@@ -111,8 +111,8 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      # SSL 证书挂载（如需启用 HTTPS，取消以下注释）
-      # - ./nginx/ssl:/etc/nginx/ssl:ro
+      # 直接挂载系统 Let's Encrypt 证书目录
+      # - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       manus-ui:
         condition: service_healthy

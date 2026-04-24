@@ -54,8 +54,8 @@ export default function Page() {
         <div className="w-full max-w-full sm:max-w-[768px] sm:min-w-[390px] mx-auto">
           {/* 对话提示内容 */}
           <div className="text-[24px] sm:text-[32px] font-bold mb-4 sm:mb-6 text-center sm:text-left">
-            <div className="text-gray-700">您好, 慕学员</div>
-            <div className="text-gray-500">我能为您做什么?</div>
+            <div className="text-gray-700">你好，同学</div>
+            <div className="text-gray-500">我能为你做什么?</div>
           </div>
           {/* 对话框 */}
           <ChatInput
