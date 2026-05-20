@@ -1,4 +1,4 @@
-import { get, post, createSSEStream, parseSSEStream } from "./fetch";
+import { get, post, patch, createSSEStream, parseSSEStream } from "./fetch";
 import type {
   Session,
   SessionDetail,
@@ -10,6 +10,7 @@ import type {
   ViewShellParams,
   SSEEventData,
   SSEEventHandler,
+  UpdateSessionConfigParams,
 } from "./types";
 
 /**
@@ -118,6 +119,13 @@ export const sessionApi = {
    */
   getSessionDetail: (sessionId: string): Promise<SessionDetail> => {
     return get<SessionDetail>(`/sessions/${sessionId}`);
+  },
+
+  updateSessionConfig: (
+    sessionId: string,
+    params: UpdateSessionConfigParams
+  ): Promise<SessionDetail> => {
+    return patch<SessionDetail>(`/sessions/${sessionId}`, params);
   },
 
   /**

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
-from typing import List, Callable, Type
+from typing import List, Callable, Type, Optional
 
 from app.application.errors.exceptions import NotFoundError, ServerRequestsError
 from app.domain.external.sandbox import Sandbox
@@ -26,14 +26,35 @@ class SessionService:
         self._uow = uow_factory()
         self._sandbox_cls = sandbox_cls
 
-    async def create_session(self) -> Session:
+    async def create_session(
+            self,
+            title: str = "新对话",
+            model_id: Optional[str] = None,
+            skill_id: Optional[str] = None,
+    ) -> Session:
         """创建一个空白的新任务会话"""
         logger.info(f"创建一个空白新任务会话")
-        session = Session(title="新对话")
+        session = Session(title=title, model_id=model_id, skill_id=skill_id)
         async with self._uow:
             await self._uow.session.save(session)
         logger.info(f"成功创建一个新任务会话: {session.id}")
         return session
+
+    async def update_session_config(
+            self,
+            session_id: str,
+            model_id: Optional[str] = None,
+            skill_id: Optional[str] = None,
+    ) -> Session:
+        async with self._uow:
+            await self._uow.session.update_session_config(
+                session_id,
+                model_id=model_id,
+                skill_id=skill_id,
+                clear_model=model_id == "",
+                clear_skill=skill_id == "",
+            )
+            return await self._uow.session.get_by_id(session_id)
 
     async def get_all_sessions(self) -> List[Session]:
         """获取项目所有任务会话列表"""

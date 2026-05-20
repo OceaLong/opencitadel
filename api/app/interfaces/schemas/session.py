@@ -8,6 +8,15 @@ from pydantic import BaseModel, Field
 from app.domain.models.file import File
 from app.domain.models.session import SessionStatus
 from app.interfaces.schemas.event import AgentSSEEvent
+from app.interfaces.schemas.skill import SkillSummaryResponse
+from app.interfaces.schemas.llm_model import LLMModelResponse
+
+
+class CreateSessionRequest(BaseModel):
+    """创建会话请求"""
+    title: Optional[str] = None
+    model_id: Optional[str] = None
+    skill_id: Optional[str] = None
 
 
 class CreateSessionResponse(BaseModel):
@@ -36,6 +45,14 @@ class ChatRequest(BaseModel):
     attachments: Optional[List[str]] = Field(default_factory=list)  # 附件列表(传递的是文件id列表)
     event_id: Optional[str] = None  # 最新事件id
     timestamp: Optional[int] = None  # 当前时间戳
+    model_id: Optional[str] = None  # 会话级模型切换
+    skill_id: Optional[str] = None  # 会话级Skill切换，空字符串表示禁用
+
+
+class UpdateSessionConfigRequest(BaseModel):
+    """更新会话配置"""
+    model_id: Optional[str] = None
+    skill_id: Optional[str] = None
 
 
 class GetSessionResponse(BaseModel):
@@ -44,6 +61,10 @@ class GetSessionResponse(BaseModel):
     title: Optional[str] = None
     status: SessionStatus
     events: List[AgentSSEEvent] = Field(default_factory=list)
+    model_id: Optional[str] = None
+    skill_id: Optional[str] = None
+    model: Optional[LLMModelResponse] = None
+    skill: Optional[SkillSummaryResponse] = None
 
 
 class GetSessionFilesResponse(BaseModel):

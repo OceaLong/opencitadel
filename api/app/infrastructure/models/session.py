@@ -11,6 +11,7 @@ from sqlalchemy import (
     Text,
     text,
     PrimaryKeyConstraint,
+    ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -68,6 +69,16 @@ class SessionModel(Base):
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )  # 会话两个Agent的记忆
+    model_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("llm_models.id", ondelete="SET NULL"),
+        nullable=True,
+    )  # 会话级模型
+    skill_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("skills.id", ondelete="SET NULL"),
+        nullable=True,
+    )  # 会话级Skill
     status: Mapped[str] = mapped_column(
         String(255),
         nullable=False,

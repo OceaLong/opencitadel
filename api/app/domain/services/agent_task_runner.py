@@ -4,7 +4,7 @@ import asyncio
 import io
 import logging
 import uuid
-from typing import List, AsyncGenerator, Callable, BinaryIO
+from typing import List, AsyncGenerator, Callable, BinaryIO, Optional
 
 from fastapi import UploadFile
 from pydantic import TypeAdapter
@@ -24,6 +24,7 @@ from app.domain.models.file import File
 from app.domain.models.message import Message
 from app.domain.models.search import SearchResults
 from app.domain.models.session import SessionStatus
+from app.domain.models.skill import Skill
 from app.domain.models.tool_result import ToolResult
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.flows.planner_react import PlannerReActFlow
@@ -50,6 +51,11 @@ class AgentTaskRunner(TaskRunner):
             browser: Browser,  # 浏览器
             search_engine: SearchEngine,  # 搜索引擎
             sandbox: Sandbox,  # 沙箱
+            skill: Optional[Skill] = None,
+            skill_prompt: str = "",
+            long_term_memory_block: str = "",
+            extra_tools: Optional[list] = None,
+            on_complete_callback: Optional[Callable] = None,
     ) -> None:
         """构造函数，完成Agent任务运行器的创建"""
         self._uow_factory = uow_factory
@@ -62,6 +68,7 @@ class AgentTaskRunner(TaskRunner):
         self._a2a_tool = A2ATool()
         self._file_storage = file_storage
         self._browser = browser
+        self._on_complete_callback = on_complete_callback
         self._flow = PlannerReActFlow(
             uow_factory=uow_factory,
             llm=llm,
@@ -73,6 +80,10 @@ class AgentTaskRunner(TaskRunner):
             search_engine=search_engine,
             mcp_tool=self._mcp_tool,
             a2a_tool=self._a2a_tool,
+            skill=skill,
+            skill_prompt=skill_prompt,
+            long_term_memory_block=long_term_memory_block,
+            extra_tools=extra_tools or [],
         )
 
     async def _put_and_add_event(self, task: Task, event: Event) -> None:
@@ -437,3 +448,8 @@ class AgentTaskRunner(TaskRunner):
     async def on_done(self, task: Task) -> None:
         """任务结束时执行的回调函数"""
         logger.info(f"AgentTaskRunner任务执行结束")
+        if self._on_complete_callback:
+            try:
+                asyncio.create_task(self._on_complete_callback(self._session_id))
+            except Exception as e:
+                logger.warning(f"后台完成回调创建失败: {e}")

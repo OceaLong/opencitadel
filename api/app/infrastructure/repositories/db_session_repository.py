@@ -177,6 +177,30 @@ class DBSessionRepository(SessionRepository):
 
         return None
 
+    async def update_session_config(
+            self,
+            session_id: str,
+            model_id: Optional[str] = None,
+            skill_id: Optional[str] = None,
+            clear_model: bool = False,
+            clear_skill: bool = False,
+    ) -> None:
+        values = {}
+        if clear_model:
+            values["model_id"] = None
+        elif model_id is not None:
+            values["model_id"] = model_id
+        if clear_skill:
+            values["skill_id"] = None
+        elif skill_id is not None:
+            values["skill_id"] = skill_id
+        if not values:
+            return
+        stmt = update(SessionModel).where(SessionModel.id == session_id).values(**values)
+        result = await self.db_session.execute(stmt)
+        if result.rowcount == 0:
+            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
+
     async def update_status(self, session_id: str, status: SessionStatus) -> None:
         """更新会话状态"""
         # 1.构建更新语句并执行

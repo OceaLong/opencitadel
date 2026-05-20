@@ -35,6 +35,9 @@ class BaseAgent(ABC):
             llm: LLM,  # 语言模型协议
             json_parser: JSONParser,  # JSON输出解析器
             tools: List[BaseTool],  # 工具列表
+            skill_prompt: str = "",
+            long_term_memory_block: str = "",
+            allowed_tool_names: Optional[List[str]] = None,
     ) -> None:
         """构造函数，完成Agent的初始化"""
         self._uow_factory = uow_factory
@@ -45,6 +48,9 @@ class BaseAgent(ABC):
         self._memory: Optional[Memory] = None
         self._json_parser = json_parser
         self._tools = tools
+        self._skill_prompt = skill_prompt
+        self._long_term_memory_block = long_term_memory_block
+        self._allowed_tool_names = allowed_tool_names
 
     async def _ensure_memory(self) -> None:
         """确保智能体记忆是存在的"""
@@ -56,7 +62,11 @@ class BaseAgent(ABC):
         """获取Agent所有可用的工具列表参数声明/Schema"""
         available_tools = []
         for tool in self._tools:
-            available_tools.extend(tool.get_tools())
+            for schema in tool.get_tools():
+                name = schema.get("function", {}).get("name", "")
+                if self._allowed_tool_names and name not in self._allowed_tool_names:
+                    continue
+                available_tools.append(schema)
         return available_tools
 
     def _get_tool(self, tool_name: str) -> BaseTool:
@@ -148,8 +158,13 @@ class BaseAgent(ABC):
 
         # 2.检查记忆的消息列表是否为空，如果是空则需要添加预设prompt作为初始记忆
         if self._memory.empty:
+            system_content = self._system_prompt
+            if self._skill_prompt:
+                system_content += f"\n\n--- Skill Instructions ---\n{self._skill_prompt}"
+            if self._long_term_memory_block:
+                system_content += f"\n\n{self._long_term_memory_block}"
             self._memory.add_message({
-                "role": "system", "content": self._system_prompt,
+                "role": "system", "content": system_content,
             })
 
         # 3.将正常消息添加到记忆中

@@ -123,6 +123,8 @@ NGINX_PORT=8088
 
 ### LLM 配置 (api/config.yaml)
 
+`api/config.yaml` 中的 `llm_config` 用于首次启动时种子化默认模型。服务启动后，请在前端「设置中心 → 模型管理」维护模型配置、设置默认模型，并在新建会话或会话详情页选择会话级模型。
+
 ```yaml
 llm_config:
   base_url: https://api.deepseek.com/
@@ -151,6 +153,21 @@ mcp_config:
 
 a2a_config:
   a2a_servers: []
+```
+
+### 模型、Skill 与记忆
+
+- 首次启动会自动从 `llm_config` 导入一个默认模型；后续模型新增、编辑、删除和默认模型切换都在「设置中心 → 模型管理」完成。
+- 系统会自动创建内置 Skill 模板（编程助手、研究分析、数据分析、内容写作），也可在「设置中心 → Skill 模板」维护自定义模板。
+- 长期记忆在「设置中心 → 长期记忆」维护，支持全局和会话两种作用域；任务开始时会自动召回相关记忆。
+- 会话详情页可查看 Agent 会话内存，并支持压缩、清空或删除单条内存消息。
+
+### 数据库迁移
+
+本版本新增 `llm_models`、`skills`、`memory_entries` 表，并为 `sessions` 表新增 `model_id`、`skill_id` 字段。首次部署或版本更新后需要执行迁移：
+
+```bash
+docker-compose exec manus-api alembic upgrade head
 ```
 
 ---
@@ -466,7 +483,9 @@ sudo crontab -e
 - [ ] 服务器已安装 Docker 和 Docker Compose
 - [ ] 防火墙已配置（仅开放 22、8088 端口）
 - [ ] .env 文件已正确配置（数据库密码、COS 凭证、LLM API Key）
-- [ ] api/config.yaml 已配置正确的 LLM 接口
+- [ ] api/config.yaml 已配置用于初始化默认模型的 LLM 接口
+- [ ] 已执行数据库迁移并确认模型、Skill、记忆相关表创建成功
+- [ ] 已在设置中心确认默认模型、内置 Skill 和长期记忆配置
 - [ ] 已测试数据库连接
 - [ ] 已配置日志轮转
 - [ ] 已设置自动备份
@@ -483,6 +502,6 @@ sudo crontab -e
 
 ---
 
-**最后更新时间**: 2026-04-22  
+**最后更新时间**: 2026-05-20
 **适用版本**: MyManus v1.0  
 **部署环境**: Ubuntu 24.04 LTS, 8核/16GB/270GB SSD/18Mbps

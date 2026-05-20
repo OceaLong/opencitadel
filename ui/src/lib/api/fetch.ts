@@ -234,6 +234,21 @@ export function put<T = unknown>(
 }
 
 /**
+ * PATCH 请求
+ */
+export function patch<T = unknown>(
+  endpoint: string,
+  data?: unknown,
+  options?: RequestOptions
+): Promise<T> {
+  return request<T>(endpoint, {
+    ...options,
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+/**
  * DELETE 请求
  */
 export function del<T = unknown>(

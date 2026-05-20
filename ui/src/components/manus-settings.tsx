@@ -528,7 +528,7 @@ function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}: MCPSet
 
 // ==================== 设置弹窗主组件 ====================
 
-type SettingTab = 'common-setting' | 'llm-setting' | 'a2a-setting' | 'mcp-setting'
+type SettingTab = 'common-setting' | 'a2a-setting' | 'mcp-setting'
 
 const SETTING_MENUS: Array<{
   key: SettingTab
@@ -536,7 +536,6 @@ const SETTING_MENUS: Array<{
   title: string
 }> = [
   {key: 'common-setting', icon: Settings, title: '通用配置'},
-  {key: 'llm-setting', icon: Languages, title: '模型提供商'},
   {key: 'a2a-setting', icon: LayoutGrid, title: 'A2A Agent 配置'},
   {key: 'mcp-setting', icon: Wrench, title: 'MCP 服务器'},
 ]
@@ -572,13 +571,9 @@ export function ManusSettings() {
 
     // 1. Agent + LLM 配置（通常很快）
     setLoadingConfig(true)
-    Promise.all([
-      configApi.getAgentConfig(),
-      configApi.getLLMConfig(),
-    ])
-      .then(([agent, llm]) => {
+    configApi.getAgentConfig()
+      .then((agent) => {
         setAgentConfig(agent)
-        setLlmConfig(llm)
       })
       .catch((err) => {
         console.error('[Settings] 获取基础配置失败:', err)
@@ -633,9 +628,6 @@ export function ManusSettings() {
       if (activeSetting === 'common-setting') {
         await configApi.updateAgentConfig(agentConfig)
         toast.success('通用配置保存成功')
-      } else if (activeSetting === 'llm-setting') {
-        await configApi.updateLLMConfig(llmConfig)
-        toast.success('模型提供商配置保存成功')
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : '保存失败'
@@ -793,7 +785,7 @@ export function ManusSettings() {
 
           {/* 右侧内容 */}
           <div className="flex-1 h-[500px] scrollbar-hide overflow-y-auto">
-            {loadingConfig && (activeSetting === 'common-setting' || activeSetting === 'llm-setting') ? (
+            {loadingConfig && activeSetting === 'common-setting' ? (
               <div className="flex justify-center items-center h-full">
                 <Loader2 className="size-6 animate-spin text-muted-foreground"/>
               </div>
@@ -801,9 +793,6 @@ export function ManusSettings() {
               <>
                 {activeSetting === 'common-setting' && (
                   <CommonSetting config={agentConfig} onChange={setAgentConfig}/>
-                )}
-                {activeSetting === 'llm-setting' && (
-                  <LLMSetting config={llmConfig} onChange={setLlmConfig}/>
                 )}
               </>
             )}

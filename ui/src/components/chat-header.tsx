@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import {SidebarTrigger, useSidebar} from '@/components/ui/sidebar'
 import {ManusSettings} from '@/components/manus-settings'
+import {Button} from '@/components/ui/button'
+import {Settings2} from 'lucide-react'
 
 export function ChatHeader() {
   const {open, isMobile} = useSidebar()
@@ -16,8 +18,15 @@ export function ChatHeader() {
         {/* Logo占位符 */}
         <Link href="/" className="block bg-white w-[80px] h-9 rounded-md"/>
       </div>
-      {/* 右侧设置模态窗 */}
-      <ManusSettings/>
+      <div className="flex items-center gap-1">
+        <Button variant="ghost" size="sm" asChild>
+          <Link href="/settings/models">
+            <Settings2 className="size-4 mr-1" />
+            设置中心
+          </Link>
+        </Button>
+        <ManusSettings/>
+      </div>
     </header>
   )
 }

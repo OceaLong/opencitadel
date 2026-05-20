@@ -13,6 +13,14 @@ class Settings(BaseSettings):
     env: str = "development"
     log_level: str = "INFO"
     app_config_filepath: str = "config.yaml"
+    api_key_secret: str = "my-manus-api-key-secret-change-in-production"
+
+    # 记忆配置
+    memory_recall_limit: int = 20
+    memory_auto_extract_enabled: bool = True
+    memory_vector_enabled: bool = False
+    embedding_provider: str = "openai"
+    embedding_model: str = "text-embedding-3-small"
 
     # 数据库相关配置
     sqlalchemy_database_uri: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/manus"

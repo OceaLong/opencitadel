@@ -15,7 +15,13 @@ from app.infrastructure.storage.postgres import get_postgres
 from app.infrastructure.storage.redis import get_redis
 from app.interfaces.endpoints.routes import router
 from app.interfaces.errors.exception_handlers import register_exception_handlers
-from app.interfaces.service_dependencies import get_agent_service
+from app.application.services.bootstrap_service import bootstrap_data
+from app.interfaces.service_dependencies import (
+    get_agent_service,
+    get_llm_model_service,
+    get_skill_service,
+)
+from app.infrastructure.storage.postgres import get_uow
 from core.config import get_settings
 
 # 1.加载配置信息
@@ -51,6 +57,13 @@ async def lifespan(app: FastAPI):
     await get_redis().init()
     await get_postgres().init()
     await get_cos().init()
+
+    # 4.种子化默认模型与内置Skill
+    await bootstrap_data(
+        uow_factory=get_uow,
+        llm_model_service=get_llm_model_service(),
+        skill_service=get_skill_service(),
+    )
 
     try:
         # 4.lifespan分界点

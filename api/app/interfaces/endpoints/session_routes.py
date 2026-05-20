@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, Dict, AsyncGenerator
 
 import websockets
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Body
 from sse_starlette import EventSourceResponse, ServerSentEvent
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets import ConnectionClosed
@@ -17,16 +17,66 @@ from app.application.services.session_service import SessionService
 from app.interfaces.schemas import Response
 from app.interfaces.schemas.event import EventMapper
 from app.interfaces.schemas.session import (
+    CreateSessionRequest,
     CreateSessionResponse,
     ListSessionResponse,
     ListSessionItem,
     ChatRequest,
-    GetSessionResponse, GetSessionFilesResponse, FileReadResponse, FileReadRequest, ShellReadResponse, ShellReadRequest,
+    GetSessionResponse,
+    GetSessionFilesResponse,
+    FileReadResponse,
+    FileReadRequest,
+    ShellReadResponse,
+    ShellReadRequest,
+    UpdateSessionConfigRequest,
 )
-from app.interfaces.service_dependencies import get_session_service, get_agent_service
+from app.interfaces.schemas.llm_model import LLMModelResponse
+from app.interfaces.schemas.skill import SkillSummaryResponse
+from app.interfaces.schemas.memory import SessionMemoryResponse, ClearMemoryRequest
+from app.interfaces.endpoints.llm_model_routes import _to_response as llm_to_response
+from app.interfaces.service_dependencies import (
+    get_session_service,
+    get_agent_service,
+    get_llm_model_service,
+    get_skill_service,
+    get_memory_service,
+)
+from app.application.services.llm_model_service import LLMModelService
+from app.application.services.skill_service import SkillService
+from app.application.services.memory_service import MemoryService
+from app.domain.models.session import Session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sessions", tags=["会话模块"])
+
+
+async def build_get_session_response(
+        session: Session,
+        llm_model_service: LLMModelService,
+        skill_service: SkillService,
+) -> GetSessionResponse:
+    """组装会话详情响应，避免在路由间直接调用 endpoint 函数"""
+    model_resp = None
+    skill_resp = None
+    if session.model_id:
+        try:
+            model_resp = llm_to_response(await llm_model_service.get_model(session.model_id))
+        except Exception:
+            pass
+    if session.skill_id:
+        summary = await skill_service.get_summary(session.skill_id)
+        if summary:
+            skill_resp = SkillSummaryResponse(**summary.model_dump())
+    return GetSessionResponse(
+        session_id=session.id,
+        title=session.title,
+        status=session.status,
+        events=EventMapper.events_to_sse_events(session.events),
+        model_id=session.model_id,
+        skill_id=session.skill_id,
+        model=model_resp,
+        skill=skill_resp,
+    )
 
 # 流式获取会话详情睡眠间隔
 SESSION_SLEEP_INTERVAL = 5
@@ -39,10 +89,15 @@ SESSION_SLEEP_INTERVAL = 5
     description="创建一个空白的新任务会话",
 )
 async def create_session(
+        request: CreateSessionRequest = Body(default_factory=CreateSessionRequest),
         session_service: SessionService = Depends(get_session_service),
 ) -> Response[CreateSessionResponse]:
     """创建一个空白的新任务会话"""
-    session = await session_service.create_session()
+    session = await session_service.create_session(
+        title=request.title or "新对话",
+        model_id=request.model_id,
+        skill_id=request.skill_id,
+    )
     return Response.success(
         msg="创建任务会话成功",
         data=CreateSessionResponse(session_id=session.id)
@@ -169,6 +224,8 @@ async def chat(
                 attachments=request.attachments,
                 latest_event_id=request.event_id,
                 timestamp=datetime.fromtimestamp(request.timestamp) if request.timestamp else None,
+                model_id=request.model_id,
+                skill_id=request.skill_id,
         ):
             # 2.将Agent事件转换为sse数据(因为普通的event没法通过流式事件传输)
             sse_event = EventMapper.event_to_sse_event(event)
@@ -190,6 +247,8 @@ async def chat(
 async def get_session(
         session_id: str,
         session_service: SessionService = Depends(get_session_service),
+        llm_model_service: LLMModelService = Depends(get_llm_model_service),
+        skill_service: SkillService = Depends(get_skill_service),
 ) -> Response[GetSessionResponse]:
     """传递指定会话id获取该会话的对话详情"""
     session = await session_service.get_session(session_id)
@@ -197,13 +256,95 @@ async def get_session(
         raise NotFoundError("该会话不存在，请核实后重试")
     return Response.success(
         msg="获取会话详情成功",
-        data=GetSessionResponse(
-            session_id=session.id,
-            title=session.title,
-            status=session.status,
-            events=EventMapper.events_to_sse_events(session.events),
+        data=await build_get_session_response(session, llm_model_service, skill_service),
+    )
+
+
+@router.patch(
+    path="/{session_id}",
+    response_model=Response[GetSessionResponse],
+    summary="更新会话配置",
+)
+async def patch_session(
+        session_id: str,
+        request: UpdateSessionConfigRequest,
+        session_service: SessionService = Depends(get_session_service),
+        llm_model_service: LLMModelService = Depends(get_llm_model_service),
+        skill_service: SkillService = Depends(get_skill_service),
+) -> Response[GetSessionResponse]:
+    await session_service.update_session_config(
+        session_id,
+        model_id=request.model_id,
+        skill_id=request.skill_id,
+    )
+    session = await session_service.get_session(session_id)
+    if not session:
+        raise NotFoundError("该会话不存在，请核实后重试")
+    return Response.success(
+        msg="更新会话配置成功",
+        data=await build_get_session_response(session, llm_model_service, skill_service),
+    )
+
+
+@router.get(
+    path="/{session_id}/memory",
+    response_model=Response[SessionMemoryResponse],
+    summary="获取会话Agent内存",
+)
+async def get_session_memory(
+        session_id: str,
+        memory_service: MemoryService = Depends(get_memory_service),
+) -> Response[SessionMemoryResponse]:
+    memories = await memory_service.get_session_memories(session_id)
+    return Response.success(
+        data=SessionMemoryResponse(
+            planner=memories.get("planner", []),
+            react=memories.get("react", []),
         )
     )
+
+
+@router.post(
+    path="/{session_id}/memory/compact",
+    response_model=Response[Optional[Dict]],
+    summary="压缩会话Agent内存",
+)
+async def compact_session_memory(
+        session_id: str,
+        request: ClearMemoryRequest,
+        memory_service: MemoryService = Depends(get_memory_service),
+) -> Response[Optional[Dict]]:
+    await memory_service.compact_session_memory(session_id, request.agent_name)
+    return Response.success(msg="压缩记忆成功")
+
+
+@router.post(
+    path="/{session_id}/memory/clear",
+    response_model=Response[Optional[Dict]],
+    summary="清空会话Agent内存",
+)
+async def clear_session_memory(
+        session_id: str,
+        request: ClearMemoryRequest,
+        memory_service: MemoryService = Depends(get_memory_service),
+) -> Response[Optional[Dict]]:
+    await memory_service.clear_session_memory(session_id, request.agent_name)
+    return Response.success(msg="清空记忆成功")
+
+
+@router.delete(
+    path="/{session_id}/memory/{agent_name}/messages/{index}",
+    response_model=Response[Optional[Dict]],
+    summary="删除会话内存中的指定消息",
+)
+async def delete_session_memory_message(
+        session_id: str,
+        agent_name: str,
+        index: int,
+        memory_service: MemoryService = Depends(get_memory_service),
+) -> Response[Optional[Dict]]:
+    await memory_service.delete_session_memory_message(session_id, agent_name, index)
+    return Response.success(msg="删除消息成功")
 
 
 @router.post(

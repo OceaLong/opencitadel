@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
-from typing import AsyncGenerator, Optional, Callable
+from typing import AsyncGenerator, Optional, Callable, List
 
 from app.domain.external.browser import Browser
 from app.domain.external.json_parser import JSONParser
@@ -9,6 +9,7 @@ from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
 from app.domain.models.app_config import AgentConfig
+from app.domain.models.skill import Skill
 from app.domain.models.event import BaseEvent, PlanEvent, PlanEventStatus, TitleEvent, MessageEvent
 from app.domain.models.event import DoneEvent
 from app.domain.models.message import Message
@@ -23,6 +24,7 @@ from app.domain.services.tools.mcp import MCPTool
 from app.domain.services.tools.message import MessageTool
 from app.domain.services.tools.search import SearchTool
 from app.domain.services.tools.shell import ShellTool
+from app.domain.services.tools.base import BaseTool
 from .base import BaseFlow, FlowStatus
 from ...repositories.uow import IUnitOfWork
 
@@ -44,6 +46,10 @@ class PlannerReActFlow(BaseFlow):
             search_engine: SearchEngine,  # 搜索引擎
             mcp_tool: MCPTool,  # mcp工具
             a2a_tool: A2ATool,  # a2a远程agent
+            skill: Optional[Skill] = None,
+            skill_prompt: str = "",
+            long_term_memory_block: str = "",
+            extra_tools: Optional[List[BaseTool]] = None,
     ) -> None:
         """构造函数，完成规划与执行流的初始化"""
         # 1.流初始化数据配置
@@ -63,8 +69,12 @@ class PlannerReActFlow(BaseFlow):
             mcp_tool,
             a2a_tool,
         ]
+        if extra_tools:
+            tools.extend(extra_tools)
 
-        # 3.创建规划Agent
+        allowed_tool_names = skill.allowed_tools if skill and skill.allowed_tools else None
+
+        # 3.创建规划Agent（agent_params 已在 AgentService 合并）
         self.planner = PlannerAgent(
             uow_factory=uow_factory,
             session_id=session_id,
@@ -72,6 +82,9 @@ class PlannerReActFlow(BaseFlow):
             llm=llm,
             json_parser=json_parser,
             tools=tools,
+            skill_prompt=skill_prompt,
+            long_term_memory_block=long_term_memory_block,
+            allowed_tool_names=allowed_tool_names,
         )
         logger.debug(f"创建规划Agent成功, 会话id: {self._session_id}")
 
@@ -83,6 +96,9 @@ class PlannerReActFlow(BaseFlow):
             llm=llm,
             json_parser=json_parser,
             tools=tools,
+            skill_prompt=skill_prompt,
+            long_term_memory_block=long_term_memory_block,
+            allowed_tool_names=allowed_tool_names,
         )
         logger.debug(f"创建执行Agent成功, 会话id: {self._session_id}")
 

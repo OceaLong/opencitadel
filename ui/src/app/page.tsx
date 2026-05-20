@@ -7,12 +7,16 @@ import {ChatInput, type ChatInputRef} from '@/components/chat-input'
 import {SuggestedQuestions} from '@/components/suggested-questions'
 import {sessionApi} from '@/lib/api/session'
 import type {FileInfo} from '@/lib/api/types'
+import {SessionModelPicker} from '@/components/session-model-picker'
+import {SessionSkillPicker} from '@/components/session-skill-picker'
 import {toast} from 'sonner'
 
 export default function Page() {
   const router = useRouter()
   const chatInputRef = useRef<ChatInputRef>(null)
   const [sending, setSending] = useState(false)
+  const [modelId, setModelId] = useState<string | undefined>()
+  const [skillId, setSkillId] = useState<string | undefined>()
 
   const handleQuestionClick = (question: string) => {
     chatInputRef.current?.setInputText(question)
@@ -25,7 +29,10 @@ export default function Page() {
 
     try {
       // 1. 创建新会话
-      const session = await sessionApi.createSession()
+      const session = await sessionApi.createSession({
+        model_id: modelId,
+        skill_id: skillId,
+      })
       const sessionId = session.session_id
 
       // 2. 将消息数据编码到 URL，在详情页发送
@@ -56,6 +63,10 @@ export default function Page() {
           <div className="text-[24px] sm:text-[32px] font-bold mb-4 sm:mb-6 text-center sm:text-left">
             <div className="text-gray-700">你好，同学</div>
             <div className="text-gray-500">我能为你做什么?</div>
+          </div>
+          <div className="flex flex-wrap gap-3 mb-3">
+            <SessionModelPicker value={modelId} onChange={setModelId} />
+            <SessionSkillPicker value={skillId} onChange={(id) => setSkillId(id)} />
           </div>
           {/* 对话框 */}
           <ChatInput

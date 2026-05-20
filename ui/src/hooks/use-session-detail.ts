@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { sessionApi } from '@/lib/api/session'
 import { normalizeEvent, normalizeEvents } from '@/lib/session-events'
-import type { SessionDetail, SSEEventData, SessionFile } from '@/lib/api/types'
+import type { SessionDetail, SSEEventData, SessionFile, UpdateSessionConfigParams } from '@/lib/api/types'
 
 export type UseSessionDetailResult = {
   session: SessionDetail | null
@@ -13,7 +13,12 @@ export type UseSessionDetailResult = {
   error: Error | null
   refresh: () => Promise<void>
   refreshFiles: () => Promise<void>
-  sendMessage: (message: string, attachmentIds: string[]) => Promise<void>
+  sendMessage: (
+    message: string,
+    attachmentIds: string[],
+    options?: { model_id?: string; skill_id?: string }
+  ) => Promise<void>
+  updateSessionConfig: (params: UpdateSessionConfigParams) => Promise<void>
   streaming: boolean
 }
 
@@ -217,8 +222,21 @@ export function useSessionDetail(
     }
   }, [])
 
+  const updateSessionConfig = useCallback(
+    async (params: UpdateSessionConfigParams) => {
+      if (!sessionId) return
+      const updated = await sessionApi.updateSessionConfig(sessionId, params)
+      setSession(updated)
+    },
+    [sessionId]
+  )
+
   const sendMessage = useCallback(
-    async (message: string, attachmentIds: string[]) => {
+    async (
+      message: string,
+      attachmentIds: string[],
+      options?: { model_id?: string; skill_id?: string }
+    ) => {
       if (!sessionId) return
       stopEmptyStream()
       // 清理已有的消息流连接（如 waiting 状态时用户再次发送）
@@ -250,7 +268,12 @@ export function useSessionDetail(
       }
       const messageStreamCleanup = sessionApi.chat(
         sessionId,
-        { message, attachments: attachmentIds },
+        {
+          message,
+          attachments: attachmentIds,
+          model_id: options?.model_id,
+          skill_id: options?.skill_id,
+        },
         onEvent,
         (err) => {
           if (err.name === 'AbortError') {
@@ -296,6 +319,7 @@ export function useSessionDetail(
     refresh,
     refreshFiles,
     sendMessage,
+    updateSessionConfig,
     streaming,
   }
 }

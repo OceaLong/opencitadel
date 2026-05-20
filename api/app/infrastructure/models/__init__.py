@@ -3,5 +3,15 @@
 from .base import Base
 from .file import FileModel
 from .session import SessionModel
+from .llm_model import LLMModelORM
+from .skill import SkillORM
+from .memory_entry import MemoryEntryORM
 
-__all__ = ["Base", "SessionModel", "FileModel"]
+__all__ = [
+    "Base",
+    "SessionModel",
+    "FileModel",
+    "LLMModelORM",
+    "SkillORM",
+    "MemoryEntryORM",
+]

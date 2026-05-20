@@ -8,6 +8,7 @@ export {
   get,
   post,
   put,
+  patch,
   del,
   createSSEConnection,
   createSSEStream,
@@ -55,4 +56,7 @@ export type {
 export { configApi } from "./config";
 export { fileApi } from "./file";
 export { sessionApi } from "./session";
+export { modelsApi } from "./models";
+export { skillsApi } from "./skills";
+export { memoryApi } from "./memory";
 

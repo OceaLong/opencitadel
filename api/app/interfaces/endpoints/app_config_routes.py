@@ -9,7 +9,9 @@ from app.application.services.app_config_service import AppConfigService
 from app.domain.models.app_config import LLMConfig, AgentConfig, MCPConfig
 from app.interfaces.schemas.app_config import ListMCPServerResponse, ListA2AServerResponse
 from app.interfaces.schemas.base import Response
-from app.interfaces.service_dependencies import get_app_config_service
+from app.interfaces.service_dependencies import get_app_config_service, get_llm_model_service
+from app.application.services.llm_model_service import LLMModelService
+from app.domain.models.llm_model import LLMModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/app-config", tags=["设置模块"])
@@ -22,9 +24,23 @@ router = APIRouter(prefix="/app-config", tags=["设置模块"])
     description="包含LLM提供商的base_url、temperature、model_name、max_tokens"
 )
 async def get_llm_config(
-        app_config_service: AppConfigService = Depends(get_app_config_service)
+        app_config_service: AppConfigService = Depends(get_app_config_service),
+        llm_model_service: LLMModelService = Depends(get_llm_model_service),
 ) -> Response[LLMConfig]:
-    """获取LLM配置信息"""
+    """获取LLM配置信息（deprecated，优先使用 /api/llm-models）"""
+    try:
+        default_model = await llm_model_service.get_default_model()
+        if default_model:
+            from pydantic import HttpUrl
+            return Response.success(data=LLMConfig(
+                base_url=HttpUrl(default_model.base_url),
+                api_key="",
+                model_name=default_model.model_name,
+                temperature=default_model.temperature,
+                max_tokens=default_model.max_tokens,
+            ).model_dump(exclude={"api_key"}))
+    except Exception:
+        pass
     llm_config = await app_config_service.get_llm_config()
     return Response.success(data=llm_config.model_dump(exclude={"api_key"}))
 
@@ -37,10 +53,23 @@ async def get_llm_config(
 )
 async def update_llm_config(
         new_llm_config: LLMConfig,
-        app_config_service: AppConfigService = Depends(get_app_config_service)
+        app_config_service: AppConfigService = Depends(get_app_config_service),
+        llm_model_service: LLMModelService = Depends(get_llm_model_service),
 ) -> Response[LLMConfig]:
-    """更新LLM配置信息"""
+    """更新LLM配置信息（deprecated，同步更新默认模型条目）"""
     updated_llm_config = await app_config_service.update_llm_config(new_llm_config)
+    try:
+        default_model = await llm_model_service.get_default_model()
+        if default_model:
+            default_model.base_url = str(new_llm_config.base_url)
+            if new_llm_config.api_key.strip():
+                default_model.api_key = new_llm_config.api_key
+            default_model.model_name = new_llm_config.model_name
+            default_model.temperature = new_llm_config.temperature
+            default_model.max_tokens = new_llm_config.max_tokens
+            await llm_model_service.update_model(default_model.id, default_model)
+    except Exception:
+        pass
     return Response.success(
         msg="更新LLM信息配置成功",
         data=updated_llm_config.model_dump(exclude={"api_key"})

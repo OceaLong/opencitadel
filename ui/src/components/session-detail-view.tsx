@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { SessionHeader } from '@/components/session-header'
-import { ChatInput } from '@/components/chat-input'
+import { ChatInput, type ChatInputRef } from '@/components/chat-input'
 import { PlanPanel } from '@/components/plan-panel'
 import { ChatMessage } from '@/components/chat-message'
 import { FilePreviewPanel } from '@/components/file-preview-panel'
@@ -20,6 +20,10 @@ import type { AttachmentFile, TimelineItem } from '@/lib/session-events'
 import { sessionApi } from '@/lib/api/session'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
+import { SessionModelPicker } from '@/components/session-model-picker'
+import { SessionSkillPicker } from '@/components/session-skill-picker'
+import { SessionMemorySheet } from '@/components/session-memory-sheet'
+import type { Skill } from '@/lib/api/types'
 
 export interface SessionDetailViewProps {
   sessionId: string
@@ -59,8 +63,12 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     refresh,
     refreshFiles,
     sendMessage,
+    updateSessionConfig,
     streaming,
   } = useSessionDetail(sessionId, hasInitialMessage)
+
+  const [activeSkill, setActiveSkill] = useState<Skill | null>(null)
+  const configEditable = session?.status === 'pending' || session?.status === 'completed'
 
   const timeline = useMemo(() => eventsToTimeline(events), [events])
   const planSteps = useMemo(() => getLatestPlanFromEvents(events), [events])
@@ -70,6 +78,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
   const [previewTool, setPreviewTool] = useState<ToolEvent | null>(null)
   const [vncOpen, setVncOpen] = useState(false)
   const initialMessageSentRef = useRef(false)
+  const chatInputRef = useRef<ChatInputRef>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const prevToolCountRef = useRef(0)
 
@@ -144,13 +153,30 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     async (message: string, uploadedFiles: FileInfo[]) => {
       try {
         const attachmentIds = uploadedFiles.map((f) => f.id)
-        await sendMessage(message, attachmentIds)
+        await sendMessage(message, attachmentIds, {
+          model_id: session?.model_id || undefined,
+          skill_id: session?.skill_id || undefined,
+        })
       } catch (e) {
         toast.error(e instanceof Error ? e.message : '发送失败，请重试')
         throw e
       }
     },
-    [sendMessage]
+    [sendMessage, session?.model_id, session?.skill_id]
+  )
+
+  const handleModelChange = useCallback(
+    async (modelId: string | undefined) => {
+      await updateSessionConfig({ model_id: modelId ?? '' })
+    },
+    [updateSessionConfig]
+  )
+
+  const handleSkillChange = useCallback(
+    async (skillId: string | undefined) => {
+      await updateSessionConfig({ skill_id: skillId ?? '' })
+    },
+    [updateSessionConfig]
   )
 
   const handleViewAllFiles = useCallback(() => {
@@ -296,8 +322,37 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
             </div>
 
             <div className="flex-shrink-0 bg-[#f8f8f7] py-4">
+              <div className="flex flex-wrap items-center gap-3 mb-2 px-1">
+                <SessionModelPicker
+                  value={session.model_id}
+                  onChange={handleModelChange}
+                  disabled={!configEditable && session.status === 'running'}
+                />
+                <SessionSkillPicker
+                  value={session.skill_id}
+                  onChange={handleSkillChange}
+                  onSkillLoaded={setActiveSkill}
+                  disabled={!configEditable && session.status === 'running'}
+                />
+                <SessionMemorySheet sessionId={sessionId} editable={configEditable} />
+              </div>
+              {activeSkill && activeSkill.examples.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2 px-1">
+                  {activeSkill.examples.map((ex) => (
+                    <button
+                      key={ex}
+                      type="button"
+                      className="text-xs px-2 py-1 rounded-full bg-muted hover:bg-muted/80 text-muted-foreground"
+                      onClick={() => chatInputRef.current?.setInputText(ex)}
+                    >
+                      {ex}
+                    </button>
+                  ))}
+                </div>
+              )}
               <PlanPanel className="mb-2" steps={planSteps} />
               <ChatInput
+                ref={chatInputRef}
                 onSend={handleSend}
                 sessionId={sessionId}
                 isRunning={session?.status === 'running'}

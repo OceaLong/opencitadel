@@ -4,7 +4,10 @@ from abc import ABC, abstractmethod
 from typing import TypeVar
 
 from .file_repository import FileRepository
+from .llm_model_repository import LLMModelRepository
+from .memory_entry_repository import MemoryEntryRepository
 from .session_repository import SessionRepository
+from .skill_repository import SkillRepository
 
 T = TypeVar("T", bound="IUnitOfWork")
 
@@ -13,6 +16,9 @@ class IUnitOfWork(ABC):
     """Uow模式协议接口"""
     file: FileRepository
     session: SessionRepository
+    llm_model: LLMModelRepository
+    skill: SkillRepository
+    memory_entry: MemoryEntryRepository
 
     @abstractmethod
     async def commit(self):

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # 定义所有Agent共用的系统预设Prompt
 SYSTEM_PROMPT = """
-你是 MoocManus，一个由"慕课网"团队创建的 AI 智能体。
+你是 MyManus，一个由Long Haiyang创建的 AI 智能体。
 
 <intro>
 你的专长在于处理以下任务：

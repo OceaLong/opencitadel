@@ -27,6 +27,121 @@ export type ToolEventStatus = "calling" | "called";
  */
 export type MCPTransport = "stdio" | "sse" | "streamable_http";
 
+// ==================== 模型管理 ====================
+
+export type LLMProvider = "openai" | "anthropic" | "gemini" | "ollama" | "azure";
+
+export type LLMModel = {
+  id: string;
+  display_name: string;
+  provider: LLMProvider;
+  base_url: string;
+  api_key?: string;
+  model_name: string;
+  temperature: number;
+  max_tokens: number;
+  extra_params?: Record<string, unknown>;
+  is_default: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type LLMModelsData = {
+  models: LLMModel[];
+};
+
+export type CreateLLMModelParams = {
+  display_name: string;
+  provider: LLMProvider;
+  base_url: string;
+  api_key?: string;
+  model_name: string;
+  temperature?: number;
+  max_tokens?: number;
+  extra_params?: Record<string, unknown>;
+  is_default?: boolean;
+};
+
+// ==================== Skill 管理 ====================
+
+export type SkillAgentParams = {
+  max_iterations?: number;
+  max_retries?: number;
+  max_search_results?: number;
+  temperature_override?: number;
+};
+
+export type Skill = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  icon: string;
+  category: string;
+  system_prompt: string;
+  allowed_tools: string[];
+  recommended_model_id?: string | null;
+  agent_params: SkillAgentParams;
+  examples: string[];
+  is_builtin: boolean;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type SkillsData = {
+  skills: Skill[];
+};
+
+export type SkillSummary = {
+  id: string;
+  name: string;
+  icon: string;
+  examples: string[];
+};
+
+export type CreateSkillParams = {
+  name: string;
+  slug?: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  system_prompt?: string;
+  allowed_tools?: string[];
+  recommended_model_id?: string | null;
+  agent_params?: SkillAgentParams;
+  examples?: string[];
+  enabled?: boolean;
+};
+
+// ==================== 记忆管理 ====================
+
+export type MemoryScope = "global" | "session";
+export type MemorySource = "manual" | "auto_extracted" | "tool_save";
+
+export type MemoryEntry = {
+  id: string;
+  scope: MemoryScope;
+  session_id?: string | null;
+  title: string;
+  content: string;
+  tags: string[];
+  source: MemorySource;
+  last_used_at?: string | null;
+  use_count: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type MemoryEntriesData = {
+  entries: MemoryEntry[];
+};
+
+export type SessionMemoryData = {
+  planner: Array<Record<string, unknown>>;
+  react: Array<Record<string, unknown>>;
+};
+
 // ==================== 配置模块类型 ====================
 
 /**
@@ -170,6 +285,8 @@ export type SessionsData = {
  */
 export type CreateSessionParams = {
   title?: string;
+  model_id?: string;
+  skill_id?: string;
   [key: string]: unknown;
 };
 
@@ -194,6 +311,8 @@ export type ChatMessage = {
 export type ChatParams = {
   message?: string;
   attachments?: string[];
+  model_id?: string;
+  skill_id?: string;
   [key: string]: unknown;
 };
 
@@ -202,6 +321,15 @@ export type ChatParams = {
  */
 export type SessionDetail = Session & {
   events?: SSEEventData[];
+  model_id?: string | null;
+  skill_id?: string | null;
+  model?: LLMModel | null;
+  skill?: SkillSummary | null;
+};
+
+export type UpdateSessionConfigParams = {
+  model_id?: string;
+  skill_id?: string;
 };
 
 /**

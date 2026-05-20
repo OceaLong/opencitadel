@@ -52,6 +52,17 @@ class SessionRepository(Protocol):
         """根据传递的会话id更新会话状态"""
         ...
 
+    async def update_session_config(
+            self,
+            session_id: str,
+            model_id: Optional[str] = None,
+            skill_id: Optional[str] = None,
+            clear_model: bool = False,
+            clear_skill: bool = False,
+    ) -> None:
+        """更新会话级模型与Skill配置"""
+        ...
+
     async def add_event(self, session_id: str, event: BaseEvent) -> None:
         """往会话中新增事件"""
         ...
