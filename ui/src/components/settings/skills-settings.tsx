@@ -256,7 +256,7 @@ export function SkillsSettings({ embedded = false }: Props) {
             </div>
             <div>
               <Label>工具白名单（逗号分隔，空=不过滤）</Label>
-              <Input value={toolsText} onChange={(e) => setToolsText(e.target.value)} placeholder="file_read, shell_execute, search_web" />
+              <Input value={toolsText} onChange={(e) => setToolsText(e.target.value)} placeholder="read_file, shell_execute, search_web" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>

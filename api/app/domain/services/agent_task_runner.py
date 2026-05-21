@@ -34,6 +34,8 @@ from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+FILE_MUTATING_FUNCTIONS = frozenset({"write_file", "replace_in_file"})
+
 
 class AgentTaskRunner(TaskRunner):
     """基于Agent智能体的任务运行器"""
@@ -177,9 +179,19 @@ class AgentTaskRunner(TaskRunner):
 
         return size
 
-    async def _sync_file_to_storage(self, filepath: str) -> File:
+    async def _sync_file_to_storage(self, filepath: str) -> Optional[File]:
         """将沙箱中指定的文件路径数据同步到存储桶中"""
         try:
+            exists_result = await self._sandbox.check_file_exists(filepath)
+            exists = (exists_result.data or {}).get("exists", False)
+            if not exists_result.success or not exists:
+                logger.warning(
+                    "会话[%s] 跳过附件同步，沙箱文件不存在: %s",
+                    self._session_id,
+                    filepath,
+                )
+                return None
+
             # 1.根据文件路径从会话中查找文件数据
             async with self._uow:
                 file = await self._uow.session.get_file_by_path(self._session_id, filepath)
@@ -209,7 +221,13 @@ class AgentTaskRunner(TaskRunner):
                 await self._uow.session.add_file(self._session_id, file)
             return file
         except Exception as e:
-            logger.exception(f"AgentTaskRunner同步消息附件到文件存储桶失败: {str(e)}")
+            logger.warning(
+                "会话[%s] 同步文件到存储桶失败 filepath=%s error=%s",
+                self._session_id,
+                filepath,
+                e,
+            )
+            return None
 
     async def _sync_message_attachments_to_storage(self, event: MessageEvent) -> None:
         """将消息事件的附件同步到文件存储桶中"""
@@ -262,7 +280,15 @@ class AgentTaskRunner(TaskRunner):
                     # 3.工具为搜索则添加搜索工具内容
                     search_results: ToolResult[SearchResults] = event.function_result
                     logger.info(f"搜索工具结果: {search_results}")
-                    event.tool_content = SearchToolContent(results=search_results.data.results)
+                    if (
+                            search_results
+                            and search_results.success
+                            and search_results.data
+                            and search_results.data.results is not None
+                    ):
+                        event.tool_content = SearchToolContent(results=search_results.data.results)
+                    else:
+                        event.tool_content = SearchToolContent(results=[])
                 elif event.tool_name == "shell":
                     # 4.工具为shell则生成shell工具内容
                     if "session_id" in event.function_args:
@@ -276,14 +302,22 @@ class AgentTaskRunner(TaskRunner):
                     else:
                         event.tool_content = ShellToolContent(console="(No console)")
                 elif event.tool_name == "file":
-                    # 5.工具为file则将文件同步到对象存储
+                    # 5.工具为file则展示内容，并在写入成功后同步到对象存储
                     if "filepath" in event.function_args:
                         filepath = event.function_args["filepath"]
                         file_read_result = await self._sandbox.read_file(filepath)
-                        file_content: str = (file_read_result.data or {}).get("content", "")
-                        event.tool_content = FileToolContent(content=file_content)
-                        # bugfix:修改为同步文件到storage
-                        await self._sync_file_to_storage(filepath)
+                        file_content: str = ""
+                        if file_read_result.success:
+                            file_content = (file_read_result.data or {}).get("content", "")
+                        event.tool_content = FileToolContent(content=file_content or "(No Content)")
+
+                        should_sync = (
+                                event.function_name in FILE_MUTATING_FUNCTIONS
+                                and event.function_result
+                                and event.function_result.success
+                        )
+                        if should_sync:
+                            await self._sync_file_to_storage(filepath)
                     else:
                         event.tool_content = FileToolContent(content="(No Content)")
                 elif event.tool_name in ["mcp", "a2a"]:

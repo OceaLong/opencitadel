@@ -27,12 +27,29 @@ from app.models.file import (
 
 logger = logging.getLogger(__name__)
 
+SANDBOX_HOME_DIR = "/home/ubuntu"
+
 
 class FileService:
     """文件沙箱服务"""
 
     def __init__(self) -> None:
         pass
+
+    @classmethod
+    def _normalize_filepath(cls, filepath: str) -> str:
+        """规范化文件路径，兼容相对路径并确保包含目录部分。"""
+        normalized = (filepath or "").strip()
+        if not normalized:
+            raise BadRequestException("文件路径不能为空")
+        if not normalized.startswith("/"):
+            normalized = f"{SANDBOX_HOME_DIR}/{normalized.lstrip('/')}"
+        if os.path.basename(normalized) in ("", ".", ".."):
+            raise BadRequestException(f"无效的文件路径: {filepath}")
+        directory = os.path.dirname(normalized)
+        if not directory:
+            raise BadRequestException(f"无效的文件路径: {filepath}")
+        return normalized
 
     @classmethod
     async def read_file(
@@ -115,6 +132,8 @@ class FileService:
     ) -> FileWriteResult:
         """根据传递的文件路径+内容向指定文件写入内容"""
         try:
+            filepath = cls._normalize_filepath(filepath)
+
             # 1.组装实际写入的内容
             if leading_newline:
                 content = "\n" + content
@@ -187,6 +206,7 @@ class FileService:
             sudo: bool = False,
     ) -> FileReplaceResult:
         """根据传递的数据替换文件内指定的内容"""
+        filepath = self._normalize_filepath(filepath)
         # 1.调用服务获取对应的文件内容
         file_read_result = await self.read_file(filepath=filepath, sudo=sudo, max_length=None)
         content = file_read_result.content
@@ -268,6 +288,8 @@ class FileService:
     async def upload_file(cls, file: UploadFile, filepath: str) -> FileUploadResult:
         """根据传递的文件源+路径将文件上传至沙箱"""
         try:
+            filepath = cls._normalize_filepath(filepath)
+
             # 1.定义分块上传，每次只上传8k
             chunk_size = 1024 * 8
             file_size = 0

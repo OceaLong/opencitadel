@@ -18,7 +18,7 @@ BUILTIN_SKILLS = [
         icon="💻",
         category="development",
         system_prompt="你是一位专业的编程助手。优先使用文件和Shell工具完成代码任务，注重代码质量与最佳实践。",
-        allowed_tools=["file_read", "file_write", "file_str_replace", "shell_execute", "message_notify_user", "message_ask_user"],
+        allowed_tools=["read_file", "write_file", "replace_in_file", "shell_execute", "message_notify_user", "message_ask_user"],
         examples=["帮我写一个Python爬虫", "重构这段代码", "修复这个bug"],
         is_builtin=True,
     ),
@@ -29,7 +29,7 @@ BUILTIN_SKILLS = [
         icon="🔍",
         category="research",
         system_prompt="你是一位研究分析专家。优先使用搜索和浏览器工具收集信息，提供有据可查的分析报告。",
-        allowed_tools=["search_web", "browser_navigate", "browser_view", "file_write", "message_notify_user"],
+        allowed_tools=["search_web", "browser_navigate", "browser_view", "write_file", "message_notify_user"],
         examples=["调研AI Agent最新进展", "对比三家云服务商", "分析市场趋势"],
         is_builtin=True,
     ),
@@ -40,7 +40,7 @@ BUILTIN_SKILLS = [
         icon="📊",
         category="analysis",
         system_prompt="你是一位数据分析专家。擅长处理结构化数据，生成清晰的分析结论和可视化建议。",
-        allowed_tools=["file_read", "file_write", "shell_execute", "search_web", "message_notify_user"],
+        allowed_tools=["read_file", "write_file", "shell_execute", "search_web", "message_notify_user"],
         examples=["分析这份CSV数据", "生成数据统计报告", "找出数据异常点"],
         is_builtin=True,
     ),
@@ -51,7 +51,7 @@ BUILTIN_SKILLS = [
         icon="✍️",
         category="writing",
         system_prompt="你是一位专业内容创作者。注重文字质量、结构清晰，根据需求调整文风。",
-        allowed_tools=["file_read", "file_write", "search_web", "message_notify_user", "message_ask_user"],
+        allowed_tools=["read_file", "write_file", "search_web", "message_notify_user", "message_ask_user"],
         examples=["写一份产品需求文档", "润色这篇文章", "生成营销文案"],
         is_builtin=True,
     ),
@@ -120,8 +120,24 @@ class SkillService:
     async def seed_builtin_skills(self) -> None:
         async with self._uow_factory() as uow:
             count = await uow.skill.count()
-            if count > 0:
+            if count == 0:
+                for skill in BUILTIN_SKILLS:
+                    await uow.skill.save(skill)
+                logger.info("已种子化4个内置Skill模板")
                 return
-            for skill in BUILTIN_SKILLS:
-                await uow.skill.save(skill)
-        logger.info("已种子化4个内置Skill模板")
+
+            builtin_by_slug = {skill.slug: skill for skill in BUILTIN_SKILLS}
+            existing = await uow.skill.get_all()
+            updated = 0
+            for skill in existing:
+                if not skill.is_builtin:
+                    continue
+                template = builtin_by_slug.get(skill.slug)
+                if not template:
+                    continue
+                if skill.allowed_tools != template.allowed_tools:
+                    skill.allowed_tools = template.allowed_tools
+                    await uow.skill.save(skill)
+                    updated += 1
+            if updated:
+                logger.info("已同步 %d 个内置Skill的工具白名单", updated)

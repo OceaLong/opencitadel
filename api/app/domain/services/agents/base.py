@@ -16,6 +16,7 @@ from app.domain.models.message import Message
 from app.domain.models.tool_result import ToolResult
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.tools.base import BaseTool
+from app.domain.services.tools.tool_names import normalize_allowed_tool_names, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -60,16 +61,20 @@ class BaseAgent(ABC):
         self._tools = tools
         self._skill_prompt = skill_prompt
         self._long_term_memory_block = long_term_memory_block
-        self._allowed_tool_names = allowed_tool_names
+        self._allowed_tool_names = normalize_allowed_tool_names(allowed_tool_names)
 
-    async def _ensure_memory(self) -> None:
-        """确保智能体记忆是存在的"""
-        if self._memory is None:
-            async with self._uow:
-                self._memory = await self._uow.session.get_memory(self._session_id, self.name)
+    def _collect_registered_tool_names(self) -> List[str]:
+        names: List[str] = []
+        for tool in self._tools:
+            for schema in tool.get_tools():
+                name = schema.get("function", {}).get("name", "")
+                if name:
+                    names.append(name)
+        return names
 
     def _get_available_tools(self) -> List[Dict[str, Any]]:
         """获取Agent所有可用的工具列表参数声明/Schema"""
+        registered_names = self._collect_registered_tool_names()
         available_tools = []
         for tool in self._tools:
             for schema in tool.get_tools():
@@ -77,17 +82,53 @@ class BaseAgent(ABC):
                 if self._allowed_tool_names and name not in self._allowed_tool_names:
                     continue
                 available_tools.append(schema)
+
+        if self._allowed_tool_names and registered_names:
+            if not available_tools:
+                logger.warning(
+                    "Skill 工具白名单过滤后无可用工具: session=%s allowed_tools=%s registered_tools=%s",
+                    self._session_id,
+                    self._allowed_tool_names,
+                    registered_names,
+                )
+            elif len(available_tools) < len(self._allowed_tool_names):
+                available_names = [s.get("function", {}).get("name", "") for s in available_tools]
+                logger.debug(
+                    "Skill 工具白名单已过滤: session=%s allowed=%s available=%s",
+                    self._session_id,
+                    self._allowed_tool_names,
+                    available_names,
+                )
         return available_tools
 
-    def _get_tool(self, tool_name: str) -> BaseTool:
-        """获取对应工具所在的工具集/包"""
-        # 1.循环遍历所有工具包
-        for tool in self._tools:
-            # 2.判断工具包中是否存在该工具
-            if tool.has_tool(tool_name):
-                return tool
+    @classmethod
+    def _messages_for_llm(cls, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """发送给 LLM 前移除内部字段，避免 OpenAI 兼容接口校验失败。"""
+        sanitized: List[Dict[str, Any]] = []
+        for message in messages:
+            if message.get("role") == "tool":
+                sanitized.append({
+                    "role": "tool",
+                    "tool_call_id": message.get("tool_call_id"),
+                    "content": message.get("content"),
+                })
+            else:
+                sanitized.append(message)
+        return sanitized
 
-        raise ValueError(f"未知工具: {tool_name}")
+    def _resolve_tool(self, function_name: str) -> BaseTool:
+        """获取工具包，兼容旧工具名。"""
+        normalized_name = normalize_tool_name(function_name)
+        for tool in self._tools:
+            if tool.has_tool(normalized_name):
+                return tool
+        raise ValueError(f"未知工具: {function_name}")
+
+    async def _ensure_memory(self) -> None:
+        """确保智能体记忆是存在的"""
+        if self._memory is None:
+            async with self._uow:
+                self._memory = await self._uow.session.get_memory(self._session_id, self.name)
 
     async def _invoke_llm(self, messages: List[Dict[str, Any]], format: Optional[str] = None) -> Dict[str, Any]:
         """调用语言模型并处理记忆内容"""
@@ -95,7 +136,12 @@ class BaseAgent(ABC):
         await self._add_to_memory(messages)
 
         # 2.组装语言模型的响应格式
-        response_format = {"type": format} if format else None
+        available_tools = self._get_available_tools()
+        effective_format = format
+        if effective_format == "json_object" and available_tools:
+            logger.debug("工具可用时跳过 json_object response_format，以兼容 tool_calls")
+            effective_format = None
+        response_format = {"type": effective_format} if effective_format else None
 
         # 3.循环向LLM发起提问直到最大重试次数
         error = "调用语言模型发生错误"
@@ -103,8 +149,8 @@ class BaseAgent(ABC):
             try:
                 # 4.调用语言模型获取响应内容
                 message = await self._llm.invoke(
-                    messages=self._memory.get_messages(),
-                    tools=self._get_available_tools(),
+                    messages=self._messages_for_llm(self._memory.get_messages()),
+                    tools=available_tools,
                     response_format=response_format,
                     tool_choice=self._tool_choice,
                 )
@@ -227,7 +273,7 @@ class BaseAgent(ABC):
             self._memory.add_message({
                 "role": "tool",
                 "tool_call_id": tool_call_id,
-                "function_name": function_name,
+                "_function_name": function_name,
                 "content": message.model_dump_json(),
             })
         else:
@@ -263,11 +309,38 @@ class BaseAgent(ABC):
 
                 # 6.取出调用工具id、名字、参数信息
                 tool_call_id = tool_call["id"] or str(uuid.uuid4())
-                function_name = tool_call["function"]["name"]
-                function_args = await self._json_parser.invoke(tool_call["function"]["arguments"])
+                function_name = normalize_tool_name(tool_call["function"]["name"])
+                raw_arguments = tool_call["function"]["arguments"]
+                if isinstance(raw_arguments, dict):
+                    function_args = raw_arguments
+                else:
+                    function_args = await self._json_parser.invoke(raw_arguments)
 
-                # 7.取出Agent中对应的工具
-                tool = self._get_tool(function_name)
+                try:
+                    tool = self._resolve_tool(function_name)
+                except ValueError as exc:
+                    logger.warning(
+                        "会话[%s] 调用未知工具[%s]: %s",
+                        self._session_id,
+                        function_name,
+                        exc,
+                    )
+                    result = ToolResult(success=False, message=str(exc))
+                    yield ToolEvent(
+                        tool_call_id=tool_call_id,
+                        tool_name="unknown",
+                        function_name=function_name,
+                        function_args=function_args if isinstance(function_args, dict) else {},
+                        function_result=result,
+                        status=ToolEventStatus.CALLED,
+                    )
+                    tool_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "_function_name": function_name,
+                        "content": result.model_dump_json(),
+                    })
+                    continue
 
                 # 8.返回工具即将调用事件，其中tool_content比较特殊，需要在具体业务中进行实现，这里留空即可
                 yield ToolEvent(
@@ -295,12 +368,12 @@ class BaseAgent(ABC):
                 tool_messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
-                    "function_name": function_name,
+                    "_function_name": function_name,
                     "content": result.model_dump_json(),
                 })
 
             # 12.所有工具都执行完成后，调用LLM获取汇总消息二次提供
-            message = await self._invoke_llm(tool_messages)
+            message = await self._invoke_llm(tool_messages, format=None)
         else:
             # 13.超过最大迭代次数后，则抛出错误
             yield ErrorEvent(error=f"Agent迭代超过最大迭代次数: {self._agent_config.max_iterations}, 任务处理失败")
