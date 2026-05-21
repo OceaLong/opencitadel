@@ -7,9 +7,9 @@
  * 推荐问题/任务配置
  */
 export const suggestedQuestions = [
-  '与最高的建筑相比，埃菲尔铁塔有多高？',
-  'GitHub上最热门的存储库有哪些？',
-  '如果看待中国的外卖大战？',
-  '超加工食品与健康有关吗？超加工食品的历史怎样？',
+  '帮我分析2026年AI Agent的最新发展趋势',
+  '用Python实现一个基于RAG的智能知识库系统',
+  '对比GPT-5、Claude 4和Gemini Ultra的技术特点',
+  '如何构建企业级多Agent协作平台？',
 ] as const
 

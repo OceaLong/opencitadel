@@ -6,6 +6,7 @@ import { getToolKind, getFriendlyToolLabel, getArg } from '@/components/tool-use
 import type { ToolKind } from '@/components/tool-use/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
+import { MarkdownContent } from '@/components/markdown-content'
 import {
   Maximize2,
   Monitor,
@@ -217,10 +218,17 @@ function SearchPreview({ tool }: { tool: ToolEvent }) {
   )
 }
 
+function isMarkdownPath(filepath: string | null | undefined): boolean {
+  if (!filepath) return false
+  const ext = filepath.toLowerCase().split('.').pop()
+  return ext === 'md' || ext === 'markdown'
+}
+
 function FileToolPreview({ tool }: { tool: ToolEvent }) {
   const content = getToolContent(tool)
   const fileContent = typeof content?.content === 'string' ? content.content : null
   const filepath = getArg(tool.args, 'filepath', 'path', 'pathname')
+  const isMarkdown = isMarkdownPath(filepath)
 
   return (
     <div className="flex flex-col gap-3 p-4 h-full">
@@ -231,9 +239,15 @@ function FileToolPreview({ tool }: { tool: ToolEvent }) {
           </div>
         )}
         <ScrollArea className="flex-1">
-          <pre className="p-4 font-mono text-sm text-gray-300 whitespace-pre-wrap break-words leading-relaxed">
-            {fileContent ?? '等待文件内容...'}
-          </pre>
+          {isMarkdown && fileContent ? (
+            <div className="p-4 bg-white">
+              <MarkdownContent content={fileContent} />
+            </div>
+          ) : (
+            <pre className="p-4 font-mono text-sm text-gray-300 whitespace-pre-wrap break-words leading-relaxed">
+              {fileContent ?? '等待文件内容...'}
+            </pre>
+          )}
         </ScrollArea>
       </div>
     </div>

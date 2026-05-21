@@ -8,6 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { formatFileSize } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { AttachmentFile } from '@/lib/session-events'
+import { MarkdownContent } from '@/components/markdown-content'
 
 export interface FilePreviewPanelProps {
   /** 要预览的文件信息 */
@@ -48,6 +49,11 @@ function isSupportedFileType(extension: string): { type: 'text' | 'image' | 'uns
   return { type: 'unsupported' }
 }
 
+function isMarkdownExtension(extension: string): boolean {
+  const ext = extension.toLowerCase().replace(/^\./, '')
+  return ext === 'md' || ext === 'markdown'
+}
+
 export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -55,6 +61,7 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
 
   const fileType = file ? isSupportedFileType(file.extension) : { type: 'unsupported' as const }
+  const isMarkdown = file ? isMarkdownExtension(file.extension) : false
 
   // 加载文件内容
   const loadFileContent = useCallback(async (fileId: string, type: 'text' | 'image' | 'unsupported') => {
@@ -215,9 +222,15 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
 
         {!loading && !error && fileType.type === 'text' && content !== null && (
           <ScrollArea className="h-full">
-            <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-words text-gray-700">
-              {content}
-            </pre>
+            {isMarkdown ? (
+              <div className="p-4">
+                <MarkdownContent content={content} />
+              </div>
+            ) : (
+              <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-words text-gray-700">
+                {content}
+              </pre>
+            )}
           </ScrollArea>
         )}
       </div>
