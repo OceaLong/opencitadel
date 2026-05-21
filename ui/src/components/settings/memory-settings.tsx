@@ -6,7 +6,6 @@ import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { memoryApi } from '@/lib/api/memory'
 import type { MemoryEntry, MemoryScope } from '@/lib/api/types'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -161,31 +160,57 @@ export function MemorySettings({ embedded = false }: Props) {
       ) : (
         <div className="space-y-3">
           {entries.map((e) => (
-            <Card key={e.id}>
-              <CardHeader className="pb-2">
-                <div className="flex justify-between items-start gap-2">
-                  <CardTitle className="text-base">{e.title}</CardTitle>
-                  <div className="flex gap-1 items-center shrink-0">
-                    <Badge variant="outline">{e.scope}</Badge>
+            <div
+              key={e.id}
+              className="group rounded-lg border border-border/70 bg-muted/20 overflow-hidden shadow-sm transition-colors hover:bg-muted/30"
+            >
+              <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-border/60 bg-muted/40">
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-semibold text-foreground truncate">{e.title}</h3>
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                      {e.scope}
+                    </Badge>
                     {e.session_id && (
-                      <Badge variant="outline" className="font-mono text-xs">
+                      <Badge variant="outline" className="font-mono text-[10px] px-1.5 py-0">
                         {e.session_id.slice(0, 8)}…
                       </Badge>
                     )}
-                    <Badge variant="secondary">{e.source}</Badge>
-                    <Button variant="ghost" size="icon" onClick={() => openEdit(e)}>
-                      <Pencil className="size-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(e.id)}>
-                      <Trash2 className="size-4 text-destructive" />
-                    </Button>
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                      {e.source}
+                    </Badge>
+                    {e.use_count > 0 && (
+                      <span className="text-[10px] text-muted-foreground">
+                        使用 {e.use_count} 次
+                      </span>
+                    )}
                   </div>
+                  {e.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {e.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-background border border-border/60 text-muted-foreground"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </CardHeader>
-              <CardContent className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-4">
+                <div className="flex gap-0.5 shrink-0 opacity-80 group-hover:opacity-100">
+                  <Button variant="ghost" size="icon" className="size-8" onClick={() => openEdit(e)}>
+                    <Pencil className="size-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="size-8" onClick={() => handleDelete(e.id)}>
+                    <Trash2 className="size-3.5 text-destructive" />
+                  </Button>
+                </div>
+              </div>
+              <div className="px-4 py-3 text-sm text-muted-foreground whitespace-pre-wrap line-clamp-4 font-mono leading-relaxed">
                 {e.content}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           ))}
           {entries.length === 0 && (
             <p className="text-center text-muted-foreground py-8 text-sm">暂无记忆条目</p>

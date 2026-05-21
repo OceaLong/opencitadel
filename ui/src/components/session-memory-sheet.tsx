@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Brain, Loader2, Trash2 } from 'lucide-react'
+import { Brain, Copy, Loader2, Trash2 } from 'lucide-react'
 import { memoryApi } from '@/lib/api/memory'
 import type { SessionMemoryData } from '@/lib/api/types'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
   Sheet,
   SheetContent,
@@ -27,6 +28,88 @@ type Props = {
   compact?: boolean
 }
 
+function formatMessageContent(msg: Record<string, unknown>): string {
+  if (typeof msg.content === 'string') {
+    return msg.content
+  }
+  return JSON.stringify(msg, null, 2)
+}
+
+function MemoryMessageCard({
+  index,
+  msg,
+  editable,
+  onDelete,
+}: {
+  index: number
+  msg: Record<string, unknown>
+  editable: boolean
+  onDelete: () => void
+}) {
+  const content = formatMessageContent(msg)
+  const lines = content.split('\n')
+  const role = String(msg.role ?? 'unknown')
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content)
+      toast.success('已复制')
+    } catch {
+      toast.error('复制失败')
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border/70 bg-muted/30 overflow-hidden shadow-sm">
+      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/60 bg-muted/50">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {role}
+          </span>
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-mono">
+            #{index + 1}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-0.5 shrink-0">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-7"
+            onClick={handleCopy}
+            title="复制"
+          >
+            <Copy className="size-3.5" />
+          </Button>
+          {editable && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 text-destructive hover:text-destructive"
+              onClick={onDelete}
+              title="删除"
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          )}
+        </div>
+      </div>
+      <div className="flex text-xs font-mono leading-relaxed">
+        <div className="select-none shrink-0 border-r border-border/50 bg-muted/40 px-2.5 py-3 text-muted-foreground/70 text-right">
+          {lines.map((_, lineIndex) => (
+            <div key={lineIndex} className="h-[1.25rem]">
+              {lineIndex + 1}
+            </div>
+          ))}
+        </div>
+        <pre className="flex-1 p-3 whitespace-pre-wrap break-words max-h-48 overflow-auto text-foreground/90">
+          {content.slice(0, 2000)}
+          {content.length > 2000 ? '\n…' : ''}
+        </pre>
+      </div>
+    </div>
+  )
+}
+
 export function SessionMemorySheet({
   sessionId,
   editable = true,
@@ -38,7 +121,9 @@ export function SessionMemorySheet({
   const [loading, setLoading] = useState(false)
   const [mounted, setMounted] = useState(false)
 
-  const messageCount = (data?.planner?.length ?? 0) + (data?.react?.length ?? 0)
+  const plannerCount = data?.planner?.length ?? 0
+  const reactCount = data?.react?.length ?? 0
+  const messageCount = plannerCount + reactCount
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -91,34 +176,29 @@ export function SessionMemorySheet({
   }
 
   const renderAgent = (agent: string, messages: Array<Record<string, unknown>>) => (
-    <div className="space-y-2">
+    <div className="space-y-3 pr-2">
       {editable && (
-        <div className="flex gap-2 mb-2">
-          <Button size="sm" variant="outline" onClick={() => handleCompact(agent)}>压缩</Button>
-          <Button size="sm" variant="outline" onClick={() => handleClear(agent)}>清空</Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleCompact(agent)}>
+            压缩
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleClear(agent)}>
+            清空
+          </Button>
         </div>
       )}
       {messages.map((msg, i) => (
-        <div key={i} className="border rounded p-2 text-xs relative group">
-          <span className="font-mono text-muted-foreground">[{String(msg.role)}]</span>
-          <pre className="mt-1 whitespace-pre-wrap break-all max-h-32 overflow-auto">
-            {typeof msg.content === 'string'
-              ? msg.content.slice(0, 500)
-              : JSON.stringify(msg, null, 2).slice(0, 500)}
-          </pre>
-          {editable && (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="absolute top-1 right-1 size-6 opacity-0 group-hover:opacity-100"
-              onClick={() => handleDeleteMsg(agent, i)}
-            >
-              <Trash2 className="size-3" />
-            </Button>
-          )}
-        </div>
+        <MemoryMessageCard
+          key={i}
+          index={i}
+          msg={msg}
+          editable={editable}
+          onDelete={() => handleDeleteMsg(agent, i)}
+        />
       ))}
-      {messages.length === 0 && <p className="text-muted-foreground text-sm">暂无消息</p>}
+      {messages.length === 0 && (
+        <p className="text-muted-foreground text-sm py-6 text-center">暂无消息</p>
+      )}
     </div>
   )
 
@@ -126,23 +206,15 @@ export function SessionMemorySheet({
     <Button
       variant="ghost"
       size="icon-sm"
-      className="cursor-pointer flex-shrink-0 relative"
-      title={messageCount > 0 ? `会话记忆 ${messageCount} 条` : '会话记忆'}
+      className="cursor-pointer flex-shrink-0"
+      title="会话记忆"
     >
       <Brain />
-      {messageCount > 0 && (
-        <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-primary text-primary-foreground text-[9px] leading-[14px] text-center">
-          {messageCount > 99 ? '99+' : messageCount}
-        </span>
-      )}
     </Button>
   ) : (
     <Button variant="ghost" size="sm" className="h-8 gap-1">
       <Brain className="size-4" />
       记忆
-      {messageCount > 0 && (
-        <span className="text-[10px] text-muted-foreground">({messageCount})</span>
-      )}
     </Button>
   )
 
@@ -157,8 +229,22 @@ export function SessionMemorySheet({
       </SheetTrigger>
       <SheetContent className="w-full sm:max-w-lg">
         <SheetHeader>
-          <SheetTitle>会话内存</SheetTitle>
-          <SheetDescription>查看与编辑 Agent 短期上下文（Tier 1）</SheetDescription>
+          <SheetTitle className="flex items-center gap-2">
+            会话内存
+            {!loading && (
+              <Badge variant="secondary" className="font-normal text-xs">
+                共 {messageCount} 条
+              </Badge>
+            )}
+          </SheetTitle>
+          <SheetDescription>
+            查看与编辑 Agent 短期上下文（Tier 1）
+            {!loading && messageCount > 0 && (
+              <span className="block mt-1 text-xs">
+                Planner {plannerCount} 条 · ReAct {reactCount} 条
+              </span>
+            )}
+          </SheetDescription>
         </SheetHeader>
         {loading ? (
           <div className="flex justify-center py-12"><Loader2 className="size-6 animate-spin" /></div>
@@ -167,19 +253,15 @@ export function SessionMemorySheet({
             <TabsList>
               <TabsTrigger value="planner">
                 Planner
-                {data.planner.length > 0 && (
-                  <span className={cn('ml-1 text-xs text-muted-foreground')}>
-                    ({data.planner.length})
-                  </span>
-                )}
+                <span className={cn('ml-1 text-xs text-muted-foreground')}>
+                  ({plannerCount})
+                </span>
               </TabsTrigger>
               <TabsTrigger value="react">
                 ReAct
-                {data.react.length > 0 && (
-                  <span className={cn('ml-1 text-xs text-muted-foreground')}>
-                    ({data.react.length})
-                  </span>
-                )}
+                <span className={cn('ml-1 text-xs text-muted-foreground')}>
+                  ({reactCount})
+                </span>
               </TabsTrigger>
             </TabsList>
             <ScrollArea className="h-[calc(100vh-180px)] mt-4">

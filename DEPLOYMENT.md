@@ -123,13 +123,13 @@ NGINX_PORT=8088
 
 ### LLM 配置 (api/config.yaml)
 
-`api/config.yaml` 中的 `llm_config` 用于首次启动时种子化默认模型。服务启动后，请在前端「设置中心 → 模型管理」维护模型配置、设置默认模型，并在新建会话或会话详情页选择会话级模型。
+`llm_config` 用于首次启动时种子化默认模型（可选）。仅当 `base_url`、`model_name` 齐全且（非 Ollama 时）提供了 `api_key` 时才会导入；未配置时系统保持无模型，发起对话会提示先在设置中添加模型。服务启动后，请在前端「设置中心 → 模型管理」维护模型配置、设置默认模型，并在新建会话或会话详情页选择会话级模型。
 
 ```yaml
 llm_config:
   base_url: https://api.deepseek.com/
   api_key: sk-YOUR_API_KEY_HERE
-  model_name: deepseek-reasoner
+  model_name: deepseek-chat
   temperature: 0.7
   max_tokens: 8192
 
@@ -157,7 +157,7 @@ a2a_config:
 
 ### 模型、Skill 与记忆
 
-- 首次启动会自动从 `llm_config` 导入一个默认模型；后续模型新增、编辑、删除和默认模型切换都在「设置中心 → 模型管理」完成。
+- 首次启动且 `llm_config` 配置完整时会自动导入一个默认模型；未配置则保持无模型。后续模型新增、编辑、删除和默认模型切换都在「设置中心 → 模型管理」完成。若数据库已有模型，修改 `api/config.yaml` 不会改变当前运行时默认模型。
 - 系统会自动创建内置 Skill 模板（编程助手、研究分析、数据分析、内容写作），也可在「设置中心 → Skill 模板」维护自定义模板。
 - 长期记忆在「设置中心 → 长期记忆」维护，支持全局和会话两种作用域；任务开始时会自动召回相关记忆。
 - 会话详情页可查看 Agent 会话内存，并支持压缩、清空或删除单条内存消息。

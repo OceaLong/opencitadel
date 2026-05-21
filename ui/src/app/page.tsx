@@ -69,7 +69,7 @@ export default function Page() {
             className="mb-4 sm:mb-6"
             onSend={handleSend}
             disabled={sending}
-            toolbarLeft={
+            toolbarRight={
               <>
                 <SessionModelPicker value={modelId} onChange={setModelId} disabled={sending} />
                 <SessionSkillPicker value={skillId} onChange={(id) => setSkillId(id)} disabled={sending} />

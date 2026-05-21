@@ -4,7 +4,7 @@ import logging
 import uuid
 from typing import List
 
-from app.application.errors.exceptions import NotFoundError
+from app.application.errors.exceptions import NotFoundError, BadRequestError
 from app.domain.models.app_config import AppConfig, LLMConfig, AgentConfig, MCPConfig, A2AConfig, A2AServerConfig
 from app.domain.repositories.app_config_repository import AppConfigRepository
 from app.domain.services.tools.a2a import A2AClientManager
@@ -28,6 +28,8 @@ class AppConfigService:
     async def get_llm_config(self) -> LLMConfig:
         """获取LLM提供商配置"""
         app_config = await self._load_app_config()
+        if not app_config.llm_config:
+            raise BadRequestError("未在 config.yaml 中配置 llm_config")
         return app_config.llm_config
 
     async def update_llm_config(self, llm_config: LLMConfig) -> LLMConfig:
@@ -36,7 +38,7 @@ class AppConfigService:
         app_config = await self._load_app_config()
 
         # 2.判断api_key是否为空
-        if not llm_config.api_key.strip():
+        if not llm_config.api_key.strip() and app_config.llm_config:
             llm_config.api_key = app_config.llm_config.api_key
 
         # 3.调用函数更新app_config

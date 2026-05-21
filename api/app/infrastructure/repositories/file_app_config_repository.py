@@ -8,7 +8,7 @@ import yaml
 from filelock import FileLock
 
 from app.application.errors.exceptions import ServerRequestsError
-from app.domain.models.app_config import AppConfig, LLMConfig, AgentConfig, MCPConfig, A2AConfig
+from app.domain.models.app_config import AppConfig, AgentConfig, MCPConfig, A2AConfig
 from app.domain.repositories.app_config_repository import AppConfigRepository
 
 logger = logging.getLogger(__name__)
@@ -31,12 +31,18 @@ class FileAppConfigRepository(AppConfigRepository):
         """如果配置文件不存在，则使用默认配置并写入到本地文件"""
         if not self._config_path.exists():
             default_app_config = AppConfig(
-                llm_config=LLMConfig(),
                 agent_config=AgentConfig(),
                 mcp_config=MCPConfig(),
                 a2a_config=A2AConfig(),
             )
             self.save(default_app_config)
+
+    def load_raw(self) -> dict:
+        """读取原始 YAML 数据，用于判断 llm_config 是否显式配置。"""
+        self._create_default_app_config_if_not_exists()
+        with open(self._config_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        return data if isinstance(data, dict) else {}
 
     def load(self) -> Optional[AppConfig]:
         """从本地yaml文件中加载应用配置"""

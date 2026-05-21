@@ -8,10 +8,10 @@ from pydantic import BaseModel, HttpUrl, Field, ConfigDict, model_validator
 
 
 class LLMConfig(BaseModel):
-    """LLM提供商配置"""
+    """LLM提供商配置（仅在 config.yaml 显式提供时用于种子化默认模型）"""
     base_url: HttpUrl = "https://api.deepseek.com"  # 模型基础URL地址
     api_key: str = ""  # 模型API秘钥
-    model_name: str = "deepseek-reasoner"  # 模型名字，默认使用deepseek-reasoner带推理的模型，传递tools会自动切换到deepseek-chat
+    model_name: str = "deepseek-chat"  # 模型名字；deepseek-reasoner 在 Agent 携带 tools 时会自动切换到 deepseek-chat
     temperature: float = Field(0.7)  # 温度，默认设置为0.7
     max_tokens: int = Field(8192, ge=0)  # 最大输出token数，默认设置为deepseek-chat模型的最大输出限制
 
@@ -87,7 +87,7 @@ class A2AConfig(BaseModel):
 
 class AppConfig(BaseModel):
     """应用配置信息，包含Agent配置、LLM提供商配置、MCP配置、A2A配置"""
-    llm_config: LLMConfig  # 语言模型配置
+    llm_config: Optional[LLMConfig] = None  # 可选；显式提供且完整时才会种子化默认模型
     agent_config: AgentConfig  # Agent通用配置
     mcp_config: MCPConfig  # MCP服务配置
     a2a_config: A2AConfig  # A2A服务配置

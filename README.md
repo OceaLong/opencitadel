@@ -229,13 +229,13 @@ NGINX_PORT=8088                             # 对外访问端口
 
 #### 3. 配置 AI 模型
 
-编辑 `api/config.yaml`，配置首次启动时用于种子化默认模型的 LLM 提供商：
+编辑 `api/config.yaml`，可选配置首次启动时用于种子化默认模型的 LLM 提供商。若未提供 `llm_config` 或配置不完整，系统不会自动创建默认模型，需在前端「设置中心 → 模型管理」手动添加后才能调用。
 
 ```yaml
 llm_config:
   base_url: https://api.deepseek.com/       # LLM API 地址
   api_key: sk-your_api_key_here             # API Key
-  model_name: deepseek-reasoner             # 模型名称
+  model_name: deepseek-chat                 # 模型名称（Agent 推荐使用支持工具调用的模型）
   temperature: 0.7                          # 温度参数 (0-1)
   max_tokens: 8192                          # 最大输出 Token 数
 
@@ -245,7 +245,7 @@ agent_config:
   max_search_results: 10                    # 搜索结果数量
 ```
 
-服务启动后，可在前端「设置中心 → 模型管理」新增、编辑、删除模型并设置默认模型。`config.yaml` 中的 `llm_config` 仅在数据库没有任何模型时自动导入为默认模型。
+服务启动后，可在前端「设置中心 → 模型管理」新增、编辑、删除模型并设置默认模型。`config.yaml` 中的 `llm_config` 仅在数据库没有任何模型且配置完整时自动导入为默认模型；若数据库已有模型，修改 `config.yaml` 不会改变运行时默认模型。
 
 **支持的 LLM 提供商：**
 - DeepSeek
@@ -297,13 +297,13 @@ docker compose logs -f
 
 ##### LLM 配置
 
-`llm_config` 用于首次启动时初始化默认模型；后续建议在前端「设置中心 → 模型管理」维护模型配置。模型配置会存储在 PostgreSQL 的 `llm_models` 表中，API Key 会加密保存，列表展示时会被掩码。
+`llm_config` 用于首次启动时初始化默认模型（可选，需配置完整）；后续建议在前端「设置中心 → 模型管理」维护模型配置。模型配置会存储在 PostgreSQL 的 `llm_models` 表中，API Key 会加密保存，列表展示时会被掩码。未配置任何模型时无法发起对话。
 
 ```yaml
 llm_config:
   base_url: https://api.deepseek.com/     # API 基础 URL
   api_key: sk-xxx                         # API Key
-  model_name: deepseek-reasoner           # 模型名称
+  model_name: deepseek-chat               # 模型名称
   temperature: 0.7                        # 温度 (0-1，越高越随机)
   max_tokens: 8192                        # 最大输出 Token 数
 ```

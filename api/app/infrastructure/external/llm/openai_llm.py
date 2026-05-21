@@ -12,6 +12,18 @@ from app.domain.models.llm_model import LLMModel
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_TOOL_MODEL = "deepseek-chat"
+_CLIENT_EXTRA_KEYS = frozenset({"base_url", "api_key", "tool_model_name", "omit_parallel_tool_calls"})
+
+
+def _resolve_request_model(model_name: str, tools: List[Dict[str, Any]] | None, extra: Dict[str, Any]) -> str:
+    """推理模型在携带 tools 时切换到可工具调用的模型。"""
+    if not tools:
+        return model_name
+    if model_name == "deepseek-reasoner" or model_name.endswith("-reasoner"):
+        return str(extra.get("tool_model_name") or _DEFAULT_TOOL_MODEL)
+    return model_name
+
 
 class OpenAILLM(LLM):
     """基于OpenAI SDK/兼容OpenAI格式的LLM调用类（支持OpenAI/Ollama/Azure）"""
@@ -32,10 +44,11 @@ class OpenAILLM(LLM):
             max_tokens = config.max_tokens
             extra = {}
 
+        self._extra_params = extra
         self._client = AsyncOpenAI(
             base_url=base_url,
             api_key=api_key or "sk-placeholder",
-            **{k: v for k, v in extra.items() if k not in ("base_url", "api_key")},
+            **{k: v for k, v in extra.items() if k not in _CLIENT_EXTRA_KEYS},
             **kwargs,
         )
         self._model_name = model_name
@@ -62,8 +75,9 @@ class OpenAILLM(LLM):
             response_format: Dict[str, Any] = None,
             tool_choice: str = None,
     ) -> Dict[str, Any]:
+        request_model = _resolve_request_model(self._model_name, tools, self._extra_params)
         request_kwargs: Dict[str, Any] = {
-            "model": self._model_name,
+            "model": request_model,
             "messages": messages,
             "timeout": self._timeout,
         }
@@ -76,15 +90,22 @@ class OpenAILLM(LLM):
 
         try:
             if tools:
-                logger.info(f"调用OpenAI客户端向LLM发起请求并携带工具信息: {self._model_name}")
+                logger.info(
+                    f"调用OpenAI客户端向LLM发起请求并携带工具信息: {request_model}"
+                    + (f" (配置模型: {self._model_name})" if request_model != self._model_name else "")
+                )
+                tool_kwargs: Dict[str, Any] = {
+                    "tools": tools,
+                    "tool_choice": tool_choice,
+                }
+                if not self._extra_params.get("omit_parallel_tool_calls"):
+                    tool_kwargs["parallel_tool_calls"] = False
                 response = await self._client.chat.completions.create(
                     **request_kwargs,
-                    tools=tools,
-                    tool_choice=tool_choice,
-                    parallel_tool_calls=False,
+                    **tool_kwargs,
                 )
             else:
-                logger.info(f"调用OpenAI客户端向LLM发起请求未携带工具: {self._model_name}")
+                logger.info(f"调用OpenAI客户端向LLM发起请求未携带工具: {request_model}")
                 response = await self._client.chat.completions.create(**request_kwargs)
             logger.info(f"OpenAI客户端返回内容: {response.model_dump()}")
             return response.choices[0].message.model_dump()

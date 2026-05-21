@@ -344,7 +344,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
                 sessionId={sessionId}
                 isRunning={session?.status === 'running'}
                 onStop={handleStop}
-                toolbarLeft={
+                toolbarRight={
                   <>
                     <SessionModelPicker
                       value={session.model_id}
