@@ -1,6 +1,6 @@
 'use client'
 
-import {useRef, useState} from 'react'
+import {useRef, useState, useCallback} from 'react'
 import {useRouter} from 'next/navigation'
 import {ChatHeader} from '@/components/chat-header'
 import {ChatInput, type ChatInputRef} from '@/components/chat-input'
@@ -17,6 +17,10 @@ export default function Page() {
   const [sending, setSending] = useState(false)
   const [modelId, setModelId] = useState<string | undefined>()
   const [skillId, setSkillId] = useState<string | undefined>()
+
+  const handleDefaultModelLoaded = useCallback((id: string | undefined) => {
+    setModelId((current) => current ?? id)
+  }, [])
 
   const handleQuestionClick = (question: string) => {
     chatInputRef.current?.setInputText(question)
@@ -71,7 +75,12 @@ export default function Page() {
             disabled={sending}
             toolbarRight={
               <>
-                <SessionModelPicker value={modelId} onChange={setModelId} disabled={sending} />
+                <SessionModelPicker
+                  value={modelId}
+                  onChange={setModelId}
+                  onDefaultModelLoaded={handleDefaultModelLoaded}
+                  disabled={sending}
+                />
                 <SessionSkillPicker value={skillId} onChange={(id) => setSkillId(id)} disabled={sending} />
               </>
             }

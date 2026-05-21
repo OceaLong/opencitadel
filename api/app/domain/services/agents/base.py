@@ -6,6 +6,7 @@ import uuid
 from abc import ABC
 from typing import Optional, List, AsyncGenerator, Dict, Any, Callable
 
+from app.application.errors.exceptions import AppException
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
 from app.domain.models.app_config import AgentConfig
@@ -17,6 +18,15 @@ from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
+
+
+def _format_agent_error(error: Exception) -> str:
+    """提取可读错误信息，兼容 AppException 空 str(e) 问题。"""
+    msg = getattr(error, "msg", None)
+    if msg:
+        return str(msg)
+    text = str(error)
+    return text if text else repr(error)
 
 
 class BaseAgent(ABC):
@@ -127,8 +137,12 @@ class BaseAgent(ABC):
                 return filtered_message
             except Exception as e:
                 # 10.记录日志并睡眠指定的时间
-                logger.error(f"调用语言模型发生错误: {str(e)}")
-                error = str(e)
+                error_msg = _format_agent_error(e)
+                logger.error(
+                    f"调用语言模型发生错误: {error_msg}",
+                    exc_info=not isinstance(e, AppException),
+                )
+                error = error_msg
                 await asyncio.sleep(self._retry_interval)
                 continue
 

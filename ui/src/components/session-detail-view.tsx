@@ -166,7 +166,8 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
 
   const handleModelChange = useCallback(
     async (modelId: string | undefined) => {
-      await updateSessionConfig({ model_id: modelId ?? '' })
+      if (!modelId) return
+      await updateSessionConfig({ model_id: modelId })
     },
     [updateSessionConfig]
   )

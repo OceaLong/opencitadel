@@ -12,7 +12,7 @@ from app.infrastructure.external.json_parser.repair_json_parser import RepairJSO
 logger = logging.getLogger(__name__)
 
 EXTRACT_PROMPT = """从以下会话内容中提炼3-10条值得长期记住的关键事实（用户偏好、重要结论、项目信息等）。
-以JSON数组返回，每项格式: {"title": "...", "content": "...", "tags": ["tag1"]}
+以JSON数组返回，每项格式: {{"title": "...", "content": "...", "tags": ["tag1"]}}
 只返回JSON数组，不要其他文字。
 
 会话事件摘要:
@@ -41,8 +41,8 @@ class MemoryExtractorService:
         for event in session.events[-30:]:
             events_summary.append(str(event.model_dump(mode="json") if hasattr(event, "model_dump") else event)[:500])
 
-        prompt = EXTRACT_PROMPT.format(events_summary="\n".join(events_summary)[:8000])
         try:
+            prompt = EXTRACT_PROMPT.format(events_summary="\n".join(events_summary)[:8000])
             response = await self._llm.invoke([{"role": "user", "content": prompt}])
             content = response.get("content", "[]")
             parsed = await self._json_parser.invoke(content)

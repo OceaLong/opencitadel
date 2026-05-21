@@ -25,6 +25,16 @@ def _resolve_request_model(model_name: str, tools: List[Dict[str, Any]] | None, 
     return model_name
 
 
+def _format_llm_error(error: Exception, model_name: str) -> str:
+    message = str(error)
+    if "Not supported model" in message:
+        return (
+            f"调用LLM失败: 模型 {model_name} 不被当前 Base URL 支持，"
+            f"请在模型管理中检查 Model Name。原始错误: {message}"
+        )
+    return f"调用LLM失败: {message}"
+
+
 class OpenAILLM(LLM):
     """基于OpenAI SDK/兼容OpenAI格式的LLM调用类（支持OpenAI/Ollama/Azure）"""
 
@@ -111,4 +121,4 @@ class OpenAILLM(LLM):
             return response.choices[0].message.model_dump()
         except Exception as e:
             logger.error(f"调用OpenAI客户端发生错误: {str(e)}", exc_info=True)
-            raise ServerRequestsError(f"调用LLM失败: {str(e)}")
+            raise ServerRequestsError(_format_llm_error(e, request_model))
