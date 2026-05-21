@@ -35,4 +35,11 @@ def setup_logging():
     # 7.将控制台日志处理器添加到根日志处理器中
     root_logger.addHandler(console_handler)
 
+    # 8.确保应用与 uvicorn 相关 logger 可正常输出
+    for logger_name in ("app", "uvicorn", "uvicorn.error", "uvicorn.access"):
+        named_logger = logging.getLogger(logger_name)
+        named_logger.setLevel(log_level)
+        named_logger.propagate = True
+        named_logger.disabled = False
+
     root_logger.info("日志系统初始化完成")

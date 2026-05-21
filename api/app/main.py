@@ -52,6 +52,8 @@ async def lifespan(app: FastAPI):
     # 2.运行数据库迁移(将数据同步到生产环境)
     alembic_cfg = Config("alembic.ini")
     command.upgrade(alembic_cfg, "head")
+    # Alembic fileConfig 可能覆盖应用日志，迁移后重新初始化
+    setup_logging()
 
     # 3.初始化Redis/Postgres/Cos客户端
     await get_redis().init()
@@ -64,6 +66,7 @@ async def lifespan(app: FastAPI):
         llm_model_service=get_llm_model_service(),
         skill_service=get_skill_service(),
     )
+    logger.info("MyManus初始化完成")
 
     try:
         # 4.lifespan分界点

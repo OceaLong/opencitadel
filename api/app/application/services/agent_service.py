@@ -265,7 +265,7 @@ class AgentService:
 
             logger.info(f"会话[{session_id}]本轮运行结束")
         except Exception as e:
-            logger.error(f"任务会话[{session_id}]对话出错: {str(e)}")
+            logger.exception(f"任务会话[{session_id}]对话出错: {str(e)}")
             event = ErrorEvent(error=str(e))
             try:
                 async with self._uow:

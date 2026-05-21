@@ -30,9 +30,9 @@ type Props = {
 
 function formatMessageContent(msg: Record<string, unknown>): string {
   if (typeof msg.content === 'string') {
-    return msg.content
+    return msg.content.trim()
   }
-  return JSON.stringify(msg, null, 2)
+  return JSON.stringify(msg, null, 2).trim()
 }
 
 function MemoryMessageCard({
@@ -47,7 +47,7 @@ function MemoryMessageCard({
   onDelete: () => void
 }) {
   const content = formatMessageContent(msg)
-  const lines = content.split('\n')
+  const displayContent = content.slice(0, 2000) + (content.length > 2000 ? '\n…' : '')
   const role = String(msg.role ?? 'unknown')
 
   const handleCopy = async () => {
@@ -93,19 +93,9 @@ function MemoryMessageCard({
           )}
         </div>
       </div>
-      <div className="flex text-xs font-mono leading-relaxed">
-        <div className="select-none shrink-0 border-r border-border/50 bg-muted/40 px-2.5 py-3 text-muted-foreground/70 text-right">
-          {lines.map((_, lineIndex) => (
-            <div key={lineIndex} className="h-[1.25rem]">
-              {lineIndex + 1}
-            </div>
-          ))}
-        </div>
-        <pre className="flex-1 p-3 whitespace-pre-wrap break-words max-h-48 overflow-auto text-foreground/90">
-          {content.slice(0, 2000)}
-          {content.length > 2000 ? '\n…' : ''}
-        </pre>
-      </div>
+      <pre className="p-3 text-xs font-mono leading-relaxed whitespace-pre-wrap break-words max-h-48 overflow-auto text-foreground/90">
+        {displayContent || '(empty)'}
+      </pre>
     </div>
   )
 }

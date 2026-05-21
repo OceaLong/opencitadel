@@ -44,7 +44,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def exception_handler(req: Request, e: Exception) -> JSONResponse:
         """处理MyManus中抛出的未定义的任意一场，将状态码统一设置为500"""
-        logger.error(f"Exception: {str(e)}")
+        logger.exception("未捕获异常: %s", e)
         return JSONResponse(
             status_code=500,
             content=Response(
