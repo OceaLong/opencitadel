@@ -17,6 +17,7 @@ class CreateSessionRequest(BaseModel):
     title: Optional[str] = None
     model_id: Optional[str] = None
     skill_id: Optional[str] = None
+    thinking_enabled: Optional[bool] = None
 
 
 class CreateSessionResponse(BaseModel):
@@ -47,12 +48,14 @@ class ChatRequest(BaseModel):
     timestamp: Optional[int] = None  # 当前时间戳
     model_id: Optional[str] = None  # 会话级模型切换
     skill_id: Optional[str] = None  # 会话级Skill切换，空字符串表示禁用
+    thinking_enabled: Optional[bool] = None  # 会话级思考模式切换
 
 
 class UpdateSessionConfigRequest(BaseModel):
     """更新会话配置"""
     model_id: Optional[str] = None
     skill_id: Optional[str] = None
+    thinking_enabled: Optional[bool] = None
 
 
 class GetSessionResponse(BaseModel):
@@ -63,6 +66,7 @@ class GetSessionResponse(BaseModel):
     events: List[AgentSSEEvent] = Field(default_factory=list)
     model_id: Optional[str] = None
     skill_id: Optional[str] = None
+    thinking_enabled: bool = False
     model: Optional[LLMModelResponse] = None
     skill: Optional[SkillSummaryResponse] = None
 

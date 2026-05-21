@@ -182,6 +182,7 @@ class DBSessionRepository(SessionRepository):
             session_id: str,
             model_id: Optional[str] = None,
             skill_id: Optional[str] = None,
+            thinking_enabled: Optional[bool] = None,
             clear_model: bool = False,
             clear_skill: bool = False,
     ) -> None:
@@ -194,6 +195,8 @@ class DBSessionRepository(SessionRepository):
             values["skill_id"] = None
         elif skill_id is not None:
             values["skill_id"] = skill_id
+        if thinking_enabled is not None:
+            values["thinking_enabled"] = thinking_enabled
         if not values:
             return
         stmt = update(SessionModel).where(SessionModel.id == session_id).values(**values)

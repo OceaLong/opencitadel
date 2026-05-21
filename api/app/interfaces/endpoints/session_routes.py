@@ -74,6 +74,7 @@ async def build_get_session_response(
         events=EventMapper.events_to_sse_events(session.events),
         model_id=session.model_id,
         skill_id=session.skill_id,
+        thinking_enabled=session.thinking_enabled,
         model=model_resp,
         skill=skill_resp,
     )
@@ -97,6 +98,7 @@ async def create_session(
         title=request.title or "新对话",
         model_id=request.model_id,
         skill_id=request.skill_id,
+        thinking_enabled=bool(request.thinking_enabled) if request.thinking_enabled is not None else False,
     )
     return Response.success(
         msg="创建任务会话成功",
@@ -226,6 +228,7 @@ async def chat(
                 timestamp=datetime.fromtimestamp(request.timestamp) if request.timestamp else None,
                 model_id=request.model_id,
                 skill_id=request.skill_id,
+                thinking_enabled=request.thinking_enabled,
         ):
             # 2.将Agent事件转换为sse数据(因为普通的event没法通过流式事件传输)
             sse_event = EventMapper.event_to_sse_event(event)
@@ -276,6 +279,7 @@ async def patch_session(
         session_id,
         model_id=request.model_id,
         skill_id=request.skill_id,
+        thinking_enabled=request.thinking_enabled,
     )
     session = await session_service.get_session(session_id)
     if not session:

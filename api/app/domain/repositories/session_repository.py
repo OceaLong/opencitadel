@@ -57,10 +57,11 @@ class SessionRepository(Protocol):
             session_id: str,
             model_id: Optional[str] = None,
             skill_id: Optional[str] = None,
+            thinking_enabled: Optional[bool] = None,
             clear_model: bool = False,
             clear_skill: bool = False,
     ) -> None:
-        """更新会话级模型与Skill配置"""
+        """更新会话级模型、Skill与思考模式配置"""
         ...
 
     async def add_event(self, session_id: str, event: BaseEvent) -> None:

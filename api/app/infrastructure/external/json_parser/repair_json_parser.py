@@ -15,8 +15,11 @@ class RepairJSONParser(JSONParser):
 
     async def invoke(self, text: str, default_value: Optional[Any] = None) -> Union[Dict, List, Any]:
         """传递文本，并使用json修复库进行修复"""
-        # 1.记录日志并判断text是否传递
-        logger.info(f"解析json文本: {text}")
+        preview = (text or "").strip()
+        if preview:
+            logger.debug(f"解析json文本(前200字符): {preview[:200]}")
+        else:
+            logger.debug("解析json文本: 空内容")
         if not text or not text.strip():
             if default_value is not None:
                 return default_value

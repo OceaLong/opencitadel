@@ -9,6 +9,7 @@ import {sessionApi} from '@/lib/api/session'
 import type {FileInfo} from '@/lib/api/types'
 import {SessionModelPicker} from '@/components/session-model-picker'
 import {SessionSkillPicker} from '@/components/session-skill-picker'
+import {ThinkingToggle} from '@/components/thinking-toggle'
 import {toast} from 'sonner'
 
 export default function Page() {
@@ -17,6 +18,7 @@ export default function Page() {
   const [sending, setSending] = useState(false)
   const [modelId, setModelId] = useState<string | undefined>()
   const [skillId, setSkillId] = useState<string | undefined>()
+  const [thinkingEnabled, setThinkingEnabled] = useState(false)
 
   const handleDefaultModelLoaded = useCallback((id: string | undefined) => {
     setModelId((current) => current ?? id)
@@ -36,6 +38,7 @@ export default function Page() {
       const session = await sessionApi.createSession({
         model_id: modelId,
         skill_id: skillId,
+        thinking_enabled: thinkingEnabled,
       })
       const sessionId = session.session_id
 
@@ -75,6 +78,11 @@ export default function Page() {
             disabled={sending}
             toolbarRight={
               <>
+                <ThinkingToggle
+                  enabled={thinkingEnabled}
+                  onChange={setThinkingEnabled}
+                  disabled={sending}
+                />
                 <SessionModelPicker
                   value={modelId}
                   onChange={setModelId}

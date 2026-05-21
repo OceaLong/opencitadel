@@ -13,16 +13,56 @@ from app.domain.models.llm_model import LLMModel
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TOOL_MODEL = "deepseek-chat"
-_CLIENT_EXTRA_KEYS = frozenset({"base_url", "api_key", "tool_model_name", "omit_parallel_tool_calls"})
+_CLIENT_EXTRA_KEYS = frozenset({
+    "base_url",
+    "api_key",
+    "tool_model_name",
+    "omit_parallel_tool_calls",
+    "thinking_request_params",
+    "thinking_extra_body",
+    "thinking_model_name",
+})
+_THINKING_CONFIG_KEYS = frozenset({
+    "thinking_request_params",
+    "thinking_extra_body",
+    "thinking_model_name",
+})
 
 
-def _resolve_request_model(model_name: str, tools: List[Dict[str, Any]] | None, extra: Dict[str, Any]) -> str:
-    """推理模型在携带 tools 时切换到可工具调用的模型。"""
-    if not tools:
+def _resolve_request_model(
+        model_name: str,
+        tools: List[Dict[str, Any]] | None,
+        extra: Dict[str, Any],
+        thinking_enabled: bool = False,
+) -> str:
+    """推理模型在携带 tools 时切换到可工具调用的模型；思考模式可切换到 reasoner 模型。"""
+    if tools:
+        if model_name == "deepseek-reasoner" or model_name.endswith("-reasoner"):
+            return str(extra.get("tool_model_name") or _DEFAULT_TOOL_MODEL)
         return model_name
-    if model_name == "deepseek-reasoner" or model_name.endswith("-reasoner"):
-        return str(extra.get("tool_model_name") or _DEFAULT_TOOL_MODEL)
+    if thinking_enabled:
+        thinking_model = extra.get("thinking_model_name")
+        if thinking_model:
+            return str(thinking_model)
     return model_name
+
+
+def _merge_thinking_request_kwargs(
+        request_kwargs: Dict[str, Any],
+        extra: Dict[str, Any],
+        thinking_enabled: bool,
+) -> None:
+    if not thinking_enabled:
+        return
+    thinking_params = extra.get("thinking_request_params")
+    if isinstance(thinking_params, dict):
+        request_kwargs.update(thinking_params)
+    thinking_body = extra.get("thinking_extra_body")
+    if isinstance(thinking_body, dict):
+        existing = request_kwargs.get("extra_body")
+        if not isinstance(existing, dict):
+            existing = {}
+        request_kwargs["extra_body"] = {**existing, **thinking_body}
 
 
 def _format_llm_error(error: Exception, model_name: str) -> str:
@@ -35,10 +75,24 @@ def _format_llm_error(error: Exception, model_name: str) -> str:
     return f"调用LLM失败: {message}"
 
 
+def _log_response_summary(response: Any, request_model: str) -> None:
+    usage = getattr(response, "usage", None)
+    usage_text = usage.model_dump() if usage is not None and hasattr(usage, "model_dump") else None
+    finish_reason = response.choices[0].finish_reason if response.choices else None
+    logger.info(
+        f"OpenAI客户端返回摘要: model={request_model} finish_reason={finish_reason} usage={usage_text}"
+    )
+
+
 class OpenAILLM(LLM):
     """基于OpenAI SDK/兼容OpenAI格式的LLM调用类（支持OpenAI/Ollama/Azure）"""
 
-    def __init__(self, config: Union[LLMModel, LLMConfig], **kwargs) -> None:
+    def __init__(
+            self,
+            config: Union[LLMModel, LLMConfig],
+            thinking_enabled: bool = False,
+            **kwargs,
+    ) -> None:
         if isinstance(config, LLMModel):
             base_url = config.base_url
             api_key = config.api_key
@@ -55,6 +109,11 @@ class OpenAILLM(LLM):
             extra = {}
 
         self._extra_params = extra
+        self._thinking_enabled = thinking_enabled
+        if thinking_enabled and not any(key in extra for key in _THINKING_CONFIG_KEYS):
+            logger.warning(
+                f"会话已开启思考模式，但模型[{model_name}]未配置 thinking 参数模板，将按普通模式请求"
+            )
         self._client = AsyncOpenAI(
             base_url=base_url,
             api_key=api_key or "sk-placeholder",
@@ -85,7 +144,12 @@ class OpenAILLM(LLM):
             response_format: Dict[str, Any] = None,
             tool_choice: str = None,
     ) -> Dict[str, Any]:
-        request_model = _resolve_request_model(self._model_name, tools, self._extra_params)
+        request_model = _resolve_request_model(
+            self._model_name,
+            tools,
+            self._extra_params,
+            thinking_enabled=self._thinking_enabled,
+        )
         request_kwargs: Dict[str, Any] = {
             "model": request_model,
             "messages": messages,
@@ -97,12 +161,18 @@ class OpenAILLM(LLM):
             request_kwargs["max_tokens"] = self._max_tokens
         if response_format is not None:
             request_kwargs["response_format"] = response_format
+        _merge_thinking_request_kwargs(
+            request_kwargs,
+            self._extra_params,
+            thinking_enabled=self._thinking_enabled,
+        )
 
         try:
             if tools:
                 logger.info(
                     f"调用OpenAI客户端向LLM发起请求并携带工具信息: {request_model}"
                     + (f" (配置模型: {self._model_name})" if request_model != self._model_name else "")
+                    + (f" thinking={self._thinking_enabled}" if self._thinking_enabled else "")
                 )
                 tool_kwargs: Dict[str, Any] = {
                     "tools": tools,
@@ -115,10 +185,20 @@ class OpenAILLM(LLM):
                     **tool_kwargs,
                 )
             else:
-                logger.info(f"调用OpenAI客户端向LLM发起请求未携带工具: {request_model}")
+                logger.info(
+                    f"调用OpenAI客户端向LLM发起请求未携带工具: {request_model}"
+                    + (f" thinking={self._thinking_enabled}" if self._thinking_enabled else "")
+                )
                 response = await self._client.chat.completions.create(**request_kwargs)
-            logger.info(f"OpenAI客户端返回内容: {response.model_dump()}")
-            return response.choices[0].message.model_dump()
+            if not response.choices:
+                raise ServerRequestsError("调用LLM失败: 响应 choices 为空")
+            message = response.choices[0].message
+            if message is None:
+                raise ServerRequestsError("调用LLM失败: 响应 message 为空")
+            _log_response_summary(response, request_model)
+            return message.model_dump()
+        except ServerRequestsError:
+            raise
         except Exception as e:
             logger.error(f"调用OpenAI客户端发生错误: {str(e)}", exc_info=True)
             raise ServerRequestsError(_format_llm_error(e, request_model))

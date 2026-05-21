@@ -31,10 +31,16 @@ class SessionService:
             title: str = "新对话",
             model_id: Optional[str] = None,
             skill_id: Optional[str] = None,
+            thinking_enabled: bool = False,
     ) -> Session:
         """创建一个空白的新任务会话"""
         logger.info(f"创建一个空白新任务会话")
-        session = Session(title=title, model_id=model_id, skill_id=skill_id)
+        session = Session(
+            title=title,
+            model_id=model_id,
+            skill_id=skill_id,
+            thinking_enabled=thinking_enabled,
+        )
         async with self._uow:
             await self._uow.session.save(session)
         logger.info(f"成功创建一个新任务会话: {session.id}")
@@ -45,12 +51,14 @@ class SessionService:
             session_id: str,
             model_id: Optional[str] = None,
             skill_id: Optional[str] = None,
+            thinking_enabled: Optional[bool] = None,
     ) -> Session:
         async with self._uow:
             await self._uow.session.update_session_config(
                 session_id,
                 model_id=model_id,
                 skill_id=skill_id,
+                thinking_enabled=thinking_enabled,
                 clear_model=model_id == "",
                 clear_skill=skill_id == "",
             )

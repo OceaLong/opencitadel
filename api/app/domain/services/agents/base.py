@@ -111,19 +111,27 @@ class BaseAgent(ABC):
 
                 # 5.处理AI响应内容避免空回复
                 if message.get("role") == "assistant":
-                    if not message.get("content") and not message.get("tool_calls"):
-                        logger.warning(f"LLM回复了空内容，执行重试")
+                    content = message.get("content")
+                    tool_calls = message.get("tool_calls")
+                    reasoning_content = message.get("reasoning_content")
+                    if not content and not tool_calls and not reasoning_content:
+                        logger.warning("LLM回复了空内容，执行重试")
                         await self._add_to_memory([
                             {"role": "assistant", "content": ""},
                             {"role": "user", "content": "AI无响应内容，请继续。"}
                         ])
                         await asyncio.sleep(self._retry_interval)
                         continue
+                    if not content and not tool_calls and reasoning_content:
+                        logger.warning(
+                            "LLM仅返回reasoning_content，未返回content/tool_calls，"
+                            "请检查思考模式参数或模型兼容性"
+                        )
 
                     # 6.取出非空消息并处理工具调用(兼容DeepSeek思考模型的写法)
-                    filtered_message = {"role": "assistant", "content": message.get("content")}
-                    if message.get("reasoning_content"):
-                        filtered_message["reasoning_content"] = message.get("reasoning_content")
+                    filtered_message = {"role": "assistant", "content": content}
+                    if reasoning_content:
+                        filtered_message["reasoning_content"] = reasoning_content
                     if message.get("tool_calls"):
                         # 7.取出工具调用的数据，限制LLM一次只能调用工具
                         filtered_message["tool_calls"] = message.get("tool_calls")[:1]

@@ -287,6 +287,7 @@ export type CreateSessionParams = {
   title?: string;
   model_id?: string;
   skill_id?: string;
+  thinking_enabled?: boolean;
   [key: string]: unknown;
 };
 
@@ -313,6 +314,7 @@ export type ChatParams = {
   attachments?: string[];
   model_id?: string;
   skill_id?: string;
+  thinking_enabled?: boolean;
   [key: string]: unknown;
 };
 
@@ -323,6 +325,7 @@ export type SessionDetail = Session & {
   events?: SSEEventData[];
   model_id?: string | null;
   skill_id?: string | null;
+  thinking_enabled?: boolean;
   model?: LLMModel | null;
   skill?: SkillSummary | null;
 };
@@ -330,6 +333,7 @@ export type SessionDetail = Session & {
 export type UpdateSessionConfigParams = {
   model_id?: string;
   skill_id?: string;
+  thinking_enabled?: boolean;
 };
 
 /**

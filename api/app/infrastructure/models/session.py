@@ -7,6 +7,7 @@ from typing import List, Dict, Any
 from sqlalchemy import (
     String,
     Integer,
+    Boolean,
     DateTime,
     Text,
     text,
@@ -79,6 +80,11 @@ class SessionModel(Base):
         ForeignKey("skills.id", ondelete="SET NULL"),
         nullable=True,
     )  # 会话级Skill
+    thinking_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )  # 会话级思考模式
     status: Mapped[str] = mapped_column(
         String(255),
         nullable=False,

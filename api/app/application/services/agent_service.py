@@ -103,7 +103,7 @@ class AgentService:
         llm_model = await self._llm_model_service.resolve_model(model_id)
         if temperature_override is not None:
             llm_model = llm_model.model_copy(update={"temperature": temperature_override})
-        llm = LLMFactory.create(llm_model)
+        llm = LLMFactory.create(llm_model, thinking_enabled=session.thinking_enabled)
         long_term_memory_block = await self._memory_recall(session.id)
         return llm, agent_config, skill, skill_prompt, long_term_memory_block
 
@@ -197,6 +197,7 @@ class AgentService:
             timestamp: Optional[datetime] = None,
             model_id: Optional[str] = None,
             skill_id: Optional[str] = None,
+            thinking_enabled: Optional[bool] = None,
     ) -> AsyncGenerator[BaseEvent, None]:
         try:
             async with self._uow:
@@ -205,12 +206,13 @@ class AgentService:
                 logger.error(f"尝试与不存在的任务会话[{session_id}]对话")
                 raise RuntimeError("任务会话不存在, 请核实后重试")
 
-            if model_id is not None or skill_id is not None:
+            if model_id is not None or skill_id is not None or thinking_enabled is not None:
                 async with self._uow:
                     await self._uow.session.update_session_config(
                         session_id,
                         model_id=model_id,
                         skill_id=skill_id,
+                        thinking_enabled=thinking_enabled,
                         clear_model=model_id == "",
                         clear_skill=skill_id == "",
                     )

@@ -22,6 +22,7 @@ import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import { SessionModelPicker } from '@/components/session-model-picker'
 import { SessionSkillPicker } from '@/components/session-skill-picker'
+import { ThinkingToggle } from '@/components/thinking-toggle'
 import type { Skill } from '@/lib/api/types'
 
 export interface SessionDetailViewProps {
@@ -155,13 +156,21 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
         await sendMessage(message, attachmentIds, {
           model_id: session?.model_id || undefined,
           skill_id: session?.skill_id || undefined,
+          thinking_enabled: session?.thinking_enabled ?? false,
         })
       } catch (e) {
         toast.error(e instanceof Error ? e.message : '发送失败，请重试')
         throw e
       }
     },
-    [sendMessage, session?.model_id, session?.skill_id]
+    [sendMessage, session?.model_id, session?.skill_id, session?.thinking_enabled]
+  )
+
+  const handleThinkingChange = useCallback(
+    async (enabled: boolean) => {
+      await updateSessionConfig({ thinking_enabled: enabled })
+    },
+    [updateSessionConfig]
   )
 
   const handleModelChange = useCallback(
@@ -347,6 +356,11 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
                 onStop={handleStop}
                 toolbarRight={
                   <>
+                    <ThinkingToggle
+                      enabled={session?.thinking_enabled ?? false}
+                      onChange={handleThinkingChange}
+                      disabled={!configEditable && session.status === 'running'}
+                    />
                     <SessionModelPicker
                       value={session.model_id}
                       onChange={handleModelChange}
