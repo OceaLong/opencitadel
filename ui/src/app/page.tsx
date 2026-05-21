@@ -64,16 +64,17 @@ export default function Page() {
             <div className="text-gray-700">你好，同学</div>
             <div className="text-gray-500">我能为你做什么?</div>
           </div>
-          <div className="flex flex-wrap gap-3 mb-3">
-            <SessionModelPicker value={modelId} onChange={setModelId} />
-            <SessionSkillPicker value={skillId} onChange={(id) => setSkillId(id)} />
-          </div>
-          {/* 对话框 */}
           <ChatInput
             ref={chatInputRef}
             className="mb-4 sm:mb-6"
             onSend={handleSend}
             disabled={sending}
+            toolbarLeft={
+              <>
+                <SessionModelPicker value={modelId} onChange={setModelId} disabled={sending} />
+                <SessionSkillPicker value={skillId} onChange={(id) => setSkillId(id)} disabled={sending} />
+              </>
+            }
           />
           {/* 推荐对话内容 */}
           <SuggestedQuestions onQuestionClick={handleQuestionClick}/>

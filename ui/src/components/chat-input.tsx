@@ -22,6 +22,8 @@ interface ChatInputProps {
   isRunning?: boolean
   /** 点击暂停按钮的回调 */
   onStop?: () => void
+  /** 输入框底部左侧自定义控件（模型/Skill 选择等） */
+  toolbarLeft?: React.ReactNode
 }
 
 export interface ChatInputRef {
@@ -31,7 +33,7 @@ export interface ChatInputRef {
 }
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
-  ({ className, onInputValueChange, onSend, disabled = false, sessionId, isRunning = false, onStop }, ref) => {
+  ({ className, onInputValueChange, onSend, disabled = false, sessionId, isRunning = false, onStop, toolbarLeft }, ref) => {
     const [files, setFiles] = useState<FileInfo[]>([])
     const [uploading, setUploading] = useState(false)
     const [sending, setSending] = useState(false)
@@ -202,9 +204,8 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         />
       </div>
       {/* 底部上传&发送按钮 */}
-      <footer className="flex flex-row justify-between w-full px-3">
-        {/* 上传按钮 */}
-        <div className="flex gap-2">
+      <footer className="flex flex-row justify-between items-center w-full px-3 gap-2">
+        <div className="flex items-center gap-1 min-w-0 flex-1">
           <input
             ref={fileInputRef}
             type="file"
@@ -215,7 +216,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
           />
           <Button
             variant="outline"
-            className="rounded-full w-8 h-8 cursor-pointer"
+            className="rounded-full w-8 h-8 cursor-pointer shrink-0"
             onClick={handleUploadClick}
             disabled={uploading}
           >
@@ -225,9 +226,13 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
               <Paperclip/>
             )}
           </Button>
+          {toolbarLeft && (
+            <div className="flex items-center gap-0.5 min-w-0 overflow-hidden">
+              {toolbarLeft}
+            </div>
+          )}
         </div>
-        {/* 发送/暂停按钮 */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0">
           {isRunning ? (
             // 任务运行中时显示暂停按钮
             <Button

@@ -62,32 +62,32 @@ class OpenAILLM(LLM):
             response_format: Dict[str, Any] = None,
             tool_choice: str = None,
     ) -> Dict[str, Any]:
+        request_kwargs: Dict[str, Any] = {
+            "model": self._model_name,
+            "messages": messages,
+            "timeout": self._timeout,
+        }
+        if self._temperature is not None:
+            request_kwargs["temperature"] = self._temperature
+        if self._max_tokens is not None and self._max_tokens > 0:
+            request_kwargs["max_tokens"] = self._max_tokens
+        if response_format is not None:
+            request_kwargs["response_format"] = response_format
+
         try:
             if tools:
                 logger.info(f"调用OpenAI客户端向LLM发起请求并携带工具信息: {self._model_name}")
                 response = await self._client.chat.completions.create(
-                    model=self._model_name,
-                    temperature=self._temperature,
-                    max_tokens=self._max_tokens,
-                    messages=messages,
-                    response_format=response_format,
+                    **request_kwargs,
                     tools=tools,
                     tool_choice=tool_choice,
                     parallel_tool_calls=False,
-                    timeout=self._timeout,
                 )
             else:
                 logger.info(f"调用OpenAI客户端向LLM发起请求未携带工具: {self._model_name}")
-                response = await self._client.chat.completions.create(
-                    model=self._model_name,
-                    temperature=self._temperature,
-                    max_tokens=self._max_tokens,
-                    messages=messages,
-                    response_format=response_format,
-                    timeout=self._timeout,
-                )
+                response = await self._client.chat.completions.create(**request_kwargs)
             logger.info(f"OpenAI客户端返回内容: {response.model_dump()}")
             return response.choices[0].message.model_dump()
         except Exception as e:
-            logger.error(f"调用OpenAI客户端发生错误: {str(e)}")
-            raise ServerRequestsError("调用OpenAI客户端向LLM发起请求出错")
+            logger.error(f"调用OpenAI客户端发生错误: {str(e)}", exc_info=True)
+            raise ServerRequestsError(f"调用LLM失败: {str(e)}")

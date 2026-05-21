@@ -2,7 +2,10 @@
 
 import {useCallback, useEffect, useRef, useState} from 'react'
 import {toast} from 'sonner'
-import {LayoutGrid, LayoutList, Loader2, Languages, Settings, Trash, Wrench} from 'lucide-react'
+import {Brain, Cpu, LayoutGrid, LayoutList, Loader2, Settings, Sparkles, Trash, Wrench} from 'lucide-react'
+import {ModelsSettings} from '@/components/settings/models-settings'
+import {SkillsSettings} from '@/components/settings/skills-settings'
+import {MemorySettings} from '@/components/settings/memory-settings'
 import {
   Dialog,
   DialogClose,
@@ -22,7 +25,7 @@ import {Badge} from '@/components/ui/badge'
 import {Switch} from '@/components/ui/switch'
 import {Textarea} from '@/components/ui/textarea'
 import {configApi} from '@/lib/api'
-import type {AgentConfig, LLMConfig, ListMCPServerItem, ListA2AServerItem} from '@/lib/api'
+import type {AgentConfig, ListMCPServerItem, ListA2AServerItem} from '@/lib/api'
 
 // ==================== 通用配置 ====================
 
@@ -86,106 +89,6 @@ function CommonSetting({config, onChange}: CommonSettingProps) {
               />
               <FieldDescription className="text-xs">
                 默认情况下，每个搜索步骤包含 10 个结果。
-              </FieldDescription>
-            </Field>
-          </FieldGroup>
-        </FieldSet>
-      </FieldGroup>
-    </form>
-  )
-}
-
-// ==================== 模型提供商 ====================
-
-type LLMSettingProps = {
-  config: LLMConfig
-  onChange: (config: LLMConfig) => void
-}
-
-function LLMSetting({config, onChange}: LLMSettingProps) {
-  const handleChange = (field: keyof LLMConfig, value: string) => {
-    onChange({...config, [field]: value})
-  }
-
-  const handleNumberChange = (field: keyof LLMConfig, value: string) => {
-    const numValue = value === '' ? undefined : Number(value)
-    onChange({...config, [field]: numValue})
-  }
-
-  return (
-    <form className="w-full px-1" onSubmit={(e) => e.preventDefault()}>
-      <FieldGroup>
-        <FieldSet>
-          <FieldLegend className="text-lg font-bold text-gray-700">模型提供商</FieldLegend>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="base_url">提供商基础地址(base_url)</FieldLabel>
-              <Input
-                id="base_url"
-                type="url"
-                placeholder="请填写LLM基础URL地址"
-                value={config.base_url ?? ''}
-                onChange={(e) => handleChange('base_url', e.target.value)}
-              />
-              <FieldDescription className="text-xs">
-                请填写模型提供商的基础 url 地址，需兼容 OpenAI 格式。
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="api_key">提供商密钥</FieldLabel>
-              <Input
-                id="api_key"
-                type="password"
-                placeholder="请填写提供商API密钥"
-                value={config.api_key ?? ''}
-                onChange={(e) => handleChange('api_key', e.target.value)}
-              />
-              <FieldDescription className="text-xs">
-                请填写模型提供商密钥信息。
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="model_name">模型名</FieldLabel>
-              <Input
-                id="model_name"
-                type="text"
-                placeholder="请填写需要使用的模型名字"
-                value={config.model_name ?? ''}
-                onChange={(e) => handleChange('model_name', e.target.value)}
-              />
-              <FieldDescription className="text-xs">
-                请填写 MyManus 调用的模型名字，模型必须支持工具调用、图像识别等功能。
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="temperature">温度(temperature)</FieldLabel>
-              <Input
-                id="temperature"
-                type="number"
-                placeholder="请填写模型温度"
-                value={config.temperature ?? 0.7}
-                onChange={(e) => handleNumberChange('temperature', e.target.value)}
-                min={0}
-                max={2}
-                step={0.1}
-              />
-              <FieldDescription className="text-xs">
-                温度越低，模型输出越确定、越稳定；温度越高，输出越具创造性和随机性，默认为 0.7。
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="max_tokens">最大输出 Token 数(max_tokens)</FieldLabel>
-              <Input
-                id="max_tokens"
-                type="number"
-                placeholder="请填写模型最大输出Token数"
-                value={config.max_tokens ?? 8192}
-                onChange={(e) => handleNumberChange('max_tokens', e.target.value)}
-                min={1}
-                max={128000}
-              />
-              <FieldDescription className="text-xs">
-                模型单次回复允许生成的最大 Token 数量，默认为 8192。
               </FieldDescription>
             </Field>
           </FieldGroup>
@@ -528,7 +431,13 @@ function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}: MCPSet
 
 // ==================== 设置弹窗主组件 ====================
 
-type SettingTab = 'common-setting' | 'a2a-setting' | 'mcp-setting'
+type SettingTab =
+  | 'common-setting'
+  | 'models-setting'
+  | 'skills-setting'
+  | 'memory-setting'
+  | 'a2a-setting'
+  | 'mcp-setting'
 
 const SETTING_MENUS: Array<{
   key: SettingTab
@@ -536,6 +445,9 @@ const SETTING_MENUS: Array<{
   title: string
 }> = [
   {key: 'common-setting', icon: Settings, title: '通用配置'},
+  {key: 'models-setting', icon: Cpu, title: '模型管理'},
+  {key: 'skills-setting', icon: Sparkles, title: 'Skill 模板'},
+  {key: 'memory-setting', icon: Brain, title: '长期记忆'},
   {key: 'a2a-setting', icon: LayoutGrid, title: 'A2A Agent 配置'},
   {key: 'mcp-setting', icon: Wrench, title: 'MCP 服务器'},
 ]
@@ -551,7 +463,6 @@ export function ManusSettings() {
 
   // ---- 数据 ----
   const [agentConfig, setAgentConfig] = useState<AgentConfig>({})
-  const [llmConfig, setLlmConfig] = useState<LLMConfig>({})
   const [mcpServers, setMcpServers] = useState<ListMCPServerItem[]>([])
   const [a2aServers, setA2aServers] = useState<ListA2AServerItem[]>([])
 
@@ -621,7 +532,9 @@ export function ManusSettings() {
     }
   }, [open, fetchAllConfigs])
 
-  // ---- 保存 (通用配置 / LLM) ----
+  const showFooterSave = activeSetting === 'common-setting'
+
+  // ---- 保存 (通用配置) ----
   const handleSave = async () => {
     setSaving(true)
     try {
@@ -754,7 +667,7 @@ export function ManusSettings() {
       </DialogTrigger>
 
       {/* 弹窗内容 */}
-      <DialogContent className="!max-w-[850px]">
+      <DialogContent className="!max-w-[920px]">
         {/* 头部 */}
         <DialogHeader className="border-b pb-4">
           <DialogTitle className="text-gray-700">MyManus 设置</DialogTitle>
@@ -764,17 +677,17 @@ export function ManusSettings() {
         {/* 中间主体 */}
         <div className="flex flex-row gap-4">
           {/* 左侧导航菜单 */}
-          <div className="max-w-[180px]">
+          <div className="w-[168px] shrink-0">
             <div className="flex flex-col gap-0">
               {SETTING_MENUS.map((menu) => (
                 <Button
                   key={menu.key}
                   variant={activeSetting === menu.key ? 'default' : 'ghost'}
-                  className="cursor-pointer justify-start"
+                  className="cursor-pointer justify-start text-sm px-2"
                   onClick={() => setActiveSetting(menu.key)}
                 >
-                  <menu.icon/>
-                  {menu.title}
+                  <menu.icon className="size-4"/>
+                  <span className="truncate">{menu.title}</span>
                 </Button>
               ))}
             </div>
@@ -796,6 +709,9 @@ export function ManusSettings() {
                 )}
               </>
             )}
+            {activeSetting === 'models-setting' && <ModelsSettings embedded />}
+            {activeSetting === 'skills-setting' && <SkillsSettings embedded />}
+            {activeSetting === 'memory-setting' && <MemorySettings embedded />}
             {activeSetting === 'a2a-setting' && (
               <A2ASetting
                 servers={a2aServers}
@@ -817,20 +733,21 @@ export function ManusSettings() {
           </div>
         </div>
 
-        {/* 底部按钮 */}
-        <DialogFooter className="border-t pt-4">
-          <DialogClose asChild>
-            <Button variant="outline" className="cursor-pointer">取消</Button>
-          </DialogClose>
-          <Button
-            className="cursor-pointer"
-            disabled={saving}
-            onClick={handleSave}
-          >
-            {saving && <Loader2 className="animate-spin"/>}
-            保存
-          </Button>
-        </DialogFooter>
+        {showFooterSave && (
+          <DialogFooter className="border-t pt-4">
+            <DialogClose asChild>
+              <Button variant="outline" className="cursor-pointer">取消</Button>
+            </DialogClose>
+            <Button
+              className="cursor-pointer"
+              disabled={saving}
+              onClick={handleSave}
+            >
+              {saving && <Loader2 className="animate-spin"/>}
+              保存
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   )

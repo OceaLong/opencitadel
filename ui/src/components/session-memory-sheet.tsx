@@ -16,16 +16,29 @@ import {
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { cn } from '@/lib/utils'
 
 type Props = {
   sessionId: string
   editable?: boolean
+  /** 自定义触发按钮，不传则使用默认样式 */
+  trigger?: React.ReactNode
+  /** 紧凑图标按钮模式（用于会话头部） */
+  compact?: boolean
 }
 
-export function SessionMemorySheet({ sessionId, editable = true }: Props) {
+export function SessionMemorySheet({
+  sessionId,
+  editable = true,
+  trigger,
+  compact = false,
+}: Props) {
   const [open, setOpen] = useState(false)
   const [data, setData] = useState<SessionMemoryData | null>(null)
   const [loading, setLoading] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  const messageCount = (data?.planner?.length ?? 0) + (data?.react?.length ?? 0)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -38,6 +51,11 @@ export function SessionMemorySheet({ sessionId, editable = true }: Props) {
       setLoading(false)
     }
   }, [sessionId])
+
+  useEffect(() => {
+    setMounted(true)
+    load().catch(() => {})
+  }, [load])
 
   useEffect(() => {
     if (open) load()
@@ -104,13 +122,38 @@ export function SessionMemorySheet({ sessionId, editable = true }: Props) {
     </div>
   )
 
+  const defaultTrigger = compact ? (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      className="cursor-pointer flex-shrink-0 relative"
+      title={messageCount > 0 ? `会话记忆 ${messageCount} 条` : '会话记忆'}
+    >
+      <Brain />
+      {messageCount > 0 && (
+        <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-primary text-primary-foreground text-[9px] leading-[14px] text-center">
+          {messageCount > 99 ? '99+' : messageCount}
+        </span>
+      )}
+    </Button>
+  ) : (
+    <Button variant="ghost" size="sm" className="h-8 gap-1">
+      <Brain className="size-4" />
+      记忆
+      {messageCount > 0 && (
+        <span className="text-[10px] text-muted-foreground">({messageCount})</span>
+      )}
+    </Button>
+  )
+
+  if (!mounted) {
+    return trigger ?? defaultTrigger
+  }
+
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-8 gap-1">
-          <Brain className="size-4" />
-          记忆
-        </Button>
+        {trigger ?? defaultTrigger}
       </SheetTrigger>
       <SheetContent className="w-full sm:max-w-lg">
         <SheetHeader>
@@ -122,8 +165,22 @@ export function SessionMemorySheet({ sessionId, editable = true }: Props) {
         ) : data ? (
           <Tabs defaultValue="planner" className="mt-4">
             <TabsList>
-              <TabsTrigger value="planner">Planner</TabsTrigger>
-              <TabsTrigger value="react">ReAct</TabsTrigger>
+              <TabsTrigger value="planner">
+                Planner
+                {data.planner.length > 0 && (
+                  <span className={cn('ml-1 text-xs text-muted-foreground')}>
+                    ({data.planner.length})
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="react">
+                ReAct
+                {data.react.length > 0 && (
+                  <span className={cn('ml-1 text-xs text-muted-foreground')}>
+                    ({data.react.length})
+                  </span>
+                )}
+              </TabsTrigger>
             </TabsList>
             <ScrollArea className="h-[calc(100vh-180px)] mt-4">
               <TabsContent value="planner">{renderAgent('planner', data.planner)}</TabsContent>

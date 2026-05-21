@@ -4,17 +4,44 @@ import logging
 from typing import Callable, List, Optional
 
 from app.application.errors.exceptions import NotFoundError, BadRequestError
-from app.domain.models.llm_model import LLMModel
+from app.domain.models.llm_model import LLMModel, LLMProvider
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 
 logger = logging.getLogger(__name__)
+
+_SUPPORTED_PROVIDERS = {
+    LLMProvider.OPENAI,
+    LLMProvider.OLLAMA,
+    LLMProvider.AZURE,
+}
 
 
 class LLMModelService:
     def __init__(self, uow_factory: Callable[[], IUnitOfWork], cipher: ApiKeyCipher) -> None:
         self._uow_factory = uow_factory
         self._cipher = cipher
+
+    def _validate_model(self, model: LLMModel, *, require_api_key: bool = False) -> None:
+        if not model.display_name.strip():
+            raise BadRequestError("模型显示名称不能为空")
+        if not model.model_name.strip():
+            raise BadRequestError("模型名称(model_name)不能为空")
+        if not model.base_url.strip():
+            raise BadRequestError("模型 Base URL 不能为空")
+        if model.provider not in _SUPPORTED_PROVIDERS:
+            raise BadRequestError(
+                f"Provider「{model.provider.value}」尚未实现，请使用 OpenAI/Ollama/Azure"
+            )
+        if require_api_key and not model.api_key.strip():
+            raise BadRequestError("API Key 不能为空")
+
+    def _ensure_invokable(self, model: LLMModel) -> None:
+        self._validate_model(model)
+        if model.provider != LLMProvider.OLLAMA and not model.api_key.strip():
+            raise BadRequestError(
+                f"模型「{model.display_name}」未配置 API Key，请在设置中补充后再调用"
+            )
 
     def _mask(self, model: LLMModel) -> LLMModel:
         masked = model.mask_api_key()
@@ -42,13 +69,16 @@ class LLMModelService:
             if model_id:
                 model = await uow.llm_model.get_by_id(model_id)
                 if model:
+                    self._ensure_invokable(model)
                     return model
             model = await uow.llm_model.get_default()
         if not model:
             raise BadRequestError("未配置任何LLM模型，请先在设置中添加模型")
+        self._ensure_invokable(model)
         return model
 
     async def create_model(self, model: LLMModel) -> LLMModel:
+        self._validate_model(model, require_api_key=model.provider != LLMProvider.OLLAMA)
         encrypted = self._cipher.encrypt(model.api_key) if model.api_key else ""
         async with self._uow_factory() as uow:
             if model.is_default:
@@ -62,8 +92,9 @@ class LLMModelService:
             if not existing:
                 raise NotFoundError(f"模型[{model_id}]不存在")
             updates.id = model_id
-            if not updates.api_key.strip():
+            if not updates.api_key.strip() or "****" in updates.api_key:
                 updates.api_key = existing.api_key
+            self._validate_model(updates)
             encrypted = self._cipher.encrypt(updates.api_key) if updates.api_key else ""
             if updates.is_default:
                 await uow.llm_model.clear_default()
@@ -93,9 +124,10 @@ class LLMModelService:
             model = await uow.llm_model.get_by_id(model_id)
             if not model:
                 raise NotFoundError(f"模型[{model_id}]不存在")
+            self._validate_model(model)
             await uow.llm_model.clear_default()
             model.is_default = True
-            await uow.llm_model.save(model, self._cipher.encrypt(model.api_key))
+            await uow.llm_model.save(model, "")
         return self._mask(model)
 
     async def sync_from_llm_config(self, llm_config) -> LLMModel:

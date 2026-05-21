@@ -22,7 +22,6 @@ import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import { SessionModelPicker } from '@/components/session-model-picker'
 import { SessionSkillPicker } from '@/components/session-skill-picker'
-import { SessionMemorySheet } from '@/components/session-memory-sheet'
 import type { Skill } from '@/lib/api/types'
 
 export interface SessionDetailViewProps {
@@ -290,6 +289,8 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
                 onFileListOpenChange={setFileListOpen}
                 onFetchFiles={refreshFiles}
                 onFileClick={handleFileClick}
+                sessionId={sessionId}
+                memoryEditable={configEditable}
               />
             </div>
 
@@ -322,20 +323,6 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
             </div>
 
             <div className="flex-shrink-0 bg-[#f8f8f7] py-4">
-              <div className="flex flex-wrap items-center gap-3 mb-2 px-1">
-                <SessionModelPicker
-                  value={session.model_id}
-                  onChange={handleModelChange}
-                  disabled={!configEditable && session.status === 'running'}
-                />
-                <SessionSkillPicker
-                  value={session.skill_id}
-                  onChange={handleSkillChange}
-                  onSkillLoaded={setActiveSkill}
-                  disabled={!configEditable && session.status === 'running'}
-                />
-                <SessionMemorySheet sessionId={sessionId} editable={configEditable} />
-              </div>
               {activeSkill && activeSkill.examples.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-2 px-1">
                   {activeSkill.examples.map((ex) => (
@@ -357,6 +344,21 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
                 sessionId={sessionId}
                 isRunning={session?.status === 'running'}
                 onStop={handleStop}
+                toolbarLeft={
+                  <>
+                    <SessionModelPicker
+                      value={session.model_id}
+                      onChange={handleModelChange}
+                      disabled={!configEditable && session.status === 'running'}
+                    />
+                    <SessionSkillPicker
+                      value={session.skill_id}
+                      onChange={handleSkillChange}
+                      onSkillLoaded={setActiveSkill}
+                      disabled={!configEditable && session.status === 'running'}
+                    />
+                  </>
+                }
               />
             </div>
           </div>

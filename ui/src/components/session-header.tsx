@@ -27,6 +27,7 @@ import { toast } from 'sonner'
 import type { SessionFile } from '@/lib/api/types'
 import { sessionFileToAttachment } from '@/lib/session-events'
 import type { AttachmentFile } from '@/lib/session-events'
+import { SessionMemorySheet } from '@/components/session-memory-sheet'
 
 export interface SessionHeaderProps {
   /** 任务/会话标题 */
@@ -41,6 +42,10 @@ export interface SessionHeaderProps {
   onFetchFiles?: () => void | Promise<void>
   /** 点击文件时的预览回调 */
   onFileClick?: (file: AttachmentFile) => void
+  /** 会话 ID，用于记忆按钮 */
+  sessionId?: string
+  /** 记忆是否可编辑 */
+  memoryEditable?: boolean
 }
 
 export function SessionHeader({
@@ -50,6 +55,8 @@ export function SessionHeader({
   onFileListOpenChange,
   onFetchFiles,
   onFileClick,
+  sessionId,
+  memoryEditable = true,
 }: SessionHeaderProps) {
   const { open, isMobile } = useSidebar()
   const [mounted, setMounted] = useState(false)
@@ -129,13 +136,21 @@ export function SessionHeader({
       <div className="text-gray-700 text-lg whitespace-nowrap text-ellipsis overflow-hidden flex-1 min-w-0">
         {title || '未命名任务'}
       </div>
-      {mounted ? (
-        <Dialog open={openState} onOpenChange={setOpenState}>
-          <DialogTrigger asChild>
-            <Button variant="ghost" size="icon-sm" className="cursor-pointer flex-shrink-0">
-              <FileSearchCorner />
-            </Button>
-          </DialogTrigger>
+      <div className="flex items-center gap-0.5 shrink-0">
+        {sessionId && (
+          <SessionMemorySheet
+            sessionId={sessionId}
+            editable={memoryEditable}
+            compact
+          />
+        )}
+        {mounted ? (
+          <Dialog open={openState} onOpenChange={setOpenState}>
+            <DialogTrigger asChild>
+              <Button variant="ghost" size="icon-sm" className="cursor-pointer flex-shrink-0">
+                <FileSearchCorner />
+              </Button>
+            </DialogTrigger>
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>此任务中的所有文件</DialogTitle>
@@ -186,11 +201,12 @@ export function SessionHeader({
               </ScrollArea>
           </DialogContent>
         </Dialog>
-      ) : (
-        <Button variant="ghost" size="icon-sm" className="cursor-pointer flex-shrink-0">
-          <FileSearchCorner />
-        </Button>
-      )}
+        ) : (
+          <Button variant="ghost" size="icon-sm" className="cursor-pointer flex-shrink-0">
+            <FileSearchCorner />
+          </Button>
+        )}
+      </div>
     </header>
   )
 }
