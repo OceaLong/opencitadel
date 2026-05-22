@@ -27,6 +27,8 @@ from app.infrastructure.external.llm.factory import LLMFactory
 
 logger = logging.getLogger(__name__)
 
+_SESSION_NOT_FOUND_MSG = "任务会话不存在, 请核实后重试"
+
 
 class AgentService:
     """Manus智能体服务"""
@@ -199,12 +201,15 @@ class AgentService:
             skill_id: Optional[str] = None,
             thinking_enabled: Optional[bool] = None,
     ) -> AsyncGenerator[BaseEvent, None]:
+        session_missing = False
         try:
             async with self._uow:
                 session = await self._uow.session.get_by_id(session_id)
             if not session:
                 logger.error(f"尝试与不存在的任务会话[{session_id}]对话")
-                raise RuntimeError("任务会话不存在, 请核实后重试")
+                session_missing = True
+                yield ErrorEvent(error=_SESSION_NOT_FOUND_MSG)
+                return
 
             if model_id is not None or skill_id is not None or thinking_enabled is not None:
                 async with self._uow:
@@ -276,10 +281,11 @@ class AgentService:
                 logger.warning(f"会话[{session_id}]添加错误事件失败: {add_err}")
             yield event
         finally:
-            try:
-                asyncio.create_task(self._safe_update_unread_count(session_id))
-            except RuntimeError:
-                logger.warning(f"会话[{session_id}]无法创建后台任务更新未读消息计数")
+            if not session_missing:
+                try:
+                    asyncio.create_task(self._safe_update_unread_count(session_id))
+                except RuntimeError:
+                    logger.warning(f"会话[{session_id}]无法创建后台任务更新未读消息计数")
 
     async def stop_session(self, session_id: str) -> None:
         async with self._uow:

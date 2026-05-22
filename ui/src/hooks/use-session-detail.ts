@@ -1,9 +1,24 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ApiError } from '@/lib/api'
 import { sessionApi } from '@/lib/api/session'
 import { normalizeEvent, normalizeEvents } from '@/lib/session-events'
 import type { SessionDetail, SSEEventData, SessionFile, UpdateSessionConfigParams } from '@/lib/api/types'
+
+function isSessionMissingError(err: unknown): boolean {
+  if (err instanceof ApiError && err.code === 404) {
+    return true
+  }
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes('会话不存在') || msg.includes('任务会话不存在')
+}
+
+function getSessionMissingErrorFromEvent(ev: SSEEventData): boolean {
+  if (ev.type !== 'error') return false
+  const errorMsg = (ev.data as { error?: string })?.error
+  return typeof errorMsg === 'string' && isSessionMissingError(new Error(errorMsg))
+}
 
 export type UseSessionDetailResult = {
   session: SessionDetail | null
@@ -39,8 +54,34 @@ export function useSessionDetail(
   const [skipEmptyStream, setSkipEmptyStream] = useState(initialSkipEmptyStream || false)
   const emptyStreamCleanupRef = useRef<(() => void) | null>(null)
   const messageStreamCleanupRef = useRef<(() => void) | null>(null)
+  const emptyStreamRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const sessionMissingRef = useRef(false)
   const isSendMessageRef = useRef(false)
   const lastEventIdRef = useRef<string | null>(null)
+
+  const clearEmptyStreamRetryTimer = useCallback(() => {
+    if (emptyStreamRetryTimerRef.current) {
+      clearTimeout(emptyStreamRetryTimerRef.current)
+      emptyStreamRetryTimerRef.current = null
+    }
+  }, [])
+
+  const stopEmptyStream = useCallback(() => {
+    clearEmptyStreamRetryTimer()
+    if (emptyStreamCleanupRef.current) {
+      emptyStreamCleanupRef.current()
+      emptyStreamCleanupRef.current = null
+    }
+  }, [clearEmptyStreamRetryTimer])
+
+  const handleSessionMissing = useCallback((err: unknown) => {
+    sessionMissingRef.current = true
+    stopEmptyStream()
+    setSession(null)
+    setError(err instanceof Error ? err : new Error('会话不存在'))
+    setStreaming(false)
+    isSendMessageRef.current = false
+  }, [stopEmptyStream])
 
   const appendEvent = useCallback((ev: SSEEventData) => {
     let evToAppend = ev
@@ -95,28 +136,41 @@ export function useSessionDetail(
     
     // error 事件时也可以认为任务结束
     if (evToAppend.type === 'error') {
+      if (getSessionMissingErrorFromEvent(evToAppend)) {
+        sessionMissingRef.current = true
+      }
       setSession((prev) => prev ? { ...prev, status: 'completed' } : null)
     }
   }, [])
 
   const startEmptyStream = useCallback(() => {
-    if (!sessionId) return
-    if (emptyStreamCleanupRef.current) {
-      emptyStreamCleanupRef.current()
-      emptyStreamCleanupRef.current = null
-    }
+    if (!sessionId || sessionMissingRef.current) return
+    stopEmptyStream()
     emptyStreamCleanupRef.current = sessionApi.chat(
       sessionId,
       { event_id: lastEventIdRef.current || undefined },
-      (ev) => appendEvent(ev),
+      (ev) => {
+        appendEvent(ev)
+        if (getSessionMissingErrorFromEvent(ev)) {
+          handleSessionMissing(new Error('会话不存在'))
+        }
+      },
       (err) => {
         if (err.name === 'AbortError') {
+          return
+        }
+        if (isSessionMissingError(err)) {
+          emptyStreamCleanupRef.current = null
+          handleSessionMissing(err)
           return
         }
         // 流正常结束（服务端关闭连接），延迟重连
         if (err.message === 'SSE_STREAM_END') {
           emptyStreamCleanupRef.current = null
-          setTimeout(() => {
+          clearEmptyStreamRetryTimer()
+          emptyStreamRetryTimerRef.current = setTimeout(() => {
+            emptyStreamRetryTimerRef.current = null
+            if (sessionMissingRef.current) return
             if (!emptyStreamCleanupRef.current && !isSendMessageRef.current) {
               startEmptyStream()
             }
@@ -126,14 +180,7 @@ export function useSessionDetail(
         console.warn('Session detail empty stream error:', err)
       }
     )
-  }, [sessionId, appendEvent])
-
-  const stopEmptyStream = useCallback(() => {
-    if (emptyStreamCleanupRef.current) {
-      emptyStreamCleanupRef.current()
-      emptyStreamCleanupRef.current = null
-    }
-  }, [])
+  }, [sessionId, appendEvent, stopEmptyStream, clearEmptyStreamRetryTimer, handleSessionMissing])
 
   const normalizeFileList = useCallback((raw: unknown): SessionFile[] => {
     if (Array.isArray(raw)) return raw as SessionFile[]
@@ -164,11 +211,15 @@ export function useSessionDetail(
         if (lastEvId) lastEventIdRef.current = lastEvId
       }
     } catch (e) {
-      setError(e instanceof Error ? e : new Error('加载失败'))
+      if (isSessionMissingError(e)) {
+        handleSessionMissing(e)
+      } else {
+        setError(e instanceof Error ? e : new Error('加载失败'))
+      }
     } finally {
       setLoading(false)
     }
-  }, [sessionId, normalizeFileList])
+  }, [sessionId, normalizeFileList, handleSessionMissing])
 
   const refreshFiles = useCallback(async () => {
     if (!sessionId) return
@@ -187,9 +238,11 @@ export function useSessionDetail(
       setFiles([])
       setEvents([])
       setError(null)
+      sessionMissingRef.current = false
       stopEmptyStream()
       return
     }
+    sessionMissingRef.current = false
     setLoading(true)
     refresh().then(() => {
       // 由下面的 effect 根据 session 状态决定是否开空流
@@ -200,7 +253,7 @@ export function useSessionDetail(
   }, [sessionId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!sessionId || !session) return
+    if (!sessionId || !session || sessionMissingRef.current) return
     const status = session.status
     const completed = status === 'completed'
     // 如果标记了跳过空流（比如有初始消息待发送），则不启动空流
@@ -215,12 +268,13 @@ export function useSessionDetail(
   // 组件卸载时清理消息流
   useEffect(() => {
     return () => {
+      clearEmptyStreamRetryTimer()
       if (messageStreamCleanupRef.current) {
         messageStreamCleanupRef.current()
         messageStreamCleanupRef.current = null
       }
     }
-  }, [])
+  }, [clearEmptyStreamRetryTimer])
 
   const updateSessionConfig = useCallback(
     async (params: UpdateSessionConfigParams) => {
@@ -254,6 +308,14 @@ export function useSessionDetail(
       
       const onEvent = (ev: SSEEventData) => {
         appendEvent(ev)
+        if (getSessionMissingErrorFromEvent(ev)) {
+          if (messageStreamCleanupRef.current) {
+            messageStreamCleanupRef.current()
+            messageStreamCleanupRef.current = null
+          }
+          handleSessionMissing(new Error('会话不存在'))
+          return
+        }
         if (ev.type === 'done') {
           setStreaming(false)
           isSendMessageRef.current = false
@@ -282,6 +344,14 @@ export function useSessionDetail(
             isSendMessageRef.current = false
             return
           }
+          if (isSessionMissingError(err)) {
+            if (messageStreamCleanupRef.current) {
+              messageStreamCleanupRef.current()
+              messageStreamCleanupRef.current = null
+            }
+            handleSessionMissing(err)
+            return
+          }
           // 流正常结束（服务端关闭连接），重置状态并启动空流监听后续事件
           if (err.message === 'SSE_STREAM_END') {
             setStreaming(false)
@@ -302,13 +372,15 @@ export function useSessionDetail(
             messageStreamCleanupRef.current()
             messageStreamCleanupRef.current = null
           }
-          startEmptyStream()
+          if (!sessionMissingRef.current) {
+            startEmptyStream()
+          }
         }
       )
       // 将消息流的 cleanup 存到独立的 ref，不与 emptyStream 混淆
       messageStreamCleanupRef.current = messageStreamCleanup
     },
-    [sessionId, appendEvent, startEmptyStream, stopEmptyStream]
+    [sessionId, appendEvent, startEmptyStream, stopEmptyStream, handleSessionMissing]
   )
 
   return {
