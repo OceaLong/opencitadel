@@ -110,6 +110,9 @@ class OpenAILLM(LLM):
 
         self._extra_params = extra
         self._thinking_enabled = thinking_enabled
+        self._supports_multimodal = (
+            config.supports_multimodal if isinstance(config, LLMModel) else False
+        )
         if thinking_enabled and not any(key in extra for key in _THINKING_CONFIG_KEYS):
             logger.warning(
                 f"会话已开启思考模式，但模型[{model_name}]未配置 thinking 参数模板，将按普通模式请求"
@@ -136,6 +139,10 @@ class OpenAILLM(LLM):
     @property
     def max_tokens(self) -> int:
         return self._max_tokens
+
+    @property
+    def supports_multimodal(self) -> bool:
+        return self._supports_multimodal
 
     async def invoke(
             self,

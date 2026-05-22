@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import asyncio
+import json
 import logging
 import uuid
 from abc import ABC
@@ -12,13 +13,20 @@ from app.domain.external.llm import LLM
 from app.domain.models.app_config import AgentConfig
 from app.domain.models.event import ToolEvent, ToolEventStatus, ErrorEvent, MessageEvent, BaseEvent
 from app.domain.models.memory import Memory
-from app.domain.models.message import Message
+from app.domain.models.message import Message, VisionAttachment
 from app.domain.models.tool_result import ToolResult
+from app.domain.utils.vision import (
+    build_image_content_part_from_base64,
+    build_user_message,
+)
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.tool_names import normalize_allowed_tool_names, normalize_tool_name
 
 logger = logging.getLogger(__name__)
+
+BROWSER_VISION_TOOLS = frozenset({"browser_view", "browser_navigate"})
+_BROWSER_CONTENT_MAX_LEN = 8000
 
 
 def _format_agent_error(error: Exception) -> str:
@@ -113,8 +121,66 @@ class BaseAgent(ABC):
                     "content": message.get("content"),
                 })
             else:
-                sanitized.append(message)
+                cleaned = {k: v for k, v in message.items() if not k.startswith("_")}
+                sanitized.append(cleaned)
         return sanitized
+
+    def _build_browser_tool_payload(
+            self,
+            function_name: str,
+            result: ToolResult,
+    ) -> tuple[str, List[Dict[str, Any]]]:
+        """构建浏览器工具返回给 LLM 的文本与可选截图 user 消息。"""
+        data = result.data or {}
+        interactive_elements = data.get("interactive_elements") or []
+        elements_text = "\n".join(interactive_elements[:100])
+        text_sections: List[str] = []
+
+        if function_name == "browser_view":
+            page_content = data.get("content")
+            if page_content:
+                excerpt = str(page_content)[:_BROWSER_CONTENT_MAX_LEN]
+                text_sections.append(f"Page content (markdown excerpt):\n{excerpt}")
+
+        if elements_text:
+            text_sections.append(f"Interactive elements:\n{elements_text}")
+
+        if not text_sections:
+            text_sections.append("Browser page captured.")
+
+        summary = {
+            "success": result.success,
+            "message": result.message,
+            "interactive_elements": interactive_elements[:100],
+            "note": (
+                "Page screenshot attached in the following user message."
+                if self._llm.supports_multimodal and data.get("screenshot_base64")
+                else None
+            ),
+        }
+        if function_name == "browser_view" and not self._llm.supports_multimodal:
+            summary["content"] = data.get("content")
+
+        extra_messages: List[Dict[str, Any]] = []
+        screenshot_base64 = data.get("screenshot_base64")
+        if self._llm.supports_multimodal and screenshot_base64:
+            extra_messages.append({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Screenshot from `{function_name}` "
+                            f"(see interactive element indices in tool result above):"
+                        ),
+                    },
+                    build_image_content_part_from_base64(
+                        screenshot_base64,
+                        "image/png",
+                    ),
+                ],
+            })
+        return json.dumps(summary, ensure_ascii=False), extra_messages
 
     def _resolve_tool(self, function_name: str) -> BaseTool:
         """获取工具包，兼容旧工具名。"""
@@ -284,16 +350,23 @@ class BaseAgent(ABC):
         async with self._uow:
             await self._uow.session.save_memory(self._session_id, self.name, self._memory)
 
-    async def invoke(self, query: str, format: Optional[str] = None) -> AsyncGenerator[BaseEvent, None]:
+    async def invoke(
+            self,
+            query: str,
+            format: Optional[str] = None,
+            vision_attachments: Optional[List[VisionAttachment]] = None,
+    ) -> AsyncGenerator[BaseEvent, None]:
         """传递消息+响应格式调用程序生成异步迭代内容"""
         # 1.需要判断下是否传递了format
         format = format if format else self._format
 
         # 2.调用语言模型获取响应内容
-        message = await self._invoke_llm(
-            [{"role": "user", "content": query}],
-            format,
+        user_message = build_user_message(
+            query,
+            vision_attachments,
+            supports_multimodal=self._llm.supports_multimodal,
         )
+        message = await self._invoke_llm([user_message], format)
 
         # 3.循环遍历直到最大迭代次数
         for _ in range(self._agent_config.max_iterations):
@@ -365,12 +438,26 @@ class BaseAgent(ABC):
                 )
 
                 # 11.组装工具响应
+                extra_messages: List[Dict[str, Any]] = []
+                if (
+                        function_name in BROWSER_VISION_TOOLS
+                        and self._llm.supports_multimodal
+                        and result.success
+                ):
+                    tool_content, extra_messages = self._build_browser_tool_payload(
+                        function_name,
+                        result,
+                    )
+                else:
+                    tool_content = result.model_dump_json()
+
                 tool_messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
                     "_function_name": function_name,
-                    "content": result.model_dump_json(),
+                    "content": tool_content,
                 })
+                tool_messages.extend(extra_messages)
 
             # 12.所有工具都执行完成后，调用LLM获取汇总消息二次提供
             message = await self._invoke_llm(tool_messages, format=None)

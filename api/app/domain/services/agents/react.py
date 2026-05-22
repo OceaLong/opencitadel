@@ -44,7 +44,10 @@ class ReActAgent(BaseAgent):
         yield StepEvent(step=step, status=StepEventStatus.STARTED)
 
         # 3.调用invoke获取agent返回的事件内容
-        async for event in self.invoke(query):
+        async for event in self.invoke(
+            query,
+            vision_attachments=message.vision_attachments,
+        ):
             # 4.判断事件类型执行不同操作
             if isinstance(event, ToolEvent):
                 # 5.工具事件需要判断工具的名称是否为message_ask_user
@@ -100,7 +103,10 @@ class ReActAgent(BaseAgent):
         query = SUMMARIZE_PROMPT
 
         # 2.调用invoke方法获取Agent生成的事件
-        async for event in self.invoke(query):
+        async for event in self.invoke(
+            query,
+            vision_attachments=message.vision_attachments,
+        ):
             # 3.判断事件类型是否为消息事件，如果是则表示Agent结构化生成汇总内容
             if isinstance(event, MessageEvent):
                 # 4.记录日志并解析输出内容

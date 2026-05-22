@@ -66,9 +66,16 @@ class Memory(BaseModel):
                     message["content"] = "(removed)"
                     logger.debug(f"从记忆中移除对应工具的结果: {function_name}")
 
-            # 3.压缩记忆时reasoning_content内容可以去除压缩上下文
-            if "reasoning_content" in message:
-                logger.debug(f"从记忆中移除工具思考结果: {message['reasoning_content'][:50]}...")
+            # 3.仅移除非 assistant 消息中的 reasoning_content；thinking 模式要求
+            #    assistant 历史必须回传 reasoning_content，否则后续 LLM 调用会 400
+            if (
+                "reasoning_content" in message
+                and message.get("role") != "assistant"
+            ):
+                logger.debug(
+                    f"从记忆中移除非 assistant 思考结果: "
+                    f"{str(message['reasoning_content'])[:50]}..."
+                )
                 del message["reasoning_content"]
 
     @property

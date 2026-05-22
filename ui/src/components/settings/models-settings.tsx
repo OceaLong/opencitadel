@@ -24,6 +24,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 
 /** 当前已完整实现、可用于调用的 Provider */
 export const SUPPORTED_PROVIDERS: { value: LLMProvider; label: string }[] = [
@@ -40,6 +41,7 @@ const emptyForm: CreateLLMModelParams = {
   model_name: 'gpt-4o',
   temperature: 0.7,
   max_tokens: 8192,
+  supports_multimodal: false,
 }
 
 type Props = {
@@ -84,6 +86,7 @@ export function ModelsSettings({ embedded = false }: Props) {
       model_name: m.model_name,
       temperature: m.temperature,
       max_tokens: m.max_tokens,
+      supports_multimodal: m.supports_multimodal ?? false,
       is_default: m.is_default,
     })
     setDialogOpen(true)
@@ -167,6 +170,9 @@ export function ModelsSettings({ embedded = false }: Props) {
                     <CardTitle className="text-base flex items-center gap-2 flex-wrap">
                       {m.display_name}
                       {m.is_default && <Badge variant="secondary">默认</Badge>}
+                      {m.supports_multimodal && (
+                        <Badge variant="outline">多模态</Badge>
+                      )}
                       {!SUPPORTED_PROVIDERS.some((p) => p.value === m.provider) && (
                         <Badge variant="outline" className="text-amber-600">未实现</Badge>
                       )}
@@ -248,6 +254,20 @@ export function ModelsSettings({ embedded = false }: Props) {
               <Input
                 value={form.model_name}
                 onChange={(e) => setForm({ ...form, model_name: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <Label>支持多模态理解</Label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  开启后可将用户图片与浏览器截图直接传给模型
+                </p>
+              </div>
+              <Switch
+                checked={form.supports_multimodal ?? false}
+                onCheckedChange={(checked) =>
+                  setForm({ ...form, supports_multimodal: checked })
+                }
               />
             </div>
             <div className="grid grid-cols-2 gap-4">

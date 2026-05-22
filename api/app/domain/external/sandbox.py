@@ -108,7 +108,7 @@ class Sandbox(Protocol):
         """销毁当前沙箱实例"""
         ...
 
-    async def get_browser(self) -> Browser:
+    async def get_browser(self, supports_multimodal: bool = False) -> Browser:
         """获取沙箱中的浏览器实例"""
         ...
 

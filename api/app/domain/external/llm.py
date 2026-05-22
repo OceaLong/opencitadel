@@ -30,3 +30,8 @@ class LLM(Protocol):
     def max_tokens(self) -> int:
         """只读属性，返回LLM的最大生成token数"""
         ...
+
+    @property
+    def supports_multimodal(self) -> bool:
+        """只读属性，模型是否支持多模态（图片）理解"""
+        ...

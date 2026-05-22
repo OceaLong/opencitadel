@@ -26,6 +26,9 @@ class LLMModelORM(Base):
     extra_params: Mapped[Dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    supports_multimodal: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
@@ -46,6 +49,7 @@ class LLMModelORM(Base):
             temperature=model.temperature,
             max_tokens=model.max_tokens,
             extra_params=model.extra_params,
+            supports_multimodal=model.supports_multimodal,
             is_default=model.is_default,
         )
 
@@ -60,6 +64,7 @@ class LLMModelORM(Base):
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             extra_params=self.extra_params or {},
+            supports_multimodal=self.supports_multimodal,
             is_default=self.is_default,
             created_at=self.created_at,
             updated_at=self.updated_at,

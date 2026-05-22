@@ -28,6 +28,7 @@ class LLMModel(BaseModel):
     temperature: float = Field(default=0.7, ge=0, le=2)
     max_tokens: int = Field(default=8192, ge=1)
     extra_params: Dict[str, Any] = Field(default_factory=dict)
+    supports_multimodal: bool = False
     is_default: bool = False
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

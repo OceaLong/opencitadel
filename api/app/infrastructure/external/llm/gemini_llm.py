@@ -18,6 +18,7 @@ class GeminiLLM(LLM):
         self._model_name = model.model_name
         self._temperature = model.temperature
         self._max_tokens = model.max_tokens
+        self._supports_multimodal = model.supports_multimodal
 
     @property
     def model_name(self) -> str:
@@ -30,6 +31,10 @@ class GeminiLLM(LLM):
     @property
     def max_tokens(self) -> int:
         return self._max_tokens
+
+    @property
+    def supports_multimodal(self) -> bool:
+        return self._supports_multimodal
 
     async def invoke(
             self,

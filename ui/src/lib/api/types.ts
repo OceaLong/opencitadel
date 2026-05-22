@@ -41,6 +41,7 @@ export type LLMModel = {
   temperature: number;
   max_tokens: number;
   extra_params?: Record<string, unknown>;
+  supports_multimodal?: boolean;
   is_default: boolean;
   created_at?: string;
   updated_at?: string;
@@ -59,6 +60,7 @@ export type CreateLLMModelParams = {
   temperature?: number;
   max_tokens?: number;
   extra_params?: Record<string, unknown>;
+  supports_multimodal?: boolean;
   is_default?: boolean;
 };
 

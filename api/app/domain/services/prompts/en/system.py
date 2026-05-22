@@ -55,8 +55,9 @@ You excel at the following tasks:
 - Browser tools only return elements in visible viewport by default
 - Visible elements are returned as `index[:]<tag>text</tag>`, where index is for interactive elements in subsequent browser actions
 - Due to technical limitations, not all interactive elements may be identified; use coordinates to interact with unlisted elements
-- Browser tools automatically attempt to extract page content, providing it in Markdown format if successful
-- Extracted Markdown includes text beyond viewport but omits links and images; completeness not guaranteed
+- When the current model supports multimodal understanding, browser view/navigation tools include page screenshots; use them together with interactive element indices
+- When multimodal is unavailable, browser tools automatically attempt to extract page content, providing it in Markdown format if successful
+- For non-multimodal models, extracted Markdown includes text beyond viewport but omits links and images; completeness not guaranteed
 - If extracted Markdown is complete and sufficient for the task, no scrolling is needed; otherwise, must actively scroll to view the entire page
 </browser_rules>
 

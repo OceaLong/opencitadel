@@ -131,12 +131,12 @@ class AgentService:
             async with self._uow:
                 await self._uow.session.save(session)
 
-        browser = await sandbox.get_browser()
+        llm, agent_config, skill, skill_prompt, ltm_block = await self._resolve_llm_and_config(session)
+
+        browser = await sandbox.get_browser(supports_multimodal=llm.supports_multimodal)
         if not browser:
             logger.error(f"获取沙箱[{sandbox.id}]中的浏览器实例失败")
             raise RuntimeError(f"获取沙箱[{sandbox.id}]中的浏览器实例失败")
-
-        llm, agent_config, skill, skill_prompt, ltm_block = await self._resolve_llm_and_config(session)
 
         async def save_memory_fn(title, content, tags, scope):
             entry = await self._memory_service.save_from_tool(

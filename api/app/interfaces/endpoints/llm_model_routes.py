@@ -31,6 +31,7 @@ def _to_response(model: LLMModel) -> LLMModelResponse:
         temperature=model.temperature,
         max_tokens=model.max_tokens,
         extra_params=model.extra_params,
+        supports_multimodal=model.supports_multimodal,
         is_default=model.is_default,
         created_at=model.created_at,
         updated_at=model.updated_at,

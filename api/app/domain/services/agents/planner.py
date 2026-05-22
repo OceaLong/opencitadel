@@ -53,7 +53,10 @@ class PlannerAgent(BaseAgent):
         )
 
         # 2.调用invoke函数返回迭代事件
-        async for event in self.invoke(query):
+        async for event in self.invoke(
+            query,
+            vision_attachments=message.vision_attachments,
+        ):
             # 3.规划智能体因为使用json_object，正常情况下会返回MessageEvent
             if isinstance(event, MessageEvent):
                 # 4.记录日志并使用json解析器解析得到对应的数据

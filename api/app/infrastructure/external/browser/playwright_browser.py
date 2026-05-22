@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import asyncio
+import base64
 import logging
 from typing import Optional, List, Any
 
@@ -26,10 +27,12 @@ class PlaywrightBrowser(BrowserProtocol):
             self,
             cdp_url: str,  # CDP的连接地址
             llm: Optional[LLM] = None,  # 可选参数，传递LLM，如果传递了则会使用LLM对页面内容进行整理变成markdown格式
+            supports_multimodal: bool = False,
     ) -> None:
         """构造函数，完成Playwright浏览器的初始化"""
         # LLM相关
         self.llm: Optional[LLM] = llm
+        self.supports_multimodal: bool = supports_multimodal
 
         # 浏览器相关
         self.cdp_url: str = cdp_url
@@ -303,10 +306,12 @@ class PlaywrightBrowser(BrowserProtocol):
 
             # 3.使用goto进行跳转
             await self.page.goto(url)
-            return ToolResult(
-                success=True,
-                data={"interactive_elements": await self._extract_interactive_elements()}
-            )
+            interactive_elements = await self._extract_interactive_elements()
+            data: dict[str, Any] = {"interactive_elements": interactive_elements}
+            if self.supports_multimodal:
+                screenshot_bytes = await self.screenshot()
+                data["screenshot_base64"] = base64.b64encode(screenshot_bytes).decode("ascii")
+            return ToolResult(success=True, data=data)
         except Exception as e:
             # 返回错误的工具结果
             return ToolResult(success=False, message=f"浏览器导航到[{url}]失败: {str(e)}")
@@ -322,14 +327,17 @@ class PlaywrightBrowser(BrowserProtocol):
         # 3.更新页面的可交互元素
         interactive_elements = await self._extract_interactive_elements()
 
+        data: dict[str, Any] = {
+            "interactive_elements": interactive_elements,
+        }
+        if self.supports_multimodal:
+            screenshot_bytes = await self.screenshot()
+            data["screenshot_base64"] = base64.b64encode(screenshot_bytes).decode("ascii")
+        else:
+            data["content"] = await self._extract_content()
+
         # 4.返回工具结果
-        return ToolResult(
-            success=True,
-            data={
-                "content": await self._extract_content(),
-                "interactive_elements": interactive_elements,
-            }
-        )
+        return ToolResult(success=True, data=data)
 
     async def input(
             self,

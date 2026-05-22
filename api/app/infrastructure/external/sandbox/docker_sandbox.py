@@ -221,9 +221,9 @@ class DockerSandbox(Sandbox):
             logger.error(f"获取沙箱发生未知错误: {str(e)}")
             return None
 
-    async def get_browser(self) -> Browser:
+    async def get_browser(self, supports_multimodal: bool = False) -> Browser:
         """获取沙箱中的浏览器实例"""
-        return PlaywrightBrowser(self.cdp_url)
+        return PlaywrightBrowser(self.cdp_url, supports_multimodal=supports_multimodal)
 
     async def ensure_sandbox(self) -> None:
         """确保沙箱一定存在/服务全部都开启了才执行后续步骤"""
