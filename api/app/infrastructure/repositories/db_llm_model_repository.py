@@ -57,7 +57,8 @@ class DBLLMModelRepository(LLMModelRepository):
             record.temperature = model.temperature
             record.max_tokens = model.max_tokens
             record.extra_params = model.extra_params
-            record.supports_multimodal = model.supports_multimodal
+            record.capabilities = model.capabilities.model_dump()
+            record.supports_multimodal = model.capabilities.vision
             record.is_default = model.is_default
             record.updated_at = model.updated_at
         else:

@@ -13,6 +13,7 @@ from app.interfaces.schemas.llm_model import (
     LLMModelUpdateRequest,
     LLMModelResponse,
     LLMModelListResponse,
+    MultimodalProbeResponse,
 )
 from app.interfaces.service_dependencies import get_llm_model_service
 
@@ -31,6 +32,7 @@ def _to_response(model: LLMModel) -> LLMModelResponse:
         temperature=model.temperature,
         max_tokens=model.max_tokens,
         extra_params=model.extra_params,
+        capabilities=model.capabilities,
         supports_multimodal=model.supports_multimodal,
         is_default=model.is_default,
         created_at=model.created_at,
@@ -97,3 +99,15 @@ async def set_default_model(
 ) -> Response[LLMModelResponse]:
     model = await llm_model_service.set_default(model_id)
     return Response.success(msg="已设为默认模型", data=_to_response(model))
+
+
+@router.post("/{model_id}/probe-multimodal", response_model=Response[MultimodalProbeResponse])
+async def probe_multimodal(
+        model_id: str,
+        llm_model_service: LLMModelService = Depends(get_llm_model_service),
+) -> Response[MultimodalProbeResponse]:
+    result = await llm_model_service.probe_multimodal(model_id)
+    return Response.success(
+        msg="多模态探测完成",
+        data=MultimodalProbeResponse(**result),
+    )

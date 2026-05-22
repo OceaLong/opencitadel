@@ -61,7 +61,11 @@ class Browser(Protocol):
         ...
 
     async def screenshot(self, full_page: Optional[bool] = None) -> bytes:
-        """对当前浏览器的页面进行截图，传递full_page=True则意味着整页截图"""
+        """传递full_page完成网页截图"""
+        ...
+
+    async def take_screenshot(self) -> ToolResult:
+        """捕获当前页面截图，供多模态模型按需理解页面视觉信息。"""
         ...
 
     async def console_exec(self, javascript: str) -> ToolResult:

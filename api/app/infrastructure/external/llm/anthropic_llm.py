@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 
 from app.application.errors.exceptions import ServerRequestsError
 from app.domain.external.llm import LLM
-from app.domain.models.llm_model import LLMModel
+from app.domain.models.llm_model import LLMModel, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ class AnthropicLLM(LLM):
         self._temperature = model.temperature
         self._max_tokens = model.max_tokens
         self._supports_multimodal = model.supports_multimodal
+        self._capabilities = model.capabilities
 
     @property
     def model_name(self) -> str:
@@ -35,6 +36,10 @@ class AnthropicLLM(LLM):
     @property
     def supports_multimodal(self) -> bool:
         return self._supports_multimodal
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return self._capabilities
 
     async def invoke(
             self,

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional, List
 
 from app.domain.models.event import (
     StepEventStatus,
@@ -14,7 +14,7 @@ from app.domain.models.event import (
     BaseEvent
 )
 from app.domain.models.file import File
-from app.domain.models.message import Message
+from app.domain.models.message import Message, VisionAttachment
 from app.domain.models.plan import Plan, Step, ExecutionStatus
 from app.domain.services.prompts.react import REACT_SYSTEM_PROMPT, EXECUTION_PROMPT, SUMMARIZE_PROMPT
 from app.domain.services.prompts.system import SYSTEM_PROMPT
@@ -29,7 +29,13 @@ class ReActAgent(BaseAgent):
     _system_prompt: str = SYSTEM_PROMPT + REACT_SYSTEM_PROMPT
     _format: str = "json_object"  # format控制的是content、工具调用控制的是tool_calls两者不冲突
 
-    async def execute_step(self, plan: Plan, step: Step, message: Message) -> AsyncGenerator[BaseEvent, None]:
+    async def execute_step(
+            self,
+            plan: Plan,
+            step: Step,
+            message: Message,
+            vision_attachments=None,
+    ) -> AsyncGenerator[BaseEvent, None]:
         """根据传递的消息+规划+子步骤，执行相应的子步骤"""
         # 1.根据传递的内容生成执行消息
         query = EXECUTION_PROMPT.format(
@@ -46,7 +52,7 @@ class ReActAgent(BaseAgent):
         # 3.调用invoke获取agent返回的事件内容
         async for event in self.invoke(
             query,
-            vision_attachments=message.vision_attachments,
+            vision_attachments=vision_attachments,
         ):
             # 4.判断事件类型执行不同操作
             if isinstance(event, ToolEvent):
@@ -102,11 +108,8 @@ class ReActAgent(BaseAgent):
         # 1.构建请求query
         query = SUMMARIZE_PROMPT
 
-        # 2.调用invoke方法获取Agent生成的事件
-        async for event in self.invoke(
-            query,
-            vision_attachments=message.vision_attachments,
-        ):
+        # 2.调用invoke方法获取Agent生成的事件（汇总阶段不再重传用户图片）
+        async for event in self.invoke(query):
             # 3.判断事件类型是否为消息事件，如果是则表示Agent结构化生成汇总内容
             if isinstance(event, MessageEvent):
                 # 4.记录日志并解析输出内容

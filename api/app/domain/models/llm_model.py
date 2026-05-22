@@ -3,9 +3,11 @@
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+_DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 
 class LLMProvider(str, Enum):
@@ -15,6 +17,19 @@ class LLMProvider(str, Enum):
     GEMINI = "gemini"
     OLLAMA = "ollama"
     AZURE = "azure"
+
+
+class ModelCapabilities(BaseModel):
+    """模型多模态与图像相关能力描述。"""
+    vision: bool = False
+    vision_with_tools: bool = True
+    max_image_bytes: int = Field(default=_DEFAULT_MAX_IMAGE_BYTES, ge=1)
+    max_images_per_request: int = Field(default=8, ge=1)
+    image_encoding: Literal["data_url", "url"] = "data_url"
+
+    @classmethod
+    def from_legacy_flag(cls, supports_multimodal: bool) -> "ModelCapabilities":
+        return cls(vision=supports_multimodal)
 
 
 class LLMModel(BaseModel):
@@ -28,10 +43,19 @@ class LLMModel(BaseModel):
     temperature: float = Field(default=0.7, ge=0, le=2)
     max_tokens: int = Field(default=8192, ge=1)
     extra_params: Dict[str, Any] = Field(default_factory=dict)
+    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     supports_multimodal: bool = False
     is_default: bool = False
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
+
+    @model_validator(mode="after")
+    def _sync_capabilities_and_legacy_flag(self) -> "LLMModel":
+        if self.supports_multimodal and not self.capabilities.vision:
+            self.capabilities = self.capabilities.model_copy(update={"vision": True})
+        elif self.capabilities.vision:
+            self.supports_multimodal = True
+        return self
 
     def mask_api_key(self) -> "LLMModel":
         """返回api_key已脱敏的副本"""

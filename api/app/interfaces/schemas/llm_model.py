@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from app.domain.models.llm_model import LLMProvider
+from app.domain.models.llm_model import LLMProvider, ModelCapabilities
 
 
 class LLMModelCreateRequest(BaseModel):
@@ -17,6 +17,7 @@ class LLMModelCreateRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0, le=2)
     max_tokens: int = Field(default=8192, ge=1)
     extra_params: Dict[str, Any] = Field(default_factory=dict)
+    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     supports_multimodal: bool = False
     is_default: bool = False
 
@@ -30,6 +31,7 @@ class LLMModelUpdateRequest(BaseModel):
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
     max_tokens: Optional[int] = Field(default=None, ge=1)
     extra_params: Optional[Dict[str, Any]] = None
+    capabilities: Optional[ModelCapabilities] = None
     supports_multimodal: Optional[bool] = None
     is_default: Optional[bool] = None
 
@@ -44,6 +46,7 @@ class LLMModelResponse(BaseModel):
     temperature: float
     max_tokens: int
     extra_params: Dict[str, Any] = Field(default_factory=dict)
+    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     supports_multimodal: bool = False
     is_default: bool
     created_at: datetime
@@ -52,3 +55,9 @@ class LLMModelResponse(BaseModel):
 
 class LLMModelListResponse(BaseModel):
     models: List[LLMModelResponse]
+
+
+class MultimodalProbeResponse(BaseModel):
+    status: str
+    message: str = ""
+    error_code: Optional[str] = None

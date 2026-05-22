@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import asyncio
-import base64
-import json
 import logging
 import uuid
 from abc import ABC
@@ -16,19 +14,14 @@ from app.domain.models.event import ToolEvent, ToolEventStatus, ErrorEvent, Mess
 from app.domain.models.memory import Memory
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.models.tool_result import ToolResult
-from app.domain.utils.vision import (
-    build_image_content_part_from_base64,
-    build_user_message,
-    MAX_VISION_IMAGE_BYTES,
-)
+from app.domain.services import vision_service
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.tool_names import normalize_allowed_tool_names, normalize_tool_name
 
 logger = logging.getLogger(__name__)
 
-BROWSER_VISION_TOOLS = frozenset({"browser_view", "browser_navigate"})
-_BROWSER_CONTENT_MAX_LEN = 8000
+BROWSER_VISION_TOOLS = frozenset({"browser_screenshot"})
 
 
 def _format_agent_error(error: Exception) -> str:
@@ -112,8 +105,8 @@ class BaseAgent(ABC):
         return available_tools
 
     @classmethod
-    def _messages_for_llm(cls, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """发送给 LLM 前移除内部字段，避免 OpenAI 兼容接口校验失败。"""
+    def _messages_for_llm(cls, messages: List[Dict[str, Any]], llm: Optional[LLM] = None) -> List[Dict[str, Any]]:
+        """发送给 LLM 前移除内部字段，并将 image_ref 还原为 provider 可识别格式。"""
         sanitized: List[Dict[str, Any]] = []
         for message in messages:
             if message.get("role") == "tool":
@@ -125,78 +118,19 @@ class BaseAgent(ABC):
             else:
                 cleaned = {k: v for k, v in message.items() if not k.startswith("_")}
                 sanitized.append(cleaned)
-        return sanitized
+        return vision_service.inflate_messages_for_llm(sanitized, llm)
 
     def _build_browser_tool_payload(
             self,
             function_name: str,
             result: ToolResult,
     ) -> tuple[str, List[Dict[str, Any]]]:
-        """构建浏览器工具返回给 LLM 的文本与可选截图 user 消息。"""
-        data = result.data or {}
-        interactive_elements = data.get("interactive_elements") or []
-        elements_text = "\n".join(interactive_elements[:100])
-        text_sections: List[str] = []
-
-        if function_name == "browser_view":
-            page_content = data.get("content")
-            if page_content:
-                excerpt = str(page_content)[:_BROWSER_CONTENT_MAX_LEN]
-                text_sections.append(f"Page content (markdown excerpt):\n{excerpt}")
-
-        if elements_text:
-            text_sections.append(f"Interactive elements:\n{elements_text}")
-
-        if not text_sections:
-            text_sections.append("Browser page captured.")
-
-        summary = {
-            "success": result.success,
-            "message": result.message,
-            "interactive_elements": interactive_elements[:100],
-            "note": (
-                "Page screenshot attached in the following user message."
-                if self._llm.supports_multimodal and data.get("screenshot_base64")
-                else None
-            ),
-        }
-        if function_name == "browser_view" and not self._llm.supports_multimodal:
-            summary["content"] = data.get("content")
-
-        extra_messages: List[Dict[str, Any]] = []
-        screenshot_base64 = data.get("screenshot_base64")
-        if self._llm.supports_multimodal and screenshot_base64:
-            try:
-                screenshot_bytes = base64.b64decode(screenshot_base64, validate=False)
-            except Exception:
-                screenshot_bytes = b""
-            if len(screenshot_bytes) > MAX_VISION_IMAGE_BYTES:
-                logger.warning(
-                    "会话[%s] 跳过过大的浏览器截图 function=%s size_bytes=%s max_bytes=%s",
-                    self._session_id,
-                    function_name,
-                    len(screenshot_bytes),
-                    MAX_VISION_IMAGE_BYTES,
-                )
-                summary["note"] = "Page screenshot omitted due to size limit."
-            else:
-                extra_messages.append({
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                f"Screenshot from `{function_name}` "
-                                f"(see interactive element indices in tool result above):"
-                            ),
-                        },
-                        build_image_content_part_from_base64(
-                            screenshot_base64,
-                            "image/png",
-                        ),
-                    ],
-                })
-        return json.dumps(summary, ensure_ascii=False), extra_messages
+        """构建浏览器截图工具返回给 LLM 的文本与可选截图 user 消息。"""
+        return vision_service.build_screenshot_messages(
+            function_name,
+            result.data or {},
+            self._llm,
+        )
 
     def _resolve_tool(self, function_name: str) -> BaseTool:
         """获取工具包，兼容旧工具名。"""
@@ -231,7 +165,7 @@ class BaseAgent(ABC):
             try:
                 # 4.调用语言模型获取响应内容
                 message = await self._llm.invoke(
-                    messages=self._messages_for_llm(self._memory.get_messages()),
+                    messages=self._messages_for_llm(self._memory.get_messages(), self._llm),
                     tools=available_tools,
                     response_format=response_format,
                     tool_choice=self._tool_choice,
@@ -377,10 +311,10 @@ class BaseAgent(ABC):
         format = format if format else self._format
 
         # 2.调用语言模型获取响应内容
-        user_message = build_user_message(
+        user_message = vision_service.build_user_message(
             query,
             vision_attachments,
-            supports_multimodal=self._llm.supports_multimodal,
+            llm=self._llm,
         )
         message = await self._invoke_llm([user_message], format)
 
@@ -457,7 +391,7 @@ class BaseAgent(ABC):
                 extra_messages: List[Dict[str, Any]] = []
                 if (
                         function_name in BROWSER_VISION_TOOLS
-                        and self._llm.supports_multimodal
+                        and vision_service.vision_enabled(self._llm)
                         and result.success
                 ):
                     tool_content, extra_messages = self._build_browser_tool_payload(

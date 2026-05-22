@@ -9,6 +9,7 @@ class VisionAttachment(BaseModel):
     """多模态图片附件，用于直接传给支持视觉理解的模型。"""
     mime_type: str = ""
     data_base64: str = ""
+    ref_url: str = ""
 
 
 class Message(BaseModel):

@@ -23,7 +23,8 @@ from app.domain.models.event import ErrorEvent, Event, MessageEvent, BaseEvent, 
     TitleEvent, WaitEvent, DoneEvent
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
-from app.domain.utils.vision import is_image_mime, MAX_VISION_IMAGE_BYTES
+from app.domain.utils.vision import is_image_mime
+from app.domain.services import vision_service
 from app.domain.models.search import SearchResults
 from app.domain.models.session import SessionStatus
 from app.domain.models.skill import Skill
@@ -142,44 +143,11 @@ class AgentTaskRunner(TaskRunner):
 
     async def _build_vision_attachments(self, files: List[File]) -> List[VisionAttachment]:
         """为多模态模型构建用户图片附件的 vision 数据。"""
-        if not self._flow.react._llm.supports_multimodal:
-            return []
-
-        vision_attachments: List[VisionAttachment] = []
-        for file in files:
-            if not is_image_mime(file.mime_type):
-                continue
-            try:
-                file_data, _ = await self._file_storage.download_file(file.id)
-                image_bytes = file_data.read()
-                if len(image_bytes) > MAX_VISION_IMAGE_BYTES:
-                    logger.warning(
-                        "会话[%s] 跳过过大的图片附件 file_id=%s size_bytes=%s max_bytes=%s",
-                        self._session_id,
-                        file.id,
-                        len(image_bytes),
-                        MAX_VISION_IMAGE_BYTES,
-                    )
-                    continue
-                logger.info(
-                    "会话[%s] 构建 vision 附件 file_id=%s mime=%s size_bytes=%s",
-                    self._session_id,
-                    file.id,
-                    file.mime_type,
-                    len(image_bytes),
-                )
-                vision_attachments.append(VisionAttachment(
-                    mime_type=file.mime_type,
-                    data_base64=base64.b64encode(image_bytes).decode("ascii"),
-                ))
-            except Exception as e:
-                logger.warning(
-                    "会话[%s] 构建图片附件 vision 数据失败 file_id=%s: %s",
-                    self._session_id,
-                    file.id,
-                    e,
-                )
-        return vision_attachments
+        return await vision_service.prepare_vision_attachments_from_files(
+            files,
+            self._flow.react._llm,
+            self._file_storage,
+        )
 
     async def _sync_message_attachments_to_sandbox(self, event: MessageEvent) -> None:
         """将消息事件中的附件同步到沙箱中"""

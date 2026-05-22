@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, Plus, Star, Trash2 } from 'lucide-react'
 import { modelsApi } from '@/lib/api/models'
-import type { LLMModel, LLMProvider, CreateLLMModelParams } from '@/lib/api/types'
+import type { LLMModel, LLMProvider, CreateLLMModelParams, ModelCapabilities } from '@/lib/api/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -33,6 +33,14 @@ export const SUPPORTED_PROVIDERS: { value: LLMProvider; label: string }[] = [
   { value: 'azure', label: 'Azure OpenAI' },
 ]
 
+const defaultCapabilities: ModelCapabilities = {
+  vision: false,
+  vision_with_tools: true,
+  max_image_bytes: 5 * 1024 * 1024,
+  max_images_per_request: 8,
+  image_encoding: 'data_url',
+}
+
 const emptyForm: CreateLLMModelParams = {
   display_name: '',
   provider: 'openai',
@@ -41,6 +49,7 @@ const emptyForm: CreateLLMModelParams = {
   model_name: 'gpt-4o',
   temperature: 0.7,
   max_tokens: 8192,
+  capabilities: defaultCapabilities,
   supports_multimodal: false,
 }
 
@@ -55,6 +64,8 @@ export function ModelsSettings({ embedded = false }: Props) {
   const [editing, setEditing] = useState<LLMModel | null>(null)
   const [form, setForm] = useState<CreateLLMModelParams>(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [probingId, setProbingId] = useState<string | null>(null)
+  const [probeStatus, setProbeStatus] = useState<Record<string, string>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -86,6 +97,10 @@ export function ModelsSettings({ embedded = false }: Props) {
       model_name: m.model_name,
       temperature: m.temperature,
       max_tokens: m.max_tokens,
+      capabilities: m.capabilities ?? {
+        ...defaultCapabilities,
+        vision: m.supports_multimodal ?? false,
+      },
       supports_multimodal: m.supports_multimodal ?? false,
       is_default: m.is_default,
     })
@@ -102,12 +117,21 @@ export function ModelsSettings({ embedded = false }: Props) {
       return
     }
     setSaving(true)
+    const payload = {
+      ...form,
+      supports_multimodal: form.capabilities?.vision ?? form.supports_multimodal ?? false,
+      capabilities: {
+        ...defaultCapabilities,
+        ...form.capabilities,
+        vision: form.capabilities?.vision ?? form.supports_multimodal ?? false,
+      },
+    }
     try {
       if (editing) {
-        await modelsApi.update(editing.id, form)
+        await modelsApi.update(editing.id, payload)
         toast.success('模型已更新')
       } else {
-        await modelsApi.create(form)
+        await modelsApi.create(payload)
         toast.success('模型已创建')
       }
       setDialogOpen(false)
@@ -136,6 +160,24 @@ export function ModelsSettings({ embedded = false }: Props) {
       load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '操作失败')
+    }
+  }
+
+  const handleProbe = async (id: string) => {
+    setProbingId(id)
+    try {
+      const result = await modelsApi.probeMultimodal(id)
+      setProbeStatus((prev) => ({ ...prev, [id]: result.status }))
+      if (result.status === 'ok') {
+        toast.success(result.message || '多模态探测成功')
+      } else {
+        toast.info(result.message || '多模态探测完成')
+      }
+    } catch (e) {
+      setProbeStatus((prev) => ({ ...prev, [id]: 'error' }))
+      toast.error(e instanceof Error ? e.message : '探测失败')
+    } finally {
+      setProbingId(null)
     }
   }
 
@@ -173,6 +215,12 @@ export function ModelsSettings({ embedded = false }: Props) {
                       {m.supports_multimodal && (
                         <Badge variant="outline">多模态</Badge>
                       )}
+                      {probeStatus[m.id] === 'ok' && (
+                        <Badge variant="outline" className="text-green-600">已校验</Badge>
+                      )}
+                      {probeStatus[m.id] === 'error' && (
+                        <Badge variant="outline" className="text-red-600">探测失败</Badge>
+                      )}
                       {!SUPPORTED_PROVIDERS.some((p) => p.value === m.provider) && (
                         <Badge variant="outline" className="text-amber-600">未实现</Badge>
                       )}
@@ -185,6 +233,16 @@ export function ModelsSettings({ embedded = false }: Props) {
                     {!m.is_default && (
                       <Button variant="ghost" size="icon" onClick={() => handleSetDefault(m.id)}>
                         <Star className="size-4" />
+                      </Button>
+                    )}
+                    {m.supports_multimodal && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={probingId === m.id}
+                        onClick={() => handleProbe(m.id)}
+                      >
+                        {probingId === m.id ? '探测中...' : '测试多模态'}
                       </Button>
                     )}
                     <Button variant="ghost" size="sm" onClick={() => openEdit(m)}>
@@ -264,12 +322,77 @@ export function ModelsSettings({ embedded = false }: Props) {
                 </p>
               </div>
               <Switch
-                checked={form.supports_multimodal ?? false}
+                checked={form.capabilities?.vision ?? form.supports_multimodal ?? false}
                 onCheckedChange={(checked) =>
-                  setForm({ ...form, supports_multimodal: checked })
+                  setForm({
+                    ...form,
+                    supports_multimodal: checked,
+                    capabilities: {
+                      ...defaultCapabilities,
+                      ...form.capabilities,
+                      vision: checked,
+                    },
+                  })
                 }
               />
             </div>
+            {(form.capabilities?.vision ?? form.supports_multimodal) && (
+              <div className="grid grid-cols-2 gap-4 rounded-lg border p-3">
+                <div>
+                  <Label>单图最大字节</Label>
+                  <Input
+                    type="number"
+                    value={form.capabilities?.max_image_bytes ?? defaultCapabilities.max_image_bytes}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        capabilities: {
+                          ...defaultCapabilities,
+                          ...form.capabilities,
+                          vision: true,
+                          max_image_bytes: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>单次最多图片数</Label>
+                  <Input
+                    type="number"
+                    value={form.capabilities?.max_images_per_request ?? defaultCapabilities.max_images_per_request}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        capabilities: {
+                          ...defaultCapabilities,
+                          ...form.capabilities,
+                          vision: true,
+                          max_images_per_request: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </div>
+                <div className="col-span-2 flex items-center justify-between">
+                  <Label>携带工具时仍发送图片</Label>
+                  <Switch
+                    checked={form.capabilities?.vision_with_tools ?? true}
+                    onCheckedChange={(checked) =>
+                      setForm({
+                        ...form,
+                        capabilities: {
+                          ...defaultCapabilities,
+                          ...form.capabilities,
+                          vision: true,
+                          vision_with_tools: checked,
+                        },
+                      })
+                    }
+                  />
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Temperature</Label>

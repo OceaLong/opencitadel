@@ -31,6 +31,14 @@ export type MCPTransport = "stdio" | "sse" | "streamable_http";
 
 export type LLMProvider = "openai" | "anthropic" | "gemini" | "ollama" | "azure";
 
+export type ModelCapabilities = {
+  vision: boolean;
+  vision_with_tools?: boolean;
+  max_image_bytes?: number;
+  max_images_per_request?: number;
+  image_encoding?: "data_url" | "url";
+};
+
 export type LLMModel = {
   id: string;
   display_name: string;
@@ -41,6 +49,7 @@ export type LLMModel = {
   temperature: number;
   max_tokens: number;
   extra_params?: Record<string, unknown>;
+  capabilities?: ModelCapabilities;
   supports_multimodal?: boolean;
   is_default: boolean;
   created_at?: string;
@@ -60,8 +69,15 @@ export type CreateLLMModelParams = {
   temperature?: number;
   max_tokens?: number;
   extra_params?: Record<string, unknown>;
+  capabilities?: ModelCapabilities;
   supports_multimodal?: boolean;
   is_default?: boolean;
+};
+
+export type MultimodalProbeResult = {
+  status: string;
+  message?: string;
+  error_code?: string | null;
 };
 
 // ==================== Skill 管理 ====================

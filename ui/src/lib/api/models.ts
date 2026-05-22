@@ -1,5 +1,5 @@
 import { get, post, put, del } from "./fetch";
-import type { LLMModel, LLMModelsData, CreateLLMModelParams } from "./types";
+import type { LLMModel, LLMModelsData, CreateLLMModelParams, MultimodalProbeResult } from "./types";
 
 export const modelsApi = {
   list: (): Promise<LLMModelsData> => get<LLMModelsData>("/llm-models"),
@@ -16,4 +16,7 @@ export const modelsApi = {
 
   setDefault: (id: string): Promise<LLMModel> =>
     post<LLMModel>(`/llm-models/${id}/set-default`, {}),
+
+  probeMultimodal: (id: string): Promise<MultimodalProbeResult> =>
+    post<MultimodalProbeResult>(`/llm-models/${id}/probe-multimodal`, {}),
 };

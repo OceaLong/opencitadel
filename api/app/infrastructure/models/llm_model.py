@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
-from ...domain.models.llm_model import LLMModel, LLMProvider
+from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities
 
 
 class LLMModelORM(Base):
@@ -24,6 +24,9 @@ class LLMModelORM(Base):
     temperature: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0.7"))
     max_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("8192"))
     extra_params: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    capabilities: Mapped[Dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     supports_multimodal: Mapped[bool] = mapped_column(
@@ -49,11 +52,17 @@ class LLMModelORM(Base):
             temperature=model.temperature,
             max_tokens=model.max_tokens,
             extra_params=model.extra_params,
+            capabilities=model.capabilities.model_dump(),
             supports_multimodal=model.supports_multimodal,
             is_default=model.is_default,
         )
 
     def to_domain(self, decrypted_api_key: str) -> LLMModel:
+        raw_capabilities = self.capabilities or {}
+        if raw_capabilities:
+            capabilities = ModelCapabilities.model_validate(raw_capabilities)
+        else:
+            capabilities = ModelCapabilities.from_legacy_flag(self.supports_multimodal)
         return LLMModel(
             id=self.id,
             display_name=self.display_name,
@@ -64,6 +73,7 @@ class LLMModelORM(Base):
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             extra_params=self.extra_params or {},
+            capabilities=capabilities,
             supports_multimodal=self.supports_multimodal,
             is_default=self.is_default,
             created_at=self.created_at,

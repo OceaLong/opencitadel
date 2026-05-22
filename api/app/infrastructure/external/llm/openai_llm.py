@@ -8,7 +8,14 @@ from openai import AsyncOpenAI
 from app.application.errors.exceptions import ServerRequestsError
 from app.domain.external.llm import LLM
 from app.domain.models.app_config import LLMConfig
-from app.domain.models.llm_model import LLMModel
+from app.domain.models.llm_model import LLMModel, ModelCapabilities
+from app.infrastructure.external.llm.base_llm import (
+    MultimodalFallbackMixin,
+    _has_multimodal_image_content,
+    _strip_multimodal_to_text,
+    is_retriable_multimodal_error,
+)
+from app.infrastructure.observability.llm_metrics import record_multimodal_request
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +44,6 @@ def _resolve_request_model(
         extra: Dict[str, Any],
         thinking_enabled: bool = False,
 ) -> str:
-    """推理模型在携带 tools 时切换到可工具调用的模型；思考模式可切换到 reasoner 模型。"""
     if tools:
         if model_name == "deepseek-reasoner" or model_name.endswith("-reasoner"):
             return str(extra.get("tool_model_name") or _DEFAULT_TOOL_MODEL)
@@ -87,7 +93,6 @@ def _log_response_summary(response: Any, request_model: str) -> None:
 
 
 def _resolve_request_timeout(extra: Dict[str, Any]) -> float:
-    """从模型 extra_params 解析单次 LLM 请求超时（秒）。"""
     configured = extra.get("request_timeout")
     if configured is None:
         return float(_DEFAULT_REQUEST_TIMEOUT)
@@ -100,16 +105,17 @@ def _resolve_request_timeout(extra: Dict[str, Any]) -> float:
 
 
 def _log_multimodal_request_summary(messages: List[Dict[str, Any]]) -> None:
-    """记录多模态消息摘要，便于排查长时间等待。"""
     image_count = 0
+    image_bytes = 0
     for message in messages:
         content = message.get("content")
         if not isinstance(content, list):
             continue
         for part in content:
-            if isinstance(part, dict) and part.get("type") == "image_url":
+            if isinstance(part, dict) and part.get("type") in {"image_url", "image_ref"}:
                 image_count += 1
     if image_count:
+        record_multimodal_request(image_bytes=image_bytes, image_count=image_count)
         logger.info(
             "OpenAI多模态请求摘要: message_count=%s image_part_count=%s",
             len(messages),
@@ -117,7 +123,7 @@ def _log_multimodal_request_summary(messages: List[Dict[str, Any]]) -> None:
         )
 
 
-class OpenAILLM(LLM):
+class OpenAILLM(MultimodalFallbackMixin, LLM):
     """基于OpenAI SDK/兼容OpenAI格式的LLM调用类（支持OpenAI/Ollama/Azure）"""
 
     def __init__(
@@ -133,6 +139,8 @@ class OpenAILLM(LLM):
             temperature = config.temperature
             max_tokens = config.max_tokens
             extra = config.extra_params or {}
+            self._capabilities = config.capabilities
+            self._supports_multimodal = config.supports_multimodal
         else:
             base_url = str(config.base_url)
             api_key = config.api_key
@@ -140,12 +148,11 @@ class OpenAILLM(LLM):
             temperature = config.temperature
             max_tokens = config.max_tokens
             extra = {}
+            self._capabilities = ModelCapabilities()
+            self._supports_multimodal = False
 
         self._extra_params = extra
         self._thinking_enabled = thinking_enabled
-        self._supports_multimodal = (
-            config.supports_multimodal if isinstance(config, LLMModel) else False
-        )
         if thinking_enabled and not any(key in extra for key in _THINKING_CONFIG_KEYS):
             logger.warning(
                 f"会话已开启思考模式，但模型[{model_name}]未配置 thinking 参数模板，将按普通模式请求"
@@ -176,6 +183,57 @@ class OpenAILLM(LLM):
     @property
     def supports_multimodal(self) -> bool:
         return self._supports_multimodal
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return self._capabilities
+
+    async def _create_chat_completion(
+            self,
+            request_kwargs: Dict[str, Any],
+            tools: List[Dict[str, Any]] | None,
+            tool_choice: str | None,
+            request_model: str,
+    ) -> Any:
+        if tools:
+            logger.info(
+                f"调用OpenAI客户端向LLM发起请求并携带工具信息: {request_model}"
+                + (f" (配置模型: {self._model_name})" if request_model != self._model_name else "")
+                + (f" thinking={self._thinking_enabled}" if self._thinking_enabled else "")
+                + f" timeout={self._timeout}s"
+            )
+            tool_kwargs: Dict[str, Any] = {
+                "tools": tools,
+                "tool_choice": tool_choice,
+            }
+            if not self._extra_params.get("omit_parallel_tool_calls"):
+                tool_kwargs["parallel_tool_calls"] = False
+            return await self._client.chat.completions.create(
+                **request_kwargs,
+                **tool_kwargs,
+            )
+
+        logger.info(
+            f"调用OpenAI客户端向LLM发起请求未携带工具: {request_model}"
+            + (f" thinking={self._thinking_enabled}" if self._thinking_enabled else "")
+            + f" timeout={self._timeout}s"
+        )
+        return await self._client.chat.completions.create(**request_kwargs)
+
+    def _raise_llm_error(self, error: Exception, request_model: str) -> None:
+        error_text = str(error).lower()
+        if "timeout" in error_text or "timed out" in error_text:
+            logger.error(
+                "调用OpenAI客户端超时: model=%s timeout=%ss error=%s",
+                request_model,
+                self._timeout,
+                error,
+            )
+            raise ServerRequestsError(
+                f"调用LLM超时(>{self._timeout}s): 请检查模型服务或减小多模态图片体积"
+            )
+        logger.error(f"调用OpenAI客户端发生错误: {str(error)}", exc_info=True)
+        raise ServerRequestsError(_format_llm_error(error, request_model))
 
     async def invoke(
             self,
@@ -208,51 +266,37 @@ class OpenAILLM(LLM):
         )
         _log_multimodal_request_summary(messages)
 
+        async def _create_with_kwargs(kwargs: Dict[str, Any]):
+            return await self._create_chat_completion(
+                kwargs,
+                tools,
+                tool_choice,
+                request_model,
+            )
+
         try:
-            if tools:
-                logger.info(
-                    f"调用OpenAI客户端向LLM发起请求并携带工具信息: {request_model}"
-                    + (f" (配置模型: {self._model_name})" if request_model != self._model_name else "")
-                    + (f" thinking={self._thinking_enabled}" if self._thinking_enabled else "")
-                    + f" timeout={self._timeout}s"
-                )
-                tool_kwargs: Dict[str, Any] = {
-                    "tools": tools,
-                    "tool_choice": tool_choice,
-                }
-                if not self._extra_params.get("omit_parallel_tool_calls"):
-                    tool_kwargs["parallel_tool_calls"] = False
-                response = await self._client.chat.completions.create(
-                    **request_kwargs,
-                    **tool_kwargs,
-                )
-            else:
-                logger.info(
-                    f"调用OpenAI客户端向LLM发起请求未携带工具: {request_model}"
-                    + (f" thinking={self._thinking_enabled}" if self._thinking_enabled else "")
-                    + f" timeout={self._timeout}s"
-                )
-                response = await self._client.chat.completions.create(**request_kwargs)
-            if not response.choices:
-                raise ServerRequestsError("调用LLM失败: 响应 choices 为空")
-            message = response.choices[0].message
-            if message is None:
-                raise ServerRequestsError("调用LLM失败: 响应 message 为空")
-            _log_response_summary(response, request_model)
-            return message.model_dump()
+            response = await _create_with_kwargs(request_kwargs)
         except ServerRequestsError:
             raise
-        except Exception as e:
-            error_text = str(e).lower()
-            if "timeout" in error_text or "timed out" in error_text:
-                logger.error(
-                    "调用OpenAI客户端超时: model=%s timeout=%ss error=%s",
-                    request_model,
-                    self._timeout,
-                    e,
-                )
-                raise ServerRequestsError(
-                    f"调用LLM超时(>{self._timeout}s): 请检查模型服务或减小多模态图片体积"
-                )
-            logger.error(f"调用OpenAI客户端发生错误: {str(e)}", exc_info=True)
-            raise ServerRequestsError(_format_llm_error(e, request_model))
+        except Exception as error:
+            if _has_multimodal_image_content(messages) and is_retriable_multimodal_error(error):
+                try:
+                    response = await self._apply_multimodal_fallback(
+                        error,
+                        request_kwargs,
+                        _create_with_kwargs,
+                    )
+                except Exception as retry_error:
+                    if retry_error is error:
+                        self._raise_llm_error(error, request_model)
+                    self._raise_llm_error(retry_error, request_model)
+            else:
+                self._raise_llm_error(error, request_model)
+
+        if not response.choices:
+            raise ServerRequestsError("调用LLM失败: 响应 choices 为空")
+        message = response.choices[0].message
+        if message is None:
+            raise ServerRequestsError("调用LLM失败: 响应 message 为空")
+        _log_response_summary(response, request_model)
+        return message.model_dump()

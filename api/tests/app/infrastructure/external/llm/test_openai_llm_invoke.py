@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.application.errors.exceptions import ServerRequestsError
-from app.domain.models.llm_model import LLMModel, LLMProvider
+from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities
+from app.infrastructure.external.llm.base_llm import (
+    _has_multimodal_image_content,
+    _strip_multimodal_to_text,
+)
 from app.infrastructure.external.llm.openai_llm import OpenAILLM
 
 
@@ -113,3 +117,176 @@ async def _test_openai_llm_invoke_timeout_raises_server_requests_error():
 
 def test_openai_llm_invoke_timeout_raises_server_requests_error():
     asyncio.run(_test_openai_llm_invoke_timeout_raises_server_requests_error())
+
+
+def test_has_multimodal_image_content():
+    assert _has_multimodal_image_content([
+        {"role": "user", "content": [{"type": "text", "text": "hi"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}}]},
+    ]) is True
+    assert _has_multimodal_image_content([{"role": "user", "content": "hi"}]) is False
+
+
+def test_strip_multimodal_to_text_keeps_text_and_removes_images():
+    messages = [
+        {"role": "user", "content": [
+            {"type": "text", "text": "describe this"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+        ]},
+    ]
+    fallback = _strip_multimodal_to_text(messages)
+    assert fallback[0]["content"] == "describe this"
+
+
+def test_strip_multimodal_to_text_adds_note_for_image_only_message():
+    messages = [
+        {"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+        ]},
+    ]
+    fallback = _strip_multimodal_to_text(messages)
+    assert "图片附件" in fallback[0]["content"]
+
+
+async def _test_openai_llm_invoke_multimodal_connection_error_falls_back_to_text():
+    llm = OpenAILLM(
+        LLMModel(
+            provider=LLMProvider.OPENAI,
+            base_url="https://example.com/v1",
+            api_key="sk-test",
+            model_name="gpt-4o",
+            supports_multimodal=True,
+        )
+    )
+    message = SimpleNamespace(
+        model_dump=lambda: {"role": "assistant", "content": "ok"},
+    )
+    choice = SimpleNamespace(message=message, finish_reason="stop")
+    response = SimpleNamespace(choices=[choice], usage=None)
+    llm._client = MagicMock()
+    llm._client.chat.completions.create = AsyncMock(
+        side_effect=[
+            Exception("Connection error."),
+            response,
+        ]
+    )
+
+    multimodal_messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "describe this"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+        ],
+    }]
+    result = await llm.invoke(multimodal_messages)
+    assert result["content"] == "ok"
+    assert llm._client.chat.completions.create.await_count == 2
+    second_kwargs = llm._client.chat.completions.create.await_args_list[1].kwargs
+    assert second_kwargs["messages"][0]["content"] == "describe this"
+    assert not _has_multimodal_image_content(second_kwargs["messages"])
+
+
+def test_openai_llm_invoke_multimodal_connection_error_falls_back_to_text():
+    asyncio.run(_test_openai_llm_invoke_multimodal_connection_error_falls_back_to_text())
+
+
+async def _test_openai_llm_invoke_multimodal_fallback_preserves_tools():
+    llm = OpenAILLM(
+        LLMModel(
+            provider=LLMProvider.OPENAI,
+            base_url="https://example.com/v1",
+            api_key="sk-test",
+            model_name="gpt-4o",
+            supports_multimodal=True,
+        )
+    )
+    message = SimpleNamespace(
+        model_dump=lambda: {"role": "assistant", "content": "ok", "tool_calls": []},
+    )
+    choice = SimpleNamespace(message=message, finish_reason="stop")
+    response = SimpleNamespace(choices=[choice], usage=None)
+    llm._client = MagicMock()
+    llm._client.chat.completions.create = AsyncMock(
+        side_effect=[
+            Exception("Connection error."),
+            response,
+        ]
+    )
+    tools = [{"type": "function", "function": {"name": "search", "parameters": {}}}]
+
+    await llm.invoke(
+        [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "find this"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+            ],
+        }],
+        tools=tools,
+    )
+    second_kwargs = llm._client.chat.completions.create.await_args_list[1].kwargs
+    assert second_kwargs["tools"] == tools
+    assert second_kwargs["parallel_tool_calls"] is False
+
+
+def test_openai_llm_invoke_multimodal_fallback_preserves_tools():
+    asyncio.run(_test_openai_llm_invoke_multimodal_fallback_preserves_tools())
+
+
+async def _test_openai_llm_invoke_text_only_connection_error_no_fallback():
+    llm = OpenAILLM(
+        LLMModel(
+            provider=LLMProvider.OPENAI,
+            base_url="https://example.com/v1",
+            api_key="sk-test",
+            model_name="deepseek-chat",
+        )
+    )
+    llm._client = MagicMock()
+    llm._client.chat.completions.create = AsyncMock(side_effect=Exception("Connection error."))
+
+    with pytest.raises(ServerRequestsError, match="Connection error"):
+        await llm.invoke([{"role": "user", "content": "hi"}])
+    assert llm._client.chat.completions.create.await_count == 1
+
+
+def test_openai_llm_invoke_text_only_connection_error_no_fallback():
+    asyncio.run(_test_openai_llm_invoke_text_only_connection_error_no_fallback())
+
+
+async def _test_openai_llm_invoke_multimodal_invalid_image_falls_back_to_text():
+    llm = OpenAILLM(
+        LLMModel(
+            provider=LLMProvider.OPENAI,
+            base_url="https://example.com/v1",
+            api_key="sk-test",
+            model_name="gpt-4o",
+            capabilities=ModelCapabilities(vision=True),
+        )
+    )
+    message = SimpleNamespace(
+        model_dump=lambda: {"role": "assistant", "content": "ok"},
+    )
+    choice = SimpleNamespace(message=message, finish_reason="stop")
+    response = SimpleNamespace(choices=[choice], usage=None)
+    llm._client = MagicMock()
+
+    class BadRequestError(Exception):
+        status_code = 400
+
+    llm._client.chat.completions.create = AsyncMock(
+        side_effect=[BadRequestError("invalid image"), response]
+    )
+
+    result = await llm.invoke([{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "describe"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+        ],
+    }])
+    assert result["content"] == "ok"
+    assert llm._client.chat.completions.create.await_count == 2
+
+
+def test_openai_llm_invoke_multimodal_invalid_image_falls_back_to_text():
+    asyncio.run(_test_openai_llm_invoke_multimodal_invalid_image_falls_back_to_text())

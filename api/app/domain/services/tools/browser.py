@@ -27,6 +27,16 @@ class BrowserTool(BaseTool):
         return await self.browser.view_page()
 
     @tool(
+        name="browser_screenshot",
+        description="捕获当前浏览器页面截图，仅在需要视觉理解页面布局/样式时使用。",
+        parameters={},
+        required=[],
+    )
+    async def browser_screenshot(self) -> ToolResult:
+        """按需捕获浏览器当前页面截图"""
+        return await self.browser.take_screenshot()
+
+    @tool(
         name="browser_navigate",
         description="将浏览器导航至指定网址，当需要访问新页面时使用。",
         parameters={

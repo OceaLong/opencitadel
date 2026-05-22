@@ -58,6 +58,7 @@ class PlannerReActFlow(BaseFlow):
         self._session_id = session_id
         self.status = FlowStatus.IDLE
         self.plan: Optional[Plan] = None
+        self._vision_consumed: bool = False
 
         # 2.初始化Agent预设工具列表
         tools = [
@@ -136,6 +137,8 @@ class PlannerReActFlow(BaseFlow):
 
         # 6.获取当前会话中最新事件
         self.plan = session.get_latest_plan()
+        if session.status == SessionStatus.PENDING:
+            self._vision_consumed = False
         logger.info(f"Planner&ReAct流接收消息: {message.message[:50]}...")
 
         # 7.定义当前正在执行的子步骤
@@ -187,8 +190,16 @@ class PlannerReActFlow(BaseFlow):
 
                 # 20.调用执行Agent执行对应的步骤
                 logger.info(f"Planner&ReAct流开始执行步骤 {step.id}: {step.description[:50]}...")
-                async for event in self.react.execute_step(self.plan, step, message):
+                step_vision = None if self._vision_consumed else message.vision_attachments
+                async for event in self.react.execute_step(
+                        self.plan,
+                        step,
+                        message,
+                        vision_attachments=step_vision,
+                ):
                     yield event
+                if step_vision:
+                    self._vision_consumed = True
 
                 # 21.压缩执行Agent记忆，避免上下文腐化+消耗大量token
                 logger.info(f"压缩{self.react.name} Agent记忆/上下文")

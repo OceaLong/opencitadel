@@ -1,11 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import asyncio
+import base64
 import logging
 from typing import Callable, List, Optional
 
-from app.application.errors.exceptions import NotFoundError, BadRequestError
-from app.domain.models.llm_model import LLMModel, LLMProvider
+from app.application.errors.exceptions import NotFoundError, BadRequestError, ServerRequestsError
+from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities
 from app.domain.repositories.uow import IUnitOfWork
+from app.infrastructure.external.llm.factory import LLMFactory
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 
 logger = logging.getLogger(__name__)
@@ -30,6 +33,10 @@ class LLMModelService:
         if not model.base_url.strip():
             raise BadRequestError("模型 Base URL 不能为空")
         if model.provider not in _SUPPORTED_PROVIDERS:
+            if model.capabilities.vision or model.supports_multimodal:
+                raise BadRequestError(
+                    f"Provider「{model.provider.value}」尚未实现多模态支持，请使用 OpenAI/Ollama/Azure"
+                )
             raise BadRequestError(
                 f"Provider「{model.provider.value}」尚未实现，请使用 OpenAI/Ollama/Azure"
             )
@@ -129,6 +136,38 @@ class LLMModelService:
             model.is_default = True
             await uow.llm_model.save(model, "")
         return self._mask(model)
+
+    async def probe_multimodal(self, model_id: str) -> dict:
+        model = await self.get_model(model_id, mask=False)
+        self._ensure_invokable(model)
+        if not model.capabilities.vision:
+            return {"status": "skipped", "message": "模型未开启多模态能力"}
+
+        llm = LLMFactory.create(model)
+        one_pixel_png = (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQ"
+            "AAAABJRU5ErkJggg=="
+        )
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "probe"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{one_pixel_png}"},
+                },
+            ],
+        }]
+        try:
+            result = await llm.invoke(messages)
+            if result.get("content") is not None or result.get("tool_calls"):
+                return {"status": "ok", "message": "多模态探测成功"}
+            return {"status": "fallback", "message": "模型返回空内容"}
+        except ServerRequestsError as exc:
+            message = getattr(exc, "msg", None) or str(exc)
+            return {"status": "error", "message": message, "error_code": "server_error"}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc), "error_code": type(exc).__name__}
 
     async def sync_from_llm_config(self, llm_config) -> LLMModel:
         """从config.yaml迁移默认模型"""

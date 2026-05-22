@@ -5,6 +5,7 @@ from typing import List
 
 from app.domain.external.health_checker import HealthChecker
 from app.domain.models.health_status import HealthStatus
+from app.infrastructure.observability.llm_metrics import get_llm_metrics_snapshot
 
 
 class StatusService:
@@ -34,5 +35,16 @@ class StatusService:
                 ))
             else:
                 processed_results.append(res)
+
+        metrics = get_llm_metrics_snapshot()
+        processed_results.append(HealthStatus(
+            service="llm_multimodal_metrics",
+            status="ok",
+            details=(
+                f"requests={metrics.multimodal_request_total};"
+                f"fallbacks={metrics.multimodal_fallback_total};"
+                f"avg_image_bytes={metrics.multimodal_image_bytes_avg:.0f}"
+            ),
+        ))
 
         return processed_results

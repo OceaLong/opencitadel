@@ -308,9 +308,6 @@ class PlaywrightBrowser(BrowserProtocol):
             await self.page.goto(url)
             interactive_elements = await self._extract_interactive_elements()
             data: dict[str, Any] = {"interactive_elements": interactive_elements}
-            if self.supports_multimodal:
-                screenshot_bytes = await self.screenshot()
-                data["screenshot_base64"] = base64.b64encode(screenshot_bytes).decode("ascii")
             return ToolResult(success=True, data=data)
         except Exception as e:
             # 返回错误的工具结果
@@ -329,15 +326,26 @@ class PlaywrightBrowser(BrowserProtocol):
 
         data: dict[str, Any] = {
             "interactive_elements": interactive_elements,
+            "content": await self._extract_content(),
         }
-        if self.supports_multimodal:
-            screenshot_bytes = await self.screenshot()
-            data["screenshot_base64"] = base64.b64encode(screenshot_bytes).decode("ascii")
-        else:
-            data["content"] = await self._extract_content()
 
         # 4.返回工具结果
         return ToolResult(success=True, data=data)
+
+    async def take_screenshot(self) -> ToolResult:
+        """按需捕获当前页面截图。"""
+        if not self.supports_multimodal:
+            return ToolResult(success=False, message="当前模型不支持多模态，无法使用浏览器截图工具")
+        await self._ensure_page()
+        await self.wait_for_page_load()
+        screenshot_bytes = await self.screenshot()
+        return ToolResult(
+            success=True,
+            data={
+                "screenshot_base64": base64.b64encode(screenshot_bytes).decode("ascii"),
+                "interactive_elements": await self._extract_interactive_elements(),
+            },
+        )
 
     async def input(
             self,

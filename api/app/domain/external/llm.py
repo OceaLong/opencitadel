@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import Protocol, List, Dict, Any
+from typing import Protocol, List, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.domain.models.llm_model import ModelCapabilities
 
 
 class LLM(Protocol):
@@ -34,4 +37,9 @@ class LLM(Protocol):
     @property
     def supports_multimodal(self) -> bool:
         """只读属性，模型是否支持多模态（图片）理解"""
+        ...
+
+    @property
+    def capabilities(self) -> "ModelCapabilities":
+        """只读属性，模型能力描述"""
         ...

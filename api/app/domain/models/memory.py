@@ -7,6 +7,39 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+_IMAGE_OMITTED_TEXT = "[image omitted in compact]"
+
+
+def _message_has_image_part(message: Dict[str, Any]) -> bool:
+    content = message.get("content")
+    if not isinstance(content, list):
+        return False
+    return any(
+        isinstance(part, dict) and part.get("type") in {"image_url", "image_ref"}
+        for part in content
+    )
+
+
+def _strip_image_parts_from_message(message: Dict[str, Any]) -> None:
+    content = message.get("content")
+    if not isinstance(content, list):
+        return
+    new_parts: List[Dict[str, Any]] = []
+    had_image = False
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") in {"image_url", "image_ref"}:
+            had_image = True
+            continue
+        new_parts.append(part)
+    if had_image:
+        new_parts.append({"type": "text", "text": _IMAGE_OMITTED_TEXT})
+    if new_parts:
+        message["content"] = new_parts
+    elif had_image:
+        message["content"] = _IMAGE_OMITTED_TEXT
+
 
 class Memory(BaseModel):
     """记忆类，定义Agent的记忆基础信息"""
@@ -57,14 +90,23 @@ class Memory(BaseModel):
 
     def compact(self) -> None:
         """记忆压缩，将记忆中已经执行的工具(搜索/网页源码获取/浏览器访问结果等)这类已经执行过的消息进行压缩检索"""
+        last_image_index: Optional[int] = None
+        for index, message in enumerate(self.messages):
+            if _message_has_image_part(message):
+                last_image_index = index
+
         # 1.循环遍历所有的消息列表
         for index, message in enumerate(self.messages):
             # 2.判断消息的角色是否为tool
             if self.get_message_role(message) == "tool":
                 function_name = self._resolve_tool_function_name(index, message)
-                if function_name in ["browser_view", "browser_navigate"]:
+                if function_name in ["browser_view", "browser_navigate", "browser_screenshot"]:
                     message["content"] = "(removed)"
                     logger.debug(f"从记忆中移除对应工具的结果: {function_name}")
+
+            if _message_has_image_part(message) and index != last_image_index:
+                _strip_image_parts_from_message(message)
+                logger.debug("从记忆中压缩历史多模态图片 part: index=%s", index)
 
             # 3.仅移除非 assistant 消息中的 reasoning_content；thinking 模式要求
             #    assistant 历史必须回传 reasoning_content，否则后续 LLM 调用会 400
