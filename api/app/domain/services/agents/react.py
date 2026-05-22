@@ -97,7 +97,7 @@ class ReActAgent(BaseAgent):
         # 16.循环迭代完成后代表子步骤已实现，需要更新状态
         step.status = ExecutionStatus.COMPLETED
 
-    async def summarize(self) -> AsyncGenerator[BaseEvent, None]:
+    async def summarize(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         """调用Agent汇总历史的消息并生成最终回复+附件"""
         # 1.构建请求query
         query = SUMMARIZE_PROMPT
@@ -114,15 +114,15 @@ class ReActAgent(BaseAgent):
                 parsed_obj = await self._json_parser.invoke(event.message)
 
                 # 5.将解析数据转换为Message对象
-                message = Message.model_validate(parsed_obj)
+                summary_message = Message.model_validate(parsed_obj)
 
                 # 6.提取消息中的附件信息
-                attachments = [File(filepath=filepath) for filepath in message.attachments]
+                attachments = [File(filepath=filepath) for filepath in summary_message.attachments]
 
                 # 7.返回消息事件并将消息+附件进行相应
                 yield MessageEvent(
                     role="assistant",
-                    message=message.message,
+                    message=summary_message.message,
                     attachments=attachments,
                 )
             else:

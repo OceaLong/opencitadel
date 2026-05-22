@@ -6,6 +6,7 @@ from app.domain.models.session import Session
 from app.infrastructure.external.llm.openai_llm import (
     _merge_thinking_request_kwargs,
     _resolve_request_model,
+    _resolve_request_timeout,
 )
 
 
@@ -85,3 +86,15 @@ def test_is_seedable_llm_config_ollama_without_api_key():
         api_key="",
     )
     assert is_seedable_llm_config(llm) is True
+
+
+def test_resolve_request_timeout_default():
+    assert _resolve_request_timeout({}) == 300
+
+
+def test_resolve_request_timeout_from_extra_params():
+    assert _resolve_request_timeout({"request_timeout": 120}) == 120
+
+
+def test_resolve_request_timeout_invalid_value_falls_back():
+    assert _resolve_request_timeout({"request_timeout": "bad"}) == 300

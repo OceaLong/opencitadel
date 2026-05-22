@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import asyncio
+import base64
 import json
 import logging
 import uuid
@@ -18,6 +19,7 @@ from app.domain.models.tool_result import ToolResult
 from app.domain.utils.vision import (
     build_image_content_part_from_base64,
     build_user_message,
+    MAX_VISION_IMAGE_BYTES,
 )
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.tools.base import BaseTool
@@ -164,22 +166,36 @@ class BaseAgent(ABC):
         extra_messages: List[Dict[str, Any]] = []
         screenshot_base64 = data.get("screenshot_base64")
         if self._llm.supports_multimodal and screenshot_base64:
-            extra_messages.append({
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"Screenshot from `{function_name}` "
-                            f"(see interactive element indices in tool result above):"
+            try:
+                screenshot_bytes = base64.b64decode(screenshot_base64, validate=False)
+            except Exception:
+                screenshot_bytes = b""
+            if len(screenshot_bytes) > MAX_VISION_IMAGE_BYTES:
+                logger.warning(
+                    "会话[%s] 跳过过大的浏览器截图 function=%s size_bytes=%s max_bytes=%s",
+                    self._session_id,
+                    function_name,
+                    len(screenshot_bytes),
+                    MAX_VISION_IMAGE_BYTES,
+                )
+                summary["note"] = "Page screenshot omitted due to size limit."
+            else:
+                extra_messages.append({
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Screenshot from `{function_name}` "
+                                f"(see interactive element indices in tool result above):"
+                            ),
+                        },
+                        build_image_content_part_from_base64(
+                            screenshot_base64,
+                            "image/png",
                         ),
-                    },
-                    build_image_content_part_from_base64(
-                        screenshot_base64,
-                        "image/png",
-                    ),
-                ],
-            })
+                    ],
+                })
         return json.dumps(summary, ensure_ascii=False), extra_messages
 
     def _resolve_tool(self, function_name: str) -> BaseTool:

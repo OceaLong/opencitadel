@@ -23,7 +23,7 @@ from app.domain.models.event import ErrorEvent, Event, MessageEvent, BaseEvent, 
     TitleEvent, WaitEvent, DoneEvent
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
-from app.domain.utils.vision import is_image_mime
+from app.domain.utils.vision import is_image_mime, MAX_VISION_IMAGE_BYTES
 from app.domain.models.search import SearchResults
 from app.domain.models.session import SessionStatus
 from app.domain.models.skill import Skill
@@ -152,6 +152,22 @@ class AgentTaskRunner(TaskRunner):
             try:
                 file_data, _ = await self._file_storage.download_file(file.id)
                 image_bytes = file_data.read()
+                if len(image_bytes) > MAX_VISION_IMAGE_BYTES:
+                    logger.warning(
+                        "会话[%s] 跳过过大的图片附件 file_id=%s size_bytes=%s max_bytes=%s",
+                        self._session_id,
+                        file.id,
+                        len(image_bytes),
+                        MAX_VISION_IMAGE_BYTES,
+                    )
+                    continue
+                logger.info(
+                    "会话[%s] 构建 vision 附件 file_id=%s mime=%s size_bytes=%s",
+                    self._session_id,
+                    file.id,
+                    file.mime_type,
+                    len(image_bytes),
+                )
                 vision_attachments.append(VisionAttachment(
                     mime_type=file.mime_type,
                     data_base64=base64.b64encode(image_bytes).decode("ascii"),

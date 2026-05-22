@@ -63,3 +63,53 @@ async def _test_openai_llm_invoke_merges_thinking_params():
 
 def test_openai_llm_invoke_merges_thinking_params():
     asyncio.run(_test_openai_llm_invoke_merges_thinking_params())
+
+
+async def _test_openai_llm_invoke_uses_configured_timeout():
+    llm = OpenAILLM(
+        LLMModel(
+            provider=LLMProvider.OPENAI,
+            base_url="https://example.com/v1",
+            api_key="sk-test",
+            model_name="deepseek-chat",
+            extra_params={"request_timeout": 90},
+        )
+    )
+    assert llm._timeout == 90
+
+    message = SimpleNamespace(
+        model_dump=lambda: {"role": "assistant", "content": "ok"},
+    )
+    choice = SimpleNamespace(message=message, finish_reason="stop")
+    response = SimpleNamespace(choices=[choice], usage=None)
+    llm._client = MagicMock()
+    llm._client.chat.completions.create = AsyncMock(return_value=response)
+
+    await llm.invoke([{"role": "user", "content": "hi"}])
+    kwargs = llm._client.chat.completions.create.await_args.kwargs
+    assert kwargs["timeout"] == 90
+
+
+def test_openai_llm_invoke_uses_configured_timeout():
+    asyncio.run(_test_openai_llm_invoke_uses_configured_timeout())
+
+
+async def _test_openai_llm_invoke_timeout_raises_server_requests_error():
+    llm = OpenAILLM(
+        LLMModel(
+            provider=LLMProvider.OPENAI,
+            base_url="https://example.com/v1",
+            api_key="sk-test",
+            model_name="deepseek-chat",
+            extra_params={"request_timeout": 30},
+        )
+    )
+    llm._client = MagicMock()
+    llm._client.chat.completions.create = AsyncMock(side_effect=TimeoutError("request timed out"))
+
+    with pytest.raises(ServerRequestsError, match="调用LLM超时"):
+        await llm.invoke([{"role": "user", "content": "hi"}])
+
+
+def test_openai_llm_invoke_timeout_raises_server_requests_error():
+    asyncio.run(_test_openai_llm_invoke_timeout_raises_server_requests_error())
