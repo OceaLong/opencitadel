@@ -10,7 +10,10 @@ from app.application.errors.exceptions import AppException
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
 from app.domain.models.app_config import AgentConfig
-from app.domain.models.event import ToolEvent, ToolEventStatus, ErrorEvent, MessageEvent, BaseEvent
+from app.domain.models.event import (
+    ToolEvent, ToolEventStatus, ErrorEvent, MessageEvent, BaseEvent,
+    MessageDeltaEvent, ReasoningDeltaEvent, ToolArgsDeltaEvent,
+)
 from app.domain.models.memory import Memory
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.models.tool_result import ToolResult
@@ -22,6 +25,7 @@ from app.domain.services.tools.tool_names import normalize_allowed_tool_names, n
 logger = logging.getLogger(__name__)
 
 BROWSER_VISION_TOOLS = frozenset({"browser_screenshot"})
+STATEFUL_TOOL_NAMES = frozenset({"browser", "shell"})
 
 
 def _format_agent_error(error: Exception) -> str:
@@ -65,6 +69,8 @@ class BaseAgent(ABC):
         self._skill_prompt = skill_prompt
         self._long_term_memory_block = long_term_memory_block
         self._allowed_tool_names = normalize_allowed_tool_names(allowed_tool_names)
+        self._stateful_tool_lock = asyncio.Lock()
+        self._pending_delta_events: List[BaseEvent] = []
 
     def _collect_registered_tool_names(self) -> List[str]:
         names: List[str] = []
@@ -146,12 +152,15 @@ class BaseAgent(ABC):
             async with self._uow:
                 self._memory = await self._uow.session.get_memory(self._session_id, self.name)
 
-    async def _invoke_llm(self, messages: List[Dict[str, Any]], format: Optional[str] = None) -> Dict[str, Any]:
-        """调用语言模型并处理记忆内容"""
-        # 1.将消息添加到记忆中
+    async def _invoke_llm(
+            self,
+            messages: List[Dict[str, Any]],
+            format: Optional[str] = None,
+            stream_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """调用语言模型并处理记忆内容，支持流式 delta 事件。"""
         await self._add_to_memory(messages)
 
-        # 2.组装语言模型的响应格式
         available_tools = self._get_available_tools()
         effective_format = format
         if effective_format == "json_object" and available_tools:
@@ -159,54 +168,86 @@ class BaseAgent(ABC):
             effective_format = None
         response_format = {"type": effective_format} if effective_format else None
 
-        # 3.循环向LLM发起提问直到最大重试次数
         error = "调用语言模型发生错误"
         for _ in range(self._agent_config.max_retries):
             try:
-                # 4.调用语言模型获取响应内容
-                message = await self._llm.invoke(
-                    messages=self._messages_for_llm(self._memory.get_messages(), self._llm),
-                    tools=available_tools,
-                    response_format=response_format,
-                    tool_choice=self._tool_choice,
-                )
+                stream_id = stream_id or str(uuid.uuid4())
+                aggregated: Dict[str, Any] = {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "",
+                    "tool_calls": [],
+                }
+                tool_call_acc: Dict[int, Dict[str, Any]] = {}
+                delta_events: List[BaseEvent] = []
 
-                # 5.处理AI响应内容避免空回复
-                if message.get("role") == "assistant":
-                    content = message.get("content")
-                    tool_calls = message.get("tool_calls")
-                    reasoning_content = message.get("reasoning_content")
-                    if not content and not tool_calls and not reasoning_content:
-                        logger.warning("LLM回复了空内容，执行重试")
-                        await self._add_to_memory([
-                            {"role": "assistant", "content": ""},
-                            {"role": "user", "content": "AI无响应内容，请继续。"}
-                        ])
-                        await asyncio.sleep(self._retry_interval)
-                        continue
-                    if not content and not tool_calls and reasoning_content:
-                        logger.warning(
-                            "LLM仅返回reasoning_content，未返回content/tool_calls，"
-                            "请检查思考模式参数或模型兼容性"
-                        )
+                async for delta in self._llm.stream_invoke(
+                        messages=self._messages_for_llm(self._memory.get_messages(), self._llm),
+                        tools=available_tools,
+                        response_format=response_format,
+                        tool_choice=self._tool_choice,
+                ):
+                    if content := delta.get("content"):
+                        aggregated["content"] += content
+                        delta_events.append(MessageDeltaEvent(stream_id=stream_id, delta=content))
+                    if reasoning := delta.get("reasoning_content"):
+                        aggregated["reasoning_content"] += reasoning
+                        delta_events.append(ReasoningDeltaEvent(stream_id=stream_id, delta=reasoning))
+                    for tc_delta in delta.get("tool_calls") or []:
+                        idx = tc_delta.get("index", 0)
+                        acc = tool_call_acc.setdefault(idx, {
+                            "id": "",
+                            "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        })
+                        if tc_delta.get("id"):
+                            acc["id"] = tc_delta["id"]
+                        fn = tc_delta.get("function") or {}
+                        if fn.get("name"):
+                            acc["function"]["name"] = fn["name"]
+                        if fn.get("arguments"):
+                            acc["function"]["arguments"] += fn["arguments"]
+                            delta_events.append(ToolArgsDeltaEvent(
+                                stream_id=stream_id,
+                                tool_call_id=acc["id"] or f"pending-{idx}",
+                                tool_name=acc["function"]["name"],
+                                delta=fn["arguments"],
+                            ))
 
-                    # 6.取出非空消息并处理工具调用(兼容DeepSeek思考模型的写法)
-                    filtered_message = {"role": "assistant", "content": content}
-                    if reasoning_content:
-                        filtered_message["reasoning_content"] = reasoning_content
-                    if message.get("tool_calls"):
-                        # 7.取出工具调用的数据，限制LLM一次只能调用工具
-                        filtered_message["tool_calls"] = message.get("tool_calls")[:1]
-                else:
-                    # 8.非AI消息则记录日志并存储message
-                    logger.warning(f"LLM响应内容无法确认消息角色: {message.get('role')}")
-                    filtered_message = message
+                if tool_call_acc:
+                    aggregated["tool_calls"] = [
+                        tool_call_acc[i] for i in sorted(tool_call_acc.keys())
+                    ]
 
-                # 9.将消息添加到记忆中
+                self._pending_delta_events = delta_events
+
+                content = aggregated.get("content")
+                tool_calls = aggregated.get("tool_calls")
+                reasoning_content = aggregated.get("reasoning_content")
+                if not content and not tool_calls and not reasoning_content:
+                    logger.warning("LLM回复了空内容，执行重试")
+                    await self._add_to_memory([
+                        {"role": "assistant", "content": ""},
+                        {"role": "user", "content": "AI无响应内容，请继续。"}
+                    ])
+                    await asyncio.sleep(self._retry_interval)
+                    continue
+                if not content and not tool_calls and reasoning_content:
+                    logger.warning(
+                        "LLM仅返回reasoning_content，未返回content/tool_calls，"
+                        "请检查思考模式参数或模型兼容性"
+                    )
+
+                filtered_message = {"role": "assistant", "content": content or None}
+                if reasoning_content:
+                    filtered_message["reasoning_content"] = reasoning_content
+                if tool_calls:
+                    filtered_message["tool_calls"] = tool_calls
+                    filtered_message["stream_id"] = stream_id
+
                 await self._add_to_memory([filtered_message])
                 return filtered_message
             except Exception as e:
-                # 10.记录日志并睡眠指定的时间
                 error_msg = _format_agent_error(e)
                 logger.error(
                     f"调用语言模型发生错误: {error_msg}",
@@ -216,7 +257,6 @@ class BaseAgent(ABC):
                 await asyncio.sleep(self._retry_interval)
                 continue
 
-        # 11.所有重试均已耗尽仍未获得有效响应，抛出异常避免返回None
         raise RuntimeError(f"调用语言模型失败, 已达到最大重试次数({self._agent_config.max_retries}): {error}")
 
     async def _invoke_tool(self, tool: BaseTool, tool_name: str, arguments: Dict[str, Any]) -> ToolResult:
@@ -317,6 +357,9 @@ class BaseAgent(ABC):
             llm=self._llm,
         )
         message = await self._invoke_llm([user_message], format)
+        for delta_event in getattr(self, "_pending_delta_events", []):
+            yield delta_event
+        self._pending_delta_events = []
 
         # 3.循环遍历直到最大迭代次数
         for _ in range(self._agent_config.max_iterations):
@@ -324,13 +367,15 @@ class BaseAgent(ABC):
             if not message or not message.get("tool_calls"):
                 break
 
-            # 5.循环遍历工具参数并执行
-            tool_messages = []
-            for tool_call in message["tool_calls"]:
-                if not tool_call.get("function"):
-                    continue
+            tool_calls = message.get("tool_calls") or []
+            tool_messages: List[Dict[str, Any]] = []
 
-                # 6.取出调用工具id、名字、参数信息
+            async def _run_tool_call(tool_call: Dict[str, Any]) -> tuple[List[BaseEvent], List[Dict[str, Any]]]:
+                events: List[BaseEvent] = []
+                msgs: List[Dict[str, Any]] = []
+                if not tool_call.get("function"):
+                    return events, msgs
+
                 tool_call_id = tool_call["id"] or str(uuid.uuid4())
                 function_name = normalize_tool_name(tool_call["function"]["name"])
                 raw_arguments = tool_call["function"]["arguments"]
@@ -349,74 +394,86 @@ class BaseAgent(ABC):
                         exc,
                     )
                     result = ToolResult(success=False, message=str(exc))
-                    yield ToolEvent(
+                    events.append(ToolEvent(
                         tool_call_id=tool_call_id,
                         tool_name="unknown",
                         function_name=function_name,
                         function_args=function_args if isinstance(function_args, dict) else {},
                         function_result=result,
                         status=ToolEventStatus.CALLED,
-                    )
-                    tool_messages.append({
+                    ))
+                    msgs.append({
                         "role": "tool",
                         "tool_call_id": tool_call_id,
                         "_function_name": function_name,
                         "content": result.model_dump_json(),
                     })
-                    continue
+                    return events, msgs
 
-                # 8.返回工具即将调用事件，其中tool_content比较特殊，需要在具体业务中进行实现，这里留空即可
-                yield ToolEvent(
-                    tool_call_id=tool_call_id,
-                    tool_name=tool.name,
-                    function_name=function_name,
-                    function_args=function_args,
-                    status=ToolEventStatus.CALLING,
-                )
+                async def _execute() -> tuple[List[BaseEvent], List[Dict[str, Any]]]:
+                    inner_events: List[BaseEvent] = []
+                    inner_msgs: List[Dict[str, Any]] = []
+                    inner_events.append(ToolEvent(
+                        tool_call_id=tool_call_id,
+                        tool_name=tool.name,
+                        function_name=function_name,
+                        function_args=function_args,
+                        status=ToolEventStatus.CALLING,
+                    ))
+                    result = await self._invoke_tool(tool, function_name, function_args)
+                    inner_events.append(ToolEvent(
+                        tool_call_id=tool_call_id,
+                        tool_name=tool.name,
+                        function_name=function_name,
+                        function_args=function_args,
+                        function_result=result,
+                        status=ToolEventStatus.CALLED,
+                    ))
+                    extra_messages: List[Dict[str, Any]] = []
+                    if (
+                            function_name in BROWSER_VISION_TOOLS
+                            and vision_service.vision_enabled(self._llm)
+                            and result.success
+                    ):
+                        tool_content, extra_messages = self._build_browser_tool_payload(
+                            function_name,
+                            result,
+                        )
+                    else:
+                        tool_content = result.model_dump_json()
+                    inner_msgs.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "_function_name": function_name,
+                        "content": tool_content,
+                    })
+                    inner_msgs.extend(extra_messages)
+                    return inner_events, inner_msgs
 
-                # 9.调用工具并获取结果
-                result = await self._invoke_tool(tool, function_name, function_args)
+                if tool.name in STATEFUL_TOOL_NAMES:
+                    async with self._stateful_tool_lock:
+                        return await _execute()
+                return await _execute()
 
-                # 10.返回工具调用结果，其中tool_content比较特殊，需要在业务中进行实现
-                yield ToolEvent(
-                    tool_call_id=tool_call_id,
-                    tool_name=tool.name,
-                    function_name=function_name,
-                    function_args=function_args,
-                    function_result=result,
-                    status=ToolEventStatus.CALLED,
-                )
+            results = await asyncio.gather(*[_run_tool_call(tc) for tc in tool_calls])
+            for events, msgs in results:
+                for event in events:
+                    yield event
+                tool_messages.extend(msgs)
 
-                # 11.组装工具响应
-                extra_messages: List[Dict[str, Any]] = []
-                if (
-                        function_name in BROWSER_VISION_TOOLS
-                        and vision_service.vision_enabled(self._llm)
-                        and result.success
-                ):
-                    tool_content, extra_messages = self._build_browser_tool_payload(
-                        function_name,
-                        result,
-                    )
-                else:
-                    tool_content = result.model_dump_json()
-
-                tool_messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "_function_name": function_name,
-                    "content": tool_content,
-                })
-                tool_messages.extend(extra_messages)
-
-            # 12.所有工具都执行完成后，调用LLM获取汇总消息二次提供
             message = await self._invoke_llm(tool_messages, format=None)
+            for delta_event in getattr(self, "_pending_delta_events", []):
+                yield delta_event
+            self._pending_delta_events = []
         else:
             # 13.超过最大迭代次数后，则抛出错误
             yield ErrorEvent(error=f"Agent迭代超过最大迭代次数: {self._agent_config.max_iterations}, 任务处理失败")
 
         # 14.在指定步骤内完成了迭代则返回消息事件
         if message and message.get("content") is not None:
-            yield MessageEvent(message=message["content"])
+            yield MessageEvent(
+                message=message["content"],
+                stream_id=message.get("stream_id"),
+            )
         else:
             yield ErrorEvent(error="Agent未能生成有效回复内容")

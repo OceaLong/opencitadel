@@ -25,7 +25,7 @@ RUN uv pip install --system --no-cache -r requirements.txt
 COPY . .
 
 # 9.为运行脚本配置权限
-RUN chmod +x run.sh
+RUN chmod +x run.sh worker.sh migrate.sh
 
 # 10.设置Python路径变量
 ENV PYTHONPATH=/app

@@ -1,0 +1,59 @@
+replicaCount:
+  api: 2
+  worker: 2
+
+image:
+  api:
+    repository: manus-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  worker:
+    repository: manus-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  ui:
+    repository: manus-ui
+    tag: latest
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  host: my-manus.local
+
+autoscaling:
+  api:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  worker:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 75
+
+resources:
+  api:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  worker:
+    requests:
+      cpu: 1
+      memory: 2Gi
+    limits:
+      cpu: 4
+      memory: 8Gi
+
+env:
+  OTEL_ENABLED: "false"
+  OTEL_SERVICE_NAME: "my-manus-api"
+
+migrate:
+  enabled: true

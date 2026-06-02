@@ -65,6 +65,17 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
 沙箱服务通过根目录的 `docker-compose.yml` 统一部署。生产环境中沙箱作为固定容器运行，API 服务通过 `SANDBOX_ADDRESS=manus-sandbox` 连接。
 
+### 超时配置
+
+沙箱闲置自动销毁时间通过环境变量配置（单位：分钟）：
+
+```bash
+SERVER_TIMEOUT_MINUTES=60   # 推荐（pydantic-settings 标准名）
+# 兼容旧名: SERVICE_TIMEOUT_MINUTES=60
+```
+
+API 侧通过 `SANDBOX_TTL_MINUTES` 创建动态沙箱时注入 `SERVER_TIMEOUT_MINUTES`。
+
 ### 端口说明
 
 在 Docker Compose 部署中，沙箱端口仅在容器网络内部可访问，不对外暴露：

@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     memory_vector_enabled: bool = False
     embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"
+    embedding_api_key: str = ""
+    embedding_base_url: str = "https://api.openai.com/v1"
 
     # 数据库相关配置
     sqlalchemy_database_uri: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/manus"
@@ -49,6 +51,19 @@ class Settings(BaseSettings):
     sandbox_https_proxy: Optional[str] = None
     sandbox_http_proxy: Optional[str] = None
     sandbox_no_proxy: Optional[str] = None
+
+    # Observability
+    otel_enabled: bool = False
+    otel_service_name: str = "my-manus-api"
+    otel_exporter_endpoint: str = ""
+    langfuse_enabled: bool = False
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+
+    # Secrets / Vault
+    vault_addr: str = ""
+    vault_token: str = ""
+    use_db_app_config: bool = False
 
     # 使用pydantic v2的写法来完成环境变量信息的告知
     model_config = SettingsConfigDict(

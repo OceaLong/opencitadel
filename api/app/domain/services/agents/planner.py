@@ -6,6 +6,7 @@ from typing import Optional, AsyncGenerator
 from app.domain.models.event import BaseEvent, MessageEvent, PlanEvent, PlanEventStatus
 from app.domain.models.message import Message
 from app.domain.models.plan import Plan, Step
+from app.domain.schemas.planner_output import PlannerPlanSchema
 from app.domain.services.prompts.planner import (
     PLANNER_SYSTEM_PROMPT,
     CREATE_PLAN_PROMPT,
@@ -63,8 +64,9 @@ class PlannerAgent(BaseAgent):
                 logger.info(f"PlannerAgent生成消息: {event.message}")
                 parsed_obj = await self._json_parser.invoke(event.message)
 
-                # 5.将解析对象转换成Plan计划
-                plan = Plan.model_validate(parsed_obj)
+                # 5.严格校验并转换成 Plan
+                validated = PlannerPlanSchema.model_validate(parsed_obj)
+                plan = Plan.model_validate(validated.model_dump())
 
                 # 6.返回PlanEvent表示规划创建成功
                 yield PlanEvent(plan=plan, status=PlanEventStatus.CREATED)
@@ -88,8 +90,9 @@ class PlannerAgent(BaseAgent):
                 logger.info(f"PlannerAgent生成消息: {event.message}")
                 parsed_obj = await self._json_parser.invoke(event.message)
 
-                # 5.将解析对象转换成Plan
-                updated_plan = Plan.model_validate(parsed_obj)
+                # 5.严格校验并转换成 Plan
+                validated = PlannerPlanSchema.model_validate(parsed_obj)
+                updated_plan = Plan.model_validate(validated.model_dump())
 
                 # 6.拷贝更新计划中的steps，避免造成数据污染
                 new_steps = [Step.model_validate(step) for step in updated_plan.steps]

@@ -1,0 +1,53 @@
+# MyManus Helm Chart
+
+Kubernetes 部署 MyManus 的 Helm Chart，支持 API 与 Agent Worker 独立扩缩容。
+
+## 前置要求
+
+- Kubernetes 1.24+
+- Helm 3.x
+- 已构建并推送 `manus-api` 镜像（API 与 Worker 共用同一镜像，启动命令不同）
+- 集群内可访问 PostgreSQL（pgvector）、Redis
+
+## 安装
+
+```bash
+helm upgrade --install my-manus ./deploy/helm/my-manus \
+  --namespace manus --create-namespace \
+  --set image.api.repository=your-registry/manus-api \
+  --set image.api.tag=latest \
+  --set replicaCount.api=2 \
+  --set replicaCount.worker=2
+```
+
+## 主要 Values
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `replicaCount.api` | 2 | API 副本数 |
+| `replicaCount.worker` | 2 | Worker 副本数 |
+| `autoscaling.api.enabled` | true | API HPA |
+| `autoscaling.worker.enabled` | true | Worker HPA |
+| `migrate.enabled` | true | API initContainer 执行迁移 |
+| `env.OTEL_ENABLED` | false | OpenTelemetry |
+
+## 架构
+
+- **API Deployment**：无状态 FastAPI，SSE 连接层
+- **Worker Deployment**：消费 Redis dispatch 队列，执行 Agent
+- **migrate initContainer**：`python -m app.migrate`，与 docker-compose `manus-migrate` 等价
+
+## 扩缩容
+
+```bash
+# 手动调整 Worker 副本（处理 Agent 负载）
+kubectl scale deployment my-manus-worker --replicas=4 -n manus
+
+# 或启用 HPA（values.yaml 中 autoscaling.worker.enabled=true）
+```
+
+## 相关文档
+
+- 根目录 [README.md](../../README.md) — 架构与配置说明
+- [DEPLOYMENT.md](../../DEPLOYMENT.md) — 生产部署指南
+- [api/README.md](../../api/README.md) — API / Worker 本地开发

@@ -2,40 +2,63 @@
 
 基于 FastAPI 构建的后端 API 服务，提供会话管理、AI Agent 调度、模型管理、Skill 模板、长期记忆、文件处理、沙箱管理等核心功能。
 
+Agent 任务由**独立 Worker 进程**执行，API 层无状态，支持多副本水平扩展。
+
 ## 技术栈
 
 - Python 3.12+
 - FastAPI + Uvicorn
-- SQLAlchemy (asyncpg) + Alembic
-- Redis (异步客户端)
-- Docker SDK (沙箱管理)
-- Playwright (浏览器自动化)
-- WebSocket (VNC 代理转发)
+- SQLAlchemy (asyncpg) + Alembic + **pgvector**
+- Redis 7（任务 dispatch 消费组 + Streams 事件管道）
+- Docker SDK + SandboxProvider（沙箱池化抽象）
+- Playwright（浏览器自动化，运行于 API/Worker 进程）
+- OpenTelemetry + Prometheus（可选可观测性）
+- MCP SDK / httpx（MCP、A2A、Anthropic、Gemini）
+
+## 架构概览
+
+```
+Client ──SSE──► FastAPI API（无状态）
+                  │ 写入 task:input / dispatch
+                  ▼
+              Redis Streams + 消费组
+                  │
+                  ▼
+           Agent Worker 池
+                  │ Planner → ReAct 循环
+                  ▼
+              写入 task:output ──► API SSE 直读
+```
+
+- **API**：创建任务、写入用户消息、SSE 读取 output stream、`stop` 通过 Redis cancel 通道
+- **Worker**：消费 `task:dispatch`，运行 `AgentTaskRunner`，写入事件到 output stream
+- **Migrate**：独立 job（`python -m app.migrate`），API 启动时仅校验 schema 版本
 
 ## 项目结构
 
 ```
 api/
 ├── app/
-│   ├── application/       # 应用层（业务服务编排）
-│   ├── domain/            # 领域层（核心业务逻辑）
-│   ├── infrastructure/    # 基础设施层（外部服务集成）
-│   │   ├── external/      # 沙箱、浏览器等外部服务
-│   │   ├── storage/       # PostgreSQL、Redis、COS 存储
-│   │   ├── security/      # API Key 加密等安全能力
-│   │   └── models/        # ORM 模型
-│   ├── interfaces/        # 接口层（API 端点）
-│   │   ├── endpoints/     # 路由定义
-│   │   └── schemas/       # 请求/响应模型
-│   └── main.py            # 应用入口
-├── alembic/               # 数据库迁移
-├── core/
-│   └── config.py          # 配置管理（Pydantic Settings）
-├── .env                   # 环境变量
-├── config.yaml            # 应用配置（LLM、MCP、A2A）
-├── Dockerfile
-├── requirements.txt
-└── run.sh                 # 启动脚本
+│   ├── application/
+│   │   ├── services/          # AgentService, TaskRunnerFactory, MemoryService...
+│   │   └── ...
+│   ├── domain/
+│   │   ├── services/agents/   # BaseAgent, Planner, ReAct
+│   │   ├── services/flows/    # PlannerReActFlow
+│   │   └── schemas/           # PlannerPlanSchema 等结构化输出
+│   ├── infrastructure/
+│   │   ├── external/task/     # RedisStreamTask, TaskStateService
+│   │   ├── external/sandbox/  # DockerSandbox, SandboxProvider
+│   │   ├── external/llm/      # OpenAI, Anthropic, Gemini
+│   │   ├── observability/     # OTel, AgentTracer, logging_context
+│   │   └── security/          # ApiKeyCipher, SecretManager
+│   ├── worker/main.py         # Agent Worker 入口
+│   ├── migrate.py             # 独立迁移入口
+│   └── main.py                # FastAPI 入口
+├── alembic/
+├── core/config.py
+├── migrate.sh / worker.sh / run.sh
+└── Dockerfile
 ```
 
 ## API 路由
@@ -43,6 +66,7 @@ api/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/status` | 健康检查 |
+| GET | `/api/metrics` | Prometheus 指标 |
 | GET/POST | `/api/app-config` | 应用配置管理 |
 | GET/POST | `/api/llm-models` | 模型列表与创建 |
 | GET/PUT/DELETE | `/api/llm-models/{id}` | 模型详情、更新与删除 |
@@ -57,76 +81,110 @@ api/
 | POST | `/api/sessions/stream` | SSE 流式获取会话列表 |
 | GET | `/api/sessions/{id}` | 获取会话详情 |
 | PATCH | `/api/sessions/{id}` | 更新会话模型或 Skill 配置 |
-| POST | `/api/sessions/{id}/chat` | SSE 流式对话 |
+| POST | `/api/sessions/{id}/chat` | SSE 流式对话（含 Token delta 事件） |
 | GET | `/api/sessions/{id}/memory` | 获取会话 Agent 内存 |
 | POST | `/api/sessions/{id}/memory/compact` | 压缩会话 Agent 内存 |
 | POST | `/api/sessions/{id}/memory/clear` | 清空会话 Agent 内存 |
 | DELETE | `/api/sessions/{id}/memory/{agent_name}/messages/{index}` | 删除指定会话内存消息 |
 | WS | `/api/sessions/{id}/vnc` | VNC WebSocket 代理 |
 
-## 模型、Skill 与记忆
+### SSE 事件类型
 
-- 首次启动时，如果数据库没有任何模型，会从 `config.yaml` 的 `llm_config` 初始化一个默认模型；之后模型配置通过 `/api/llm-models` 管理。
-- 模型 API Key 会加密存储，列表和详情接口默认返回掩码值，编辑模型时可留空表示不更新密钥。
-- 内置 Skill 会在启动时自动种子化，包括编程助手、研究分析、数据分析和内容写作；内置 Skill 不可删除，但可以禁用或编辑。
-- 长期记忆支持 `global` 与 `session` 两种作用域，任务开始时会召回相关记忆并注入 Agent 上下文。
-- 会话支持 `model_id` 与 `skill_id`，可在创建会话、发起聊天或 `PATCH /api/sessions/{id}` 时指定。
+除 `message` / `tool` / `plan` / `step` 等外，还支持 Token 级增量事件：
+
+| 事件 | 说明 |
+|------|------|
+| `message_delta` | 助手文本增量（按 `stream_id` 合并） |
+| `reasoning_delta` | 思考内容增量 |
+| `tool_args_delta` | 工具参数 JSON 增量 |
+
+## Agent 能力
+
+- **Token 流式**：`LLM.stream_invoke()` 逐 delta 推送至 SSE
+- **并行工具**：单轮多 `tool_calls` 并发；browser/shell 自动加锁
+- **结构化 Planner 输出**：`PlannerPlanSchema` Pydantic 严格校验
+- **向量记忆**：`MEMORY_VECTOR_ENABLED=true` 时启用 pgvector 混合召回
+- **多 Provider**：OpenAI 兼容 / Anthropic / Gemini 原生适配
 
 ## 本地开发
 
 ### 环境准备
 
 ```bash
-# 1. 创建虚拟环境
 python -m venv .venv
-
-# 2. 激活虚拟环境
-# Linux/macOS:
 source .venv/bin/activate
-# Windows:
-.venv\Scripts\activate
-
-# 3. 安装依赖
 pip install uv
 uv pip install -r requirements.txt
-
-# 4. 安装 Playwright 浏览器
 playwright install
 ```
 
 ### 配置环境变量
 
-修改 `.env` 文件，将数据库和 Redis 地址改为 `localhost`：
+参考 `.env.example`，关键配置：
 
 ```bash
 SQLALCHEMY_DATABASE_URI=postgresql+asyncpg://postgres:postgres@localhost:5432/manus
 REDIS_HOST=localhost
 REDIS_PORT=6379
-SANDBOX_ADDRESS=         # 留空则动态创建沙箱容器
+SANDBOX_ADDRESS=          # 留空则动态创建沙箱容器
+
+# 可选：向量记忆
+MEMORY_VECTOR_ENABLED=false
+EMBEDDING_API_KEY=
+
+# 可选：可观测性
+OTEL_ENABLED=false
+OTEL_EXPORTER_ENDPOINT=
 ```
 
 ### 启动服务
 
 ```bash
-# 启动开发服务器
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# 1. 数据库迁移（必须先执行）
+./migrate.sh
+
+# 2. 启动 API
+./run.sh
+# 或: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 3. 另开终端启动 Worker（必须，否则 Agent 任务不会执行）
+./worker.sh
 ```
 
-服务启动后访问 `http://localhost:8000/docs` 查看 API 文档。
+访问 `http://localhost:8000/docs` 查看 API 文档。
 
 ### 数据库迁移
 
 ```bash
-# 生成迁移脚本
+# 推荐：独立迁移脚本
+./migrate.sh
+# 或
+python -m app.migrate
+
+# 开发：生成新迁移
 alembic revision --autogenerate -m "描述"
-
-# 执行迁移
 alembic upgrade head
-
-# 回滚
-alembic downgrade -1
 ```
+
+> **注意**：API 启动时会校验 DB schema 是否为 Alembic head，未迁移将拒绝启动（test 环境跳过）。
 
 ## Docker 部署
 
-API 服务通过根目录的 `docker-compose.yml` 统一部署，无需单独构建。环境变量由根目录 `.env` 文件提供。
+通过根目录 `docker-compose.yml` 统一部署：
+
+| 服务 | 说明 |
+|------|------|
+| `manus-migrate` | 一次性 init job，执行 `alembic upgrade head` |
+| `manus-api` | FastAPI 无状态 API |
+| `manus-worker` | Agent Worker 池（可 scale） |
+| `manus-postgres` | `pgvector/pgvector:pg16` |
+| `manus-redis` | 任务队列与事件流 |
+
+```bash
+docker compose up -d --build
+docker compose logs -f manus-worker
+```
+
+## Kubernetes
+
+Helm Chart 位于 [`../deploy/helm/my-manus/`](../deploy/helm/my-manus/)，包含 API/Worker Deployment、HPA 与 migrate initContainer。

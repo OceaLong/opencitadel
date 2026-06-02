@@ -20,7 +20,7 @@ class LLMFactory:
         if provider in (LLMProvider.OPENAI, LLMProvider.OLLAMA, LLMProvider.AZURE):
             return OpenAILLM(model, thinking_enabled=thinking_enabled)
         if provider == LLMProvider.ANTHROPIC:
-            return AnthropicLLM(model)
+            return AnthropicLLM(model, thinking_enabled=thinking_enabled)
         if provider == LLMProvider.GEMINI:
-            return GeminiLLM(model)
+            return GeminiLLM(model, thinking_enabled=thinking_enabled)
         raise ValueError(f"不支持的LLM Provider: {provider}")

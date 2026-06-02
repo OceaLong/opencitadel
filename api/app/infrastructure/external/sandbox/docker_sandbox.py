@@ -117,11 +117,11 @@ class DockerSandbox(Sandbox):
                 "detach": True,
                 "remove": True,
                 "environment": {
-                    "SERVICE_TIMEOUT_MINUTES": settings.sandbox_ttl_minutes,
-                    "CHROME_ARGS": settings.sandbox_chrome_args,
-                    "HTTPS_PROXY": settings.sandbox_https_proxy,
-                    "HTTP_PROXY": settings.sandbox_http_proxy,
-                    "NO_PROXY": settings.sandbox_no_proxy,
+                    "SERVER_TIMEOUT_MINUTES": str(settings.sandbox_ttl_minutes or 60),
+                    "CHROME_ARGS": settings.sandbox_chrome_args or "",
+                    "HTTPS_PROXY": settings.sandbox_https_proxy or "",
+                    "HTTP_PROXY": settings.sandbox_http_proxy or "",
+                    "NO_PROXY": settings.sandbox_no_proxy or "",
                 }
             }
 

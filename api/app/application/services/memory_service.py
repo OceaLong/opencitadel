@@ -78,6 +78,9 @@ class MemoryService:
         await self._validate_entry(entry)
         async with self._uow_factory() as uow:
             await uow.memory_entry.save(entry)
+        from app.application.services.vector_memory_service import VectorMemoryService
+        vector_service = VectorMemoryService()
+        await vector_service.store_embedding(entry.id, f"{entry.title}\n{entry.content}")
         return entry
 
     async def update_entry(self, entry_id: str, updates: MemoryEntry) -> MemoryEntry:
@@ -95,12 +98,34 @@ class MemoryService:
             await uow.memory_entry.delete_by_id(entry_id)
 
     async def recall_for_session(self, session_id: str) -> str:
-        """召回长期记忆并格式化为system块"""
+        """召回长期记忆并格式化为system块（时间衰减 + 可选向量混合检索）"""
+        from app.application.services.vector_memory_service import VectorMemoryService
+        from core.config import get_settings
+
+        settings = get_settings()
+        query_text = ""
         async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(session_id)
+            if session:
+                query_text = session.latest_message or ""
             entries = await uow.memory_entry.recall_for_session(
                 session_id, limit=self._recall_limit
             )
-            if entries:
+
+        if settings.memory_vector_enabled and query_text.strip():
+            vector_service = VectorMemoryService()
+            vector_entries = await vector_service.search_similar(
+                query_text, session_id=session_id, limit=self._recall_limit
+            )
+            seen = {e.id for e in entries}
+            for entry in vector_entries:
+                if entry.id not in seen:
+                    entries.append(entry)
+                    seen.add(entry.id)
+            entries = entries[: self._recall_limit]
+
+        if entries:
+            async with self._uow_factory() as uow:
                 await uow.memory_entry.touch_used([e.id for e in entries])
         if not entries:
             return ""

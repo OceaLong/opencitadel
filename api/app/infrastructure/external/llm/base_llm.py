@@ -110,3 +110,25 @@ class MultimodalFallbackMixin:
         logger.warning("多模态请求失败，降级为文本请求重试: reason=%s error=%s", reason, error)
         retry_kwargs = {**request_kwargs, "messages": fallback_messages}
         return await create_fn(retry_kwargs)
+
+
+async def invoke_to_stream_deltas(message: Dict[str, Any]):
+    """Convert a complete LLM message into stream deltas (fallback for non-native streaming)."""
+    content = message.get("content")
+    if content:
+        yield {"content": content}
+    reasoning = message.get("reasoning_content")
+    if reasoning:
+        yield {"reasoning_content": reasoning}
+    for idx, tool_call in enumerate(message.get("tool_calls") or []):
+        fn = tool_call.get("function") or {}
+        yield {
+            "tool_calls": [{
+                "index": idx,
+                "id": tool_call.get("id"),
+                "function": {
+                    "name": fn.get("name"),
+                    "arguments": fn.get("arguments") or "",
+                },
+            }]
+        }

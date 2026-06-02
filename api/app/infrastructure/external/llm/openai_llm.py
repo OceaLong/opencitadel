@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, AsyncGenerator
 
 from openai import AsyncOpenAI
 
@@ -300,3 +300,78 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             raise ServerRequestsError("调用LLM失败: 响应 message 为空")
         _log_response_summary(response, request_model)
         return message.model_dump()
+
+    async def stream_invoke(
+            self,
+            messages: List[Dict[str, Any]],
+            tools: List[Dict[str, Any]] = None,
+            response_format: Dict[str, Any] = None,
+            tool_choice: str = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        request_model = _resolve_request_model(
+            self._model_name,
+            tools,
+            self._extra_params,
+            thinking_enabled=self._thinking_enabled,
+        )
+        request_kwargs: Dict[str, Any] = {
+            "model": request_model,
+            "messages": messages,
+            "timeout": self._timeout,
+            "stream": True,
+        }
+        if self._temperature is not None:
+            request_kwargs["temperature"] = self._temperature
+        if self._max_tokens is not None and self._max_tokens > 0:
+            request_kwargs["max_tokens"] = self._max_tokens
+        if response_format is not None:
+            request_kwargs["response_format"] = response_format
+        _merge_thinking_request_kwargs(
+            request_kwargs,
+            self._extra_params,
+            thinking_enabled=self._thinking_enabled,
+        )
+        _log_multimodal_request_summary(messages)
+
+        tool_kwargs: Dict[str, Any] = {}
+        if tools:
+            tool_kwargs = {
+                "tools": tools,
+                "tool_choice": tool_choice,
+            }
+            if not self._extra_params.get("omit_parallel_tool_calls"):
+                tool_kwargs["parallel_tool_calls"] = True
+
+        try:
+            stream = await self._client.chat.completions.create(
+                **request_kwargs,
+                **tool_kwargs,
+            )
+        except Exception as error:
+            self._raise_llm_error(error, request_model)
+
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta is None:
+                continue
+            payload: Dict[str, Any] = {}
+            if delta.content:
+                payload["content"] = delta.content
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                payload["reasoning_content"] = reasoning
+            if delta.tool_calls:
+                payload["tool_calls"] = []
+                for tool_call in delta.tool_calls:
+                    payload["tool_calls"].append({
+                        "index": tool_call.index,
+                        "id": tool_call.id,
+                        "function": {
+                            "name": tool_call.function.name if tool_call.function else None,
+                            "arguments": tool_call.function.arguments if tool_call.function else "",
+                        },
+                    })
+            if payload:
+                yield payload

@@ -21,7 +21,7 @@ services:
       retries: 5
 
   manus-postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: manus-postgres
     restart: unless-stopped
     environment:
@@ -50,6 +50,23 @@ services:
     networks:
       - manus-network
 
+  # ==================== 数据库迁移 (一次性) ====================
+
+  manus-migrate:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: manus-migrate
+    env_file:
+      - .env
+    depends_on:
+      manus-postgres:
+        condition: service_healthy
+    networks:
+      - manus-network
+    command: ["python", "-m", "app.migrate"]
+    restart: "no"
+
   # ==================== 后端 API ====================
 
   manus-api:
@@ -68,6 +85,8 @@ services:
         condition: service_healthy
       manus-postgres:
         condition: service_healthy
+      manus-migrate:
+        condition: service_completed_successfully
     networks:
       - manus-network
     healthcheck:
@@ -76,6 +95,29 @@ services:
       timeout: 10s
       retries: 5
       start_period: 20s
+
+  # ==================== Agent Worker ====================
+
+  manus-worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: manus-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      manus-redis:
+        condition: service_healthy
+      manus-postgres:
+        condition: service_healthy
+      manus-migrate:
+        condition: service_completed_successfully
+    networks:
+      - manus-network
+    command: ["./worker.sh"]
 
   # ==================== 前端 UI ====================
 

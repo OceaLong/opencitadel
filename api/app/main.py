@@ -4,12 +4,16 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from alembic import command
 from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.infrastructure.logging import setup_logging
+from app.infrastructure.observability.logging_context import configure_structured_logging
+from app.infrastructure.observability.otel import setup_observability
 from app.infrastructure.storage.cos import get_cos
 from app.infrastructure.storage.postgres import get_postgres
 from app.infrastructure.storage.redis import get_redis
@@ -40,20 +44,45 @@ openapi_tags = [
 ]
 
 
+def _verify_db_migrations() -> None:
+    """Ensure DB schema is at head; fail fast if migrate job was not run."""
+    if settings.env == "test":
+        logger.info("Skipping migration verification in test environment")
+        return
+    try:
+        alembic_cfg = Config("alembic.ini")
+        script = ScriptDirectory.from_config(alembic_cfg)
+        head_revision = script.get_current_head()
+        sync_url = settings.sqlalchemy_database_uri.replace("+asyncpg", "")
+        engine = create_engine(sync_url)
+        with engine.connect() as conn:
+            context = MigrationContext.configure(conn)
+            current = context.get_current_revision()
+    except Exception as exc:
+        if settings.env == "development":
+            logger.warning("Migration verification skipped (DB unavailable): %s", exc)
+            return
+        raise
+    if current != head_revision:
+        raise RuntimeError(
+            f"Database migration required: current={current}, head={head_revision}. "
+            "Run `./migrate.sh' or `python -m app.migrate' before starting the API."
+        )
+    logger.info("Database schema verified at revision %s", head_revision)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """创建FastAPI应用生命周期上下文管理器"""
     # 0.重新初始化日志系统(uvicorn启动时dictConfig会影响根日志处理器，需要在此重新配置)
     setup_logging()
+    configure_structured_logging()
 
     # 1.日志打印代码已经开始执行了
     logger.info("MyManus正在初始化")
 
-    # 2.运行数据库迁移(将数据同步到生产环境)
-    alembic_cfg = Config("alembic.ini")
-    command.upgrade(alembic_cfg, "head")
-    # Alembic fileConfig 可能覆盖应用日志，迁移后重新初始化
-    setup_logging()
+    # 2.校验数据库迁移版本（迁移由独立 migrate job 执行）
+    _verify_db_migrations()
 
     # 3.初始化Redis/Postgres/Cos客户端
     await get_redis().init()
@@ -113,3 +142,4 @@ register_exception_handlers(app)
 
 # 7.集成路由
 app.include_router(router, prefix="/api")
+setup_observability(app)

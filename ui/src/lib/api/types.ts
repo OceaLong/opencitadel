@@ -399,6 +399,9 @@ export type ToolEvent = {
  */
 export type SSEEventType =
   | "message"
+  | "message_delta"
+  | "reasoning_delta"
+  | "tool_args_delta"
   | "title"
   | "plan"
   | "step"
@@ -412,6 +415,9 @@ export type SSEEventType =
  */
 export type SSEEventData =
   | { type: "message"; data: ChatMessage }
+  | { type: "message_delta"; data: { stream_id: string; delta: string; role?: string } }
+  | { type: "reasoning_delta"; data: { stream_id: string; delta: string } }
+  | { type: "tool_args_delta"; data: { stream_id: string; tool_call_id: string; tool_name?: string; delta: string } }
   | { type: "title"; data: { title: string } }
   | { type: "plan"; data: PlanEvent }
   | { type: "step"; data: StepEvent }

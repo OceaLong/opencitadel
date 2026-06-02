@@ -8,21 +8,28 @@ from typing import Optional, Dict
 from app.domain.external.message_queue import MessageQueue
 from app.domain.external.task import Task, TaskRunner
 from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
+from app.infrastructure.external.task.task_state import TaskStateService, TaskStatus, get_task_state
 
 logger = logging.getLogger(__name__)
 
 
 class RedisStreamTask(Task):
-    """基于Redis流的任务类"""
+    """Distributed task backed by Redis Streams and worker dispatch queue."""
 
-    # 定义一个全局变量用于存储所有已注册的任务
-    _task_registry: Dict[str, "RedisStreamTask"] = {}
+    _local_executions: Dict[str, asyncio.Task] = {}
 
-    def __init__(self, task_runner: TaskRunner) -> None:
-        """构造函数，传递任务运行器完成Task初始化"""
+    def __init__(
+            self,
+            task_id: str,
+            session_id: str,
+            task_runner: Optional[TaskRunner] = None,
+            task_state: Optional[TaskStateService] = None,
+    ) -> None:
+        self._id = task_id
+        self._session_id = session_id
         self._task_runner = task_runner
-        self._id = str(uuid.uuid4())
-        self._execution_task: Optional[asyncio.Task] = None  # 定义在后台执行的任务
+        self._task_state = task_state or get_task_state()
+        self._execution_task: Optional[asyncio.Task] = None
 
         input_stream_name = f"task:input:{self._id}"
         output_stream_name = f"task:output:{self._id}"
@@ -30,26 +37,67 @@ class RedisStreamTask(Task):
         self._input_stream = RedisStreamMessageQueue(input_stream_name)
         self._output_stream = RedisStreamMessageQueue(output_stream_name)
 
-        # 将当前类实例注册到全局变量中
-        RedisStreamTask._task_registry[self._id] = self
+    @classmethod
+    async def create_for_session(
+            cls,
+            session_id: str,
+            task_state: Optional[TaskStateService] = None,
+    ) -> "RedisStreamTask":
+        task_id = str(uuid.uuid4())
+        state = task_state or get_task_state()
+        await state.register_task(task_id, session_id)
+        return cls(task_id=task_id, session_id=session_id, task_state=state)
 
-    def _cleanup_registry(self) -> None:
-        """清除类全局变量中当前注册的任务"""
-        if self._id in RedisStreamTask._task_registry:
-            del RedisStreamTask._task_registry[self._id]
-            logger.info(f"任务[{self._id}]从注册中心移除")
+    @classmethod
+    def from_task_id(
+            cls,
+            task_id: str,
+            session_id: str = "",
+            task_state: Optional[TaskStateService] = None,
+    ) -> "RedisStreamTask":
+        return cls(task_id=task_id, session_id=session_id, task_state=task_state)
 
-    def _on_task_done(self) -> None:
-        """任务结束时的回调函数"""
-        # 1.检测task_runner是否存在，如果存在则调用task_runner的回调函数
-        if self._task_runner:
-            asyncio.create_task(self._task_runner.on_done(self))
+    @classmethod
+    async def get(cls, task_id: str) -> Optional["RedisStreamTask"]:
+        state = get_task_state()
+        meta = await state.get_task_meta(task_id)
+        if not meta:
+            return None
+        return cls.from_task_id(task_id, meta.get("session_id", ""), state)
 
-        # 2.清除当前任务对应的资源
-        self._cleanup_registry()
+    @classmethod
+    def create(cls, task_runner: TaskRunner) -> "RedisStreamTask":
+        raise NotImplementedError(
+            "Use create_for_session() in API or worker execution path instead"
+        )
+
+    async def dispatch_to_worker(self) -> None:
+        await self._task_state.set_status(self._id, TaskStatus.PENDING)
+        await self._task_state.dispatch(self._id, self._session_id)
+        logger.info(f"任务[{self._id}]已分发到 worker 队列")
+
+    async def invoke(self) -> None:
+        """API path: enqueue for worker execution."""
+        await self.dispatch_to_worker()
+
+    async def execute_locally(self) -> None:
+        """Worker path: run task runner in this process."""
+        if not self._task_runner:
+            raise RuntimeError(f"任务[{self._id}]缺少 TaskRunner，无法在本地执行")
+        if self._id in self._local_executions and not self._local_executions[self._id].done():
+            return
+        self._execution_task = asyncio.create_task(self._execute_task())
+        self._local_executions[self._id] = self._execution_task
+        await self._task_state.set_status(self._id, TaskStatus.RUNNING)
+        logger.info(f"任务[{self._id}]在 worker 中开始执行")
+
+    def cancel(self) -> bool:
+        asyncio.create_task(self._task_state.request_cancel(self._id))
+        if self._execution_task and not self._execution_task.done():
+            self._execution_task.cancel()
+        return True
 
     async def _execute_task(self) -> None:
-        """使用TaskRunner执行任务"""
         try:
             await self._task_runner.invoke(self)
         except asyncio.CancelledError:
@@ -58,28 +106,10 @@ class RedisStreamTask(Task):
         except Exception as e:
             logger.exception(f"任务[{self._id}]执行出现异常: {str(e)}")
         finally:
-            self._on_task_done()
-
-    async def invoke(self) -> None:
-        """使用提供的task_runner来运行任务"""
-        if self.done:
-            self._execution_task = asyncio.create_task(self._execute_task())
-            logger.info(f"任务[{self._id}]开始执行")
-
-    def cancel(self) -> bool:
-        """取消当前执行的任务"""
-        if not self.done:
-            # 1.取消任务
-            self._execution_task.cancel()
-            logger.info(f"任务[{self._id}]已取消")
-
-            # 2.清除注册的当前任务
-            self._cleanup_registry()
-            return True
-
-        # 3.否则代表任务已结束，无需重复取消
-        self._cleanup_registry()
-        return True
+            if self._task_runner:
+                await self._task_runner.on_done(self)
+            await self._task_state.set_status(self._id, TaskStatus.DONE)
+            self._local_executions.pop(self._id, None)
 
     @property
     def input_stream(self) -> MessageQueue:
@@ -94,29 +124,20 @@ class RedisStreamTask(Task):
         return self._id
 
     @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @property
     def done(self) -> bool:
-        if self._execution_task is None:
-            return True
-        return self._execution_task.done()
+        if self._execution_task is not None:
+            return self._execution_task.done()
+        return False
 
-    @classmethod
-    def get(cls, task_id: str) -> Optional["Task"]:
-        return RedisStreamTask._task_registry.get(task_id)
-
-    @classmethod
-    def create(cls, task_runner: TaskRunner) -> "Task":
-        return cls(task_runner)
+    async def is_done(self) -> bool:
+        return await self._task_state.is_done(self._id)
 
     @classmethod
     async def destroy(cls) -> None:
-        for task_id in RedisStreamTask._task_registry:
-            # 1.获取对应的任务
-            task = RedisStreamTask._task_registry[task_id]
-            task.cancel()
-
-            # 2.检测任务是否有任务运行器
-            if task._task_runner:
-                await task._task_runner.destroy()
-
-        # 3.清除全局变量
-        cls._task_registry.clear()
+        for task_id, execution in list(cls._local_executions.items()):
+            execution.cancel()
+        cls._local_executions.clear()

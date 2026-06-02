@@ -10,6 +10,7 @@ from pydantic import TypeAdapter
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.memory_service import MemoryService
 from app.application.services.skill_service import SkillService
+from app.application.services.task_runner_factory import TaskRunnerFactory
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.sandbox import Sandbox
@@ -18,12 +19,10 @@ from app.domain.external.task import Task
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
 from app.domain.models.event import BaseEvent, ErrorEvent, MessageEvent, Event, DoneEvent, WaitEvent
 from app.domain.models.session import Session, SessionStatus
-from app.domain.models.skill import Skill
 from app.domain.repositories.uow import IUnitOfWork
-from app.application.services.memory_extractor_service import MemoryExtractorService
-from app.domain.services.agent_task_runner import AgentTaskRunner
-from app.domain.services.tools.memory import MemoryTool
-from app.infrastructure.external.llm.factory import LLMFactory
+from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
+from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
+from app.infrastructure.external.task.task_state import get_task_state
 
 logger = logging.getLogger(__name__)
 
@@ -51,135 +50,36 @@ class AgentService:
     ) -> None:
         self._uow_factory = uow_factory
         self._uow = uow_factory()
-        self._llm_model_service = llm_model_service
-        self._skill_service = skill_service
-        self._memory_service = memory_service
-        self._agent_config = agent_config
-        self._mcp_config = mcp_config
-        self._a2a_config = a2a_config
-        self._sandbox_cls = sandbox_cls
         self._task_cls = task_cls
-        self._json_parser = json_parser
-        self._search_engine = search_engine
-        self._file_storage = file_storage
-        self._auto_extract_memory = auto_extract_memory
+        self._task_state = get_task_state()
+        self._runner_factory = TaskRunnerFactory(
+            uow_factory=uow_factory,
+            llm_model_service=llm_model_service,
+            skill_service=skill_service,
+            memory_service=memory_service,
+            agent_config=agent_config,
+            mcp_config=mcp_config,
+            a2a_config=a2a_config,
+            sandbox_cls=sandbox_cls,
+            json_parser=json_parser,
+            search_engine=search_engine,
+            file_storage=file_storage,
+            auto_extract_memory=auto_extract_memory,
+        )
         logger.info("AgentService初始化成功")
 
-    def _apply_skill_agent_params(self, agent_config: AgentConfig, skill: Skill) -> AgentConfig:
-        """将 Skill agent_params 合并到 AgentConfig（唯一入口）"""
-        params = skill.agent_params
-        if not params:
-            return agent_config
-        overrides = {}
-        if params.max_iterations is not None:
-            overrides["max_iterations"] = params.max_iterations
-        if params.max_retries is not None:
-            overrides["max_retries"] = params.max_retries
-        if params.max_search_results is not None:
-            overrides["max_search_results"] = params.max_search_results
-        return agent_config.model_copy(update=overrides) if overrides else agent_config
-
-    async def _resolve_llm_and_config(self, session: Session):
-        """解析会话级模型、Skill与长期记忆"""
-        model_id = session.model_id
-        skill = None
-        skill_prompt = ""
-        agent_config = self._agent_config
-        temperature_override: Optional[float] = None
-
-        if session.skill_id:
-            try:
-                skill = await self._skill_service.get_skill(session.skill_id)
-                if skill.enabled:
-                    skill_prompt = skill.system_prompt
-                    agent_config = self._apply_skill_agent_params(agent_config, skill)
-                    if skill.agent_params and skill.agent_params.temperature_override is not None:
-                        temperature_override = skill.agent_params.temperature_override
-                    if not model_id and skill.recommended_model_id:
-                        model_id = skill.recommended_model_id
-                else:
-                    skill = None
-            except Exception:
-                skill = None
-
-        llm_model = await self._llm_model_service.resolve_model(model_id)
-        if temperature_override is not None:
-            llm_model = llm_model.model_copy(update={"temperature": temperature_override})
-        llm = LLMFactory.create(llm_model, thinking_enabled=session.thinking_enabled)
-        long_term_memory_block = await self._memory_recall(session.id)
-        return llm, agent_config, skill, skill_prompt, long_term_memory_block
-
-    async def _memory_recall(self, session_id: str) -> str:
-        try:
-            return await self._memory_service.recall_for_session(session_id)
-        except Exception as e:
-            logger.warning(f"召回长期记忆失败: {e}")
-            return ""
-
-    async def _get_task(self, session: Session) -> Optional[Task]:
+    async def _get_task(self, session: Session) -> Optional[RedisStreamTask]:
         task_id = session.task_id
         if not task_id:
             return None
-        return self._task_cls.get(task_id)
+        return await RedisStreamTask.get(task_id)
 
-    async def _create_task(self, session: Session) -> Task:
-        sandbox = None
-        sandbox_id = session.sandbox_id
-        if sandbox_id:
-            sandbox = await self._sandbox_cls.get(sandbox_id)
-        if not sandbox:
-            sandbox = await self._sandbox_cls.create()
-            session.sandbox_id = sandbox.id
-            async with self._uow:
-                await self._uow.session.save(session)
-
-        llm, agent_config, skill, skill_prompt, ltm_block = await self._resolve_llm_and_config(session)
-
-        browser = await sandbox.get_browser(supports_multimodal=llm.supports_multimodal)
-        if not browser:
-            logger.error(f"获取沙箱[{sandbox.id}]中的浏览器实例失败")
-            raise RuntimeError(f"获取沙箱[{sandbox.id}]中的浏览器实例失败")
-
-        async def save_memory_fn(title, content, tags, scope):
-            entry = await self._memory_service.save_from_tool(
-                title=title, content=content, tags=tags, scope=scope, session_id=session.id
-            )
-            return {"id": entry.id}
-
-        extra_tools = [MemoryTool(save_fn=save_memory_fn, session_id=session.id)]
-
-        async def on_complete(session_id: str) -> None:
-            if self._auto_extract_memory:
-                extractor = MemoryExtractorService(
-                    uow_factory=self._uow_factory,
-                    llm=llm,
-                    json_parser=self._json_parser,
-                )
-                await extractor.extract_from_session(session_id)
-
-        task_runner = AgentTaskRunner(
-            uow_factory=self._uow_factory,
-            llm=llm,
-            agent_config=agent_config,
-            mcp_config=self._mcp_config,
-            a2a_config=self._a2a_config,
-            session_id=session.id,
-            file_storage=self._file_storage,
-            json_parser=self._json_parser,
-            browser=browser,
-            search_engine=self._search_engine,
-            sandbox=sandbox,
-            skill=skill,
-            skill_prompt=skill_prompt,
-            long_term_memory_block=ltm_block,
-            extra_tools=extra_tools,
-            on_complete_callback=on_complete if self._auto_extract_memory else None,
-        )
-
-        task = self._task_cls.create(task_runner=task_runner)
+    async def _create_task(self, session: Session) -> RedisStreamTask:
+        task = await RedisStreamTask.create_for_session(session.id)
         session.task_id = task.id
         async with self._uow:
             await self._uow.session.save(session)
+            await self._uow.session.update_status(session.id, SessionStatus.RUNNING)
         return task
 
     async def _safe_update_unread_count(self, session_id: str) -> None:
@@ -189,6 +89,39 @@ class AgentService:
                 await uow.session.update_unread_message_count(session_id, 0)
         except Exception as e:
             logger.warning(f"会话[{session_id}]后台更新未读消息计数失败: {e}")
+
+    async def _consume_output_stream(
+            self,
+            task_id: str,
+            session_id: str,
+            latest_event_id: Optional[str],
+    ) -> AsyncGenerator[BaseEvent, None]:
+        output_stream = RedisStreamMessageQueue(f"task:output:{task_id}")
+        cursor = latest_event_id or "0"
+
+        while True:
+            if await self._task_state.is_cancelled(task_id):
+                break
+
+            event_id, event_str = await output_stream.get(start_id=cursor, block_ms=500)
+            if event_str is not None:
+                cursor = event_id
+                event = TypeAdapter(Event).validate_json(event_str)
+                event.id = event_id
+                async with self._uow:
+                    await self._uow.session.update_unread_message_count(session_id, 0)
+                yield event
+                if isinstance(event, (DoneEvent, ErrorEvent, WaitEvent)):
+                    return
+                continue
+
+            if await self._task_state.is_done(task_id):
+                async with self._uow:
+                    session = await self._uow.session.get_by_id(session_id)
+                if session and session.status in {SessionStatus.COMPLETED, SessionStatus.WAITING}:
+                    return
+                if await output_stream.is_empty():
+                    return
 
     async def chat(
             self,
@@ -255,20 +188,15 @@ class AgentService:
                 await task.invoke()
                 logger.info(f"往会话[{session_id}]输入消息队列写入消息: {message[:50]}...")
 
-            logger.info(f"会话[{session_id}]已启动")
+            if not task:
+                task = await self._get_task(session)
+            if not task:
+                return
 
-            while task and not task.done:
-                event_id, event_str = await task.output_stream.get(start_id=latest_event_id, block_ms=0)
-                latest_event_id = event_id
-                if event_str is None:
-                    continue
-                event = TypeAdapter(Event).validate_json(event_str)
-                event.id = event_id
-                async with self._uow:
-                    await self._uow.session.update_unread_message_count(session_id, 0)
+            logger.info(f"会话[{session_id}]已启动, task_id={task.id}")
+
+            async for event in self._consume_output_stream(task.id, session_id, latest_event_id):
                 yield event
-                if isinstance(event, (DoneEvent, ErrorEvent, WaitEvent)):
-                    break
 
             logger.info(f"会话[{session_id}]本轮运行结束")
         except Exception as e:
@@ -292,13 +220,10 @@ class AgentService:
             session = await self._uow.session.get_by_id(session_id)
         if not session:
             raise RuntimeError("任务会话不存在, 请核实后重试")
-        task = await self._get_task(session)
-        if task:
-            task.cancel()
+        if session.task_id:
+            await self._task_state.request_cancel(session.task_id)
         async with self._uow:
             await self._uow.session.update_status(session_id, SessionStatus.COMPLETED)
 
     async def shutdown(self) -> None:
-        logger.info("正在清除所有会话任务资源并释放")
-        await self._task_cls.destroy()
-        logger.info("所有会话任务资源清除成功")
+        logger.info("AgentService 关闭（任务由独立 worker 执行，无需清理本地 registry）")

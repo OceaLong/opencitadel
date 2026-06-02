@@ -25,6 +25,8 @@ from app.domain.services.tools.message import MessageTool
 from app.domain.services.tools.search import SearchTool
 from app.domain.services.tools.shell import ShellTool
 from app.domain.services.tools.base import BaseTool
+from app.infrastructure.observability.agent_tracer import AgentTracer
+from app.infrastructure.observability.otel import record_agent_step
 from .base import BaseFlow, FlowStatus
 from ...repositories.uow import IUnitOfWork
 
@@ -105,6 +107,12 @@ class PlannerReActFlow(BaseFlow):
 
     async def invoke(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         """传递消息，运行流，在六中调用planner&react智能体组合完成任务并返回对应事件"""
+        tracer = AgentTracer(self._session_id)
+        with tracer.span("planner_react_flow"):
+            async for event in self._invoke_flow(message, tracer):
+                yield event
+
+    async def _invoke_flow(self, message: Message, tracer: AgentTracer) -> AsyncGenerator[BaseEvent, None]:
         # 1.调用会话仓库查询会话是否存在
         async with self._uow:
             session = await self._uow.session.get_by_id(self._session_id)
@@ -153,19 +161,21 @@ class PlannerReActFlow(BaseFlow):
             elif self.status == FlowStatus.PLANNING:
                 # 10.流状态为规划中，则调用规划Agent
                 logger.info(f"Planner&ReAct流开始创建计划/Plan")
-                async for event in self.planner.create_plan(message):
-                    # 11.判断规划Agent是否返回规划事件
-                    if isinstance(event, PlanEvent) and event.status == PlanEventStatus.CREATED:
-                        # 12.创建计划成功时需要更新计划
-                        self.plan = event.plan
-                        logger.info(f"Planner&ReAct流成功创建计划, 共计: {len(event.plan.steps)} 步")
+                record_agent_step("planner", "create_plan")
+                with tracer.span("planner.create_plan"):
+                    async for event in self.planner.create_plan(message):
+                        # 11.判断规划Agent是否返回规划事件
+                        if isinstance(event, PlanEvent) and event.status == PlanEventStatus.CREATED:
+                            # 12.创建计划成功时需要更新计划
+                            self.plan = event.plan
+                            logger.info(f"Planner&ReAct流成功创建计划, 共计: {len(event.plan.steps)} 步")
 
-                        # 13.在计划中同步生成了会话标题+初始AI消息
-                        yield TitleEvent(title=event.plan.title)
-                        yield MessageEvent(role="assistant", message=event.plan.message)
+                            # 13.在计划中同步生成了会话标题+初始AI消息
+                            yield TitleEvent(title=event.plan.title)
+                            yield MessageEvent(role="assistant", message=event.plan.message)
 
-                    # 14.将生成的事件直接输出(一般来说是PlanEvent)
-                    yield event
+                        # 14.将生成的事件直接输出(一般来说是PlanEvent)
+                        yield event
 
                 # 15.计划创建完成，更新流状态为执行中
                 logger.info(f"Planner&ReAct流状态从{FlowStatus.PLANNING}变成{FlowStatus.EXECUTING}")

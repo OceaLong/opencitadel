@@ -128,9 +128,35 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
   let toolIndex = 0;
   let stepIndex = 0;
   let errorIndex = 0;
+  const streamMessages = new Map<string, { listIndex: number; content: string }>();
 
   for (const ev of events) {
     switch (ev.type) {
+      case "message_delta": {
+        const { stream_id, delta } = ev.data as { stream_id: string; delta: string };
+        const existing = streamMessages.get(stream_id);
+        if (existing) {
+          existing.content += delta;
+          const item = list[existing.listIndex];
+          if (item?.kind === "assistant") {
+            list[existing.listIndex] = {
+              ...item,
+              data: { ...item.data, message: existing.content },
+            };
+          }
+        } else {
+          list.push({
+            kind: "assistant",
+            id: stableId("assistant", messageIndex++, stream_id),
+            data: { role: "assistant", message: delta, stream_id },
+          });
+          streamMessages.set(stream_id, { listIndex: list.length - 1, content: delta });
+        }
+        break;
+      }
+      case "reasoning_delta":
+      case "tool_args_delta":
+        break;
       case "message": {
         const msg = ev.data as ChatMessage;
         if (msg.role === "user") {
@@ -151,6 +177,19 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
             });
           }
         } else if (msg.role === "assistant") {
+          const streamId = (msg as { stream_id?: string }).stream_id;
+          if (streamId && streamMessages.has(streamId)) {
+            const existing = streamMessages.get(streamId)!;
+            existing.content = msg.message || existing.content;
+            const item = list[existing.listIndex];
+            if (item?.kind === "assistant") {
+              list[existing.listIndex] = {
+                ...item,
+                data: msg,
+              };
+            }
+            break;
+          }
           // 所有 assistant 消息都直接添加，不去重
           list.push({
             kind: "assistant",

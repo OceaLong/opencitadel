@@ -66,6 +66,31 @@ class MessageEvent(BaseEvent):
     role: Literal["user", "assistant"] = "assistant"  # 消息角色
     message: str = ""  # 消息本身
     attachments: List[File] = Field(default_factory=list)  # 附件列表信息
+    stream_id: Optional[str] = None  # 流式消息合并 id
+
+
+class MessageDeltaEvent(BaseEvent):
+    """流式消息增量事件"""
+    type: Literal["message_delta"] = "message_delta"
+    stream_id: str
+    role: Literal["user", "assistant"] = "assistant"
+    delta: str = ""
+
+
+class ReasoningDeltaEvent(BaseEvent):
+    """流式思考内容增量事件"""
+    type: Literal["reasoning_delta"] = "reasoning_delta"
+    stream_id: str
+    delta: str = ""
+
+
+class ToolArgsDeltaEvent(BaseEvent):
+    """流式工具参数增量事件"""
+    type: Literal["tool_args_delta"] = "tool_args_delta"
+    stream_id: str
+    tool_call_id: str
+    tool_name: str = ""
+    delta: str = ""
 
 
 class BrowserToolContent(BaseModel):
@@ -143,6 +168,9 @@ Event = Annotated[
         TitleEvent,
         StepEvent,
         MessageEvent,
+        MessageDeltaEvent,
+        ReasoningDeltaEvent,
+        ToolArgsDeltaEvent,
         ToolEvent,
         WaitEvent,
         ErrorEvent,

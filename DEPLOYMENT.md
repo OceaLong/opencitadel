@@ -67,12 +67,16 @@ vim .env
 vim api/config.yaml
 
 # 构建并启动服务
-docker-compose up -d --build
+docker compose up -d --build
 
-# 查看服务状态
-docker-compose ps
-docker-compose logs -f
+# 查看服务状态（含 manus-migrate / manus-api / manus-worker）
+docker compose ps
+docker compose logs -f
 ```
+
+> **服务启动顺序**：`manus-postgres` + `manus-redis` → `manus-migrate`（一次性迁移）→ `manus-api` + `manus-worker` → `manus-ui` → `manus-nginx`
+
+> **Agent Worker 必须运行**：若 `manus-worker` 未启动，对话请求会写入队列但 Agent 不会执行。可通过 `docker compose logs -f manus-worker` 排查。
 
 ---
 
@@ -119,6 +123,21 @@ SANDBOX_NO_PROXY=localhost,127.0.0.1
 
 # ==================== Nginx 端口 ====================
 NGINX_PORT=8088
+
+# ==================== 记忆与向量检索（可选） ====================
+MEMORY_VECTOR_ENABLED=false
+EMBEDDING_API_KEY=
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+
+# ==================== 可观测性（可选） ====================
+OTEL_ENABLED=false
+OTEL_SERVICE_NAME=my-manus-api
+OTEL_EXPORTER_ENDPOINT=
+
+# ==================== 密钥治理（可选） ====================
+VAULT_ADDR=
+USE_DB_APP_CONFIG=false
 ```
 
 ### LLM 配置 (api/config.yaml)
@@ -159,16 +178,28 @@ a2a_config:
 
 - 首次启动且 `llm_config` 配置完整时会自动导入一个默认模型；未配置则保持无模型。后续模型新增、编辑、删除和默认模型切换都在「设置中心 → 模型管理」完成。若数据库已有模型，修改 `api/config.yaml` 不会改变当前运行时默认模型。
 - 系统会自动创建内置 Skill 模板（编程助手、研究分析、数据分析、内容写作），也可在「设置中心 → Skill 模板」维护自定义模板。
-- 长期记忆在「设置中心 → 长期记忆」维护，支持全局和会话两种作用域；任务开始时会自动召回相关记忆。
+- 长期记忆在「设置中心 → 长期记忆」维护，支持全局和会话两种作用域；任务开始时会自动召回相关记忆（时间衰减 + 可选 pgvector 向量混合检索）。
+- 开启向量记忆需设置 `MEMORY_VECTOR_ENABLED=true` 并配置 `EMBEDDING_API_KEY`；PostgreSQL 使用 `pgvector/pgvector:pg16` 镜像。
 - 会话详情页可查看 Agent 会话内存，并支持压缩、清空或删除单条内存消息。
 
 ### 数据库迁移
 
-本版本新增 `llm_models`、`skills`、`memory_entries` 表，并为 `sessions` 表新增 `model_id`、`skill_id` 字段。首次部署或版本更新后需要执行迁移：
+迁移由 **`manus-migrate` 一次性 init job** 自动执行，API 启动时仅校验 schema 版本，不再在 lifespan 内跑 `alembic upgrade`。
 
 ```bash
-docker-compose exec manus-api alembic upgrade head
+# 正常部署：docker compose up 会自动运行 manus-migrate
+docker compose up -d --build
+
+# 手动执行迁移（版本升级或排查）
+docker compose run --rm manus-migrate
+# 或进入 api 容器:
+docker compose exec manus-api python -m app.migrate
+
+# 本地开发
+cd api && ./migrate.sh
 ```
+
+新增迁移版本包括 `memory_entries.embedding vector(1536)`（pgvector 扩展）。
 
 ---
 
@@ -265,11 +296,17 @@ docker stats
 # API 健康检查
 curl http://localhost:8088/api/status
 
+# Prometheus 指标
+curl http://localhost:8088/api/metrics
+
 # 前端访问测试
 curl -I http://localhost:8088
 
 # 数据库连接测试
 docker exec manus-postgres pg_isready -U postgres
+
+# Worker 运行状态
+docker compose logs --tail=50 manus-worker
 ```
 
 ### 3. 日志管理
@@ -305,7 +342,11 @@ docker-compose up -d
 docker-compose down
 
 # 重启单个服务
-docker-compose restart manus-api
+docker compose restart manus-api
+docker compose restart manus-worker
+
+# 扩展 Worker 副本（需移除 compose 中 container_name 或使用 scale profile）
+# docker compose up -d --scale manus-worker=2
 
 # 重新构建并启动
 docker-compose up -d --build
@@ -325,7 +366,7 @@ git pull origin main
 docker-compose build
 
 # 滚动更新（零停机）
-docker-compose up -d
+docker compose up -d --build manus-api manus-worker
 
 # 清理旧镜像
 docker image prune -f
@@ -338,7 +379,7 @@ docker image prune -f
 docker exec -it manus-postgres psql -U postgres -d manus
 
 # 执行迁移
-docker exec -it manus-api alembic upgrade head
+docker compose run --rm manus-migrate
 
 # 备份恢复
 docker exec -i manus-postgres psql -U postgres manus < backup.sql
@@ -476,6 +517,29 @@ sudo crontab -e
 
 ---
 
+## ☸️ Kubernetes / Helm 部署
+
+Helm Chart 位于 `deploy/helm/my-manus/`，支持 API/Worker 独立 Deployment 与 HPA。
+
+```bash
+# 构建并推送镜像后
+helm upgrade --install my-manus ./deploy/helm/my-manus \
+  --set image.api.repository=your-registry/manus-api \
+  --set image.worker.repository=your-registry/manus-api \
+  --set replicaCount.api=2 \
+  --set replicaCount.worker=2 \
+  --set autoscaling.api.enabled=true \
+  --set autoscaling.worker.enabled=true \
+  --set migrate.enabled=true
+```
+
+Chart 特性：
+- API Deployment 含 **migrate initContainer**
+- Worker Deployment 独立 HPA
+- readiness/liveness 探针分离
+
+---
+
 ## 📝 检查清单
 
 部署前确认：
@@ -484,9 +548,11 @@ sudo crontab -e
 - [ ] 防火墙已配置（仅开放 22、8088 端口）
 - [ ] .env 文件已正确配置（数据库密码、COS 凭证、LLM API Key）
 - [ ] api/config.yaml 已配置用于初始化默认模型的 LLM 接口
-- [ ] 已执行数据库迁移并确认模型、Skill、记忆相关表创建成功
+- [ ] `manus-migrate` 已成功完成（`docker compose ps` 中状态为 exited(0)）
+- [ ] `manus-api` 与 **`manus-worker`** 均为 running
 - [ ] 已在设置中心确认默认模型、内置 Skill 和长期记忆配置
-- [ ] 已测试数据库连接
+- [ ] 已测试 `/api/status` 与 `/api/metrics`
+- [ ] （可选）已配置 `OTEL_ENABLED` / `MEMORY_VECTOR_ENABLED`
 - [ ] 已配置日志轮转
 - [ ] 已设置自动备份
 - [ ] 已验证健康检查端点
@@ -502,6 +568,6 @@ sudo crontab -e
 
 ---
 
-**最后更新时间**: 2026-05-20
+**最后更新时间**: 2026-06-02
 **适用版本**: MyManus v1.0  
 **部署环境**: Ubuntu 24.04 LTS, 8核/16GB/270GB SSD/18Mbps

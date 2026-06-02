@@ -2,15 +2,22 @@
 # -*- coding: utf-8 -*-
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """沙箱API服务基础配置信息"""
-    log_level: str = "INFO"  # 日志等级
-    server_timeout_minutes: int = 60  # 服务超时时间单位为分钟
+    log_level: str = "INFO"
+    server_timeout_minutes: int = Field(
+        default=60,
+        validation_alias=AliasChoices(
+            "SERVER_TIMEOUT_MINUTES",
+            "SERVICE_TIMEOUT_MINUTES",
+            "server_timeout_minutes",
+        ),
+    )
 
-    # 使用pydantic v2提供的写法完成环境变量信息的声明
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
