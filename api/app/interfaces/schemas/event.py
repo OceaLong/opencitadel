@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, Self, Type, Literal, List, Union, get_ar
 
 from pydantic import BaseModel, Field, ConfigDict
 
-from app.domain.models.event import Event, PlanEvent, ToolEventStatus, ToolEvent, StepEvent
+from app.domain.models.event import Event, PlanEvent, ToolEventStatus, ToolEvent, StepEvent, UsageEvent
 from app.domain.models.file import File
 from app.domain.models.plan import ExecutionStatus
 
@@ -210,6 +210,38 @@ class ErrorSSEEvent(BaseSSEEvent):
     data: ErrorEventData
 
 
+class UsageEventData(BaseEventData):
+    """Token 用量事件数据"""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    call_count: int = 0
+    delta_prompt_tokens: int = 0
+    delta_completion_tokens: int = 0
+
+
+class UsageSSEEvent(BaseSSEEvent):
+    """Token 用量流式事件"""
+    event: Literal["usage"] = "usage"
+    data: UsageEventData
+
+    @classmethod
+    def from_event(cls, event: UsageEvent) -> Self:
+        return cls(
+            data=UsageEventData(
+                **BaseEventData.base_event_data(event),
+                prompt_tokens=event.prompt_tokens,
+                completion_tokens=event.completion_tokens,
+                total_tokens=event.total_tokens,
+                estimated_cost_usd=event.estimated_cost_usd,
+                call_count=event.call_count,
+                delta_prompt_tokens=event.delta_prompt_tokens,
+                delta_completion_tokens=event.delta_completion_tokens,
+            )
+        )
+
+
 # 定义Agent流式事件类型集合
 AgentSSEEvent = Union[
     CommonSSEEvent,
@@ -220,6 +252,7 @@ AgentSSEEvent = Union[
     ToolSSEEvent,
     DoneSSEEvent,
     ErrorSSEEvent,
+    UsageSSEEvent,
     WaitSSEEvent,
 ]
 

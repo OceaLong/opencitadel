@@ -11,6 +11,7 @@ from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from core.config import get_settings
 from .db_file_repository import DBFileRepository
 from .db_llm_model_repository import DBLLMModelRepository
+from .db_llm_token_usage_repository import DBLLMTokenUsageRepository
 from .db_memory_entry_repository import DBMemoryEntryRepository
 from .db_session_repository import DBSessionRepository
 from .db_skill_repository import DBSkillRepository
@@ -46,6 +47,7 @@ class DBUnitOfWork(IUnitOfWork):
         self.llm_model = DBLLMModelRepository(db_session=self.db_session, cipher=cipher)
         self.skill = DBSkillRepository(db_session=self.db_session)
         self.memory_entry = DBMemoryEntryRepository(db_session=self.db_session)
+        self.llm_token_usage = DBLLMTokenUsageRepository(db_session=self.db_session)
 
         return self
 

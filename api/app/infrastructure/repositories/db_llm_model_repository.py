@@ -56,6 +56,8 @@ class DBLLMModelRepository(LLMModelRepository):
             record.model_name = model.model_name
             record.temperature = model.temperature
             record.max_tokens = model.max_tokens
+            record.input_price_per_million = model.input_price_per_million
+            record.output_price_per_million = model.output_price_per_million
             record.extra_params = model.extra_params
             record.capabilities = model.capabilities.model_dump()
             record.supports_multimodal = model.capabilities.vision

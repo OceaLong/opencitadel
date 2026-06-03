@@ -161,6 +161,18 @@ class DoneEvent(BaseEvent):
     type: Literal["done"] = "done"
 
 
+class UsageEvent(BaseEvent):
+    """Token 用量事件，推送会话累计消耗。"""
+    type: Literal["usage"] = "usage"
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    call_count: int = 0
+    delta_prompt_tokens: int = 0
+    delta_completion_tokens: int = 0
+
+
 # 定义应用事件类型声明
 Event = Annotated[
     Union[
@@ -174,6 +186,7 @@ Event = Annotated[
         ToolEvent,
         WaitEvent,
         ErrorEvent,
+        UsageEvent,
         DoneEvent,
     ],
     Field(discriminator="type"),

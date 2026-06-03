@@ -4,6 +4,8 @@ from typing import List, Optional
 
 # 兼容历史 Skill / 占位符 / 模型幻觉使用的旧工具名
 LEGACY_TOOL_NAME_ALIASES = {
+    "image_analyze": "analyze_image",
+    "vision_analyze": "analyze_image",
     "file_read": "read_file",
     "file_write": "write_file",
     "file_str_replace": "replace_in_file",

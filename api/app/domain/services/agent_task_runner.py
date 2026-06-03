@@ -61,6 +61,7 @@ class AgentTaskRunner(TaskRunner):
             long_term_memory_block: str = "",
             extra_tools: Optional[list] = None,
             on_complete_callback: Optional[Callable] = None,
+            model_id: Optional[str] = None,
     ) -> None:
         """构造函数，完成Agent任务运行器的创建"""
         self._uow_factory = uow_factory
@@ -89,6 +90,7 @@ class AgentTaskRunner(TaskRunner):
             skill_prompt=skill_prompt,
             long_term_memory_block=long_term_memory_block,
             extra_tools=extra_tools or [],
+            model_id=model_id,
         )
 
     async def _put_and_add_event(self, task: Task, event: Event) -> None:

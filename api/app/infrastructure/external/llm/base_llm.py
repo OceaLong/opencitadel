@@ -1,12 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import base64
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from app.domain.models.llm_model import ModelCapabilities
 from app.infrastructure.observability.llm_metrics import record_multimodal_fallback
 
 logger = logging.getLogger(__name__)
+
+_DATA_URL_PATTERN = re.compile(r"^data:([^;]+);base64,(.+)$", re.DOTALL)
 
 _FALLBACK_IMAGE_NOTE = "原始消息包含图片附件，因模型服务连接异常已省略图片内容。"
 
@@ -112,6 +116,99 @@ class MultimodalFallbackMixin:
         return await create_fn(retry_kwargs)
 
 
+def parse_data_url(url: str) -> tuple[str, str]:
+    """解析 data URL，返回 (mime_type, base64_data)。"""
+    match = _DATA_URL_PATTERN.match(url.strip())
+    if not match:
+        raise ValueError(f"无效的 data URL: {url[:80]}")
+    return match.group(1), match.group(2)
+
+
+def openai_content_to_anthropic_parts(content: Any) -> Any:
+    """将 OpenAI 风格 user/assistant content 转为 Anthropic content blocks。"""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return content if content is not None else ""
+    parts: List[Dict[str, Any]] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        part_type = part.get("type")
+        if part_type == "text":
+            text = part.get("text", "")
+            if text:
+                parts.append({"type": "text", "text": str(text)})
+        elif part_type == "image_url":
+            url = (part.get("image_url") or {}).get("url", "")
+            if not url:
+                continue
+            if url.startswith("data:"):
+                mime_type, data = parse_data_url(url)
+                parts.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": mime_type, "data": data},
+                })
+            elif url.startswith("http://") or url.startswith("https://"):
+                parts.append({
+                    "type": "image",
+                    "source": {"type": "url", "url": url},
+                })
+    return parts if parts else ""
+
+
+def openai_content_to_gemini_parts(content: Any) -> List[Dict[str, Any]]:
+    """将 OpenAI 风格 content 转为 Gemini parts 列表。"""
+    if isinstance(content, str):
+        return [{"text": content}] if content else [{"text": ""}]
+    if not isinstance(content, list):
+        return [{"text": str(content) if content is not None else ""}]
+    parts: List[Dict[str, Any]] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        part_type = part.get("type")
+        if part_type == "text":
+            text = part.get("text", "")
+            if text:
+                parts.append({"text": str(text)})
+        elif part_type == "image_url":
+            url = (part.get("image_url") or {}).get("url", "")
+            if not url:
+                continue
+            if url.startswith("data:"):
+                mime_type, data = parse_data_url(url)
+                parts.append({"inlineData": {"mimeType": mime_type, "data": data}})
+            elif url.startswith("http://") or url.startswith("https://"):
+                parts.append({"fileData": {"mimeType": "image/png", "fileUri": url}})
+    return parts if parts else [{"text": ""}]
+
+
+def normalize_usage(raw: Optional[Dict[str, Any]]) -> Dict[str, int]:
+    """统一 usage 字段为 prompt/completion/total tokens。"""
+    if not raw:
+        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    prompt = int(
+        raw.get("prompt_tokens")
+        or raw.get("input_tokens")
+        or raw.get("promptTokenCount")
+        or 0
+    )
+    completion = int(
+        raw.get("completion_tokens")
+        or raw.get("output_tokens")
+        or raw.get("completionTokenCount")
+        or raw.get("candidatesTokenCount")
+        or 0
+    )
+    total = int(raw.get("total_tokens") or raw.get("totalTokenCount") or (prompt + completion))
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+    }
+
+
 async def invoke_to_stream_deltas(message: Dict[str, Any]):
     """Convert a complete LLM message into stream deltas (fallback for non-native streaming)."""
     content = message.get("content")
@@ -132,3 +229,6 @@ async def invoke_to_stream_deltas(message: Dict[str, Any]):
                 },
             }]
         }
+    usage = message.get("_usage")
+    if usage:
+        yield {"usage": normalize_usage(usage)}

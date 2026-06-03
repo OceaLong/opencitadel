@@ -94,7 +94,7 @@ class TaskRunnerFactory:
             llm_model = llm_model.model_copy(update={"temperature": temperature_override})
         llm = LLMFactory.create(llm_model, thinking_enabled=session.thinking_enabled)
         long_term_memory_block = await self._memory_recall(session.id)
-        return llm, agent_config, skill, skill_prompt, long_term_memory_block
+        return llm, agent_config, skill, skill_prompt, long_term_memory_block, llm_model.id
 
     async def _memory_recall(self, session_id: str) -> str:
         try:
@@ -114,7 +114,7 @@ class TaskRunnerFactory:
             async with self._uow_factory() as uow:
                 await uow.session.save(session)
 
-        llm, agent_config, skill, skill_prompt, ltm_block = await self._resolve_llm_and_config(session)
+        llm, agent_config, skill, skill_prompt, ltm_block, model_id = await self._resolve_llm_and_config(session)
 
         browser = await sandbox.get_browser(supports_multimodal=llm.supports_multimodal)
         if not browser:
@@ -154,4 +154,5 @@ class TaskRunnerFactory:
             long_term_memory_block=ltm_block,
             extra_tools=extra_tools,
             on_complete_callback=on_complete if self._auto_extract_memory else None,
+            model_id=model_id,
         )

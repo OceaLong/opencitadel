@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError } from '@/lib/api'
 import { sessionApi } from '@/lib/api/session'
 import { normalizeEvent, normalizeEvents } from '@/lib/session-events'
-import type { SessionDetail, SSEEventData, SessionFile, UpdateSessionConfigParams } from '@/lib/api/types'
+import type { SessionDetail, SSEEventData, SessionFile, TokenUsageSummary, UpdateSessionConfigParams } from '@/lib/api/types'
 
 function isSessionMissingError(err: unknown): boolean {
   if (err instanceof ApiError && err.code === 404) {
@@ -129,7 +129,14 @@ export function useSessionDetail(
       setStreaming(false)
     }
     
-    // done 事件时更新为 completed
+    if (evToAppend.type === 'usage') {
+      const usage = evToAppend.data as TokenUsageSummary
+      setSession((prev) =>
+        prev ? { ...prev, token_usage: usage } : null
+      )
+    }
+
+    // done 事件时更新为 completed，并刷新 token 汇总（兜底）
     if (evToAppend.type === 'done') {
       setSession((prev) => prev ? { ...prev, status: 'completed' } : null)
     }

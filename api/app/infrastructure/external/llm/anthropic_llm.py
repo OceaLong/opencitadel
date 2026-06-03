@@ -9,7 +9,11 @@ import httpx
 from app.application.errors.exceptions import ServerRequestsError
 from app.domain.external.llm import LLM
 from app.domain.models.llm_model import LLMModel, ModelCapabilities
-from app.infrastructure.external.llm.base_llm import invoke_to_stream_deltas
+from app.infrastructure.external.llm.base_llm import (
+    invoke_to_stream_deltas,
+    normalize_usage,
+    openai_content_to_anthropic_parts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,9 @@ class AnthropicLLM(LLM):
     def capabilities(self) -> ModelCapabilities:
         return self._capabilities
 
+    def _convert_content(self, content: Any) -> Any:
+        return openai_content_to_anthropic_parts(content)
+
     def _convert_messages(self, messages: List[Dict[str, Any]]) -> tuple[str, List[Dict[str, Any]]]:
         system_parts = []
         converted = []
@@ -57,13 +64,21 @@ class AnthropicLLM(LLM):
             if role == "system":
                 system_parts.append(content if isinstance(content, str) else json.dumps(content))
             elif role == "user":
-                converted.append({"role": "user", "content": content})
+                converted.append({"role": "user", "content": self._convert_content(content)})
             elif role == "assistant":
-                converted.append({"role": "assistant", "content": content})
+                assistant_content = content
+                if isinstance(content, str) and msg.get("tool_calls"):
+                    assistant_content = content or ""
+                converted.append({"role": "assistant", "content": assistant_content})
             elif role == "tool":
+                tool_content = content if isinstance(content, str) else json.dumps(content)
                 converted.append({
                     "role": "user",
-                    "content": [{"type": "tool_result", "tool_use_id": msg.get("tool_call_id"), "content": content}],
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": msg.get("tool_call_id"),
+                        "content": tool_content,
+                    }],
                 })
         return "\n".join(system_parts), converted
 
@@ -126,6 +141,9 @@ class AnthropicLLM(LLM):
         message = {"role": "assistant", "content": "".join(text_parts) or None}
         if tool_calls:
             message["tool_calls"] = tool_calls
+        usage = normalize_usage(data.get("usage"))
+        if usage.get("total_tokens"):
+            message["_usage"] = usage
         return message
 
     async def stream_invoke(

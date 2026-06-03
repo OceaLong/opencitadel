@@ -42,6 +42,8 @@ class LLMModel(BaseModel):
     model_name: str = "gpt-4o"
     temperature: float = Field(default=0.7, ge=0, le=2)
     max_tokens: int = Field(default=8192, ge=1)
+    input_price_per_million: float = Field(default=0.0, ge=0)
+    output_price_per_million: float = Field(default=0.0, ge=0)
     extra_params: Dict[str, Any] = Field(default_factory=dict)
     capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     supports_multimodal: bool = False

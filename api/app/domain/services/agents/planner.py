@@ -47,6 +47,7 @@ class PlannerAgent(BaseAgent):
 
     async def create_plan(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         """根据用户传递的消息创建计划/规划，迭代返回对应的事件"""
+        self.set_current_step("create_plan")
         # 1.根据用户传递的消息生成创建plan的提示词
         query = CREATE_PLAN_PROMPT.format(
             message=message.message,
@@ -76,6 +77,7 @@ class PlannerAgent(BaseAgent):
 
     async def update_plan(self, plan: Plan, step: Step) -> AsyncGenerator[BaseEvent, None]:
         """根据传递的原始规划+子步骤更新事件"""
+        self.set_current_step(f"update_plan:{step.id}")
         # 1.使用plan+step创建更新Plan提示词
         query = UPDATE_PLAN_PROMPT.format(
             plan=plan.model_dump_json(),

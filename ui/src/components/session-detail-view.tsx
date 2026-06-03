@@ -301,6 +301,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
                 onFileClick={handleFileClick}
                 sessionId={sessionId}
                 memoryEditable={configEditable}
+                tokenUsage={session.token_usage}
               />
             </div>
 

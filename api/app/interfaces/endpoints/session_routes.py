@@ -29,6 +29,9 @@ from app.interfaces.schemas.session import (
     ShellReadResponse,
     ShellReadRequest,
     UpdateSessionConfigRequest,
+    GetSessionTokenUsageResponse,
+    TokenUsageSummaryResponse,
+    TokenUsageRecordResponse,
 )
 from app.interfaces.schemas.llm_model import LLMModelResponse
 from app.interfaces.schemas.skill import SkillSummaryResponse
@@ -40,7 +43,9 @@ from app.interfaces.service_dependencies import (
     get_llm_model_service,
     get_skill_service,
     get_memory_service,
+    get_llm_token_usage_service,
 )
+from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.skill_service import SkillService
 from app.application.services.memory_service import MemoryService
@@ -54,6 +59,7 @@ async def build_get_session_response(
         session: Session,
         llm_model_service: LLMModelService,
         skill_service: SkillService,
+        token_usage_service: Optional[LLMTokenUsageService] = None,
 ) -> GetSessionResponse:
     """组装会话详情响应，避免在路由间直接调用 endpoint 函数"""
     model_resp = None
@@ -67,6 +73,37 @@ async def build_get_session_response(
         summary = await skill_service.get_summary(session.skill_id)
         if summary:
             skill_resp = SkillSummaryResponse(**summary.model_dump())
+    token_usage_resp = None
+    if token_usage_service:
+        try:
+            model_prices = {}
+            if session.model_id:
+                try:
+                    model = await llm_model_service.get_model(session.model_id, mask=False)
+                    model_prices[model.id] = (
+                        model.input_price_per_million,
+                        model.output_price_per_million,
+                    )
+                    model_prices[model.model_name] = (
+                        model.input_price_per_million,
+                        model.output_price_per_million,
+                    )
+                except Exception:
+                    pass
+            summary = await token_usage_service.get_session_summary(
+                session.id,
+                model_prices=model_prices or None,
+            )
+            token_usage_resp = TokenUsageSummaryResponse(
+                prompt_tokens=summary.prompt_tokens,
+                completion_tokens=summary.completion_tokens,
+                total_tokens=summary.total_tokens,
+                estimated_cost_usd=summary.estimated_cost_usd,
+                call_count=summary.call_count,
+            )
+        except Exception as exc:
+            logger.debug("获取会话 token 汇总失败: %s", exc)
+
     return GetSessionResponse(
         session_id=session.id,
         title=session.title,
@@ -77,6 +114,7 @@ async def build_get_session_response(
         thinking_enabled=session.thinking_enabled,
         model=model_resp,
         skill=skill_resp,
+        token_usage=token_usage_resp,
     )
 
 # 流式获取会话详情睡眠间隔
@@ -256,6 +294,7 @@ async def get_session(
         session_service: SessionService = Depends(get_session_service),
         llm_model_service: LLMModelService = Depends(get_llm_model_service),
         skill_service: SkillService = Depends(get_skill_service),
+        token_usage_service: LLMTokenUsageService = Depends(get_llm_token_usage_service),
 ) -> Response[GetSessionResponse]:
     """传递指定会话id获取该会话的对话详情"""
     session = await session_service.get_session(session_id)
@@ -263,7 +302,62 @@ async def get_session(
         raise NotFoundError("该会话不存在，请核实后重试")
     return Response.success(
         msg="获取会话详情成功",
-        data=await build_get_session_response(session, llm_model_service, skill_service),
+        data=await build_get_session_response(
+            session, llm_model_service, skill_service, token_usage_service,
+        ),
+    )
+
+
+@router.get(
+    path="/{session_id}/token-usage",
+    response_model=Response[GetSessionTokenUsageResponse],
+    summary="获取会话 Token 用量明细",
+)
+async def get_session_token_usage(
+        session_id: str,
+        session_service: SessionService = Depends(get_session_service),
+        llm_model_service: LLMModelService = Depends(get_llm_model_service),
+        token_usage_service: LLMTokenUsageService = Depends(get_llm_token_usage_service),
+) -> Response[GetSessionTokenUsageResponse]:
+    session = await session_service.get_session(session_id)
+    if not session:
+        raise NotFoundError("该会话不存在，请核实后重试")
+    model_prices = {}
+    if session.model_id:
+        try:
+            model = await llm_model_service.get_model(session.model_id, mask=False)
+            model_prices[model.id] = (model.input_price_per_million, model.output_price_per_million)
+            model_prices[model.model_name] = (model.input_price_per_million, model.output_price_per_million)
+        except Exception:
+            pass
+    summary = await token_usage_service.get_session_summary(session_id, model_prices=model_prices or None)
+    records = await token_usage_service.list_by_session(session_id)
+    return Response.success(
+        msg="获取 Token 用量成功",
+        data=GetSessionTokenUsageResponse(
+            summary=TokenUsageSummaryResponse(
+                prompt_tokens=summary.prompt_tokens,
+                completion_tokens=summary.completion_tokens,
+                total_tokens=summary.total_tokens,
+                estimated_cost_usd=summary.estimated_cost_usd,
+                call_count=summary.call_count,
+            ),
+            records=[
+                TokenUsageRecordResponse(
+                    id=r.id,
+                    agent=r.agent,
+                    step=r.step,
+                    model_id=r.model_id,
+                    model_name=r.model_name,
+                    call_type=r.call_type,
+                    prompt_tokens=r.prompt_tokens,
+                    completion_tokens=r.completion_tokens,
+                    total_tokens=r.total_tokens,
+                    created_at=r.created_at,
+                )
+                for r in records
+            ],
+        ),
     )
 
 
@@ -278,6 +372,7 @@ async def patch_session(
         session_service: SessionService = Depends(get_session_service),
         llm_model_service: LLMModelService = Depends(get_llm_model_service),
         skill_service: SkillService = Depends(get_skill_service),
+        token_usage_service: LLMTokenUsageService = Depends(get_llm_token_usage_service),
 ) -> Response[GetSessionResponse]:
     await session_service.update_session_config(
         session_id,
@@ -290,7 +385,9 @@ async def patch_session(
         raise NotFoundError("该会话不存在，请核实后重试")
     return Response.success(
         msg="更新会话配置成功",
-        data=await build_get_session_response(session, llm_model_service, skill_service),
+        data=await build_get_session_response(
+            session, llm_model_service, skill_service, token_usage_service,
+        ),
     )
 
 

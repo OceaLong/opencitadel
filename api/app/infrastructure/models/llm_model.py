@@ -23,6 +23,12 @@ class LLMModelORM(Base):
     model_name: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
     temperature: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0.7"))
     max_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("8192"))
+    input_price_per_million: Mapped[float] = mapped_column(
+        Float, nullable=False, server_default=text("0")
+    )
+    output_price_per_million: Mapped[float] = mapped_column(
+        Float, nullable=False, server_default=text("0")
+    )
     extra_params: Mapped[Dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
@@ -51,6 +57,8 @@ class LLMModelORM(Base):
             model_name=model.model_name,
             temperature=model.temperature,
             max_tokens=model.max_tokens,
+            input_price_per_million=model.input_price_per_million,
+            output_price_per_million=model.output_price_per_million,
             extra_params=model.extra_params,
             capabilities=model.capabilities.model_dump(),
             supports_multimodal=model.supports_multimodal,
@@ -72,6 +80,8 @@ class LLMModelORM(Base):
             model_name=self.model_name,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            input_price_per_million=self.input_price_per_million,
+            output_price_per_million=self.output_price_per_million,
             extra_params=self.extra_params or {},
             capabilities=capabilities,
             supports_multimodal=self.supports_multimodal,

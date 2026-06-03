@@ -47,6 +47,7 @@ class ReActAgent(BaseAgent):
 
         # 2.更新步骤的执行状态为运行中并返回Step事件
         step.status = ExecutionStatus.RUNNING
+        self.set_current_step(step.id)
         yield StepEvent(step=step, status=StepEventStatus.STARTED)
 
         # 3.调用invoke获取agent返回的事件内容
@@ -105,6 +106,7 @@ class ReActAgent(BaseAgent):
 
     async def summarize(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         """调用Agent汇总历史的消息并生成最终回复+附件"""
+        self.set_current_step("summarize")
         # 1.构建请求query
         query = SUMMARIZE_PROMPT
 

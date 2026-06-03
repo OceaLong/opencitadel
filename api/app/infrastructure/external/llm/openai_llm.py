@@ -15,6 +15,7 @@ from app.infrastructure.external.llm.base_llm import (
     _strip_multimodal_to_text,
     is_retriable_multimodal_error,
 )
+from app.infrastructure.external.llm.base_llm import normalize_usage
 from app.infrastructure.observability.llm_metrics import record_multimodal_request
 
 logger = logging.getLogger(__name__)
@@ -299,7 +300,12 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         if message is None:
             raise ServerRequestsError("调用LLM失败: 响应 message 为空")
         _log_response_summary(response, request_model)
-        return message.model_dump()
+        result = message.model_dump()
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            raw = usage.model_dump() if hasattr(usage, "model_dump") else dict(usage)
+            result["_usage"] = normalize_usage(raw)
+        return result
 
     async def stream_invoke(
             self,
@@ -319,6 +325,7 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             "messages": messages,
             "timeout": self._timeout,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if self._temperature is not None:
             request_kwargs["temperature"] = self._temperature
@@ -350,7 +357,12 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         except Exception as error:
             self._raise_llm_error(error, request_model)
 
+        stream_usage: Dict[str, int] = {}
         async for chunk in stream:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                raw = usage.model_dump() if hasattr(usage, "model_dump") else dict(usage)
+                stream_usage = normalize_usage(raw)
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -375,3 +387,5 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
                     })
             if payload:
                 yield payload
+        if stream_usage.get("total_tokens"):
+            yield {"usage": stream_usage}

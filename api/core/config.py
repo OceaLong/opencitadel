@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     memory_recall_limit: int = 20
     memory_auto_extract_enabled: bool = True
     memory_vector_enabled: bool = False
+    memory_compact_strategy: str = "hybrid"  # rule | llm | hybrid
+    memory_compact_token_threshold: int = 32000
+    memory_compact_keep_recent: int = 12
+    memory_compact_tool_content_max_chars: int = 2000
     embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"
     embedding_api_key: str = ""

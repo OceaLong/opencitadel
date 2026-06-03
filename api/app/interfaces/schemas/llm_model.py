@@ -16,6 +16,8 @@ class LLMModelCreateRequest(BaseModel):
     model_name: str = "gpt-4o"
     temperature: float = Field(default=0.7, ge=0, le=2)
     max_tokens: int = Field(default=8192, ge=1)
+    input_price_per_million: float = Field(default=0.0, ge=0)
+    output_price_per_million: float = Field(default=0.0, ge=0)
     extra_params: Dict[str, Any] = Field(default_factory=dict)
     capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     supports_multimodal: bool = False
@@ -30,6 +32,8 @@ class LLMModelUpdateRequest(BaseModel):
     model_name: Optional[str] = None
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
     max_tokens: Optional[int] = Field(default=None, ge=1)
+    input_price_per_million: Optional[float] = Field(default=None, ge=0)
+    output_price_per_million: Optional[float] = Field(default=None, ge=0)
     extra_params: Optional[Dict[str, Any]] = None
     capabilities: Optional[ModelCapabilities] = None
     supports_multimodal: Optional[bool] = None
@@ -45,6 +49,8 @@ class LLMModelResponse(BaseModel):
     model_name: str
     temperature: float
     max_tokens: int
+    input_price_per_million: float = 0.0
+    output_price_per_million: float = 0.0
     extra_params: Dict[str, Any] = Field(default_factory=dict)
     capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     supports_multimodal: bool = False

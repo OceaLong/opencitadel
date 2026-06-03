@@ -9,7 +9,11 @@ import httpx
 from app.application.errors.exceptions import ServerRequestsError
 from app.domain.external.llm import LLM
 from app.domain.models.llm_model import LLMModel, ModelCapabilities
-from app.infrastructure.external.llm.base_llm import invoke_to_stream_deltas
+from app.infrastructure.external.llm.base_llm import (
+    invoke_to_stream_deltas,
+    normalize_usage,
+    openai_content_to_gemini_parts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +55,19 @@ class GeminiLLM(LLM):
         contents = []
         for msg in messages:
             role = msg.get("role")
-            text = msg.get("content")
-            if isinstance(text, list):
-                text = json.dumps(text)
+            content = msg.get("content")
             if role == "system":
+                text = content if isinstance(content, str) else json.dumps(content)
                 contents.append({"role": "user", "parts": [{"text": f"[system]\n{text}"}]})
-            elif role in {"user", "assistant"}:
-                gemini_role = "user" if role == "user" else "model"
-                contents.append({"role": gemini_role, "parts": [{"text": text or ""}]})
+            elif role == "user":
+                parts = openai_content_to_gemini_parts(content)
+                contents.append({"role": "user", "parts": parts})
+            elif role == "assistant":
+                text = content if isinstance(content, str) else json.dumps(content) if content else ""
+                contents.append({"role": "model", "parts": [{"text": text or ""}]})
+            elif role == "tool":
+                tool_text = content if isinstance(content, str) else json.dumps(content)
+                contents.append({"role": "user", "parts": [{"text": f"[tool_result]\n{tool_text}"}]})
         return contents
 
     async def invoke(
@@ -90,7 +99,16 @@ class GeminiLLM(LLM):
             raise ServerRequestsError("Gemini API returned no candidates")
         parts = candidates[0].get("content", {}).get("parts") or []
         text = "".join(part.get("text", "") for part in parts)
-        return {"role": "assistant", "content": text}
+        message: Dict[str, Any] = {"role": "assistant", "content": text}
+        usage_meta = data.get("usageMetadata") or {}
+        usage = normalize_usage({
+            "promptTokenCount": usage_meta.get("promptTokenCount"),
+            "candidatesTokenCount": usage_meta.get("candidatesTokenCount"),
+            "totalTokenCount": usage_meta.get("totalTokenCount"),
+        })
+        if usage.get("total_tokens"):
+            message["_usage"] = usage
+        return message
 
     async def stream_invoke(
             self,

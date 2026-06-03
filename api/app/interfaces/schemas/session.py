@@ -58,6 +58,35 @@ class UpdateSessionConfigRequest(BaseModel):
     thinking_enabled: Optional[bool] = None
 
 
+class TokenUsageSummaryResponse(BaseModel):
+    """会话 token 用量汇总"""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    call_count: int = 0
+
+
+class TokenUsageRecordResponse(BaseModel):
+    """单次 LLM 调用 token 记录"""
+    id: str
+    agent: str = ""
+    step: str = ""
+    model_id: Optional[str] = None
+    model_name: str = ""
+    call_type: str = "stream"
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+class GetSessionTokenUsageResponse(BaseModel):
+    """会话 token 明细响应"""
+    summary: TokenUsageSummaryResponse
+    records: List[TokenUsageRecordResponse] = Field(default_factory=list)
+
+
 class GetSessionResponse(BaseModel):
     """获取会话详情响应结构"""
     session_id: str
@@ -69,6 +98,7 @@ class GetSessionResponse(BaseModel):
     thinking_enabled: bool = False
     model: Optional[LLMModelResponse] = None
     skill: Optional[SkillSummaryResponse] = None
+    token_usage: Optional[TokenUsageSummaryResponse] = None
 
 
 class GetSessionFilesResponse(BaseModel):

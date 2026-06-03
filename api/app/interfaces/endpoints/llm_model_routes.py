@@ -31,6 +31,8 @@ def _to_response(model: LLMModel) -> LLMModelResponse:
         model_name=model.model_name,
         temperature=model.temperature,
         max_tokens=model.max_tokens,
+        input_price_per_million=model.input_price_per_million,
+        output_price_per_million=model.output_price_per_million,
         extra_params=model.extra_params,
         capabilities=model.capabilities,
         supports_multimodal=model.supports_multimodal,

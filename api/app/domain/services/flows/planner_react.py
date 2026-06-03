@@ -24,6 +24,7 @@ from app.domain.services.tools.mcp import MCPTool
 from app.domain.services.tools.message import MessageTool
 from app.domain.services.tools.search import SearchTool
 from app.domain.services.tools.shell import ShellTool
+from app.domain.services.tools.vision import VisionTool
 from app.domain.services.tools.base import BaseTool
 from app.infrastructure.observability.agent_tracer import AgentTracer
 from app.infrastructure.observability.otel import record_agent_step
@@ -52,6 +53,7 @@ class PlannerReActFlow(BaseFlow):
             skill_prompt: str = "",
             long_term_memory_block: str = "",
             extra_tools: Optional[List[BaseTool]] = None,
+            model_id: Optional[str] = None,
     ) -> None:
         """构造函数，完成规划与执行流的初始化"""
         # 1.流初始化数据配置
@@ -69,6 +71,7 @@ class PlannerReActFlow(BaseFlow):
             BrowserTool(browser=browser),
             SearchTool(search_engine=search_engine),
             MessageTool(),
+            VisionTool(sandbox=sandbox, llm=llm),
             mcp_tool,
             a2a_tool,
         ]
@@ -88,6 +91,7 @@ class PlannerReActFlow(BaseFlow):
             skill_prompt=skill_prompt,
             long_term_memory_block=long_term_memory_block,
             allowed_tool_names=allowed_tool_names,
+            model_id=model_id,
         )
         logger.debug(f"创建规划Agent成功, 会话id: {self._session_id}")
 
@@ -102,6 +106,7 @@ class PlannerReActFlow(BaseFlow):
             skill_prompt=skill_prompt,
             long_term_memory_block=long_term_memory_block,
             allowed_tool_names=allowed_tool_names,
+            model_id=model_id,
         )
         logger.debug(f"创建执行Agent成功, 会话id: {self._session_id}")
 
@@ -213,7 +218,7 @@ class PlannerReActFlow(BaseFlow):
 
                 # 21.压缩执行Agent记忆，避免上下文腐化+消耗大量token
                 logger.info(f"压缩{self.react.name} Agent记忆/上下文")
-                await self.react.compact_memory()
+                await self.react.summarize_and_compact()
 
                 # 22.将状态更新为updating
                 self.status = FlowStatus.UPDATING

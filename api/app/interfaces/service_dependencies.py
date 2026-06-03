@@ -9,6 +9,7 @@ from app.application.services.agent_service import AgentService
 from app.application.services.app_config_service import AppConfigService
 from app.application.services.file_service import FileService
 from app.application.services.llm_model_service import LLMModelService
+from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.memory_service import MemoryService
 from app.application.services.session_service import SessionService
 from app.application.services.skill_service import SkillService
@@ -51,6 +52,10 @@ def get_skill_service() -> SkillService:
 
 def get_memory_service() -> MemoryService:
     return MemoryService(uow_factory=get_uow, recall_limit=settings.memory_recall_limit)
+
+
+def get_llm_token_usage_service() -> LLMTokenUsageService:
+    return LLMTokenUsageService(uow_factory=get_uow)
 
 
 def get_status_service(

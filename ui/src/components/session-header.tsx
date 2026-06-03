@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
 import { Button } from '@/components/ui/button'
-import { Download, FileSearchCorner, FileText } from 'lucide-react'
+import { Coins, Download, FileSearchCorner, FileText } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -24,7 +24,7 @@ import { Avatar, AvatarGroupCount } from '@/components/ui/avatar'
 import { formatFileSize } from '@/lib/utils'
 import { fileApi } from '@/lib/api'
 import { toast } from 'sonner'
-import type { SessionFile } from '@/lib/api/types'
+import type { SessionFile, TokenUsageSummary } from '@/lib/api/types'
 import { sessionFileToAttachment } from '@/lib/session-events'
 import type { AttachmentFile } from '@/lib/session-events'
 import { SessionMemorySheet } from '@/components/session-memory-sheet'
@@ -46,6 +46,8 @@ export interface SessionHeaderProps {
   sessionId?: string
   /** 记忆是否可编辑 */
   memoryEditable?: boolean
+  /** 会话 token 用量汇总 */
+  tokenUsage?: TokenUsageSummary | null
 }
 
 export function SessionHeader({
@@ -57,6 +59,7 @@ export function SessionHeader({
   onFileClick,
   sessionId,
   memoryEditable = true,
+  tokenUsage,
 }: SessionHeaderProps) {
   const { open, isMobile } = useSidebar()
   const [mounted, setMounted] = useState(false)
@@ -137,6 +140,18 @@ export function SessionHeader({
         {title || '未命名任务'}
       </div>
       <div className="flex items-center gap-0.5 shrink-0">
+        {tokenUsage && tokenUsage.total_tokens > 0 && (
+          <div
+            className="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600"
+            title={`Prompt: ${tokenUsage.prompt_tokens.toLocaleString()} · Completion: ${tokenUsage.completion_tokens.toLocaleString()} · Calls: ${tokenUsage.call_count}`}
+          >
+            <Coins className="size-3.5 shrink-0 text-amber-600" />
+            <span>{tokenUsage.total_tokens.toLocaleString()} tok</span>
+            {tokenUsage.estimated_cost_usd > 0 && (
+              <span className="text-gray-400">· ${tokenUsage.estimated_cost_usd.toFixed(4)}</span>
+            )}
+          </div>
+        )}
         {sessionId && (
           <SessionMemorySheet
             sessionId={sessionId}

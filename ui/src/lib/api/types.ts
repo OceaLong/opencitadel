@@ -339,6 +339,14 @@ export type ChatParams = {
 /**
  * 会话详情（含事件列表，与 chat 流式响应格式一致）
  */
+export type TokenUsageSummary = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  call_count: number;
+};
+
 export type SessionDetail = Session & {
   events?: SSEEventData[];
   model_id?: string | null;
@@ -346,6 +354,7 @@ export type SessionDetail = Session & {
   thinking_enabled?: boolean;
   model?: LLMModel | null;
   skill?: SkillSummary | null;
+  token_usage?: TokenUsageSummary | null;
 };
 
 export type UpdateSessionConfigParams = {
@@ -407,6 +416,7 @@ export type SSEEventType =
   | "step"
   | "tool"
   | "wait"
+  | "usage"
   | "done"
   | "error";
 
@@ -423,6 +433,7 @@ export type SSEEventData =
   | { type: "step"; data: StepEvent }
   | { type: "tool"; data: ToolEvent }
   | { type: "wait"; data: Record<string, unknown> }
+  | { type: "usage"; data: TokenUsageSummary & { delta_prompt_tokens?: number; delta_completion_tokens?: number } }
   | { type: "done"; data: Record<string, unknown> }
   | { type: "error"; data: { error: string } };
 

@@ -12,8 +12,9 @@ from app.domain.external.llm import LLM
 from app.domain.models.app_config import AgentConfig
 from app.domain.models.event import (
     ToolEvent, ToolEventStatus, ErrorEvent, MessageEvent, BaseEvent,
-    MessageDeltaEvent, ReasoningDeltaEvent, ToolArgsDeltaEvent,
+    MessageDeltaEvent, ReasoningDeltaEvent, ToolArgsDeltaEvent, UsageEvent,
 )
+from app.domain.models.llm_token_usage import LLMTokenUsage
 from app.domain.models.memory import Memory
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.models.tool_result import ToolResult
@@ -21,8 +22,21 @@ from app.domain.services import vision_service
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.tool_names import normalize_allowed_tool_names, normalize_tool_name
+from app.infrastructure.observability.otel import record_llm_tokens
+from core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_MEMORY_SUMMARY_PROMPT = """请将以下 Agent 对话历史压缩为简洁摘要，保留：
+- 已完成的关键操作与结论
+- 重要文件路径、数据、错误信息
+- 用户目标与当前进度
+
+只输出摘要正文，不要 JSON。使用与历史相同的语言。
+
+历史消息:
+{history}
+"""
 
 BROWSER_VISION_TOOLS = frozenset({"browser_screenshot"})
 STATEFUL_TOOL_NAMES = frozenset({"browser", "shell"})
@@ -56,6 +70,7 @@ class BaseAgent(ABC):
             skill_prompt: str = "",
             long_term_memory_block: str = "",
             allowed_tool_names: Optional[List[str]] = None,
+            model_id: Optional[str] = None,
     ) -> None:
         """构造函数，完成Agent的初始化"""
         self._uow_factory = uow_factory
@@ -63,6 +78,7 @@ class BaseAgent(ABC):
         self._session_id = session_id
         self._agent_config = agent_config
         self._llm = llm
+        self._model_id = model_id
         self._memory: Optional[Memory] = None
         self._json_parser = json_parser
         self._tools = tools
@@ -71,6 +87,9 @@ class BaseAgent(ABC):
         self._allowed_tool_names = normalize_allowed_tool_names(allowed_tool_names)
         self._stateful_tool_lock = asyncio.Lock()
         self._pending_delta_events: List[BaseEvent] = []
+        self._pending_usage_event: Optional[UsageEvent] = None
+        self._current_step: str = "default"
+        self._last_prompt_tokens: int = 0
 
     def _collect_registered_tool_names(self) -> List[str]:
         names: List[str] = []
@@ -152,6 +171,85 @@ class BaseAgent(ABC):
             async with self._uow:
                 self._memory = await self._uow.session.get_memory(self._session_id, self.name)
 
+    def set_current_step(self, step: str) -> None:
+        self._current_step = step or "default"
+
+    def _estimate_memory_tokens(self) -> int:
+        if self._last_prompt_tokens > 0:
+            return self._last_prompt_tokens
+        total_chars = 0
+        if self._memory:
+            for message in self._memory.get_messages():
+                content = message.get("content")
+                if isinstance(content, str):
+                    total_chars += len(content)
+                elif isinstance(content, list):
+                    total_chars += len(str(content))
+                tool_calls = message.get("tool_calls")
+                if tool_calls:
+                    total_chars += len(str(tool_calls))
+        return total_chars // 4
+
+    @staticmethod
+    def _align_keep_boundary(messages: List[Dict[str, Any]], split_idx: int) -> int:
+        idx = max(1, split_idx)
+        while idx < len(messages) and messages[idx].get("role") == "tool":
+            idx += 1
+        while idx > 1 and messages[idx - 1].get("role") == "tool":
+            idx -= 1
+        if idx > 1:
+            prev = messages[idx - 1]
+            if prev.get("role") == "assistant" and prev.get("tool_calls"):
+                while idx > 1 and messages[idx - 1].get("role") == "tool":
+                    idx -= 1
+        return max(1, idx)
+
+    async def _record_token_usage(self, usage: Dict[str, int]) -> None:
+        prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        completion_tokens = int(usage.get("completion_tokens") or 0)
+        if prompt_tokens <= 0 and completion_tokens <= 0:
+            return
+        self._last_prompt_tokens = prompt_tokens
+        record_llm_tokens(
+            self._llm.model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+        record = LLMTokenUsage(
+            session_id=self._session_id,
+            agent=self.name,
+            step=self._current_step,
+            model_id=self._model_id,
+            model_name=self._llm.model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=int(usage.get("total_tokens") or (prompt_tokens + completion_tokens)),
+        )
+        try:
+            async with self._uow:
+                await self._uow.llm_token_usage.save(record)
+                summary = await self._uow.llm_token_usage.aggregate_by_session(self._session_id)
+            cost = 0.0
+            if self._model_id:
+                async with self._uow:
+                    model = await self._uow.llm_model.get_by_id(self._model_id)
+                if model:
+                    cost = (
+                        summary.prompt_tokens * model.input_price_per_million / 1_000_000
+                        + summary.completion_tokens * model.output_price_per_million / 1_000_000
+                    )
+            self._pending_usage_event = UsageEvent(
+                prompt_tokens=summary.prompt_tokens,
+                completion_tokens=summary.completion_tokens,
+                total_tokens=summary.total_tokens,
+                estimated_cost_usd=round(cost, 6),
+                call_count=summary.call_count,
+                delta_prompt_tokens=prompt_tokens,
+                delta_completion_tokens=completion_tokens,
+            )
+        except Exception as exc:
+            logger.warning("记录 token 用量失败: %s", exc)
+
     async def _invoke_llm(
             self,
             messages: List[Dict[str, Any]],
@@ -181,12 +279,16 @@ class BaseAgent(ABC):
                 tool_call_acc: Dict[int, Dict[str, Any]] = {}
                 delta_events: List[BaseEvent] = []
 
+                call_usage: Dict[str, int] = {}
                 async for delta in self._llm.stream_invoke(
                         messages=self._messages_for_llm(self._memory.get_messages(), self._llm),
                         tools=available_tools,
                         response_format=response_format,
                         tool_choice=self._tool_choice,
                 ):
+                    if usage_delta := delta.get("usage"):
+                        call_usage = usage_delta
+                        continue
                     if content := delta.get("content"):
                         aggregated["content"] += content
                         delta_events.append(MessageDeltaEvent(stream_id=stream_id, delta=content))
@@ -246,6 +348,8 @@ class BaseAgent(ABC):
                     filtered_message["stream_id"] = stream_id
 
                 await self._add_to_memory([filtered_message])
+                if call_usage:
+                    await self._record_token_usage(call_usage)
                 return filtered_message
             except Exception as e:
                 error_msg = _format_agent_error(e)
@@ -299,11 +403,72 @@ class BaseAgent(ABC):
             await self._uow.session.save_memory(self._session_id, self.name, self._memory)
 
     async def compact_memory(self) -> None:
-        """压缩Agent的记忆"""
+        """压缩Agent的记忆（仅规则裁剪）。"""
         await self._ensure_memory()
-        self._memory.compact()
+        settings = get_settings()
+        self._memory.compact(tool_content_max_chars=settings.memory_compact_tool_content_max_chars)
         async with self._uow:
             await self._uow.session.save_memory(self._session_id, self.name, self._memory)
+
+    async def summarize_and_compact(self) -> None:
+        """混合记忆压缩：规则裁剪 + 超阈值时 LLM 摘要。"""
+        settings = get_settings()
+        strategy = (settings.memory_compact_strategy or "hybrid").lower()
+        await self.compact_memory()
+        if strategy == "rule":
+            return
+        if self._estimate_memory_tokens() < settings.memory_compact_token_threshold:
+            return
+        if strategy not in {"llm", "hybrid"}:
+            return
+        await self._ensure_memory()
+        messages = self._memory.get_messages()
+        keep_recent = max(4, settings.memory_compact_keep_recent)
+        if len(messages) <= keep_recent + 2:
+            return
+        split_idx = len(messages) - keep_recent
+        split_idx = self._align_keep_boundary(messages, split_idx)
+        prefix = messages[:1] if messages and messages[0].get("role") == "system" else []
+        start_idx = len(prefix)
+        if split_idx <= start_idx:
+            return
+        middle = messages[start_idx:split_idx]
+        suffix = messages[split_idx:]
+        if not middle:
+            return
+        history_text = "\n".join(
+            f"{m.get('role')}: {str(m.get('content', ''))[:800]}"
+            for m in middle
+        )[:12000]
+        try:
+            summary_response = await self._llm.invoke([{
+                "role": "user",
+                "content": _MEMORY_SUMMARY_PROMPT.format(history=history_text),
+            }])
+            summary_text = summary_response.get("content") or ""
+            if not summary_text and summary_response.get("reasoning_content"):
+                summary_text = summary_response.get("reasoning_content") or ""
+            usage = summary_response.get("_usage")
+            if usage:
+                await self._record_token_usage(usage)
+            if not summary_text.strip():
+                logger.warning("记忆 LLM 摘要为空，跳过替换")
+                return
+            self._memory.messages = prefix + [{
+                "role": "user",
+                "content": f"[历史摘要 — 此前对话已压缩]\n{summary_text.strip()}",
+            }] + suffix
+            async with self._uow:
+                await self._uow.session.save_memory(self._session_id, self.name, self._memory)
+            logger.info(
+                "Agent[%s] LLM 记忆摘要完成: middle=%s kept=%s tokens_est=%s",
+                self.name,
+                len(middle),
+                len(suffix),
+                self._estimate_memory_tokens(),
+            )
+        except Exception as exc:
+            logger.warning("Agent[%s] LLM 记忆摘要失败，保留规则压缩结果: %s", self.name, exc)
 
     async def roll_back(self, message: Message) -> None:
         """Agent的状态回滚，该函数用于确保Agent的消息列表状态是正确，用于发送新消息、暂停/停止任务、通知用户"""
@@ -360,6 +525,9 @@ class BaseAgent(ABC):
         for delta_event in getattr(self, "_pending_delta_events", []):
             yield delta_event
         self._pending_delta_events = []
+        if self._pending_usage_event:
+            yield self._pending_usage_event
+            self._pending_usage_event = None
 
         # 3.循环遍历直到最大迭代次数
         for _ in range(self._agent_config.max_iterations):
@@ -465,6 +633,9 @@ class BaseAgent(ABC):
             for delta_event in getattr(self, "_pending_delta_events", []):
                 yield delta_event
             self._pending_delta_events = []
+            if self._pending_usage_event:
+                yield self._pending_usage_event
+                self._pending_usage_event = None
         else:
             # 13.超过最大迭代次数后，则抛出错误
             yield ErrorEvent(error=f"Agent迭代超过最大迭代次数: {self._agent_config.max_iterations}, 任务处理失败")

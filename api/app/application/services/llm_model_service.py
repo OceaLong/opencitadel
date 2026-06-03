@@ -17,6 +17,8 @@ _SUPPORTED_PROVIDERS = {
     LLMProvider.OPENAI,
     LLMProvider.OLLAMA,
     LLMProvider.AZURE,
+    LLMProvider.ANTHROPIC,
+    LLMProvider.GEMINI,
 }
 
 
@@ -33,12 +35,9 @@ class LLMModelService:
         if not model.base_url.strip():
             raise BadRequestError("模型 Base URL 不能为空")
         if model.provider not in _SUPPORTED_PROVIDERS:
-            if model.capabilities.vision or model.supports_multimodal:
-                raise BadRequestError(
-                    f"Provider「{model.provider.value}」尚未实现多模态支持，请使用 OpenAI/Ollama/Azure"
-                )
             raise BadRequestError(
-                f"Provider「{model.provider.value}」尚未实现，请使用 OpenAI/Ollama/Azure"
+                f"Provider「{model.provider.value}」尚未实现，"
+                f"请使用 OpenAI/Ollama/Azure/Anthropic/Gemini"
             )
         if require_api_key and not model.api_key.strip():
             raise BadRequestError("API Key 不能为空")

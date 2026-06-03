@@ -8,6 +8,20 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 _IMAGE_OMITTED_TEXT = "[image omitted in compact]"
+_TRUNCATED_TOOL_PREFIX = "[truncated] "
+_DEFAULT_TOOL_CONTENT_MAX = 2000
+
+_TRUNCATABLE_TOOL_NAMES = frozenset({
+    "search_web",
+    "read_file",
+    "write_file",
+    "replace_in_file",
+    "search_in_file",
+    "find_files",
+    "shell",
+    "exec_command",
+    "analyze_image",
+})
 
 
 def _message_has_image_part(message: Dict[str, Any]) -> bool:
@@ -88,7 +102,18 @@ class Memory(BaseModel):
                 return tool_calls[0].get("function", {}).get("name")
         return None
 
-    def compact(self) -> None:
+    def _truncate_tool_content(self, message: Dict[str, Any], function_name: Optional[str], max_chars: int) -> None:
+        if function_name not in _TRUNCATABLE_TOOL_NAMES:
+            return
+        content = message.get("content")
+        if not isinstance(content, str) or len(content) <= max_chars:
+            return
+        message["content"] = (
+            _TRUNCATED_TOOL_PREFIX + content[: max_chars - len(_TRUNCATED_TOOL_PREFIX)]
+            + f"... ({len(content)} chars total)"
+        )
+
+    def compact(self, tool_content_max_chars: int = _DEFAULT_TOOL_CONTENT_MAX) -> None:
         """记忆压缩，将记忆中已经执行的工具(搜索/网页源码获取/浏览器访问结果等)这类已经执行过的消息进行压缩检索"""
         last_image_index: Optional[int] = None
         for index, message in enumerate(self.messages):
@@ -103,6 +128,8 @@ class Memory(BaseModel):
                 if function_name in ["browser_view", "browser_navigate", "browser_screenshot"]:
                     message["content"] = "(removed)"
                     logger.debug(f"从记忆中移除对应工具的结果: {function_name}")
+                else:
+                    self._truncate_tool_content(message, function_name, tool_content_max_chars)
 
             if _message_has_image_part(message) and index != last_image_index:
                 _strip_image_parts_from_message(message)
