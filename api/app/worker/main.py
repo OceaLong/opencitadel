@@ -66,18 +66,6 @@ class AgentWorker:
         )
 
     async def start(self) -> None:
-        setup_logging()
-        await get_redis().init()
-        await get_postgres().init()
-        await get_cos().init()
-        await bootstrap_data(
-            uow_factory=get_uow,
-            llm_model_service=LLMModelService(
-                uow_factory=get_uow,
-                cipher=ApiKeyCipher(self._settings.api_key_secret),
-            ),
-            skill_service=SkillService(uow_factory=get_uow),
-        )
         await self._task_state.ensure_consumer_group()
         logger.info("Agent worker 启动: consumer=%s", self._consumer_name)
         while self._running:
@@ -148,6 +136,22 @@ class AgentWorker:
 
 
 async def main() -> None:
+    setup_logging()
+    settings = get_settings()
+    # 必须先初始化基础设施(Postgres/Redis/Cos)，再构造 AgentWorker，
+    # 因为 AgentWorker.__init__ 会立即创建依赖数据库会话工厂的组件(如 CosFileStorage)。
+    await get_redis().init()
+    await get_postgres().init()
+    await get_cos().init()
+    await bootstrap_data(
+        uow_factory=get_uow,
+        llm_model_service=LLMModelService(
+            uow_factory=get_uow,
+            cipher=ApiKeyCipher(settings.api_key_secret),
+        ),
+        skill_service=SkillService(uow_factory=get_uow),
+    )
+
     worker = AgentWorker()
     try:
         await worker.start()
