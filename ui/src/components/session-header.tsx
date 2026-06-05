@@ -24,10 +24,11 @@ import { Avatar, AvatarGroupCount } from '@/components/ui/avatar'
 import { formatFileSize } from '@/lib/utils'
 import { fileApi } from '@/lib/api'
 import { toast } from 'sonner'
-import type { SessionFile, TokenUsageSummary } from '@/lib/api/types'
+import type { SessionFile, TokenUsageSummary, SSEEventData } from '@/lib/api/types'
 import { sessionFileToAttachment } from '@/lib/session-events'
 import type { AttachmentFile } from '@/lib/session-events'
 import { SessionMemorySheet } from '@/components/session-memory-sheet'
+import { SessionDebugSheet } from '@/components/session-debug-sheet'
 
 export interface SessionHeaderProps {
   /** 任务/会话标题 */
@@ -48,6 +49,8 @@ export interface SessionHeaderProps {
   memoryEditable?: boolean
   /** 会话 token 用量汇总 */
   tokenUsage?: TokenUsageSummary | null
+  /** 会话事件列表，用于调试面板 */
+  events?: SSEEventData[]
 }
 
 export function SessionHeader({
@@ -60,6 +63,7 @@ export function SessionHeader({
   sessionId,
   memoryEditable = true,
   tokenUsage,
+  events = [],
 }: SessionHeaderProps) {
   const { open, isMobile } = useSidebar()
   const [mounted, setMounted] = useState(false)
@@ -159,6 +163,7 @@ export function SessionHeader({
             compact
           />
         )}
+        <SessionDebugSheet events={events} compact />
         {mounted ? (
           <Dialog open={openState} onOpenChange={setOpenState}>
             <DialogTrigger asChild>

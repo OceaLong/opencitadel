@@ -93,7 +93,12 @@ export function useSessionDetail(
     const eventId = (evToAppend.data as { event_id?: string })?.event_id
     if (eventId) lastEventIdRef.current = eventId
 
-    setEvents((prev) => [...prev, evToAppend])
+    setEvents((prev) => {
+      if (eventId && prev.some((item) => (item.data as { event_id?: string })?.event_id === eventId)) {
+        return prev
+      }
+      return [...prev, evToAppend]
+    })
     
     // 更新会话标题
     if (evToAppend.type === 'title' && evToAppend.data && typeof (evToAppend.data as { title?: string }).title === 'string') {
@@ -102,31 +107,15 @@ export function useSessionDetail(
       )
     }
     
-    // 监听事件更新会话状态
-    if (evToAppend.type === 'step') {
-      const stepData = evToAppend.data as { status?: string }
-      if (stepData.status === 'running') {
-        setSession((prev) => prev ? { ...prev, status: 'running' } : null)
+    // 服务端权威会话状态
+    if (evToAppend.type === 'session_status') {
+      const status = (evToAppend.data as { status?: SessionDetail['status'] }).status
+      if (status) {
+        setSession((prev) => (prev ? { ...prev, status } : null))
+        if (status === 'waiting' || status === 'completed') {
+          setStreaming(false)
+        }
       }
-      if (stepData.status === 'waiting') {
-        setSession((prev) => prev ? { ...prev, status: 'waiting' } : null)
-        setStreaming(false)
-      }
-    }
-
-    // message_ask_user calling → 等待用户输入，切换为 waiting
-    if (evToAppend.type === 'tool') {
-      const toolData = evToAppend.data as { function?: string; status?: string }
-      if (toolData.function === 'message_ask_user' && toolData.status === 'calling') {
-        setSession((prev) => prev ? { ...prev, status: 'waiting' } : null)
-        setStreaming(false)
-      }
-    }
-
-    // wait 事件 → 等待用户输入
-    if (evToAppend.type === 'wait') {
-      setSession((prev) => prev ? { ...prev, status: 'waiting' } : null)
-      setStreaming(false)
     }
     
     if (evToAppend.type === 'usage') {

@@ -10,7 +10,14 @@ from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
 from app.domain.models.app_config import AgentConfig
 from app.domain.models.skill import Skill
-from app.domain.models.event import BaseEvent, PlanEvent, PlanEventStatus, TitleEvent, MessageEvent
+from app.domain.models.event import (
+    BaseEvent,
+    PlanEvent,
+    PlanEventStatus,
+    TitleEvent,
+    AssistantNoticeEvent,
+    DebugItemEvent,
+)
 from app.domain.models.event import DoneEvent
 from app.domain.models.message import Message
 from app.domain.models.plan import Plan, ExecutionStatus
@@ -175,9 +182,15 @@ class PlannerReActFlow(BaseFlow):
                             self.plan = event.plan
                             logger.info(f"Planner&ReAct流成功创建计划, 共计: {len(event.plan.steps)} 步")
 
-                            # 13.在计划中同步生成了会话标题+初始AI消息
+                            # 13.同步会话标题与安全提示，不展示 planner 结构化 JSON
                             yield TitleEvent(title=event.plan.title)
-                            yield MessageEvent(role="assistant", message=event.plan.message)
+                            yield AssistantNoticeEvent(
+                                message="我已制定计划，开始执行。",
+                            )
+                            yield DebugItemEvent(
+                                item_type="planner_output",
+                                payload=event.plan.model_dump(mode="json"),
+                            )
 
                         # 14.将生成的事件直接输出(一般来说是PlanEvent)
                         yield event

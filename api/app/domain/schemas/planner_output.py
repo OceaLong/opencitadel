@@ -19,7 +19,13 @@ class PlannerPlanSchema(BaseModel):
     goal: str = ""
     language: str = "zh"
     steps: List[PlannerStepSchema] = Field(min_length=1)
-    message: str = ""
     status: ExecutionStatus = ExecutionStatus.PENDING
+
+    model_config = {"extra": "ignore"}
+
+
+class PlannerUpdateSchema(BaseModel):
+    """更新计划的结构化输出，更新时仅重新规划未完成步骤，因此只需要校验 steps。"""
+    steps: List[PlannerStepSchema] = Field(min_length=1)
 
     model_config = {"extra": "ignore"}

@@ -7,10 +7,25 @@ from typing import Literal, List, Union, Optional, Any, Dict, Annotated
 
 from pydantic import BaseModel, Field
 
+from .event_policy import EVENT_SCHEMA_VERSION
 from .file import File
 from .plan import Plan, Step
 from .search import SearchResultItem
 from .tool_result import ToolResult
+
+
+class EventVisibility(str, Enum):
+    """Who may consume this event in the product UI."""
+    USER = "user"
+    INTERNAL = "internal"
+    DEBUG = "debug"
+
+
+class EventChannel(str, Enum):
+    """Transport/rendering channel for an event."""
+    UI = "ui"
+    DEBUG = "debug"
+    RUNTIME = "runtime"
 
 
 class PlanEventStatus(str, Enum):
@@ -38,6 +53,10 @@ class BaseEvent(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # 事件id
     type: Literal[""] = ""  # 事件的类型
     created_at: datetime = Field(default_factory=datetime.now)  # 事件创建时间
+    schema_version: int = EVENT_SCHEMA_VERSION
+    visibility: EventVisibility = EventVisibility.USER
+    channel: EventChannel = EventChannel.UI
+    persist: bool = True
 
 
 class PlanEvent(BaseEvent):
@@ -70,27 +89,57 @@ class MessageEvent(BaseEvent):
 
 
 class MessageDeltaEvent(BaseEvent):
-    """流式消息增量事件"""
+    """流式消息增量事件（实时 SSE，默认不落库）"""
     type: Literal["message_delta"] = "message_delta"
     stream_id: str
     role: Literal["user", "assistant"] = "assistant"
     delta: str = ""
+    visibility: EventVisibility = EventVisibility.INTERNAL
+    channel: EventChannel = EventChannel.RUNTIME
+    persist: bool = False
 
 
 class ReasoningDeltaEvent(BaseEvent):
-    """流式思考内容增量事件"""
+    """流式思考内容增量事件（实时 SSE，默认不落库）"""
     type: Literal["reasoning_delta"] = "reasoning_delta"
     stream_id: str
     delta: str = ""
+    visibility: EventVisibility = EventVisibility.DEBUG
+    channel: EventChannel = EventChannel.DEBUG
+    persist: bool = False
 
 
 class ToolArgsDeltaEvent(BaseEvent):
-    """流式工具参数增量事件"""
+    """流式工具参数增量事件（实时 SSE，默认不落库）"""
     type: Literal["tool_args_delta"] = "tool_args_delta"
     stream_id: str
     tool_call_id: str
     tool_name: str = ""
     delta: str = ""
+    visibility: EventVisibility = EventVisibility.DEBUG
+    channel: EventChannel = EventChannel.DEBUG
+    persist: bool = False
+
+
+class AssistantNoticeEvent(BaseEvent):
+    """面向用户的简短助手提示，非结构化规划输出"""
+    type: Literal["assistant_notice"] = "assistant_notice"
+    message: str = ""
+
+
+class SessionStatusEvent(BaseEvent):
+    """服务端权威的会话状态事件"""
+    type: Literal["session_status"] = "session_status"
+    status: Literal["pending", "running", "waiting", "completed"] = "running"
+
+
+class DebugItemEvent(BaseEvent):
+    """内部调试项，供调试面板展示，不进入普通聊天气泡"""
+    type: Literal["debug_item"] = "debug_item"
+    item_type: str = ""
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    visibility: EventVisibility = EventVisibility.DEBUG
+    channel: EventChannel = EventChannel.DEBUG
 
 
 class BrowserToolContent(BaseModel):
@@ -183,6 +232,9 @@ Event = Annotated[
         MessageDeltaEvent,
         ReasoningDeltaEvent,
         ToolArgsDeltaEvent,
+        AssistantNoticeEvent,
+        SessionStatusEvent,
+        DebugItemEvent,
         ToolEvent,
         WaitEvent,
         ErrorEvent,

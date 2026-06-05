@@ -406,11 +406,26 @@ export type ToolEvent = {
 /**
  * SSE 事件类型
  */
+export type EventVisibility = "user" | "internal" | "debug";
+export type EventChannel = "ui" | "debug" | "runtime";
+
+export type EventMeta = {
+  event_id?: string;
+  schema_version?: number;
+  visibility?: EventVisibility;
+  channel?: EventChannel;
+  persist?: boolean;
+  created_at?: number;
+};
+
 export type SSEEventType =
   | "message"
   | "message_delta"
   | "reasoning_delta"
   | "tool_args_delta"
+  | "assistant_notice"
+  | "session_status"
+  | "debug_item"
   | "title"
   | "plan"
   | "step"
@@ -423,19 +438,27 @@ export type SSEEventType =
 /**
  * SSE 事件数据
  */
+export type DebugItemEvent = {
+  item_type: string;
+  payload: Record<string, unknown>;
+} & EventMeta;
+
 export type SSEEventData =
-  | { type: "message"; data: ChatMessage }
-  | { type: "message_delta"; data: { stream_id: string; delta: string; role?: string } }
-  | { type: "reasoning_delta"; data: { stream_id: string; delta: string } }
-  | { type: "tool_args_delta"; data: { stream_id: string; tool_call_id: string; tool_name?: string; delta: string } }
-  | { type: "title"; data: { title: string } }
-  | { type: "plan"; data: PlanEvent }
-  | { type: "step"; data: StepEvent }
-  | { type: "tool"; data: ToolEvent }
-  | { type: "wait"; data: Record<string, unknown> }
-  | { type: "usage"; data: TokenUsageSummary & { delta_prompt_tokens?: number; delta_completion_tokens?: number } }
-  | { type: "done"; data: Record<string, unknown> }
-  | { type: "error"; data: { error: string } };
+  | { type: "message"; data: ChatMessage & EventMeta }
+  | { type: "message_delta"; data: { stream_id: string; delta: string; role?: string } & EventMeta }
+  | { type: "reasoning_delta"; data: { stream_id: string; delta: string } & EventMeta }
+  | { type: "tool_args_delta"; data: { stream_id: string; tool_call_id: string; tool_name?: string; delta: string } & EventMeta }
+  | { type: "assistant_notice"; data: { message: string } & EventMeta }
+  | { type: "session_status"; data: { status: SessionStatus } & EventMeta }
+  | { type: "debug_item"; data: DebugItemEvent }
+  | { type: "title"; data: { title: string } & EventMeta }
+  | { type: "plan"; data: PlanEvent & EventMeta }
+  | { type: "step"; data: StepEvent & EventMeta }
+  | { type: "tool"; data: ToolEvent & EventMeta }
+  | { type: "wait"; data: Record<string, unknown> & EventMeta }
+  | { type: "usage"; data: TokenUsageSummary & { delta_prompt_tokens?: number; delta_completion_tokens?: number } & EventMeta }
+  | { type: "done"; data: Record<string, unknown> & EventMeta }
+  | { type: "error"; data: { error: string } & EventMeta };
 
 /**
  * SSE 事件处理器

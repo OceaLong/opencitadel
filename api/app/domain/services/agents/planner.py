@@ -6,7 +6,7 @@ from typing import Optional, AsyncGenerator
 from app.domain.models.event import BaseEvent, MessageEvent, PlanEvent, PlanEventStatus
 from app.domain.models.message import Message
 from app.domain.models.plan import Plan, Step
-from app.domain.schemas.planner_output import PlannerPlanSchema
+from app.domain.schemas.planner_output import PlannerPlanSchema, PlannerUpdateSchema
 from app.domain.services.prompts.planner import (
     PLANNER_SYSTEM_PROMPT,
     CREATE_PLAN_PROMPT,
@@ -58,6 +58,7 @@ class PlannerAgent(BaseAgent):
         async for event in self.invoke(
             query,
             vision_attachments=message.vision_attachments,
+            emit_deltas=False,
         ):
             # 3.规划智能体因为使用json_object，正常情况下会返回MessageEvent
             if isinstance(event, MessageEvent):
@@ -85,19 +86,18 @@ class PlannerAgent(BaseAgent):
         )
 
         # 2.调用invoke获取对应的事件
-        async for event in self.invoke(query):
+        async for event in self.invoke(query, emit_deltas=False):
             # 3.判断规划Agent生成的事件是不是消息事件
             if isinstance(event, MessageEvent):
                 # 4.记录日志并解析json
                 logger.info(f"PlannerAgent生成消息: {event.message}")
                 parsed_obj = await self._json_parser.invoke(event.message)
 
-                # 5.严格校验并转换成 Plan
-                validated = PlannerPlanSchema.model_validate(parsed_obj)
-                updated_plan = Plan.model_validate(validated.model_dump())
+                # 5.更新计划仅返回未完成步骤，因此只校验 steps，保留原计划的标题/目标等信息
+                validated = PlannerUpdateSchema.model_validate(parsed_obj)
 
                 # 6.拷贝更新计划中的steps，避免造成数据污染
-                new_steps = [Step.model_validate(step) for step in updated_plan.steps]
+                new_steps = [Step.model_validate(step.model_dump()) for step in validated.steps]
 
                 # 7.查询旧计划中第一个未完成的计划
                 first_pending_index = None

@@ -20,8 +20,10 @@ class _SummarizeAgent(ReActAgent):
             query: str,
             format: Optional[str] = None,
             vision_attachments: Optional[List[VisionAttachment]] = None,
+            emit_deltas: bool = True,
     ) -> AsyncGenerator[MessageEvent, None]:
         assert vision_attachments is None
+        assert emit_deltas is False
         yield MessageEvent(role="assistant", message='{"message":"done","attachments":[]}')
 
 
@@ -35,7 +37,9 @@ class _StepAgent(ReActAgent):
             query: str,
             format: Optional[str] = None,
             vision_attachments: Optional[List[VisionAttachment]] = None,
+            emit_deltas: bool = True,
     ) -> AsyncGenerator[MessageEvent, None]:
+        assert emit_deltas is False
         self.received_vision_counts.append(len(vision_attachments or []))
         yield MessageEvent(role="assistant", message='{"success":true,"result":"ok","attachments":[]}')
 

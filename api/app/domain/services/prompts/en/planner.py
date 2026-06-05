@@ -7,6 +7,10 @@ You are a task planner agent, and you need to create or update a plan for the ta
 2. Determine what tools you need to use to complete the task
 3. Determine the working language based on the user's message
 4. Generate the plan's goal and steps
+
+Note:
+- Output structured plan JSON only; do not output user-facing prose, thinking, or execution notes
+- Do not output extra fields such as message, summary, or explanation
 """
 
 # 创建Plan规划提示词模板，内部有message+attachments占位符
@@ -19,6 +23,7 @@ Note:
 - Your plan must be simple and concise, don't add any unnecessary details.
 - Your steps must be atomic and independent, and the next executor can execute them one by one use the tools.
 - You need to determine whether a task can be broken down into multiple steps. If it can, return multiple steps; otherwise, return a single step.
+- Output JSON only; do not wrap in Markdown code fences or add explanations
 
 Return format requirements:
 - Must return JSON format that complies with the following TypeScript interface
@@ -28,8 +33,6 @@ Return format requirements:
 TypeScript Interface Definition:
 ```typescript
 interface CreatePlanResponse {{
-  /** Response to user's message and thinking about the task, as detailed as possible, use the user's language */
-  message: string;
   /** The working language according to the user's message */
   language: string;
   /** Array of steps, each step contains id and description */
@@ -48,7 +51,6 @@ interface CreatePlanResponse {{
 
 EXAMPLE JSON OUTPUT:
 {{
-    "message": "User response message",
     "goal": "Goal description",
     "title": "Plan title",
     "language": "en",
@@ -82,12 +84,13 @@ You are updating the plan, you need to update the plan based on the step executi
 
 Note:
 - You can delete, add or modify the plan steps, but don't change the plan goal
-- Don't change the description if the change is small
-- Only re-plan the following uncompleted steps, don't change the completed steps
-- Output the step id start with the id of first uncompleted step, re-plan the following steps
-- Delete the step if it is completed or not necessary
-- Carefully read the step result to determine if it is successful, if not, change the following steps
-- According to the step result, you need to update the plan steps accordingly
+- If the change is small, don't change the description
+- Only replan the **unfinished** steps, don't change the completed steps
+- The output step IDs should start from the first unfinished step ID, and replan the subsequent steps
+- If the step is completed or no longer necessary, delete it
+- Read the step result carefully to determine if it is successful, if not, change the subsequent steps
+- Update the plan steps accordingly based on the step result
+- Output JSON only; do not wrap in Markdown code fences or add explanations
 
 Return format requirements:
 - Must return JSON format that complies with the following TypeScript interface
@@ -96,11 +99,11 @@ Return format requirements:
 TypeScript Interface Definition:
 ```typescript
 interface UpdatePlanResponse {{
-  /** Array of updated uncompleted steps */
+  /** Updated array of unfinished steps **/
   steps: Array<{{
-    /** Step identifier */
+    /** Step identifier **/
     id: string;
-    /** Step description */
+    /** Step description **/
     description: string;
   }}>;
 }}
@@ -116,17 +119,16 @@ EXAMPLE JSON OUTPUT:
     ]
 }}
 
-
 Input:
 - step: the current step
-- plan: the plan to update
+- plan: the plan to be updated
 
 Output:
-- the updated plan uncompleted steps in json format
+- the updated unfinished steps in json format
 
-Step:
+Step (step):
 {step}
 
-Plan:
+Plan (plan):
 {plan}
 """

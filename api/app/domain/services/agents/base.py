@@ -255,6 +255,7 @@ class BaseAgent(ABC):
             messages: List[Dict[str, Any]],
             format: Optional[str] = None,
             stream_id: Optional[str] = None,
+            emit_deltas: bool = True,
     ) -> Dict[str, Any]:
         """调用语言模型并处理记忆内容，支持流式 delta 事件。"""
         await self._add_to_memory(messages)
@@ -291,10 +292,12 @@ class BaseAgent(ABC):
                         continue
                     if content := delta.get("content"):
                         aggregated["content"] += content
-                        delta_events.append(MessageDeltaEvent(stream_id=stream_id, delta=content))
+                        if emit_deltas:
+                            delta_events.append(MessageDeltaEvent(stream_id=stream_id, delta=content))
                     if reasoning := delta.get("reasoning_content"):
                         aggregated["reasoning_content"] += reasoning
-                        delta_events.append(ReasoningDeltaEvent(stream_id=stream_id, delta=reasoning))
+                        if emit_deltas:
+                            delta_events.append(ReasoningDeltaEvent(stream_id=stream_id, delta=reasoning))
                     for tc_delta in delta.get("tool_calls") or []:
                         idx = tc_delta.get("index", 0)
                         acc = tool_call_acc.setdefault(idx, {
@@ -309,12 +312,13 @@ class BaseAgent(ABC):
                             acc["function"]["name"] = fn["name"]
                         if fn.get("arguments"):
                             acc["function"]["arguments"] += fn["arguments"]
-                            delta_events.append(ToolArgsDeltaEvent(
-                                stream_id=stream_id,
-                                tool_call_id=acc["id"] or f"pending-{idx}",
-                                tool_name=acc["function"]["name"],
-                                delta=fn["arguments"],
-                            ))
+                            if emit_deltas:
+                                delta_events.append(ToolArgsDeltaEvent(
+                                    stream_id=stream_id,
+                                    tool_call_id=acc["id"] or f"pending-{idx}",
+                                    tool_name=acc["function"]["name"],
+                                    delta=fn["arguments"],
+                                ))
 
                 if tool_call_acc:
                     aggregated["tool_calls"] = [
@@ -510,6 +514,7 @@ class BaseAgent(ABC):
             query: str,
             format: Optional[str] = None,
             vision_attachments: Optional[List[VisionAttachment]] = None,
+            emit_deltas: bool = True,
     ) -> AsyncGenerator[BaseEvent, None]:
         """传递消息+响应格式调用程序生成异步迭代内容"""
         # 1.需要判断下是否传递了format
@@ -521,7 +526,7 @@ class BaseAgent(ABC):
             vision_attachments,
             llm=self._llm,
         )
-        message = await self._invoke_llm([user_message], format)
+        message = await self._invoke_llm([user_message], format, emit_deltas=emit_deltas)
         for delta_event in getattr(self, "_pending_delta_events", []):
             yield delta_event
         self._pending_delta_events = []
@@ -629,7 +634,7 @@ class BaseAgent(ABC):
                     yield event
                 tool_messages.extend(msgs)
 
-            message = await self._invoke_llm(tool_messages, format=None)
+            message = await self._invoke_llm(tool_messages, format=None, emit_deltas=emit_deltas)
             for delta_event in getattr(self, "_pending_delta_events", []):
                 yield delta_event
             self._pending_delta_events = []

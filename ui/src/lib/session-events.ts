@@ -15,7 +15,75 @@ import type {
   StepEvent,
   ToolEvent,
   SessionFile,
+  EventVisibility,
+  DebugItemEvent,
 } from "@/lib/api/types";
+
+const TRANSIENT_EVENT_TYPES = new Set([
+  "message_delta",
+  "reasoning_delta",
+  "tool_args_delta",
+]);
+
+function getEventVisibility(ev: SSEEventData): EventVisibility {
+  const visibility = (ev.data as { visibility?: EventVisibility })?.visibility;
+  return visibility ?? (TRANSIENT_EVENT_TYPES.has(ev.type) ? "internal" : "user");
+}
+
+/** 判断 assistant 文本是否像 planner 结构化 JSON（历史数据兼容） */
+export function looksLikePlannerJson(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{")) return false;
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return false;
+    if (Array.isArray(parsed.steps)) return true;
+    return typeof parsed.title === "string" && typeof parsed.goal === "string";
+  } catch {
+    return false;
+  }
+}
+
+/** 从事件列表提取调试项（planner 输出、reasoning 等） */
+export function extractDebugItems(events: SSEEventData[]): DebugItemEvent[] {
+  const items: DebugItemEvent[] = [];
+  const reasoningStreams = new Map<string, string>();
+  const toolArgStreams = new Map<string, string>();
+
+  for (const ev of events) {
+    if (ev.type === "debug_item") {
+      items.push(ev.data as DebugItemEvent);
+      continue;
+    }
+    if (ev.type === "reasoning_delta") {
+      const { stream_id, delta } = ev.data as { stream_id: string; delta: string };
+      reasoningStreams.set(stream_id, (reasoningStreams.get(stream_id) ?? "") + delta);
+      continue;
+    }
+    if (ev.type === "tool_args_delta") {
+      const { tool_call_id, delta } = ev.data as { tool_call_id: string; delta: string };
+      toolArgStreams.set(tool_call_id, (toolArgStreams.get(tool_call_id) ?? "") + delta);
+    }
+  }
+
+  for (const [streamId, content] of reasoningStreams) {
+    if (content.trim()) {
+      items.push({
+        item_type: "reasoning_summary",
+        payload: { stream_id: streamId, content },
+      });
+    }
+  }
+  for (const [toolCallId, content] of toolArgStreams) {
+    if (content.trim()) {
+      items.push({
+        item_type: "tool_args",
+        payload: { tool_call_id: toolCallId, content },
+      });
+    }
+  }
+  return items;
+}
 
 /** 后端返回的原始事件（可能用 event 或 type 表示类型） */
 type RawEvent = { event?: string; type?: string; data?: unknown };
@@ -131,38 +199,38 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
   const streamMessages = new Map<string, { listIndex: number; content: string }>();
 
   for (const ev of events) {
+    const visibility = getEventVisibility(ev);
+    if (visibility === "internal" || visibility === "debug") {
+      if (ev.type !== "debug_item") {
+        continue;
+      }
+    }
+
     switch (ev.type) {
       case "message_delta": {
-        const { stream_id, delta } = ev.data as { stream_id: string; delta: string };
-        const existing = streamMessages.get(stream_id);
-        if (existing) {
-          existing.content += delta;
-          const item = list[existing.listIndex];
-          if (item?.kind === "assistant") {
-            list[existing.listIndex] = {
-              ...item,
-              data: { ...item.data, message: existing.content },
-            };
-          }
-        } else {
-          list.push({
-            kind: "assistant",
-            id: stableId("assistant", messageIndex++, stream_id),
-            data: { role: "assistant", message: delta, stream_id },
-          });
-          streamMessages.set(stream_id, { listIndex: list.length - 1, content: delta });
-        }
+        // 流式 delta 默认不进入主时间线
         break;
       }
       case "reasoning_delta":
       case "tool_args_delta":
         break;
+      case "assistant_notice": {
+        const notice = ev.data as { message?: string };
+        if (!notice.message) break;
+        list.push({
+          kind: "assistant",
+          id: stableId("assistant", messageIndex++, String(list.length)),
+          data: { role: "assistant", message: notice.message },
+        });
+        break;
+      }
+      case "debug_item":
+      case "session_status":
+        break;
       case "message": {
         const msg = ev.data as ChatMessage;
         if (msg.role === "user") {
-          // 用户消息标志着新的对话轮次，清除 step 上下文
           lastStepId = null;
-          
           list.push({
             kind: "user",
             id: stableId("user", messageIndex++, String(list.length)),
@@ -177,6 +245,9 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
             });
           }
         } else if (msg.role === "assistant") {
+          if (msg.message && looksLikePlannerJson(msg.message)) {
+            break;
+          }
           const streamId = (msg as { stream_id?: string }).stream_id;
           if (streamId && streamMessages.has(streamId)) {
             const existing = streamMessages.get(streamId)!;
@@ -190,7 +261,6 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
             }
             break;
           }
-          // 所有 assistant 消息都直接添加，不去重
           list.push({
             kind: "assistant",
             id: stableId("assistant", messageIndex++, String(list.length)),

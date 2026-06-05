@@ -6,7 +6,18 @@ from typing import Optional, Dict, Any, Self, Type, Literal, List, Union, get_ar
 
 from pydantic import BaseModel, Field, ConfigDict
 
-from app.domain.models.event import Event, PlanEvent, ToolEventStatus, ToolEvent, StepEvent, UsageEvent
+from app.domain.models.event import (
+    Event,
+    PlanEvent,
+    ToolEventStatus,
+    ToolEvent,
+    StepEvent,
+    UsageEvent,
+    AssistantNoticeEvent,
+    SessionStatusEvent,
+    DebugItemEvent,
+)
+from app.domain.models.event_policy import should_persist_event
 from app.domain.models.file import File
 from app.domain.models.plan import ExecutionStatus
 
@@ -24,9 +35,19 @@ class BaseEventData(BaseModel):
     @classmethod
     def base_event_data(cls, event: Event) -> Dict[str, Any]:
         """类方法，用于将事件Domain模型转换成基础事件数据字典"""
+        visibility = getattr(event, "visibility", "user")
+        channel = getattr(event, "channel", "ui")
+        if hasattr(visibility, "value"):
+            visibility = visibility.value
+        if hasattr(channel, "value"):
+            channel = channel.value
         return {
             "event_id": event.id,
             "created_at": int(event.created_at.timestamp()),
+            "schema_version": getattr(event, "schema_version", 1),
+            "visibility": visibility,
+            "channel": channel,
+            "persist": getattr(event, "persist", True),
         }
 
     @classmethod
@@ -242,6 +263,68 @@ class UsageSSEEvent(BaseSSEEvent):
         )
 
 
+class AssistantNoticeEventData(BaseEventData):
+    """助手提示事件数据"""
+    message: str = ""
+
+
+class AssistantNoticeSSEEvent(BaseSSEEvent):
+    """助手提示流式事件"""
+    event: Literal["assistant_notice"] = "assistant_notice"
+    data: AssistantNoticeEventData
+
+    @classmethod
+    def from_event(cls, event: AssistantNoticeEvent) -> Self:
+        return cls(
+            data=AssistantNoticeEventData(
+                **BaseEventData.base_event_data(event),
+                message=event.message,
+            )
+        )
+
+
+class SessionStatusEventData(BaseEventData):
+    """会话状态事件数据"""
+    status: Literal["pending", "running", "waiting", "completed"] = "running"
+
+
+class SessionStatusSSEEvent(BaseSSEEvent):
+    """会话状态流式事件"""
+    event: Literal["session_status"] = "session_status"
+    data: SessionStatusEventData
+
+    @classmethod
+    def from_event(cls, event: SessionStatusEvent) -> Self:
+        return cls(
+            data=SessionStatusEventData(
+                **BaseEventData.base_event_data(event),
+                status=event.status,
+            )
+        )
+
+
+class DebugItemEventData(BaseEventData):
+    """调试项事件数据"""
+    item_type: str = ""
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DebugItemSSEEvent(BaseSSEEvent):
+    """调试项流式事件"""
+    event: Literal["debug_item"] = "debug_item"
+    data: DebugItemEventData
+
+    @classmethod
+    def from_event(cls, event: DebugItemEvent) -> Self:
+        return cls(
+            data=DebugItemEventData(
+                **BaseEventData.base_event_data(event),
+                item_type=event.item_type,
+                payload=event.payload,
+            )
+        )
+
+
 # 定义Agent流式事件类型集合
 AgentSSEEvent = Union[
     CommonSSEEvent,
@@ -254,6 +337,9 @@ AgentSSEEvent = Union[
     ErrorSSEEvent,
     UsageSSEEvent,
     WaitSSEEvent,
+    AssistantNoticeSSEEvent,
+    SessionStatusSSEEvent,
+    DebugItemSSEEvent,
 ]
 
 
@@ -330,8 +416,15 @@ class EventMapper:
         return CommonSSEEvent.from_event(event)
 
     @staticmethod
-    def events_to_sse_events(events: List[Event]) -> List[AgentSSEEvent]:
+    def events_to_sse_events(
+            events: List[Event],
+            *,
+            include_transient: bool = False,
+    ) -> List[AgentSSEEvent]:
         """将领域事件模型列表转换为SSE流式事件列表"""
+        replay_events = events
+        if not include_transient:
+            replay_events = [event for event in events if should_persist_event(event)]
         return list(filter(lambda x: x is not None, [
-            EventMapper.event_to_sse_event(event) for event in events
+            EventMapper.event_to_sse_event(event) for event in replay_events
         ]))

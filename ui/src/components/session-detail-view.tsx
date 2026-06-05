@@ -302,6 +302,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
                 sessionId={sessionId}
                 memoryEditable={configEditable}
                 tokenUsage={session.token_usage}
+                events={events}
               />
             </div>
 

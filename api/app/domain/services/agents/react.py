@@ -54,6 +54,7 @@ class ReActAgent(BaseAgent):
         async for event in self.invoke(
             query,
             vision_attachments=vision_attachments,
+            emit_deltas=False,
         ):
             # 4.判断事件类型执行不同操作
             if isinstance(event, ToolEvent):
@@ -111,7 +112,7 @@ class ReActAgent(BaseAgent):
         query = SUMMARIZE_PROMPT
 
         # 2.调用invoke方法获取Agent生成的事件（汇总阶段不再重传用户图片）
-        async for event in self.invoke(query):
+        async for event in self.invoke(query, emit_deltas=False):
             # 3.判断事件类型是否为消息事件，如果是则表示Agent结构化生成汇总内容
             if isinstance(event, MessageEvent):
                 # 4.记录日志并解析输出内容

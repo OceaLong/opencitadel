@@ -21,3 +21,14 @@ def test_planner_plan_schema_rejects_empty_steps():
             "title": "Bad",
             "steps": [],
         })
+
+
+def test_planner_plan_schema_ignores_legacy_message_field():
+    validated = PlannerPlanSchema.model_validate({
+        "title": "Research task",
+        "goal": "Find info",
+        "message": "should be ignored",
+        "steps": [{"description": "Search web"}],
+    })
+    assert validated.title == "Research task"
+    assert "message" not in validated.model_dump()

@@ -20,7 +20,8 @@ from app.domain.external.task import TaskRunner, Task
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
 from app.domain.models.event import ErrorEvent, Event, MessageEvent, BaseEvent, ToolEvent, ToolEventStatus, \
     BrowserToolContent, SearchToolContent, ShellToolContent, FileToolContent, MCPToolContent, A2AToolContent, \
-    TitleEvent, WaitEvent, DoneEvent
+    TitleEvent, WaitEvent, DoneEvent, SessionStatusEvent, AssistantNoticeEvent
+from app.domain.models.event_policy import should_persist_event
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.utils.vision import is_image_mime
@@ -99,9 +100,19 @@ class AgentTaskRunner(TaskRunner):
         event_id = await task.output_stream.put(event.model_dump_json())
         event.id = event_id
 
-        # 2.将事件添加到对应的会话中
+        # 2.仅持久化稳定、高价值事件，流式 delta 不落库
+        if should_persist_event(event):
+            async with self._uow:
+                await self._uow.session.add_event(self._session_id, event)
+
+    async def _emit_session_status(self, task: Task, status: SessionStatus) -> None:
+        """推送服务端权威会话状态事件"""
         async with self._uow:
-            await self._uow.session.add_event(self._session_id, event)
+            await self._uow.session.update_status(self._session_id, status)
+        await self._put_and_add_event(
+            task,
+            SessionStatusEvent(status=status.value),
+        )
 
     @classmethod
     async def _pop_event(cls, task: Task) -> Event:
@@ -411,6 +422,7 @@ class AgentTaskRunner(TaskRunner):
             await self._sandbox.ensure_sandbox()
             await self._mcp_tool.initialize(self._mcp_config)
             await self._a2a_tool.initialize(self._a2a_config)
+            await self._emit_session_status(task, SessionStatus.RUNNING)
 
             # 2.循环读取任务中的输入消息队列
             while not await task.input_stream.is_empty():
@@ -441,7 +453,7 @@ class AgentTaskRunner(TaskRunner):
                     if isinstance(event, TitleEvent):
                         async with self._uow:
                             await self._uow.session.update_title(self._session_id, event.title)
-                    elif isinstance(event, MessageEvent):
+                    elif isinstance(event, (MessageEvent, AssistantNoticeEvent)):
                         # 9.如果事件为消息事件，则更新最新消息并新增未读消息数
                         async with self._uow:
                             await self._uow.session.update_latest_message(
@@ -452,8 +464,7 @@ class AgentTaskRunner(TaskRunner):
                             await self._uow.session.increment_unread_message_count(self._session_id)
                     elif isinstance(event, WaitEvent):
                         # 10.如果事件为等待，则更新会话状态并终止程序
-                        async with self._uow:
-                            await self._uow.session.update_status(self._session_id, SessionStatus.WAITING)
+                        await self._emit_session_status(task, SessionStatus.WAITING)
                         return
 
                     # 11.判断如果输入消息队列为空则跳出循环
@@ -461,8 +472,7 @@ class AgentTaskRunner(TaskRunner):
                         break
 
             # 12.更新会话状态为已完成
-            async with self._uow:
-                await self._uow.session.update_status(self._session_id, SessionStatus.COMPLETED)
+            await self._emit_session_status(task, SessionStatus.COMPLETED)
         except asyncio.CancelledError:
             # 13.异步任务被取消，推送结束事件并跟新状态
             logger.info(f"AgentTaskRunner任务运行取消")

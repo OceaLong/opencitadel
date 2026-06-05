@@ -7,6 +7,10 @@ PLANNER_SYSTEM_PROMPT = """
 2. 确定完成任务需要使用哪些工具;
 3. 根据用户的消息确定工作语言;
 4. 生成计划的目标和步骤;
+
+注意：
+- 你只输出结构化计划 JSON，不要输出面向用户的自然语言回复、思考过程或执行说明;
+- 不要输出 message、summary、explanation 等额外字段;
 """
 
 # 创建Plan规划提示词模板，内部有message+attachments占位符
@@ -19,6 +23,7 @@ CREATE_PLAN_PROMPT = """
 - 你的计划必须简洁明了，不要添加任何不必要的细节
 - 你的步骤必须是原子性且独立的，以便下一个执行者可以使用工具逐一执行它们
 - 你需要判断任务是否可以拆分为多个步骤，如果可以，返回多个步骤；否则，返回单个步骤
+- 只输出 JSON，不要输出 Markdown 代码块或解释文字
 
 返回格式要求：
 - 必须返回符合以下 TypeScript 接口定义的 JSON 格式
@@ -28,8 +33,6 @@ CREATE_PLAN_PROMPT = """
 TypeScript 接口定义：
 ```typescript
 interface CreatePlanResponse {{
-  /** 对用户消息的回复以及对任务的思考，尽可能详细，使用用户的语言 **/
-  message: string;
   /** 根据用户消息确定的工作语言 **/
   language: string;
   /** 步骤数组，每个步骤包含id和描述 **/
@@ -48,7 +51,6 @@ interface CreatePlanResponse {{
 
 JSON 输出示例:
 {{
-  "message": "用户回复消息",
   "goal": "目标描述",
   "title": "任务标题",
   "language": "zh",
@@ -87,6 +89,7 @@ UPDATE_PLAN_PROMPT = """
 - 如果步骤已完成或者不再必要，请将其删除
 - 仔细阅读步骤结果以确定是否成功，如果不成功，请更改后续步骤
 - 根据步骤结果，你需要相应地更新计划步骤
+- 只输出 JSON，不要输出 Markdown 代码块或解释文字
 
 返回格式要求：
 - 必须返回符合以下 TypeScript 接口定义的 JSON 格式
