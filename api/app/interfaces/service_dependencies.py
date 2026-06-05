@@ -10,6 +10,7 @@ from app.application.services.app_config_service import AppConfigService
 from app.application.services.file_service import FileService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
+from app.application.services.marketplace_service import MarketplaceService
 from app.application.services.memory_service import MemoryService
 from app.application.services.session_service import SessionService
 from app.application.services.skill_service import SkillService
@@ -79,6 +80,16 @@ def get_file_service(cos: Cos = Depends(get_cos)) -> FileService:
 
 def get_session_service() -> SessionService:
     return SessionService(uow_factory=get_uow, sandbox_cls=DockerSandbox)
+
+
+def get_marketplace_service(
+        llm_model_service: LLMModelService = Depends(get_llm_model_service),
+        file_service: FileService = Depends(get_file_service),
+) -> MarketplaceService:
+    return MarketplaceService(
+        llm_model_service=llm_model_service,
+        file_service=file_service,
+    )
 
 
 def get_agent_service(

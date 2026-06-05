@@ -252,6 +252,106 @@ export type CreateA2AServerParams = {
   base_url: string;
 };
 
+// ==================== 应用市场 ====================
+
+export type MarketplaceApp = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  category: string;
+};
+
+export type MarketplaceAppsData = {
+  apps: MarketplaceApp[];
+};
+
+export type VideoSearchParams = {
+  query: string;
+};
+
+export type VideoSearchResult = {
+  title: string;
+  platform: string;
+  icon: string;
+  url: string;
+  quality: string;
+  condition: string;
+  trust_score: number;
+  source_type?: string;
+};
+
+export type VideoSearchData = {
+  query: string;
+  copyright_notice: string;
+  results: VideoSearchResult[];
+  stats: {
+    crawled_candidates: number;
+    filtered_risk_sources: number;
+    legal_results: number;
+  };
+};
+
+export type NutritionAnalysisParams = {
+  file_id: string;
+  model_id?: string;
+  weight_kg?: number;
+  goal?: "cut" | "bulk" | "maintain";
+};
+
+export type NutritionItem = {
+  name: string;
+  grams: number;
+  confidence: number;
+  calories: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+};
+
+export type NutritionAnalysisData = {
+  meal_summary: string;
+  items: NutritionItem[];
+  totals: {
+    calories: number;
+    protein: number;
+    fat: number;
+    carbs: number;
+  };
+  assessment: {
+    overall: "green" | "yellow" | "red";
+    lights: Record<string, "green" | "yellow" | "red">;
+    tips: string[];
+    goal?: string | null;
+    ratios: {
+      calories_per_kg?: number | null;
+      protein_per_kg?: number | null;
+    };
+  };
+};
+
+export type ConsumptionAnalysisParams = {
+  file_id: string;
+  serving_grams: number;
+  model_id?: string;
+};
+
+export type ConsumptionManualParams = {
+  total_grams: number;
+  serving_grams: number;
+};
+
+export type ConsumptionAnalysisData = {
+  recognized: boolean;
+  ocr_text?: string | null;
+  confidence: number;
+  total_grams?: number | null;
+  serving_grams?: number | null;
+  servings?: number | null;
+  full_servings?: number | null;
+  message: string;
+};
+
 // ==================== 文件模块类型 ====================
 
 /**

@@ -1,0 +1,24 @@
+{
+  "foods": [
+    {"name": "米饭", "aliases": ["白米饭", "蒸米饭", "rice"], "per_100g": {"calories": 116, "protein": 2.6, "fat": 0.3, "carbs": 25.9}},
+    {"name": "鸡胸肉", "aliases": ["鸡胸", "烤鸡胸", "chicken breast"], "per_100g": {"calories": 165, "protein": 31.0, "fat": 3.6, "carbs": 0.0}},
+    {"name": "牛肉", "aliases": ["红烧牛肉", "牛排", "beef"], "per_100g": {"calories": 250, "protein": 26.0, "fat": 15.0, "carbs": 0.0}},
+    {"name": "猪肉", "aliases": ["红烧肉", "炒肉", "pork"], "per_100g": {"calories": 242, "protein": 17.0, "fat": 19.0, "carbs": 0.0}},
+    {"name": "鸡蛋", "aliases": ["煎蛋", "水煮蛋", "egg"], "per_100g": {"calories": 155, "protein": 13.0, "fat": 11.0, "carbs": 1.1}},
+    {"name": "西兰花", "aliases": ["broccoli"], "per_100g": {"calories": 34, "protein": 2.8, "fat": 0.4, "carbs": 6.6}},
+    {"name": "番茄炒蛋", "aliases": ["西红柿炒蛋"], "per_100g": {"calories": 120, "protein": 6.5, "fat": 8.0, "carbs": 5.0}},
+    {"name": "麻婆豆腐", "aliases": ["豆腐"], "per_100g": {"calories": 140, "protein": 8.0, "fat": 9.0, "carbs": 6.0}},
+    {"name": "沙拉", "aliases": ["蔬菜沙拉", "salad"], "per_100g": {"calories": 45, "protein": 2.0, "fat": 1.5, "carbs": 6.0}},
+    {"name": "面条", "aliases": ["拉面", "意面", "noodles"], "per_100g": {"calories": 138, "protein": 4.5, "fat": 2.0, "carbs": 25.0}},
+    {"name": "汉堡", "aliases": ["burger"], "per_100g": {"calories": 295, "protein": 17.0, "fat": 14.0, "carbs": 24.0}},
+    {"name": "披萨", "aliases": ["pizza"], "per_100g": {"calories": 266, "protein": 11.0, "fat": 10.0, "carbs": 33.0}},
+    {"name": "燕麦", "aliases": ["燕麦片", "oatmeal"], "per_100g": {"calories": 389, "protein": 16.9, "fat": 6.9, "carbs": 66.3}},
+    {"name": "牛奶", "aliases": ["milk"], "per_100g": {"calories": 54, "protein": 3.3, "fat": 2.0, "carbs": 4.8}},
+    {"name": "酸奶", "aliases": ["yogurt"], "per_100g": {"calories": 72, "protein": 3.5, "fat": 1.8, "carbs": 9.3}},
+    {"name": "苹果", "aliases": ["apple"], "per_100g": {"calories": 52, "protein": 0.3, "fat": 0.2, "carbs": 13.8}},
+    {"name": "香蕉", "aliases": ["banana"], "per_100g": {"calories": 89, "protein": 1.1, "fat": 0.3, "carbs": 22.8}},
+    {"name": "薯条", "aliases": ["炸薯条", "fries"], "per_100g": {"calories": 312, "protein": 3.4, "fat": 15.0, "carbs": 41.0}},
+    {"name": "炸鸡", "aliases": ["fried chicken"], "per_100g": {"calories": 260, "protein": 20.0, "fat": 16.0, "carbs": 8.0}},
+    {"name": "寿司", "aliases": ["sushi"], "per_100g": {"calories": 150, "protein": 6.0, "fat": 2.0, "carbs": 28.0}}
+  ]
+}

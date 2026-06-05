@@ -11,6 +11,7 @@ from . import (
     skill_routes,
     memory_routes,
     metrics_routes,
+    marketplace_routes,
 )
 
 
@@ -28,6 +29,7 @@ def create_api_routes() -> APIRouter:
     api_router.include_router(skill_routes.router)
     api_router.include_router(memory_routes.memory_router)
     api_router.include_router(metrics_routes.router)
+    api_router.include_router(marketplace_routes.router)
 
     # 3.返回api路由实例
     return api_router

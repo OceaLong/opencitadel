@@ -50,6 +50,11 @@ export type {
   SessionFile,
   ViewFileParams,
   ViewShellParams,
+  MarketplaceApp,
+  MarketplaceAppsData,
+  VideoSearchData,
+  NutritionAnalysisData,
+  ConsumptionAnalysisData,
 } from "./types";
 
 // 模块 API
@@ -59,4 +64,5 @@ export { sessionApi } from "./session";
 export { modelsApi } from "./models";
 export { skillsApi } from "./skills";
 export { memoryApi } from "./memory";
+export { marketplaceApi } from "./marketplace";
 
