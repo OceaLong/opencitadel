@@ -430,6 +430,7 @@ export type ChatMessage = {
 export type ChatParams = {
   message?: string;
   attachments?: string[];
+  event_id?: string;
   model_id?: string;
   skill_id?: string;
   thinking_enabled?: boolean;
@@ -449,6 +450,7 @@ export type TokenUsageSummary = {
 
 export type SessionDetail = Session & {
   events?: SSEEventData[];
+  events_next_cursor?: number | null;
   model_id?: string | null;
   skill_id?: string | null;
   thinking_enabled?: boolean;
@@ -511,11 +513,11 @@ export type EventChannel = "ui" | "debug" | "runtime";
 
 export type EventMeta = {
   event_id?: string;
-  schema_version?: number;
-  visibility?: EventVisibility;
-  channel?: EventChannel;
-  persist?: boolean;
-  created_at?: number;
+  schema_version: number;
+  visibility: EventVisibility;
+  channel: EventChannel;
+  persist: boolean;
+  created_at: number;
 };
 
 export type SSEEventType =
@@ -547,7 +549,15 @@ export type SSEEventData =
   | { type: "message"; data: ChatMessage & EventMeta }
   | { type: "message_delta"; data: { stream_id: string; delta: string; role?: string } & EventMeta }
   | { type: "reasoning_delta"; data: { stream_id: string; delta: string } & EventMeta }
-  | { type: "tool_args_delta"; data: { stream_id: string; tool_call_id: string; tool_name?: string; delta: string } & EventMeta }
+  | {
+      type: "tool_args_delta";
+      data: {
+        stream_id: string;
+        tool_call_id: string;
+        tool_name?: string;
+        delta: string;
+      } & EventMeta;
+    }
   | { type: "assistant_notice"; data: { message: string } & EventMeta }
   | { type: "session_status"; data: { status: SessionStatus } & EventMeta }
   | { type: "debug_item"; data: DebugItemEvent }
@@ -556,7 +566,13 @@ export type SSEEventData =
   | { type: "step"; data: StepEvent & EventMeta }
   | { type: "tool"; data: ToolEvent & EventMeta }
   | { type: "wait"; data: Record<string, unknown> & EventMeta }
-  | { type: "usage"; data: TokenUsageSummary & { delta_prompt_tokens?: number; delta_completion_tokens?: number } & EventMeta }
+  | {
+      type: "usage";
+      data: TokenUsageSummary & {
+        delta_prompt_tokens?: number;
+        delta_completion_tokens?: number;
+      } & EventMeta;
+    }
   | { type: "done"; data: Record<string, unknown> & EventMeta }
   | { type: "error"; data: { error: string } & EventMeta };
 
@@ -564,6 +580,11 @@ export type SSEEventData =
  * SSE 事件处理器
  */
 export type SSEEventHandler = (event: SSEEventData) => void;
+
+export type SessionEventsPage = {
+  events: SSEEventData[];
+  next_cursor?: number | null;
+};
 
 /**
  * 会话文件信息
@@ -594,4 +615,3 @@ export type ViewShellParams = {
   shell_session_id: string;
   [key: string]: unknown;
 };
-

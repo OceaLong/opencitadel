@@ -28,10 +28,13 @@ Client ──SSE──► FastAPI API（无状态）
                   │ Planner → ReAct 循环
                   ▼
               写入 task:output ──► API SSE 直读
+                  │
+                  ▼
+             session_events 追加表
 ```
 
 - **API**：创建任务、写入用户消息、SSE 读取 output stream、`stop` 通过 Redis cancel 通道
-- **Worker**：消费 `task:dispatch`，运行 `AgentTaskRunner`，写入事件到 output stream
+- **Worker**：消费 `task:dispatch`，运行 `AgentTaskRunner`，写入事件到 output stream，并将可持久化事件追加到 `session_events`
 - **Migrate**：独立 job（`python -m app.migrate`），API 启动时仅校验 schema 版本
 
 ## 项目结构
@@ -80,6 +83,7 @@ api/
 | POST | `/api/sessions` | 创建会话 |
 | POST | `/api/sessions/stream` | SSE 流式获取会话列表 |
 | GET | `/api/sessions/{id}` | 获取会话详情 |
+| GET | `/api/sessions/{id}/events` | 按游标分页获取会话事件 |
 | PATCH | `/api/sessions/{id}` | 更新会话模型或 Skill 配置 |
 | POST | `/api/sessions/{id}/chat` | SSE 流式对话（含 Token delta 事件） |
 | GET | `/api/sessions/{id}/memory` | 获取会话 Agent 内存 |
@@ -90,13 +94,27 @@ api/
 
 ### SSE 事件类型
 
-除 `message` / `tool` / `plan` / `step` 等外，还支持 Token 级增量事件：
+所有 SSE `data` 都带有 `event_id`、`created_at`、`schema_version`、`visibility`、`channel`、`persist` 元信息。历史事件通过 `GET /api/sessions/{id}/events?after=<seq>&limit=100` 分页重放，实时事件通过 `/chat` SSE 推送。
 
 | 事件 | 说明 |
 |------|------|
+| `message` | 用户或助手完整消息 |
 | `message_delta` | 助手文本增量（按 `stream_id` 合并） |
-| `reasoning_delta` | 思考内容增量 |
-| `tool_args_delta` | 工具参数 JSON 增量 |
+| `reasoning_delta` | 思考内容增量（默认仅 `include_debug=true`） |
+| `tool_args_delta` | 工具参数 JSON 增量（默认仅 `include_debug=true`） |
+| `assistant_notice` | 面向用户的助手提示 |
+| `session_status` | 服务端权威会话状态 |
+| `debug_item` | 内部调试项（`include_debug=true`） |
+| `title` | 会话标题更新 |
+| `plan` | 计划事件（含 steps 列表） |
+| `step` | 步骤事件（含 id/status/description） |
+| `tool` | 工具调用事件（含 name/function/args/content） |
+| `wait` | 等待用户输入 |
+| `usage` | Token 用量事件 |
+| `done` | 流结束 |
+| `error` | 错误事件 |
+
+更多设计细节见 [`../docs/events.md`](../docs/events.md)。
 
 ## Agent 能力
 

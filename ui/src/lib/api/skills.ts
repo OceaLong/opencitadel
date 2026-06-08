@@ -1,5 +1,5 @@
-import { get, post, put, del } from "./fetch";
-import type { Skill, SkillsData, CreateSkillParams } from "./types";
+import { del, get, post, put } from "./fetch";
+import type { CreateSkillParams, Skill, SkillsData } from "./types";
 
 export const skillsApi = {
   list: (enabledOnly = false): Promise<SkillsData> =>
@@ -7,8 +7,7 @@ export const skillsApi = {
 
   get: (id: string): Promise<Skill> => get<Skill>(`/skills/${id}`),
 
-  create: (params: CreateSkillParams): Promise<Skill> =>
-    post<Skill>("/skills", params),
+  create: (params: CreateSkillParams): Promise<Skill> => post<Skill>("/skills", params),
 
   update: (id: string, params: Partial<CreateSkillParams>): Promise<Skill> =>
     put<Skill>(`/skills/${id}`, params),

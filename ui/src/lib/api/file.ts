@@ -13,7 +13,7 @@ export const fileApi = {
   uploadFile: async (params: FileUploadParams): Promise<FileInfo> => {
     const formData = new FormData();
     formData.append("file", params.file);
-    
+
     if (params.session_id) {
       formData.append("session_id", params.session_id);
     }
@@ -37,7 +37,7 @@ export const fileApi = {
    */
   downloadFile: async (fileId: string): Promise<Blob> => {
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api"}/files/${fileId}/download`
+      `${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api"}/files/${fileId}/download`,
     );
 
     if (!response.ok) {
@@ -53,9 +53,7 @@ export const fileApi = {
    * @returns 文件下载 URL
    */
   getFileDownloadUrl: (fileId: string): string => {
-    const baseURL =
-      process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
+    const baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
     return `${baseURL}/files/${fileId}/download`;
   },
 };
-

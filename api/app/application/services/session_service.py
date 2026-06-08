@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
-from typing import List, Callable, Type, Optional
+from typing import List, Callable, Type, Optional, Tuple
 
 from app.application.errors.exceptions import NotFoundError, ServerRequestsError
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.file import File
 from app.domain.models.session import Session
+from app.domain.models.event import BaseEvent
 from app.domain.repositories.uow import IUnitOfWork
 from app.interfaces.schemas.session import FileReadResponse, ShellReadResponse
 
@@ -102,6 +103,22 @@ class SessionService:
         """获取指定会话详情信息"""
         async with self._uow:
             return await self._uow.session.get_by_id(session_id)
+
+    async def get_session_events(
+            self,
+            session_id: str,
+            after: Optional[int] = None,
+            limit: int = 100,
+    ) -> List[Tuple[int, BaseEvent]]:
+        """分页获取会话事件"""
+        async with self._uow:
+            session = await self._uow.session.get_by_id(session_id)
+            if not session:
+                raise NotFoundError("该会话不存在，请核实后重试")
+            records = await self._uow.session.list_events(session_id, after=after, limit=limit)
+            if records or after is not None:
+                return records
+            return list(enumerate(session.events[:limit], start=1))
 
     async def get_session_files(self, session_id: str) -> List[File]:
         """根据传递的会话id获取指定会话的文件列表信息"""

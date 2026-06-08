@@ -1,6 +1,8 @@
-'use client'
+"use client";
 
-import {useState} from 'react'
+import { useState } from "react";
+
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -8,39 +10,36 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import {Button} from '@/components/ui/button'
+} from "@/components/ui/dialog";
 
 type DeleteSessionDialogProps = {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onConfirm: () => Promise<void>
-}
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => Promise<void>;
+};
 
 /**
  * 删除任务确认弹窗
  * 确认后才发起 API 删除请求
  */
-export function DeleteSessionDialog({open, onOpenChange, onConfirm}: DeleteSessionDialogProps) {
-  const [deleting, setDeleting] = useState(false)
+export function DeleteSessionDialog({ open, onOpenChange, onConfirm }: DeleteSessionDialogProps) {
+  const [deleting, setDeleting] = useState(false);
 
   const handleConfirm = async () => {
-    setDeleting(true)
+    setDeleting(true);
     try {
-      await onConfirm()
+      await onConfirm();
     } finally {
-      setDeleting(false)
+      setDeleting(false);
     }
-  }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle className="text-lg font-semibold">
-            要删除任务信息吗？
-          </DialogTitle>
-          <DialogDescription className="text-sm text-muted-foreground leading-relaxed">
+          <DialogTitle className="text-lg font-semibold">要删除任务信息吗？</DialogTitle>
+          <DialogDescription className="text-muted-foreground text-sm leading-relaxed">
             删除任务信息后，该任务下的所有聊天记录将被永远删除，无法找回，所上传的文件与生成文件均无法查看&下载。
           </DialogDescription>
         </DialogHeader>
@@ -53,17 +52,11 @@ export function DeleteSessionDialog({open, onOpenChange, onConfirm}: DeleteSessi
           >
             取消
           </Button>
-          <Button
-            className="cursor-pointer"
-            onClick={handleConfirm}
-            disabled={deleting}
-          >
-            {deleting ? '删除中...' : '确认'}
+          <Button className="cursor-pointer" onClick={handleConfirm} disabled={deleting}>
+            {deleting ? "删除中..." : "确认"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  );
 }
-
-

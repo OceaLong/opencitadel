@@ -1,18 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import select, delete, update, func, cast
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import TypeAdapter
 
-from app.domain.models.event import BaseEvent
+from app.domain.models.event import BaseEvent, Event
+from app.domain.models.event_upgrader import upgrade_event_payload
 from app.domain.models.file import File
 from app.domain.models.memory import Memory
 from app.domain.models.session import Session, SessionStatus
 from app.domain.repositories.session_repository import SessionRepository
-from app.infrastructure.models import SessionModel
+from app.infrastructure.models import SessionEventModel, SessionModel
 
 
 class DBSessionRepository(SessionRepository):
@@ -56,7 +58,10 @@ class DBSessionRepository(SessionRepository):
         record = result.scalar_one_or_none()
 
         # 2.判断会话记录是否存在并返回
-        return record.to_domain() if record is not None else None
+        if record is None:
+            return None
+
+        return record.to_domain()
 
     async def delete_by_id(self, session_id: str) -> None:
         """根据传递的id删除会话"""
@@ -97,24 +102,84 @@ class DBSessionRepository(SessionRepository):
         if result.rowcount == 0:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 
-    async def add_event(self, session_id: str, event: BaseEvent) -> None:
+    async def add_event(
+            self,
+            session_id: str,
+            event: BaseEvent,
+            event_data: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """往会话中新增事件"""
-        # 1.将event序列化为json
-        event_data = event.model_dump(mode="json")
+        # 1.检查会话存在，保持与旧 JSONB 更新路径一致的错误语义
+        exists_stmt = select(SessionModel.id).where(SessionModel.id == session_id)
+        exists = await self.db_session.scalar(exists_stmt)
+        if exists is None:
+            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 
-        # 2.构建原子更新语句并执行
-        stmt = (
-            update(SessionModel)
-            .where(SessionModel.id == session_id)
-            .values(
-                events=func.coalesce(SessionModel.events, cast([], JSONB)) + cast([event_data], JSONB),
+        # 2.追加写入独立事件表，避免重写 sessions.events JSONB 数组
+        payload = event_data or event.model_dump(mode="json")
+        self.db_session.add(
+            SessionEventModel(
+                session_id=session_id,
+                stream_id=payload.get("id"),
+                type=payload.get("type", event.type),
+                payload=payload,
+                created_at=event.created_at,
             )
         )
-        result = await self.db_session.execute(stmt)
 
-        # 3.检查是否新增成功
-        if result.rowcount == 0:
+    async def add_events(self, session_id: str, events: List[BaseEvent]) -> None:
+        """批量新增事件"""
+        if not events:
+            return
+        payloads = [(event, event.model_dump(mode="json")) for event in events]
+        await self.add_event_payloads(session_id, payloads)
+
+    async def add_event_payloads(
+            self,
+            session_id: str,
+            payloads: List[Tuple[BaseEvent, Dict[str, Any]]],
+    ) -> None:
+        """批量新增已序列化事件"""
+        if not payloads:
+            return
+        exists_stmt = select(SessionModel.id).where(SessionModel.id == session_id)
+        exists = await self.db_session.scalar(exists_stmt)
+        if exists is None:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
+
+        self.db_session.add_all([
+            SessionEventModel(
+                session_id=session_id,
+                stream_id=event_data.get("id"),
+                type=event_data.get("type", event.type),
+                payload=event_data,
+                created_at=event.created_at,
+            )
+            for event, event_data in payloads
+        ])
+
+    async def list_events(
+            self,
+            session_id: str,
+            after: Optional[int] = None,
+            limit: int = 100,
+    ) -> List[Tuple[int, BaseEvent]]:
+        """按游标分页获取会话事件"""
+        stmt = (
+            select(SessionEventModel)
+            .where(SessionEventModel.session_id == session_id)
+            .order_by(SessionEventModel.seq.asc())
+            .limit(limit)
+        )
+        if after is not None:
+            stmt = stmt.where(SessionEventModel.seq > after)
+        result = await self.db_session.execute(stmt)
+        records = result.scalars().all()
+        adapter = TypeAdapter(Event)
+        return [
+            (record.seq, adapter.validate_python(upgrade_event_payload(record.payload)))
+            for record in records
+        ]
 
     async def add_file(self, session_id: str, file: File) -> None:
         """往会话中新增文件"""

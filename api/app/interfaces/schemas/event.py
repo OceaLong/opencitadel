@@ -12,12 +12,8 @@ from app.domain.models.event import (
     ToolEventStatus,
     ToolEvent,
     StepEvent,
-    UsageEvent,
-    AssistantNoticeEvent,
-    SessionStatusEvent,
-    DebugItemEvent,
 )
-from app.domain.models.event_policy import should_persist_event
+from app.domain.models.event_policy import EVENT_SCHEMA_VERSION, project_events
 from app.domain.models.file import File
 from app.domain.models.plan import ExecutionStatus
 
@@ -26,6 +22,10 @@ class BaseEventData(BaseModel):
     """基础事件数据"""
     event_id: Optional[str] = None  # 事件id
     created_at: datetime = Field(default_factory=datetime.now)  # 事件时间
+    schema_version: int = EVENT_SCHEMA_VERSION
+    visibility: Literal["user", "internal", "debug"] = "user"
+    channel: Literal["ui", "debug", "runtime"] = "ui"
+    persist: bool = True
 
     # pydantic v2写法，序列化时将datetime转换为时间戳
     model_config = ConfigDict(json_encoders={
@@ -55,7 +55,7 @@ class BaseEventData(BaseModel):
         """从事件Domain模型中构建基础事件数据"""
         return cls(
             **cls.base_event_data(event),
-            **event.model_dump(mode="json", exclude={"id", "type", "created_at"}),
+            **EventMapper.event_payload_data(event),
         )
 
 
@@ -98,23 +98,13 @@ class MessageEventData(BaseEventData):
     role: Literal["user", "assistant"] = "assistant"
     message: str = ""
     attachments: List[File] = Field(default_factory=list)
+    stream_id: Optional[str] = None
 
 
 class MessageSSEEvent(BaseSSEEvent):
     """流式消息事件数据响应结构"""
     event: Literal["message"] = "message"
     data: MessageEventData
-
-    @classmethod
-    def from_event(cls, event: Event) -> Self:
-        return cls(
-            data=MessageEventData(
-                **BaseEventData.base_event_data(event),
-                role=event.role,
-                message=event.message,
-                attachments=event.attachments,
-            )
-        )
 
 
 class TitleEventData(BaseEventData):
@@ -140,17 +130,6 @@ class StepSSEEvent(BaseSSEEvent):
     event: Literal["step"] = "step"
     data: StepEventData
 
-    @classmethod
-    def from_event(cls, event: StepEvent) -> Self:
-        return cls(
-            data=StepEventData(
-                **BaseEventData.base_event_data(event),
-                status=event.step.status,
-                id=event.step.id,
-                description=event.step.description
-            )
-        )
-
 
 class PlanEventData(BaseEventData):
     """计划事件数据"""
@@ -161,23 +140,6 @@ class PlanSSEEvent(BaseSSEEvent):
     """计划流式事件"""
     event: Literal["plan"] = "plan"
     data: PlanEventData
-
-    @classmethod
-    def from_event(cls, event: PlanEvent) -> Self:
-        return cls(
-            data=PlanEventData(
-                **BaseEventData.base_event_data(event),
-                steps=[
-                    StepEventData(
-                        **BaseEventData.base_event_data(event),
-                        id=step.id,
-                        status=step.status,
-                        description=step.description,
-                    )
-                    for step in event.plan.steps
-                ]
-            )
-        )
 
 
 class ToolEventData(BaseEventData):
@@ -194,20 +156,6 @@ class ToolSSEEvent(BaseSSEEvent):
     """工具流式事件"""
     event: Literal["tool"] = "tool"
     data: ToolEventData
-
-    @classmethod
-    def from_event(cls, event: ToolEvent) -> Self:
-        return cls(
-            data=ToolEventData(
-                **BaseEventData.base_event_data(event),
-                tool_call_id=event.tool_call_id,
-                name=event.tool_name,
-                status=event.status,
-                function=event.function_name,
-                args=event.function_args,
-                content=event.tool_content,
-            )
-        )
 
 
 class DoneSSEEvent(BaseSSEEvent):
@@ -247,21 +195,6 @@ class UsageSSEEvent(BaseSSEEvent):
     event: Literal["usage"] = "usage"
     data: UsageEventData
 
-    @classmethod
-    def from_event(cls, event: UsageEvent) -> Self:
-        return cls(
-            data=UsageEventData(
-                **BaseEventData.base_event_data(event),
-                prompt_tokens=event.prompt_tokens,
-                completion_tokens=event.completion_tokens,
-                total_tokens=event.total_tokens,
-                estimated_cost_usd=event.estimated_cost_usd,
-                call_count=event.call_count,
-                delta_prompt_tokens=event.delta_prompt_tokens,
-                delta_completion_tokens=event.delta_completion_tokens,
-            )
-        )
-
 
 class AssistantNoticeEventData(BaseEventData):
     """助手提示事件数据"""
@@ -273,15 +206,6 @@ class AssistantNoticeSSEEvent(BaseSSEEvent):
     event: Literal["assistant_notice"] = "assistant_notice"
     data: AssistantNoticeEventData
 
-    @classmethod
-    def from_event(cls, event: AssistantNoticeEvent) -> Self:
-        return cls(
-            data=AssistantNoticeEventData(
-                **BaseEventData.base_event_data(event),
-                message=event.message,
-            )
-        )
-
 
 class SessionStatusEventData(BaseEventData):
     """会话状态事件数据"""
@@ -292,15 +216,6 @@ class SessionStatusSSEEvent(BaseSSEEvent):
     """会话状态流式事件"""
     event: Literal["session_status"] = "session_status"
     data: SessionStatusEventData
-
-    @classmethod
-    def from_event(cls, event: SessionStatusEvent) -> Self:
-        return cls(
-            data=SessionStatusEventData(
-                **BaseEventData.base_event_data(event),
-                status=event.status,
-            )
-        )
 
 
 class DebugItemEventData(BaseEventData):
@@ -314,21 +229,53 @@ class DebugItemSSEEvent(BaseSSEEvent):
     event: Literal["debug_item"] = "debug_item"
     data: DebugItemEventData
 
-    @classmethod
-    def from_event(cls, event: DebugItemEvent) -> Self:
-        return cls(
-            data=DebugItemEventData(
-                **BaseEventData.base_event_data(event),
-                item_type=event.item_type,
-                payload=event.payload,
-            )
-        )
+
+class MessageDeltaEventData(BaseEventData):
+    """消息增量事件数据"""
+    stream_id: str
+    role: Literal["user", "assistant"] = "assistant"
+    delta: str = ""
+
+
+class MessageDeltaSSEEvent(BaseSSEEvent):
+    """消息增量流式事件"""
+    event: Literal["message_delta"] = "message_delta"
+    data: MessageDeltaEventData
+
+
+class ReasoningDeltaEventData(BaseEventData):
+    """思考内容增量事件数据"""
+    stream_id: str
+    delta: str = ""
+
+
+class ReasoningDeltaSSEEvent(BaseSSEEvent):
+    """思考内容增量流式事件"""
+    event: Literal["reasoning_delta"] = "reasoning_delta"
+    data: ReasoningDeltaEventData
+
+
+class ToolArgsDeltaEventData(BaseEventData):
+    """工具参数增量事件数据"""
+    stream_id: str
+    tool_call_id: str
+    tool_name: str = ""
+    delta: str = ""
+
+
+class ToolArgsDeltaSSEEvent(BaseSSEEvent):
+    """工具参数增量流式事件"""
+    event: Literal["tool_args_delta"] = "tool_args_delta"
+    data: ToolArgsDeltaEventData
 
 
 # 定义Agent流式事件类型集合
 AgentSSEEvent = Union[
     CommonSSEEvent,
     MessageSSEEvent,
+    MessageDeltaSSEEvent,
+    ReasoningDeltaSSEEvent,
+    ToolArgsDeltaSSEEvent,
     TitleSSEEvent,
     StepSSEEvent,
     PlanSSEEvent,
@@ -355,6 +302,48 @@ class EventMapper:
     """事件映射类，利用Python自身提供的自省机制，将业务逻辑中的Event转换成适合流式传输的AgentSSEEvent"""
     # 缓存映射(type: EventMapping)
     _cache_mapping: Optional[Dict[str, EventMapping]] = None
+    _DOMAIN_EXCLUDE_FIELDS = {
+        "id",
+        "type",
+        "created_at",
+        "schema_version",
+        "visibility",
+        "channel",
+        "persist",
+    }
+
+    @staticmethod
+    def event_payload_data(event: Event) -> Dict[str, Any]:
+        """将领域事件投影为 SSE data 载荷中除 EventMeta 外的业务字段。"""
+        if isinstance(event, StepEvent):
+            return {
+                "id": event.step.id,
+                "status": event.step.status,
+                "description": event.step.description,
+            }
+        if isinstance(event, PlanEvent):
+            return {
+                "steps": [
+                    StepEventData(
+                        **BaseEventData.base_event_data(event),
+                        id=step.id,
+                        status=step.status,
+                        description=step.description,
+                    )
+                    for step in event.plan.steps
+                ]
+            }
+        if isinstance(event, ToolEvent):
+            return {
+                "tool_call_id": event.tool_call_id,
+                "name": event.tool_name,
+                "status": event.status,
+                "function": event.function_name,
+                "args": event.function_args,
+                "content": event.tool_content,
+            }
+
+        return event.model_dump(mode="json", exclude=EventMapper._DOMAIN_EXCLUDE_FIELDS)
 
     @staticmethod
     def _get_event_type_mapping() -> Dict[str, EventMapping]:
@@ -420,11 +409,16 @@ class EventMapper:
             events: List[Event],
             *,
             include_transient: bool = False,
+            include_debug: bool = False,
+            include_internal: bool = False,
     ) -> List[AgentSSEEvent]:
         """将领域事件模型列表转换为SSE流式事件列表"""
-        replay_events = events
-        if not include_transient:
-            replay_events = [event for event in events if should_persist_event(event)]
+        replay_events = project_events(
+            events,
+            include_transient=include_transient,
+            include_debug=include_debug,
+            include_internal=include_internal,
+        )
         return list(filter(lambda x: x is not None, [
             EventMapper.event_to_sse_event(event) for event in replay_events
         ]))

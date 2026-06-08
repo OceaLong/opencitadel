@@ -7,6 +7,7 @@ from .llm_model import LLMModelORM
 from .skill import SkillORM
 from .memory_entry import MemoryEntryORM
 from .llm_token_usage import LLMTokenUsageORM
+from .session_event import SessionEventModel
 
 __all__ = [
     "Base",
@@ -16,4 +17,5 @@ __all__ = [
     "SkillORM",
     "MemoryEntryORM",
     "LLMTokenUsageORM",
+    "SessionEventModel",
 ]

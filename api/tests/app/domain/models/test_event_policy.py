@@ -9,6 +9,7 @@ from app.domain.models.event import (
     PlanEventStatus,
 )
 from app.domain.models.event_policy import should_persist_event, is_user_timeline_event
+from app.domain.models.event_policy import should_project_event
 from app.domain.models.plan import Plan, Step
 
 
@@ -43,3 +44,14 @@ def test_plan_event_should_persist_but_not_timeline():
     )
     assert should_persist_event(event) is True
     assert is_user_timeline_event(event) is False
+
+
+def test_projection_allows_user_message_and_message_delta():
+    assert should_project_event(MessageEvent(role="assistant", message="hi")) is True
+    assert should_project_event(MessageDeltaEvent(stream_id="s1", delta="hi")) is True
+
+
+def test_projection_hides_debug_by_default_and_allows_when_requested():
+    event = DebugItemEvent(item_type="planner_output", payload={"title": "t"})
+    assert should_project_event(event) is False
+    assert should_project_event(event, include_debug=True) is True

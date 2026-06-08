@@ -1,35 +1,40 @@
-'use client'
+"use client";
 
-import { useEffect, useMemo, useState } from 'react'
-import { skillsApi } from '@/lib/api/skills'
-import type { Skill, SkillSummary } from '@/lib/api/types'
-import { InlineOptionPicker } from '@/components/inline-option-picker'
+import { useEffect, useMemo, useState } from "react";
+
+import { InlineOptionPicker } from "@/components/inline-option-picker";
+
+import { skillsApi } from "@/lib/api/skills";
+import type { Skill, SkillSummary } from "@/lib/api/types";
 
 type Props = {
-  value?: string | null
-  onChange: (skillId: string | undefined, skill?: SkillSummary | null) => void
-  disabled?: boolean
-  onSkillLoaded?: (skill: Skill | null) => void
-  className?: string
-}
+  value?: string | null;
+  onChange: (skillId: string | undefined, skill?: SkillSummary | null) => void;
+  disabled?: boolean;
+  onSkillLoaded?: (skill: Skill | null) => void;
+  className?: string;
+};
 
 export function SessionSkillPicker({ value, onChange, disabled, onSkillLoaded, className }: Props) {
-  const [skills, setSkills] = useState<Skill[]>([])
+  const [skills, setSkills] = useState<Skill[]>([]);
 
   useEffect(() => {
-    skillsApi.list(true).then((d) => setSkills(d.skills)).catch(() => {})
-  }, [])
+    skillsApi
+      .list(true)
+      .then((d) => setSkills(d.skills))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!value) {
-      onSkillLoaded?.(null)
-      return
+      onSkillLoaded?.(null);
+      return;
     }
-    const s = skills.find((sk) => sk.id === value)
+    const s = skills.find((sk) => sk.id === value);
     if (s) {
-      onSkillLoaded?.(s)
+      onSkillLoaded?.(s);
     }
-  }, [value, skills, onSkillLoaded])
+  }, [value, skills, onSkillLoaded]);
 
   const options = useMemo(
     () =>
@@ -38,24 +43,21 @@ export function SessionSkillPicker({ value, onChange, disabled, onSkillLoaded, c
         title: s.name,
         description: s.description || s.category,
         icon: <span className="text-base leading-none">{s.icon}</span>,
-        badge: s.is_builtin ? '内置' : undefined,
+        badge: s.is_builtin ? "内置" : undefined,
       })),
-    [skills]
-  )
+    [skills],
+  );
 
   const handleChange = (skillId: string | undefined) => {
     if (!skillId) {
-      onChange(undefined, null)
-      onSkillLoaded?.(null)
-      return
+      onChange(undefined, null);
+      onSkillLoaded?.(null);
+      return;
     }
-    const s = skills.find((sk) => sk.id === skillId)
-    onChange(
-      skillId,
-      s ? { id: s.id, name: s.name, icon: s.icon, examples: s.examples } : null
-    )
-    onSkillLoaded?.(s || null)
-  }
+    const s = skills.find((sk) => sk.id === skillId);
+    onChange(skillId, s ? { id: s.id, name: s.name, icon: s.icon, examples: s.examples } : null);
+    onSkillLoaded?.(s || null);
+  };
 
   return (
     <InlineOptionPicker
@@ -68,5 +70,5 @@ export function SessionSkillPicker({ value, onChange, disabled, onSkillLoaded, c
       clearValue="__none__"
       className={className}
     />
-  )
+  );
 }

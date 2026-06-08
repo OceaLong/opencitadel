@@ -1,10 +1,5 @@
-import { get, post, put, del } from "./fetch";
-import type {
-  MemoryEntry,
-  MemoryEntriesData,
-  MemoryScope,
-  SessionMemoryData,
-} from "./types";
+import { del, get, post, put } from "./fetch";
+import type { MemoryEntriesData, MemoryEntry, MemoryScope, SessionMemoryData } from "./types";
 
 export const memoryApi = {
   list: (params?: {
@@ -40,7 +35,7 @@ export const memoryApi = {
       tags: string[];
       scope: MemoryScope;
       session_id: string;
-    }>
+    }>,
   ): Promise<MemoryEntry> => put<MemoryEntry>(`/memories/${id}`, entry),
 
   delete: (id: string): Promise<void> => del<void>(`/memories/${id}`),
@@ -57,7 +52,6 @@ export const memoryApi = {
   deleteSessionMemoryMessage: (
     sessionId: string,
     agentName: string,
-    index: number
-  ): Promise<void> =>
-    del<void>(`/sessions/${sessionId}/memory/${agentName}/messages/${index}`),
+    index: number,
+  ): Promise<void> => del<void>(`/sessions/${sessionId}/memory/${agentName}/messages/${index}`),
 };

@@ -1,5 +1,5 @@
-import { get, post, put, del } from "./fetch";
-import type { LLMModel, LLMModelsData, CreateLLMModelParams, MultimodalProbeResult } from "./types";
+import { del, get, post, put } from "./fetch";
+import type { CreateLLMModelParams, LLMModel, LLMModelsData, MultimodalProbeResult } from "./types";
 
 export const modelsApi = {
   list: (): Promise<LLMModelsData> => get<LLMModelsData>("/llm-models"),

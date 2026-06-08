@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Protocol, List, Optional
+from typing import Protocol, List, Optional, Dict, Any, Tuple
 
 from app.domain.models.event import BaseEvent
 from app.domain.models.file import File
@@ -64,8 +64,34 @@ class SessionRepository(Protocol):
         """更新会话级模型、Skill与思考模式配置"""
         ...
 
-    async def add_event(self, session_id: str, event: BaseEvent) -> None:
+    async def add_event(
+            self,
+            session_id: str,
+            event: BaseEvent,
+            event_data: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """往会话中新增事件"""
+        ...
+
+    async def add_events(self, session_id: str, events: List[BaseEvent]) -> None:
+        """批量新增会话事件"""
+        ...
+
+    async def add_event_payloads(
+            self,
+            session_id: str,
+            payloads: List[Tuple[BaseEvent, Dict[str, Any]]],
+    ) -> None:
+        """批量新增已序列化的会话事件"""
+        ...
+
+    async def list_events(
+            self,
+            session_id: str,
+            after: Optional[int] = None,
+            limit: int = 100,
+    ) -> List[Tuple[int, BaseEvent]]:
+        """按游标分页查询会话事件"""
         ...
 
     async def add_file(self, session_id: str, file: File) -> None:

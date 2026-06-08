@@ -1,19 +1,30 @@
-'use client'
+"use client";
 
-import Link from 'next/link'
-import {LayoutGrid} from 'lucide-react'
-import {SidebarTrigger, useSidebar} from '@/components/ui/sidebar'
-import {ManusSettings} from '@/components/manus-settings'
-import {Button} from '@/components/ui/button'
+import Link from "next/link";
+import { LayoutGrid } from "lucide-react";
+import type { CSSProperties } from "react";
+
+import { ManusIcon } from "@/components/manus-icon";
+import { ManusSettings } from "@/components/manus-settings";
+import { Button } from "@/components/ui/button";
+import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
 export function ChatHeader() {
-  const {open, isMobile} = useSidebar()
+  const { open, isMobile } = useSidebar();
 
   return (
-    <header className="flex justify-between items-center w-full py-2 px-4 z-50">
+    <header className="z-50 flex w-full items-center justify-between px-4 py-2">
       <div className="flex items-center gap-2">
-        {(!open || isMobile) && <SidebarTrigger className="cursor-pointer"/>}
-        <div className="block bg-white w-[80px] h-9 rounded-md"/>
+        {(!open || isMobile) && <SidebarTrigger className="cursor-pointer" />}
+        <Link
+          href="/"
+          className="border-border/60 bg-card text-foreground hover:bg-muted/60 flex h-9 items-center gap-2 rounded-xl border px-3 shadow-[var(--shadow-card)] transition-colors"
+          style={{ "--logo-color": "currentColor" } as CSSProperties}
+          aria-label="返回首页"
+        >
+          <ManusIcon />
+          <span className="sr-only">MyManus</span>
+        </Link>
       </div>
       <div className="flex items-center gap-1">
         <Button variant="outline" size="icon-sm" asChild title="应用市场">
@@ -21,8 +32,8 @@ export function ChatHeader() {
             <LayoutGrid className="size-4" />
           </Link>
         </Button>
-        <ManusSettings/>
+        <ManusSettings />
       </div>
     </header>
-  )
+  );
 }

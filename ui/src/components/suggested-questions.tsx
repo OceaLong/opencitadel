@@ -1,31 +1,32 @@
-'use client'
+"use client";
 
-import {cn} from '@/lib/utils'
-import {Button} from '@/components/ui/button'
-import {suggestedQuestions} from '@/config/app.config'
+import { Button } from "@/components/ui/button";
 
-interface SuggestedQuestionsProps {
-  className?: string
-  onQuestionClick?: (question: string) => void
-}
+import { suggestedQuestions } from "@/config/app.config";
+import { cn } from "@/lib/utils";
 
-export function SuggestedQuestions({className, onQuestionClick}: SuggestedQuestionsProps) {
+type SuggestedQuestionsProps = {
+  className?: string;
+  onQuestionClick?: (question: string) => void;
+};
+
+export function SuggestedQuestions({ className, onQuestionClick }: SuggestedQuestionsProps) {
   const handleClick = (question: string) => {
-    onQuestionClick?.(question)
-  }
+    onQuestionClick?.(question);
+  };
 
   return (
-    <div className={cn('flex flex-wrap gap-2 sm:gap-3', className)}>
+    <div className={cn("flex flex-wrap gap-2 sm:gap-3", className)}>
       {suggestedQuestions.map((question, index) => (
         <Button
           key={index}
           variant="outline"
-          className="cursor-pointer text-xs sm:text-sm whitespace-normal break-words"
+          className="cursor-pointer text-xs break-words whitespace-normal sm:text-sm"
           onClick={() => handleClick(question)}
         >
           {question}
         </Button>
       ))}
     </div>
-  )
+  );
 }

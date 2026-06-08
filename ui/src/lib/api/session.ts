@@ -1,16 +1,17 @@
-import { get, post, patch, createSSEStream, parseSSEStream } from "./fetch";
+import { createSSEStream, get, parseSSEStream, patch, post } from "./fetch";
 import type {
+  ChatParams,
+  CreateSessionParams,
   Session,
   SessionDetail,
-  SessionsData,
-  CreateSessionParams,
-  ChatParams,
+  SessionEventsPage,
   SessionFile,
-  ViewFileParams,
-  ViewShellParams,
+  SessionsData,
   SSEEventData,
   SSEEventHandler,
   UpdateSessionConfigParams,
+  ViewFileParams,
+  ViewShellParams,
 } from "./types";
 
 /**
@@ -51,15 +52,19 @@ export const sessionApi = {
    */
   streamSessions: (
     onSessions: SessionsStreamCallback,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
   ): (() => void) => {
     const controller = new AbortController();
 
     const startStream = async () => {
       try {
-        const stream = await createSSEStream("/sessions/stream", {}, {
-          signal: controller.signal,
-        });
+        const stream = await createSSEStream(
+          "/sessions/stream",
+          {},
+          {
+            signal: controller.signal,
+          },
+        );
 
         await parseSSEStream(
           stream,
@@ -82,7 +87,7 @@ export const sessionApi = {
             if (!controller.signal.aborted && onError) {
               onError(error);
             }
-          }
+          },
         );
 
         // 流正常结束（服务端关闭连接），通知上层以便重连
@@ -91,9 +96,7 @@ export const sessionApi = {
         }
       } catch (error) {
         if (!controller.signal.aborted && onError) {
-          onError(
-            error instanceof Error ? error : new Error("SSE 连接失败")
-          );
+          onError(error instanceof Error ? error : new Error("SSE 连接失败"));
         }
       }
     };
@@ -121,9 +124,21 @@ export const sessionApi = {
     return get<SessionDetail>(`/sessions/${sessionId}`);
   },
 
+  getSessionEvents: (
+    sessionId: string,
+    params?: { after?: number | null; limit?: number; include_debug?: boolean },
+  ): Promise<SessionEventsPage> => {
+    const search = new URLSearchParams();
+    if (params?.after != null) search.set("after", String(params.after));
+    if (params?.limit != null) search.set("limit", String(params.limit));
+    if (params?.include_debug != null) search.set("include_debug", String(params.include_debug));
+    const suffix = search.toString() ? `?${search.toString()}` : "";
+    return get<SessionEventsPage>(`/sessions/${sessionId}/events${suffix}`);
+  },
+
   updateSessionConfig: (
     sessionId: string,
-    params: UpdateSessionConfigParams
+    params: UpdateSessionConfigParams,
   ): Promise<SessionDetail> => {
     return patch<SessionDetail>(`/sessions/${sessionId}`, params);
   },
@@ -140,33 +155,29 @@ export const sessionApi = {
     sessionId: string,
     params: ChatParams,
     onEvent: SSEEventHandler,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
   ): (() => void) => {
     const controller = new AbortController();
 
     const startStream = async () => {
       try {
-        const stream = await createSSEStream(
-          `/sessions/${sessionId}/chat`,
-          params,
-          { 
-            signal: controller.signal,
-            // 流式连接需要很长时间，设置为 5 分钟超时
-            timeout: 5 * 60 * 1000
-          }
-        );
-        
+        const stream = await createSSEStream(`/sessions/${sessionId}/chat`, params, {
+          signal: controller.signal,
+          // 流式连接需要很长时间，设置为 5 分钟超时
+          timeout: 5 * 60 * 1000,
+        });
+
         await parseSSEStream(
           stream,
           (messageEvent) => {
             if (controller.signal.aborted) return;
-            
+
             // messageEvent.data 已经在 parseSSEStream 中解析为对象
             const data =
               typeof messageEvent.data === "string"
                 ? JSON.parse(messageEvent.data)
                 : messageEvent.data;
-            
+
             onEvent({
               type: messageEvent.type as SSEEventData["type"],
               data,
@@ -176,7 +187,7 @@ export const sessionApi = {
             if (!controller.signal.aborted && onError) {
               onError(error);
             }
-          }
+          },
         );
 
         // 流正常结束（服务端关闭连接），通知上层以便重连或状态恢复
@@ -185,13 +196,11 @@ export const sessionApi = {
         }
       } catch (error) {
         // 忽略 AbortError，这是正常的连接中止
-        if (error instanceof Error && error.name === 'AbortError') {
+        if (error instanceof Error && error.name === "AbortError") {
           return;
         }
         if (!controller.signal.aborted && onError) {
-          onError(
-            error instanceof Error ? error : new Error("启动聊天流失败")
-          );
+          onError(error instanceof Error ? error : new Error("启动聊天流失败"));
         }
       }
     };
@@ -222,10 +231,7 @@ export const sessionApi = {
    * 清除未读消息数
    */
   clearUnreadMessageCount: (sessionId: string): Promise<void> => {
-    return post<void>(
-      `/sessions/${sessionId}/clear-unread-message-count`,
-      {}
-    );
+    return post<void>(`/sessions/${sessionId}/clear-unread-message-count`, {});
   },
 
   /**
@@ -240,12 +246,9 @@ export const sessionApi = {
    */
   viewFile: (
     sessionId: string,
-    params: ViewFileParams
+    params: ViewFileParams,
   ): Promise<{ content: string; [key: string]: unknown }> => {
-    return post<{ content: string; [key: string]: unknown }>(
-      `/sessions/${sessionId}/file`,
-      params
-    );
+    return post<{ content: string; [key: string]: unknown }>(`/sessions/${sessionId}/file`, params);
   },
 
   /**
@@ -253,12 +256,8 @@ export const sessionApi = {
    */
   viewShell: (
     sessionId: string,
-    params: ViewShellParams
+    params: ViewShellParams,
   ): Promise<{ output: string; [key: string]: unknown }> => {
-    return post<{ output: string; [key: string]: unknown }>(
-      `/sessions/${sessionId}/shell`,
-      params
-    );
+    return post<{ output: string; [key: string]: unknown }>(`/sessions/${sessionId}/shell`, params);
   },
 };
-

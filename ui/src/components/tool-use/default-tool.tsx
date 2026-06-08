@@ -1,13 +1,14 @@
-'use client'
+"use client";
 
-import { SquareChevronRight } from 'lucide-react'
-import { ToolBadge } from './tool-badge'
+import { SquareChevronRight } from "lucide-react";
 
-export interface DefaultToolProps {
-  label: string
-  onClick?: () => void
-}
+import { ToolBadge } from "./tool-badge";
+
+export type DefaultToolProps = {
+  label: string;
+  onClick?: () => void;
+};
 
 export function DefaultTool({ label, onClick }: DefaultToolProps) {
-  return <ToolBadge icon={SquareChevronRight} label={label} onClick={onClick} />
+  return <ToolBadge icon={SquareChevronRight} label={label} onClick={onClick} />;
 }

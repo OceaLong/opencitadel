@@ -1,12 +1,13 @@
-'use client'
+"use client";
 
-import { useEffect, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
-import { SessionDetailView } from '@/components/session-detail-view'
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
-interface PageProps {
-  params: Promise<{ id: string }>
-}
+import { SessionDetailView } from "@/components/session-detail-view";
+
+type PageProps = {
+  params: Promise<{ id: string }>;
+};
 
 /**
  * 任务详情页：展示会话标题、事件时间线、任务进度与输入框。
@@ -16,51 +17,50 @@ interface PageProps {
  * - 支持从 URL 参数读取初始消息（用于首页跳转场景）
  */
 export default function SessionDetailPage({ params }: PageProps) {
-  const searchParams = useSearchParams()
+  const searchParams = useSearchParams();
   const [sessionData, setSessionData] = useState<{
-    id: string
-    initialMessage?: string
-    initialAttachments?: string[]
-    hasInitialMessage: boolean
-  } | null>(null)
-  
+    id: string;
+    initialMessage?: string;
+    initialAttachments?: string[];
+    hasInitialMessage: boolean;
+  } | null>(null);
+
   useEffect(() => {
-    params.then(p => {
+    params.then((p) => {
       // 尝试从 URL 参数读取初始消息（Base64 编码）
-      const initParam = searchParams.get('init')
-      
+      const initParam = searchParams.get("init");
+
       if (initParam) {
         try {
           // 解码 Base64
-          const decoded = decodeURIComponent(atob(initParam))
-          const { message, attachments } = JSON.parse(decoded)
-          
+          const decoded = decodeURIComponent(atob(initParam));
+          const { message, attachments } = JSON.parse(decoded);
+
           // 一次性设置所有状态
           setSessionData({
             id: p.id,
             initialMessage: message,
             initialAttachments: attachments,
-            hasInitialMessage: true
-          })
-        } catch (e) {
-          console.error('Failed to parse init param:', e)
+            hasInitialMessage: true,
+          });
+        } catch {
           setSessionData({
             id: p.id,
-            hasInitialMessage: false
-          })
+            hasInitialMessage: false,
+          });
         }
       } else {
         // 没有初始消息
         setSessionData({
           id: p.id,
-          hasInitialMessage: false
-        })
+          hasInitialMessage: false,
+        });
       }
-    })
-  }, [params, searchParams])
+    });
+  }, [params, searchParams]);
 
   if (!sessionData) {
-    return <div className="flex items-center justify-center h-full">加载中...</div>
+    return <div className="flex h-full items-center justify-center">加载中...</div>;
   }
 
   return (
@@ -70,5 +70,5 @@ export default function SessionDetailPage({ params }: PageProps) {
       initialAttachments={sessionData.initialAttachments}
       hasInitialMessage={sessionData.hasInitialMessage}
     />
-  )
+  );
 }

@@ -1,13 +1,14 @@
-'use client'
+"use client";
 
-import { Wrench } from 'lucide-react'
-import { ToolBadge } from './tool-badge'
+import { Wrench } from "lucide-react";
 
-export interface McpToolProps {
-  label: string
-  onClick?: () => void
-}
+import { ToolBadge } from "./tool-badge";
+
+export type McpToolProps = {
+  label: string;
+  onClick?: () => void;
+};
 
 export function McpTool({ label, onClick }: McpToolProps) {
-  return <ToolBadge icon={Wrench} label={label} onClick={onClick} />
+  return <ToolBadge icon={Wrench} label={label} onClick={onClick} />;
 }

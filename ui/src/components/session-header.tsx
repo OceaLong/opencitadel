@@ -1,17 +1,20 @@
-'use client'
+"use client";
 
-import { useCallback, useEffect, useState } from 'react'
-import { SidebarTrigger, useSidebar } from '@/components/ui/sidebar'
-import { Button } from '@/components/ui/button'
-import { Coins, Download, FileSearchCorner, FileText } from 'lucide-react'
+import { useCallback, useEffect, useState } from "react";
+import { Coins, Download, FileSearchCorner, FileText } from "lucide-react";
+import { toast } from "sonner";
+
+import { SessionDebugSheet } from "@/components/session-debug-sheet";
+import { SessionMemorySheet } from "@/components/session-memory-sheet";
+import { Avatar, AvatarGroupCount } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@/components/ui/dialog'
-import { ScrollArea } from '@/components/ui/scroll-area'
+} from "@/components/ui/dialog";
 import {
   Item,
   ItemActions,
@@ -19,42 +22,41 @@ import {
   ItemDescription,
   ItemMedia,
   ItemTitle,
-} from '@/components/ui/item'
-import { Avatar, AvatarGroupCount } from '@/components/ui/avatar'
-import { formatFileSize } from '@/lib/utils'
-import { fileApi } from '@/lib/api'
-import { toast } from 'sonner'
-import type { SessionFile, TokenUsageSummary, SSEEventData } from '@/lib/api/types'
-import { sessionFileToAttachment } from '@/lib/session-events'
-import type { AttachmentFile } from '@/lib/session-events'
-import { SessionMemorySheet } from '@/components/session-memory-sheet'
-import { SessionDebugSheet } from '@/components/session-debug-sheet'
+} from "@/components/ui/item";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
-export interface SessionHeaderProps {
+import { fileApi } from "@/lib/api";
+import type { SessionFile, SSEEventData, TokenUsageSummary } from "@/lib/api/types";
+import type { AttachmentFile } from "@/lib/session-events";
+import { sessionFileToAttachment } from "@/lib/session-events";
+import { formatFileSize } from "@/lib/utils";
+
+export type SessionHeaderProps = {
   /** 任务/会话标题 */
-  title?: string
+  title?: string;
   /** 此任务下的文件列表（用于「此任务中所有文件」弹窗） */
-  files?: SessionFile[]
+  files?: SessionFile[];
   /** 受控：文件列表弹窗是否打开（用于从页面其他处打开，如「查看此任务中所有的文件」） */
-  fileListOpen?: boolean
+  fileListOpen?: boolean;
   /** 受控：文件列表弹窗打开状态变更 */
-  onFileListOpenChange?: (open: boolean) => void
+  onFileListOpenChange?: (open: boolean) => void;
   /** 当文件列表对话框打开时的回调，用于刷新文件列表 */
-  onFetchFiles?: () => void | Promise<void>
+  onFetchFiles?: () => void | Promise<void>;
   /** 点击文件时的预览回调 */
-  onFileClick?: (file: AttachmentFile) => void
+  onFileClick?: (file: AttachmentFile) => void;
   /** 会话 ID，用于记忆按钮 */
-  sessionId?: string
+  sessionId?: string;
   /** 记忆是否可编辑 */
-  memoryEditable?: boolean
+  memoryEditable?: boolean;
   /** 会话 token 用量汇总 */
-  tokenUsage?: TokenUsageSummary | null
+  tokenUsage?: TokenUsageSummary | null;
   /** 会话事件列表，用于调试面板 */
-  events?: SSEEventData[]
-}
+  events?: SSEEventData[];
+};
 
 export function SessionHeader({
-  title = '',
+  title = "",
   files,
   fileListOpen,
   onFileListOpenChange,
@@ -65,109 +67,116 @@ export function SessionHeader({
   tokenUsage,
   events = [],
 }: SessionHeaderProps) {
-  const { open, isMobile } = useSidebar()
-  const [mounted, setMounted] = useState(false)
-  const [internalOpen, setInternalOpen] = useState(false)
-  const isControlled = fileListOpen !== undefined
-  const openState = isControlled ? fileListOpen : internalOpen
-  const setOpenState = useCallback((v: boolean) => {
-    if (isControlled) {
-      onFileListOpenChange?.(v)
-    } else {
-      setInternalOpen(v)
-    }
-    // 当对话框打开时，触发文件列表刷新
-    if (v && onFetchFiles) {
-      onFetchFiles()
-    }
-  }, [isControlled, onFileListOpenChange, onFetchFiles])
+  const { open, isMobile } = useSidebar();
+  const [mounted, setMounted] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = fileListOpen !== undefined;
+  const openState = isControlled ? fileListOpen : internalOpen;
+  const setOpenState = useCallback(
+    (v: boolean) => {
+      if (isControlled) {
+        onFileListOpenChange?.(v);
+      } else {
+        setInternalOpen(v);
+      }
+      // 当对话框打开时，触发文件列表刷新
+      if (v && onFetchFiles) {
+        onFetchFiles();
+      }
+    },
+    [isControlled, onFileListOpenChange, onFetchFiles],
+  );
 
-  const fileList = Array.isArray(files) ? files : []
-  
+  const fileList = Array.isArray(files) ? files : [];
+
   // 对相同 filepath 的文件进行去重，保留最新的（数组中最后一个）
   const uniqueFileList = fileList.reduce((acc, file) => {
     // 使用 filepath 作为去重的 key，如果为空则使用 filename
-    const key = file.filepath || file.filename
-    const existingIndex = acc.findIndex(f => (f.filepath || f.filename) === key)
-    
+    const key = file.filepath || file.filename;
+    const existingIndex = acc.findIndex((f) => (f.filepath || f.filename) === key);
+
     if (existingIndex >= 0) {
       // 如果已存在，替换为当前文件（保留最新的）
-      acc[existingIndex] = file
+      acc[existingIndex] = file;
     } else {
       // 如果不存在，添加到结果中
-      acc.push(file)
+      acc.push(file);
     }
-    
-    return acc
-  }, [] as SessionFile[])
-  
-  const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
-  const handleDownload = useCallback(async (file: SessionFile, e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (downloadingId) return
-    setDownloadingId(file.id)
-    try {
-      const blob = await fileApi.downloadFile(file.id)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = file.filename || `file-${file.id}`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      toast.success(`已下载「${file.filename}」`)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '下载失败'
-      toast.error(`下载「${file.filename}」失败: ${msg}`)
-    } finally {
-      setDownloadingId(null)
-    }
-  }, [downloadingId])
+    return acc;
+  }, [] as SessionFile[]);
 
-  const handleFileItemClick = useCallback((file: SessionFile) => {
-    if (onFileClick) {
-      onFileClick(sessionFileToAttachment(file))
-      setOpenState(false)
-    }
-  }, [onFileClick, setOpenState])
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const handleDownload = useCallback(
+    async (file: SessionFile, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (downloadingId) return;
+      setDownloadingId(file.id);
+      try {
+        const blob = await fileApi.downloadFile(file.id);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file.filename || `file-${file.id}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast.success(`已下载「${file.filename}」`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "下载失败";
+        toast.error(`下载「${file.filename}」失败: ${msg}`);
+      } finally {
+        setDownloadingId(null);
+      }
+    },
+    [downloadingId],
+  );
+
+  const handleFileItemClick = useCallback(
+    (file: SessionFile) => {
+      if (onFileClick) {
+        onFileClick(sessionFileToAttachment(file));
+        setOpenState(false);
+      }
+    },
+    [onFileClick, setOpenState],
+  );
 
   useEffect(() => {
-    setMounted(true)
-  }, [])
+    setMounted(true);
+  }, []);
 
   return (
-    <header className="bg-[#f8f8f7] flex flex-row items-center justify-between pt-3 pb-2 gap-2 sticky top-0 z-10 flex-shrink-0">
-      {(!open || isMobile) && <SidebarTrigger className="cursor-pointer flex-shrink-0" />}
-      <div className="text-gray-700 text-lg whitespace-nowrap text-ellipsis overflow-hidden flex-1 min-w-0">
-        {title || '未命名任务'}
+    <header className="bg-background/95 sticky top-0 z-10 flex flex-shrink-0 flex-row items-center justify-between gap-2 pt-3 pb-2">
+      {(!open || isMobile) && <SidebarTrigger className="flex-shrink-0 cursor-pointer" />}
+      <div className="text-foreground min-w-0 flex-1 overflow-hidden text-lg font-medium text-ellipsis whitespace-nowrap">
+        {title || "未命名任务"}
       </div>
-      <div className="flex items-center gap-0.5 shrink-0">
+      <div className="flex shrink-0 items-center gap-0.5">
         {tokenUsage && tokenUsage.total_tokens > 0 && (
           <div
-            className="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600"
+            className="border-border/70 bg-card text-muted-foreground flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)]"
             title={`Prompt: ${tokenUsage.prompt_tokens.toLocaleString()} · Completion: ${tokenUsage.completion_tokens.toLocaleString()} · Calls: ${tokenUsage.call_count}`}
           >
             <Coins className="size-3.5 shrink-0 text-amber-600" />
             <span>{tokenUsage.total_tokens.toLocaleString()} tok</span>
             {tokenUsage.estimated_cost_usd > 0 && (
-              <span className="text-gray-400">· ${tokenUsage.estimated_cost_usd.toFixed(4)}</span>
+              <span className="text-muted-foreground/70">
+                · ${tokenUsage.estimated_cost_usd.toFixed(4)}
+              </span>
             )}
           </div>
         )}
         {sessionId && (
-          <SessionMemorySheet
-            sessionId={sessionId}
-            editable={memoryEditable}
-            compact
-          />
+          <SessionMemorySheet sessionId={sessionId} editable={memoryEditable} compact />
         )}
         <SessionDebugSheet events={events} compact />
         {mounted ? (
           <Dialog open={openState} onOpenChange={setOpenState}>
             <DialogTrigger asChild>
-              <Button variant="ghost" size="icon-sm" className="cursor-pointer flex-shrink-0">
+              <Button variant="ghost" size="icon-sm" className="flex-shrink-0 cursor-pointer">
                 <FileSearchCorner />
               </Button>
             </DialogTrigger>
@@ -178,13 +187,13 @@ export function SessionHeader({
               <ScrollArea className="h-[500px]">
                 <div className="flex flex-col gap-1">
                   {uniqueFileList.length === 0 ? (
-                    <p className="text-sm text-gray-500 py-4">暂无文件</p>
+                    <p className="text-muted-foreground py-4 text-sm">暂无文件</p>
                   ) : (
                     uniqueFileList.map((file) => (
                       <Item
                         key={file.id}
                         variant="default"
-                        className="p-2 flex-shrink-0 gap-2 cursor-pointer hover:bg-gray-100"
+                        className="hover:bg-muted/60 flex-shrink-0 cursor-pointer gap-2 p-2"
                         onClick={() => handleFileItemClick(file)}
                       >
                         <ItemMedia>
@@ -195,11 +204,9 @@ export function SessionHeader({
                           </Avatar>
                         </ItemMedia>
                         <ItemContent className="gap-0">
-                          <ItemTitle className="text-sm text-gray-700">
-                            {file.filename}
-                          </ItemTitle>
+                          <ItemTitle className="text-foreground text-sm">{file.filename}</ItemTitle>
                           <ItemDescription className="text-xs">
-                            {file.extension.replace(/^\./, '')} · {formatFileSize(file.size)}
+                            {file.extension.replace(/^\./, "")} · {formatFileSize(file.size)}
                           </ItemDescription>
                         </ItemContent>
                         <ItemActions>
@@ -219,14 +226,14 @@ export function SessionHeader({
                   )}
                 </div>
               </ScrollArea>
-          </DialogContent>
-        </Dialog>
+            </DialogContent>
+          </Dialog>
         ) : (
-          <Button variant="ghost" size="icon-sm" className="cursor-pointer flex-shrink-0">
+          <Button variant="ghost" size="icon-sm" className="flex-shrink-0 cursor-pointer">
             <FileSearchCorner />
           </Button>
         )}
       </div>
     </header>
-  )
+  );
 }

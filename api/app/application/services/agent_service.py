@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import logging
+import json
 from datetime import datetime
 from typing import AsyncGenerator, Optional, List, Type, Callable
 
@@ -19,6 +20,7 @@ from app.domain.external.search import SearchEngine
 from app.domain.external.task import Task
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
 from app.domain.models.event import BaseEvent, ErrorEvent, MessageEvent, Event, DoneEvent, WaitEvent
+from app.domain.models.event_upgrader import upgrade_event_payload
 from app.domain.models.session import Session, SessionStatus
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
@@ -101,19 +103,19 @@ class AgentService:
     ) -> AsyncGenerator[BaseEvent, None]:
         output_stream = RedisStreamMessageQueue(f"task:output:{task_id}")
         cursor = latest_event_id or "0"
+        await self._safe_update_unread_count(session_id)
 
         while True:
             if await self._task_state.is_cancelled(task_id):
                 yield DoneEvent()
                 break
 
-            event_id, event_str = await output_stream.get(start_id=cursor, block_ms=500)
+            event_id, event_str = await output_stream.get(start_id=cursor, block_ms=100)
             if event_str is not None:
                 cursor = event_id
-                event = TypeAdapter(Event).validate_json(event_str)
+                event_payload = json.loads(event_str)
+                event = TypeAdapter(Event).validate_python(upgrade_event_payload(event_payload))
                 event.id = event_id
-                async with self._uow:
-                    await self._uow.session.update_unread_message_count(session_id, 0)
                 yield event
                 if isinstance(event, (DoneEvent, ErrorEvent, WaitEvent)):
                     return

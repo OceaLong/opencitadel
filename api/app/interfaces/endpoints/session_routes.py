@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, Dict, AsyncGenerator
 
 import websockets
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Depends, Body, Query
 from sse_starlette import EventSourceResponse, ServerSentEvent
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets import ConnectionClosed
@@ -32,6 +32,7 @@ from app.interfaces.schemas.session import (
     GetSessionTokenUsageResponse,
     TokenUsageSummaryResponse,
     TokenUsageRecordResponse,
+    GetSessionEventsResponse,
 )
 from app.interfaces.schemas.llm_model import LLMModelResponse
 from app.interfaces.schemas.skill import SkillSummaryResponse
@@ -50,6 +51,8 @@ from app.application.services.llm_model_service import LLMModelService
 from app.application.services.skill_service import SkillService
 from app.application.services.memory_service import MemoryService
 from app.domain.models.session import Session
+from app.domain.models.event import BaseEvent
+from app.domain.models.event_policy import should_project_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sessions", tags=["会话模块"])
@@ -60,6 +63,9 @@ async def build_get_session_response(
         llm_model_service: LLMModelService,
         skill_service: SkillService,
         token_usage_service: Optional[LLMTokenUsageService] = None,
+        include_debug: bool = False,
+        event_records: Optional[list[tuple[int, BaseEvent]]] = None,
+        event_limit: int = 100,
 ) -> GetSessionResponse:
     """组装会话详情响应，避免在路由间直接调用 endpoint 函数"""
     model_resp = None
@@ -104,11 +110,19 @@ async def build_get_session_response(
         except Exception as exc:
             logger.debug("获取会话 token 汇总失败: %s", exc)
 
+    if event_records is None:
+        events = session.events
+        events_next_cursor = None
+    else:
+        events = [event for _, event in event_records]
+        events_next_cursor = event_records[-1][0] if len(event_records) == event_limit else None
+
     return GetSessionResponse(
         session_id=session.id,
         title=session.title,
         status=session.status,
-        events=EventMapper.events_to_sse_events(session.events),
+        events=EventMapper.events_to_sse_events(events, include_debug=include_debug),
+        events_next_cursor=events_next_cursor,
         model_id=session.model_id,
         skill_id=session.skill_id,
         thinking_enabled=session.thinking_enabled,
@@ -251,6 +265,7 @@ async def delete_session(
 async def chat(
         session_id: str,
         request: ChatRequest,
+        include_debug: bool = Query(default=False),
         agent_service: AgentService = Depends(get_agent_service),
         session_service: SessionService = Depends(get_session_service),
 ) -> EventSourceResponse:
@@ -272,6 +287,8 @@ async def chat(
                 skill_id=request.skill_id,
                 thinking_enabled=request.thinking_enabled,
         ):
+            if not should_project_event(event, include_transient=True, include_debug=include_debug):
+                continue
             # 2.将Agent事件转换为sse数据(因为普通的event没法通过流式事件传输)
             sse_event = EventMapper.event_to_sse_event(event)
             if sse_event:
@@ -284,6 +301,34 @@ async def chat(
 
 
 @router.get(
+    path="/{session_id}/events",
+    response_model=Response[GetSessionEventsResponse],
+    summary="分页获取指定会话事件",
+    description="根据游标分页获取指定会话的持久化事件",
+)
+async def get_session_events(
+        session_id: str,
+        after: Optional[int] = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=500),
+        include_debug: bool = Query(default=False),
+        session_service: SessionService = Depends(get_session_service),
+) -> Response[GetSessionEventsResponse]:
+    records = await session_service.get_session_events(session_id, after=after, limit=limit)
+    projected = [
+        event
+        for _, event in records
+        if should_project_event(event, include_transient=False, include_debug=include_debug)
+    ]
+    return Response.success(
+        msg="分页获取会话事件成功",
+        data=GetSessionEventsResponse(
+            events=EventMapper.events_to_sse_events(projected, include_debug=include_debug),
+            next_cursor=records[-1][0] if len(records) == limit else None,
+        ),
+    )
+
+
+@router.get(
     path="/{session_id}",
     response_model=Response[GetSessionResponse],
     summary="获取指定会话详情信息",
@@ -291,6 +336,8 @@ async def chat(
 )
 async def get_session(
         session_id: str,
+        include_debug: bool = Query(default=False),
+        events_limit: int = Query(default=100, ge=1, le=500),
         session_service: SessionService = Depends(get_session_service),
         llm_model_service: LLMModelService = Depends(get_llm_model_service),
         skill_service: SkillService = Depends(get_skill_service),
@@ -300,10 +347,17 @@ async def get_session(
     session = await session_service.get_session(session_id)
     if not session:
         raise NotFoundError("该会话不存在，请核实后重试")
+    event_records = await session_service.get_session_events(session_id, limit=events_limit)
     return Response.success(
         msg="获取会话详情成功",
         data=await build_get_session_response(
-            session, llm_model_service, skill_service, token_usage_service,
+            session,
+            llm_model_service,
+            skill_service,
+            token_usage_service,
+            include_debug=include_debug,
+            event_records=event_records,
+            event_limit=events_limit,
         ),
     )
 
@@ -369,6 +423,8 @@ async def get_session_token_usage(
 async def patch_session(
         session_id: str,
         request: UpdateSessionConfigRequest,
+        include_debug: bool = Query(default=False),
+        events_limit: int = Query(default=100, ge=1, le=500),
         session_service: SessionService = Depends(get_session_service),
         llm_model_service: LLMModelService = Depends(get_llm_model_service),
         skill_service: SkillService = Depends(get_skill_service),
@@ -383,10 +439,17 @@ async def patch_session(
     session = await session_service.get_session(session_id)
     if not session:
         raise NotFoundError("该会话不存在，请核实后重试")
+    event_records = await session_service.get_session_events(session_id, limit=events_limit)
     return Response.success(
         msg="更新会话配置成功",
         data=await build_get_session_response(
-            session, llm_model_service, skill_service, token_usage_service,
+            session,
+            llm_model_service,
+            skill_service,
+            token_usage_service,
+            include_debug=include_debug,
+            event_records=event_records,
+            event_limit=events_limit,
         ),
     )
 

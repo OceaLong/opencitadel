@@ -1,13 +1,14 @@
-'use client'
+"use client";
 
-import { Search } from 'lucide-react'
-import { ToolBadge } from './tool-badge'
+import { Search } from "lucide-react";
 
-export interface SearchToolProps {
-  label: string
-  onClick?: () => void
-}
+import { ToolBadge } from "./tool-badge";
+
+export type SearchToolProps = {
+  label: string;
+  onClick?: () => void;
+};
 
 export function SearchTool({ label, onClick }: SearchToolProps) {
-  return <ToolBadge icon={Search} label={label} onClick={onClick} />
+  return <ToolBadge icon={Search} label={label} onClick={onClick} />;
 }

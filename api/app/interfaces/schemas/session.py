@@ -93,12 +93,19 @@ class GetSessionResponse(BaseModel):
     title: Optional[str] = None
     status: SessionStatus
     events: List[AgentSSEEvent] = Field(default_factory=list)
+    events_next_cursor: Optional[int] = None
     model_id: Optional[str] = None
     skill_id: Optional[str] = None
     thinking_enabled: bool = False
     model: Optional[LLMModelResponse] = None
     skill: Optional[SkillSummaryResponse] = None
     token_usage: Optional[TokenUsageSummaryResponse] = None
+
+
+class GetSessionEventsResponse(BaseModel):
+    """分页获取会话事件响应结构"""
+    events: List[AgentSSEEvent] = Field(default_factory=list)
+    next_cursor: Optional[int] = None
 
 
 class GetSessionFilesResponse(BaseModel):

@@ -7,27 +7,34 @@
  */
 
 import type {
+  ChatMessage,
+  DebugItemEvent,
+  EventMeta,
+  EventVisibility,
+  PlanEvent,
+  PlanStep,
+  SessionFile,
   SSEEventData,
   SSEEventType,
-  ChatMessage,
-  PlanStep,
-  PlanEvent,
   StepEvent,
   ToolEvent,
-  SessionFile,
-  EventVisibility,
-  DebugItemEvent,
 } from "@/lib/api/types";
 
-const TRANSIENT_EVENT_TYPES = new Set([
-  "message_delta",
-  "reasoning_delta",
-  "tool_args_delta",
-]);
+const TRANSIENT_EVENT_TYPES = new Set(["message_delta", "reasoning_delta", "tool_args_delta"]);
 
 function getEventVisibility(ev: SSEEventData): EventVisibility {
   const visibility = (ev.data as { visibility?: EventVisibility })?.visibility;
   return visibility ?? (TRANSIENT_EVENT_TYPES.has(ev.type) ? "internal" : "user");
+}
+
+function syntheticDebugMeta(): EventMeta {
+  return {
+    schema_version: 2,
+    visibility: "debug",
+    channel: "debug",
+    persist: false,
+    created_at: Math.floor(Date.now() / 1000),
+  };
 }
 
 /** 判断 assistant 文本是否像 planner 结构化 JSON（历史数据兼容） */
@@ -69,6 +76,7 @@ export function extractDebugItems(events: SSEEventData[]): DebugItemEvent[] {
   for (const [streamId, content] of reasoningStreams) {
     if (content.trim()) {
       items.push({
+        ...syntheticDebugMeta(),
         item_type: "reasoning_summary",
         payload: { stream_id: streamId, content },
       });
@@ -77,6 +85,7 @@ export function extractDebugItems(events: SSEEventData[]): DebugItemEvent[] {
   for (const [toolCallId, content] of toolArgStreams) {
     if (content.trim()) {
       items.push({
+        ...syntheticDebugMeta(),
         item_type: "tool_args",
         payload: { tool_call_id: toolCallId, content },
       });
@@ -140,9 +149,13 @@ export function sessionFileToAttachment(f: SessionFile): AttachmentFile {
 }
 
 /** 从 ChatMessage.attachments 项转为 AttachmentFile（无 size 时用 0） */
-export function chatAttachmentToDisplay(
-  a: { file_id?: string; id?: string; filename: string; size?: number; [key: string]: unknown }
-): AttachmentFile {
+export function chatAttachmentToDisplay(a: {
+  file_id?: string;
+  id?: string;
+  filename: string;
+  size?: number;
+  [key: string]: unknown;
+}): AttachmentFile {
   const ext = (a.filename || "").split(".").pop() || "";
   return {
     id: a.file_id || a.id || "",
@@ -161,12 +174,12 @@ function formatTimeLabel(ts: number | string | undefined): string | undefined {
   if (ts === undefined || ts === null) return undefined;
   let t = typeof ts === "string" ? parseInt(ts, 10) : ts;
   if (Number.isNaN(t)) return undefined;
-  
+
   // 后端返回的是秒级时间戳（10位数），需要转为毫秒级（13位数）
   if (t < 10000000000) {
     t = t * 1000;
   }
-  
+
   const now = Date.now();
   const diff = now - t;
   if (diff < 0) return "刚刚";
@@ -180,9 +193,10 @@ function formatTimeLabel(ts: number | string | undefined): string | undefined {
 }
 
 export function getToolTimeLabel(tool: ToolEvent): string | undefined {
-  const ts = (tool as { timestamp?: number; created_at?: number; ts?: number }).timestamp
-    ?? (tool as { created_at?: number }).created_at
-    ?? (tool as { ts?: number }).ts;
+  const ts =
+    (tool as { timestamp?: number; created_at?: number; ts?: number }).timestamp ??
+    (tool as { created_at?: number }).created_at ??
+    (tool as { ts?: number }).ts;
   return formatTimeLabel(ts);
 }
 
@@ -279,7 +293,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
       }
       case "step": {
         const step = ev.data as StepEvent;
-        
+
         // 判断是更新现有 step 还是创建新 step
         // 关键：只有当 lastStepId === step.id 时才是同一个 step 的状态更新
         if (lastStepId !== null && lastStepId === step.id) {
@@ -293,15 +307,15 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
               break;
             }
           }
-          
+
           if (existingIdx >= 0) {
             const existing = list[existingIdx];
             if (existing.kind === "step") {
-              list[existingIdx] = { 
-                kind: "step", 
-                id: existing.id, 
-                data: step, 
-                tools: existing.tools // 保留已有的 tools
+              list[existingIdx] = {
+                kind: "step",
+                id: existing.id,
+                data: step,
+                tools: existing.tools, // 保留已有的 tools
               };
             }
           }
@@ -314,16 +328,16 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
             tools: [], // 初始为空，tools 会在后续添加
           });
         }
-        
+
         // 更新 lastStepId 跟踪
         // 只要 step 不是 completed/failed 状态，就保持跟踪
-        if (step.status === 'completed' || step.status === 'failed') {
+        if (step.status === "completed" || step.status === "failed") {
           lastStepId = null;
         } else {
           // running, pending 等其他状态都设置 lastStepId
           lastStepId = step.id;
         }
-        
+
         break;
       }
       case "tool": {
@@ -341,14 +355,14 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
               break;
             }
           }
-          
+
           if (stepIdx >= 0) {
             const step = list[stepIdx];
             if (step.kind === "step") {
               if (toolCallId != null) {
                 // 检查是否已存在相同 tool_call_id 的工具（更新场景）
                 const existingToolIdx = step.tools.findIndex(
-                  (t) => (t as { tool_call_id?: string }).tool_call_id === toolCallId
+                  (t) => (t as { tool_call_id?: string }).tool_call_id === toolCallId,
                 );
                 if (existingToolIdx >= 0) {
                   // 更新现有工具
@@ -392,7 +406,12 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
         break;
       case "error": {
         // 处理错误事件
-        const errorData = ev.data as { error?: string; created_at?: number; event_id?: string; [key: string]: unknown };
+        const errorData = ev.data as {
+          error?: string;
+          created_at?: number;
+          event_id?: string;
+          [key: string]: unknown;
+        };
         if (errorData.error) {
           list.push({
             kind: "error",

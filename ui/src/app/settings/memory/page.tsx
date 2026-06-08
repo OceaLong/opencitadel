@@ -1,7 +1,7 @@
-'use client'
+"use client";
 
-import { MemorySettings } from '@/components/settings/memory-settings'
+import { MemorySettings } from "@/components/settings/memory-settings";
 
 export default function MemorySettingsPage() {
-  return <MemorySettings />
+  return <MemorySettings />;
 }

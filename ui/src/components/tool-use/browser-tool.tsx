@@ -1,13 +1,14 @@
-'use client'
+"use client";
 
-import { Globe } from 'lucide-react'
-import { ToolBadge } from './tool-badge'
+import { Globe } from "lucide-react";
 
-export interface BrowserToolProps {
-  label: string
-  onClick?: () => void
-}
+import { ToolBadge } from "./tool-badge";
+
+export type BrowserToolProps = {
+  label: string;
+  onClick?: () => void;
+};
 
 export function BrowserTool({ label, onClick }: BrowserToolProps) {
-  return <ToolBadge icon={Globe} label={label} onClick={onClick} />
+  return <ToolBadge icon={Globe} label={label} onClick={onClick} />;
 }

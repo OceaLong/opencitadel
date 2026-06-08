@@ -1,11 +1,24 @@
-'use client'
+"use client";
 
-import {useCallback, useEffect, useRef, useState} from 'react'
-import {toast} from 'sonner'
-import {Brain, Cpu, LayoutGrid, LayoutList, Loader2, Settings, Sparkles, Trash, Wrench} from 'lucide-react'
-import {ModelsSettings} from '@/components/settings/models-settings'
-import {SkillsSettings} from '@/components/settings/skills-settings'
-import {MemorySettings} from '@/components/settings/memory-settings'
+import { useEffect, useState } from "react";
+import {
+  Brain,
+  Cpu,
+  LayoutGrid,
+  LayoutList,
+  Loader2,
+  Settings,
+  Sparkles,
+  Trash,
+  Wrench,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { MemorySettings } from "@/components/settings/memory-settings";
+import { ModelsSettings } from "@/components/settings/models-settings";
+import { SkillsSettings } from "@/components/settings/skills-settings";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogClose,
@@ -15,36 +28,42 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@/components/ui/dialog'
-import {Button} from '@/components/ui/button'
-import {Separator} from '@/components/ui/separator'
-import {Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet} from '@/components/ui/field'
-import {Input} from '@/components/ui/input'
-import {Item, ItemContent, ItemDescription, ItemGroup, ItemTitle} from '@/components/ui/item'
-import {Badge} from '@/components/ui/badge'
-import {Switch} from '@/components/ui/switch'
-import {Textarea} from '@/components/ui/textarea'
-import {configApi} from '@/lib/api'
-import type {AgentConfig, ListMCPServerItem, ListA2AServerItem} from '@/lib/api'
+} from "@/components/ui/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+
+import { type SettingTab, useManusSettings } from "@/hooks/use-manus-settings";
+import type { AgentConfig, ListA2AServerItem, ListMCPServerItem } from "@/lib/api";
 
 // ==================== 通用配置 ====================
 
 type CommonSettingProps = {
-  config: AgentConfig
-  onChange: (config: AgentConfig) => void
-}
+  config: AgentConfig;
+  onChange: (config: AgentConfig) => void;
+};
 
-function CommonSetting({config, onChange}: CommonSettingProps) {
+function CommonSetting({ config, onChange }: CommonSettingProps) {
   const handleChange = (field: keyof AgentConfig, value: string) => {
-    const numValue = value === '' ? undefined : Number(value)
-    onChange({...config, [field]: numValue})
-  }
+    const numValue = value === "" ? undefined : Number(value);
+    onChange({ ...config, [field]: numValue });
+  };
 
   return (
     <form className="w-full px-1" onSubmit={(e) => e.preventDefault()}>
       <FieldGroup>
         <FieldSet>
-          <FieldLegend className="text-lg font-bold text-gray-700">通用配置</FieldLegend>
+          <FieldLegend className="text-foreground text-lg font-semibold">通用配置</FieldLegend>
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="max_iterations">最大计划迭代次数</FieldLabel>
@@ -53,7 +72,7 @@ function CommonSetting({config, onChange}: CommonSettingProps) {
                 type="number"
                 placeholder="Agent最大迭代次数"
                 value={config.max_iterations ?? 100}
-                onChange={(e) => handleChange('max_iterations', e.target.value)}
+                onChange={(e) => handleChange("max_iterations", e.target.value)}
                 min={0}
                 max={200}
               />
@@ -68,13 +87,11 @@ function CommonSetting({config, onChange}: CommonSettingProps) {
                 type="number"
                 placeholder="LLM/Tool最大重试次数"
                 value={config.max_retries ?? 3}
-                onChange={(e) => handleChange('max_retries', e.target.value)}
+                onChange={(e) => handleChange("max_retries", e.target.value)}
                 min={0}
                 max={10}
               />
-              <FieldDescription className="text-xs">
-                默认情况下，最大重试次数为3
-              </FieldDescription>
+              <FieldDescription className="text-xs">默认情况下，最大重试次数为3</FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="max_search_results">最大搜索结果</FieldLabel>
@@ -83,7 +100,7 @@ function CommonSetting({config, onChange}: CommonSettingProps) {
                 type="number"
                 placeholder="搜索工具返回的最大结果数"
                 value={config.max_search_results ?? 10}
-                onChange={(e) => handleChange('max_search_results', e.target.value)}
+                onChange={(e) => handleChange("max_search_results", e.target.value)}
                 min={0}
                 max={30}
               />
@@ -95,65 +112,67 @@ function CommonSetting({config, onChange}: CommonSettingProps) {
         </FieldSet>
       </FieldGroup>
     </form>
-  )
+  );
 }
 
 // ==================== A2A Agent 配置 ====================
 
 type A2ASettingProps = {
-  servers: ListA2AServerItem[]
-  loading: boolean
-  onToggleEnabled: (id: string, enabled: boolean) => void
-  onDelete: (id: string) => void
-  onAdd: (baseUrl: string) => Promise<boolean>
-}
+  servers: ListA2AServerItem[];
+  loading: boolean;
+  onToggleEnabled: (id: string, enabled: boolean) => void;
+  onDelete: (id: string) => void;
+  onAdd: (baseUrl: string) => Promise<boolean>;
+};
 
-function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd}: A2ASettingProps) {
-  const [addDialogOpen, setAddDialogOpen] = useState(false)
-  const [addUrl, setAddUrl] = useState('')
-  const [adding, setAdding] = useState(false)
+function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: A2ASettingProps) {
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addUrl, setAddUrl] = useState("");
+  const [adding, setAdding] = useState(false);
 
   const handleAdd = async () => {
     if (!addUrl.trim()) {
-      toast.error('请输入远程 Agent 地址')
-      return
+      toast.error("请输入远程 Agent 地址");
+      return;
     }
-    setAdding(true)
+    setAdding(true);
     try {
-      const success = await onAdd(addUrl.trim())
+      const success = await onAdd(addUrl.trim());
       if (success) {
-        setAddUrl('')
-        setAddDialogOpen(false)
+        setAddUrl("");
+        setAddDialogOpen(false);
       }
     } finally {
-      setAdding(false)
+      setAdding(false);
     }
-  }
+  };
 
   return (
     <div className="w-full px-1">
       <FieldGroup>
         <FieldSet>
-          <FieldLegend className="w-full flex justify-between items-center text-lg font-bold text-gray-700">
+          <FieldLegend className="text-foreground flex w-full items-center justify-between text-lg font-semibold">
             A2A Agent 配置
             <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
               <DialogTrigger asChild>
-                <Button type="button" size="xs" className="cursor-pointer">添加远程Agent</Button>
+                <Button type="button" size="xs" className="cursor-pointer">
+                  添加远程Agent
+                </Button>
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle className="text-gray-700">添加远程Agent</DialogTitle>
-                  <DialogDescription className="text-gray-500">
+                  <DialogTitle className="text-foreground">添加远程Agent</DialogTitle>
+                  <DialogDescription className="text-muted-foreground">
                     MyManus 使用标准的 A2A 协议来连接远程 Agent。
-                    <br/>
-                    请将您的配置粘贴到下方，然后点击"添加"即可添加 Agent。
+                    <br />
+                    请将您的配置粘贴到下方，然后点击&ldquo;添加&rdquo;即可添加 Agent。
                   </DialogDescription>
                 </DialogHeader>
                 <form
                   className="w-full"
                   onSubmit={(e) => {
-                    e.preventDefault()
-                    handleAdd()
+                    e.preventDefault();
+                    handleAdd();
                   }}
                 >
                   <FieldGroup>
@@ -173,10 +192,12 @@ function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd}: A2ASet
                 </form>
                 <DialogFooter>
                   <DialogClose asChild>
-                    <Button variant="outline" className="cursor-pointer" disabled={adding}>取消</Button>
+                    <Button variant="outline" className="cursor-pointer" disabled={adding}>
+                      取消
+                    </Button>
                   </DialogClose>
                   <Button className="cursor-pointer" onClick={handleAdd} disabled={adding}>
-                    {adding && <Loader2 className="animate-spin"/>}
+                    {adding && <Loader2 className="animate-spin" />}
                     添加
                   </Button>
                 </DialogFooter>
@@ -184,19 +205,20 @@ function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd}: A2ASet
             </Dialog>
           </FieldLegend>
           <FieldDescription className="text-sm">
-            模型上下文协议 (MCP) 通过集成外部工具来增强 MyManus 的性能，例如私有域搜索、网页浏览、订餐、PPT 生成等任务。
+            模型上下文协议 (MCP) 通过集成外部工具来增强 MyManus
+            的性能，例如私有域搜索、网页浏览、订餐、PPT 生成等任务。
           </FieldDescription>
 
           {/* 加载态 */}
           {loading && (
             <div className="flex justify-center py-8">
-              <Loader2 className="size-6 animate-spin text-muted-foreground"/>
+              <Loader2 className="text-muted-foreground size-6 animate-spin" />
             </div>
           )}
 
           {/* 空态 */}
           {!loading && servers.length === 0 && (
-            <div className="py-8 text-center text-sm text-muted-foreground">
+            <div className="text-muted-foreground py-8 text-center text-sm">
               暂无 A2A Agent，请点击上方按钮添加
             </div>
           )}
@@ -207,8 +229,8 @@ function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd}: A2ASet
               {servers.map((server) => (
                 <Item key={server.id} variant="outline">
                   <ItemContent>
-                    <ItemTitle className="w-full flex justify-between items-center text-md font-bold text-gray-700">
-                      <div className="flex gap-2 items-center">
+                    <ItemTitle className="text-md text-foreground flex w-full items-center justify-between font-semibold">
+                      <div className="flex items-center gap-2">
                         {server.name}
                         {!server.enabled && <Badge>禁用</Badge>}
                       </div>
@@ -220,7 +242,7 @@ function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd}: A2ASet
                           className="cursor-pointer"
                           onClick={() => onDelete(server.id)}
                         >
-                          <Trash/>
+                          <Trash />
                         </Button>
                         <Switch
                           checked={server.enabled}
@@ -228,28 +250,44 @@ function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd}: A2ASet
                         />
                       </div>
                     </ItemTitle>
-                    {server.description && (
-                      <ItemDescription>{server.description}</ItemDescription>
-                    )}
+                    {server.description && <ItemDescription>{server.description}</ItemDescription>}
                     <ItemDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <LayoutList size={12}/>
+                      <LayoutList size={12} />
                       {server.input_modes?.map((mode) => (
-                        <Badge key={`in-${mode}`} variant="secondary" className="text-gray-500">
+                        <Badge
+                          key={`in-${mode}`}
+                          variant="secondary"
+                          className="text-muted-foreground"
+                        >
                           输入: {mode}
                         </Badge>
                       ))}
                       {server.output_modes?.map((mode) => (
-                        <Badge key={`out-${mode}`} variant="secondary" className="text-gray-500">
+                        <Badge
+                          key={`out-${mode}`}
+                          variant="secondary"
+                          className="text-muted-foreground"
+                        >
                           输出: {mode}
                         </Badge>
                       ))}
-                      <Badge variant={server.streaming ? 'secondary' : 'outline'}
-                             className={server.streaming ? 'text-gray-500' : 'text-gray-400'}>
-                        流式输出: {server.streaming ? '开启' : '关闭'}
+                      <Badge
+                        variant={server.streaming ? "secondary" : "outline"}
+                        className={
+                          server.streaming ? "text-muted-foreground" : "text-muted-foreground/70"
+                        }
+                      >
+                        流式输出: {server.streaming ? "开启" : "关闭"}
                       </Badge>
-                      <Badge variant={server.push_notifications ? 'secondary' : 'outline'}
-                             className={server.push_notifications ? 'text-gray-500' : 'text-gray-400'}>
-                        推送通知: {server.push_notifications ? '开启' : '关闭'}
+                      <Badge
+                        variant={server.push_notifications ? "secondary" : "outline"}
+                        className={
+                          server.push_notifications
+                            ? "text-muted-foreground"
+                            : "text-muted-foreground/70"
+                        }
+                      >
+                        推送通知: {server.push_notifications ? "开启" : "关闭"}
                       </Badge>
                     </ItemDescription>
                   </ItemContent>
@@ -260,23 +298,23 @@ function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd}: A2ASet
         </FieldSet>
       </FieldGroup>
     </div>
-  )
+  );
 }
 
 // ==================== MCP 服务器 ====================
 
 type MCPSettingProps = {
-  servers: ListMCPServerItem[]
-  loading: boolean
-  onToggleEnabled: (serverName: string, enabled: boolean) => void
-  onDelete: (serverName: string) => void
-  onAdd: (config: string) => Promise<boolean>
-}
+  servers: ListMCPServerItem[];
+  loading: boolean;
+  onToggleEnabled: (serverName: string, enabled: boolean) => void;
+  onDelete: (serverName: string) => void;
+  onAdd: (config: string) => Promise<boolean>;
+};
 
-function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}: MCPSettingProps) {
-  const [addDialogOpen, setAddDialogOpen] = useState(false)
-  const [addConfig, setAddConfig] = useState('')
-  const [adding, setAdding] = useState(false)
+function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: MCPSettingProps) {
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addConfig, setAddConfig] = useState("");
+  const [adding, setAdding] = useState(false);
 
   const mcpConfigPlaceholder = `{
   "mcpServers": {
@@ -291,48 +329,50 @@ function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}: MCPSet
       }
     }
   }
-}`
+}`;
 
   const handleAdd = async () => {
     if (!addConfig.trim()) {
-      toast.error('请输入 MCP 服务器配置')
-      return
+      toast.error("请输入 MCP 服务器配置");
+      return;
     }
-    setAdding(true)
+    setAdding(true);
     try {
-      const success = await onAdd(addConfig.trim())
+      const success = await onAdd(addConfig.trim());
       if (success) {
-        setAddConfig('')
-        setAddDialogOpen(false)
+        setAddConfig("");
+        setAddDialogOpen(false);
       }
     } finally {
-      setAdding(false)
+      setAdding(false);
     }
-  }
+  };
 
   return (
     <div className="w-full px-1">
       <FieldGroup>
         <FieldSet>
-          <FieldLegend className="w-full flex justify-between items-center text-lg font-bold text-gray-700">
+          <FieldLegend className="text-foreground flex w-full items-center justify-between text-lg font-semibold">
             MCP 服务器
             <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
               <DialogTrigger asChild>
-                <Button type="button" size="xs" className="cursor-pointer">添加服务器</Button>
+                <Button type="button" size="xs" className="cursor-pointer">
+                  添加服务器
+                </Button>
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle className="text-gray-700">添加新的 MCP 服务器</DialogTitle>
-                  <DialogDescription className="text-gray-500">
+                  <DialogTitle className="text-foreground">添加新的 MCP 服务器</DialogTitle>
+                  <DialogDescription className="text-muted-foreground">
                     MyManus 使用标准的 JSON MCP 配置来创建新服务器。
-                    请将您的配置粘贴到下方，然后点击"添加"即可添加新服务器。
+                    请将您的配置粘贴到下方，然后点击&ldquo;添加&rdquo;即可添加新服务器。
                   </DialogDescription>
                 </DialogHeader>
                 <form
                   className="w-full"
                   onSubmit={(e) => {
-                    e.preventDefault()
-                    handleAdd()
+                    e.preventDefault();
+                    handleAdd();
                   }}
                 >
                   <FieldGroup>
@@ -352,10 +392,12 @@ function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}: MCPSet
                 </form>
                 <DialogFooter>
                   <DialogClose asChild>
-                    <Button variant="outline" className="cursor-pointer" disabled={adding}>取消</Button>
+                    <Button variant="outline" className="cursor-pointer" disabled={adding}>
+                      取消
+                    </Button>
                   </DialogClose>
                   <Button className="cursor-pointer" onClick={handleAdd} disabled={adding}>
-                    {adding && <Loader2 className="animate-spin"/>}
+                    {adding && <Loader2 className="animate-spin" />}
                     添加
                   </Button>
                 </DialogFooter>
@@ -363,19 +405,20 @@ function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}: MCPSet
             </Dialog>
           </FieldLegend>
           <FieldDescription className="text-sm">
-            模型上下文协议 (MCP) 通过集成外部工具来增强 MyManus 的性能，例如私有域搜索、网页浏览、订餐、PPT 生成等任务。
+            模型上下文协议 (MCP) 通过集成外部工具来增强 MyManus
+            的性能，例如私有域搜索、网页浏览、订餐、PPT 生成等任务。
           </FieldDescription>
 
           {/* 加载态 */}
           {loading && (
             <div className="flex justify-center py-8">
-              <Loader2 className="size-6 animate-spin text-muted-foreground"/>
+              <Loader2 className="text-muted-foreground size-6 animate-spin" />
             </div>
           )}
 
           {/* 空态 */}
           {!loading && servers.length === 0 && (
-            <div className="py-8 text-center text-sm text-muted-foreground">
+            <div className="text-muted-foreground py-8 text-center text-sm">
               暂无 MCP 服务器，请点击上方按钮添加
             </div>
           )}
@@ -386,8 +429,8 @@ function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}: MCPSet
               {servers.map((server) => (
                 <Item key={server.server_name} variant="outline">
                   <ItemContent>
-                    <ItemTitle className="w-full flex justify-between items-center text-md font-bold text-gray-700">
-                      <div className="flex gap-2 items-center">
+                    <ItemTitle className="text-md text-foreground flex w-full items-center justify-between font-semibold">
+                      <div className="flex items-center gap-2">
                         {server.server_name}
                         <Badge>{server.transport}</Badge>
                         {!server.enabled && <Badge>禁用</Badge>}
@@ -400,19 +443,21 @@ function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}: MCPSet
                           className="cursor-pointer"
                           onClick={() => onDelete(server.server_name)}
                         >
-                          <Trash/>
+                          <Trash />
                         </Button>
                         <Switch
                           checked={server.enabled}
-                          onCheckedChange={(checked) => onToggleEnabled(server.server_name, checked)}
+                          onCheckedChange={(checked) =>
+                            onToggleEnabled(server.server_name, checked)
+                          }
                         />
                       </div>
                     </ItemTitle>
                     {server.tools.length > 0 && (
                       <ItemDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <Wrench size={12}/>
+                        <Wrench size={12} />
                         {server.tools.map((tool) => (
-                          <Badge key={tool} variant="secondary" className="text-gray-500">
+                          <Badge key={tool} variant="secondary" className="text-muted-foreground">
                             {tool}
                           </Badge>
                         ))}
@@ -426,235 +471,62 @@ function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}: MCPSet
         </FieldSet>
       </FieldGroup>
     </div>
-  )
+  );
 }
 
 // ==================== 设置弹窗主组件 ====================
 
-type SettingTab =
-  | 'common-setting'
-  | 'models-setting'
-  | 'skills-setting'
-  | 'memory-setting'
-  | 'a2a-setting'
-  | 'mcp-setting'
-
 const SETTING_MENUS: Array<{
-  key: SettingTab
-  icon: typeof Settings
-  title: string
+  key: SettingTab;
+  icon: typeof Settings;
+  title: string;
 }> = [
-  {key: 'common-setting', icon: Settings, title: '通用配置'},
-  {key: 'models-setting', icon: Cpu, title: '模型管理'},
-  {key: 'skills-setting', icon: Sparkles, title: 'Skill 模板'},
-  {key: 'memory-setting', icon: Brain, title: '长期记忆'},
-  {key: 'a2a-setting', icon: LayoutGrid, title: 'A2A Agent 配置'},
-  {key: 'mcp-setting', icon: Wrench, title: 'MCP 服务器'},
-]
+  { key: "common-setting", icon: Settings, title: "通用配置" },
+  { key: "models-setting", icon: Cpu, title: "模型管理" },
+  { key: "skills-setting", icon: Sparkles, title: "Skill 模板" },
+  { key: "memory-setting", icon: Brain, title: "长期记忆" },
+  { key: "a2a-setting", icon: LayoutGrid, title: "A2A Agent 配置" },
+  { key: "mcp-setting", icon: Wrench, title: "MCP 服务器" },
+];
 
 export function ManusSettings() {
   // ---- 防止 SSR hydration 不匹配（Radix Dialog 在服务端/客户端生成不同的 aria-controls ID）----
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => { setMounted(true) }, [])
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const id = window.setTimeout(() => setMounted(true), 0);
+    return () => window.clearTimeout(id);
+  }, []);
 
   // ---- 弹窗 & 导航 ----
-  const [open, setOpen] = useState(false)
-  const [activeSetting, setActiveSetting] = useState<SettingTab>('common-setting')
+  const [open, setOpen] = useState(false);
+  const [activeSetting, setActiveSetting] = useState<SettingTab>("common-setting");
 
-  // ---- 数据 ----
-  const [agentConfig, setAgentConfig] = useState<AgentConfig>({})
-  const [mcpServers, setMcpServers] = useState<ListMCPServerItem[]>([])
-  const [a2aServers, setA2aServers] = useState<ListA2AServerItem[]>([])
-
-  // ---- 状态 ----
-  const [loadingConfig, setLoadingConfig] = useState(false)
-  const [loadingMCP, setLoadingMCP] = useState(false)
-  const [loadingA2A, setLoadingA2A] = useState(false)
-  const [saving, setSaving] = useState(false)
-
-  // 防止 Strict Mode 重复获取
-  const fetchingRef = useRef(false)
-
-  // ---- 数据拉取（各接口独立请求、独立更新，互不阻塞） ----
-  const fetchAllConfigs = useCallback(() => {
-    if (fetchingRef.current) return
-    fetchingRef.current = true
-
-    // 1. Agent + LLM 配置（通常很快）
-    setLoadingConfig(true)
-    configApi.getAgentConfig()
-      .then((agent) => {
-        setAgentConfig(agent)
-      })
-      .catch((err) => {
-        console.error('[Settings] 获取基础配置失败:', err)
-      })
-      .finally(() => {
-        setLoadingConfig(false)
-      })
-
-    // 2. MCP 服务器列表（可能较慢）
-    setLoadingMCP(true)
-    configApi
-      .getMCPServers()
-      .then((data) => {
-        setMcpServers(data?.mcp_servers ?? [])
-      })
-      .catch((err) => {
-        console.error('[Settings] 获取 MCP 服务器列表失败:', err)
-      })
-      .finally(() => {
-        setLoadingMCP(false)
-      })
-
-    // 3. A2A 服务器列表
-    setLoadingA2A(true)
-    configApi
-      .getA2AServers()
-      .then((data) => {
-        setA2aServers(data?.a2a_servers ?? [])
-      })
-      .catch((err) => {
-        console.error('[Settings] 获取 A2A 服务器列表失败:', err)
-      })
-      .finally(() => {
-        setLoadingA2A(false)
-      })
-  }, [])
-
-  // 弹窗打开时拉取数据
-  useEffect(() => {
-    if (open) {
-      fetchAllConfigs()
-    } else {
-      // 弹窗关闭时重置 ref，下次打开可以重新获取
-      fetchingRef.current = false
-    }
-  }, [open, fetchAllConfigs])
-
-  const showFooterSave = activeSetting === 'common-setting'
-
-  // ---- 保存 (通用配置) ----
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      if (activeSetting === 'common-setting') {
-        await configApi.updateAgentConfig(agentConfig)
-        toast.success('通用配置保存成功')
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '保存失败'
-      toast.error(msg)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // ---- MCP 操作 ----
-  const handleMCPToggle = useCallback(async (serverName: string, enabled: boolean) => {
-    // 乐观更新
-    setMcpServers((prev) =>
-      prev.map((s) => (s.server_name === serverName ? {...s, enabled} : s)),
-    )
-    try {
-      await configApi.updateMCPServerEnabled(serverName, enabled)
-      toast.success(`${serverName} 已${enabled ? '启用' : '禁用'}`)
-    } catch {
-      // 回滚
-      setMcpServers((prev) =>
-        prev.map((s) => (s.server_name === serverName ? {...s, enabled: !enabled} : s)),
-      )
-      toast.error(`操作失败，请重试`)
-    }
-  }, [])
-
-  const handleMCPDelete = useCallback(async (serverName: string) => {
-    const prev = mcpServers
-    // 乐观更新
-    setMcpServers((list) => list.filter((s) => s.server_name !== serverName))
-    try {
-      await configApi.deleteMCPServer(serverName)
-      toast.success(`已删除 MCP 服务器「${serverName}」`)
-    } catch {
-      setMcpServers(prev)
-      toast.error(`删除失败，请重试`)
-    }
-  }, [mcpServers])
-
-  const handleMCPAdd = useCallback(async (configText: string): Promise<boolean> => {
-    try {
-      const parsed = JSON.parse(configText)
-      await configApi.addMCPServer(parsed)
-      toast.success('MCP 服务器添加成功')
-      // 重新拉取列表
-      try {
-        const data = await configApi.getMCPServers()
-        setMcpServers(data?.mcp_servers ?? [])
-      } catch { /* 忽略刷新失败 */ }
-      return true
-    } catch (err) {
-      if (err instanceof SyntaxError) {
-        toast.error('JSON 格式错误，请检查配置')
-      } else {
-        toast.error(err instanceof Error ? err.message : '添加失败')
-      }
-      return false
-    }
-  }, [])
-
-  // ---- A2A 操作 ----
-  const handleA2AToggle = useCallback(async (id: string, enabled: boolean) => {
-    setA2aServers((prev) =>
-      prev.map((s) => (s.id === id ? {...s, enabled} : s)),
-    )
-    try {
-      await configApi.updateA2AServerEnabled(id, enabled)
-      const server = a2aServers.find((s) => s.id === id)
-      toast.success(`${server?.name ?? 'Agent'} 已${enabled ? '启用' : '禁用'}`)
-    } catch {
-      setA2aServers((prev) =>
-        prev.map((s) => (s.id === id ? {...s, enabled: !enabled} : s)),
-      )
-      toast.error(`操作失败，请重试`)
-    }
-  }, [a2aServers])
-
-  const handleA2ADelete = useCallback(async (id: string) => {
-    const prev = a2aServers
-    const target = a2aServers.find((s) => s.id === id)
-    setA2aServers((list) => list.filter((s) => s.id !== id))
-    try {
-      await configApi.deleteA2AServer(id)
-      toast.success(`已删除 A2A Agent「${target?.name ?? id}」`)
-    } catch {
-      setA2aServers(prev)
-      toast.error(`删除失败，请重试`)
-    }
-  }, [a2aServers])
-
-  const handleA2AAdd = useCallback(async (baseUrl: string): Promise<boolean> => {
-    try {
-      await configApi.addA2AServer({base_url: baseUrl})
-      toast.success('远程 Agent 添加成功')
-      // 重新拉取列表
-      try {
-        const data = await configApi.getA2AServers()
-        setA2aServers(data?.a2a_servers ?? [])
-      } catch { /* 忽略刷新失败 */ }
-      return true
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '添加失败')
-      return false
-    }
-  }, [])
+  const showFooterSave = activeSetting === "common-setting";
+  const {
+    agentConfig,
+    setAgentConfig,
+    mcpServers,
+    a2aServers,
+    loadingConfig,
+    loadingMCP,
+    loadingA2A,
+    saving,
+    handleSave,
+    handleMCPToggle,
+    handleMCPDelete,
+    handleMCPAdd,
+    handleA2AToggle,
+    handleA2ADelete,
+    handleA2AAdd,
+  } = useManusSettings(open, activeSetting);
 
   // 客户端挂载前，仅渲染普通按钮占位，避免 Radix Dialog SSR hydration 不匹配
   if (!mounted) {
     return (
       <Button variant="outline" size="icon-sm" className="cursor-pointer">
-        <Settings/>
+        <Settings />
       </Button>
-    )
+    );
   }
 
   return (
@@ -662,16 +534,18 @@ export function ManusSettings() {
       {/* 触发按钮 */}
       <DialogTrigger asChild>
         <Button variant="outline" size="icon-sm" className="cursor-pointer">
-          <Settings/>
+          <Settings />
         </Button>
       </DialogTrigger>
 
       {/* 弹窗内容 */}
-      <DialogContent className="!max-w-[920px]">
+      <DialogContent className="!max-w-[920px] shadow-[var(--shadow-panel)]">
         {/* 头部 */}
-        <DialogHeader className="border-b pb-4">
-          <DialogTitle className="text-gray-700">MyManus 设置</DialogTitle>
-          <DialogDescription className="text-gray-500">在此管理您的 MyManus 设置。</DialogDescription>
+        <DialogHeader className="border-border/70 border-b pb-4">
+          <DialogTitle className="text-foreground">MyManus 设置</DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            在此管理您的 MyManus 设置。
+          </DialogDescription>
         </DialogHeader>
 
         {/* 中间主体 */}
@@ -682,11 +556,11 @@ export function ManusSettings() {
               {SETTING_MENUS.map((menu) => (
                 <Button
                   key={menu.key}
-                  variant={activeSetting === menu.key ? 'default' : 'ghost'}
-                  className="cursor-pointer justify-start text-sm px-2"
+                  variant={activeSetting === menu.key ? "default" : "ghost"}
+                  className="cursor-pointer justify-start px-2 text-sm"
                   onClick={() => setActiveSetting(menu.key)}
                 >
-                  <menu.icon className="size-4"/>
+                  <menu.icon className="size-4" />
                   <span className="truncate">{menu.title}</span>
                 </Button>
               ))}
@@ -694,25 +568,25 @@ export function ManusSettings() {
           </div>
 
           {/* 分隔符 */}
-          <Separator orientation="vertical"/>
+          <Separator orientation="vertical" />
 
           {/* 右侧内容 */}
-          <div className="flex-1 h-[500px] scrollbar-hide overflow-y-auto">
-            {loadingConfig && activeSetting === 'common-setting' ? (
-              <div className="flex justify-center items-center h-full">
-                <Loader2 className="size-6 animate-spin text-muted-foreground"/>
+          <div className="scrollbar-hide h-[500px] flex-1 overflow-y-auto">
+            {loadingConfig && activeSetting === "common-setting" ? (
+              <div className="flex h-full items-center justify-center">
+                <Loader2 className="text-muted-foreground size-6 animate-spin" />
               </div>
             ) : (
               <>
-                {activeSetting === 'common-setting' && (
-                  <CommonSetting config={agentConfig} onChange={setAgentConfig}/>
+                {activeSetting === "common-setting" && (
+                  <CommonSetting config={agentConfig} onChange={setAgentConfig} />
                 )}
               </>
             )}
-            {activeSetting === 'models-setting' && <ModelsSettings embedded />}
-            {activeSetting === 'skills-setting' && <SkillsSettings embedded />}
-            {activeSetting === 'memory-setting' && <MemorySettings embedded />}
-            {activeSetting === 'a2a-setting' && (
+            {activeSetting === "models-setting" && <ModelsSettings embedded />}
+            {activeSetting === "skills-setting" && <SkillsSettings embedded />}
+            {activeSetting === "memory-setting" && <MemorySettings embedded />}
+            {activeSetting === "a2a-setting" && (
               <A2ASetting
                 servers={a2aServers}
                 loading={loadingA2A}
@@ -721,7 +595,7 @@ export function ManusSettings() {
                 onAdd={handleA2AAdd}
               />
             )}
-            {activeSetting === 'mcp-setting' && (
+            {activeSetting === "mcp-setting" && (
               <MCPSetting
                 servers={mcpServers}
                 loading={loadingMCP}
@@ -736,19 +610,17 @@ export function ManusSettings() {
         {showFooterSave && (
           <DialogFooter className="border-t pt-4">
             <DialogClose asChild>
-              <Button variant="outline" className="cursor-pointer">取消</Button>
+              <Button variant="outline" className="cursor-pointer">
+                取消
+              </Button>
             </DialogClose>
-            <Button
-              className="cursor-pointer"
-              disabled={saving}
-              onClick={handleSave}
-            >
-              {saving && <Loader2 className="animate-spin"/>}
+            <Button className="cursor-pointer" disabled={saving} onClick={handleSave}>
+              {saving && <Loader2 className="animate-spin" />}
               保存
             </Button>
           </DialogFooter>
         )}
       </DialogContent>
     </Dialog>
-  )
+  );
 }

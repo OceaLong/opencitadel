@@ -1,13 +1,14 @@
-'use client'
+"use client";
 
-import { Terminal } from 'lucide-react'
-import { ToolBadge } from './tool-badge'
+import { Terminal } from "lucide-react";
 
-export interface BashToolProps {
-  label: string
-  onClick?: () => void
-}
+import { ToolBadge } from "./tool-badge";
+
+export type BashToolProps = {
+  label: string;
+  onClick?: () => void;
+};
 
 export function BashTool({ label, onClick }: BashToolProps) {
-  return <ToolBadge icon={Terminal} label={label} onClick={onClick} />
+  return <ToolBadge icon={Terminal} label={label} onClick={onClick} />;
 }

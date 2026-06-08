@@ -1,42 +1,43 @@
-'use client'
+"use client";
 
-import React, {createContext, useCallback, useContext, useEffect, useRef, useState} from 'react'
-import {sessionApi} from '@/lib/api'
-import type {Session} from '@/lib/api'
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+
+import type { Session } from "@/lib/api";
+import { sessionApi } from "@/lib/api";
 
 /** 重连配置 */
 const RETRY_CONFIG = {
   maxRetries: 10,
   baseDelay: 1000,
   maxDelay: 30_000,
-} as const
+} as const;
 
 /**
  * 从 API 返回值中安全提取 Session 数组
  * 兼容 data 为 { sessions: [...] } / 直接数组 / null 等格式
  */
 function normalizeSessions(raw: unknown): Session[] {
-  if (Array.isArray(raw)) return raw as Session[]
-  if (raw && typeof raw === 'object' && 'sessions' in raw) {
+  if (Array.isArray(raw)) return raw as Session[];
+  if (raw && typeof raw === "object" && "sessions" in raw) {
     return Array.isArray((raw as Record<string, unknown>).sessions)
       ? ((raw as Record<string, unknown>).sessions as Session[])
-      : []
+      : [];
   }
-  return []
+  return [];
 }
 
 // ==================== Context ====================
 
 type SessionsContextValue = {
-  sessions: Session[]
-  loading: boolean
-  error: string | null
+  sessions: Session[];
+  loading: boolean;
+  error: string | null;
   /** 手动刷新（通过 REST 接口拉取一次） */
-  refresh: () => Promise<void>
-  deleteSession: (sessionId: string) => Promise<boolean>
-}
+  refresh: () => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<boolean>;
+};
 
-const SessionsContext = createContext<SessionsContextValue | null>(null)
+const SessionsContext = createContext<SessionsContextValue | null>(null);
 
 // ==================== Provider ====================
 
@@ -51,133 +52,129 @@ const SessionsContext = createContext<SessionsContextValue | null>(null)
  *  3. SSE 断开后自动指数退避重连
  *  4. refresh() 可手动通过 REST 拉取
  */
-export function SessionsProvider({children}: { children: React.ReactNode }) {
-  const [sessions, setSessions] = useState<Session[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+export function SessionsProvider({ children }: { children: React.ReactNode }) {
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const cleanupRef = useRef<(() => void) | null>(null)
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cleanupRef = useRef<(() => void) | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 确保 REST 初始请求只发起一次（防止 Strict Mode 重复） */
-  const initialFetchedRef = useRef(false)
+  const initialFetchedRef = useRef(false);
   /** 标记 SSE 是否已经推送过数据，防止 REST 回调覆盖更新的 SSE 数据 */
-  const sseReceivedRef = useRef(false)
+  const sseReceivedRef = useRef(false);
 
   // ---------- 手动刷新 ----------
   const refresh = useCallback(async () => {
     try {
-      setLoading(true)
-      setError(null)
-      const raw = await sessionApi.getSessions()
-      setSessions(normalizeSessions(raw))
+      setLoading(true);
+      setError(null);
+      const raw = await sessionApi.getSessions();
+      setSessions(normalizeSessions(raw));
     } catch (err) {
-      console.error('[Sessions] REST 获取失败:', err)
-      setError(err instanceof Error ? err.message : '获取会话列表失败')
+      setError(err instanceof Error ? err.message : "获取会话列表失败");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [])
+  }, []);
 
   // ---------- 初始 REST 请求（仅一次） ----------
   useEffect(() => {
-    if (initialFetchedRef.current) return
-    initialFetchedRef.current = true
+    if (initialFetchedRef.current) return;
+    initialFetchedRef.current = true;
 
     sessionApi
       .getSessions()
       .then((raw) => {
         // 仅在 SSE 尚未推送过数据时更新，防止用旧数据覆盖 SSE 已推送的新数据
         if (!sseReceivedRef.current) {
-          setSessions(normalizeSessions(raw))
+          setSessions(normalizeSessions(raw));
         }
-        setLoading(false)
-        setError(null)
+        setLoading(false);
+        setError(null);
       })
       .catch((err) => {
-        console.error('[Sessions] 初始获取失败:', err)
-        setError(err instanceof Error ? err.message : '获取会话列表失败')
-        setLoading(false)
-      })
-  }, [])
+        setError(err instanceof Error ? err.message : "获取会话列表失败");
+        setLoading(false);
+      });
+  }, []);
 
   // ---------- SSE 实时订阅 ----------
   useEffect(() => {
-    let mounted = true
-    let retryCount = 0
+    let mounted = true;
+    let retryCount = 0;
 
     const connect = () => {
-      if (!mounted) return
+      if (!mounted) return;
 
       // 清理上一次连接
       if (cleanupRef.current) {
-        cleanupRef.current()
-        cleanupRef.current = null
+        cleanupRef.current();
+        cleanupRef.current = null;
       }
 
       const cleanup = sessionApi.streamSessions(
         // onSessions
         (newSessions) => {
-          if (!mounted) return
-          retryCount = 0
-          sseReceivedRef.current = true
-          setSessions(newSessions)
-          setLoading(false)
-          setError(null)
+          if (!mounted) return;
+          retryCount = 0;
+          sseReceivedRef.current = true;
+          setSessions(newSessions);
+          setLoading(false);
+          setError(null);
         },
         // onError / onEnd
-        (err) => {
-          if (!mounted) return
-          console.warn('[Sessions] SSE 断开:', err.message)
+        () => {
+          if (!mounted) return;
 
           if (retryCount >= RETRY_CONFIG.maxRetries) {
-            console.error('[Sessions] 超过最大重试次数，停止重连')
-            return
+            setError("会话列表实时连接已断开，请手动刷新");
+            return;
           }
 
           const delay = Math.min(
             RETRY_CONFIG.baseDelay * Math.pow(2, retryCount),
             RETRY_CONFIG.maxDelay,
-          )
-          retryCount++
-          console.log(`[Sessions] ${delay}ms 后尝试重连（第 ${retryCount} 次）`)
-          retryTimerRef.current = setTimeout(connect, delay)
+          );
+          retryCount++;
+          retryTimerRef.current = setTimeout(connect, delay);
         },
-      )
+      );
 
-      cleanupRef.current = cleanup
-    }
+      cleanupRef.current = cleanup;
+    };
 
-    connect()
+    connect();
 
     return () => {
-      mounted = false
+      mounted = false;
       if (cleanupRef.current) {
-        cleanupRef.current()
-        cleanupRef.current = null
+        cleanupRef.current();
+        cleanupRef.current = null;
       }
       if (retryTimerRef.current) {
-        clearTimeout(retryTimerRef.current)
-        retryTimerRef.current = null
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
       }
-    }
-  }, [])
+    };
+  }, []);
 
   // ---------- 删除会话 ----------
   const deleteSession = useCallback(async (sessionId: string): Promise<boolean> => {
     try {
-      await sessionApi.deleteSession(sessionId)
-      setSessions((prev) => prev.filter((s) => s.session_id !== sessionId))
-      return true
+      await sessionApi.deleteSession(sessionId);
+      setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
+      return true;
     } catch {
-      return false
+      return false;
     }
-  }, [])
+  }, []);
 
   return (
-    <SessionsContext.Provider value={{sessions, loading, error, refresh, deleteSession}}>
+    <SessionsContext.Provider value={{ sessions, loading, error, refresh, deleteSession }}>
       {children}
     </SessionsContext.Provider>
-  )
+  );
 }
 
 // ==================== Hook ====================
@@ -188,10 +185,9 @@ export function SessionsProvider({children}: { children: React.ReactNode }) {
  * 必须在 <SessionsProvider> 内使用
  */
 export function useSessions(): SessionsContextValue {
-  const ctx = useContext(SessionsContext)
+  const ctx = useContext(SessionsContext);
   if (!ctx) {
-    throw new Error('useSessions 必须在 SessionsProvider 内使用')
+    throw new Error("useSessions 必须在 SessionsProvider 内使用");
   }
-  return ctx
+  return ctx;
 }
-

@@ -3,7 +3,7 @@
 import asyncio
 import io
 import logging
-from typing import List, AsyncGenerator, Callable, BinaryIO, Optional
+from typing import Any, Dict, List, AsyncGenerator, Callable, BinaryIO, Optional, Tuple
 
 from fastapi import UploadFile
 from pydantic import TypeAdapter
@@ -73,6 +73,8 @@ class AgentTaskRunner(TaskRunner):
         self._browser = browser
         self._on_complete_callback = on_complete_callback
         self._session_state = SessionStateService(uow_factory)
+        self._event_persist_buffer: List[Tuple[BaseEvent, Dict[str, Any]]] = []
+        self._event_persist_batch_size = 5
         self._tool_presenter = ToolEventPresenter(
             sandbox=sandbox,
             browser=browser,
@@ -106,8 +108,18 @@ class AgentTaskRunner(TaskRunner):
 
         # 2.仅持久化稳定、高价值事件，流式 delta 不落库
         if should_persist_event(event):
-            async with self._uow:
-                await self._uow.session.add_event(self._session_id, event)
+            self._event_persist_buffer.append((event, event.model_dump(mode="json")))
+            if len(self._event_persist_buffer) >= self._event_persist_batch_size:
+                await self._flush_event_persist_buffer()
+
+    async def _flush_event_persist_buffer(self) -> None:
+        """批量刷入已持久化事件，降低数据库往返次数。"""
+        if not self._event_persist_buffer:
+            return
+        payloads = self._event_persist_buffer
+        self._event_persist_buffer = []
+        async with self._uow:
+            await self._uow.session.add_event_payloads(self._session_id, payloads)
 
     async def _emit_session_status(self, task: Task, status: SessionStatus) -> None:
         """推送服务端权威会话状态事件"""
@@ -370,6 +382,7 @@ class AgentTaskRunner(TaskRunner):
                             await self._uow.session.increment_unread_message_count(self._session_id)
                     elif isinstance(event, WaitEvent):
                         await self._emit_session_status(task, SessionStatus.WAITING)
+                        await self._flush_event_persist_buffer()
                         return
 
                     if not await task.input_stream.is_empty():
@@ -381,20 +394,25 @@ class AgentTaskRunner(TaskRunner):
             if cancelled:
                 await self._put_and_add_event(task, DoneEvent())
                 await self._emit_session_status(task, SessionStatus.CANCELLED)
+                await self._flush_event_persist_buffer()
                 record_agent_cancel(self._session_id)
             else:
                 await self._emit_session_status(task, SessionStatus.COMPLETED)
+                await self._flush_event_persist_buffer()
         except asyncio.CancelledError:
             logger.info(f"AgentTaskRunner任务运行取消")
             await self._put_and_add_event(task, DoneEvent())
             await self._emit_session_status(task, SessionStatus.CANCELLED)
+            await self._flush_event_persist_buffer()
             record_agent_cancel(self._session_id)
             raise
         except Exception as e:
             logger.exception(f"AgentTaskRunner运行出错: {str(e)}")
             await self._put_and_add_event(task, ErrorEvent(error=f"AgentTaskRunner出错: {str(e)}"))
             await self._emit_session_status(task, SessionStatus.COMPLETED)
+            await self._flush_event_persist_buffer()
         finally:
+            await self._flush_event_persist_buffer()
             await self._cleanup_tools()
 
     async def cleanup(self) -> None:

@@ -1,11 +1,11 @@
 import { get, post } from "./fetch";
 import type {
-  LLMConfig,
+  A2AServersData,
   AgentConfig,
+  CreateA2AServerParams,
+  LLMConfig,
   MCPConfig,
   MCPServersData,
-  A2AServersData,
-  CreateA2AServerParams,
 } from "./types";
 
 /**
@@ -65,14 +65,8 @@ export const configApi = {
   /**
    * 更新 MCP 启用状态
    */
-  updateMCPServerEnabled: (
-    serverName: string,
-    enabled: boolean
-  ): Promise<void> => {
-    return post<void>(
-      `/app-config/mcp-servers/${serverName}/enabled`,
-      { enabled }
-    );
+  updateMCPServerEnabled: (serverName: string, enabled: boolean): Promise<void> => {
+    return post<void>(`/app-config/mcp-servers/${serverName}/enabled`, { enabled });
   },
 
   /**
@@ -100,14 +94,7 @@ export const configApi = {
   /**
    * 更新 A2A 启用状态
    */
-  updateA2AServerEnabled: (
-    a2aId: string,
-    enabled: boolean
-  ): Promise<void> => {
-    return post<void>(
-      `/app-config/a2a-servers/${a2aId}/enabled`,
-      { enabled }
-    );
+  updateA2AServerEnabled: (a2aId: string, enabled: boolean): Promise<void> => {
+    return post<void>(`/app-config/a2a-servers/${a2aId}/enabled`, { enabled });
   },
 };
-

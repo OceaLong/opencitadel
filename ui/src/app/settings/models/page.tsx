@@ -1,7 +1,7 @@
-'use client'
+"use client";
 
-import { ModelsSettings } from '@/components/settings/models-settings'
+import { ModelsSettings } from "@/components/settings/models-settings";
 
 export default function ModelsSettingsPage() {
-  return <ModelsSettings />
+  return <ModelsSettings />;
 }

@@ -15,7 +15,7 @@ export class ApiError extends Error {
   constructor(
     public code: number,
     public msg: string,
-    public data: unknown = null
+    public data: unknown = null,
   ) {
     super(msg);
     this.name = "ApiError";
@@ -35,11 +35,11 @@ type RequestOptions = RequestInit & {
  */
 async function parseResponse<T>(response: Response): Promise<ApiResponse<T>> {
   const contentType = response.headers.get("content-type");
-  
+
   if (contentType?.includes("application/json")) {
     return await response.json();
   }
-  
+
   // 处理非 JSON 响应（如文件下载）
   const text = await response.text();
   return {
@@ -54,7 +54,7 @@ async function parseResponse<T>(response: Response): Promise<ApiResponse<T>> {
  */
 async function handleErrorResponse(response: Response): Promise<never> {
   let errorData: ApiResponse;
-  
+
   try {
     errorData = await parseResponse(response);
   } catch {
@@ -64,7 +64,7 @@ async function handleErrorResponse(response: Response): Promise<never> {
       data: null,
     };
   }
-  
+
   throw new ApiError(errorData.code, errorData.msg, errorData.data);
 }
 
@@ -74,7 +74,7 @@ async function handleErrorResponse(response: Response): Promise<never> {
 function fetchWithTimeout(
   url: string,
   options: RequestOptions = {},
-  timeout: number = API_CONFIG.timeout
+  timeout: number = API_CONFIG.timeout,
 ): Promise<Response> {
   return new Promise((resolve, reject) => {
     const controller = new AbortController();
@@ -107,11 +107,9 @@ function fetchWithTimeout(
  */
 export async function request<T = unknown>(
   endpoint: string,
-  options: RequestOptions = {}
+  options: RequestOptions = {},
 ): Promise<T> {
-  const url = endpoint.startsWith("http")
-    ? endpoint
-    : `${API_CONFIG.baseURL}${endpoint}`;
+  const url = endpoint.startsWith("http") ? endpoint : `${API_CONFIG.baseURL}${endpoint}`;
 
   const {
     timeout = API_CONFIG.timeout,
@@ -138,7 +136,7 @@ export async function request<T = unknown>(
         ...fetchOptions,
         headers: mergedHeaders,
       },
-      timeout
+      timeout,
     );
 
     // 处理 HTTP 错误状态码
@@ -180,10 +178,10 @@ export async function request<T = unknown>(
 export function get<T = unknown>(
   endpoint: string,
   params?: Record<string, string | number | boolean>,
-  options?: RequestOptions
+  options?: RequestOptions,
 ): Promise<T> {
   let url = endpoint;
-  
+
   if (params) {
     const searchParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -209,7 +207,7 @@ export function get<T = unknown>(
 export function post<T = unknown>(
   endpoint: string,
   data?: unknown,
-  options?: RequestOptions
+  options?: RequestOptions,
 ): Promise<T> {
   return request<T>(endpoint, {
     ...options,
@@ -224,7 +222,7 @@ export function post<T = unknown>(
 export function put<T = unknown>(
   endpoint: string,
   data?: unknown,
-  options?: RequestOptions
+  options?: RequestOptions,
 ): Promise<T> {
   return request<T>(endpoint, {
     ...options,
@@ -239,7 +237,7 @@ export function put<T = unknown>(
 export function patch<T = unknown>(
   endpoint: string,
   data?: unknown,
-  options?: RequestOptions
+  options?: RequestOptions,
 ): Promise<T> {
   return request<T>(endpoint, {
     ...options,
@@ -251,10 +249,7 @@ export function patch<T = unknown>(
 /**
  * DELETE 请求
  */
-export function del<T = unknown>(
-  endpoint: string,
-  options?: RequestOptions
-): Promise<T> {
+export function del<T = unknown>(endpoint: string, options?: RequestOptions): Promise<T> {
   return request<T>(endpoint, {
     ...options,
     method: "DELETE",
@@ -264,20 +259,12 @@ export function del<T = unknown>(
 /**
  * 创建 SSE 连接
  */
-export function createSSEConnection(
-  endpoint: string,
-  data?: unknown,
-  options?: RequestOptions
-): EventSource {
-  const url = endpoint.startsWith("http")
-    ? endpoint
-    : `${API_CONFIG.baseURL}${endpoint}`;
+export function createSSEConnection(endpoint: string, data?: unknown): EventSource {
+  const url = endpoint.startsWith("http") ? endpoint : `${API_CONFIG.baseURL}${endpoint}`;
 
   // 对于 POST 请求，使用 fetch + ReadableStream 方式
   if (data !== undefined) {
-    throw new Error(
-      "带数据的 SSE 连接请使用 createSSEStream 函数"
-    );
+    throw new Error("带数据的 SSE 连接请使用 createSSEStream 函数");
   }
 
   return new EventSource(url);
@@ -293,11 +280,9 @@ export function createSSEConnection(
 export async function createSSEStream(
   endpoint: string,
   data?: unknown,
-  options?: RequestOptions
+  options?: RequestOptions,
 ): Promise<ReadableStream<Uint8Array>> {
-  const url = endpoint.startsWith("http")
-    ? endpoint
-    : `${API_CONFIG.baseURL}${endpoint}`;
+  const url = endpoint.startsWith("http") ? endpoint : `${API_CONFIG.baseURL}${endpoint}`;
 
   const {
     timeout = API_CONFIG.timeout,
@@ -360,7 +345,7 @@ export async function createSSEStream(
   } catch (error) {
     clearTimeout(timeoutId);
     // 忽略 AbortError，这是正常的连接中止
-    if (error instanceof Error && error.name === 'AbortError') {
+    if (error instanceof Error && error.name === "AbortError") {
       throw error; // 重新抛出，让调用方处理
     }
     if (error instanceof ApiError) {
@@ -376,7 +361,7 @@ export async function createSSEStream(
 export async function parseSSEStream(
   stream: ReadableStream<Uint8Array>,
   onEvent: (event: MessageEvent) => void,
-  onError?: (error: Error) => void
+  onError?: (error: Error) => void,
 ): Promise<void> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -400,7 +385,7 @@ export async function parseSSEStream(
       buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
       const parts = buffer.split("\n\n");
-      
+
       // 保留最后一个不完整的事件（可能没有以 \n\n 结尾）
       buffer = parts.pop() || "";
 
@@ -413,7 +398,7 @@ export async function parseSSEStream(
     }
   } catch (error) {
     // 忽略 AbortError，这是正常的连接中止
-    if (error instanceof Error && error.name === 'AbortError') {
+    if (error instanceof Error && error.name === "AbortError") {
       return;
     }
     if (onError) {
@@ -434,14 +419,14 @@ export async function parseSSEStream(
 function processSSEEvent(
   eventText: string,
   onEvent: (event: MessageEvent) => void,
-  onError?: (error: Error) => void
+  onError?: (error: Error) => void,
 ): void {
   let eventType = "message";
   let eventData = "";
   let eventId = "";
 
   const lines = eventText.split("\n");
-  
+
   for (const line of lines) {
     if (line.startsWith("event:")) {
       eventType = line.slice(6).trim();
@@ -466,15 +451,11 @@ function processSSEEvent(
         new MessageEvent(eventType, {
           data,
           lastEventId: eventId,
-        })
+        }),
       );
     } catch (error) {
       if (onError) {
-        onError(
-          error instanceof Error
-            ? error
-            : new Error(`解析 SSE 数据失败: ${eventData}`)
-        );
+        onError(error instanceof Error ? error : new Error(`解析 SSE 数据失败: ${eventData}`));
       }
     }
   }
@@ -486,11 +467,10 @@ function processSSEEvent(
 function processSSEBuffer(
   buffer: string,
   onEvent: (event: MessageEvent) => void,
-  onError?: (error: Error) => void
+  onError?: (error: Error) => void,
 ): void {
   const events = buffer.split("\n\n").filter((e) => e.trim());
   for (const event of events) {
     processSSEEvent(event, onEvent, onError);
   }
 }
-
