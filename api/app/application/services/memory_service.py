@@ -4,6 +4,7 @@ import logging
 from typing import Callable, Dict, List, Optional
 
 from app.application.errors.exceptions import NotFoundError, BadRequestError
+from app.domain.utils.memory_recall import rank_entries_with_decay
 from app.domain.models.memory import Memory
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
 from app.domain.repositories.uow import IUnitOfWork
@@ -76,11 +77,15 @@ class MemoryService:
 
     async def create_entry(self, entry: MemoryEntry) -> MemoryEntry:
         await self._validate_entry(entry)
-        async with self._uow_factory() as uow:
-            await uow.memory_entry.save(entry)
         from app.application.services.vector_memory_service import VectorMemoryService
         vector_service = VectorMemoryService()
-        await vector_service.store_embedding(entry.id, f"{entry.title}\n{entry.content}")
+        async with self._uow_factory() as uow:
+            await uow.memory_entry.save(entry)
+            await vector_service.store_embedding(
+                entry.id,
+                f"{entry.title}\n{entry.content}",
+                db_session=getattr(uow, "db_session", None),
+            )
         return entry
 
     async def update_entry(self, entry_id: str, updates: MemoryEntry) -> MemoryEntry:
@@ -91,6 +96,9 @@ class MemoryService:
                 raise NotFoundError(f"记忆[{entry_id}]不存在")
             updates.id = entry_id
             await uow.memory_entry.save(updates)
+        from app.application.services.vector_memory_service import VectorMemoryService
+        vector_service = VectorMemoryService()
+        await vector_service.store_embedding(entry_id, f"{updates.title}\n{updates.content}")
         return updates
 
     async def delete_entry(self, entry_id: str) -> None:
@@ -111,18 +119,22 @@ class MemoryService:
             entries = await uow.memory_entry.recall_for_session(
                 session_id, limit=self._recall_limit
             )
+            entries = rank_entries_with_decay(entries, self._recall_limit)
 
-        if settings.memory_vector_enabled and query_text.strip():
-            vector_service = VectorMemoryService()
-            vector_entries = await vector_service.search_similar(
-                query_text, session_id=session_id, limit=self._recall_limit
-            )
-            seen = {e.id for e in entries}
-            for entry in vector_entries:
-                if entry.id not in seen:
-                    entries.append(entry)
-                    seen.add(entry.id)
-            entries = entries[: self._recall_limit]
+            if settings.memory_vector_enabled and query_text.strip():
+                vector_service = VectorMemoryService()
+                vector_entries = await vector_service.search_similar(
+                    query_text,
+                    session_id=session_id,
+                    limit=self._recall_limit,
+                    db_session=getattr(uow, "db_session", None),
+                )
+                seen = {e.id for e in entries}
+                for entry in vector_entries:
+                    if entry.id not in seen:
+                        entries.append(entry)
+                        seen.add(entry.id)
+                entries = rank_entries_with_decay(entries, self._recall_limit)
 
         if entries:
             async with self._uow_factory() as uow:

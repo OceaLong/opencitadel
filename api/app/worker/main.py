@@ -19,11 +19,13 @@ from app.infrastructure.external.search.bing_search import BingSearchEngine
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
 from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
 from app.infrastructure.logging import setup_logging
-from app.infrastructure.repositories.file_app_config_repository import FileAppConfigRepository
+from app.application.services.config_provider import get_app_config_provider
+from app.infrastructure.external.tools.connection_pool import A2AConnectionPool, MCPConnectionPool
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.storage.cos import get_cos
 from app.infrastructure.storage.postgres import get_postgres, get_uow
 from app.infrastructure.storage.redis import get_redis
+from app.domain.models.app_config import AgentConfig, A2AConfig, MCPConfig
 from app.domain.models.session import SessionStatus
 from core.config import get_settings
 
@@ -36,8 +38,7 @@ class AgentWorker:
         self._task_state = get_task_state()
         self._consumer_name = f"worker-{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
         self._running = True
-        app_config_repo = FileAppConfigRepository(self._settings.app_config_filepath)
-        app_config = app_config_repo.load()
+        self._config_provider = get_app_config_provider()
         cipher = ApiKeyCipher(self._settings.api_key_secret)
         llm_model_service = LLMModelService(uow_factory=get_uow, cipher=cipher)
         skill_service = SkillService(uow_factory=get_uow)
@@ -55,14 +56,15 @@ class AgentWorker:
             llm_model_service=llm_model_service,
             skill_service=skill_service,
             memory_service=memory_service,
-            agent_config=app_config.agent_config,
-            mcp_config=app_config.mcp_config,
-            a2a_config=app_config.a2a_config,
+            agent_config=AgentConfig(),
+            mcp_config=MCPConfig(),
+            a2a_config=A2AConfig(),
             sandbox_cls=DockerSandbox,
             json_parser=RepairJSONParser(),
             search_engine=BingSearchEngine(),
             file_storage=file_storage,
             auto_extract_memory=self._settings.memory_auto_extract_enabled,
+            config_provider=self._config_provider,
         )
 
     async def start(self) -> None:
@@ -125,7 +127,9 @@ class AgentWorker:
                 await watcher
             except asyncio.CancelledError:
                 pass
-            await runner.destroy()
+            await runner.cleanup()
+            await MCPConnectionPool.release_stale()
+            await A2AConnectionPool.release_stale()
 
     async def shutdown(self) -> None:
         self._running = False

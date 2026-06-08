@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import asyncio
-import base64
 import io
 import logging
-import uuid
 from typing import List, AsyncGenerator, Callable, BinaryIO, Optional
 
 from fastapi import UploadFile
@@ -18,27 +16,25 @@ from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
 from app.domain.external.task import TaskRunner, Task
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
-from app.domain.models.event import ErrorEvent, Event, MessageEvent, BaseEvent, ToolEvent, ToolEventStatus, \
-    BrowserToolContent, SearchToolContent, ShellToolContent, FileToolContent, MCPToolContent, A2AToolContent, \
-    TitleEvent, WaitEvent, DoneEvent, SessionStatusEvent, AssistantNoticeEvent
+from app.domain.models.event import ErrorEvent, Event, MessageEvent, BaseEvent, ToolEvent, \
+    TitleEvent, WaitEvent, DoneEvent, AssistantNoticeEvent
 from app.domain.models.event_policy import should_persist_event
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.utils.vision import is_image_mime
 from app.domain.services import vision_service
-from app.domain.models.search import SearchResults
 from app.domain.models.session import SessionStatus
 from app.domain.models.skill import Skill
-from app.domain.models.tool_result import ToolResult
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.flows.planner_react import PlannerReActFlow
+from app.domain.services.tool_event_presenter import ToolEventPresenter
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.mcp import MCPTool
-from core.config import get_settings
+from app.application.services.session_state_service import SessionStateService
+from app.infrastructure.observability.otel import record_agent_cancel
+from app.infrastructure.external.task.task_state import get_task_state
 
 logger = logging.getLogger(__name__)
-
-FILE_MUTATING_FUNCTIONS = frozenset({"write_file", "replace_in_file"})
 
 
 class AgentTaskRunner(TaskRunner):
@@ -76,6 +72,14 @@ class AgentTaskRunner(TaskRunner):
         self._file_storage = file_storage
         self._browser = browser
         self._on_complete_callback = on_complete_callback
+        self._session_state = SessionStateService(uow_factory)
+        self._tool_presenter = ToolEventPresenter(
+            sandbox=sandbox,
+            browser=browser,
+            file_storage=file_storage,
+            sync_file_to_storage=self._sync_file_to_storage,
+            get_stream_size=self._get_stream_size,
+        )
         self._flow = PlannerReActFlow(
             uow_factory=uow_factory,
             llm=llm,
@@ -107,12 +111,12 @@ class AgentTaskRunner(TaskRunner):
 
     async def _emit_session_status(self, task: Task, status: SessionStatus) -> None:
         """推送服务端权威会话状态事件"""
-        async with self._uow:
-            await self._uow.session.update_status(self._session_id, status)
-        await self._put_and_add_event(
-            task,
-            SessionStatusEvent(status=status.value),
-        )
+        event = await self._session_state.transition(self._session_id, status, emit_event=True)
+        if event:
+            await self._put_and_add_event(task, event)
+
+    async def _is_cancelled(self, task: Task) -> bool:
+        return await get_task_state().is_cancelled(task.id)
 
     @classmethod
     async def _pop_event(cls, task: Task) -> Event:
@@ -273,109 +277,9 @@ class AgentTaskRunner(TaskRunner):
         except Exception as e:
             logger.exception(f"AgentTaskRunner同步消息附件到存储桶失败: {str(e)}")
 
-    async def _get_browser_screenshot(self) -> str:
-        """获取浏览器截图并返回截图文件对应的在线URL"""
-        # 1.调用浏览器完成截图
-        screenshot = await self._browser.screenshot()
-
-        # 2.将浏览器截图上传到文件存储中
-        file = await self._file_storage.upload_file(UploadFile(
-            file=io.BytesIO(screenshot),
-            filename=f"{str(uuid.uuid4())}.png",
-            # bugfix:添加size尺寸
-            size=self._get_stream_size(io.BytesIO(screenshot)),
-        ))
-
-        # 3.获取setting并组装完整URL
-        settings = get_settings()
-        return f"https://{settings.cos_bucket}.cos.{settings.cos_region}.myqcloud.com/{file.key}"
-
     async def _handle_tool_event(self, event: ToolEvent) -> None:
         """额外处理工具消息，使其前端交互更友好"""
-        try:
-            # 1.如果事件状态为已调用则执行以下代码
-            if event.status == ToolEventStatus.CALLED:
-                # 2.工具为浏览器则补全工具浏览器工具内容
-                if event.tool_name == "browser":
-                    event.tool_content = BrowserToolContent(
-                        screenshot=await self._get_browser_screenshot(),
-                    )
-                elif event.tool_name == "search":
-                    # 3.工具为搜索则添加搜索工具内容
-                    search_results: ToolResult[SearchResults] = event.function_result
-                    logger.info(f"搜索工具结果: {search_results}")
-                    if (
-                            search_results
-                            and search_results.success
-                            and search_results.data
-                            and search_results.data.results is not None
-                    ):
-                        event.tool_content = SearchToolContent(results=search_results.data.results)
-                    else:
-                        event.tool_content = SearchToolContent(results=[])
-                elif event.tool_name == "shell":
-                    # 4.工具为shell则生成shell工具内容
-                    if "session_id" in event.function_args:
-                        shell_result = await self._sandbox.read_shell_output(
-                            event.function_args["session_id"],
-                            console=True,
-                        )
-                        event.tool_content = ShellToolContent(
-                            console=(shell_result.data or {}).get("console_records", [])
-                        )
-                    else:
-                        event.tool_content = ShellToolContent(console="(No console)")
-                elif event.tool_name == "file":
-                    # 5.工具为file则展示内容，并在写入成功后同步到对象存储
-                    if "filepath" in event.function_args:
-                        filepath = event.function_args["filepath"]
-                        file_read_result = await self._sandbox.read_file(filepath)
-                        file_content: str = ""
-                        if file_read_result.success:
-                            file_content = (file_read_result.data or {}).get("content", "")
-                        event.tool_content = FileToolContent(content=file_content or "(No Content)")
-
-                        should_sync = (
-                                event.function_name in FILE_MUTATING_FUNCTIONS
-                                and event.function_result
-                                and event.function_result.success
-                        )
-                        if should_sync:
-                            await self._sync_file_to_storage(filepath)
-                    else:
-                        event.tool_content = FileToolContent(content="(No Content)")
-                elif event.tool_name in ["mcp", "a2a"]:
-                    # 6.工具为mcp/a2a则处理调用结果
-                    logger.info(f"处理MCP/A2A工具事件, function_result: {event.function_result}")
-                    if event.function_result:
-                        # 7.如果结果包含data则提取data
-                        if hasattr(event.function_result, "data") and event.function_result.data:
-                            logger.info(f"MCP/A2A工具调用结果: {event.function_result.data}")
-                            event.tool_content = MCPToolContent(result=event.function_result.data) \
-                                if event.tool_name == "mcp" \
-                                else A2AToolContent(a2a_result=event.function_result.data)
-                        elif hasattr(event.function_result, "success") and event.function_result.success:
-                            # 8.mcp/a2a工具调用正常，但是无结果产生
-                            logger.info(f"MCP/A2A工具调用成功返回，但无结果: {event.function_result}")
-                            result_data = event.function_result.model_dump() \
-                                if hasattr(event.function_result, "model_dump") \
-                                else str(event.function_result)
-                            event.tool_content = MCPToolContent(result=result_data) \
-                                if event.tool_name == "mcp" \
-                                else A2AToolContent(a2a_result=result_data)
-                        else:
-                            # 9.其他情况将结果转换成字符串进行传递
-                            logger.info(f"MCP/A2A工具额记过: {event.function_result}")
-                            event.tool_content = MCPToolContent(result=str(event.function_result)) \
-                                if event.tool_name == "mcp" \
-                                else A2AToolContent(a2a_result=str(event.function_result))
-                    else:
-                        logger.warning("MCP/A2A工具调用结果未发现")
-                        event.tool_content = MCPToolContent(result="(MCP工具无可用结果)") \
-                            if event.tool_name == "mcp" \
-                            else A2AToolContent(a2a_result="(A2A智能体无可用结果)")
-        except Exception as e:
-            logger.exception(f"AgentTaskRunner生成工具内容失败: {str(e)}")
+        await self._tool_presenter.enrich(event)
 
     async def _run_flow(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         """根据消息对象运行PlannerReActFlow"""
@@ -410,33 +314,33 @@ class AgentTaskRunner(TaskRunner):
             logger.warning(f"清理MCP工具资源时出错: {e}")
         try:
             if self._a2a_tool:
-                await self._a2a_tool.manager.cleanup()
+                await self._a2a_tool.cleanup()
         except Exception as e:
             logger.warning(f"清理A2A工具资源时出错: {e}")
 
     async def invoke(self, task: Task) -> None:
         """根据传递的任务处理agent消息队列并运行agent流"""
+        cancelled = False
         try:
-            # 1.确保沙箱、mcp、a2a均初始化完成
             logger.info(f"AgentTaskRunner任务处理开始")
             await self._sandbox.ensure_sandbox()
             await self._mcp_tool.initialize(self._mcp_config)
             await self._a2a_tool.initialize(self._a2a_config)
             await self._emit_session_status(task, SessionStatus.RUNNING)
 
-            # 2.循环读取任务中的输入消息队列
             while not await task.input_stream.is_empty():
-                # 3.从输入流中获取数据
+                if await self._is_cancelled(task):
+                    cancelled = True
+                    break
+
                 event = await self._pop_event(task)
                 message = ""
 
-                # 4.判断事件类型是否为消息事件，如果是则处理消息并将附件同步到沙箱中
                 if isinstance(event, MessageEvent):
                     message = event.message or ""
                     await self._sync_message_attachments_to_sandbox(event)
                     logger.info(f"AgentTaskRunner接收到新消息: {message[:50]}...")
 
-                # 5.将消息事件转换称消息对象
                 synced_files = event.attachments or []
                 message_obj = Message(
                     message=message,
@@ -444,17 +348,17 @@ class AgentTaskRunner(TaskRunner):
                     vision_attachments=await self._build_vision_attachments(synced_files),
                 )
 
-                # 6.传递消息对象并运行PlannerReActFlow
                 async for event in self._run_flow(message_obj):
-                    # 7.将得到的事件添加到消息队列中
+                    if await self._is_cancelled(task):
+                        cancelled = True
+                        break
+
                     await self._put_and_add_event(task, event)
 
-                    # 8.如果事件类型为标题事件则更新会话标题
                     if isinstance(event, TitleEvent):
                         async with self._uow:
                             await self._uow.session.update_title(self._session_id, event.title)
                     elif isinstance(event, (MessageEvent, AssistantNoticeEvent)):
-                        # 9.如果事件为消息事件，则更新最新消息并新增未读消息数
                         async with self._uow:
                             await self._uow.session.update_latest_message(
                                 self._session_id,
@@ -463,46 +367,45 @@ class AgentTaskRunner(TaskRunner):
                             )
                             await self._uow.session.increment_unread_message_count(self._session_id)
                     elif isinstance(event, WaitEvent):
-                        # 10.如果事件为等待，则更新会话状态并终止程序
                         await self._emit_session_status(task, SessionStatus.WAITING)
                         return
 
-                    # 11.判断如果输入消息队列为空则跳出循环
                     if not await task.input_stream.is_empty():
                         break
 
-            # 12.更新会话状态为已完成
-            await self._emit_session_status(task, SessionStatus.COMPLETED)
+                if cancelled:
+                    break
+
+            if cancelled:
+                await self._put_and_add_event(task, DoneEvent())
+                await self._emit_session_status(task, SessionStatus.CANCELLED)
+                record_agent_cancel(self._session_id)
+            else:
+                await self._emit_session_status(task, SessionStatus.COMPLETED)
         except asyncio.CancelledError:
-            # 13.异步任务被取消，推送结束事件并跟新状态
             logger.info(f"AgentTaskRunner任务运行取消")
             await self._put_and_add_event(task, DoneEvent())
-            async with self._uow:
-                await self._uow.session.update_status(self._session_id, SessionStatus.COMPLETED)
+            await self._emit_session_status(task, SessionStatus.CANCELLED)
+            record_agent_cancel(self._session_id)
             raise
         except Exception as e:
-            # 14.记录日志并往任务队列/消息队列中写入异常事件并更新会话状态
             logger.exception(f"AgentTaskRunner运行出错: {str(e)}")
             await self._put_and_add_event(task, ErrorEvent(error=f"AgentTaskRunner出错: {str(e)}"))
-            async with self._uow:
-                await self._uow.session.update_status(self._session_id, SessionStatus.COMPLETED)
+            await self._emit_session_status(task, SessionStatus.COMPLETED)
         finally:
-            # 15.在同一个asyncio Task上下文中清理MCP/A2A工具资源
-            # 这是关键：streamablehttp_client内部使用anyio.create_task_group()，
-            # 要求在同一个Task中进入和退出cancel scope，
-            # 所以必须在invoke()的finally块（即初始化MCP的同一个Task）中清理
             await self._cleanup_tools()
 
+    async def cleanup(self) -> None:
+        """清理任务级资源（保留 sandbox 供后续对话复用）"""
+        await self._cleanup_tools()
+
     async def destroy(self) -> None:
-        """销毁任务运行器并释放资源"""
-        # 1.清除沙箱
+        """销毁任务运行器并释放 sandbox 资源"""
         logger.info(f"开始清除销毁AgentTaskRunner资源")
+        await self.cleanup()
         if self._sandbox:
             logger.info("销毁AgentTaskRunner中的沙箱环境")
             await self._sandbox.destroy()
-
-        # 2.清除mcp和a2a工具（幂等操作，如果invoke()中已清理则不会重复执行）
-        await self._cleanup_tools()
 
     async def on_done(self, task: Task) -> None:
         """任务结束时执行的回调函数"""

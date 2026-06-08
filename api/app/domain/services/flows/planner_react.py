@@ -18,21 +18,16 @@ from app.domain.models.event import (
     AssistantNoticeEvent,
     DebugItemEvent,
 )
-from app.domain.models.event import DoneEvent
+from app.domain.models.event import ErrorEvent, DoneEvent
 from app.domain.models.message import Message
 from app.domain.models.plan import Plan, ExecutionStatus
 from app.domain.models.session import SessionStatus
 from app.domain.services.agents.planner import PlannerAgent
 from app.domain.services.agents.react import ReActAgent
 from app.domain.services.tools.a2a import A2ATool
-from app.domain.services.tools.browser import BrowserTool
-from app.domain.services.tools.file import FileTool
-from app.domain.services.tools.mcp import MCPTool
-from app.domain.services.tools.message import MessageTool
-from app.domain.services.tools.search import SearchTool
-from app.domain.services.tools.shell import ShellTool
-from app.domain.services.tools.vision import VisionTool
 from app.domain.services.tools.base import BaseTool
+from app.domain.services.tools.mcp import MCPTool
+from app.domain.services.tools.tool_registry import ToolRegistry
 from app.infrastructure.observability.agent_tracer import AgentTracer
 from app.infrastructure.observability.otel import record_agent_step
 from .base import BaseFlow, FlowStatus
@@ -71,19 +66,19 @@ class PlannerReActFlow(BaseFlow):
         self.plan: Optional[Plan] = None
         self._vision_consumed: bool = False
 
-        # 2.初始化Agent预设工具列表
-        tools = [
-            FileTool(sandbox=sandbox),
-            ShellTool(sandbox=sandbox),
-            BrowserTool(browser=browser),
-            SearchTool(search_engine=search_engine),
-            MessageTool(),
-            VisionTool(sandbox=sandbox, llm=llm),
-            mcp_tool,
-            a2a_tool,
-        ]
-        if extra_tools:
-            tools.extend(extra_tools)
+        self._agent_config = agent_config
+        self._flow_step_budget = agent_config.max_flow_steps
+        self._flow_steps_used = 0
+
+        tools = ToolRegistry.build_default_tools(
+            sandbox=sandbox,
+            browser=browser,
+            search_engine=search_engine,
+            llm=llm,
+            mcp_tool=mcp_tool,
+            a2a_tool=a2a_tool,
+            extra_tools=extra_tools,
+        )
 
         allowed_tool_names = skill.allowed_tools if skill and skill.allowed_tools else None
 
@@ -151,9 +146,7 @@ class PlannerReActFlow(BaseFlow):
             logger.debug(f"会话[{self._session_id}]处于等待状态并传递了新消息")
             self.status = FlowStatus.EXECUTING
 
-        # 5.更新会话状态为运行中
-        async with self._uow:
-            await self._uow.session.update_status(self._session_id, SessionStatus.RUNNING)
+        # 5.更新会话状态为运行中（由 AgentTaskRunner 统一管理，此处不再重复写入）
 
         # 6.获取当前会话中最新事件
         self.plan = session.get_latest_plan()
@@ -166,6 +159,17 @@ class PlannerReActFlow(BaseFlow):
 
         # 8.创建死循环执行任务，根据流的不同状态执行不同的操作
         while True:
+            self._flow_steps_used += 1
+            if self._flow_steps_used > self._flow_step_budget:
+                logger.warning(
+                    "Planner&ReAct流超过步骤预算 session=%s budget=%s",
+                    self._session_id,
+                    self._flow_step_budget,
+                )
+                yield ErrorEvent(error="任务步骤数超过上限，已终止执行")
+                self.status = FlowStatus.COMPLETED
+                break
+
             # 9.如果流的状态为空闲，则只需要将状态修改为规划中
             if self.status == FlowStatus.IDLE:
                 logger.info(f"Planner&ReAct流状态从{FlowStatus.IDLE}变成{FlowStatus.PLANNING}")

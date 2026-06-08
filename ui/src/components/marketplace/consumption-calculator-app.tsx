@@ -1,7 +1,7 @@
 'use client'
 
-import { useRef, useState } from 'react'
-import { Camera, Loader2, Upload } from 'lucide-react'
+import { useState } from 'react'
+import { Calculator, Package } from 'lucide-react'
 import { toast } from 'sonner'
 import { marketplaceApi } from '@/lib/api/marketplace'
 import { fileApi } from '@/lib/api/file'
@@ -10,12 +10,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
+import { ImageUploadZone } from '@/components/marketplace/image-upload-zone'
+import { Skeleton } from '@/components/ui/skeleton'
 
 const MAX_SIZE = 5 * 1024 * 1024
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png']
 
 export function ConsumptionCalculatorApp() {
-  const fileRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [servingGrams, setServingGrams] = useState('50')
   const [manualTotal, setManualTotal] = useState('')
@@ -80,9 +81,9 @@ export function ConsumptionCalculatorApp() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div>
-        <h2 className="text-lg font-bold text-gray-700">实物消耗计算器</h2>
+        <h2 className="text-lg font-bold text-gray-800">实物消耗计算器</h2>
         <p className="text-sm text-muted-foreground mt-1">
           拍摄包装净含量标识，结合单次用量计算可食用次数
         </p>
@@ -98,40 +99,41 @@ export function ConsumptionCalculatorApp() {
         />
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/jpeg,image/png"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (file) handleFile(file)
-          }}
-        />
-        <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={loading}>
-          <Upload className="size-4" />
-          上传包装图
-        </Button>
-        <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={loading}>
-          <Camera className="size-4" />
-          拍照识别
-        </Button>
-        {loading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
-      </div>
+      <ImageUploadZone
+        loading={loading}
+        preview={preview}
+        previewAlt="包装预览"
+        hint="上传包装净含量照片，支持点击或拖拽，JPG/PNG 最大 5MB"
+        onFile={handleFile}
+      />
 
-      {preview && (
-        <img src={preview} alt="包装预览" className="max-h-48 rounded-lg border object-cover" />
+      {loading && (
+        <div className="space-y-3">
+          <Skeleton className="h-32 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-lg" />
+        </div>
       )}
 
-      {result && !result.recognized && (
-        <Card>
+      {!loading && !result && !preview && (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 py-10 px-4 text-center">
+          <Package className="size-10 text-muted-foreground/50 mb-3" />
+          <p className="text-sm font-medium text-foreground">上传包装照片开始识别</p>
+          <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+            先填写单次食用量，系统将自动识别净含量并计算可食用次数
+          </p>
+        </div>
+      )}
+
+      {result && !result.recognized && !loading && (
+        <Card className="border-amber-200 bg-amber-50/30">
           <CardContent className="py-4 space-y-3">
-            <p className="text-sm text-muted-foreground">{result.message}</p>
+            <p className="text-sm text-foreground">{result.message}</p>
             {result.ocr_text && (
-              <p className="text-xs text-muted-foreground">识别文本: {result.ocr_text}</p>
+              <p className="text-xs text-muted-foreground rounded-md bg-background/60 px-2 py-1.5">
+                识别文本: {result.ocr_text}
+              </p>
             )}
-            <div className="flex gap-2 items-end">
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
               <div className="space-y-2 flex-1">
                 <Label htmlFor="manual-total">手动输入总量 (g)</Label>
                 <Input
@@ -142,7 +144,8 @@ export function ConsumptionCalculatorApp() {
                   onChange={(e) => setManualTotal(e.target.value)}
                 />
               </div>
-              <Button onClick={handleManualCalculate} disabled={loading}>
+              <Button onClick={handleManualCalculate} disabled={loading} className="shrink-0">
+                <Calculator className="size-4" />
                 重新计算
               </Button>
             </div>
@@ -150,16 +153,43 @@ export function ConsumptionCalculatorApp() {
         </Card>
       )}
 
-      {result?.recognized && (
-        <Card>
-          <CardContent className="py-4 space-y-2">
-            <p className="text-base font-medium text-gray-700">{result.message}</p>
-            {result.ocr_text && (
-              <p className="text-xs text-muted-foreground">识别: {result.ocr_text}</p>
-            )}
-            <div className="text-sm text-muted-foreground">
-              总量 {result.total_grams}g · 每次 {result.serving_grams}g · 约 {result.servings} 次
+      {result?.recognized && !loading && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="py-5 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                <Calculator className="size-6 text-primary" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm text-muted-foreground">{result.message}</p>
+                <p className="text-3xl font-bold text-foreground mt-1">
+                  约 {result.servings}
+                  <span className="text-base font-normal text-muted-foreground ml-1">次</span>
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">可食用次数</p>
+              </div>
             </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+              <div className="rounded-lg border bg-background/80 px-3 py-2">
+                <p className="text-[11px] text-muted-foreground">总量</p>
+                <p className="font-medium">{result.total_grams} g</p>
+              </div>
+              <div className="rounded-lg border bg-background/80 px-3 py-2">
+                <p className="text-[11px] text-muted-foreground">每次</p>
+                <p className="font-medium">{result.serving_grams} g</p>
+              </div>
+              <div className="rounded-lg border bg-background/80 px-3 py-2">
+                <p className="text-[11px] text-muted-foreground">可食用</p>
+                <p className="font-medium text-primary">{result.servings} 次</p>
+              </div>
+            </div>
+
+            {result.ocr_text && (
+              <p className="text-xs text-muted-foreground rounded-md bg-background/60 px-2 py-1.5">
+                识别: {result.ocr_text}
+              </p>
+            )}
           </CardContent>
         </Card>
       )}

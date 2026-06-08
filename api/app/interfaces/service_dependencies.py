@@ -22,7 +22,7 @@ from app.infrastructure.external.json_parser.repair_json_parser import RepairJSO
 from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
 from app.infrastructure.external.search.bing_search import BingSearchEngine
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
-from app.infrastructure.repositories.file_app_config_repository import FileAppConfigRepository
+from app.application.services.config_provider import get_app_config_provider
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.storage.cos import Cos, get_cos
 from app.infrastructure.storage.postgres import get_db_session, get_uow
@@ -98,8 +98,8 @@ def get_agent_service(
         skill_service: SkillService = Depends(get_skill_service),
         memory_service: MemoryService = Depends(get_memory_service),
 ) -> AgentService:
-    app_config_repository = FileAppConfigRepository(config_path=settings.app_config_filepath)
-    app_config = app_config_repository.load()
+    config_provider = get_app_config_provider()
+    app_config = config_provider._cache or config_provider._repository.load()
     file_storage = CosFileStorage(
         bucket=settings.cos_bucket,
         cos=cos,
@@ -119,4 +119,5 @@ def get_agent_service(
         search_engine=BingSearchEngine(),
         file_storage=file_storage,
         auto_extract_memory=settings.memory_auto_extract_enabled,
+        config_provider=config_provider,
     )

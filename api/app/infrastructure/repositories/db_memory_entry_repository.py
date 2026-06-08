@@ -49,6 +49,7 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
         return record.to_domain() if record else None
 
     async def recall_for_session(self, session_id: str, limit: int = 20) -> List[MemoryEntry]:
+        fetch_limit = max(limit * 3, limit)
         stmt = (
             select(MemoryEntryORM)
             .where(
@@ -65,7 +66,7 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
                 MemoryEntryORM.use_count.desc(),
                 MemoryEntryORM.created_at.desc(),
             )
-            .limit(limit)
+            .limit(fetch_limit)
         )
         result = await self.db_session.execute(stmt)
         return [r.to_domain() for r in result.scalars().all()]

@@ -10,6 +10,8 @@ import httpx
 from app.application.errors.exceptions import ServerRequestsError
 from app.domain.models.app_config import A2AConfig
 from app.domain.models.tool_result import ToolResult
+from app.domain.utils.app_config_filter import filter_enabled_a2a_config
+from app.infrastructure.external.tools.connection_pool import A2AConnectionPool
 from .base import BaseTool, tool
 
 logger = logging.getLogger(__name__)
@@ -72,9 +74,10 @@ class A2AClientManager:
             raise ServerRequestsError(f"A2A客户端管理器加载失败")
 
     async def _get_a2a_agent_cards(self) -> None:
-        """根据配置连接所有a2a服务器获取AgentCard信息"""
-        # 1.循环遍历所有的a2a服务
+        """根据配置连接所有已启用的 a2a 服务器获取 AgentCard 信息"""
         for a2a_server_config in self._a2a_config.a2a_servers:
+            if not a2a_server_config.enabled:
+                continue
             try:
                 # 2.调用httpx客户端发起请求
                 agent_card_response = await self._httpx_client.get(
@@ -92,12 +95,12 @@ class A2AClientManager:
 
     async def invoke(self, agent_id: str, query: str) -> ToolResult:
         """根据传递的智能体id+query调用Remote-Agent"""
-        # 1.判断传递的agent_id是否存在
         if agent_id not in self._agent_cards:
             return ToolResult(success=False, message="该远程Agent不存在")
 
-        # 2.Agent存在，则取出端点信息
         agent_card = self._agent_cards.get(agent_id, {})
+        if not agent_card.get("enabled", True):
+            return ToolResult(success=False, message="该远程Agent已禁用")
         url = agent_card.get("url", "")
 
         # 3.判断端点是否存在
@@ -154,15 +157,16 @@ class A2ATool(BaseTool):
         super().__init__()
         self._initialized: bool = False
         self.manager: Optional[A2AClientManager] = None
+        self._uses_pool: bool = False
 
     async def initialize(self, a2a_config: Optional[A2AConfig] = None) -> None:
         """初始化A2A工具包"""
-        # 1.判断下是否已初始化
-        if not self._initialized:
-            # 2.初始化A2A客户端管理器
-            self.manager = A2AClientManager(a2a_config)
-            await self.manager.initialize()
-            self._initialized = True
+        if self._initialized:
+            return
+        filtered = filter_enabled_a2a_config(a2a_config) if a2a_config else A2AConfig()
+        self.manager = await A2AConnectionPool.acquire(filtered)
+        self._uses_pool = True
+        self._initialized = True
 
     @tool(
         name="get_remote_agent_cards",
@@ -172,11 +176,14 @@ class A2ATool(BaseTool):
     )
     async def get_remote_agent_cards(self) -> ToolResult:
         """获取远程Agent卡片信息列表"""
-        # 1.重组结构，将id填充到agent_card中
+        if not self.manager:
+            return ToolResult(success=False, message="A2A工具未初始化")
         agent_cards = []
-        for id, agent_card in self.manager.agent_cards.items():
+        for card_id, agent_card in self.manager.agent_cards.items():
+            if not agent_card.get("enabled", True):
+                continue
             agent_cards.append({
-                "id": id,
+                "id": card_id,
                 **agent_card,
             })
 
@@ -204,4 +211,18 @@ class A2ATool(BaseTool):
     )
     async def call_remote_agent(self, id: str, query: str) -> ToolResult:
         """调用远程Agent并完成对应需求"""
+        if not self.manager:
+            return ToolResult(success=False, message="A2A工具未初始化")
         return await self.manager.invoke(agent_id=id, query=query)
+
+    async def cleanup(self) -> None:
+        """清除A2A工具资源（连接池模式下仅重置本地状态）"""
+        if self._uses_pool:
+            self.manager = None
+            self._initialized = False
+            self._uses_pool = False
+            return
+        if self.manager:
+            await self.manager.cleanup()
+        self.manager = None
+        self._initialized = False

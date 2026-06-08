@@ -4,6 +4,8 @@
 import logging
 from typing import Callable, Optional, Type
 
+from app.application.services.config_provider import AppConfigProvider, get_app_config_provider
+
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.memory_extractor_service import MemoryExtractorService
 from app.application.services.memory_service import MemoryService
@@ -40,6 +42,7 @@ class TaskRunnerFactory:
             search_engine: SearchEngine,
             file_storage: FileStorage,
             auto_extract_memory: bool = True,
+            config_provider: Optional[AppConfigProvider] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm_model_service = llm_model_service
@@ -53,6 +56,13 @@ class TaskRunnerFactory:
         self._search_engine = search_engine
         self._file_storage = file_storage
         self._auto_extract_memory = auto_extract_memory
+        self._config_provider = config_provider or get_app_config_provider()
+
+    async def _refresh_runtime_config(self) -> None:
+        app_config = await self._config_provider.get()
+        self._agent_config = app_config.agent_config
+        self._mcp_config = app_config.mcp_config
+        self._a2a_config = app_config.a2a_config
 
     def _apply_skill_agent_params(self, agent_config: AgentConfig, skill: Skill) -> AgentConfig:
         params = skill.agent_params
@@ -104,6 +114,7 @@ class TaskRunnerFactory:
             return ""
 
     async def create_runner(self, session: Session) -> AgentTaskRunner:
+        await self._refresh_runtime_config()
         sandbox = None
         sandbox_id = session.sandbox_id
         if sandbox_id:

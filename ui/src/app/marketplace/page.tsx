@@ -17,8 +17,8 @@ export default function MarketplacePage() {
         </Button>
         <span className="text-sm text-muted-foreground">应用市场</span>
       </header>
-      <div className="flex-1 overflow-auto p-4 sm:p-6">
-        <div className="max-w-6xl mx-auto h-full">
+      <div className="flex-1 overflow-hidden p-4 sm:p-6">
+        <div className="w-full h-full max-w-7xl mx-auto">
           <MarketplaceShell />
         </div>
       </div>

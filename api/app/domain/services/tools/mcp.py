@@ -10,6 +10,8 @@ from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 
 from app.application.errors.exceptions import NotFoundError
+from app.domain.utils.app_config_filter import filter_enabled_mcp_config
+from app.infrastructure.external.tools.connection_pool import MCPConnectionPool
 from app.domain.models.app_config import MCPConfig, MCPServerConfig, MCPTransport
 from app.domain.models.tool_result import ToolResult
 from .base import BaseTool
@@ -73,14 +75,13 @@ class MCPClientManager:
             raise
 
     async def _connect_mcp_servers(self) -> None:
-        """根据配置连接所有MCP服务"""
-        # 1.循环遍历传递进来的所有MCP服务器，不用理会enabled的状态，因为在外部会执行筛选
+        """根据配置连接所有已启用的 MCP 服务"""
         for server_name, server_config in self._mcp_config.mcpServers.items():
+            if not server_config.enabled:
+                continue
             try:
-                # 2.根据服务名字+服务配置连接到MCP服务器
                 await self._connect_mcp_server(server_name, server_config)
             except Exception as e:
-                # 3.记录错误日志并跳过错误的MCP服务器
                 logger.error(f"连接MCP服务器[{server_name}]出错: {str(e)}")
                 continue
 
@@ -355,18 +356,17 @@ class MCPTool(BaseTool):
         self._initialized: bool = False
         self._tools = []
         self._manager: MCPClientManager = None
+        self._uses_pool: bool = False
 
     async def initialize(self, mcp_config: Optional[MCPConfig] = None) -> None:
         """初始化MCP工具包"""
-        # 1.判断是否初始化，如果未初始化则进行初始化
-        if not self._initialized:
-            # 2.初始化MCP客户端管理器
-            self._manager = MCPClientManager(mcp_config=mcp_config)
-            await self._manager.initialize()
-
-            # 3.获取mcpServers工具列表
-            self._tools = await self._manager.get_all_tools()
-            self._initialized = True
+        if self._initialized:
+            return
+        filtered = filter_enabled_mcp_config(mcp_config) if mcp_config else MCPConfig()
+        self._manager = await MCPConnectionPool.acquire(filtered)
+        self._uses_pool = True
+        self._tools = await self._manager.get_all_tools()
+        self._initialized = True
 
     def get_tools(self) -> List[Dict[str, Any]]:
         """同步获取工具包下的所有工具列表"""
@@ -387,6 +387,15 @@ class MCPTool(BaseTool):
         return await self._manager.invoke(tool_name, kwargs)
 
     async def cleanup(self) -> None:
-        """清除MCP工具资源"""
+        """清除MCP工具资源（连接池模式下仅重置本地状态）"""
+        if self._uses_pool:
+            self._tools = []
+            self._manager = None
+            self._initialized = False
+            self._uses_pool = False
+            return
         if self._manager:
             await self._manager.cleanup()
+        self._tools = []
+        self._manager = None
+        self._initialized = False

@@ -51,6 +51,17 @@ class GeminiLLM(LLM):
     def capabilities(self) -> ModelCapabilities:
         return self._capabilities
 
+    def _convert_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        declarations = []
+        for tool in tools or []:
+            fn = tool.get("function", {})
+            declarations.append({
+                "name": fn.get("name"),
+                "description": fn.get("description"),
+                "parameters": fn.get("parameters") or {"type": "object", "properties": {}},
+            })
+        return declarations
+
     def _convert_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         contents = []
         for msg in messages:
@@ -63,11 +74,35 @@ class GeminiLLM(LLM):
                 parts = openai_content_to_gemini_parts(content)
                 contents.append({"role": "user", "parts": parts})
             elif role == "assistant":
-                text = content if isinstance(content, str) else json.dumps(content) if content else ""
-                contents.append({"role": "model", "parts": [{"text": text or ""}]})
+                parts: List[Dict[str, Any]] = []
+                text = content if isinstance(content, str) else ""
+                if text:
+                    parts.append({"text": text})
+                for tool_call in msg.get("tool_calls") or []:
+                    fn = tool_call.get("function") or {}
+                    raw_args = fn.get("arguments") or "{}"
+                    try:
+                        parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    except json.JSONDecodeError:
+                        parsed_args = {}
+                    parts.append({
+                        "functionCall": {
+                            "name": fn.get("name"),
+                            "args": parsed_args or {},
+                        }
+                    })
+                contents.append({"role": "model", "parts": parts or [{"text": ""}]})
             elif role == "tool":
                 tool_text = content if isinstance(content, str) else json.dumps(content)
-                contents.append({"role": "user", "parts": [{"text": f"[tool_result]\n{tool_text}"}]})
+                contents.append({
+                    "role": "function",
+                    "parts": [{
+                        "functionResponse": {
+                            "name": msg.get("name") or "tool",
+                            "response": {"result": tool_text},
+                        }
+                    }],
+                })
         return contents
 
     async def invoke(
@@ -87,6 +122,8 @@ class GeminiLLM(LLM):
         }
         if response_format and response_format.get("type") == "json_object":
             payload["generationConfig"]["responseMimeType"] = "application/json"
+        if tools:
+            payload["tools"] = [{"functionDeclarations": self._convert_tools(tools)}]
         url = f"{self._base_url}/v1beta/models/{self._model_name}:generateContent?key={self._api_key}"
         async with httpx.AsyncClient(timeout=300) as client:
             response = await client.post(url, json=payload)
@@ -98,8 +135,24 @@ class GeminiLLM(LLM):
         if not candidates:
             raise ServerRequestsError("Gemini API returned no candidates")
         parts = candidates[0].get("content", {}).get("parts") or []
-        text = "".join(part.get("text", "") for part in parts)
-        message: Dict[str, Any] = {"role": "assistant", "content": text}
+        text_parts = []
+        tool_calls = []
+        for part in parts:
+            if "text" in part:
+                text_parts.append(part.get("text", ""))
+            function_call = part.get("functionCall")
+            if function_call:
+                tool_calls.append({
+                    "id": f"call_{function_call.get('name', 'tool')}",
+                    "type": "function",
+                    "function": {
+                        "name": function_call.get("name"),
+                        "arguments": json.dumps(function_call.get("args") or {}),
+                    },
+                })
+        message: Dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
+        if tool_calls:
+            message["tool_calls"] = tool_calls
         usage_meta = data.get("usageMetadata") or {}
         usage = normalize_usage({
             "promptTokenCount": usage_meta.get("promptTokenCount"),

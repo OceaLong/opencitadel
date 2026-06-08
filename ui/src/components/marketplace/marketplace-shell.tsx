@@ -1,10 +1,11 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { LayoutGrid, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { marketplaceApi } from '@/lib/api/marketplace'
 import type { MarketplaceApp } from '@/lib/api/types'
+import { Skeleton } from '@/components/ui/skeleton'
 import { AppCard } from '@/components/marketplace/app-card'
 import { VideoSearchApp } from '@/components/marketplace/video-search-app'
 import { NutritionAnalysisApp } from '@/components/marketplace/nutrition-analysis-app'
@@ -43,8 +44,26 @@ function renderApp(appId: string) {
     case 'consumption-calculator':
       return <ConsumptionCalculatorApp />
     default:
-      return <p className="text-muted-foreground text-sm">请选择一个应用</p>
+      return (
+        <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
+          <LayoutGrid className="size-10 mb-3 opacity-40" />
+          <p className="text-sm">请从左侧选择一个应用开始使用</p>
+        </div>
+      )
   }
+}
+
+function AppListSkeleton({ compact }: { compact?: boolean }) {
+  return (
+    <div className={compact ? 'flex gap-2 overflow-hidden' : 'grid gap-2'}>
+      {Array.from({ length: 3 }).map((_, i) => (
+        <Skeleton
+          key={i}
+          className={compact ? 'h-24 w-[220px] shrink-0 rounded-xl' : 'h-24 w-full rounded-xl'}
+        />
+      ))}
+    </div>
+  )
 }
 
 export function MarketplaceShell() {
@@ -73,36 +92,85 @@ export function MarketplaceShell() {
   }, [load])
 
   const displayApps = apps.length > 0 ? apps : FALLBACK_APPS
+  const activeApp = displayApps.find((app) => app.id === activeId)
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 min-h-0 flex-1">
-      <aside className="w-full lg:w-72 shrink-0 space-y-3">
-        <div>
-          <h1 className="text-xl font-bold text-gray-700">应用市场助手</h1>
+    <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 min-h-0 flex-1 h-full">
+      <aside className="w-full lg:w-80 xl:w-72 shrink-0 flex flex-col min-h-0">
+        <div className="mb-4 shrink-0">
+          <h1 className="text-xl font-bold text-gray-800">应用市场助手</h1>
           <p className="text-sm text-muted-foreground mt-1">
             免下载小应用，点击即可使用
           </p>
         </div>
-        {loading ? (
-          <div className="flex justify-center py-8">
-            <Loader2 className="size-5 animate-spin" />
+
+        <div className="hidden lg:flex flex-col min-h-0 flex-1">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 shrink-0">
+            全部应用
+          </p>
+          <div className="overflow-y-auto pr-1 -mr-1 flex-1 min-h-0">
+            {loading ? (
+              <AppListSkeleton />
+            ) : (
+              <div className="grid gap-2 pb-2">
+                {displayApps.map((app) => (
+                  <AppCard
+                    key={app.id}
+                    app={app}
+                    selected={activeId === app.id}
+                    onClick={() => setActiveId(app.id)}
+                  />
+                ))}
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="grid gap-2">
-            {displayApps.map((app) => (
-              <AppCard
-                key={app.id}
-                app={app}
-                selected={activeId === app.id}
-                onClick={() => setActiveId(app.id)}
-              />
-            ))}
-          </div>
-        )}
+        </div>
+
+        <div className="lg:hidden shrink-0">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+            全部应用
+          </p>
+          {loading ? (
+            <AppListSkeleton compact />
+          ) : (
+            <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 snap-x snap-mandatory">
+              {displayApps.map((app) => (
+                <AppCard
+                  key={app.id}
+                  app={app}
+                  selected={activeId === app.id}
+                  compact
+                  onClick={() => setActiveId(app.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </aside>
 
-      <main className="flex-1 min-w-0 rounded-xl border bg-white p-4 sm:p-6 overflow-auto">
-        {renderApp(activeId)}
+      <main className="flex-1 min-w-0 min-h-0 flex flex-col rounded-xl border border-border/60 bg-white shadow-sm overflow-hidden">
+        {activeApp && (
+          <div className="shrink-0 border-b bg-muted/20 px-4 sm:px-6 py-3">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">{activeApp.icon}</span>
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">{activeApp.name}</h2>
+                <p className="text-xs text-muted-foreground line-clamp-1">
+                  {activeApp.description}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="flex-1 overflow-auto p-4 sm:p-6">
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            renderApp(activeId)
+          )}
+        </div>
       </main>
     </div>
   )

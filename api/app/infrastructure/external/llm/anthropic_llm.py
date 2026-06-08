@@ -66,10 +66,27 @@ class AnthropicLLM(LLM):
             elif role == "user":
                 converted.append({"role": "user", "content": self._convert_content(content)})
             elif role == "assistant":
-                assistant_content = content
-                if isinstance(content, str) and msg.get("tool_calls"):
-                    assistant_content = content or ""
-                converted.append({"role": "assistant", "content": assistant_content})
+                blocks: List[Dict[str, Any]] = []
+                text = content if isinstance(content, str) else ""
+                if text:
+                    blocks.append({"type": "text", "text": text})
+                for tool_call in msg.get("tool_calls") or []:
+                    fn = tool_call.get("function") or {}
+                    raw_args = fn.get("arguments") or "{}"
+                    try:
+                        parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    except json.JSONDecodeError:
+                        parsed_args = {}
+                    blocks.append({
+                        "type": "tool_use",
+                        "id": tool_call.get("id"),
+                        "name": fn.get("name"),
+                        "input": parsed_args or {},
+                    })
+                converted.append({
+                    "role": "assistant",
+                    "content": blocks if blocks else (content or ""),
+                })
             elif role == "tool":
                 tool_content = content if isinstance(content, str) else json.dumps(content)
                 converted.append({

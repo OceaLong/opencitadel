@@ -10,6 +10,7 @@ from pydantic import TypeAdapter
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.memory_service import MemoryService
 from app.application.services.skill_service import SkillService
+from app.application.services.config_provider import AppConfigProvider, get_app_config_provider
 from app.application.services.task_runner_factory import TaskRunnerFactory
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.json_parser import JSONParser
@@ -47,6 +48,7 @@ class AgentService:
             search_engine: SearchEngine,
             file_storage: FileStorage,
             auto_extract_memory: bool = True,
+            config_provider: Optional[AppConfigProvider] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._uow = uow_factory()
@@ -65,6 +67,7 @@ class AgentService:
             search_engine=search_engine,
             file_storage=file_storage,
             auto_extract_memory=auto_extract_memory,
+            config_provider=config_provider or get_app_config_provider(),
         )
         logger.info("AgentService初始化成功")
 
@@ -101,6 +104,7 @@ class AgentService:
 
         while True:
             if await self._task_state.is_cancelled(task_id):
+                yield DoneEvent()
                 break
 
             event_id, event_str = await output_stream.get(start_id=cursor, block_ms=500)
@@ -118,7 +122,11 @@ class AgentService:
             if await self._task_state.is_done(task_id):
                 async with self._uow:
                     session = await self._uow.session.get_by_id(session_id)
-                if session and session.status in {SessionStatus.COMPLETED, SessionStatus.WAITING}:
+                if session and session.status in {
+                    SessionStatus.COMPLETED,
+                    SessionStatus.WAITING,
+                    SessionStatus.CANCELLED,
+                }:
                     return
                 if await output_stream.is_empty():
                     return
@@ -223,7 +231,7 @@ class AgentService:
         if session.task_id:
             await self._task_state.request_cancel(session.task_id)
         async with self._uow:
-            await self._uow.session.update_status(session_id, SessionStatus.COMPLETED)
+            await self._uow.session.update_status(session_id, SessionStatus.CANCELLED)
 
     async def shutdown(self) -> None:
         logger.info("AgentService 关闭（任务由独立 worker 执行，无需清理本地 registry）")

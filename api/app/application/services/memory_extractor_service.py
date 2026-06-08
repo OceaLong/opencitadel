@@ -93,5 +93,9 @@ class MemoryExtractorService:
                 if entry.title and entry.content:
                     await uow.memory_entry.save(entry)
                     entries.append(entry)
+        from app.application.services.vector_memory_service import VectorMemoryService
+        vector_service = VectorMemoryService()
+        for entry in entries:
+            await vector_service.store_embedding(entry.id, f"{entry.title}\n{entry.content}")
         logger.info(f"会话[{session_id}]自动抽取了{len(entries)}条记忆")
         return entries

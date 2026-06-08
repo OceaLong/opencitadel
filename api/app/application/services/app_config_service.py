@@ -5,6 +5,7 @@ import uuid
 from typing import List
 
 from app.application.errors.exceptions import NotFoundError, BadRequestError
+from app.application.services.config_provider import get_app_config_provider
 from app.domain.models.app_config import AppConfig, LLMConfig, AgentConfig, MCPConfig, A2AConfig, A2AServerConfig
 from app.domain.repositories.app_config_repository import AppConfigRepository
 from app.domain.services.tools.a2a import A2AClientManager
@@ -43,8 +44,7 @@ class AppConfigService:
 
         # 3.调用函数更新app_config
         app_config.llm_config = llm_config
-        self.app_config_repository.save(app_config)
-
+        self._save_app_config(app_config)
         return app_config.llm_config
 
     async def get_agent_config(self) -> AgentConfig:
@@ -52,15 +52,15 @@ class AppConfigService:
         app_config = await self._load_app_config()
         return app_config.agent_config
 
+    def _save_app_config(self, app_config: AppConfig) -> None:
+        self._save_app_config(app_config)
+        get_app_config_provider().invalidate()
+
     async def update_agent_config(self, agent_config: AgentConfig) -> AgentConfig:
         """根据传递的agent_config更新Agent通用配置"""
-        # 1.获取应用配置
         app_config = await self._load_app_config()
-
-        # 2.调用函数更新app_config
         app_config.agent_config = agent_config
-        self.app_config_repository.save(app_config)
-
+        self._save_app_config(app_config)
         return app_config.agent_config
 
     async def get_mcp_servers(self) -> List[ListMCPServerItem]:
@@ -102,7 +102,7 @@ class AppConfigService:
         app_config.mcp_config.mcpServers.update(mcp_config.mcpServers)
 
         # 3.调用数据仓库完成存储or更新
-        self.app_config_repository.save(app_config)
+        self._save_app_config(app_config)
         return app_config.mcp_config
 
     async def delete_mcp_server(self, server_name: str) -> MCPConfig:
@@ -116,7 +116,7 @@ class AppConfigService:
 
         # 3.如果存在则删除字典中对应的服务
         del app_config.mcp_config.mcpServers[server_name]
-        self.app_config_repository.save(app_config)
+        self._save_app_config(app_config)
         return app_config.mcp_config
 
     async def set_mcp_server_enabled(self, server_name: str, enabled: bool) -> MCPConfig:
@@ -130,7 +130,7 @@ class AppConfigService:
 
         # 3.如果存在则更新该MCP服务的启用状态
         app_config.mcp_config.mcpServers[server_name].enabled = enabled
-        self.app_config_repository.save(app_config)
+        self._save_app_config(app_config)
         return app_config.mcp_config
 
     async def create_a2a_server(self, base_url: str) -> A2AConfig:
@@ -147,7 +147,7 @@ class AppConfigService:
         app_config.a2a_config.a2a_servers.append(a2a_server_config)
 
         # 3.调用数据仓库更新
-        self.app_config_repository.save(app_config)
+        self._save_app_config(app_config)
         return app_config.a2a_config
 
     async def get_a2a_servers(self) -> List[ListA2AServerItem]:
@@ -200,8 +200,8 @@ class AppConfigService:
 
         # 3.如果存在则更新数据
         app_config.a2a_config.a2a_servers[idx].enabled = enabled
-        self.app_config_repository.save(app_config)
-        return app_config.mcp_config
+        self._save_app_config(app_config)
+        return app_config.a2a_config
 
     async def delete_a2a_server(self, a2a_id: str) -> A2AConfig:
         """根据传递的id删除指定的a2a服务"""
@@ -219,5 +219,5 @@ class AppConfigService:
 
         # 3.删除a2a服务器
         del app_config.a2a_config.a2a_servers[idx]
-        self.app_config_repository.save(app_config)
-        return app_config.mcp_config
+        self._save_app_config(app_config)
+        return app_config.a2a_config

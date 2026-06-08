@@ -1,6 +1,6 @@
 'use client'
 
-import {useRouter} from 'next/navigation'
+import {usePathname, useRouter} from 'next/navigation'
 import {Sidebar, SidebarContent, SidebarHeader, SidebarTrigger} from '@/components/ui/sidebar'
 import {Button} from '@/components/ui/button'
 import {Plus} from 'lucide-react'
@@ -9,6 +9,11 @@ import {SessionList} from '@/components/session-list'
 
 export function LeftPanel() {
   const router = useRouter()
+  const pathname = usePathname()
+
+  if (pathname.startsWith('/marketplace')) {
+    return null
+  }
 
   return (
     <Sidebar>

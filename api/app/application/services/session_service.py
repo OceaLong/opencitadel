@@ -85,7 +85,15 @@ class SessionService:
             logger.error(f"会话[{session_id}]不存在, 删除失败")
             raise NotFoundError(f"会话[{session_id}]不存在, 删除失败")
 
-        # 2.根据传递的会话id删除会话
+        # 2.销毁关联 sandbox 后删除会话
+        if session.sandbox_id:
+            try:
+                sandbox = await self._sandbox_cls.get(session.sandbox_id)
+                if sandbox:
+                    await sandbox.destroy()
+            except Exception as e:
+                logger.warning("删除会话时销毁 sandbox 失败 session=%s: %s", session_id, e)
+
         async with self._uow:
             await self._uow.session.delete_by_id(session_id)
         logger.info(f"删除会话[{session_id}]成功")

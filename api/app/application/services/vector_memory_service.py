@@ -6,9 +6,9 @@ from typing import List, Optional
 
 from openai import AsyncOpenAI
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
-from app.infrastructure.storage.postgres import get_postgres
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -42,19 +42,27 @@ class VectorMemoryService:
         )
         return response.data[0].embedding
 
-    async def store_embedding(self, entry_id: str, content: str) -> None:
+    async def store_embedding(
+            self,
+            entry_id: str,
+            content: str,
+            db_session: Optional[AsyncSession] = None,
+    ) -> None:
         if not self.enabled:
             return
         vector = await self.embed(f"{content}")
         if not vector:
             return
-        postgres = get_postgres()
         vector_literal = "[" + ",".join(str(v) for v in vector) + "]"
+        stmt = text("UPDATE memory_entries SET embedding = :embedding::vector WHERE id = :id")
+        params = {"embedding": vector_literal, "id": entry_id}
+        if db_session is not None:
+            await db_session.execute(stmt, params)
+            return
+        from app.infrastructure.storage.postgres import get_postgres
+        postgres = get_postgres()
         async with postgres.session_factory() as session:
-            await session.execute(
-                text("UPDATE memory_entries SET embedding = :embedding::vector WHERE id = :id"),
-                {"embedding": vector_literal, "id": entry_id},
-            )
+            await session.execute(stmt, params)
             await session.commit()
 
     async def search_similar(
@@ -62,6 +70,7 @@ class VectorMemoryService:
             query: str,
             session_id: Optional[str] = None,
             limit: int = 20,
+            db_session: Optional[AsyncSession] = None,
     ) -> List[MemoryEntry]:
         if not self.enabled or not query.strip():
             return []
@@ -69,29 +78,32 @@ class VectorMemoryService:
         if not query_vector:
             return []
 
-        postgres = get_postgres()
-        async with postgres.session_factory() as session:
-            stmt = text("""
-                SELECT id, scope, session_id, title, content, tags, source,
-                       last_used_at, use_count, created_at, updated_at
-                FROM memory_entries
-                WHERE embedding IS NOT NULL
-                  AND (
-                    scope = 'global'
-                    OR (scope = 'session' AND session_id = :session_id)
-                  )
-                ORDER BY embedding <=> :query_vec::vector
-                LIMIT :limit
-            """)
-            result = await session.execute(
-                stmt,
-                {
-                    "session_id": session_id,
-                    "query_vec": "[" + ",".join(str(v) for v in query_vector) + "]",
-                    "limit": limit,
-                },
-            )
+        stmt = text("""
+            SELECT id, scope, session_id, title, content, tags, source,
+                   last_used_at, use_count, created_at, updated_at
+            FROM memory_entries
+            WHERE embedding IS NOT NULL
+              AND (
+                scope = 'global'
+                OR (scope = 'session' AND session_id = :session_id)
+              )
+            ORDER BY embedding <=> :query_vec::vector
+            LIMIT :limit
+        """)
+        params = {
+            "session_id": session_id,
+            "query_vec": "[" + ",".join(str(v) for v in query_vector) + "]",
+            "limit": limit,
+        }
+        if db_session is not None:
+            result = await db_session.execute(stmt, params)
             rows = result.fetchall()
+        else:
+            from app.infrastructure.storage.postgres import get_postgres
+            postgres = get_postgres()
+            async with postgres.session_factory() as session:
+                result = await session.execute(stmt, params)
+                rows = result.fetchall()
 
         entries: List[MemoryEntry] = []
         for row in rows:

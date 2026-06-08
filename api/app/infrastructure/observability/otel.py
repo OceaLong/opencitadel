@@ -105,3 +105,18 @@ def record_llm_tokens(model: str, prompt_tokens: int = 0, completion_tokens: int
             _llm_token_counter.add(completion_tokens, {"model": model, "type": "completion"})
     except Exception:
         pass
+
+
+_agent_cancel_counter = None
+
+
+def record_agent_cancel(session_id: str = "") -> None:
+    global _agent_cancel_counter
+    try:
+        from opentelemetry import metrics
+        if _agent_cancel_counter is None:
+            meter = metrics.get_meter("my-manus.agent")
+            _agent_cancel_counter = meter.create_counter("agent_cancellations_total")
+        _agent_cancel_counter.add(1, {"session_id": session_id or "unknown"})
+    except Exception:
+        pass
