@@ -51,6 +51,7 @@ export type UseSessionDetailResult = {
 export function useSessionDetail(
   sessionId: string | null,
   initialSkipEmptyStream?: boolean,
+  includeDebug?: boolean,
 ): UseSessionDetailResult {
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [files, setFiles] = useState<SessionFile[]>([]);
@@ -136,7 +137,7 @@ export function useSessionDetail(
       const status = (evToAppend.data as { status?: SessionDetail["status"] }).status;
       if (status) {
         setSession((prev) => (prev ? { ...prev, status } : null));
-        if (status === "waiting" || status === "completed") {
+        if (status === "waiting" || status === "completed" || status === "cancelled") {
           setStreaming(false);
         }
       }
@@ -197,8 +198,16 @@ export function useSessionDetail(
         }
         setError(err instanceof Error ? err : new Error("会话流连接异常"));
       },
+      { include_debug: includeDebug },
     );
-  }, [sessionId, appendEvent, stopEmptyStream, clearEmptyStreamRetryTimer, handleSessionMissing]);
+  }, [
+    sessionId,
+    appendEvent,
+    stopEmptyStream,
+    clearEmptyStreamRetryTimer,
+    handleSessionMissing,
+    includeDebug,
+  ]);
 
   const normalizeFileList = useCallback((raw: unknown): SessionFile[] => {
     if (Array.isArray(raw)) return raw as SessionFile[];
@@ -226,7 +235,7 @@ export function useSessionDetail(
     setError(null);
     try {
       const [detail, fileListRaw] = await Promise.all([
-        sessionApi.getSessionDetail(sessionId),
+        sessionApi.getSessionDetail(sessionId, { include_debug: includeDebug, events_limit: 100 }),
         sessionApi.getSessionFiles(sessionId),
       ]);
       setSession(detail);
@@ -239,7 +248,11 @@ export function useSessionDetail(
 
       let cursor = (detail as { events_next_cursor?: number | null }).events_next_cursor ?? null;
       while (cursor != null) {
-        const page = await sessionApi.getSessionEvents(sessionId, { after: cursor, limit: 100 });
+        const page = await sessionApi.getSessionEvents(sessionId, {
+          after: cursor,
+          limit: 100,
+          include_debug: includeDebug,
+        });
         pagedEvents.push(...normalizeEvents((page as { events?: unknown }).events));
         cursor = (page as { next_cursor?: number | null }).next_cursor ?? null;
       }
@@ -259,7 +272,7 @@ export function useSessionDetail(
     } finally {
       setLoading(false);
     }
-  }, [sessionId, normalizeFileList, handleSessionMissing]);
+  }, [sessionId, normalizeFileList, handleSessionMissing, includeDebug]);
 
   const refreshFiles = useCallback(async () => {
     if (!sessionId) return;
@@ -296,7 +309,7 @@ export function useSessionDetail(
 
   useEffect(() => {
     if (!sessionId || !sessionStatus || sessionMissingRef.current) return;
-    const completed = sessionStatus === "completed";
+    const completed = sessionStatus === "completed" || sessionStatus === "cancelled";
     // 如果标记了跳过空流（比如有初始消息待发送），则不启动空流
     if (!completed && !isSendMessageRef.current && !skipEmptyStream) {
       startEmptyStream();
@@ -417,11 +430,12 @@ export function useSessionDetail(
             startEmptyStream();
           }
         },
+        { include_debug: includeDebug },
       );
       // 将消息流的 cleanup 存到独立的 ref，不与 emptyStream 混淆
       messageStreamCleanupRef.current = messageStreamCleanup;
     },
-    [sessionId, appendEvent, startEmptyStream, stopEmptyStream, handleSessionMissing],
+    [sessionId, appendEvent, startEmptyStream, stopEmptyStream, handleSessionMissing, includeDebug],
   );
 
   return {

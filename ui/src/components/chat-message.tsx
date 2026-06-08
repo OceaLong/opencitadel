@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckIcon, ChevronDown, Languages } from "lucide-react";
+import { AlertCircle, CheckIcon, ChevronDown, Clock3, Languages, Loader2 } from "lucide-react";
 
 import { AttachmentsMessage } from "@/components/attachments-message";
 import { ManusIcon } from "@/components/manus-icon";
@@ -97,6 +97,17 @@ export function ChatMessage({
     return <StepBlock stepItem={item} className={className} onToolClick={onToolClick} />;
   }
 
+  if (item.kind === "wait") {
+    return (
+      <div className={cn("mt-3 flex w-full", className)}>
+        <div className="border-border/70 bg-muted/40 text-muted-foreground flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+          <Clock3 className="size-4 shrink-0" />
+          <span>{item.message}</span>
+        </div>
+      </div>
+    );
+  }
+
   if (item.kind === "attachments") {
     return (
       <div className={cn("mt-3", className)}>
@@ -120,6 +131,12 @@ export function ChatMessage({
           </div>
         </div>
         <div className="m-0 max-w-none p-0 text-red-600">
+          {item.contextLabel && (
+            <div className="mb-1 flex items-center gap-1 text-xs text-red-500">
+              <AlertCircle className="size-3.5" />
+              <span>可能发生在{item.contextLabel}之后</span>
+            </div>
+          )}
           <MarkdownContent content={item.error} />
         </div>
       </div>
@@ -141,6 +158,8 @@ function StepBlock({
   const [expanded, setExpanded] = useState(true);
   const { data, tools } = stepItem;
   const isCompleted = data.status === "completed";
+  const isFailed = data.status === "failed";
+  const isRunning = data.status === "running";
 
   return (
     <div className={cn("mt-3 flex flex-col", className)}>
@@ -161,9 +180,16 @@ function StepBlock({
             className={cn(
               "border-primary/20 bg-primary/75 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border shadow-[var(--shadow-card)]",
               !isCompleted && "bg-muted border-border",
+              isFailed && "border-red-500/30 bg-red-500",
             )}
           >
-            <CheckIcon className="text-white" size={10} />
+            {isRunning ? (
+              <Loader2 className="text-muted-foreground size-2.5 animate-spin" />
+            ) : isFailed ? (
+              <AlertCircle className="text-white" size={10} />
+            ) : (
+              <CheckIcon className="text-white" size={10} />
+            )}
           </div>
           <div className="markdown-content min-w-0 truncate font-medium">{data.description}</div>
           <ChevronDown

@@ -20,7 +20,7 @@ export type ExecutionStatus = "pending" | "running" | "completed" | "failed";
 /**
  * 工具事件状态
  */
-export type ToolEventStatus = "calling" | "called";
+export type ToolEventStatus = "calling" | "called" | "error";
 
 /**
  * MCP 传输类型
@@ -490,6 +490,12 @@ export type StepEvent = {
   id: string;
   status: ExecutionStatus;
   description: string;
+  started_at?: number | string | null;
+  ended_at?: number | string | null;
+  duration_ms?: number | null;
+  error?: string | null;
+  span_id?: string | null;
+  parent_span_id?: string | null;
   [key: string]: unknown;
 };
 
@@ -497,11 +503,18 @@ export type StepEvent = {
  * 工具调用事件
  */
 export type ToolEvent = {
+  tool_call_id?: string;
   name: string;
   function: string;
   args: Record<string, unknown>;
   content?: unknown;
   status?: ToolEventStatus;
+  started_at?: number | string | null;
+  ended_at?: number | string | null;
+  duration_ms?: number | null;
+  error?: string | null;
+  span_id?: string | null;
+  parent_span_id?: string | null;
   [key: string]: unknown;
 };
 

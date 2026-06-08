@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from datetime import datetime, timedelta
+
 from app.domain.models.event import (
     AssistantNoticeEvent,
     DebugItemEvent,
@@ -41,6 +43,13 @@ def test_session_status_sse_mapping():
     sse = EventMapper.event_to_sse_event(event)
     assert sse.event == "session_status"
     assert sse.data.status == "running"
+
+
+def test_session_status_sse_mapping_allows_cancelled():
+    event = SessionStatusEvent(status="cancelled")
+    sse = EventMapper.event_to_sse_event(event)
+    assert sse.event == "session_status"
+    assert sse.data.status == "cancelled"
 
 
 def test_all_event_types_have_typed_sse_mapping_and_meta():
@@ -88,3 +97,59 @@ def test_event_upgrader_adds_v2_metadata_defaults():
     assert upgraded["visibility"] == "internal"
     assert upgraded["channel"] == "runtime"
     assert upgraded["persist"] is False
+
+
+def test_observability_fields_are_projected_for_step_and_tool():
+    started_at = datetime.now()
+    ended_at = started_at + timedelta(seconds=2)
+    step_event = StepEvent(
+        step=Step(id="s1", description="step"),
+        started_at=started_at,
+        ended_at=ended_at,
+        duration_ms=2000,
+        error="step failed",
+    )
+    tool_event = ToolEvent(
+        tool_call_id="tool-1",
+        tool_name="shell",
+        function_name="run",
+        function_args={"cmd": "ls"},
+        started_at=started_at,
+        ended_at=ended_at,
+        duration_ms=2000,
+        error="tool failed",
+        span_id="tool:tool-1",
+        parent_span_id="step:s1",
+    )
+
+    step_sse = EventMapper.event_to_sse_event(step_event)
+    tool_sse = EventMapper.event_to_sse_event(tool_event)
+
+    assert step_sse.data.duration_ms == 2000
+    assert step_sse.data.error == "step failed"
+    assert tool_sse.data.duration_ms == 2000
+    assert tool_sse.data.error == "tool failed"
+    assert tool_sse.data.span_id == "tool:tool-1"
+    assert tool_sse.data.parent_span_id == "step:s1"
+
+
+def test_debug_projection_includes_debug_items_only_when_requested():
+    events = [
+        MessageEvent(role="assistant", message="hi"),
+        DebugItemEvent(item_type="planner_output", payload={"title": "t"}),
+        ReasoningDeltaEvent(stream_id="stream-1", delta="thinking"),
+    ]
+
+    default_projection = EventMapper.events_to_sse_events(events, include_transient=True)
+    debug_projection = EventMapper.events_to_sse_events(
+        events,
+        include_transient=True,
+        include_debug=True,
+    )
+
+    assert [item.event for item in default_projection] == ["message"]
+    assert [item.event for item in debug_projection] == [
+        "message",
+        "debug_item",
+        "reasoning_delta",
+    ]

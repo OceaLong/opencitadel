@@ -43,6 +43,7 @@ export function SessionDetailView({
     configEditable,
     timeline,
     planSteps,
+    observationSummary,
     fileListOpen,
     setFileListOpen,
     previewFile,
@@ -63,6 +64,7 @@ export function SessionDetailView({
     handleOpenVNC,
     handleCloseVNC,
     handleStop,
+    handleDebugOpen,
   } = useSessionDetailView({
     sessionId,
     initialMessage,
@@ -124,6 +126,8 @@ export function SessionDetailView({
                 memoryEditable={configEditable}
                 tokenUsage={session.token_usage}
                 events={events}
+                observationSummary={observationSummary}
+                onDebugOpen={handleDebugOpen}
               />
             </div>
 

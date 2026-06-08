@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Coins, Download, FileSearchCorner, FileText } from "lucide-react";
+import { Activity, Coins, Download, FileSearchCorner, FileText } from "lucide-react";
 import { toast } from "sonner";
 
 import { SessionDebugSheet } from "@/components/session-debug-sheet";
@@ -28,8 +28,8 @@ import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
 import { fileApi } from "@/lib/api";
 import type { SessionFile, SSEEventData, TokenUsageSummary } from "@/lib/api/types";
-import type { AttachmentFile } from "@/lib/session-events";
-import { sessionFileToAttachment } from "@/lib/session-events";
+import type { AttachmentFile, TaskObservationSummary } from "@/lib/session-events";
+import { formatDuration, sessionFileToAttachment } from "@/lib/session-events";
 import { formatFileSize } from "@/lib/utils";
 
 export type SessionHeaderProps = {
@@ -53,6 +53,10 @@ export type SessionHeaderProps = {
   tokenUsage?: TokenUsageSummary | null;
   /** 会话事件列表，用于调试面板 */
   events?: SSEEventData[];
+  /** 打开调试面板时触发 debug 事件订阅 */
+  onDebugOpen?: () => void;
+  /** 单任务观测摘要 */
+  observationSummary?: TaskObservationSummary;
 };
 
 export function SessionHeader({
@@ -66,6 +70,8 @@ export function SessionHeader({
   memoryEditable = true,
   tokenUsage,
   events = [],
+  onDebugOpen,
+  observationSummary,
 }: SessionHeaderProps) {
   const { open, isMobile } = useSidebar();
   const [mounted, setMounted] = useState(false);
@@ -155,6 +161,24 @@ export function SessionHeader({
         {title || "未命名任务"}
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
+        {observationSummary &&
+          (observationSummary.toolCount > 0 || observationSummary.errorCount > 0) && (
+            <div
+              className="border-border/70 bg-card text-muted-foreground flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)]"
+              title={`工具: ${observationSummary.toolCount} · 错误: ${observationSummary.errorCount} · 等待: ${observationSummary.waitCount}`}
+            >
+              <Activity className="size-3.5 shrink-0" />
+              <span>{observationSummary.toolCount} tools</span>
+              {observationSummary.durationMs !== undefined && (
+                <span className="text-muted-foreground/70">
+                  · {formatDuration(observationSummary.durationMs)}
+                </span>
+              )}
+              {observationSummary.errorCount > 0 && (
+                <span className="text-red-600">· {observationSummary.errorCount} err</span>
+              )}
+            </div>
+          )}
         {tokenUsage && tokenUsage.total_tokens > 0 && (
           <div
             className="border-border/70 bg-card text-muted-foreground flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)]"
@@ -172,7 +196,7 @@ export function SessionHeader({
         {sessionId && (
           <SessionMemorySheet sessionId={sessionId} editable={memoryEditable} compact />
         )}
-        <SessionDebugSheet events={events} compact />
+        <SessionDebugSheet events={events} compact onOpen={onDebugOpen} />
         {mounted ? (
           <Dialog open={openState} onOpenChange={setOpenState}>
             <DialogTrigger asChild>

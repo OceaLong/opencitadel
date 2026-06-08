@@ -7,6 +7,7 @@ from app.domain.models.event import (
     DebugItemEvent,
     PlanEvent,
     PlanEventStatus,
+    ReasoningDeltaEvent,
 )
 from app.domain.models.event_policy import should_persist_event, is_user_timeline_event
 from app.domain.models.event_policy import should_project_event
@@ -55,3 +56,9 @@ def test_projection_hides_debug_by_default_and_allows_when_requested():
     event = DebugItemEvent(item_type="planner_output", payload={"title": "t"})
     assert should_project_event(event) is False
     assert should_project_event(event, include_debug=True) is True
+
+
+def test_projection_hides_debug_transient_by_default_and_allows_when_requested():
+    event = ReasoningDeltaEvent(stream_id="s1", delta="thinking")
+    assert should_project_event(event, include_transient=True) is False
+    assert should_project_event(event, include_transient=True, include_debug=True) is True

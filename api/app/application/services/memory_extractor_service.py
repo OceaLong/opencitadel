@@ -48,11 +48,13 @@ class MemoryExtractorService:
     async def extract_from_session(self, session_id: str) -> List[MemoryEntry]:
         async with self._uow_factory() as uow:
             session = await uow.session.get_by_id(session_id)
+            event_records = await uow.session.list_events(session_id, limit=30)
         if not session:
             return []
 
         events_summary = []
-        for event in session.events[-30:]:
+        recent_events = [event for _, event in event_records] if event_records else session.events[-30:]
+        for event in recent_events:
             events_summary.append(str(event.model_dump(mode="json") if hasattr(event, "model_dump") else event)[:500])
 
         parsed = None

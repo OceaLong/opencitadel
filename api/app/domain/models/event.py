@@ -77,6 +77,12 @@ class StepEvent(BaseEvent):
     type: Literal["step"] = "step"
     step: Step  # 步骤信息
     status: StepEventStatus = StepEventStatus.STARTED
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    error: Optional[str] = None
+    span_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
 
 
 class MessageEvent(BaseEvent):
@@ -130,7 +136,7 @@ class AssistantNoticeEvent(BaseEvent):
 class SessionStatusEvent(BaseEvent):
     """服务端权威的会话状态事件"""
     type: Literal["session_status"] = "session_status"
-    status: Literal["pending", "running", "waiting", "completed"] = "running"
+    status: Literal["pending", "running", "waiting", "completed", "cancelled"] = "running"
 
 
 class DebugItemEvent(BaseEvent):
@@ -192,6 +198,12 @@ class ToolEvent(BaseEvent):
     function_args: Dict[str, Any]  # LLM生成的工具调用参数
     function_result: Optional[ToolResult] = None  # 工具调用结果
     status: ToolEventStatus = ToolEventStatus.CALLING  # 工具事件状态
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    error: Optional[str] = None
+    span_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
 
 
 class WaitEvent(BaseEvent):
@@ -203,6 +215,8 @@ class ErrorEvent(BaseEvent):
     """错误事件"""
     type: Literal["error"] = "error"
     error: str = ""  # 错误信息
+    parent_event_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
 
 
 class DoneEvent(BaseEvent):

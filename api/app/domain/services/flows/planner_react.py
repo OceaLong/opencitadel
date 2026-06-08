@@ -122,8 +122,11 @@ class PlannerReActFlow(BaseFlow):
         # 1.调用会话仓库查询会话是否存在
         async with self._uow:
             session = await self._uow.session.get_by_id(self._session_id)
+            event_records = await self._uow.session.list_events(self._session_id, limit=200)
         if not session:
             raise ValueError(f"会话[{self._session_id}]不存在, 请核实后尝试")
+        if event_records:
+            session.events = [event for _, event in event_records]
 
         # 2.判断会话的状态是不是空闲
         #   如果不是则有可能有两种状态

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Bug } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,7 @@ import { extractDebugItems } from "@/lib/session-events";
 type Props = {
   events: SSEEventData[];
   compact?: boolean;
+  onOpen?: () => void;
 };
 
 function formatPayload(payload: Record<string, unknown>): string {
@@ -31,15 +32,24 @@ function formatPayload(payload: Record<string, unknown>): string {
   }
 }
 
-export function SessionDebugSheet({ events, compact }: Props) {
+function getDebugDescription(type: string): string {
+  if (type.includes("planner")) return "Planner";
+  if (type.includes("reasoning")) return "Reasoning";
+  if (type.includes("tool")) return "Tool Args";
+  return "Debug";
+}
+
+export function SessionDebugSheet({ events, compact, onOpen }: Props) {
+  const [open, setOpen] = useState(false);
   const debugItems = useMemo(() => extractDebugItems(events), [events]);
 
-  if (debugItems.length === 0) {
-    return null;
-  }
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (nextOpen) onOpen?.();
+  };
 
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetTrigger asChild>
         <Button
           variant="ghost"
@@ -60,21 +70,38 @@ export function SessionDebugSheet({ events, compact }: Props) {
         </SheetHeader>
         <ScrollArea className="mt-4 h-[calc(100vh-8rem)] pr-3">
           <div className="flex flex-col gap-3">
-            {debugItems.map((item, index) => (
-              <div
-                key={`${item.item_type}-${index}`}
-                className="border-border/70 bg-muted/30 overflow-hidden rounded-lg border"
-              >
-                <div className="border-border/60 bg-muted/50 flex items-center gap-2 border-b px-3 py-2">
-                  <Badge variant="outline" className="font-mono text-[10px]">
-                    {item.item_type}
-                  </Badge>
-                </div>
-                <pre className="text-muted-foreground max-h-64 overflow-auto p-3 font-mono text-xs break-words whitespace-pre-wrap">
-                  {formatPayload(item.payload)}
-                </pre>
+            {debugItems.length === 0 ? (
+              <div className="text-muted-foreground border-border/70 bg-muted/30 rounded-lg border p-4 text-sm">
+                暂无调试事件。打开后会请求 debug 事件，新的 planner、reasoning 与 tool args
+                会显示在这里。
               </div>
-            ))}
+            ) : (
+              debugItems.map((item, index) => (
+                <div
+                  key={`${item.item_type}-${index}`}
+                  className="border-border/70 bg-muted/30 overflow-hidden rounded-lg border"
+                >
+                  <div className="border-border/60 bg-muted/50 flex items-center justify-between gap-2 border-b px-3 py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {getDebugDescription(item.item_type)}
+                      </Badge>
+                      <span className="text-muted-foreground truncate font-mono text-xs">
+                        {item.item_type}
+                      </span>
+                    </div>
+                    {item.created_at && (
+                      <span className="text-muted-foreground text-[10px]">
+                        {new Date(item.created_at * 1000).toLocaleTimeString()}
+                      </span>
+                    )}
+                  </div>
+                  <pre className="text-muted-foreground max-h-64 overflow-auto p-3 font-mono text-xs break-words whitespace-pre-wrap">
+                    {formatPayload(item.payload)}
+                  </pre>
+                </div>
+              ))
+            )}
           </div>
         </ScrollArea>
       </SheetContent>

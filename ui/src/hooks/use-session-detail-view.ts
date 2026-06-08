@@ -11,7 +11,11 @@ import { useSessionDetail } from "@/hooks/use-session-detail";
 import { sessionApi } from "@/lib/api/session";
 import type { FileInfo, Skill, ToolEvent } from "@/lib/api/types";
 import type { AttachmentFile, TimelineItem } from "@/lib/session-events";
-import { eventsToTimeline, getLatestPlanFromEvents } from "@/lib/session-events";
+import {
+  eventsToTimeline,
+  getLatestPlanFromEvents,
+  getTaskObservationSummary,
+} from "@/lib/session-events";
 
 export type UseSessionDetailViewOptions = {
   sessionId: string;
@@ -44,7 +48,8 @@ export function useSessionDetailView({
   hasInitialMessage,
 }: UseSessionDetailViewOptions) {
   const router = useRouter();
-  const detail = useSessionDetail(sessionId, hasInitialMessage);
+  const [includeDebug, setIncludeDebug] = useState(false);
+  const detail = useSessionDetail(sessionId, hasInitialMessage, includeDebug);
   const {
     session,
     files,
@@ -71,6 +76,10 @@ export function useSessionDetailView({
   const configEditable = session?.status === "pending" || session?.status === "completed";
   const timeline = useMemo(() => eventsToTimeline(events), [events]);
   const planSteps = useMemo(() => getLatestPlanFromEvents(events), [events]);
+  const observationSummary = useMemo(
+    () => getTaskObservationSummary(events, session?.status),
+    [events, session?.status],
+  );
   const hasPreview = previewFile !== null || previewTool !== null;
 
   const resolvedPreviewTool = useMemo(() => {
@@ -246,6 +255,10 @@ export function useSessionDetailView({
     }
   }, [session, sessionId, refresh]);
 
+  const handleDebugOpen = useCallback(() => {
+    setIncludeDebug(true);
+  }, []);
+
   return {
     session,
     files,
@@ -260,6 +273,7 @@ export function useSessionDetailView({
     configEditable,
     timeline,
     planSteps,
+    observationSummary,
     fileListOpen,
     setFileListOpen,
     previewFile,
@@ -280,5 +294,6 @@ export function useSessionDetailView({
     handleOpenVNC,
     handleCloseVNC,
     handleStop,
+    handleDebugOpen,
   };
 }

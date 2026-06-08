@@ -3,6 +3,7 @@
 import asyncio
 import io
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, AsyncGenerator, Callable, BinaryIO, Optional, Tuple
 
 from fastapi import UploadFile
@@ -17,7 +18,7 @@ from app.domain.external.search import SearchEngine
 from app.domain.external.task import TaskRunner, Task
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
 from app.domain.models.event import ErrorEvent, Event, MessageEvent, BaseEvent, ToolEvent, \
-    TitleEvent, WaitEvent, DoneEvent, AssistantNoticeEvent
+    TitleEvent, WaitEvent, DoneEvent, AssistantNoticeEvent, StepEvent, ToolEventStatus
 from app.domain.models.event_policy import should_persist_event
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
@@ -75,6 +76,9 @@ class AgentTaskRunner(TaskRunner):
         self._session_state = SessionStateService(uow_factory)
         self._event_persist_buffer: List[Tuple[BaseEvent, Dict[str, Any]]] = []
         self._event_persist_batch_size = 5
+        self._step_started_at: Dict[str, datetime] = {}
+        self._tool_started_at: Dict[str, datetime] = {}
+        self._last_observable_event_id: Optional[str] = None
         self._tool_presenter = ToolEventPresenter(
             sandbox=sandbox,
             browser=browser,
@@ -105,6 +109,8 @@ class AgentTaskRunner(TaskRunner):
         # 1.往任务的输出消息队列中新增事件
         event_id = await task.output_stream.put(event.model_dump_json())
         event.id = event_id
+        if isinstance(event, (StepEvent, ToolEvent)):
+            self._last_observable_event_id = event.id
 
         # 2.仅持久化稳定、高价值事件，流式 delta 不落库
         if should_persist_event(event):
@@ -293,6 +299,43 @@ class AgentTaskRunner(TaskRunner):
         """额外处理工具消息，使其前端交互更友好"""
         await self._tool_presenter.enrich(event)
 
+    def _annotate_observable_event(self, event: BaseEvent) -> None:
+        """Attach lightweight timing and parent hints for single-task observability."""
+        now = event.created_at or datetime.now(timezone.utc)
+        if isinstance(event, StepEvent):
+            step_id = event.step.id
+            if event.step.status.value == "running":
+                started_at = self._step_started_at.setdefault(step_id, now)
+                event.started_at = event.started_at or started_at
+            elif event.step.status.value in {"completed", "failed"}:
+                started_at = self._step_started_at.get(step_id)
+                event.started_at = event.started_at or started_at
+                event.ended_at = event.ended_at or now
+                if started_at and event.duration_ms is None:
+                    event.duration_ms = max(0, int((event.ended_at - started_at).total_seconds() * 1000))
+                event.error = event.error or event.step.error
+            event.span_id = event.span_id or f"step:{step_id}"
+            return
+
+        if isinstance(event, ToolEvent):
+            tool_id = event.tool_call_id
+            if event.status == ToolEventStatus.CALLING:
+                started_at = self._tool_started_at.setdefault(tool_id, now)
+                event.started_at = event.started_at or started_at
+            elif event.status == ToolEventStatus.CALLED:
+                started_at = self._tool_started_at.get(tool_id)
+                event.started_at = event.started_at or started_at
+                event.ended_at = event.ended_at or now
+                if started_at and event.duration_ms is None:
+                    event.duration_ms = max(0, int((event.ended_at - started_at).total_seconds() * 1000))
+                if event.function_result and not event.function_result.success:
+                    event.error = event.error or event.function_result.message
+            event.span_id = event.span_id or f"tool:{tool_id}"
+            return
+
+        if isinstance(event, ErrorEvent):
+            event.parent_event_id = event.parent_event_id or self._last_observable_event_id
+
     async def _run_flow(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         """根据消息对象运行PlannerReActFlow"""
         # 1.判断传递的消息是否为空
@@ -309,6 +352,8 @@ class AgentTaskRunner(TaskRunner):
             elif isinstance(event, MessageEvent):
                 # 4.如果是消息事件则将AI消息事件中的附件同步到存储中
                 await self._sync_message_attachments_to_storage(event)
+
+            self._annotate_observable_event(event)
 
             # 5.将事件直接返回
             yield event

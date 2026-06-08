@@ -123,6 +123,12 @@ class StepEventData(BaseEventData):
     id: str  # 步骤id
     status: ExecutionStatus  # 步骤执行状态
     description: str  # 步骤描述
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    error: Optional[str] = None
+    span_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
 
 
 class StepSSEEvent(BaseSSEEvent):
@@ -150,6 +156,12 @@ class ToolEventData(BaseEventData):
     function: str  # 工具名字
     args: Dict[str, Any]  # 工具参数
     content: Optional[Any] = None  # 工具调用结果
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    error: Optional[str] = None
+    span_id: Optional[str] = None
+    parent_span_id: Optional[str] = None
 
 
 class ToolSSEEvent(BaseSSEEvent):
@@ -209,7 +221,7 @@ class AssistantNoticeSSEEvent(BaseSSEEvent):
 
 class SessionStatusEventData(BaseEventData):
     """会话状态事件数据"""
-    status: Literal["pending", "running", "waiting", "completed"] = "running"
+    status: Literal["pending", "running", "waiting", "completed", "cancelled"] = "running"
 
 
 class SessionStatusSSEEvent(BaseSSEEvent):
@@ -320,6 +332,12 @@ class EventMapper:
                 "id": event.step.id,
                 "status": event.step.status,
                 "description": event.step.description,
+                "started_at": event.started_at,
+                "ended_at": event.ended_at,
+                "duration_ms": event.duration_ms,
+                "error": event.error or event.step.error,
+                "span_id": event.span_id,
+                "parent_span_id": event.parent_span_id,
             }
         if isinstance(event, PlanEvent):
             return {
@@ -341,6 +359,12 @@ class EventMapper:
                 "function": event.function_name,
                 "args": event.function_args,
                 "content": event.tool_content,
+                "started_at": event.started_at,
+                "ended_at": event.ended_at,
+                "duration_ms": event.duration_ms,
+                "error": event.error,
+                "span_id": event.span_id,
+                "parent_span_id": event.parent_span_id,
             }
 
         return event.model_dump(mode="json", exclude=EventMapper._DOMAIN_EXCLUDE_FIELDS)

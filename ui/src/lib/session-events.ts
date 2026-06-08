@@ -127,7 +127,18 @@ export type TimelineItem =
   | { kind: "assistant"; id: string; data: ChatMessage }
   | { kind: "tool"; id: string; data: ToolEvent; timeLabel?: string }
   | { kind: "step"; id: string; data: StepEvent; tools: ToolEvent[] }
-  | { kind: "error"; id: string; error: string; timestamp?: number };
+  | { kind: "wait"; id: string; message: string; timestamp?: number }
+  | { kind: "error"; id: string; error: string; timestamp?: number; contextLabel?: string };
+
+export type TaskObservationSummary = {
+  startedAt?: number;
+  endedAt?: number;
+  durationMs?: number;
+  toolCount: number;
+  errorCount: number;
+  waitCount: number;
+  debugCount: number;
+};
 
 /** 附件展示用（文件名、类型、大小等） */
 export type AttachmentFile = {
@@ -167,6 +178,26 @@ export function chatAttachmentToDisplay(a: {
 
 function stableId(prefix: string, index: number, suffix: string): string {
   return `${prefix}-${index}-${suffix}`;
+}
+
+function toMillis(ts: number | string | undefined | null): number | undefined {
+  if (ts === undefined || ts === null) return undefined;
+  let value = typeof ts === "string" ? Date.parse(ts) : ts;
+  if (Number.isNaN(value)) return undefined;
+  if (typeof ts === "number" && value < 10000000000) {
+    value *= 1000;
+  }
+  return value;
+}
+
+export function formatDuration(ms: number | undefined | null): string | undefined {
+  if (ms === undefined || ms === null || Number.isNaN(ms)) return undefined;
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
 }
 
 /** 将时间戳格式化为相对时间，如 2天前、刚刚 */
@@ -210,19 +241,47 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
   let toolIndex = 0;
   let stepIndex = 0;
   let errorIndex = 0;
+  let lastContextLabel: string | undefined;
   const streamMessages = new Map<string, { listIndex: number; content: string }>();
 
   for (const ev of events) {
     const visibility = getEventVisibility(ev);
     if (visibility === "internal" || visibility === "debug") {
-      if (ev.type !== "debug_item") {
+      if (ev.type !== "debug_item" && ev.type !== "message_delta") {
         continue;
       }
     }
 
     switch (ev.type) {
       case "message_delta": {
-        // 流式 delta 默认不进入主时间线
+        const deltaData = ev.data as {
+          stream_id?: string;
+          delta?: string;
+          role?: string;
+          event_id?: string;
+        };
+        if (deltaData.role && deltaData.role !== "assistant") break;
+        const streamId = deltaData.stream_id || deltaData.event_id;
+        if (!streamId || !deltaData.delta) break;
+        const existing = streamMessages.get(streamId);
+        if (existing) {
+          existing.content += deltaData.delta;
+          const item = list[existing.listIndex];
+          if (item?.kind === "assistant") {
+            list[existing.listIndex] = {
+              ...item,
+              data: { ...item.data, message: existing.content, stream_id: streamId },
+            };
+          }
+        } else {
+          const listIndex = list.length;
+          streamMessages.set(streamId, { listIndex, content: deltaData.delta });
+          list.push({
+            kind: "assistant",
+            id: stableId("assistant-stream", messageIndex++, streamId),
+            data: { role: "assistant", message: deltaData.delta, stream_id: streamId },
+          });
+        }
         break;
       }
       case "reasoning_delta":
@@ -293,6 +352,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
       }
       case "step": {
         const step = ev.data as StepEvent;
+        lastContextLabel = `步骤：${step.description}`;
 
         // 判断是更新现有 step 还是创建新 step
         // 关键：只有当 lastStepId === step.id 时才是同一个 step 的状态更新
@@ -343,6 +403,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
       case "tool": {
         const tool = ev.data as ToolEvent;
         const toolCallId = (tool as { tool_call_id?: string }).tool_call_id;
+        lastContextLabel = `工具：${tool.name || tool.function}`;
 
         if (lastStepId !== null) {
           // 工具属于当前 step，添加到 step 的 tools 中
@@ -401,9 +462,18 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
       }
       case "title":
       case "plan":
-      case "wait":
       case "done":
         break;
+      case "wait": {
+        const data = ev.data as { message?: string; reason?: string; prompt?: string; created_at?: number };
+        list.push({
+          kind: "wait",
+          id: stableId("wait", errorIndex++, String(list.length)),
+          message: data.message || data.prompt || data.reason || "等待你的输入或确认。",
+          timestamp: data.created_at,
+        });
+        break;
+      }
       case "error": {
         // 处理错误事件
         const errorData = ev.data as {
@@ -418,6 +488,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
             id: stableId("error", errorIndex++, String(list.length)),
             error: errorData.error,
             timestamp: errorData.created_at,
+            contextLabel: lastContextLabel,
           });
         }
         break;
@@ -428,6 +499,49 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
   }
 
   return list;
+}
+
+export function getTaskObservationSummary(
+  events: SSEEventData[],
+  sessionStatus?: string,
+): TaskObservationSummary {
+  let startedAt: number | undefined;
+  let endedAt: number | undefined;
+  let toolCount = 0;
+  let errorCount = 0;
+  let waitCount = 0;
+  let debugCount = 0;
+  const seenTools = new Set<string>();
+
+  for (const ev of events) {
+    const createdAt = toMillis((ev.data as { created_at?: number | string }).created_at);
+    if (createdAt !== undefined) {
+      startedAt = startedAt === undefined ? createdAt : Math.min(startedAt, createdAt);
+      endedAt = endedAt === undefined ? createdAt : Math.max(endedAt, createdAt);
+    }
+    if (ev.type === "tool") {
+      const tool = ev.data as ToolEvent;
+      const id = tool.tool_call_id || `${tool.name}:${tool.function}:${toolCount}`;
+      if (!seenTools.has(id)) {
+        seenTools.add(id);
+        toolCount += 1;
+      }
+      if (tool.error) errorCount += 1;
+    } else if (ev.type === "error") {
+      errorCount += 1;
+    } else if (ev.type === "wait") {
+      waitCount += 1;
+    } else if (ev.type === "debug_item" || ev.type === "reasoning_delta" || ev.type === "tool_args_delta") {
+      debugCount += 1;
+    }
+  }
+
+  const durationEnd =
+    sessionStatus === "running" && startedAt !== undefined ? Date.now() : endedAt ?? startedAt;
+  const durationMs =
+    startedAt !== undefined && durationEnd !== undefined ? Math.max(0, durationEnd - startedAt) : undefined;
+
+  return { startedAt, endedAt, durationMs, toolCount, errorCount, waitCount, debugCount };
 }
 
 /**

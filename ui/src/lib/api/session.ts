@@ -14,6 +14,26 @@ import type {
   ViewShellParams,
 } from "./types";
 
+type SessionDetailParams = {
+  include_debug?: boolean;
+  events_limit?: number;
+};
+
+type ChatStreamOptions = {
+  include_debug?: boolean;
+};
+
+function compactParams(
+  params?: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean> | undefined {
+  if (!params) return undefined;
+  const out: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /**
  * 会话列表流式更新回调
  */
@@ -120,8 +140,8 @@ export const sessionApi = {
    * 获取会话详情（含事件列表，与 chat 流式响应格式一致）
    * 若后端在 GET /sessions/:id 中返回 events 字段则一并返回
    */
-  getSessionDetail: (sessionId: string): Promise<SessionDetail> => {
-    return get<SessionDetail>(`/sessions/${sessionId}`);
+  getSessionDetail: (sessionId: string, params?: SessionDetailParams): Promise<SessionDetail> => {
+    return get<SessionDetail>(`/sessions/${sessionId}`, compactParams(params));
   },
 
   getSessionEvents: (
@@ -156,12 +176,18 @@ export const sessionApi = {
     params: ChatParams,
     onEvent: SSEEventHandler,
     onError?: (error: Error) => void,
+    options?: ChatStreamOptions,
   ): (() => void) => {
     const controller = new AbortController();
+    const search = new URLSearchParams();
+    if (options?.include_debug != null) {
+      search.set("include_debug", String(options.include_debug));
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : "";
 
     const startStream = async () => {
       try {
-        const stream = await createSSEStream(`/sessions/${sessionId}/chat`, params, {
+        const stream = await createSSEStream(`/sessions/${sessionId}/chat${suffix}`, params, {
           signal: controller.signal,
           // 流式连接需要很长时间，设置为 5 分钟超时
           timeout: 5 * 60 * 1000,
