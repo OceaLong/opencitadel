@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
+import asyncio
 from contextlib import AsyncExitStack
 from typing import Optional, Dict, List, Any
 
@@ -76,14 +77,22 @@ class MCPClientManager:
 
     async def _connect_mcp_servers(self) -> None:
         """根据配置连接所有已启用的 MCP 服务"""
-        for server_name, server_config in self._mcp_config.mcpServers.items():
-            if not server_config.enabled:
-                continue
-            try:
-                await self._connect_mcp_server(server_name, server_config)
-            except Exception as e:
-                logger.error(f"连接MCP服务器[{server_name}]出错: {str(e)}")
-                continue
+        enabled_servers = [
+            (server_name, server_config)
+            for server_name, server_config in self._mcp_config.mcpServers.items()
+            if server_config.enabled
+        ]
+        await asyncio.gather(*[
+            self._connect_mcp_server_safely(server_name, server_config)
+            for server_name, server_config in enabled_servers
+        ])
+
+    async def _connect_mcp_server_safely(self, server_name: str, server_config: MCPServerConfig) -> None:
+        try:
+            await self._connect_mcp_server(server_name, server_config)
+        except Exception as e:
+            logger.error(f"连接MCP服务器[{server_name}]出错: {str(e)}")
+            return
 
     async def _connect_mcp_server(self, server_name: str, server_config: MCPServerConfig) -> None:
         """根据传递的服务名字+服务配置连接到单个MCP服务"""
@@ -110,7 +119,7 @@ class MCPClientManager:
         # 1.从配置中提取相关命令信息
         command = server_config.command
         args = server_config.args
-        env = server_config.env
+        env = server_config.env or {}
 
         # 2.检查command是否存在
         if not command:

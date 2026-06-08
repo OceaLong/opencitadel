@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """Enrich tool events with UI-facing content (screenshots, file previews, etc.)."""
+import base64
 import io
 import logging
 import uuid
@@ -53,7 +54,7 @@ class ToolEventPresenter:
         try:
             if event.tool_name == "browser":
                 event.tool_content = BrowserToolContent(
-                    screenshot=await self._get_browser_screenshot(),
+                    screenshot=await self._get_browser_screenshot(event),
                 )
             elif event.tool_name == "search":
                 search_results: ToolResult[SearchResults] = event.function_result
@@ -67,7 +68,10 @@ class ToolEventPresenter:
                 else:
                     event.tool_content = SearchToolContent(results=[])
             elif event.tool_name == "shell":
-                if "session_id" in event.function_args:
+                console = self._get_tool_result_data(event).get("console_records")
+                if console is not None:
+                    event.tool_content = ShellToolContent(console=console)
+                elif "session_id" in event.function_args:
                     shell_result = await self._sandbox.read_shell_output(
                         event.function_args["session_id"],
                         console=True,
@@ -84,22 +88,27 @@ class ToolEventPresenter:
         except Exception as e:
             logger.exception("ToolEventPresenter enrich failed: %s", e)
 
+    @staticmethod
+    def _get_tool_result_data(event: ToolEvent) -> dict:
+        data = event.function_result.data if event.function_result else None
+        return data if isinstance(data, dict) else {}
+
     async def _enrich_file_event(self, event: ToolEvent) -> None:
-        if "filepath" not in event.function_args:
-            event.tool_content = FileToolContent(content="(No Content)")
-            return
-        filepath = event.function_args["filepath"]
-        file_read_result = await self._sandbox.read_file(filepath)
-        file_content = ""
-        if file_read_result.success:
-            file_content = (file_read_result.data or {}).get("content", "")
+        result_data = self._get_tool_result_data(event)
+        file_content = result_data.get("content", "")
+        filepath = event.function_args.get("filepath")
         event.tool_content = FileToolContent(content=file_content or "(No Content)")
         should_sync = (
                 event.function_name in FILE_MUTATING_FUNCTIONS
                 and event.function_result
                 and event.function_result.success
+                and filepath
         )
         if should_sync:
+            file_read_result = await self._sandbox.read_file(filepath)
+            if file_read_result.success:
+                file_content = (file_read_result.data or {}).get("content", "")
+                event.tool_content = FileToolContent(content=file_content or "(No Content)")
             await self._sync_file_to_storage(filepath)
 
     async def _enrich_mcp_a2a_event(self, event: ToolEvent) -> None:
@@ -126,12 +135,17 @@ class ToolEventPresenter:
             else A2AToolContent(a2a_result=data)
         )
 
-    async def _get_browser_screenshot(self) -> str:
-        screenshot = await self._browser.screenshot()
+    async def _get_browser_screenshot(self, event: ToolEvent) -> str:
+        result_data = self._get_tool_result_data(event)
+        screenshot_base64 = result_data.get("screenshot_base64")
+        if not screenshot_base64:
+            return ""
+        screenshot = base64.b64decode(screenshot_base64)
+        stream = io.BytesIO(screenshot)
         file = await self._file_storage.upload_file(UploadFile(
-            file=io.BytesIO(screenshot),
+            file=stream,
             filename=f"{uuid.uuid4()}.png",
-            size=self._get_stream_size(io.BytesIO(screenshot)),
+            size=self._get_stream_size(stream),
         ))
         settings = get_settings()
         return f"https://{settings.cos_bucket}.cos.{settings.cos_region}.myqcloud.com/{file.key}"

@@ -29,6 +29,9 @@ class ReActAgent(BaseAgent):
     _system_prompt: str = SYSTEM_PROMPT + REACT_SYSTEM_PROMPT
     _format: str = "json_object"  # format控制的是content、工具调用控制的是tool_calls两者不冲突
 
+    def _should_emit_deltas(self) -> bool:
+        return type(self) is ReActAgent
+
     async def execute_step(
             self,
             plan: Plan,
@@ -51,10 +54,11 @@ class ReActAgent(BaseAgent):
         yield StepEvent(step=step, status=StepEventStatus.STARTED)
 
         # 3.调用invoke获取agent返回的事件内容
+        step_failed = False
         async for event in self.invoke(
             query,
             vision_attachments=vision_attachments,
-            emit_deltas=False,
+            emit_deltas=self._should_emit_deltas(),
         ):
             # 4.判断事件类型执行不同操作
             if isinstance(event, ToolEvent):
@@ -95,6 +99,7 @@ class ReActAgent(BaseAgent):
                 # 13.错误事件更新步骤的状态
                 step.status = ExecutionStatus.FAILED
                 step.error = event.error
+                step_failed = True
 
                 # 14.返回子步骤对应事件
                 yield StepEvent(step=step, status=StepEventStatus.FAILED)
@@ -103,7 +108,8 @@ class ReActAgent(BaseAgent):
             yield event
 
         # 16.循环迭代完成后代表子步骤已实现，需要更新状态
-        step.status = ExecutionStatus.COMPLETED
+        if not step_failed:
+            step.status = ExecutionStatus.COMPLETED
 
     async def summarize(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         """调用Agent汇总历史的消息并生成最终回复+附件"""
@@ -112,7 +118,7 @@ class ReActAgent(BaseAgent):
         query = SUMMARIZE_PROMPT
 
         # 2.调用invoke方法获取Agent生成的事件（汇总阶段不再重传用户图片）
-        async for event in self.invoke(query, emit_deltas=False):
+        async for event in self.invoke(query, emit_deltas=self._should_emit_deltas()):
             # 3.判断事件类型是否为消息事件，如果是则表示Agent结构化生成汇总内容
             if isinstance(event, MessageEvent):
                 # 4.记录日志并解析输出内容

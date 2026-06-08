@@ -27,7 +27,7 @@ from app.domain.models.session import SessionStatus
 from app.domain.models.skill import Skill
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.flows.planner_react import PlannerReActFlow
-from app.domain.services.tool_event_presenter import ToolEventPresenter
+from app.domain.services.tool_event_presenter import FILE_MUTATING_FUNCTIONS, ToolEventPresenter
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.mcp import MCPTool
 from app.application.services.session_state_service import SessionStateService
@@ -119,7 +119,7 @@ class AgentTaskRunner(TaskRunner):
         return await get_task_state().is_cancelled(task.id)
 
     @classmethod
-    async def _pop_event(cls, task: Task) -> Event:
+    async def _pop_event(cls, task: Task) -> Optional[Event]:
         """从任务的输入流中获取事件信息"""
         # 1.从任务task中读取数据
         event_id, event_str = await task.input_stream.pop()
@@ -334,6 +334,8 @@ class AgentTaskRunner(TaskRunner):
                     break
 
                 event = await self._pop_event(task)
+                if event is None:
+                    continue
                 message = ""
 
                 if isinstance(event, MessageEvent):

@@ -165,12 +165,63 @@ class DockerSandbox(Sandbox):
 
             # 2.关闭并移除容器
             if self._container_name:
-                docker_client = docker.from_env()
-                docker_client.containers.get(self._container_name).remove(force=True)
+                await asyncio.to_thread(self._remove_container, self._container_name)
             return True
         except Exception as e:
             logger.error(f"销毁当前Docker沙箱[{self._container_name}]失败: {str(e)}")
             return False
+
+    @classmethod
+    def _remove_container(cls, container_name: str) -> None:
+        docker_client = docker.from_env()
+        try:
+            docker_client.containers.get(container_name).remove(force=True)
+        finally:
+            docker_client.close()
+
+    @classmethod
+    def _get_running_container_ip(cls, id: str) -> Optional[str]:
+        docker_client = docker.from_env()
+        try:
+            container = docker_client.containers.get(id)
+            container.reload()
+            if container.status != "running":
+                logger.warning(f"容器存在但未运行, 容器名字: {id}")
+                return None
+            return cls._get_container_ip(container)
+        except NotFound:
+            logger.warning(f"该容器找不到可能被销毁: {str(id)}")
+            return None
+        except APIError as e:
+            logger.error(f"Docker API出错: {str(e)}")
+            return None
+        finally:
+            docker_client.close()
+
+    @classmethod
+    def _cleanup_orphaned_containers_sync(cls) -> int:
+        settings = get_settings()
+        if settings.sandbox_address or not settings.sandbox_name_prefix:
+            return 0
+        docker_client = docker.from_env()
+        removed = 0
+        try:
+            containers = docker_client.containers.list(
+                all=True,
+                filters={"name": f"{settings.sandbox_name_prefix}-"},
+            )
+            for container in containers:
+                container.reload()
+                if container.status in {"exited", "dead", "created"}:
+                    container.remove(force=True)
+                    removed += 1
+            return removed
+        finally:
+            docker_client.close()
+
+    @classmethod
+    async def cleanup_orphaned_containers(cls) -> int:
+        return await asyncio.to_thread(cls._cleanup_orphaned_containers_sync)
 
     @classmethod
     async def get(cls, id: str) -> Optional[Self]:
@@ -186,36 +237,11 @@ class DockerSandbox(Sandbox):
                 return None
 
         try:
-            # 2.创建docker客户端并根据容器名字获取容器
-            docker_client = docker.from_env()
-
-            try:
-                # 3.根据id获取容器
-                container = docker_client.containers.get(id)
-                container.reload()
-
-                # 4.检查容器是否正常运行
-                if container.status != "running":
-                    logger.warning(f"容器存在但未运行, 容器名字: {id}")
-                    return None
-
-                # 4.获取容器的ip地址
-                ip = cls._get_container_ip(container)
-                if not ip:
-                    return None
-
-                return DockerSandbox(ip=ip, container_name=id)
-            except NotFound:
-                # 5.找不到容器(容器被销毁)
-                logger.warning(f"该容器找不到可能被销毁: {str(id)}")
+            # 2.创建docker客户端并根据容器名字获取容器（在线程中执行同步 Docker SDK）
+            ip = await asyncio.to_thread(cls._get_running_container_ip, id)
+            if not ip:
                 return None
-            except APIError as e:
-                # 6.Docker容器守护进程出错
-                logger.error(f"Docker API出错: {str(e)}")
-                return None
-            finally:
-                # 7.显示关闭docker client
-                docker_client.close()
+            return DockerSandbox(ip=ip, container_name=id)
         except Exception as e:
             # 8.其他错误统一捕获
             logger.error(f"获取沙箱发生未知错误: {str(e)}")

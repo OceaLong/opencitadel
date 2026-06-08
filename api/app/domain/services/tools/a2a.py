@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 import logging
 import uuid
+import asyncio
+import json
 from contextlib import AsyncExitStack
 from typing import Optional, Dict, Any
 
@@ -75,23 +77,31 @@ class A2AClientManager:
 
     async def _get_a2a_agent_cards(self) -> None:
         """根据配置连接所有已启用的 a2a 服务器获取 AgentCard 信息"""
-        for a2a_server_config in self._a2a_config.a2a_servers:
-            if not a2a_server_config.enabled:
-                continue
-            try:
-                # 2.调用httpx客户端发起请求
-                agent_card_response = await self._httpx_client.get(
-                    f"{a2a_server_config.base_url}/.well-known/agent-card.json"
-                )
-                agent_card_response.raise_for_status()
-                agent_card = agent_card_response.json()
+        enabled_servers = [
+            server_config
+            for server_config in self._a2a_config.a2a_servers
+            if server_config.enabled
+        ]
+        await asyncio.gather(*[
+            self._load_a2a_agent_card(server_config)
+            for server_config in enabled_servers
+        ])
 
-                # 3.存储到agent_cards
-                agent_card["enabled"] = a2a_server_config.enabled
-                self._agent_cards[a2a_server_config.id] = agent_card
-            except Exception as e:
-                logger.warning(f"加载A2A服务[{a2a_server_config.id}]失败: {str(e)}")
-                continue
+    async def _load_a2a_agent_card(self, a2a_server_config) -> None:
+        try:
+            # 2.调用httpx客户端发起请求
+            agent_card_response = await self._httpx_client.get(
+                f"{a2a_server_config.base_url}/.well-known/agent-card.json"
+            )
+            agent_card_response.raise_for_status()
+            agent_card = agent_card_response.json()
+
+            # 3.存储到agent_cards
+            agent_card["enabled"] = a2a_server_config.enabled
+            self._agent_cards[a2a_server_config.id] = agent_card
+        except Exception as e:
+            logger.warning(f"加载A2A服务[{a2a_server_config.id}]失败: {str(e)}")
+            return
 
     async def invoke(self, agent_id: str, query: str) -> ToolResult:
         """根据传递的智能体id+query调用Remote-Agent"""
@@ -107,35 +117,83 @@ class A2AClientManager:
         if url == "":
             return ToolResult(success=False, message="该远程Agent调用端点不存在")
 
+        payload = self._build_message_payload(query)
         try:
-            # 4.使用httpx客户端发起post请求并传递数据
-            agent_response = await self._httpx_client.post(
-                url,
-                json={
-                    "id": str(uuid.uuid4()),
-                    "jsonrpc": "2.0",
-                    "method": "message/send",
-                    "params": {
-                        "message": {
-                            "messageId": str(uuid.uuid4()),
-                            "role": "user",
-                            "parts": [
-                                {"kind": "text", "text": query},
-                            ],
-                        },
-                    },
-                },
+            # 4.根据 AgentCard 能力选择流式或非流式调用
+            if agent_card.get("capabilities", {}).get("streaming", False):
+                result = await self._invoke_stream(url, payload)
+            else:
+                result = await self._invoke_send(url, payload)
+            text = self._extract_text(result)
+            return ToolResult(
+                success=True,
+                message="调用远程Agent成功",
+                data={"text": text, "raw": result} if text else result,
             )
-            agent_response.raise_for_status()
-            result = agent_response.json()
-
-            return ToolResult(success=True, message="调用远程Agent成功", data=result)
         except Exception as e:
             logger.error(f"调用远程Agent[{agent_id}:{url}]出错: {str(e)}")
             return ToolResult(
                 success=False,
                 message=f"调用远程Agent[{agent_id}:{url}]出错: {str(e)}"
             )
+
+    @staticmethod
+    def _build_message_payload(query: str) -> Dict[str, Any]:
+        return {
+            "id": str(uuid.uuid4()),
+            "jsonrpc": "2.0",
+            "method": "message/send",
+            "params": {
+                "message": {
+                    "messageId": str(uuid.uuid4()),
+                    "role": "user",
+                    "parts": [
+                        {"kind": "text", "text": query},
+                    ],
+                },
+            },
+        }
+
+    async def _invoke_send(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        agent_response = await self._httpx_client.post(url, json=payload)
+        agent_response.raise_for_status()
+        return agent_response.json()
+
+    async def _invoke_stream(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        stream_payload = {**payload, "method": "message/stream"}
+        events = []
+        async with self._httpx_client.stream("POST", url, json=stream_payload) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line:
+                    continue
+                if line.startswith("data:"):
+                    line = line[5:].strip()
+                if not line or line == "[DONE]":
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except Exception:
+                    events.append({"text": line})
+        return {"events": events}
+
+    @classmethod
+    def _extract_text(cls, payload: Any) -> str:
+        texts = []
+
+        def visit(value: Any) -> None:
+            if isinstance(value, dict):
+                if isinstance(value.get("text"), str):
+                    texts.append(value["text"])
+                for key in ("result", "message", "artifact", "parts", "events"):
+                    if key in value:
+                        visit(value[key])
+            elif isinstance(value, list):
+                for item in value:
+                    visit(item)
+
+        visit(payload)
+        return "\n".join(text for text in texts if text).strip()
 
     async def cleanup(self) -> None:
         """当退出A2A客户端管理器时，清除对应资源"""

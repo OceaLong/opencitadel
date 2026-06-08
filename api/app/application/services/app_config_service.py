@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 import logging
 import uuid
+import asyncio
 from typing import List
 
 from app.application.errors.exceptions import NotFoundError, BadRequestError
 from app.application.services.config_provider import get_app_config_provider
 from app.domain.models.app_config import AppConfig, LLMConfig, AgentConfig, MCPConfig, A2AConfig, A2AServerConfig
 from app.domain.repositories.app_config_repository import AppConfigRepository
-from app.domain.services.tools.a2a import A2AClientManager
-from app.domain.services.tools.mcp import MCPClientManager
+from app.infrastructure.external.tools.connection_pool import A2AConnectionPool, MCPConnectionPool
 from app.interfaces.schemas.app_config import ListMCPServerItem, ListA2AServerItem
 
 logger = logging.getLogger(__name__)
@@ -53,8 +53,18 @@ class AppConfigService:
         return app_config.agent_config
 
     def _save_app_config(self, app_config: AppConfig) -> None:
-        self._save_app_config(app_config)
+        self.app_config_repository.save(app_config)
         get_app_config_provider().invalidate()
+        self._invalidate_runtime_pools()
+
+    @staticmethod
+    def _invalidate_runtime_pools() -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(MCPConnectionPool.invalidate_all())
+        loop.create_task(A2AConnectionPool.invalidate_all())
 
     async def update_agent_config(self, agent_config: AgentConfig) -> AgentConfig:
         """根据传递的agent_config更新Agent通用配置"""
@@ -68,28 +78,21 @@ class AppConfigService:
         # 1.获取当前应用配置
         app_config = await self._load_app_config()
 
-        # 2.创建mcp客户端管理器，对配置信息不进行过滤
+        # 2.复用运行时连接池，避免设置页每次请求都冷启动 MCP 连接
         mcp_servers = []
-        mcp_client_manager = MCPClientManager(mcp_config=app_config.mcp_config)
+        mcp_client_manager = await MCPConnectionPool.acquire(app_config.mcp_config)
 
-        try:
-            # 3.初始化mcp客户端管理器
-            await mcp_client_manager.initialize()
+        # 3.获取mcp客户端管理器的工具列表
+        tools = mcp_client_manager.tools
 
-            # 4.获取mcp客户端管理器的工具列表
-            tools = mcp_client_manager.tools
-
-            # 5.循环组装响应的工具格式
-            for server_name, server_config in app_config.mcp_config.mcpServers.items():
-                mcp_servers.append(ListMCPServerItem(
-                    server_name=server_name,
-                    enabled=server_config.enabled,
-                    transport=server_config.transport,
-                    tools=[tool.name for tool in tools.get(server_name, [])]
-                ))
-        finally:
-            # 6.清除MCP客户端管理器的相关资源
-            await mcp_client_manager.cleanup()
+        # 4.循环组装响应的工具格式
+        for server_name, server_config in app_config.mcp_config.mcpServers.items():
+            mcp_servers.append(ListMCPServerItem(
+                server_name=server_name,
+                enabled=server_config.enabled,
+                transport=server_config.transport,
+                tools=[tool.name for tool in tools.get(server_name, [])]
+            ))
 
         return mcp_servers
 
@@ -155,32 +158,25 @@ class AppConfigService:
         # 1.获取当前的应用配置
         app_config = await self._load_app_config()
 
-        # 2.构建a2a客户端管理器，对配置信息不过滤
+        # 2.复用运行时连接池，避免设置页每次请求都冷启动 A2A 连接
         a2a_servers = []
-        a2a_client_manager = A2AClientManager(app_config.a2a_config)
+        a2a_client_manager = await A2AConnectionPool.acquire(app_config.a2a_config)
 
-        try:
-            # 3.初始化a2a客户端管理器
-            await a2a_client_manager.initialize()
+        # 3.获取Agent卡片列表
+        agent_cards = a2a_client_manager.agent_cards
 
-            # 4.获取Agent卡片列表
-            agent_cards = a2a_client_manager.agent_cards
-
-            # 5.组装响应结构
-            for id, agent_card in agent_cards.items():
-                a2a_servers.append(ListA2AServerItem(
-                    id=id,
-                    name=agent_card.get("name", ""),
-                    description=agent_card.get("description", ""),
-                    input_modes=agent_card.get("defaultInputModes", []),
-                    output_modes=agent_card.get("defaultOutputModes", []),
-                    streaming=agent_card.get("capabilities", {}).get("streaming", False),
-                    push_notifications=agent_card.get("capabilities", {}).get("push_notifications", False),
-                    enabled=agent_card.get("enabled", False),
-                ))
-        finally:
-            # 6.清除客户端管理器资源
-            await a2a_client_manager.cleanup()
+        # 4.组装响应结构
+        for id, agent_card in agent_cards.items():
+            a2a_servers.append(ListA2AServerItem(
+                id=id,
+                name=agent_card.get("name", ""),
+                description=agent_card.get("description", ""),
+                input_modes=agent_card.get("defaultInputModes", []),
+                output_modes=agent_card.get("defaultOutputModes", []),
+                streaming=agent_card.get("capabilities", {}).get("streaming", False),
+                push_notifications=agent_card.get("capabilities", {}).get("push_notifications", False),
+                enabled=agent_card.get("enabled", False),
+            ))
 
         return a2a_servers
 

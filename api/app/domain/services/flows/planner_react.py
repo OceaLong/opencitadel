@@ -64,7 +64,6 @@ class PlannerReActFlow(BaseFlow):
         self._session_id = session_id
         self.status = FlowStatus.IDLE
         self.plan: Optional[Plan] = None
-        self._vision_consumed: bool = False
 
         self._agent_config = agent_config
         self._flow_step_budget = agent_config.max_flow_steps
@@ -80,7 +79,7 @@ class PlannerReActFlow(BaseFlow):
             extra_tools=extra_tools,
         )
 
-        allowed_tool_names = skill.allowed_tools if skill and skill.allowed_tools else None
+        allowed_tool_names = skill.allowed_tools if skill else None
 
         # 3.创建规划Agent（agent_params 已在 AgentService 合并）
         self.planner = PlannerAgent(
@@ -150,8 +149,6 @@ class PlannerReActFlow(BaseFlow):
 
         # 6.获取当前会话中最新事件
         self.plan = session.get_latest_plan()
-        if session.status == SessionStatus.PENDING:
-            self._vision_consumed = False
         logger.info(f"Planner&ReAct流接收消息: {message.message[:50]}...")
 
         # 7.定义当前正在执行的子步骤
@@ -200,6 +197,8 @@ class PlannerReActFlow(BaseFlow):
                         yield event
 
                 # 15.计划创建完成，更新流状态为执行中
+                logger.info(f"压缩{self.planner.name} Agent记忆/上下文")
+                await self.planner.summarize_and_compact()
                 logger.info(f"Planner&ReAct流状态从{FlowStatus.PLANNING}变成{FlowStatus.EXECUTING}")
                 self.status = FlowStatus.EXECUTING
 
@@ -222,16 +221,13 @@ class PlannerReActFlow(BaseFlow):
 
                 # 20.调用执行Agent执行对应的步骤
                 logger.info(f"Planner&ReAct流开始执行步骤 {step.id}: {step.description[:50]}...")
-                step_vision = None if self._vision_consumed else message.vision_attachments
                 async for event in self.react.execute_step(
                         self.plan,
                         step,
                         message,
-                        vision_attachments=step_vision,
+                        vision_attachments=message.vision_attachments,
                 ):
                     yield event
-                if step_vision:
-                    self._vision_consumed = True
 
                 # 21.压缩执行Agent记忆，避免上下文腐化+消耗大量token
                 logger.info(f"压缩{self.react.name} Agent记忆/上下文")
@@ -241,9 +237,15 @@ class PlannerReActFlow(BaseFlow):
                 self.status = FlowStatus.UPDATING
             elif self.status == FlowStatus.UPDATING:
                 # 23.流状态为更新表示需要更新计划
+                if not self.plan.get_next_step():
+                    logger.info("Planner&ReAct流无剩余步骤，跳过计划更新")
+                    self.status = FlowStatus.SUMMARIZING
+                    continue
                 logger.info(f"Planner&ReAct流开始更新计划")
                 async for event in self.planner.update_plan(self.plan, step):
                     yield event
+                logger.info(f"压缩{self.planner.name} Agent记忆/上下文")
+                await self.planner.summarize_and_compact()
 
                 # 24.计划更新完成，需要执行相应的子步骤
                 logger.info(f"Planner&ReAct流状态从{FlowStatus.UPDATING}变成{FlowStatus.EXECUTING}")

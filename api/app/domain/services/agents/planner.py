@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
+import json
 from typing import Optional, AsyncGenerator
 
 from app.domain.models.event import BaseEvent, MessageEvent, PlanEvent, PlanEventStatus
@@ -80,8 +81,14 @@ class PlannerAgent(BaseAgent):
         """根据传递的原始规划+子步骤更新事件"""
         self.set_current_step(f"update_plan:{step.id}")
         # 1.使用plan+step创建更新Plan提示词
+        pending_plan_payload = plan.model_dump(mode="json")
+        pending_plan_payload["steps"] = [
+            pending_step.model_dump(mode="json")
+            for pending_step in plan.steps
+            if not pending_step.done
+        ]
         query = UPDATE_PLAN_PROMPT.format(
-            plan=plan.model_dump_json(),
+            plan=json.dumps(pending_plan_payload, ensure_ascii=False),
             step=step.model_dump_json(),
         )
 

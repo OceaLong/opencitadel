@@ -32,5 +32,6 @@ class MemoryEntry(BaseModel):
     source: MemorySource = MemorySource.MANUAL
     last_used_at: Optional[datetime] = None
     use_count: int = 0
+    vector_score: Optional[float] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

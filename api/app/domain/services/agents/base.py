@@ -107,11 +107,11 @@ class BaseAgent(ABC):
         for tool in self._tools:
             for schema in tool.get_tools():
                 name = schema.get("function", {}).get("name", "")
-                if self._allowed_tool_names and name not in self._allowed_tool_names:
+                if self._allowed_tool_names is not None and name not in self._allowed_tool_names:
                     continue
                 available_tools.append(schema)
 
-        if self._allowed_tool_names and registered_names:
+        if self._allowed_tool_names is not None and registered_names:
             if not available_tools:
                 logger.warning(
                     "Skill 工具白名单过滤后无可用工具: session=%s allowed_tools=%s registered_tools=%s",
@@ -170,6 +170,29 @@ class BaseAgent(ABC):
         if self._memory is None:
             async with self._uow:
                 self._memory = await self._uow.session.get_memory(self._session_id, self.name)
+
+    def _build_system_content(self) -> str:
+        system_content = self._system_prompt
+        if self._skill_prompt:
+            system_content += f"\n\n--- Skill Instructions ---\n{self._skill_prompt}"
+        if self._long_term_memory_block:
+            system_content += f"\n\n{self._long_term_memory_block}"
+        return system_content
+
+    def _ensure_system_message(self) -> bool:
+        system_content = self._build_system_content()
+        messages = self._memory.get_messages()
+        if not messages:
+            self._memory.add_message({"role": "system", "content": system_content})
+            return True
+        if messages[0].get("role") == "system" and messages[0].get("content") != system_content:
+            messages[0]["content"] = system_content
+            self._memory.messages = messages
+            return True
+        if messages[0].get("role") != "system":
+            self._memory.messages = [{"role": "system", "content": system_content}] + messages
+            return True
+        return False
 
     def set_current_step(self, step: str) -> None:
         self._current_step = step or "default"
@@ -258,7 +281,7 @@ class BaseAgent(ABC):
             emit_deltas: bool = True,
     ) -> Dict[str, Any]:
         """调用语言模型并处理记忆内容，支持流式 delta 事件。"""
-        await self._add_to_memory(messages)
+        await self._add_to_memory(messages, persist=False)
 
         available_tools = self._get_available_tools()
         effective_format = format
@@ -371,9 +394,24 @@ class BaseAgent(ABC):
         """传递工具包+工具名字+对应参数调用指定工具"""
         # 1.执行循环调用工具获取结果
         err = ""
+        timeout_seconds = max(1, get_settings().tool_timeout_seconds)
         for _ in range(self._agent_config.max_retries):
             try:
-                return await tool.invoke(tool_name, **arguments)
+                result = await asyncio.wait_for(
+                    tool.invoke(tool_name, **arguments),
+                    timeout=timeout_seconds,
+                )
+                if tool.name in {"mcp", "a2a"} and not result.success:
+                    err = result.message or f"调用工具[{tool_name}]失败"
+                    logger.warning("调用工具[%s]返回失败，准备重试: %s", tool_name, err)
+                    await asyncio.sleep(self._retry_interval)
+                    continue
+                return result
+            except asyncio.TimeoutError:
+                err = f"调用工具[{tool_name}]超时({timeout_seconds}s)"
+                logger.warning(err)
+                await asyncio.sleep(self._retry_interval)
+                continue
             except Exception as e:
                 err = str(e)
                 logger.exception(f"调用工具[{tool_name}]出错, 错误: {str(e)}")
@@ -383,28 +421,21 @@ class BaseAgent(ABC):
         # 2.循环最大重试次数后没有结果则将错误作为工具的执行结果，让LLM自行处理
         return ToolResult(success=False, message=err)
 
-    async def _add_to_memory(self, messages: List[Dict[str, Any]]) -> None:
+    async def _add_to_memory(self, messages: List[Dict[str, Any]], persist: bool = True) -> None:
         """将对应的信息添加到记忆中"""
         # 1.先检查确保记忆是存在的
         await self._ensure_memory()
 
-        # 2.检查记忆的消息列表是否为空，如果是空则需要添加预设prompt作为初始记忆
-        if self._memory.empty:
-            system_content = self._system_prompt
-            if self._skill_prompt:
-                system_content += f"\n\n--- Skill Instructions ---\n{self._skill_prompt}"
-            if self._long_term_memory_block:
-                system_content += f"\n\n{self._long_term_memory_block}"
-            self._memory.add_message({
-                "role": "system", "content": system_content,
-            })
+        # 2.确保系统提示与当前 Skill / 长期记忆配置保持同步
+        system_changed = self._ensure_system_message()
 
         # 3.将正常消息添加到记忆中
         self._memory.add_messages(messages)
 
         # 4.将记忆持久化到数据仓库中
-        async with self._uow:
-            await self._uow.session.save_memory(self._session_id, self.name, self._memory)
+        if persist or system_changed:
+            async with self._uow:
+                await self._uow.session.save_memory(self._session_id, self.name, self._memory)
 
     async def compact_memory(self) -> None:
         """压缩Agent的记忆（仅规则裁剪）。"""
@@ -556,6 +587,24 @@ class BaseAgent(ABC):
                     function_args = raw_arguments
                 else:
                     function_args = await self._json_parser.invoke(raw_arguments)
+
+                if self._allowed_tool_names is not None and function_name not in self._allowed_tool_names:
+                    result = ToolResult(success=False, message=f"工具[{function_name}]未被当前Skill授权")
+                    events.append(ToolEvent(
+                        tool_call_id=tool_call_id,
+                        tool_name="blocked",
+                        function_name=function_name,
+                        function_args=function_args if isinstance(function_args, dict) else {},
+                        function_result=result,
+                        status=ToolEventStatus.CALLED,
+                    ))
+                    msgs.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "_function_name": function_name,
+                        "content": result.model_dump_json(),
+                    })
+                    return events, msgs
 
                 try:
                     tool = self._resolve_tool(function_name)

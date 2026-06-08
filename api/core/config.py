@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_api_key: str = ""
     embedding_base_url: str = "https://api.openai.com/v1"
+    tool_timeout_seconds: int = 120
 
     # 数据库相关配置
     sqlalchemy_database_uri: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/manus"
@@ -36,6 +37,7 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_db: int = 0
     redis_password: str | None = None
+    redis_stream_maxlen: int = 10000
 
     # Cos腾讯云对象存储配置
     cos_secret_id: str = ""
@@ -55,6 +57,7 @@ class Settings(BaseSettings):
     sandbox_https_proxy: Optional[str] = None
     sandbox_http_proxy: Optional[str] = None
     sandbox_no_proxy: Optional[str] = None
+    sandbox_cleanup_interval_seconds: int = 300
 
     # Observability
     otel_enabled: bool = False

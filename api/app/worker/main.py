@@ -79,10 +79,8 @@ class AgentWorker:
                 if claim is None:
                     continue
                 message_id, task_id, session_id = claim
-                try:
-                    await self._execute_job(task_id, session_id)
-                finally:
-                    await self._task_state.ack_dispatch(message_id)
+                await self._execute_job(task_id, session_id)
+                await self._task_state.ack_dispatch(message_id)
             except asyncio.CancelledError:
                 break
             except Exception as exc:

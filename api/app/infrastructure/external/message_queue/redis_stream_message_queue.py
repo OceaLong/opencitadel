@@ -7,6 +7,7 @@ from typing import Any, Tuple, Optional, AsyncGenerator
 
 from app.domain.external.message_queue import MessageQueue
 from app.infrastructure.storage.redis import get_redis
+from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class RedisStreamMessageQueue(MessageQueue):
         self._stream_name = stream_name
         self._redis = get_redis()
         self._lock_expire_seconds = 10
+        self._maxlen = get_settings().redis_stream_maxlen
 
     async def _acquire_lock(self, lock_key: str, timeout_seconds: int = 5) -> Optional[str]:
         """根据传递的lock键构建一个分布式锁"""
@@ -72,7 +74,12 @@ class RedisStreamMessageQueue(MessageQueue):
         """往redis-stream中添加一条消息并返回id"""
         logger.debug(f"往消息队列[{self._stream_name}]中添加一条消息: {message}")
 
-        return await self._redis.client.xadd(self._stream_name, {"data": message})
+        return await self._redis.client.xadd(
+            self._stream_name,
+            {"data": message},
+            maxlen=self._maxlen,
+            approximate=True,
+        )
 
     async def get(self, start_id: str = None, block_ms: int = None) -> Tuple[str, Any]:
         """从redis-stream获取一条数据"""

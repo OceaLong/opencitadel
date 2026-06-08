@@ -23,6 +23,7 @@ def rank_entries_with_decay(entries: List[MemoryEntry], limit: int) -> List[Memo
         age_hours = _entry_age_hours(entry, now)
         decay = math.exp(-age_hours / 168.0)
         usage_boost = 1.0 + math.log1p(entry.use_count or 0)
-        scored.append((decay * usage_boost, entry))
+        semantic_boost = entry.vector_score if entry.vector_score is not None else 1.0
+        scored.append((semantic_boost * decay * usage_boost, entry))
     scored.sort(key=lambda item: item[0], reverse=True)
     return [entry for _, entry in scored[:limit]]

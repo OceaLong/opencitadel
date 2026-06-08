@@ -23,6 +23,7 @@ from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
 from app.infrastructure.external.search.bing_search import BingSearchEngine
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
 from app.application.services.config_provider import get_app_config_provider
+from app.infrastructure.repositories.file_app_config_repository import FileAppConfigRepository
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.storage.cos import Cos, get_cos
 from app.infrastructure.storage.postgres import get_db_session, get_uow

@@ -167,8 +167,10 @@ class AgentService:
             task = await self._get_task(session)
 
             if message:
+                should_dispatch = False
                 if session.status != SessionStatus.RUNNING or task is None:
                     task = await self._create_task(session)
+                    should_dispatch = True
                     if not task:
                         logger.error(f"会话[{session_id}]创建任务失败")
                         raise RuntimeError(f"会话[{session_id}]创建任务失败")
@@ -193,7 +195,8 @@ class AgentService:
                 yield message_event
                 async with self._uow:
                     await self._uow.session.add_event(session_id, message_event)
-                await task.invoke()
+                if should_dispatch:
+                    await task.invoke()
                 logger.info(f"往会话[{session_id}]输入消息队列写入消息: {message[:50]}...")
 
             if not task:

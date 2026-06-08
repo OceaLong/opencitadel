@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any, Dict, Optional, Tuple
 
 from app.infrastructure.storage.redis import get_redis
+from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,24 @@ class TaskStateService:
         return await self._redis.client.xadd(
             TASK_DISPATCH_STREAM,
             {"task_id": task_id, "session_id": session_id},
+            maxlen=get_settings().redis_stream_maxlen,
+            approximate=True,
         )
+
+    @staticmethod
+    def _parse_dispatch_message(message) -> Optional[Tuple[str, str, str]]:
+        if not message:
+            return None
+        message_id, fields = message
+        task_id = fields.get("task_id") or fields.get(b"task_id")
+        session_id = fields.get("session_id") or fields.get(b"session_id")
+        if isinstance(task_id, bytes):
+            task_id = task_id.decode()
+        if isinstance(session_id, bytes):
+            session_id = session_id.decode()
+        if not task_id or not session_id:
+            return None
+        return message_id, task_id, session_id
 
     async def claim_dispatch(
             self,
@@ -110,6 +128,23 @@ class TaskStateService:
     ) -> Optional[Tuple[str, str, str]]:
         """Claim one dispatch job. Returns (message_id, task_id, session_id)."""
         await self.ensure_consumer_group()
+        try:
+            claimed = await self._redis.client.xautoclaim(
+                TASK_DISPATCH_STREAM,
+                WORKER_CONSUMER_GROUP,
+                consumer_name,
+                min_idle_time=60000,
+                start_id="0-0",
+                count=1,
+            )
+            claimed_messages = claimed[1] if claimed and len(claimed) > 1 else []
+            if claimed_messages:
+                parsed = self._parse_dispatch_message(claimed_messages[0])
+                if parsed:
+                    return parsed
+        except Exception as exc:
+            logger.warning("认领 pending dispatch 失败: %s", exc)
+
         messages = await self._redis.client.xreadgroup(
             WORKER_CONSUMER_GROUP,
             consumer_name,
@@ -122,14 +157,7 @@ class TaskStateService:
         stream_messages = messages[0][1]
         if not stream_messages:
             return None
-        message_id, fields = stream_messages[0]
-        task_id = fields.get("task_id") or fields.get(b"task_id")
-        session_id = fields.get("session_id") or fields.get(b"session_id")
-        if isinstance(task_id, bytes):
-            task_id = task_id.decode()
-        if isinstance(session_id, bytes):
-            session_id = session_id.decode()
-        return message_id, task_id, session_id
+        return self._parse_dispatch_message(stream_messages[0])
 
     async def ack_dispatch(self, message_id: str) -> None:
         await self._redis.client.xack(TASK_DISPATCH_STREAM, WORKER_CONSUMER_GROUP, message_id)

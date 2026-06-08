@@ -129,9 +129,12 @@ class MemoryService:
                     limit=self._recall_limit,
                     db_session=getattr(uow, "db_session", None),
                 )
-                seen = {e.id for e in entries}
+                by_id = {e.id: e for e in entries}
+                seen = set(by_id.keys())
                 for entry in vector_entries:
-                    if entry.id not in seen:
+                    if entry.id in by_id:
+                        by_id[entry.id].vector_score = entry.vector_score
+                    else:
                         entries.append(entry)
                         seen.add(entry.id)
                 entries = rank_entries_with_decay(entries, self._recall_limit)

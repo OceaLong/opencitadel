@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.infrastructure.logging import setup_logging
+from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
 from app.infrastructure.observability.logging_context import configure_structured_logging
 from app.infrastructure.observability.otel import setup_observability
 from app.infrastructure.storage.cos import get_cos
@@ -34,6 +35,20 @@ settings = get_settings()
 # 2.初始化日志系统
 setup_logging()
 logger = logging.getLogger()
+
+
+async def _sandbox_cleanup_loop() -> None:
+    interval = max(60, settings.sandbox_cleanup_interval_seconds)
+    while True:
+        try:
+            removed = await DockerSandbox.cleanup_orphaned_containers()
+            if removed:
+                logger.info("清理孤儿沙箱容器数量: %s", removed)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("清理孤儿沙箱容器失败: %s", exc)
+        await asyncio.sleep(interval)
 
 # 3.定义FastAPI路由tags标签
 openapi_tags = [
@@ -95,12 +110,18 @@ async def lifespan(app: FastAPI):
         llm_model_service=get_llm_model_service(),
         skill_service=get_skill_service(),
     )
+    sandbox_cleanup_task = asyncio.create_task(_sandbox_cleanup_loop())
     logger.info("MyManus初始化完成")
 
     try:
         # 4.lifespan分界点
         yield
     finally:
+        sandbox_cleanup_task.cancel()
+        try:
+            await sandbox_cleanup_task
+        except asyncio.CancelledError:
+            pass
         try:
             # 5.等待agent服务关闭
             logger.info("MyManus正在关闭")

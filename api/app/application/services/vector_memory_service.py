@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Vector memory with pgvector + OpenAI-compatible embeddings."""
 import logging
+from collections import OrderedDict
 from typing import List, Optional
 
 from openai import AsyncOpenAI
@@ -13,6 +14,7 @@ from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 _EMBEDDING_DIM = 1536
+_EMBEDDING_CACHE_MAX_SIZE = 256
 
 
 class VectorMemoryService:
@@ -25,22 +27,37 @@ class VectorMemoryService:
         self.embedding_model = settings.embedding_model
         self._openai_api_key = settings.embedding_api_key or ""
         self._openai_base_url = settings.embedding_base_url or "https://api.openai.com/v1"
-
-    def _client(self) -> AsyncOpenAI:
-        return AsyncOpenAI(
+        self._embedding_cache: OrderedDict[str, List[float]] = OrderedDict()
+        self._client = AsyncOpenAI(
             api_key=self._openai_api_key or "sk-placeholder",
             base_url=self._openai_base_url,
         )
 
+    def _cache_get(self, content: str) -> Optional[List[float]]:
+        cached = self._embedding_cache.get(content)
+        if cached is None:
+            return None
+        self._embedding_cache.move_to_end(content)
+        return cached
+
+    def _cache_set(self, content: str, vector: List[float]) -> None:
+        self._embedding_cache[content] = vector
+        self._embedding_cache.move_to_end(content)
+        while len(self._embedding_cache) > _EMBEDDING_CACHE_MAX_SIZE:
+            self._embedding_cache.popitem(last=False)
+
     async def embed(self, content: str) -> List[float]:
         if not self.enabled or not content.strip():
             return []
-        client = self._client()
-        response = await client.embeddings.create(
+        if cached := self._cache_get(content):
+            return cached
+        response = await self._client.embeddings.create(
             model=self.embedding_model,
             input=content,
         )
-        return response.data[0].embedding
+        vector = response.data[0].embedding
+        self._cache_set(content, vector)
+        return vector
 
     async def store_embedding(
             self,
@@ -80,7 +97,8 @@ class VectorMemoryService:
 
         stmt = text("""
             SELECT id, scope, session_id, title, content, tags, source,
-                   last_used_at, use_count, created_at, updated_at
+                   last_used_at, use_count, created_at, updated_at,
+                   embedding <=> :query_vec::vector AS distance
             FROM memory_entries
             WHERE embedding IS NOT NULL
               AND (
@@ -117,6 +135,7 @@ class VectorMemoryService:
                 source=MemorySource(row.source),
                 last_used_at=row.last_used_at,
                 use_count=row.use_count,
+                vector_score=max(0.0, 1.0 - float(row.distance or 0.0)),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             ))
