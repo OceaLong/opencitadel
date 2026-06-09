@@ -124,6 +124,12 @@ class DockerSandbox(Sandbox):
                     "NO_PROXY": settings.sandbox_no_proxy or "",
                 }
             }
+            if settings.sandbox_memory_limit:
+                container_config["mem_limit"] = settings.sandbox_memory_limit
+            if settings.sandbox_cpu_limit and settings.sandbox_cpu_limit > 0:
+                container_config["nano_cpus"] = int(settings.sandbox_cpu_limit * 1_000_000_000)
+            if settings.sandbox_pids_limit and settings.sandbox_pids_limit > 0:
+                container_config["pids_limit"] = settings.sandbox_pids_limit
 
             # 5.判断是否传递了网络
             if settings.sandbox_network:

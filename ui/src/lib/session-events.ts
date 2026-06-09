@@ -8,6 +8,7 @@
 
 import type {
   ChatMessage,
+  ClarifyQuestion,
   DebugItemEvent,
   EventMeta,
   EventVisibility,
@@ -125,6 +126,13 @@ export type TimelineItem =
   | { kind: "user"; id: string; data: ChatMessage }
   | { kind: "attachments"; id: string; role: "user" | "assistant"; files: AttachmentFile[] }
   | { kind: "assistant"; id: string; data: ChatMessage }
+  | {
+      kind: "clarify";
+      id: string;
+      title?: string | null;
+      questions: ClarifyQuestion[];
+      interactive: boolean;
+    }
   | { kind: "tool"; id: string; data: ToolEvent; timeLabel?: string }
   | { kind: "step"; id: string; data: StepEvent; tools: ToolEvent[] }
   | { kind: "wait"; id: string; message: string; timestamp?: number }
@@ -178,6 +186,16 @@ export function chatAttachmentToDisplay(a: {
 
 function stableId(prefix: string, index: number, suffix: string): string {
   return `${prefix}-${index}-${suffix}`;
+}
+
+function markLatestClarifyAnswered(list: TimelineItem[]): void {
+  for (let i = list.length - 1; i >= 0; i--) {
+    const item = list[i];
+    if (item.kind === "clarify" && item.interactive) {
+      list[i] = { ...item, interactive: false };
+      return;
+    }
+  }
 }
 
 function toMillis(ts: number | string | undefined | null): number | undefined {
@@ -241,6 +259,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
   let toolIndex = 0;
   let stepIndex = 0;
   let errorIndex = 0;
+  let clarifyIndex = 0;
   let lastContextLabel: string | undefined;
   const streamMessages = new Map<string, { listIndex: number; content: string }>();
 
@@ -300,9 +319,32 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
       case "debug_item":
       case "session_status":
         break;
+      case "clarify": {
+        const data = ev.data as {
+          title?: string | null;
+          questions?: ClarifyQuestion[];
+          event_id?: string;
+        };
+        for (let i = list.length - 1; i >= 0; i--) {
+          const item = list[i];
+          if (item.kind === "clarify" && item.interactive) {
+            list[i] = { ...item, interactive: false };
+            break;
+          }
+        }
+        list.push({
+          kind: "clarify",
+          id: stableId("clarify", clarifyIndex++, data.event_id || String(list.length)),
+          title: data.title,
+          questions: Array.isArray(data.questions) ? data.questions : [],
+          interactive: true,
+        });
+        break;
+      }
       case "message": {
         const msg = ev.data as ChatMessage;
         if (msg.role === "user") {
+          markLatestClarifyAnswered(list);
           lastStepId = null;
           list.push({
             kind: "user",

@@ -96,9 +96,13 @@ class MemoryService:
                 raise NotFoundError(f"记忆[{entry_id}]不存在")
             updates.id = entry_id
             await uow.memory_entry.save(updates)
-        from app.application.services.vector_memory_service import VectorMemoryService
-        vector_service = VectorMemoryService()
-        await vector_service.store_embedding(entry_id, f"{updates.title}\n{updates.content}")
+            from app.application.services.vector_memory_service import VectorMemoryService
+            vector_service = VectorMemoryService()
+            await vector_service.store_embedding(
+                entry_id,
+                f"{updates.title}\n{updates.content}",
+                db_session=getattr(uow, "db_session", None),
+            )
         return updates
 
     async def delete_entry(self, entry_id: str) -> None:

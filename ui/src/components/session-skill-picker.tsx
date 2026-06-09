@@ -7,6 +7,21 @@ import { InlineOptionPicker } from "@/components/inline-option-picker";
 import { skillsApi } from "@/lib/api/skills";
 import type { Skill, SkillSummary } from "@/lib/api/types";
 
+let skillsCache: Skill[] | null = null;
+let skillsPromise: Promise<Skill[]> | null = null;
+
+function loadSkills(): Promise<Skill[]> {
+  if (skillsCache) return Promise.resolve(skillsCache);
+  if (!skillsPromise) {
+    skillsPromise = skillsApi.list(true).then((data) => {
+      skillsCache = data.skills;
+      skillsPromise = null;
+      return data.skills;
+    });
+  }
+  return skillsPromise;
+}
+
 type Props = {
   value?: string | null;
   onChange: (skillId: string | undefined, skill?: SkillSummary | null) => void;
@@ -19,10 +34,17 @@ export function SessionSkillPicker({ value, onChange, disabled, onSkillLoaded, c
   const [skills, setSkills] = useState<Skill[]>([]);
 
   useEffect(() => {
-    skillsApi
-      .list(true)
-      .then((d) => setSkills(d.skills))
-      .catch(() => {});
+    let cancelled = false;
+    loadSkills()
+      .then((items) => {
+        if (!cancelled) setSkills(items);
+      })
+      .catch(() => {
+        if (!cancelled) setSkills([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

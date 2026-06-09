@@ -118,6 +118,57 @@ export function useSessionDetail(
       ) {
         return prev;
       }
+      if (evToAppend.type === "message_delta") {
+        const data = evToAppend.data as { stream_id?: string; delta?: string };
+        const idx = prev.findIndex(
+          (item) =>
+            item.type === "message_delta" &&
+            (item.data as { stream_id?: string })?.stream_id === data.stream_id,
+        );
+        if (idx >= 0) {
+          const next = [...prev];
+          const current = next[idx].data as { stream_id?: string; delta?: string };
+          next[idx] = {
+            ...next[idx],
+            data: { ...current, delta: `${current.delta ?? ""}${data.delta ?? ""}` },
+          } as SSEEventData;
+          return next;
+        }
+      }
+      if (evToAppend.type === "reasoning_delta") {
+        const data = evToAppend.data as { stream_id?: string; delta?: string };
+        const idx = prev.findIndex(
+          (item) =>
+            item.type === "reasoning_delta" &&
+            (item.data as { stream_id?: string })?.stream_id === data.stream_id,
+        );
+        if (idx >= 0) {
+          const next = [...prev];
+          const current = next[idx].data as { stream_id?: string; delta?: string };
+          next[idx] = {
+            ...next[idx],
+            data: { ...current, delta: `${current.delta ?? ""}${data.delta ?? ""}` },
+          } as SSEEventData;
+          return next;
+        }
+      }
+      if (evToAppend.type === "tool_args_delta") {
+        const data = evToAppend.data as { tool_call_id?: string; delta?: string };
+        const idx = prev.findIndex(
+          (item) =>
+            item.type === "tool_args_delta" &&
+            (item.data as { tool_call_id?: string })?.tool_call_id === data.tool_call_id,
+        );
+        if (idx >= 0) {
+          const next = [...prev];
+          const current = next[idx].data as { tool_call_id?: string; delta?: string };
+          next[idx] = {
+            ...next[idx],
+            data: { ...current, delta: `${current.delta ?? ""}${data.delta ?? ""}` },
+          } as SSEEventData;
+          return next;
+        }
+      }
       return [...prev, evToAppend];
     });
 

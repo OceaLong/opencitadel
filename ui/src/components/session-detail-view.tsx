@@ -59,6 +59,7 @@ export function SessionDetailView({
     handleViewAllFiles,
     handleFileClick,
     handleToolClick,
+    handleClarifyAnswer,
     handleClosePreview,
     handleJumpToLatest,
     handleOpenVNC,
@@ -145,6 +146,8 @@ export function SessionDetailView({
                     onViewAllFiles={handleViewAllFiles}
                     onFileClick={handleFileClick}
                     onToolClick={handleToolClick}
+                    onClarifyAnswer={handleClarifyAnswer}
+                    sessionStatus={session.status}
                   />
                 ))}
 

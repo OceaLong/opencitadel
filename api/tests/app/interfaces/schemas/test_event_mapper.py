@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 
 from app.domain.models.event import (
     AssistantNoticeEvent,
+    ClarifyEvent,
+    ClarifyOption,
+    ClarifyQuestion,
     DebugItemEvent,
     DoneEvent,
     ErrorEvent,
@@ -61,6 +64,16 @@ def test_all_event_types_have_typed_sse_mapping_and_meta():
         AssistantNoticeEvent(message="notice"),
         SessionStatusEvent(status="running"),
         DebugItemEvent(item_type="planner_output", payload={"title": "t"}),
+        ClarifyEvent(
+            title="需要确认",
+            questions=[
+                ClarifyQuestion(
+                    id="scope",
+                    prompt="选择范围",
+                    options=[ClarifyOption(id="api", label="API")],
+                )
+            ],
+        ),
         TitleEvent(title="title"),
         PlanEvent(plan=Plan(title="t", goal="g", steps=[Step(id="s1", description="step")])),
         StepEvent(step=Step(id="s1", description="step")),
@@ -80,6 +93,32 @@ def test_all_event_types_have_typed_sse_mapping_and_meta():
         assert sse.data.visibility in {"user", "internal", "debug"}
         assert sse.data.channel in {"ui", "runtime", "debug"}
         assert isinstance(sse.data.persist, bool)
+
+
+def test_clarify_sse_mapping_projects_questions():
+    event = ClarifyEvent(
+        title="需要确认几个关键点",
+        questions=[
+            ClarifyQuestion(
+                id="scope",
+                prompt="选择实现范围",
+                options=[
+                    ClarifyOption(id="backend", label="后端"),
+                    ClarifyOption(id="frontend", label="前端"),
+                ],
+                allow_multiple=True,
+                allow_custom=True,
+            )
+        ],
+    )
+
+    sse = EventMapper.event_to_sse_event(event)
+
+    assert sse.event == "clarify"
+    assert sse.data.title == "需要确认几个关键点"
+    assert sse.data.questions[0].id == "scope"
+    assert sse.data.questions[0].allow_multiple is True
+    assert sse.data.questions[0].options[1].label == "前端"
 
 
 def test_event_upgrader_adds_v2_metadata_defaults():

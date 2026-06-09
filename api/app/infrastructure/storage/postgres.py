@@ -35,8 +35,11 @@ class Postgres:
             logger.info("正在初始化Postgres连接...")
             self._engine = create_async_engine(
                 self._settings.sqlalchemy_database_uri,
-                echo=True if self._settings.env == "development" else False,
+                echo=self._settings.sqlalchemy_echo,
                 pool_pre_ping=True,  # 每次从连接池获取连接前先检测连接是否有效，防止使用已关闭的连接
+                pool_size=self._settings.postgres_pool_size,
+                max_overflow=self._settings.postgres_max_overflow,
+                pool_recycle=self._settings.postgres_pool_recycle_seconds,
             )
 
             # 3.创建会话工厂

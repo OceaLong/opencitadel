@@ -14,15 +14,14 @@ from app.domain.models.event import (
     ToolEvent, ToolEventStatus, ErrorEvent, MessageEvent, BaseEvent,
     MessageDeltaEvent, ReasoningDeltaEvent, ToolArgsDeltaEvent, UsageEvent,
 )
-from app.domain.models.llm_token_usage import LLMTokenUsage
 from app.domain.models.memory import Memory
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.models.tool_result import ToolResult
 from app.domain.services import vision_service
 from app.domain.repositories.uow import IUnitOfWork
+from app.domain.services.agents.token_accountant import TokenAccountant
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.tool_names import normalize_allowed_tool_names, normalize_tool_name
-from app.infrastructure.observability.otel import record_llm_tokens
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -86,10 +85,17 @@ class BaseAgent(ABC):
         self._long_term_memory_block = long_term_memory_block
         self._allowed_tool_names = normalize_allowed_tool_names(allowed_tool_names)
         self._stateful_tool_lock = asyncio.Lock()
-        self._pending_delta_events: List[BaseEvent] = []
         self._pending_usage_event: Optional[UsageEvent] = None
+        self._last_llm_message: Optional[Dict[str, Any]] = None
         self._current_step: str = "default"
         self._last_prompt_tokens: int = 0
+        self._token_accountant = TokenAccountant(
+            uow_factory=uow_factory,
+            session_id=session_id,
+            agent_name=self.name,
+            model_name=llm.model_name,
+            model_id=model_id,
+        )
 
     def _collect_registered_tool_names(self) -> List[str]:
         names: List[str] = []
@@ -233,43 +239,8 @@ class BaseAgent(ABC):
         if prompt_tokens <= 0 and completion_tokens <= 0:
             return
         self._last_prompt_tokens = prompt_tokens
-        record_llm_tokens(
-            self._llm.model_name,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-        )
-        record = LLMTokenUsage(
-            session_id=self._session_id,
-            agent=self.name,
-            step=self._current_step,
-            model_id=self._model_id,
-            model_name=self._llm.model_name,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=int(usage.get("total_tokens") or (prompt_tokens + completion_tokens)),
-        )
         try:
-            async with self._uow:
-                await self._uow.llm_token_usage.save(record)
-                summary = await self._uow.llm_token_usage.aggregate_by_session(self._session_id)
-            cost = 0.0
-            if self._model_id:
-                async with self._uow:
-                    model = await self._uow.llm_model.get_by_id(self._model_id)
-                if model:
-                    cost = (
-                        summary.prompt_tokens * model.input_price_per_million / 1_000_000
-                        + summary.completion_tokens * model.output_price_per_million / 1_000_000
-                    )
-            self._pending_usage_event = UsageEvent(
-                prompt_tokens=summary.prompt_tokens,
-                completion_tokens=summary.completion_tokens,
-                total_tokens=summary.total_tokens,
-                estimated_cost_usd=round(cost, 6),
-                call_count=summary.call_count,
-                delta_prompt_tokens=prompt_tokens,
-                delta_completion_tokens=completion_tokens,
-            )
+            self._pending_usage_event = await self._token_accountant.record(usage, self._current_step)
         except Exception as exc:
             logger.warning("记录 token 用量失败: %s", exc)
 
@@ -279,8 +250,8 @@ class BaseAgent(ABC):
             format: Optional[str] = None,
             stream_id: Optional[str] = None,
             emit_deltas: bool = True,
-    ) -> Dict[str, Any]:
-        """调用语言模型并处理记忆内容，支持流式 delta 事件。"""
+    ) -> AsyncGenerator[BaseEvent, None]:
+        """调用语言模型并处理记忆内容，实时向调用方输出流式 delta 事件。"""
         await self._add_to_memory(messages, persist=False)
 
         available_tools = self._get_available_tools()
@@ -292,6 +263,7 @@ class BaseAgent(ABC):
 
         error = "调用语言模型发生错误"
         for _ in range(self._agent_config.max_retries):
+            self._last_llm_message = None
             try:
                 stream_id = stream_id or str(uuid.uuid4())
                 aggregated: Dict[str, Any] = {
@@ -301,7 +273,6 @@ class BaseAgent(ABC):
                     "tool_calls": [],
                 }
                 tool_call_acc: Dict[int, Dict[str, Any]] = {}
-                delta_events: List[BaseEvent] = []
 
                 call_usage: Dict[str, int] = {}
                 async for delta in self._llm.stream_invoke(
@@ -316,11 +287,11 @@ class BaseAgent(ABC):
                     if content := delta.get("content"):
                         aggregated["content"] += content
                         if emit_deltas:
-                            delta_events.append(MessageDeltaEvent(stream_id=stream_id, delta=content))
+                            yield MessageDeltaEvent(stream_id=stream_id, delta=content)
                     if reasoning := delta.get("reasoning_content"):
                         aggregated["reasoning_content"] += reasoning
                         if emit_deltas:
-                            delta_events.append(ReasoningDeltaEvent(stream_id=stream_id, delta=reasoning))
+                            yield ReasoningDeltaEvent(stream_id=stream_id, delta=reasoning)
                     for tc_delta in delta.get("tool_calls") or []:
                         idx = tc_delta.get("index", 0)
                         acc = tool_call_acc.setdefault(idx, {
@@ -336,19 +307,17 @@ class BaseAgent(ABC):
                         if fn.get("arguments"):
                             acc["function"]["arguments"] += fn["arguments"]
                             if emit_deltas:
-                                delta_events.append(ToolArgsDeltaEvent(
+                                yield ToolArgsDeltaEvent(
                                     stream_id=stream_id,
                                     tool_call_id=acc["id"] or f"pending-{idx}",
                                     tool_name=acc["function"]["name"],
                                     delta=fn["arguments"],
-                                ))
+                                )
 
                 if tool_call_acc:
                     aggregated["tool_calls"] = [
                         tool_call_acc[i] for i in sorted(tool_call_acc.keys())
                     ]
-
-                self._pending_delta_events = delta_events
 
                 content = aggregated.get("content")
                 tool_calls = aggregated.get("tool_calls")
@@ -374,10 +343,11 @@ class BaseAgent(ABC):
                     filtered_message["tool_calls"] = tool_calls
                     filtered_message["stream_id"] = stream_id
 
-                await self._add_to_memory([filtered_message])
+                await self._add_to_memory([filtered_message], persist=False)
                 if call_usage:
                     await self._record_token_usage(call_usage)
-                return filtered_message
+                self._last_llm_message = filtered_message
+                return
             except Exception as e:
                 error_msg = _format_agent_error(e)
                 logger.error(
@@ -436,6 +406,11 @@ class BaseAgent(ABC):
         if persist or system_changed:
             async with self._uow:
                 await self._uow.session.save_memory(self._session_id, self.name, self._memory)
+
+    async def _persist_memory(self) -> None:
+        await self._ensure_memory()
+        async with self._uow:
+            await self._uow.session.save_memory(self._session_id, self.name, self._memory)
 
     async def compact_memory(self) -> None:
         """压缩Agent的记忆（仅规则裁剪）。"""
@@ -557,10 +532,9 @@ class BaseAgent(ABC):
             vision_attachments,
             llm=self._llm,
         )
-        message = await self._invoke_llm([user_message], format, emit_deltas=emit_deltas)
-        for delta_event in getattr(self, "_pending_delta_events", []):
-            yield delta_event
-        self._pending_delta_events = []
+        async for event in self._invoke_llm([user_message], format, emit_deltas=emit_deltas):
+            yield event
+        message = self._last_llm_message
         if self._pending_usage_event:
             yield self._pending_usage_event
             self._pending_usage_event = None
@@ -683,16 +657,17 @@ class BaseAgent(ABC):
                     yield event
                 tool_messages.extend(msgs)
 
-            message = await self._invoke_llm(tool_messages, format=None, emit_deltas=emit_deltas)
-            for delta_event in getattr(self, "_pending_delta_events", []):
-                yield delta_event
-            self._pending_delta_events = []
+            async for event in self._invoke_llm(tool_messages, format=None, emit_deltas=emit_deltas):
+                yield event
+            message = self._last_llm_message
             if self._pending_usage_event:
                 yield self._pending_usage_event
                 self._pending_usage_event = None
         else:
             # 13.超过最大迭代次数后，则抛出错误
             yield ErrorEvent(error=f"Agent迭代超过最大迭代次数: {self._agent_config.max_iterations}, 任务处理失败")
+
+        await self._persist_memory()
 
         # 14.在指定步骤内完成了迭代则返回消息事件
         if message and message.get("content") is not None:

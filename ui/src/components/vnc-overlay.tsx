@@ -7,6 +7,8 @@ import { Loader2, WifiOff, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { VNCStatus } from "@/components/vnc-viewer";
 
+import { API_CONFIG } from "@/lib/api/fetch";
+
 const VNCViewer = dynamic(
   () => import("@/components/vnc-viewer").then((m) => ({ default: m.VNCViewer })),
   { ssr: false },
@@ -18,7 +20,7 @@ export type VNCOverlayProps = {
 };
 
 function buildVNCUrl(sessionId: string): string {
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
+  const apiBase = API_CONFIG.baseURL;
 
   let host: string;
   let pathname: string;

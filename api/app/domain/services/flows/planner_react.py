@@ -12,16 +12,18 @@ from app.domain.models.app_config import AgentConfig
 from app.domain.models.skill import Skill
 from app.domain.models.event import (
     BaseEvent,
+    ClarifyEvent,
     PlanEvent,
     PlanEventStatus,
     TitleEvent,
     AssistantNoticeEvent,
     DebugItemEvent,
 )
-from app.domain.models.event import ErrorEvent, DoneEvent
+from app.domain.models.event import ErrorEvent, DoneEvent, WaitEvent
 from app.domain.models.message import Message
 from app.domain.models.plan import Plan, ExecutionStatus
 from app.domain.models.session import SessionStatus
+from app.domain.services.agents.clarify import ClarifyAgent
 from app.domain.services.agents.planner import PlannerAgent
 from app.domain.services.agents.react import ReActAgent
 from app.domain.services.tools.a2a import A2ATool
@@ -34,6 +36,8 @@ from .base import BaseFlow, FlowStatus
 from ...repositories.uow import IUnitOfWork
 
 logger = logging.getLogger(__name__)
+
+CLARIFY_PENDING_PHASE = "clarify"
 
 
 class PlannerReActFlow(BaseFlow):
@@ -81,7 +85,22 @@ class PlannerReActFlow(BaseFlow):
 
         allowed_tool_names = skill.allowed_tools if skill else None
 
-        # 3.创建规划Agent（agent_params 已在 AgentService 合并）
+        # 3.创建澄清Agent（agent_params 已在 AgentService 合并）
+        self.clarify = ClarifyAgent(
+            uow_factory=uow_factory,
+            session_id=session_id,
+            agent_config=agent_config,
+            llm=llm,
+            json_parser=json_parser,
+            tools=tools,
+            skill_prompt=skill_prompt,
+            long_term_memory_block=long_term_memory_block,
+            allowed_tool_names=allowed_tool_names,
+            model_id=model_id,
+        )
+        logger.debug(f"创建澄清Agent成功, 会话id: {self._session_id}")
+
+        # 4.创建规划Agent（agent_params 已在 AgentService 合并）
         self.planner = PlannerAgent(
             uow_factory=uow_factory,
             session_id=session_id,
@@ -96,7 +115,7 @@ class PlannerReActFlow(BaseFlow):
         )
         logger.debug(f"创建规划Agent成功, 会话id: {self._session_id}")
 
-        # 4.创建执行Agent
+        # 5.创建执行Agent
         self.react = ReActAgent(
             uow_factory=uow_factory,
             session_id=session_id,
@@ -133,18 +152,22 @@ class PlannerReActFlow(BaseFlow):
         #    - 任务未结束，还在运行，但是用户又传递一条消息
         #    - Agent在等待人类输入，这时候人类输入了
         #   这时候均需要处理历史消息列表，避免AI(工具调用消息)后直接接上人类消息
-        if session.status != SessionStatus.PENDING:
+        clarify_resume = session.pending_phase == CLARIFY_PENDING_PHASE
+        if session.status != SessionStatus.PENDING and not clarify_resume:
             logger.debug(f"会话[{self._session_id}]未处于空闲状态，回滚数据确保消息列表格式正确")
             await self.planner.roll_back(message)
             await self.react.roll_back(message)
 
-        # 3.如果会话状态等于运行中，则流需要重新规划内容/plan
-        if session.status == SessionStatus.RUNNING:
+        # 3.如果会话处于澄清等待或运行中收到新消息，则先进入澄清阶段再规划
+        if clarify_resume:
+            logger.debug(f"会话[{self._session_id}]处于澄清等待状态并传递了新消息")
+            self.status = FlowStatus.CLARIFYING
+        elif session.status == SessionStatus.RUNNING:
             logger.debug(f"会话[{self._session_id}]处于运行状态并传递了新消息")
-            self.status = FlowStatus.PLANNING
+            self.status = FlowStatus.CLARIFYING
 
-        # 4.如果会话状态等于等待人类输入，则需要修改流的状态为执行中
-        if session.status == SessionStatus.WAITING:
+        # 4.如果会话状态等于执行期等待人类输入，则恢复执行中
+        if session.status == SessionStatus.WAITING and not clarify_resume:
             logger.debug(f"会话[{self._session_id}]处于等待状态并传递了新消息")
             self.status = FlowStatus.EXECUTING
 
@@ -172,7 +195,31 @@ class PlannerReActFlow(BaseFlow):
 
             # 9.如果流的状态为空闲，则只需要将状态修改为规划中
             if self.status == FlowStatus.IDLE:
-                logger.info(f"Planner&ReAct流状态从{FlowStatus.IDLE}变成{FlowStatus.PLANNING}")
+                logger.info(f"Planner&ReAct流状态从{FlowStatus.IDLE}变成{FlowStatus.CLARIFYING}")
+                self.status = FlowStatus.CLARIFYING
+            elif self.status == FlowStatus.CLARIFYING:
+                logger.info("Planner&ReAct流开始澄清任务需求")
+                record_agent_step("clarify", "analyze")
+                asked = False
+                with tracer.span("clarify.analyze"):
+                    async for event in self.clarify.analyze(message):
+                        if isinstance(event, ClarifyEvent):
+                            asked = True
+                        yield event
+
+                if asked:
+                    await self._set_pending_phase(CLARIFY_PENDING_PHASE)
+                    yield WaitEvent()
+                    return
+
+                await self._set_pending_phase(None)
+                brief = self.clarify.last_brief or message.message
+                message = Message(
+                    message=brief,
+                    attachments=message.attachments,
+                    vision_attachments=message.vision_attachments,
+                )
+                logger.info(f"Planner&ReAct流状态从{FlowStatus.CLARIFYING}变成{FlowStatus.PLANNING}")
                 self.status = FlowStatus.PLANNING
             elif self.status == FlowStatus.PLANNING:
                 # 10.流状态为规划中，则调用规划Agent
@@ -209,6 +256,7 @@ class PlannerReActFlow(BaseFlow):
                 if not self.plan or len(self.plan.steps) == 0:
                     logger.info(f"Planner&ReAct流创建计划失败或无子步骤")
                     self.status = FlowStatus.COMPLETED
+                    break
             elif self.status == FlowStatus.EXECUTING:
                 # 17.流的状态为执行中，先将计划状态调整为运行中，同时调用执行Agent完成每个子步骤
                 self.plan.status = ExecutionStatus.RUNNING
@@ -263,6 +311,9 @@ class PlannerReActFlow(BaseFlow):
                 logger.info(f"Planner&ReAct流状态从{FlowStatus.SUMMARIZING}变成{FlowStatus.COMPLETED}")
                 self.status = FlowStatus.COMPLETED
             elif self.status == FlowStatus.COMPLETED:
+                if self.plan is None:
+                    self.status = FlowStatus.IDLE
+                    break
                 # 27.计划状态已完成则更新plan状态，并发送计划事件通知API已完成
                 self.plan.status = ExecutionStatus.COMPLETED
                 self.status = FlowStatus.IDLE
@@ -276,3 +327,8 @@ class PlannerReActFlow(BaseFlow):
     def done(self) -> bool:
         """只读属性，返回流是否运行结束"""
         return self.status == FlowStatus.IDLE
+
+    async def _set_pending_phase(self, phase: Optional[str]) -> None:
+        """持久化等待恢复阶段，用于区分澄清等待和执行期等待。"""
+        async with self._uow_factory() as uow:
+            await uow.session.set_pending_phase(self._session_id, phase)

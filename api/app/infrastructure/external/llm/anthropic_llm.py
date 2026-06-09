@@ -10,7 +10,6 @@ from app.application.errors.exceptions import ServerRequestsError
 from app.domain.external.llm import LLM
 from app.domain.models.llm_model import LLMModel, ModelCapabilities
 from app.infrastructure.external.llm.base_llm import (
-    invoke_to_stream_deltas,
     normalize_usage,
     openai_content_to_anthropic_parts,
 )
@@ -31,6 +30,7 @@ class AnthropicLLM(LLM):
         self._thinking_enabled = thinking_enabled
         self._base_url = model.base_url.rstrip("/") or "https://api.anthropic.com"
         self._api_key = model.api_key
+        self._client = httpx.AsyncClient(timeout=300)
 
     @property
     def model_name(self) -> str:
@@ -134,11 +134,10 @@ class AnthropicLLM(LLM):
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
-        async with httpx.AsyncClient(timeout=300) as client:
-            response = await client.post(f"{self._base_url}/v1/messages", json=payload, headers=headers)
-            if response.status_code >= 400:
-                raise ServerRequestsError(f"Anthropic API error: {response.text}")
-            data = response.json()
+        response = await self._client.post(f"{self._base_url}/v1/messages", json=payload, headers=headers)
+        if response.status_code >= 400:
+            raise ServerRequestsError(f"Anthropic API error: {response.text}")
+        data = response.json()
 
         content_blocks = data.get("content") or []
         text_parts = []
@@ -170,6 +169,102 @@ class AnthropicLLM(LLM):
             response_format: Dict[str, Any] = None,
             tool_choice: str = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        message = await self.invoke(messages, tools, response_format, tool_choice)
-        async for delta in invoke_to_stream_deltas(message):
-            yield delta
+        system, converted = self._convert_messages(messages)
+        payload: Dict[str, Any] = {
+            "model": self._model_name,
+            "max_tokens": self._max_tokens or 8192,
+            "messages": converted,
+            "stream": True,
+        }
+        if system:
+            payload["system"] = system
+        if self._temperature is not None:
+            payload["temperature"] = self._temperature
+        if tools:
+            payload["tools"] = self._convert_tools(tools)
+        headers = {
+            "x-api-key": self._api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+
+        prompt_tokens = 0
+        completion_tokens = 0
+        tool_blocks: Dict[int, Dict[str, Any]] = {}
+        async with self._client.stream(
+                "POST",
+                f"{self._base_url}/v1/messages",
+                json=payload,
+                headers=headers,
+        ) as response:
+            if response.status_code >= 400:
+                body = await response.aread()
+                raise ServerRequestsError(f"Anthropic API error: {body.decode(errors='ignore')}")
+
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                raw = line.removeprefix("data:").strip()
+                if not raw or raw == "[DONE]":
+                    continue
+                try:
+                    event = json.loads(raw)
+                except json.JSONDecodeError:
+                    logger.debug("忽略无法解析的 Anthropic stream chunk: %s", raw[:200])
+                    continue
+
+                event_type = event.get("type")
+                if event_type == "message_start":
+                    usage = event.get("message", {}).get("usage") or {}
+                    prompt_tokens = int(usage.get("input_tokens") or 0)
+                elif event_type == "content_block_start":
+                    idx = int(event.get("index") or 0)
+                    block = event.get("content_block") or {}
+                    if block.get("type") == "tool_use":
+                        tool_blocks[idx] = {
+                            "id": block.get("id"),
+                            "name": block.get("name"),
+                            "arguments": "",
+                        }
+                        yield {
+                            "tool_calls": [{
+                                "index": idx,
+                                "id": block.get("id"),
+                                "function": {
+                                    "name": block.get("name"),
+                                    "arguments": "",
+                                },
+                            }]
+                        }
+                elif event_type == "content_block_delta":
+                    idx = int(event.get("index") or 0)
+                    delta = event.get("delta") or {}
+                    delta_type = delta.get("type")
+                    if delta_type == "text_delta" and delta.get("text"):
+                        yield {"content": delta.get("text")}
+                    elif delta_type in {"thinking_delta", "signature_delta"} and delta.get("thinking"):
+                        yield {"reasoning_content": delta.get("thinking")}
+                    elif delta_type == "input_json_delta":
+                        partial_json = delta.get("partial_json") or ""
+                        block = tool_blocks.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                        block["arguments"] += partial_json
+                        yield {
+                            "tool_calls": [{
+                                "index": idx,
+                                "id": block.get("id"),
+                                "function": {
+                                    "name": block.get("name"),
+                                    "arguments": partial_json,
+                                },
+                            }]
+                        }
+                elif event_type == "message_delta":
+                    usage = event.get("usage") or {}
+                    completion_tokens = int(usage.get("output_tokens") or completion_tokens)
+
+        usage = normalize_usage({
+            "input_tokens": prompt_tokens,
+            "output_tokens": completion_tokens,
+        })
+        if usage.get("total_tokens"):
+            yield {"usage": usage}

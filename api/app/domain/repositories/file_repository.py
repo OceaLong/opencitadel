@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import Protocol, Optional
+from typing import Protocol, Optional, List
 
 from app.domain.models.file import File
 
@@ -14,4 +14,8 @@ class FileRepository(Protocol):
 
     async def get_by_id(self, file_id: str) -> Optional[File]:
         """根据传递的文件id获取文件信息"""
+        ...
+
+    async def list_by_ids(self, file_ids: List[str]) -> List[File]:
+        """根据传递的文件id列表批量获取文件信息"""
         ...

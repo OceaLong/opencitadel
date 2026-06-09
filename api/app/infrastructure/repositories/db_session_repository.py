@@ -40,10 +40,15 @@ class DBSessionRepository(SessionRepository):
         # 3.会话存在则更新会话
         record.update_from_domain(session)
 
-    async def get_all(self) -> List[Session]:
+    async def get_all(self, limit: int = 100, offset: int = 0) -> List[Session]:
         """获取所有会话列表"""
         # 1.构建sql查询所有记录
-        stmt = select(SessionModel).order_by(SessionModel.latest_message_at.desc())
+        stmt = (
+            select(SessionModel)
+            .order_by(SessionModel.latest_message_at.desc().nullslast())
+            .offset(max(offset, 0))
+            .limit(max(1, min(limit, 500)))
+        )
         result = await self.db_session.execute(stmt)
         records = result.scalars().all()
 
@@ -280,6 +285,17 @@ class DBSessionRepository(SessionRepository):
         result = await self.db_session.execute(stmt)
 
         # 2.检查是否更新成功
+        if result.rowcount == 0:
+            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
+
+    async def set_pending_phase(self, session_id: str, phase: Optional[str]) -> None:
+        """更新会话等待恢复的内部阶段"""
+        stmt = (
+            update(SessionModel)
+            .where(SessionModel.id == session_id)
+            .values(pending_phase=phase)
+        )
+        result = await self.db_session.execute(stmt)
         if result.rowcount == 0:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 

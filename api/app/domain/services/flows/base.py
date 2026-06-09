@@ -11,6 +11,7 @@ from app.domain.models.message import Message
 class FlowStatus(str, Enum):
     """流状态类型枚举"""
     IDLE = "idle"  # 空闲中
+    CLARIFYING = "clarifying"  # 澄清中
     PLANNING = "planning"  # 规划中
     EXECUTING = "executing"  # 执行中
     UPDATING = "updating"  # 更新中

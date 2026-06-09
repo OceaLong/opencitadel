@@ -90,6 +90,7 @@ class RedisStreamTask(Task):
         self._local_executions[self._id] = self._execution_task
         await self._task_state.set_status(self._id, TaskStatus.RUNNING)
         logger.info(f"任务[{self._id}]在 worker 中开始执行")
+        await self._execution_task
 
     def cancel(self) -> bool:
         asyncio.create_task(self._task_state.request_cancel(self._id))
@@ -102,13 +103,18 @@ class RedisStreamTask(Task):
             await self._task_runner.invoke(self)
         except asyncio.CancelledError:
             logger.info(f"任务[{self._id}]执行被取消")
+            await self._task_state.set_status(self._id, TaskStatus.CANCELLED)
             raise
         except Exception as e:
             logger.exception(f"任务[{self._id}]执行出现异常: {str(e)}")
+            await self._task_state.set_status(self._id, TaskStatus.FAILED)
+            raise
         finally:
             if self._task_runner:
                 await self._task_runner.on_done(self)
-            await self._task_state.set_status(self._id, TaskStatus.DONE)
+            status = await self._task_state.get_status(self._id)
+            if status not in {TaskStatus.CANCELLED, TaskStatus.FAILED}:
+                await self._task_state.set_status(self._id, TaskStatus.DONE)
             self._local_executions.pop(self._id, None)
 
     @property

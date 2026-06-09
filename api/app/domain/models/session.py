@@ -38,6 +38,7 @@ class Session(BaseModel):
     model_id: Optional[str] = None  # 会话级模型id，null使用全局默认
     skill_id: Optional[str] = None  # 会话级Skill id，null表示不启用
     thinking_enabled: bool = False  # 会话级思考模式，默认关闭
+    pending_phase: Optional[str] = None  # 等待恢复的内部阶段
     status: SessionStatus = SessionStatus.PENDING  # 状态
     updated_at: datetime = Field(default_factory=datetime.now)  # 更新时间
     created_at: datetime = Field(default_factory=datetime.now)  # 创建时间

@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { AlertCircle, CheckIcon, ChevronDown, Clock3, Languages, Loader2 } from "lucide-react";
 
 import { AttachmentsMessage } from "@/components/attachments-message";
+import { ClarifyQuestions } from "@/components/clarify-questions";
 import { ManusIcon } from "@/components/manus-icon";
 import { MarkdownContent } from "@/components/markdown-content";
 import { ToolUse } from "@/components/tool-use";
 
-import type { ToolEvent } from "@/lib/api/types";
+import type { SessionStatus, ToolEvent } from "@/lib/api/types";
 import { type AttachmentFile, getToolTimeLabel, type TimelineItem } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +19,8 @@ export type ChatMessageProps = {
   onViewAllFiles?: () => void;
   onFileClick?: (file: AttachmentFile) => void;
   onToolClick?: (tool: ToolEvent) => void;
+  onClarifyAnswer?: (answer: string) => Promise<void> | void;
+  sessionStatus?: SessionStatus;
 };
 
 type ToolRowProps = {
@@ -47,12 +50,14 @@ function ToolRow({ className, timeLabel, children }: ToolRowProps) {
   );
 }
 
-export function ChatMessage({
+function ChatMessageComponent({
   className,
   item,
   onViewAllFiles,
   onFileClick,
   onToolClick,
+  onClarifyAnswer,
+  sessionStatus,
 }: ChatMessageProps) {
   if (item.kind === "user") {
     return (
@@ -78,6 +83,25 @@ export function ChatMessage({
         <div className="text-foreground m-0 max-w-none p-0">
           <MarkdownContent content={item.data.message ?? ""} />
         </div>
+      </div>
+    );
+  }
+
+  if (item.kind === "clarify") {
+    return (
+      <div className={cn("group mt-3 flex w-full flex-col gap-2", className)}>
+        <div className="group flex h-7 items-center justify-between">
+          <div className="text-foreground flex items-center justify-center gap-1">
+            <Languages size={18} />
+            <ManusIcon />
+          </div>
+        </div>
+        <ClarifyQuestions
+          title={item.title}
+          questions={item.questions}
+          interactive={item.interactive && sessionStatus === "waiting"}
+          onSubmit={onClarifyAnswer}
+        />
       </div>
     );
   }
@@ -145,6 +169,49 @@ export function ChatMessage({
 
   return null;
 }
+
+function toolSignature(tool: ToolEvent): string {
+  return [
+    (tool as { tool_call_id?: string }).tool_call_id,
+    (tool as { status?: string }).status,
+    (tool as { function_name?: string }).function_name,
+  ].join(":");
+}
+
+function itemSignature(item: TimelineItem): string {
+  switch (item.kind) {
+    case "user":
+      return `${item.kind}:${item.id}:${item.data.message ?? ""}`;
+    case "assistant":
+      return `${item.kind}:${item.id}:${item.data.message ?? ""}`;
+    case "clarify":
+      return `${item.kind}:${item.id}:${item.interactive}:${item.questions.length}`;
+    case "tool":
+      return `${item.kind}:${item.id}:${toolSignature(item.data)}`;
+    case "step":
+      return `${item.kind}:${item.id}:${item.data.status}:${item.tools.length}:${item.tools.map(toolSignature).join("|")}`;
+    case "attachments":
+      return `${item.kind}:${item.id}:${item.role}:${item.files.map((file) => file.id).join("|")}`;
+    case "wait":
+      return `${item.kind}:${item.id}:${item.message}`;
+    case "error":
+      return `${item.kind}:${item.id}:${item.error}:${item.contextLabel ?? ""}`;
+    default:
+      return "";
+  }
+}
+
+export const ChatMessage = memo(ChatMessageComponent, (prev, next) => {
+  return (
+    prev.className === next.className &&
+    prev.sessionStatus === next.sessionStatus &&
+    prev.onViewAllFiles === next.onViewAllFiles &&
+    prev.onFileClick === next.onFileClick &&
+    prev.onToolClick === next.onToolClick &&
+    prev.onClarifyAnswer === next.onClarifyAnswer &&
+    itemSignature(prev.item) === itemSignature(next.item)
+  );
+});
 
 function StepBlock({
   stepItem,

@@ -169,6 +169,13 @@ export function useSessionDetailView({
     [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled],
   );
 
+  const handleClarifyAnswer = useCallback(
+    async (answer: string) => {
+      await handleSend(answer, []);
+    },
+    [handleSend],
+  );
+
   const handleThinkingChange = useCallback(
     async (enabled: boolean) => {
       await updateSessionConfig({ thinking_enabled: enabled });
@@ -283,6 +290,7 @@ export function useSessionDetailView({
     chatInputRef,
     scrollContainerRef,
     handleSend,
+    handleClarifyAnswer,
     handleThinkingChange,
     handleModelChange,
     handleSkillChange,

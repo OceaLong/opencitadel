@@ -53,7 +53,6 @@ class AgentService:
             config_provider: Optional[AppConfigProvider] = None,
     ) -> None:
         self._uow_factory = uow_factory
-        self._uow = uow_factory()
         self._task_cls = task_cls
         self._task_state = get_task_state()
         self._runner_factory = TaskRunnerFactory(
@@ -82,9 +81,9 @@ class AgentService:
     async def _create_task(self, session: Session) -> RedisStreamTask:
         task = await RedisStreamTask.create_for_session(session.id)
         session.task_id = task.id
-        async with self._uow:
-            await self._uow.session.save(session)
-            await self._uow.session.update_status(session.id, SessionStatus.RUNNING)
+        async with self._uow_factory() as uow:
+            await uow.session.save(session)
+            await uow.session.update_status(session.id, SessionStatus.RUNNING)
         return task
 
     async def _safe_update_unread_count(self, session_id: str) -> None:
@@ -122,8 +121,8 @@ class AgentService:
                 continue
 
             if await self._task_state.is_done(task_id):
-                async with self._uow:
-                    session = await self._uow.session.get_by_id(session_id)
+                async with self._uow_factory() as uow:
+                    session = await uow.session.get_by_id(session_id)
                 if session and session.status in {
                     SessionStatus.COMPLETED,
                     SessionStatus.WAITING,
@@ -146,8 +145,8 @@ class AgentService:
     ) -> AsyncGenerator[BaseEvent, None]:
         session_missing = False
         try:
-            async with self._uow:
-                session = await self._uow.session.get_by_id(session_id)
+            async with self._uow_factory() as uow:
+                session = await uow.session.get_by_id(session_id)
             if not session:
                 logger.error(f"尝试与不存在的任务会话[{session_id}]对话")
                 session_missing = True
@@ -155,8 +154,8 @@ class AgentService:
                 return
 
             if model_id is not None or skill_id is not None or thinking_enabled is not None:
-                async with self._uow:
-                    await self._uow.session.update_session_config(
+                async with self._uow_factory() as uow:
+                    await uow.session.update_session_config(
                         session_id,
                         model_id=model_id,
                         skill_id=skill_id,
@@ -164,7 +163,7 @@ class AgentService:
                         clear_model=model_id == "",
                         clear_skill=skill_id == "",
                     )
-                    session = await self._uow.session.get_by_id(session_id)
+                    session = await uow.session.get_by_id(session_id)
 
             task = await self._get_task(session)
 
@@ -177,26 +176,26 @@ class AgentService:
                         logger.error(f"会话[{session_id}]创建任务失败")
                         raise RuntimeError(f"会话[{session_id}]创建任务失败")
 
-                async with self._uow:
-                    await self._uow.session.update_latest_message(
+                async with self._uow_factory() as uow:
+                    await uow.session.update_latest_message(
                         session_id=session_id,
                         message=message,
                         timestamp=timestamp or datetime.now(),
                     )
 
-                async with self._uow:
-                    db_attachments = [await self._uow.file.get_by_id(id) for id in (attachments or [])]
+                async with self._uow_factory() as uow:
+                    db_attachments = await uow.file.list_by_ids(attachments or [])
 
                 message_event = MessageEvent(
                     role="user",
                     message=message,
-                    attachments=[a for a in db_attachments if a is not None],
+                    attachments=db_attachments,
                 )
                 event_id = await task.input_stream.put(message_event.model_dump_json())
                 message_event.id = event_id
                 yield message_event
-                async with self._uow:
-                    await self._uow.session.add_event(session_id, message_event)
+                async with self._uow_factory() as uow:
+                    await uow.session.add_event(session_id, message_event)
                 if should_dispatch:
                     await task.invoke()
                 logger.info(f"往会话[{session_id}]输入消息队列写入消息: {message[:50]}...")
@@ -216,8 +215,8 @@ class AgentService:
             logger.exception(f"任务会话[{session_id}]对话出错: {str(e)}")
             event = ErrorEvent(error=str(e))
             try:
-                async with self._uow:
-                    await self._uow.session.add_event(session_id, event)
+                async with self._uow_factory() as uow:
+                    await uow.session.add_event(session_id, event)
             except (asyncio.CancelledError, Exception) as add_err:
                 logger.warning(f"会话[{session_id}]添加错误事件失败: {add_err}")
             yield event
@@ -229,14 +228,14 @@ class AgentService:
                     logger.warning(f"会话[{session_id}]无法创建后台任务更新未读消息计数")
 
     async def stop_session(self, session_id: str) -> None:
-        async with self._uow:
-            session = await self._uow.session.get_by_id(session_id)
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(session_id)
         if not session:
             raise RuntimeError("任务会话不存在, 请核实后重试")
         if session.task_id:
             await self._task_state.request_cancel(session.task_id)
-        async with self._uow:
-            await self._uow.session.update_status(session_id, SessionStatus.CANCELLED)
+        async with self._uow_factory() as uow:
+            await uow.session.update_status(session_id, SessionStatus.CANCELLED)
 
     async def shutdown(self) -> None:
         logger.info("AgentService 关闭（任务由独立 worker 执行，无需清理本地 registry）")

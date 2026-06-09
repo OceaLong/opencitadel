@@ -9,6 +9,21 @@ import { SUPPORTED_PROVIDERS } from "@/hooks/use-models-settings";
 import { modelsApi } from "@/lib/api/models";
 import type { LLMModel } from "@/lib/api/types";
 
+let modelsCache: LLMModel[] | null = null;
+let modelsPromise: Promise<LLMModel[]> | null = null;
+
+function loadModels(): Promise<LLMModel[]> {
+  if (modelsCache) return Promise.resolve(modelsCache);
+  if (!modelsPromise) {
+    modelsPromise = modelsApi.list().then((data) => {
+      modelsCache = data.models;
+      modelsPromise = null;
+      return data.models;
+    });
+  }
+  return modelsPromise;
+}
+
 type Props = {
   value?: string | null;
   onChange: (modelId: string | undefined) => void;
@@ -28,10 +43,17 @@ export function SessionModelPicker({
   const [models, setModels] = useState<LLMModel[]>([]);
 
   useEffect(() => {
-    modelsApi
-      .list()
-      .then((d) => setModels(d.models))
-      .catch(() => {});
+    let cancelled = false;
+    loadModels()
+      .then((items) => {
+        if (!cancelled) setModels(items);
+      })
+      .catch(() => {
+        if (!cancelled) setModels([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const supportedModels = useMemo(() => {

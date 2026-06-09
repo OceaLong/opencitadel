@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import Optional
+from typing import Optional, List
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,3 +42,12 @@ class DBFileRepository(FileRepository):
 
         # 2.判断文件记录是否存在返回不同的值
         return record.to_domain() if record is not None else None
+
+    async def list_by_ids(self, file_ids: List[str]) -> List[File]:
+        """根据传递的文件id列表批量获取文件信息，并按输入顺序返回。"""
+        if not file_ids:
+            return []
+        stmt = select(FileModel).where(FileModel.id.in_(file_ids))
+        result = await self.db_session.execute(stmt)
+        records = {record.id: record.to_domain() for record in result.scalars().all()}
+        return [records[file_id] for file_id in file_ids if file_id in records]

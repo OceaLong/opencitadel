@@ -10,7 +10,6 @@ from app.application.errors.exceptions import ServerRequestsError
 from app.domain.external.llm import LLM
 from app.domain.models.llm_model import LLMModel, ModelCapabilities
 from app.infrastructure.external.llm.base_llm import (
-    invoke_to_stream_deltas,
     normalize_usage,
     openai_content_to_gemini_parts,
 )
@@ -30,6 +29,7 @@ class GeminiLLM(LLM):
         self._capabilities = model.capabilities
         self._base_url = (model.base_url or "https://generativelanguage.googleapis.com").rstrip("/")
         self._api_key = model.api_key
+        self._client = httpx.AsyncClient(timeout=300)
 
     @property
     def model_name(self) -> str:
@@ -125,11 +125,10 @@ class GeminiLLM(LLM):
         if tools:
             payload["tools"] = [{"functionDeclarations": self._convert_tools(tools)}]
         url = f"{self._base_url}/v1beta/models/{self._model_name}:generateContent?key={self._api_key}"
-        async with httpx.AsyncClient(timeout=300) as client:
-            response = await client.post(url, json=payload)
-            if response.status_code >= 400:
-                raise ServerRequestsError(f"Gemini API error: {response.text}")
-            data = response.json()
+        response = await self._client.post(url, json=payload)
+        if response.status_code >= 400:
+            raise ServerRequestsError(f"Gemini API error: {response.text}")
+        data = response.json()
 
         candidates = data.get("candidates") or []
         if not candidates:
@@ -170,6 +169,71 @@ class GeminiLLM(LLM):
             response_format: Dict[str, Any] = None,
             tool_choice: str = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        message = await self.invoke(messages, tools, response_format, tool_choice)
-        async for delta in invoke_to_stream_deltas(message):
-            yield delta
+        contents = self._convert_messages(messages)
+        payload: Dict[str, Any] = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": self._temperature,
+                "maxOutputTokens": self._max_tokens or 8192,
+            },
+        }
+        if response_format and response_format.get("type") == "json_object":
+            payload["generationConfig"]["responseMimeType"] = "application/json"
+        if tools:
+            payload["tools"] = [{"functionDeclarations": self._convert_tools(tools)}]
+        url = f"{self._base_url}/v1beta/models/{self._model_name}:streamGenerateContent?alt=sse&key={self._api_key}"
+
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+        tool_index_by_name: Dict[str, int] = {}
+        async with self._client.stream("POST", url, json=payload) as response:
+            if response.status_code >= 400:
+                body = await response.aread()
+                raise ServerRequestsError(f"Gemini API error: {body.decode(errors='ignore')}")
+
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                raw = line.removeprefix("data:").strip()
+                if not raw or raw == "[DONE]":
+                    continue
+                try:
+                    chunk = json.loads(raw)
+                except json.JSONDecodeError:
+                    logger.debug("忽略无法解析的 Gemini stream chunk: %s", raw[:200])
+                    continue
+
+                usage_meta = chunk.get("usageMetadata") or {}
+                prompt_tokens = int(usage_meta.get("promptTokenCount") or prompt_tokens)
+                completion_tokens = int(usage_meta.get("candidatesTokenCount") or completion_tokens)
+                total_tokens = int(usage_meta.get("totalTokenCount") or total_tokens)
+
+                for candidate in chunk.get("candidates") or []:
+                    parts = candidate.get("content", {}).get("parts") or []
+                    for part in parts:
+                        text = part.get("text")
+                        if text:
+                            yield {"content": text}
+                        function_call = part.get("functionCall")
+                        if function_call:
+                            name = function_call.get("name") or "tool"
+                            idx = tool_index_by_name.setdefault(name, len(tool_index_by_name))
+                            yield {
+                                "tool_calls": [{
+                                    "index": idx,
+                                    "id": f"call_{name}_{idx}",
+                                    "function": {
+                                        "name": name,
+                                        "arguments": json.dumps(function_call.get("args") or {}),
+                                    },
+                                }]
+                            }
+
+        usage = normalize_usage({
+            "promptTokenCount": prompt_tokens,
+            "candidatesTokenCount": completion_tokens,
+            "totalTokenCount": total_tokens,
+        })
+        if usage.get("total_tokens"):
+            yield {"usage": usage}

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 TASK_META_PREFIX = "task:meta:"
 TASK_CANCEL_PREFIX = "task:cancel:"
 TASK_DISPATCH_STREAM = "task:dispatch"
+TASK_DISPATCH_DLQ_STREAM = "task:dispatch:dlq"
 WORKER_CONSUMER_GROUP = "manus-workers"
 TASK_META_TTL_SECONDS = 86400 * 7
 
@@ -24,6 +25,7 @@ class TaskStatus(str, Enum):
     RUNNING = "running"
     DONE = "done"
     CANCELLED = "cancelled"
+    FAILED = "failed"
 
 
 class TaskStateService:
@@ -57,6 +59,7 @@ class TaskStateService:
             "task_id": task_id,
             "session_id": session_id,
             "status": TaskStatus.PENDING.value,
+            "retry_count": 0,
         }
         await self._redis.client.set(
             self.meta_key(task_id),
@@ -81,11 +84,21 @@ class TaskStateService:
             ex=TASK_META_TTL_SECONDS,
         )
 
+    async def get_status(self, task_id: str) -> Optional[TaskStatus]:
+        meta = await self.get_task_meta(task_id)
+        if not meta or not meta.get("status"):
+            return None
+        return TaskStatus(meta["status"])
+
     async def is_done(self, task_id: str) -> bool:
         meta = await self.get_task_meta(task_id)
         if not meta:
             return True
-        return meta.get("status") in {TaskStatus.DONE.value, TaskStatus.CANCELLED.value}
+        return meta.get("status") in {
+            TaskStatus.DONE.value,
+            TaskStatus.CANCELLED.value,
+            TaskStatus.FAILED.value,
+        }
 
     async def request_cancel(self, task_id: str) -> None:
         await self._redis.client.set(self.cancel_key(task_id), "1", ex=3600)
@@ -102,7 +115,7 @@ class TaskStateService:
         return await self._redis.client.xadd(
             TASK_DISPATCH_STREAM,
             {"task_id": task_id, "session_id": session_id},
-            maxlen=get_settings().redis_stream_maxlen,
+            maxlen=get_settings().redis_dispatch_stream_maxlen,
             approximate=True,
         )
 
@@ -161,6 +174,54 @@ class TaskStateService:
 
     async def ack_dispatch(self, message_id: str) -> None:
         await self._redis.client.xack(TASK_DISPATCH_STREAM, WORKER_CONSUMER_GROUP, message_id)
+
+    async def mark_dispatch_failure(
+            self,
+            message_id: str,
+            task_id: str,
+            session_id: str,
+            error: str,
+    ) -> None:
+        settings = get_settings()
+        meta = await self.get_task_meta(task_id) or {
+            "task_id": task_id,
+            "session_id": session_id,
+            "status": TaskStatus.PENDING.value,
+            "retry_count": 0,
+        }
+        retry_count = int(meta.get("retry_count") or 0) + 1
+        meta["retry_count"] = retry_count
+        meta["last_error"] = error
+
+        if retry_count >= max(1, settings.task_dispatch_max_retries):
+            meta["status"] = TaskStatus.FAILED.value
+            await self._redis.client.xadd(
+                TASK_DISPATCH_DLQ_STREAM,
+                {
+                    "task_id": task_id,
+                    "session_id": session_id,
+                    "error": error,
+                    "retry_count": retry_count,
+                },
+                maxlen=settings.redis_stream_maxlen,
+                approximate=True,
+            )
+            await self._redis.client.set(
+                self.meta_key(task_id),
+                json.dumps(meta),
+                ex=TASK_META_TTL_SECONDS,
+            )
+            await self.ack_dispatch(message_id)
+            return
+
+        meta["status"] = TaskStatus.PENDING.value
+        await self._redis.client.set(
+            self.meta_key(task_id),
+            json.dumps(meta),
+            ex=TASK_META_TTL_SECONDS,
+        )
+        await self.ack_dispatch(message_id)
+        await self.dispatch(task_id, session_id)
 
 
 _task_state: Optional[TaskStateService] = None

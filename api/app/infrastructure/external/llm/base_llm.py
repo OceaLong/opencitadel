@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import base64
+import asyncio
 import logging
 import re
 from typing import Any, Dict, List, Optional
@@ -102,7 +103,8 @@ class MultimodalFallbackMixin:
         if reason == "payload_too_large":
             from app.domain.services.vision_service import compress_messages_for_retry
 
-            compressed_messages = compress_messages_for_retry(
+            compressed_messages = await asyncio.to_thread(
+                compress_messages_for_retry,
                 messages,
                 self._capabilities.max_image_bytes,
             )

@@ -20,7 +20,13 @@ class RedisStreamMessageQueue(MessageQueue):
         self._stream_name = stream_name
         self._redis = get_redis()
         self._lock_expire_seconds = 10
-        self._maxlen = get_settings().redis_stream_maxlen
+        settings = get_settings()
+        if stream_name.startswith("task:output:"):
+            self._maxlen = settings.redis_task_output_stream_maxlen
+        elif stream_name.startswith("task:input:"):
+            self._maxlen = settings.redis_task_input_stream_maxlen
+        else:
+            self._maxlen = settings.redis_stream_maxlen
 
     async def _acquire_lock(self, lock_key: str, timeout_seconds: int = 5) -> Optional[str]:
         """根据传递的lock键构建一个分布式锁"""
@@ -126,13 +132,16 @@ class RedisStreamMessageQueue(MessageQueue):
             return None, None
 
         try:
-            # 3.从redis流中获取第一条消息
-            messages = await self._redis.client.xrange(self._stream_name, "-", "+", count=1)
+            # 3.从redis流中获取第一条消息。短阻塞读取可减少空队列轮询。
+            messages = await self._redis.client.xread({self._stream_name: "0"}, count=1, block=1000)
             if not messages:
                 return None, None
 
             # 4.取出消息id和消息
-            message_id, message_data = messages[0]
+            stream_messages = messages[0][1]
+            if not stream_messages:
+                return None, None
+            message_id, message_data = stream_messages[0]
 
             # 5.删除消息队列中的message数据
             await self._redis.client.xdel(self._stream_name, message_id)
@@ -140,7 +149,7 @@ class RedisStreamMessageQueue(MessageQueue):
             return message_id, message_data.get("data")
         except Exception as e:
             logger.error(f"解析消息队列[{self._stream_name}]出错: {str(e)}")
-            return None
+            return None, None
         finally:
             await self._release_lock(lock_key, lock_value)
 

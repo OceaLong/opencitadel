@@ -164,6 +164,8 @@ async def create_session(
     description="间隔指定时间流式获取所有会话基础信息列表",
 )
 async def stream_sessions(
+        limit: int = Query(default=100, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
         session_service: SessionService = Depends(get_session_service),
 ) -> EventSourceResponse:
     """间隔指定时间流式获取所有会话基础信息列表"""
@@ -172,7 +174,7 @@ async def stream_sessions(
         """定义一个异步迭代器，用于获取所有会话列表"""
         while True:
             # 1.获取所有会话列表
-            sessions = await session_service.get_all_sessions()
+            sessions = await session_service.get_all_sessions(limit=limit, offset=offset)
 
             # 2.循环遍历并组装数据
             session_items = [
@@ -206,10 +208,12 @@ async def stream_sessions(
     description="获取MyManus项目中所有任务会话基础信息列表",
 )
 async def get_all_sessions(
+        limit: int = Query(default=100, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
         session_service: SessionService = Depends(get_session_service),
 ) -> Response[ListSessionResponse]:
     """获取MyManus项目中所有任务会话基础信息列表"""
-    sessions = await session_service.get_all_sessions()
+    sessions = await session_service.get_all_sessions(limit=limit, offset=offset)
     session_items = [
         ListSessionItem(
             session_id=session.id,

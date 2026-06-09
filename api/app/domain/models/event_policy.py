@@ -19,6 +19,7 @@ DEBUG_EVENT_TYPES = frozenset({
 })
 
 TIMELINE_EVENT_TYPES = frozenset({
+    "clarify",
     "message",
     "assistant_notice",
     "step",

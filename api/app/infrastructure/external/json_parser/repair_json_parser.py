@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
+import asyncio
 from typing import Optional, Any, Union, Dict, List
 
 import json_repair
@@ -29,4 +30,9 @@ class RepairJSONParser(JSONParser):
             raise ValueError("json文本为空，且无默认值")
 
         # 2.存在数值则使用json_repair库修复并解析
-        return json_repair.repair_json(text, ensure_ascii=False, return_objects=True)
+        return await asyncio.to_thread(
+            json_repair.repair_json,
+            text,
+            ensure_ascii=False,
+            return_objects=True,
+        )

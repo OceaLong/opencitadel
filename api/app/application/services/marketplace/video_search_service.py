@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import re
+import asyncio
 from typing import Any, Dict, List
 import httpx
 from bs4 import BeautifulSoup
@@ -92,7 +93,7 @@ class VideoSearchService:
         ) as client:
             response = await client.get("https://www.bing.com/search", params=params)
             response.raise_for_status()
-            soup = BeautifulSoup(response.text, "html.parser")
+            soup = await asyncio.to_thread(BeautifulSoup, response.text, "html.parser")
 
         legal_results: List[Dict[str, Any]] = []
         filtered_count = 0

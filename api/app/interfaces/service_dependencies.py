@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
+from functools import lru_cache
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,24 +39,29 @@ def get_cipher() -> ApiKeyCipher:
     return ApiKeyCipher(settings.api_key_secret)
 
 
+@lru_cache()
 def get_app_config_service() -> AppConfigService:
     logger.info("加载获取AppConfigService")
     file_app_config_repository = FileAppConfigRepository(settings.app_config_filepath)
     return AppConfigService(app_config_repository=file_app_config_repository)
 
 
-def get_llm_model_service(cipher: ApiKeyCipher = Depends(get_cipher)) -> LLMModelService:
-    return LLMModelService(uow_factory=get_uow, cipher=cipher)
+@lru_cache()
+def get_llm_model_service() -> LLMModelService:
+    return LLMModelService(uow_factory=get_uow, cipher=get_cipher())
 
 
+@lru_cache()
 def get_skill_service() -> SkillService:
     return SkillService(uow_factory=get_uow)
 
 
+@lru_cache()
 def get_memory_service() -> MemoryService:
     return MemoryService(uow_factory=get_uow, recall_limit=settings.memory_recall_limit)
 
 
+@lru_cache()
 def get_llm_token_usage_service() -> LLMTokenUsageService:
     return LLMTokenUsageService(uow_factory=get_uow)
 
@@ -70,15 +76,17 @@ def get_status_service(
     return StatusService(checkers=[postgres_checker, redis_checker])
 
 
-def get_file_service(cos: Cos = Depends(get_cos)) -> FileService:
+@lru_cache()
+def get_file_service() -> FileService:
     file_storage = CosFileStorage(
         bucket=settings.cos_bucket,
-        cos=cos,
+        cos=get_cos(),
         uow_factory=get_uow,
     )
     return FileService(uow_factory=get_uow, file_storage=file_storage)
 
 
+@lru_cache()
 def get_session_service() -> SessionService:
     return SessionService(uow_factory=get_uow, sandbox_cls=DockerSandbox)
 
@@ -93,24 +101,21 @@ def get_marketplace_service(
     )
 
 
+@lru_cache()
 def get_agent_service(
-        cos: Cos = Depends(get_cos),
-        llm_model_service: LLMModelService = Depends(get_llm_model_service),
-        skill_service: SkillService = Depends(get_skill_service),
-        memory_service: MemoryService = Depends(get_memory_service),
 ) -> AgentService:
     config_provider = get_app_config_provider()
     app_config = config_provider._cache or config_provider._repository.load()
     file_storage = CosFileStorage(
         bucket=settings.cos_bucket,
-        cos=cos,
+        cos=get_cos(),
         uow_factory=get_uow,
     )
     return AgentService(
         uow_factory=get_uow,
-        llm_model_service=llm_model_service,
-        skill_service=skill_service,
-        memory_service=memory_service,
+        llm_model_service=get_llm_model_service(),
+        skill_service=get_skill_service(),
+        memory_service=get_memory_service(),
         agent_config=app_config.agent_config,
         mcp_config=app_config.mcp_config,
         a2a_config=app_config.a2a_config,

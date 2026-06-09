@@ -55,6 +55,17 @@ class BaseTool:
     def __init__(self) -> None:
         """构造函数，完成缓存初始化"""
         self._tools_cache = None
+        self._tool_methods_cache = None
+
+    def _get_tool_methods(self) -> Dict[str, Callable]:
+        if self._tool_methods_cache is not None:
+            return self._tool_methods_cache
+        self._tool_methods_cache = {
+            getattr(method, "_tool_name"): method
+            for _, method in inspect.getmembers(self, inspect.ismethod)
+            if hasattr(method, "_tool_name")
+        }
+        return self._tool_methods_cache
 
     @classmethod
     def _filter_parameters(cls, method: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -90,22 +101,16 @@ class BaseTool:
 
     def has_tool(self, tool_name: str) -> bool:
         """传递工具名字，判断该工具集下是否存在该工具"""
-        for _, method in inspect.getmembers(self, inspect.ismethod):
-            if hasattr(method, "_tool_name") and getattr(method, "_tool_name") == tool_name:
-                return True
-        return False
+        return tool_name in self._get_tool_methods()
 
     async def invoke(self, tool_name: str, **kwargs) -> ToolResult:
         """根据传递的工具名+kwargs调用指定工具并获取结果"""
         # 1.循环遍历工具集的所有方法
-        for _, method in inspect.getmembers(self, inspect.ismethod):
-            # 2.判断对应的方法是否存在_tool_name
-            if hasattr(method, "_tool_name") and getattr(method, "_tool_name") == tool_name:
-                # 3.筛选传递的kwargs参数保留method对应的参数，多余的剔除
-                filtered_kwargs = self._filter_parameters(method, kwargs)
+        method = self._get_tool_methods().get(tool_name)
+        if method is not None:
+            # 2.筛选传递的kwargs参数保留method对应的参数，多余的剔除
+            filtered_kwargs = self._filter_parameters(method, kwargs)
+            return await method(**filtered_kwargs)
 
-                # 4.调用方法获取工具结果
-                return await method(**filtered_kwargs)
-
-        # 5.如果循环结束还没有找到工具并调用则抛出错误
+        # 3.如果没有找到工具则抛出错误
         raise ValueError(f"工具[{tool_name}]未找到")

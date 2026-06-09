@@ -79,7 +79,22 @@ class AgentWorker:
                 if claim is None:
                     continue
                 message_id, task_id, session_id = claim
-                await self._execute_job(task_id, session_id)
+                try:
+                    await self._execute_job(task_id, session_id)
+                except Exception as exc:
+                    logger.exception(
+                        "Worker 执行任务失败: task_id=%s session_id=%s error=%s",
+                        task_id,
+                        session_id,
+                        exc,
+                    )
+                    await self._task_state.mark_dispatch_failure(
+                        message_id=message_id,
+                        task_id=task_id,
+                        session_id=session_id,
+                        error=str(exc),
+                    )
+                    continue
                 await self._task_state.ack_dispatch(message_id)
             except asyncio.CancelledError:
                 break
@@ -96,8 +111,8 @@ class AgentWorker:
             session = await uow.session.get_by_id(session_id)
         if not session:
             logger.error("Worker 找不到会话: session_id=%s task_id=%s", session_id, task_id)
-            await self._task_state.set_status(task_id, TaskStatus.DONE)
-            return
+            await self._task_state.set_status(task_id, TaskStatus.FAILED)
+            raise RuntimeError(f"任务会话不存在: {session_id}")
 
         async with get_uow() as uow:
             await uow.session.update_status(session_id, SessionStatus.RUNNING)

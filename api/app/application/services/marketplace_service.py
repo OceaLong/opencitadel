@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
+import asyncio
 from typing import Optional
 
 from app.application.services.file_service import FileService
@@ -91,7 +92,7 @@ class MarketplaceService:
 
     async def _load_image(self, file_id: str):
         file_data, file_info = await self._file_service.download_file(file_id)
-        image_bytes = file_data.read()
+        image_bytes = await asyncio.to_thread(file_data.read)
         return image_bytes, file_info
 
     async def _resolve_vision_llm(self, model_id: Optional[str]):

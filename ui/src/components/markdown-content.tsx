@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useDeferredValue, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -110,7 +110,8 @@ const components: React.ComponentProps<typeof ReactMarkdown>["components"] = {
 };
 
 export function MarkdownContent({ content, className }: MarkdownContentProps) {
-  const normalized = useMemo(() => normalizeAutolinks(content), [content]);
+  const deferredContent = useDeferredValue(content);
+  const normalized = useMemo(() => normalizeAutolinks(deferredContent), [deferredContent]);
 
   return (
     <div className={cn("markdown-content break-words", className)}>

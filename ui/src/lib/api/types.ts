@@ -518,6 +518,19 @@ export type ToolEvent = {
   [key: string]: unknown;
 };
 
+export type ClarifyOption = {
+  id: string;
+  label: string;
+};
+
+export type ClarifyQuestion = {
+  id: string;
+  prompt: string;
+  options: ClarifyOption[];
+  allow_multiple?: boolean;
+  allow_custom?: boolean;
+};
+
 /**
  * SSE 事件类型
  */
@@ -534,6 +547,7 @@ export type EventMeta = {
 };
 
 export type SSEEventType =
+  | "clarify"
   | "message"
   | "message_delta"
   | "reasoning_delta"
@@ -559,6 +573,10 @@ export type DebugItemEvent = {
 } & EventMeta;
 
 export type SSEEventData =
+  | {
+      type: "clarify";
+      data: { title?: string | null; questions: ClarifyQuestion[] } & EventMeta;
+    }
   | { type: "message"; data: ChatMessage & EventMeta }
   | { type: "message_delta"; data: { stream_id: string; delta: string; role?: string } & EventMeta }
   | { type: "reasoning_delta"; data: { stream_id: string; delta: string } & EventMeta }

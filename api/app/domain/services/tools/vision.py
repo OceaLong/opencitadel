@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import base64
+import asyncio
 import logging
 import mimetypes
 from typing import Any, Dict, Optional
@@ -75,7 +76,8 @@ class VisionTool(BaseTool):
 
         capabilities = vision_service.resolve_capabilities(self._llm)
         if len(image_bytes) > capabilities.max_image_bytes:
-            image_bytes = vision_service._compress_image_bytes(
+            image_bytes = await asyncio.to_thread(
+                vision_service._compress_image_bytes,
                 image_bytes,
                 mime_type,
                 capabilities.max_image_bytes,

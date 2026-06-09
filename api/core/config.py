@@ -31,6 +31,10 @@ class Settings(BaseSettings):
 
     # 数据库相关配置
     sqlalchemy_database_uri: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/manus"
+    sqlalchemy_echo: bool = False
+    postgres_pool_size: int = 10
+    postgres_max_overflow: int = 20
+    postgres_pool_recycle_seconds: int = 1800
 
     # Redis缓存配置
     redis_host: str = "localhost"
@@ -38,6 +42,10 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_password: str | None = None
     redis_stream_maxlen: int = 10000
+    redis_dispatch_stream_maxlen: int = 10000
+    redis_task_input_stream_maxlen: int = 10000
+    redis_task_output_stream_maxlen: int = 50000
+    task_dispatch_max_retries: int = 3
 
     # Cos腾讯云对象存储配置
     cos_secret_id: str = ""
@@ -58,6 +66,9 @@ class Settings(BaseSettings):
     sandbox_http_proxy: Optional[str] = None
     sandbox_no_proxy: Optional[str] = None
     sandbox_cleanup_interval_seconds: int = 300
+    sandbox_memory_limit: Optional[str] = "2g"
+    sandbox_cpu_limit: Optional[float] = 2.0
+    sandbox_pids_limit: Optional[int] = 512
 
     # Observability
     otel_enabled: bool = False

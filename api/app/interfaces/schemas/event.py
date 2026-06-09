@@ -118,6 +118,33 @@ class TitleSSEEvent(BaseSSEEvent):
     data: TitleEventData
 
 
+class ClarifyOptionData(BaseModel):
+    """澄清问题选项数据"""
+    id: str
+    label: str
+
+
+class ClarifyQuestionData(BaseModel):
+    """澄清问题数据"""
+    id: str
+    prompt: str
+    options: List[ClarifyOptionData] = Field(default_factory=list)
+    allow_multiple: bool = False
+    allow_custom: bool = True
+
+
+class ClarifyEventData(BaseEventData):
+    """澄清事件数据"""
+    title: Optional[str] = None
+    questions: List[ClarifyQuestionData] = Field(default_factory=list)
+
+
+class ClarifySSEEvent(BaseSSEEvent):
+    """澄清流式事件"""
+    event: Literal["clarify"] = "clarify"
+    data: ClarifyEventData
+
+
 class StepEventData(BaseEventData):
     """步骤事件数据"""
     id: str  # 步骤id
@@ -284,6 +311,7 @@ class ToolArgsDeltaSSEEvent(BaseSSEEvent):
 # 定义Agent流式事件类型集合
 AgentSSEEvent = Union[
     CommonSSEEvent,
+    ClarifySSEEvent,
     MessageSSEEvent,
     MessageDeltaSSEEvent,
     ReasoningDeltaSSEEvent,

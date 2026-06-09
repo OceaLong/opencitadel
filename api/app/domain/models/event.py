@@ -59,6 +59,28 @@ class BaseEvent(BaseModel):
     persist: bool = True
 
 
+class ClarifyOption(BaseModel):
+    """澄清问题选项"""
+    id: str
+    label: str
+
+
+class ClarifyQuestion(BaseModel):
+    """澄清问题，支持单选、多选和自定义回答"""
+    id: str
+    prompt: str
+    options: List[ClarifyOption] = Field(default_factory=list)
+    allow_multiple: bool = False
+    allow_custom: bool = True
+
+
+class ClarifyEvent(BaseEvent):
+    """澄清事件，展示交互式问题并等待用户回答"""
+    type: Literal["clarify"] = "clarify"
+    title: Optional[str] = None
+    questions: List[ClarifyQuestion] = Field(default_factory=list)
+
+
 class PlanEvent(BaseEvent):
     """规划事件类型"""
     type: Literal["plan"] = "plan"
@@ -239,6 +261,7 @@ class UsageEvent(BaseEvent):
 # 定义应用事件类型声明
 Event = Annotated[
     Union[
+        ClarifyEvent,
         PlanEvent,
         TitleEvent,
         StepEvent,

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from sqlalchemy import (
     String,
@@ -59,6 +59,7 @@ class SessionModel(Base):
         JSONB,
         nullable=False,
         server_default=text("'[]'::jsonb"),
+        deferred=True,
     )  # 事件列表
     files: Mapped[List[Dict[str, Any]]] = mapped_column(
         JSONB,
@@ -85,6 +86,10 @@ class SessionModel(Base):
         nullable=False,
         server_default=text("false"),
     )  # 会话级思考模式
+    pending_phase: Mapped[Optional[str]] = mapped_column(
+        String(32),
+        nullable=True,
+    )  # 等待恢复的内部阶段
     status: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
@@ -114,13 +119,31 @@ class SessionModel(Base):
             # 2.复杂字段: 使用BaseModel提供的json字典转换格式
             **session.model_dump(
                 mode="json",
-                include={"memories", "files", "events"},
+                include={"memories", "files"},
             )
         )
 
     def to_domain(self) -> Session:
         """将会话ORM模型转换成领域模型"""
-        return Session.model_validate(self, from_attributes=True)
+        return Session.model_validate({
+            "id": self.id,
+            "sandbox_id": self.sandbox_id,
+            "task_id": self.task_id,
+            "title": self.title,
+            "unread_message_count": self.unread_message_count,
+            "latest_message": self.latest_message,
+            "latest_message_at": self.latest_message_at,
+            "events": [],
+            "files": self.files or [],
+            "memories": self.memories or {},
+            "model_id": self.model_id,
+            "skill_id": self.skill_id,
+            "thinking_enabled": self.thinking_enabled,
+            "pending_phase": self.pending_phase,
+            "status": self.status,
+            "updated_at": self.updated_at,
+            "created_at": self.created_at,
+        })
 
     def update_from_domain(self, session: Session) -> None:
         """从传递的领域模型更新ORM数据"""
@@ -133,7 +156,7 @@ class SessionModel(Base):
         # 2.复杂字段: JSON模式
         json_data = session.model_dump(
             mode="json",
-            include={"memories", "files", "events"},
+            include={"memories", "files"},
         )
 
         # 3.合并更新

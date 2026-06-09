@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import select, delete, update, or_, and_
+from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope
@@ -34,13 +35,12 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
             conditions.append(MemoryEntryORM.session_id == session_id)
         if q:
             conditions.append(MemoryEntryORM.title.ilike(f"%{q}%"))
+        if tags:
+            conditions.append(MemoryEntryORM.tags.op("?|")(array(tags)))
         if conditions:
             stmt = stmt.where(and_(*conditions))
         result = await self.db_session.execute(stmt)
-        entries = [r.to_domain() for r in result.scalars().all()]
-        if tags:
-            entries = [e for e in entries if any(t in e.tags for t in tags)]
-        return entries
+        return [r.to_domain() for r in result.scalars().all()]
 
     async def get_by_id(self, entry_id: str) -> Optional[MemoryEntry]:
         stmt = select(MemoryEntryORM).where(MemoryEntryORM.id == entry_id)
