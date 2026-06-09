@@ -64,12 +64,19 @@ openapi_tags = [
 def _verify_production_secrets() -> None:
     if settings.env in {"test", "development"}:
         return
+    secret = (settings.api_key_secret or "").strip()
     weak = {
         "",
+        "<strong_secret>",
+        "<generate_with_openssl_rand_hex_32>",
+        "change-me",
+        "changeme",
         "my-manus-api-key-secret-change-in-production",
         "my-manus-default-secret",
+        "replace-me",
+        "replace-with-strong-random-secret",
     }
-    if settings.api_key_secret in weak:
+    if len(secret) < 32 or secret.lower() in weak or secret.startswith("<"):
         raise RuntimeError(
             "Production requires a strong API_KEY_SECRET. "
             "Set a unique value in environment variables before starting the API."

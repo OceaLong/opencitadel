@@ -89,6 +89,7 @@ docker compose logs -f
 ENV=production
 LOG_LEVEL=INFO
 APP_CONFIG_FILEPATH=config.yaml
+API_KEY_SECRET=<GENERATE_WITH_OPENSSL_RAND_HEX_32>
 
 # ==================== 数据库配置 ====================
 POSTGRES_USER=postgres

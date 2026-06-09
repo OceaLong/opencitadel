@@ -326,6 +326,8 @@ docker compose logs -f
 
 | 变量名 | 必填 | 默认值 | 说明 |
 |--------|------|--------|------|
+| `ENV` | ❌ | development | 运行环境；生产部署设为 `production` |
+| `API_KEY_SECRET` | ✅ | - | API Key 加密密钥；生产环境必须使用强随机值 |
 | `COS_SECRET_ID` | ✅ | - | 腾讯云 COS SecretId |
 | `COS_SECRET_KEY` | ✅ | - | 腾讯云 COS SecretKey |
 | `COS_BUCKET` | ✅ | - | COS 存储桶名称 |
