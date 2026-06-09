@@ -131,6 +131,9 @@ async def lifespan(app: FastAPI):
         llm_model_service=get_llm_model_service(),
         skill_service=get_skill_service(),
     )
+    from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
+
+    await get_sandbox_pool().start()
     sandbox_cleanup_task = asyncio.create_task(_sandbox_cleanup_loop())
     logger.info("MyManus初始化完成")
 
@@ -152,6 +155,10 @@ async def lifespan(app: FastAPI):
             logger.warning("Agent服务关闭超时, 强制关闭, 部分任务将被释放")
         except Exception as e:
             logger.error(f"Agent服务关闭期间出现错误: {str(e)}")
+
+        from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
+
+        await get_sandbox_pool().shutdown()
 
         # 6.关闭其他应用
         await get_redis().shutdown()

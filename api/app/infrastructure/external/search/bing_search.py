@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import asyncio
 import logging
 import re
 import time
@@ -13,6 +14,110 @@ from app.domain.models.search import SearchResults, SearchResultItem
 from app.domain.models.tool_result import ToolResult
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_bing_html(html: str, query: str, date_range: Optional[str]) -> ToolResult[SearchResults]:
+    """Parse Bing HTML synchronously (run in a worker thread)."""
+    soup = BeautifulSoup(html, "html.parser")
+    search_results = []
+    result_items = soup.find_all("li", class_="b_algo")
+
+    for item in result_items:
+        try:
+            title, url = ("", "")
+            title_tag = item.find("h2")
+            if title_tag:
+                a_tag = title_tag.find("a")
+                if a_tag:
+                    title = a_tag.get_text(strip=True)
+                    url = a_tag.get("href", "")
+
+            if not title:
+                a_tags = item.find_all("a")
+                for a_tag in a_tags:
+                    text = a_tag.get_text(strip=True)
+                    if len(text) > 10 and not text.startswith("http"):
+                        title = text
+                        url = a_tag.get("href", "")
+                        break
+
+            if not title:
+                continue
+
+            snippet = ""
+            snippet_items = item.find_all(
+                ["p", "div"],
+                class_=re.compile(r'b_lineclamp|b_descript|b_caption')
+            )
+            if snippet_items:
+                snippet = snippet_items[0].get_text(strip=True)
+
+            if not snippet:
+                p_tags = item.find_all("p")
+                for p in p_tags:
+                    text = p.get_text(strip=True)
+                    if len(text) > 20:
+                        snippet = text
+                        break
+
+            if not snippet:
+                all_text = item.get_text(strip=True)
+                sentences = re.split(r'[.!?\n。！]', all_text)
+                for sentence in sentences:
+                    clean_sentence = sentence.strip()
+                    if len(clean_sentence) > 20 and clean_sentence != title:
+                        snippet = clean_sentence
+                        break
+
+            if url and not url.startswith("http"):
+                if url.startswith("//"):
+                    url = "https:" + url
+                elif url.startswith("/"):
+                    url = "https://www.bing.com" + url
+
+            search_results.append(SearchResultItem(
+                title=title,
+                url=url,
+                snippet=snippet,
+            ))
+        except Exception as e:
+            logger.warning(f"Bing搜索结果解析失败: {str(e)}")
+            continue
+
+    total_results = 0
+    result_stats = soup.find_all(string=re.compile(r"\d+[,\d+]\s*results"))
+    if result_stats:
+        for stat in result_stats:
+            match = re.search(r"([\d,]+)\s*results", stat)
+            if match:
+                try:
+                    total_results = int(match.group(1).replace(",", ""))
+                    break
+                except Exception:
+                    continue
+
+    if total_results == 0:
+        count_elements = soup.find_all(
+            ["span", "div", "p"],
+            class_=re.compile(r"sb_count|b_focusTextMedium")
+        )
+        for element in count_elements:
+            text = element.get_text(strip=True)
+            match = re.search(r"([\d,]+)\s*results", text)
+            if match:
+                try:
+                    total_results = int(match.group(1).replace(',', ''))
+                    break
+                except Exception:
+                    continue
+
+    results = SearchResults(
+        query=query,
+        date_range=date_range,
+        total_results=total_results,
+        results=search_results,
+    )
+    return ToolResult(success=True, data=results)
 
 
 class BingSearchEngine(SearchEngine):
@@ -69,131 +174,12 @@ class BingSearchEngine(SearchEngine):
                 # 8.更新cookie信息
                 self.cookies.update(response.cookies)
 
-                # 9.使用bs4解析html内容
-                soup = BeautifulSoup(response.text, "html.parser")
-
-                # 10.定义搜索结果并解析li.b_alog对应的dom元素
-                search_results = []
-                result_items = soup.find_all("li", class_="b_algo")
-
-                # 11.循环遍历所有匹配的dom
-                for item in result_items:
-                    try:
-                        # 12.定义变量存储数据
-                        title, url = ("", "")
-
-                        # 13.解析搜索结果中的标题与URL链接
-                        title_tag = item.find("h2")
-                        if title_tag:
-                            a_tag = title_tag.find("a")
-                            if a_tag:
-                                title = a_tag.get_text(strip=True)
-                                url = a_tag.get("href", "")
-
-                        # 14.判断标题如果不存在提取该dom下的a标签
-                        if not title:
-                            a_tags = item.find_all("a")
-                            for a_tag in a_tags:
-                                # 15.提取标签中的文本并判断文本的长度是否超过10+不以http为开头
-                                text = a_tag.get_text(strip=True)
-                                if len(text) > 10 and not text.startswith("http"):
-                                    title = text
-                                    url = a_tag.get("href", "")
-                                    break
-
-                        # 16.如果两种查询方式都找不到title则跳过这次数据
-                        if not title:
-                            continue
-
-                        # 17.提取检索数据的摘要信息
-                        snippet = ""
-                        snippet_items = item.find_all(
-                            ["p", "div"],
-                            class_=re.compile(r'b_lineclamp|b_descript|b_caption')
-                        )
-                        if snippet_items:
-                            snippet = snippet_items[0].get_text(strip=True)
-
-                        # 18.如果未找到摘要则查询所有p标签(段落标签)
-                        if not snippet:
-                            p_tags = item.find_all("p")
-                            for p in p_tags:
-                                text = p.get_text(strip=True)
-                                if len(text) > 20:
-                                    snippet = text
-                                    break
-
-                        # 19.如果还找不到摘要数据，则提取选项中的所有文本并使用常见的分隔符分割
-                        if not snippet:
-                            all_text = item.get_text(strip=True)
-                            # 20.将所有文本分割成对应的句子，并循环遍历取出长度>20的句子
-                            sentences = re.split(r'[.!?\n。！]', all_text)
-                            for sentence in sentences:
-                                clean_sentence = sentence.strip()
-                                if len(clean_sentence) > 20 and clean_sentence != title:
-                                    snippet = clean_sentence
-                                    break
-
-                        # 21.补全相对路径的url链接与缺失协议的部分
-                        if url and not url.startswith("http"):
-                            if url.startswith("//"):
-                                url = "https:" + url
-                            elif url.startswith("/"):
-                                url = "https://www.bing.com" + url
-
-                        # 22.如果标题和链接都存在则添加数据
-                        search_results.append(SearchResultItem(
-                            title=title,
-                            url=url,
-                            snippet=snippet,
-                        ))
-
-                    except Exception as e:
-                        # 23.记录错误信息并继续解析
-                        logger.warning(f"Bing搜索结果解析失败: {str(e)}")
-                        continue
-
-                # 24.提取整个页面的内容并查找`results`对应的文本
-                total_results = 0
-                result_stats = soup.find_all(string=re.compile(r"\d+[,\d+]\s*results"))
-                if result_stats:
-                    for stat in result_stats:
-                        # 25.匹配出对应的数字分组
-                        match = re.search(r"([\d,]+)\s*results", stat)
-                        if match:
-                            try:
-                                # 26.取出匹配的分组内容，去除逗号转换为整型
-                                total_results = int(match.group(1).replace(",", ""))
-                                break
-                            except Exception:
-                                continue
-
-                # 27.如果使用正则匹配找不到results(有可能是页面结构不一致)则使用新逻辑
-                if total_results == 0:
-                    # 28.使用类元素查找器
-                    count_elements = soup.find_all(
-                        ["span", "div", "p"],
-                        class_=re.compile(r"sb_count|b_focusTextMedium")
-                    )
-                    for element in count_elements:
-                        # 29.提取dom的文本并获取数字
-                        text = element.get_text(strip=True)
-                        match = re.search(r"([\d,]+)\s*results", text)
-                        if match:
-                            try:
-                                total_results = int(match.group(1).replace(',', ''))
-                                break
-                            except Exception:
-                                continue
-
-                # 30.返回搜索结果
-                results = SearchResults(
-                    query=query,
-                    date_range=date_range,
-                    total_results=total_results,
-                    results=search_results,
+                return await asyncio.to_thread(
+                    _parse_bing_html,
+                    response.text,
+                    query,
+                    date_range,
                 )
-                return ToolResult(success=True, data=results)
         except Exception as e:
             # 31.记录日志并返回错误工具调用结果
             logger.error(f"Bing搜索出错: {str(e)}")

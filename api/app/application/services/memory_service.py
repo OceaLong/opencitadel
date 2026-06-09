@@ -77,8 +77,8 @@ class MemoryService:
 
     async def create_entry(self, entry: MemoryEntry) -> MemoryEntry:
         await self._validate_entry(entry)
-        from app.application.services.vector_memory_service import VectorMemoryService
-        vector_service = VectorMemoryService()
+        from app.application.services.vector_memory_service import get_vector_memory_service
+        vector_service = get_vector_memory_service()
         async with self._uow_factory() as uow:
             await uow.memory_entry.save(entry)
             await vector_service.store_embedding(
@@ -96,8 +96,8 @@ class MemoryService:
                 raise NotFoundError(f"记忆[{entry_id}]不存在")
             updates.id = entry_id
             await uow.memory_entry.save(updates)
-            from app.application.services.vector_memory_service import VectorMemoryService
-            vector_service = VectorMemoryService()
+            from app.application.services.vector_memory_service import get_vector_memory_service
+            vector_service = get_vector_memory_service()
             await vector_service.store_embedding(
                 entry_id,
                 f"{updates.title}\n{updates.content}",
@@ -111,7 +111,7 @@ class MemoryService:
 
     async def recall_for_session(self, session_id: str) -> str:
         """召回长期记忆并格式化为system块（时间衰减 + 可选向量混合检索）"""
-        from app.application.services.vector_memory_service import VectorMemoryService
+        from app.application.services.vector_memory_service import get_vector_memory_service
         from core.config import get_settings
 
         settings = get_settings()
@@ -126,7 +126,7 @@ class MemoryService:
             entries = rank_entries_with_decay(entries, self._recall_limit)
 
             if settings.memory_vector_enabled and query_text.strip():
-                vector_service = VectorMemoryService()
+                vector_service = get_vector_memory_service()
                 vector_entries = await vector_service.search_similar(
                     query_text,
                     session_id=session_id,

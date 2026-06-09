@@ -56,8 +56,11 @@ export function useSessionDetailView({
     events,
     checkpoints,
     loading,
+    loadingEarlier,
+    hasEarlierHistory,
     error,
     refresh,
+    loadEarlierEvents,
     refreshFiles,
     sendMessage,
     updateSessionConfig,
@@ -70,6 +73,8 @@ export function useSessionDetailView({
   const [previewTool, setPreviewTool] = useState<ToolEvent | null>(null);
   const [vncOpen, setVncOpen] = useState(false);
   const [restoringCheckpoint, setRestoringCheckpoint] = useState(false);
+  const [checkpointDialogOpen, setCheckpointDialogOpen] = useState(false);
+  const [pendingCheckpoint, setPendingCheckpoint] = useState<SessionCheckpoint | null>(null);
   const initialMessageSentRef = useRef(false);
   const chatInputRef = useRef<ChatInputRef>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -275,31 +280,31 @@ export function useSessionDetailView({
     setIncludeDebug(true);
   }, []);
 
-  const handleRestoreCheckpoint = useCallback(
-    async (checkpoint: SessionCheckpoint) => {
-      if (!session) return;
-      const confirmed = window.confirm(
-        `确定要回退到「${checkpoint.label || "此处"}」吗？\n\n将删除该点之后的所有对话、Agent 记忆、沙箱文件与 COS 文件记录。`,
-      );
-      if (!confirmed) return;
+  const handleRestoreCheckpoint = useCallback((checkpoint: SessionCheckpoint) => {
+    if (!session) return;
+    setPendingCheckpoint(checkpoint);
+    setCheckpointDialogOpen(true);
+  }, [session]);
 
-      setRestoringCheckpoint(true);
-      try {
-        if (session.status === "running") {
-          await sessionApi.stopSession(sessionId);
-        }
-        await sessionApi.restoreCheckpoint(sessionId, checkpoint.id);
-        toast.success("已回退到指定还原点");
-        await refresh();
-        await refreshFiles();
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "回退失败");
-      } finally {
-        setRestoringCheckpoint(false);
+  const confirmRestoreCheckpoint = useCallback(async () => {
+    if (!session || !pendingCheckpoint) return;
+    setRestoringCheckpoint(true);
+    try {
+      if (session.status === "running") {
+        await sessionApi.stopSession(sessionId);
       }
-    },
-    [session, sessionId, refresh, refreshFiles],
-  );
+      await sessionApi.restoreCheckpoint(sessionId, pendingCheckpoint.id);
+      toast.success("已回退到指定还原点");
+      setCheckpointDialogOpen(false);
+      setPendingCheckpoint(null);
+      await refresh();
+      await refreshFiles();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "回退失败");
+    } finally {
+      setRestoringCheckpoint(false);
+    }
+  }, [session, pendingCheckpoint, sessionId, refresh, refreshFiles]);
 
   const resolveCheckpoint = useCallback(
     (anchorEventId?: string) => {
@@ -314,8 +319,11 @@ export function useSessionDetailView({
     files,
     events,
     loading,
+    loadingEarlier,
+    hasEarlierHistory,
     error,
     refresh,
+    loadEarlierEvents,
     refreshFiles,
     streaming,
     activeSkill,
@@ -349,5 +357,9 @@ export function useSessionDetailView({
     resolveCheckpoint,
     handleRestoreCheckpoint,
     restoringCheckpoint,
+    checkpointDialogOpen,
+    setCheckpointDialogOpen,
+    pendingCheckpoint,
+    confirmRestoreCheckpoint,
   };
 }

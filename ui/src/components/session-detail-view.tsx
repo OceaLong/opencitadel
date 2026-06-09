@@ -3,7 +3,7 @@
 import { Loader2 } from "lucide-react";
 
 import { ChatInput } from "@/components/chat-input";
-import { ChatMessage } from "@/components/chat-message";
+import { CheckpointRestoreDialog } from "@/components/checkpoint-restore-dialog";
 import { FilePreviewPanel } from "@/components/file-preview-panel";
 import { PlanPanel } from "@/components/plan-panel";
 import { SessionHeader } from "@/components/session-header";
@@ -12,8 +12,12 @@ import { SessionSkillPicker } from "@/components/session-skill-picker";
 import { ThinkingToggle } from "@/components/thinking-toggle";
 import { ToolPreviewPanel } from "@/components/tool-preview-panel";
 import { getToolKind } from "@/components/tool-use/utils";
+import { VirtualizedTimeline } from "@/components/virtualized-timeline";
 import { VNCOverlay } from "@/components/vnc-overlay";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useSessionDetailView } from "@/hooks/use-session-detail-view";
 
 export type SessionDetailViewProps = {
@@ -29,14 +33,18 @@ export function SessionDetailView({
   initialAttachments,
   hasInitialMessage,
 }: SessionDetailViewProps) {
+  const isMobile = useIsMobile();
   const {
     session,
     files,
     events,
     loading,
+    loadingEarlier,
+    hasEarlierHistory,
     error,
     refresh,
     refreshFiles,
+    loadEarlierEvents,
     streaming,
     activeSkill,
     setActiveSkill,
@@ -69,12 +77,32 @@ export function SessionDetailView({
     resolveCheckpoint,
     handleRestoreCheckpoint,
     restoringCheckpoint,
+    checkpointDialogOpen,
+    setCheckpointDialogOpen,
+    pendingCheckpoint,
+    confirmRestoreCheckpoint,
   } = useSessionDetailView({
     sessionId,
     initialMessage,
     initialAttachments,
     hasInitialMessage,
   });
+
+  const previewPanel = (
+    <>
+      {previewFile && (
+        <FilePreviewPanel file={previewFile} onClose={handleClosePreview} />
+      )}
+      {resolvedPreviewTool && (
+        <ToolPreviewPanel
+          tool={resolvedPreviewTool}
+          onClose={handleClosePreview}
+          onJumpToLatest={handleJumpToLatest}
+          onOpenVNC={getToolKind(resolvedPreviewTool) === "browser" ? handleOpenVNC : undefined}
+        />
+      )}
+    </>
+  );
 
   if (loading && !session) {
     return (
@@ -113,10 +141,9 @@ export function SessionDetailView({
   return (
     <>
       <div className="flex h-screen w-full flex-row overflow-hidden">
-        {/* 主内容区 */}
         <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
           <div
-            className={`mx-auto flex h-full w-full min-w-0 flex-col px-4 ${hasPreview ? "" : "max-w-[768px]"}`}
+            className={`mx-auto flex h-full w-full min-w-0 flex-col px-4 ${hasPreview && !isMobile ? "" : "max-w-[768px]"}`}
           >
             <div className="flex-shrink-0">
               <SessionHeader
@@ -137,29 +164,39 @@ export function SessionDetailView({
 
             <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
               <div className="flex w-full flex-col gap-3 pt-3">
+                {hasEarlierHistory && (
+                  <div className="flex justify-center">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => loadEarlierEvents()}
+                      disabled={loadingEarlier}
+                    >
+                      {loadingEarlier ? "加载中..." : "加载更早对话"}
+                    </Button>
+                  </div>
+                )}
+
                 {timeline.length === 0 && !streaming && !hasInitialMessage && (
                   <div className="text-muted-foreground flex items-center justify-center py-8 text-sm">
                     暂无对话记录，在下方输入任务或提问
                   </div>
                 )}
-                {timeline.map((item) => (
-                  <ChatMessage
-                    key={item.id}
-                    item={item}
-                    onViewAllFiles={handleViewAllFiles}
-                    onFileClick={handleFileClick}
-                    onToolClick={handleToolClick}
-                    onClarifyAnswer={handleClarifyAnswer}
-                    sessionStatus={session.status}
-                    checkpoint={
-                      item.kind === "user" || item.kind === "step"
-                        ? resolveCheckpoint(item.anchorEventId)
-                        : undefined
-                    }
-                    onRestoreCheckpoint={handleRestoreCheckpoint}
-                    restoringCheckpoint={restoringCheckpoint}
-                  />
-                ))}
+
+                <VirtualizedTimeline
+                  timeline={timeline}
+                  scrollContainerRef={scrollContainerRef}
+                  sessionStatus={session.status}
+                  onViewAllFiles={handleViewAllFiles}
+                  onFileClick={handleFileClick}
+                  onToolClick={handleToolClick}
+                  onClarifyAnswer={handleClarifyAnswer}
+                  resolveCheckpoint={resolveCheckpoint}
+                  onRestoreCheckpoint={handleRestoreCheckpoint}
+                  restoringCheckpoint={restoringCheckpoint}
+                  streaming={streaming}
+                />
 
                 {(session?.status === "running" ||
                   (hasInitialMessage && timeline.length === 0)) && (
@@ -220,28 +257,30 @@ export function SessionDetailView({
           </div>
         </div>
 
-        {/* 文件预览面板 */}
-        {previewFile && (
-          <div className="animate-in slide-in-from-right h-full w-[600px] flex-shrink-0 duration-300">
-            <FilePreviewPanel file={previewFile} onClose={handleClosePreview} />
-          </div>
-        )}
-
-        {/* 工具预览面板 */}
-        {resolvedPreviewTool && (
-          <div className="animate-in slide-in-from-right h-full w-[600px] flex-shrink-0 py-2 pr-2 duration-300">
-            <ToolPreviewPanel
-              tool={resolvedPreviewTool}
-              onClose={handleClosePreview}
-              onJumpToLatest={handleJumpToLatest}
-              onOpenVNC={getToolKind(resolvedPreviewTool) === "browser" ? handleOpenVNC : undefined}
-            />
+        {hasPreview && !isMobile && (
+          <div className="animate-in slide-in-from-right h-full w-full max-w-[600px] flex-shrink-0 duration-300">
+            {previewPanel}
           </div>
         )}
       </div>
 
-      {/* noVNC 全屏远程桌面覆盖层 */}
+      {isMobile && (
+        <Sheet open={hasPreview} onOpenChange={(open) => !open && handleClosePreview()}>
+          <SheetContent side="right" className="w-full max-w-full p-2 sm:max-w-[600px]">
+            {previewPanel}
+          </SheetContent>
+        </Sheet>
+      )}
+
       {vncOpen && <VNCOverlay sessionId={sessionId} onClose={handleCloseVNC} />}
+
+      <CheckpointRestoreDialog
+        checkpoint={pendingCheckpoint}
+        open={checkpointDialogOpen}
+        restoring={restoringCheckpoint}
+        onOpenChange={setCheckpointDialogOpen}
+        onConfirm={confirmRestoreCheckpoint}
+      />
     </>
   );
 }

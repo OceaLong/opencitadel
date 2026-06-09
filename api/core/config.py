@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     redis_task_input_stream_maxlen: int = 10000
     redis_task_output_stream_maxlen: int = 50000
     task_dispatch_max_retries: int = 3
+    worker_max_concurrent_tasks: int = 4
+
+    # Sandbox pool
+    sandbox_pool_enabled: bool = True
+    sandbox_pool_size: int = 2
+    sandbox_idle_timeout_minutes: int = 30
+    sandbox_warmup_retry_interval_seconds: float = 0.5
 
     # Cos腾讯云对象存储配置
     cos_secret_id: str = ""

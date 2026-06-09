@@ -107,6 +107,10 @@ class DBSessionRepository(SessionRepository):
         if result.rowcount == 0:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 
+        from app.infrastructure.external.session_list_notifier import notify_sessions_changed
+
+        await notify_sessions_changed()
+
     async def add_event(
             self,
             session_id: str,
@@ -167,24 +171,62 @@ class DBSessionRepository(SessionRepository):
             self,
             session_id: str,
             after: Optional[int] = None,
+            before: Optional[int] = None,
             limit: int = 100,
+            latest: bool = False,
     ) -> List[Tuple[int, BaseEvent]]:
-        """按游标分页获取会话事件"""
-        stmt = (
-            select(SessionEventModel)
-            .where(SessionEventModel.session_id == session_id)
-            .order_by(SessionEventModel.seq.asc())
-            .limit(limit)
-        )
-        if after is not None:
-            stmt = stmt.where(SessionEventModel.seq > after)
-        result = await self.db_session.execute(stmt)
-        records = result.scalars().all()
+        """按游标分页获取会话事件（支持正向 after、反向 before、或最近 latest）"""
         adapter = TypeAdapter(Event)
+
+        if latest:
+            stmt = (
+                select(SessionEventModel)
+                .where(SessionEventModel.session_id == session_id)
+                .order_by(SessionEventModel.seq.desc())
+                .limit(limit)
+            )
+            result = await self.db_session.execute(stmt)
+            records = list(reversed(result.scalars().all()))
+        elif before is not None:
+            stmt = (
+                select(SessionEventModel)
+                .where(
+                    SessionEventModel.session_id == session_id,
+                    SessionEventModel.seq < before,
+                )
+                .order_by(SessionEventModel.seq.desc())
+                .limit(limit)
+            )
+            result = await self.db_session.execute(stmt)
+            records = list(reversed(result.scalars().all()))
+        else:
+            stmt = (
+                select(SessionEventModel)
+                .where(SessionEventModel.session_id == session_id)
+                .order_by(SessionEventModel.seq.asc())
+                .limit(limit)
+            )
+            if after is not None:
+                stmt = stmt.where(SessionEventModel.seq > after)
+            result = await self.db_session.execute(stmt)
+            records = result.scalars().all()
+
         return [
             (record.seq, adapter.validate_python(upgrade_event_payload(record.payload)))
             for record in records
         ]
+
+    async def has_events_before(self, session_id: str, seq: int) -> bool:
+        stmt = (
+            select(SessionEventModel.id)
+            .where(
+                SessionEventModel.session_id == session_id,
+                SessionEventModel.seq < seq,
+            )
+            .limit(1)
+        )
+        result = await self.db_session.execute(stmt)
+        return result.scalar_one_or_none() is not None
 
     async def add_file(self, session_id: str, file: File) -> None:
         """往会话中新增文件"""

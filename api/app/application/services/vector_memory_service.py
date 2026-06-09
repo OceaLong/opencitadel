@@ -15,6 +15,8 @@ from core.config import get_settings
 logger = logging.getLogger(__name__)
 _EMBEDDING_DIM = 1536
 _EMBEDDING_CACHE_MAX_SIZE = 256
+_EMBEDDING_BATCH_SIZE = 64
+_vector_memory_service: Optional["VectorMemoryService"] = None
 
 
 class VectorMemoryService:
@@ -49,15 +51,44 @@ class VectorMemoryService:
     async def embed(self, content: str) -> List[float]:
         if not self.enabled or not content.strip():
             return []
-        if cached := self._cache_get(content):
-            return cached
-        response = await self._client.embeddings.create(
-            model=self.embedding_model,
-            input=content,
-        )
-        vector = response.data[0].embedding
-        self._cache_set(content, vector)
-        return vector
+        vectors = await self.embed_batch([content])
+        return vectors[0] if vectors else []
+
+    async def embed_batch(self, contents: List[str]) -> List[List[float]]:
+        if not self.enabled:
+            return [[] for _ in contents]
+
+        results: List[Optional[List[float]]] = [None] * len(contents)
+        uncached_indices: List[int] = []
+        uncached_texts: List[str] = []
+
+        for index, content in enumerate(contents):
+            if not content.strip():
+                results[index] = []
+                continue
+            cached = self._cache_get(content)
+            if cached is not None:
+                results[index] = cached
+            else:
+                uncached_indices.append(index)
+                uncached_texts.append(content)
+
+        for batch_start in range(0, len(uncached_texts), _EMBEDDING_BATCH_SIZE):
+            batch_indices = uncached_indices[batch_start:batch_start + _EMBEDDING_BATCH_SIZE]
+            batch_texts = uncached_texts[batch_start:batch_start + _EMBEDDING_BATCH_SIZE]
+            if not batch_texts:
+                continue
+            response = await self._client.embeddings.create(
+                model=self.embedding_model,
+                input=batch_texts,
+            )
+            for offset, item in enumerate(response.data):
+                vector = item.embedding
+                content = batch_texts[offset]
+                self._cache_set(content, vector)
+                results[batch_indices[offset]] = vector
+
+        return [vector if vector is not None else [] for vector in results]
 
     async def store_embedding(
             self,
@@ -140,3 +171,10 @@ class VectorMemoryService:
                 updated_at=row.updated_at,
             ))
         return entries
+
+
+def get_vector_memory_service() -> VectorMemoryService:
+    global _vector_memory_service
+    if _vector_memory_service is None:
+        _vector_memory_service = VectorMemoryService()
+    return _vector_memory_service

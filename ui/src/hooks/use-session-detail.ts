@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import type React from "react";
 
 import { ApiError } from "@/lib/api";
 import { sessionApi } from "@/lib/api/session";
@@ -28,14 +29,51 @@ function getSessionMissingErrorFromEvent(ev: SSEEventData): boolean {
   return typeof errorMsg === "string" && isSessionMissingError(new Error(errorMsg));
 }
 
+const INITIAL_EVENTS_LIMIT = 100;
+
+function rebuildEventIndexRefs(
+  events: SSEEventData[],
+  refs: {
+    eventIds: React.MutableRefObject<Set<string>>;
+    messageDelta: React.MutableRefObject<Map<string, number>>;
+    reasoningDelta: React.MutableRefObject<Map<string, number>>;
+    toolArgsDelta: React.MutableRefObject<Map<string, number>>;
+  },
+) {
+  refs.eventIds.current = new Set();
+  refs.messageDelta.current.clear();
+  refs.reasoningDelta.current.clear();
+  refs.toolArgsDelta.current.clear();
+
+  events.forEach((item, index) => {
+    const eventId = (item.data as { event_id?: string })?.event_id;
+    if (eventId) refs.eventIds.current.add(eventId);
+    if (item.type === "message_delta") {
+      const streamId = (item.data as { stream_id?: string })?.stream_id;
+      if (streamId) refs.messageDelta.current.set(streamId, index);
+    }
+    if (item.type === "reasoning_delta") {
+      const streamId = (item.data as { stream_id?: string })?.stream_id;
+      if (streamId) refs.reasoningDelta.current.set(streamId, index);
+    }
+    if (item.type === "tool_args_delta") {
+      const toolCallId = (item.data as { tool_call_id?: string })?.tool_call_id;
+      if (toolCallId) refs.toolArgsDelta.current.set(toolCallId, index);
+    }
+  });
+}
+
 export type UseSessionDetailResult = {
   session: SessionDetail | null;
   files: SessionFile[];
   events: SSEEventData[];
   checkpoints: SessionCheckpoint[];
   loading: boolean;
+  loadingEarlier: boolean;
+  hasEarlierHistory: boolean;
   error: Error | null;
   refresh: () => Promise<void>;
+  loadEarlierEvents: () => Promise<void>;
   refreshFiles: () => Promise<void>;
   sendMessage: (
     message: string,
@@ -65,8 +103,15 @@ export function useSessionDetail(
   const [events, setEvents] = useState<SSEEventData[]>([]);
   const [checkpoints, setCheckpoints] = useState<SessionCheckpoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const [hasEarlierHistory, setHasEarlierHistory] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [streaming, setStreaming] = useState(false);
+  const earlierCursorRef = useRef<number | null>(null);
+  const eventIdSetRef = useRef<Set<string>>(new Set());
+  const messageDeltaIndexRef = useRef<Map<string, number>>(new Map());
+  const reasoningDeltaIndexRef = useRef<Map<string, number>>(new Map());
+  const toolArgsDeltaIndexRef = useRef<Map<string, number>>(new Map());
   const [skipEmptyStream, setSkipEmptyStream] = useState(initialSkipEmptyStream || false);
   const emptyStreamCleanupRef = useRef<(() => void) | null>(null);
   const messageStreamCleanupRef = useRef<(() => void) | null>(null);
@@ -102,6 +147,13 @@ export function useSessionDetail(
     [stopEmptyStream],
   );
 
+  const indexRefs = {
+    eventIds: eventIdSetRef,
+    messageDelta: messageDeltaIndexRef,
+    reasoningDelta: reasoningDeltaIndexRef,
+    toolArgsDelta: toolArgsDeltaIndexRef,
+  };
+
   const appendEvent = useCallback((ev: SSEEventData) => {
     let evToAppend = ev;
     if (
@@ -120,64 +172,59 @@ export function useSessionDetail(
     if (eventId) lastEventIdRef.current = eventId;
 
     setEvents((prev) => {
-      if (
-        eventId &&
-        prev.some((item) => (item.data as { event_id?: string })?.event_id === eventId)
-      ) {
+      if (eventId && eventIdSetRef.current.has(eventId)) {
         return prev;
       }
+
+      const mergeDelta = (
+        indexMap: MutableRefObject<Map<string, number>>,
+        key: string | undefined,
+        delta: string | undefined,
+      ) => {
+        if (!key) return null;
+        const idx = indexMap.current.get(key);
+        if (idx === undefined || idx < 0 || idx >= prev.length) return null;
+        const next = [...prev];
+        const current = next[idx].data as { delta?: string };
+        next[idx] = {
+          ...next[idx],
+          data: { ...next[idx].data, delta: `${current.delta ?? ""}${delta ?? ""}` },
+        } as SSEEventData;
+        return next;
+      };
+
       if (evToAppend.type === "message_delta") {
         const data = evToAppend.data as { stream_id?: string; delta?: string };
-        const idx = prev.findIndex(
-          (item) =>
-            item.type === "message_delta" &&
-            (item.data as { stream_id?: string })?.stream_id === data.stream_id,
-        );
-        if (idx >= 0) {
-          const next = [...prev];
-          const current = next[idx].data as { stream_id?: string; delta?: string };
-          next[idx] = {
-            ...next[idx],
-            data: { ...current, delta: `${current.delta ?? ""}${data.delta ?? ""}` },
-          } as SSEEventData;
-          return next;
-        }
+        const merged = mergeDelta(messageDeltaIndexRef, data.stream_id, data.delta);
+        if (merged) return merged;
       }
       if (evToAppend.type === "reasoning_delta") {
         const data = evToAppend.data as { stream_id?: string; delta?: string };
-        const idx = prev.findIndex(
-          (item) =>
-            item.type === "reasoning_delta" &&
-            (item.data as { stream_id?: string })?.stream_id === data.stream_id,
-        );
-        if (idx >= 0) {
-          const next = [...prev];
-          const current = next[idx].data as { stream_id?: string; delta?: string };
-          next[idx] = {
-            ...next[idx],
-            data: { ...current, delta: `${current.delta ?? ""}${data.delta ?? ""}` },
-          } as SSEEventData;
-          return next;
-        }
+        const merged = mergeDelta(reasoningDeltaIndexRef, data.stream_id, data.delta);
+        if (merged) return merged;
       }
       if (evToAppend.type === "tool_args_delta") {
         const data = evToAppend.data as { tool_call_id?: string; delta?: string };
-        const idx = prev.findIndex(
-          (item) =>
-            item.type === "tool_args_delta" &&
-            (item.data as { tool_call_id?: string })?.tool_call_id === data.tool_call_id,
-        );
-        if (idx >= 0) {
-          const next = [...prev];
-          const current = next[idx].data as { tool_call_id?: string; delta?: string };
-          next[idx] = {
-            ...next[idx],
-            data: { ...current, delta: `${current.delta ?? ""}${data.delta ?? ""}` },
-          } as SSEEventData;
-          return next;
-        }
+        const merged = mergeDelta(toolArgsDeltaIndexRef, data.tool_call_id, data.delta);
+        if (merged) return merged;
       }
-      return [...prev, evToAppend];
+
+      const next = [...prev, evToAppend];
+      const newIndex = next.length - 1;
+      if (eventId) eventIdSetRef.current.add(eventId);
+      if (evToAppend.type === "message_delta") {
+        const streamId = (evToAppend.data as { stream_id?: string })?.stream_id;
+        if (streamId) messageDeltaIndexRef.current.set(streamId, newIndex);
+      }
+      if (evToAppend.type === "reasoning_delta") {
+        const streamId = (evToAppend.data as { stream_id?: string })?.stream_id;
+        if (streamId) reasoningDeltaIndexRef.current.set(streamId, newIndex);
+      }
+      if (evToAppend.type === "tool_args_delta") {
+        const toolCallId = (evToAppend.data as { tool_call_id?: string })?.tool_call_id;
+        if (toolCallId) toolArgsDeltaIndexRef.current.set(toolCallId, newIndex);
+      }
+      return next;
     });
 
     // 更新会话标题
@@ -293,32 +340,26 @@ export function useSessionDetail(
     if (!sessionId) return;
     setError(null);
     try {
-      const [detail, fileListRaw, checkpointData] = await Promise.all([
-        sessionApi.getSessionDetail(sessionId, { include_debug: includeDebug, events_limit: 100 }),
+      const [detail, fileListRaw, checkpointData, eventsPage] = await Promise.all([
+        sessionApi.getSessionDetail(sessionId, { include_debug: includeDebug, events_limit: 1 }),
         sessionApi.getSessionFiles(sessionId),
         sessionApi.listCheckpoints(sessionId).catch(() => ({ checkpoints: [] })),
+        sessionApi.getSessionEvents(sessionId, {
+          latest: true,
+          limit: INITIAL_EVENTS_LIMIT,
+          include_debug: includeDebug,
+        }),
       ]);
       setCheckpoints(checkpointData.checkpoints ?? []);
       setSession(detail);
       setFiles(normalizeFileList(fileListRaw));
-      const rawEvents = (detail as { events?: unknown }).events;
-      const pagedEvents: SSEEventData[] = [];
-      if (rawEvents && Array.isArray(rawEvents) && rawEvents.length > 0) {
-        pagedEvents.push(...normalizeEvents(rawEvents));
-      }
 
-      let cursor = (detail as { events_next_cursor?: number | null }).events_next_cursor ?? null;
-      while (cursor != null) {
-        const page = await sessionApi.getSessionEvents(sessionId, {
-          after: cursor,
-          limit: 100,
-          include_debug: includeDebug,
-        });
-        pagedEvents.push(...normalizeEvents((page as { events?: unknown }).events));
-        cursor = (page as { next_cursor?: number | null }).next_cursor ?? null;
-      }
-
+      const pagedEvents = normalizeEvents(eventsPage.events);
       setEvents(pagedEvents);
+      rebuildEventIndexRefs(pagedEvents, indexRefs);
+      earlierCursorRef.current = eventsPage.prev_cursor ?? null;
+      setHasEarlierHistory(Boolean(eventsPage.has_earlier));
+
       if (pagedEvents.length > 0) {
         const lastEvId = (pagedEvents[pagedEvents.length - 1]?.data as { event_id?: string })
           ?.event_id;
@@ -334,6 +375,30 @@ export function useSessionDetail(
       setLoading(false);
     }
   }, [sessionId, normalizeFileList, handleSessionMissing, includeDebug]);
+
+  const loadEarlierEvents = useCallback(async () => {
+    if (!sessionId || !earlierCursorRef.current || loadingEarlier) return;
+    setLoadingEarlier(true);
+    try {
+      const page = await sessionApi.getSessionEvents(sessionId, {
+        before: earlierCursorRef.current,
+        limit: INITIAL_EVENTS_LIMIT,
+        include_debug: includeDebug,
+      });
+      const earlierEvents = normalizeEvents(page.events);
+      setEvents((prev) => {
+        const merged = [...earlierEvents, ...prev];
+        rebuildEventIndexRefs(merged, indexRefs);
+        return merged;
+      });
+      earlierCursorRef.current = page.prev_cursor ?? null;
+      setHasEarlierHistory(Boolean(page.has_earlier));
+    } catch (e) {
+      setError(e instanceof Error ? e : new Error("加载更早历史失败"));
+    } finally {
+      setLoadingEarlier(false);
+    }
+  }, [sessionId, includeDebug, loadingEarlier]);
 
   const refreshFiles = useCallback(async () => {
     if (!sessionId) return;
@@ -512,8 +577,11 @@ export function useSessionDetail(
     events,
     checkpoints,
     loading,
+    loadingEarlier,
+    hasEarlierHistory,
     error,
     refresh,
+    loadEarlierEvents,
     refreshFiles,
     sendMessage,
     updateSessionConfig,

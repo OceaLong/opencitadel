@@ -179,12 +179,12 @@ async def stream_sessions(
     """间隔指定时间流式获取所有会话基础信息列表"""
 
     async def event_generator() -> AsyncGenerator[ServerSentEvent, None]:
-        """定义一个异步迭代器，用于获取所有会话列表"""
-        while True:
-            # 1.获取所有会话列表
-            sessions = await session_service.get_all_sessions(limit=limit, offset=offset)
+        """Push session list updates on Redis pub/sub; heartbeat on idle timeout."""
+        from app.infrastructure.external.session_list_notifier import SESSION_LIST_CHANNEL
+        from app.infrastructure.storage.redis import get_redis
 
-            # 2.循环遍历并组装数据
+        async def build_sessions_event() -> ServerSentEvent:
+            sessions = await session_service.get_all_sessions(limit=limit, offset=offset)
             session_items = [
                 ListSessionItem(
                     session_id=session.id,
@@ -196,15 +196,28 @@ async def stream_sessions(
                 )
                 for session in sessions
             ]
-
-            # 3.将会话列表转换为流式事件数据并返回
-            yield ServerSentEvent(
+            return ServerSentEvent(
                 event="sessions",
                 data=ListSessionResponse(sessions=session_items).model_dump_json(),
             )
 
-            # 4.睡眠指定时间避免高频响应
-            await asyncio.sleep(SESSION_SLEEP_INTERVAL)
+        yield await build_sessions_event()
+
+        pubsub = get_redis().client.pubsub()
+        await pubsub.subscribe(SESSION_LIST_CHANNEL)
+        try:
+            while True:
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True,
+                    timeout=float(SESSION_SLEEP_INTERVAL),
+                )
+                if message and message.get("type") == "message":
+                    yield await build_sessions_event()
+                else:
+                    yield ServerSentEvent(event="ping", data="")
+        finally:
+            await pubsub.unsubscribe(SESSION_LIST_CHANNEL)
+            await pubsub.aclose()
 
     return EventSourceResponse(event_generator())
 
@@ -322,21 +335,35 @@ async def chat(
 async def get_session_events(
         session_id: str,
         after: Optional[int] = Query(default=None),
+        before: Optional[int] = Query(default=None),
+        latest: bool = Query(default=False),
         limit: int = Query(default=100, ge=1, le=500),
         include_debug: bool = Query(default=False),
         session_service: SessionService = Depends(get_session_service),
 ) -> Response[GetSessionEventsResponse]:
-    records = await session_service.get_session_events(session_id, after=after, limit=limit)
+    records = await session_service.get_session_events(
+        session_id,
+        after=after,
+        before=before,
+        limit=limit,
+        latest=latest,
+    )
     projected = [
         event
         for _, event in records
         if should_project_event(event, include_transient=False, include_debug=include_debug)
     ]
+    prev_cursor = records[0][0] if records else None
+    has_earlier = False
+    if prev_cursor is not None:
+        has_earlier = await session_service.has_events_before(session_id, prev_cursor)
     return Response.success(
         msg="分页获取会话事件成功",
         data=GetSessionEventsResponse(
             events=EventMapper.events_to_sse_events(projected, include_debug=include_debug),
-            next_cursor=records[-1][0] if len(records) == limit else None,
+            next_cursor=records[-1][0] if len(records) == limit and not latest and before is None else None,
+            prev_cursor=prev_cursor,
+            has_earlier=has_earlier,
         ),
     )
 

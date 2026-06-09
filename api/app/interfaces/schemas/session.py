@@ -110,6 +110,8 @@ class GetSessionEventsResponse(BaseModel):
     """分页获取会话事件响应结构"""
     events: List[AgentSSEEvent] = Field(default_factory=list)
     next_cursor: Optional[int] = None
+    prev_cursor: Optional[int] = None
+    has_earlier: bool = False
 
 
 class GetSessionFilesResponse(BaseModel):

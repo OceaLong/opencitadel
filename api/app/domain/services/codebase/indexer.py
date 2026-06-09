@@ -22,7 +22,18 @@ class CodebaseIndexer:
             file_contents: Dict[str, str],
     ) -> List[CodebaseChunk]:
         chunks: List[CodebaseChunk] = []
+        pending_texts: List[str] = []
+        pending_meta: List[tuple[str, str, Optional[str], Optional[str]]] = []
         path_by_file_id = {f.id: f.path for f in files}
+
+        def queue_chunk(
+                *,
+                file_id: str,
+                symbol_id: Optional[str],
+                chunk_text: str,
+        ) -> None:
+            pending_texts.append(chunk_text)
+            pending_meta.append((file_id, symbol_id, chunk_text, str(uuid.uuid4())))
 
         for sym in symbols:
             path = path_by_file_id.get(sym.file_id, "")
@@ -39,32 +50,33 @@ class CodebaseIndexer:
             chunk_text = header + snippet
             if len(chunk_text) > CHUNK_MAX_CHARS:
                 chunk_text = chunk_text[:CHUNK_MAX_CHARS]
-            embedding = await self._vector.embed(chunk_text) if self._vector.enabled else []
-            chunks.append(
-                CodebaseChunk(
-                    id=str(uuid.uuid4()),
-                    codebase_id=codebase_id,
-                    file_id=sym.file_id,
-                    symbol_id=sym.id,
-                    content=chunk_text,
-                    embedding=embedding,
-                )
-            )
+            queue_chunk(file_id=sym.file_id, symbol_id=sym.id, chunk_text=chunk_text)
 
+        covered_file_ids = {meta[0] for meta in pending_meta}
         for f in files:
-            if any(c.file_id == f.id for c in chunks):
+            if f.id in covered_file_ids:
                 continue
             content = file_contents.get(f.path, "")
             if not content.strip():
                 continue
             header = f"File: {f.path}\nLanguage: {f.language}\n"
             chunk_text = header + content[:CHUNK_MAX_CHARS]
-            embedding = await self._vector.embed(chunk_text) if self._vector.enabled else []
+            queue_chunk(file_id=f.id, symbol_id=None, chunk_text=chunk_text)
+
+        embeddings: List[List[float]] = []
+        if pending_texts and self._vector.enabled:
+            embeddings = await self._vector.embed_batch(pending_texts)
+        elif pending_texts:
+            embeddings = [[] for _ in pending_texts]
+
+        for index, (file_id, symbol_id, chunk_text, chunk_id) in enumerate(pending_meta):
+            embedding = embeddings[index] if index < len(embeddings) else []
             chunks.append(
                 CodebaseChunk(
-                    id=str(uuid.uuid4()),
+                    id=chunk_id,
                     codebase_id=codebase_id,
-                    file_id=f.id,
+                    file_id=file_id,
+                    symbol_id=symbol_id,
                     content=chunk_text,
                     embedding=embedding,
                 )

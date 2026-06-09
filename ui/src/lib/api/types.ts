@@ -917,6 +917,8 @@ export type SSEEventHandler = (event: SSEEventData) => void;
 export type SessionEventsPage = {
   events: SSEEventData[];
   next_cursor?: number | null;
+  prev_cursor?: number | null;
+  has_earlier?: boolean;
 };
 
 export type CheckpointAnchorType = "user_message" | "step";

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import logging
 import time
 from collections import defaultdict, deque
 from typing import Deque, DefaultDict
@@ -10,11 +11,13 @@ from starlette.responses import JSONResponse
 
 from core.config import get_settings
 
+logger = logging.getLogger(__name__)
 _WINDOW_SECONDS = 60
+_REDIS_KEY_PREFIX = "ratelimit:"
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Simple in-memory per-IP rate limiter for sensitive public endpoints."""
+    """Per-IP rate limiter backed by Redis (falls back to in-memory per process)."""
 
     def __init__(self, app, *, requests_per_minute: int = 120) -> None:
         super().__init__(app)
@@ -37,21 +40,47 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         )
         return any(path.startswith(prefix) for prefix in prefixes)
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        if request.method == "OPTIONS" or not self._is_limited_path(request.url.path):
-            return await call_next(request)
+    async def _is_rate_limited_redis(self, key: str) -> bool:
+        try:
+            from app.infrastructure.storage.redis import get_redis
 
+            redis = get_redis().client
+            redis_key = f"{_REDIS_KEY_PREFIX}{key}"
+            now = time.time()
+            window_start = now - _WINDOW_SECONDS
+            pipe = redis.pipeline()
+            pipe.zremrangebyscore(redis_key, 0, window_start)
+            pipe.zcard(redis_key)
+            _, current_count = await pipe.execute()
+            if int(current_count or 0) >= self._limit:
+                return True
+            await redis.zadd(redis_key, {str(now): now})
+            await redis.expire(redis_key, _WINDOW_SECONDS + 5)
+            return False
+        except Exception as exc:
+            logger.debug("Redis rate limit unavailable, using in-memory fallback: %s", exc)
+            return await self._is_rate_limited_memory(key)
+
+    async def _is_rate_limited_memory(self, key: str) -> bool:
         now = time.monotonic()
-        key = self._client_key(request)
         bucket = self._hits[key]
         while bucket and now - bucket[0] > _WINDOW_SECONDS:
             bucket.popleft()
         if len(bucket) >= self._limit:
+            return True
+        bucket.append(now)
+        return False
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if request.method == "OPTIONS" or not self._is_limited_path(request.url.path):
+            return await call_next(request)
+
+        key = self._client_key(request)
+        if await self._is_rate_limited_redis(key):
             return JSONResponse(
                 status_code=429,
                 content={"code": 429, "msg": "请求过于频繁，请稍后再试", "data": None},
             )
-        bucket.append(now)
         return await call_next(request)
 
 

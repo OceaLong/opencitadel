@@ -48,6 +48,9 @@ class SessionService:
         )
         async with self._uow_factory() as uow:
             await uow.session.save(session)
+        from app.infrastructure.external.session_list_notifier import notify_sessions_changed
+
+        await notify_sessions_changed()
         logger.info(f"成功创建一个新任务会话: {session.id}")
         return session
 
@@ -101,6 +104,9 @@ class SessionService:
 
         async with self._uow_factory() as uow:
             await uow.session.delete_by_id(session_id)
+        from app.infrastructure.external.session_list_notifier import notify_sessions_changed
+
+        await notify_sessions_changed()
         logger.info(f"删除会话[{session_id}]成功")
 
     async def get_session(self, session_id: str) -> Session:
@@ -112,14 +118,26 @@ class SessionService:
             self,
             session_id: str,
             after: Optional[int] = None,
+            before: Optional[int] = None,
             limit: int = 100,
+            latest: bool = False,
     ) -> List[Tuple[int, BaseEvent]]:
         """分页获取会话事件"""
         async with self._uow_factory() as uow:
             session = await uow.session.get_by_id(session_id)
             if not session:
                 raise NotFoundError("该会话不存在，请核实后重试")
-            return await uow.session.list_events(session_id, after=after, limit=limit)
+            return await uow.session.list_events(
+                session_id,
+                after=after,
+                before=before,
+                limit=limit,
+                latest=latest,
+            )
+
+    async def has_events_before(self, session_id: str, seq: int) -> bool:
+        async with self._uow_factory() as uow:
+            return await uow.session.has_events_before(session_id, seq)
 
     async def get_session_files(self, session_id: str) -> List[File]:
         """根据传递的会话id获取指定会话的文件列表信息"""

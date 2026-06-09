@@ -4,7 +4,9 @@ import asyncio
 import io
 import logging
 import socket
+import time
 import uuid
+from datetime import datetime
 from typing import Optional, Self, BinaryIO
 
 import docker
@@ -148,19 +150,37 @@ class DockerSandbox(Sandbox):
             raise Exception(f"创建Docker沙箱容器失败: {str(e)}")
 
     @classmethod
-    async def create(cls) -> Self:
-        """类方法，创建沙箱容器"""
-        # 1.获取系统配置信息
-        settings = get_settings()
+    async def _create_and_warm(cls) -> Self:
+        """Create a sandbox container and wait until supervisor services are ready."""
+        sandbox = await cls._create_fresh()
+        await sandbox.ensure_sandbox()
+        from app.infrastructure.external.sandbox.sandbox_pool import SandboxPool
 
-        # 2.判断是否使用现成的沙箱
+        await SandboxPool.touch_activity(sandbox.id)
+        return sandbox
+
+    @classmethod
+    async def _create_fresh(cls) -> Self:
+        settings = get_settings()
         if settings.sandbox_address:
-            # 3.将沙箱主机/地址解析成ip
+            ip = await cls._resolve_hostname_to_ip(settings.sandbox_address)
+            return DockerSandbox(ip=ip)
+        return await asyncio.to_thread(cls._create_task)
+
+    @classmethod
+    async def create(cls) -> Self:
+        """类方法，创建沙箱容器（优先从预热池获取）"""
+        settings = get_settings()
+        if settings.sandbox_address:
             ip = await cls._resolve_hostname_to_ip(settings.sandbox_address)
             return DockerSandbox(ip=ip)
 
-        # 4.使用子线程创建一个容器后返回
-        return await asyncio.to_thread(cls._create_task)
+        from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
+
+        pool = get_sandbox_pool()
+        if pool.enabled:
+            return await pool.acquire()
+        return await cls._create_and_warm()
 
     async def destroy(self) -> bool:
         """销毁当前的DockerSandbox实例"""
@@ -211,6 +231,8 @@ class DockerSandbox(Sandbox):
             return 0
         docker_client = docker.from_env()
         removed = 0
+        idle_timeout_seconds = max(60, (settings.sandbox_idle_timeout_minutes or 30) * 60)
+        now = time.time()
         try:
             containers = docker_client.containers.list(
                 all=True,
@@ -221,6 +243,48 @@ class DockerSandbox(Sandbox):
                 if container.status in {"exited", "dead", "created"}:
                     container.remove(force=True)
                     removed += 1
+                    continue
+                if container.status != "running":
+                    continue
+                container_name = container.name.lstrip("/")
+                started_at = container.attrs.get("State", {}).get("StartedAt")
+                idle_seconds = idle_timeout_seconds
+                if started_at:
+                    try:
+                        started_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                        idle_seconds = now - started_dt.timestamp()
+                    except ValueError:
+                        idle_seconds = 0
+                if idle_seconds < idle_timeout_seconds:
+                    continue
+                try:
+                    import redis as sync_redis
+
+                    redis_client = sync_redis.Redis(
+                        host=settings.redis_host,
+                        port=settings.redis_port,
+                        db=settings.redis_db,
+                        password=settings.redis_password,
+                        decode_responses=True,
+                    )
+                    last_active_raw = redis_client.get(f"sandbox:last_active:{container_name}")
+                    redis_client.close()
+                    if last_active_raw:
+                        last_active = int(last_active_raw)
+                        if now - last_active < idle_timeout_seconds:
+                            continue
+                except Exception:
+                    pass
+                try:
+                    container.stop(timeout=10)
+                except Exception:
+                    pass
+                try:
+                    container.remove(force=True)
+                    removed += 1
+                    logger.info("Removed idle sandbox container: %s", container_name)
+                except Exception as exc:
+                    logger.warning("Failed to remove idle sandbox %s: %s", container_name, exc)
             return removed
         finally:
             docker_client.close()
@@ -259,9 +323,9 @@ class DockerSandbox(Sandbox):
 
     async def ensure_sandbox(self) -> None:
         """确保沙箱一定存在/服务全部都开启了才执行后续步骤"""
-        # 1.定义最大重试次数+重试间隔
+        settings = get_settings()
         max_retries = 30
-        retry_interval = 2
+        retry_interval = max(0.5, settings.sandbox_warmup_retry_interval_seconds)
 
         # 2.循环请求获取supervisor状态并判断服务是否正常
         for attempt in range(max_retries):
@@ -301,6 +365,9 @@ class DockerSandbox(Sandbox):
                 # 9.判断是否所有服务都启动
                 if all_running:
                     logger.info("Sandbox Supervisor所有进程服务运行正常")
+                    from app.infrastructure.external.sandbox.sandbox_pool import SandboxPool
+
+                    await SandboxPool.touch_activity(self.id)
                     return
                 else:
                     logger.info(f"正在等待Sandbox Supervisor进程服务运行, 还未运行的服务列表: {non_running_services}")

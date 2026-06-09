@@ -40,6 +40,9 @@ class AgentWorker:
         self._task_state = get_task_state()
         self._consumer_name = f"worker-{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
         self._running = True
+        self._max_concurrent = max(1, self._settings.worker_max_concurrent_tasks)
+        self._semaphore = asyncio.Semaphore(self._max_concurrent)
+        self._active_tasks: set[asyncio.Task] = set()
         self._config_provider = get_app_config_provider()
         cipher = ApiKeyCipher(self._settings.api_key_secret)
         llm_model_service = LLMModelService(uow_factory=get_uow, cipher=cipher)
@@ -77,38 +80,66 @@ class AgentWorker:
 
     async def start(self) -> None:
         await self._task_state.ensure_consumer_group()
-        logger.info("Agent worker 启动: consumer=%s", self._consumer_name)
+        logger.info(
+            "Agent worker 启动: consumer=%s max_concurrent=%s",
+            self._consumer_name,
+            self._max_concurrent,
+        )
         while self._running:
             try:
-                claim = await self._task_state.claim_dispatch(
-                    self._consumer_name,
-                    block_ms=5000,
-                )
-                if claim is None:
-                    continue
-                message_id, task_id, session_id = claim
+                await self._semaphore.acquire()
                 try:
-                    await self._execute_job(task_id, session_id)
-                except Exception as exc:
-                    logger.exception(
-                        "Worker 执行任务失败: task_id=%s session_id=%s error=%s",
-                        task_id,
-                        session_id,
-                        exc,
+                    claim = await self._task_state.claim_dispatch(
+                        self._consumer_name,
+                        block_ms=5000,
                     )
-                    await self._task_state.mark_dispatch_failure(
-                        message_id=message_id,
-                        task_id=task_id,
-                        session_id=session_id,
-                        error=str(exc),
+                    if claim is None:
+                        self._semaphore.release()
+                        continue
+                    message_id, task_id, session_id = claim
+                    task = asyncio.create_task(
+                        self._handle_claimed_job(message_id, task_id, session_id),
                     )
-                    continue
-                await self._task_state.ack_dispatch(message_id)
+                    self._active_tasks.add(task)
+                    task.add_done_callback(self._on_job_task_done)
+                except Exception:
+                    self._semaphore.release()
+                    raise
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 logger.exception("Worker 循环异常: %s", exc)
                 await asyncio.sleep(1)
+
+        if self._active_tasks:
+            await asyncio.gather(*self._active_tasks, return_exceptions=True)
+
+    def _on_job_task_done(self, task: asyncio.Task) -> None:
+        self._active_tasks.discard(task)
+        self._semaphore.release()
+
+    async def _handle_claimed_job(
+            self,
+            message_id: str,
+            task_id: str,
+            session_id: str,
+    ) -> None:
+        try:
+            await self._execute_job(task_id, session_id)
+            await self._task_state.ack_dispatch(message_id)
+        except Exception as exc:
+            logger.exception(
+                "Worker 执行任务失败: task_id=%s session_id=%s error=%s",
+                task_id,
+                session_id,
+                exc,
+            )
+            await self._task_state.mark_dispatch_failure(
+                message_id=message_id,
+                task_id=task_id,
+                session_id=session_id,
+                error=str(exc),
+            )
 
     async def _execute_job(self, task_id: str, session_id: str) -> None:
         if await self._task_state.is_cancelled(task_id):
@@ -177,6 +208,9 @@ class AgentWorker:
 
     async def shutdown(self) -> None:
         self._running = False
+        from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
+
+        await get_sandbox_pool().shutdown()
         await RedisStreamTask.destroy()
         await get_redis().shutdown()
         await get_postgres().shutdown()
@@ -191,6 +225,9 @@ async def main() -> None:
     await get_redis().init()
     await get_postgres().init()
     await get_cos().init()
+    from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
+
+    await get_sandbox_pool().start()
     await bootstrap_data(
         uow_factory=get_uow,
         llm_model_service=LLMModelService(

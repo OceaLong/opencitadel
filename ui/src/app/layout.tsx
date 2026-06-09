@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 
 import { AppShell } from "@/components/app-shell";
 import { Toaster } from "@/components/ui/sonner";
+import { ThemeProvider } from "@/providers/theme-provider";
 
 import "./globals.css";
 
@@ -23,8 +24,10 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <body className="h-screen overflow-hidden">
-        <AppShell>{children}</AppShell>
-        <Toaster position="top-center" richColors />
+        <ThemeProvider>
+          <AppShell>{children}</AppShell>
+          <Toaster position="top-center" richColors />
+        </ThemeProvider>
       </body>
     </html>
   );

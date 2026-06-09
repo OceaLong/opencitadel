@@ -93,9 +93,15 @@ class SessionRepository(Protocol):
             self,
             session_id: str,
             after: Optional[int] = None,
+            before: Optional[int] = None,
             limit: int = 100,
+            latest: bool = False,
     ) -> List[Tuple[int, BaseEvent]]:
         """按游标分页查询会话事件"""
+        ...
+
+    async def has_events_before(self, session_id: str, seq: int) -> bool:
+        """是否存在早于指定 seq 的会话事件"""
         ...
 
     async def add_file(self, session_id: str, file: File) -> None:

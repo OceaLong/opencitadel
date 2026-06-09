@@ -26,6 +26,9 @@ class SessionStateService:
     ) -> Optional[SessionStatusEvent]:
         async with self._uow_factory() as uow:
             await uow.session.update_status(session_id, status)
+        from app.infrastructure.external.session_list_notifier import notify_sessions_changed
+
+        await notify_sessions_changed()
         logger.debug("Session %s -> %s", session_id, status.value)
         if emit_event:
             return SessionStatusEvent(status=status.value)

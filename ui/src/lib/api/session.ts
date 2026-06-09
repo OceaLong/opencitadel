@@ -147,10 +147,18 @@ export const sessionApi = {
 
   getSessionEvents: (
     sessionId: string,
-    params?: { after?: number | null; limit?: number; include_debug?: boolean },
+    params?: {
+      after?: number | null;
+      before?: number | null;
+      latest?: boolean;
+      limit?: number;
+      include_debug?: boolean;
+    },
   ): Promise<SessionEventsPage> => {
     const search = new URLSearchParams();
     if (params?.after != null) search.set("after", String(params.after));
+    if (params?.before != null) search.set("before", String(params.before));
+    if (params?.latest != null) search.set("latest", String(params.latest));
     if (params?.limit != null) search.set("limit", String(params.limit));
     if (params?.include_debug != null) search.set("include_debug", String(params.include_debug));
     const suffix = search.toString() ? `?${search.toString()}` : "";

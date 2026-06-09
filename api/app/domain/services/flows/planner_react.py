@@ -146,11 +146,8 @@ class PlannerReActFlow(BaseFlow):
         # 1.调用会话仓库查询会话是否存在
         async with self._uow:
             session = await self._uow.session.get_by_id(self._session_id)
-            event_records = await self._uow.session.list_events(self._session_id, limit=200)
         if not session:
             raise ValueError(f"会话[{self._session_id}]不存在, 请核实后尝试")
-        if event_records:
-            session.events = [event for _, event in event_records]
 
         # 2.判断会话的状态是不是空闲
         #   如果不是则有可能有两种状态
@@ -158,7 +155,14 @@ class PlannerReActFlow(BaseFlow):
         #    - Agent在等待人类输入，这时候人类输入了
         #   这时候均需要处理历史消息列表，避免AI(工具调用消息)后直接接上人类消息
         clarify_resume = session.pending_phase == CLARIFY_PENDING_PHASE
-        if session.status != SessionStatus.PENDING and not clarify_resume:
+        needs_event_history = session.status != SessionStatus.PENDING and not clarify_resume
+        if needs_event_history:
+            async with self._uow:
+                event_records = await self._uow.session.list_events(self._session_id, limit=200)
+            if event_records:
+                session.events = [event for _, event in event_records]
+
+        if needs_event_history:
             logger.debug(f"会话[{self._session_id}]未处于空闲状态，回滚数据确保消息列表格式正确")
             await self.planner.roll_back(message)
             await self.react.roll_back(message)

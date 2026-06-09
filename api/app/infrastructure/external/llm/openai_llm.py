@@ -16,6 +16,7 @@ from app.infrastructure.external.llm.base_llm import (
     is_retriable_multimodal_error,
 )
 from app.infrastructure.external.llm.base_llm import normalize_usage
+from app.infrastructure.external.llm.retry import with_llm_retry
 from app.infrastructure.observability.llm_metrics import record_multimodal_request
 
 logger = logging.getLogger(__name__)
@@ -203,10 +204,12 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
                 "tool_choice": tool_choice,
             }
             if not self._extra_params.get("omit_parallel_tool_calls"):
-                tool_kwargs["parallel_tool_calls"] = False
-            return await self._client.chat.completions.create(
-                **request_kwargs,
-                **tool_kwargs,
+                tool_kwargs["parallel_tool_calls"] = True
+            return await with_llm_retry(
+                lambda: self._client.chat.completions.create(
+                    **request_kwargs,
+                    **tool_kwargs,
+                )
             )
 
         logger.info(
@@ -214,7 +217,9 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             + (f" thinking={self._thinking_enabled}" if self._thinking_enabled else "")
             + f" timeout={self._timeout}s"
         )
-        return await self._client.chat.completions.create(**request_kwargs)
+        return await with_llm_retry(
+            lambda: self._client.chat.completions.create(**request_kwargs)
+        )
 
     def _raise_llm_error(self, error: Exception, request_model: str) -> None:
         error_text = str(error).lower()
@@ -345,9 +350,11 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
                 tool_kwargs["parallel_tool_calls"] = True
 
         try:
-            stream = await self._client.chat.completions.create(
-                **request_kwargs,
-                **tool_kwargs,
+            stream = await with_llm_retry(
+                lambda: self._client.chat.completions.create(
+                    **request_kwargs,
+                    **tool_kwargs,
+                )
             )
         except ServerRequestsError:
             raise

@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
 
 import { ManusIcon } from "@/components/manus-icon";
 import { ManusSettings } from "@/components/manus-settings";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
@@ -27,16 +28,17 @@ export function ChatHeader() {
         </Link>
       </div>
       <div className="flex items-center gap-1">
-        <Button variant="outline" size="icon-sm" asChild title="代码知识库">
+        <Button variant="outline" size="icon-sm" asChild aria-label="代码知识库" title="代码知识库">
           <Link href="/codebase">
             <Code2 className="size-4" />
           </Link>
         </Button>
-        <Button variant="outline" size="icon-sm" asChild title="应用市场">
+        <Button variant="outline" size="icon-sm" asChild aria-label="应用市场" title="应用市场">
           <Link href="/marketplace">
             <LayoutGrid className="size-4" />
           </Link>
         </Button>
+        <ThemeToggle />
         <ManusSettings />
       </div>
     </header>
