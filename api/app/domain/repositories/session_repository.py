@@ -117,3 +117,31 @@ class SessionRepository(Protocol):
     async def get_memory(self, session_id: str, agent_name: str) -> Memory:
         """根据传递的会话id+Agent名字获取记忆"""
         ...
+
+    async def get_max_event_seq(self, session_id: str) -> Optional[int]:
+        """Get the maximum persisted event seq for a session."""
+        ...
+
+    async def get_event_seq_by_stream_id(self, session_id: str, stream_id: str) -> Optional[int]:
+        """Resolve a persisted event seq by stream/event id."""
+        ...
+
+    async def delete_events_from_seq(
+            self,
+            session_id: str,
+            from_seq: int,
+            inclusive: bool = True,
+    ) -> int:
+        """Delete session events from the given seq onward."""
+        ...
+
+    async def restore_session_snapshot(
+            self,
+            session_id: str,
+            memories: Dict[str, Any],
+            files: List[Dict[str, Any]],
+            status: str,
+            pending_phase: Optional[str],
+    ) -> None:
+        """Restore session memories, files and status from a checkpoint snapshot."""
+        ...

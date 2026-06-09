@@ -23,8 +23,12 @@ class ModelCapabilities(BaseModel):
     """模型多模态与图像相关能力描述。"""
     vision: bool = False
     vision_with_tools: bool = True
+    audio: bool = False
+    video: bool = False
+    image_generation: bool = False
     max_image_bytes: int = Field(default=_DEFAULT_MAX_IMAGE_BYTES, ge=1)
     max_images_per_request: int = Field(default=8, ge=1)
+    max_video_frames: int = Field(default=8, ge=1)
     image_encoding: Literal["data_url", "url"] = "data_url"
 
     @classmethod

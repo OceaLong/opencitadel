@@ -25,6 +25,8 @@ class Skill(BaseModel):
     category: str = "general"
     system_prompt: str = ""
     allowed_tools: List[str] = Field(default_factory=list)
+    mcp_server_refs: List[str] = Field(default_factory=list)
+    a2a_server_refs: List[str] = Field(default_factory=list)
     recommended_model_id: Optional[str] = None
     agent_params: SkillAgentParams = Field(default_factory=SkillAgentParams)
     examples: List[str] = Field(default_factory=list)

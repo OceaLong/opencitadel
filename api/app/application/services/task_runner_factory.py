@@ -15,10 +15,13 @@ from app.domain.external.json_parser import JSONParser
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
+from app.domain.utils.app_config_filter import filter_a2a_config_by_refs, filter_mcp_config_by_refs
 from app.domain.models.session import Session
 from app.domain.models.skill import Skill
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agent_task_runner import AgentTaskRunner
+from app.domain.services.checkpoint_service import CheckpointService
+from app.domain.services.tools.image_generation import ImageGenerationTool
 from app.domain.services.tools.memory import MemoryTool
 from app.infrastructure.external.llm.factory import LLMFactory
 
@@ -43,6 +46,7 @@ class TaskRunnerFactory:
             file_storage: FileStorage,
             auto_extract_memory: bool = True,
             config_provider: Optional[AppConfigProvider] = None,
+            checkpoint_service: Optional[CheckpointService] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm_model_service = llm_model_service
@@ -57,6 +61,7 @@ class TaskRunnerFactory:
         self._file_storage = file_storage
         self._auto_extract_memory = auto_extract_memory
         self._config_provider = config_provider or get_app_config_provider()
+        self._checkpoint_service = checkpoint_service
 
     async def _refresh_runtime_config(self) -> None:
         app_config = await self._config_provider.get()
@@ -104,7 +109,7 @@ class TaskRunnerFactory:
             llm_model = llm_model.model_copy(update={"temperature": temperature_override})
         llm = LLMFactory.create(llm_model, thinking_enabled=session.thinking_enabled)
         long_term_memory_block = await self._memory_recall(session.id)
-        return llm, agent_config, skill, skill_prompt, long_term_memory_block, llm_model.id
+        return llm, agent_config, skill, skill_prompt, long_term_memory_block, llm_model
 
     async def _memory_recall(self, session_id: str) -> str:
         try:
@@ -125,7 +130,8 @@ class TaskRunnerFactory:
             async with self._uow_factory() as uow:
                 await uow.session.save(session)
 
-        llm, agent_config, skill, skill_prompt, ltm_block, model_id = await self._resolve_llm_and_config(session)
+        llm, agent_config, skill, skill_prompt, ltm_block, llm_model = await self._resolve_llm_and_config(session)
+        model_id = llm_model.id
 
         browser = await sandbox.get_browser(supports_multimodal=llm.supports_multimodal)
         if not browser:
@@ -138,6 +144,24 @@ class TaskRunnerFactory:
             return {"id": entry.id}
 
         extra_tools = [MemoryTool(save_fn=save_memory_fn, session_id=session.id)]
+        caps = llm_model.capabilities
+        if caps and caps.image_generation:
+            extra_tools.append(
+                ImageGenerationTool(
+                    llm=llm,
+                    llm_model=llm_model,
+                    file_storage=self._file_storage,
+                )
+            )
+
+        mcp_config = filter_mcp_config_by_refs(
+            self._mcp_config,
+            skill.mcp_server_refs if skill else None,
+        )
+        a2a_config = filter_a2a_config_by_refs(
+            self._a2a_config,
+            skill.a2a_server_refs if skill else None,
+        )
 
         async def on_complete(session_id: str) -> None:
             if self._auto_extract_memory:
@@ -152,8 +176,8 @@ class TaskRunnerFactory:
             uow_factory=self._uow_factory,
             llm=llm,
             agent_config=agent_config,
-            mcp_config=self._mcp_config,
-            a2a_config=self._a2a_config,
+            mcp_config=mcp_config,
+            a2a_config=a2a_config,
             session_id=session.id,
             file_storage=self._file_storage,
             json_parser=self._json_parser,
@@ -166,4 +190,5 @@ class TaskRunnerFactory:
             extra_tools=extra_tools,
             on_complete_callback=on_complete if self._auto_extract_memory else None,
             model_id=model_id,
+            checkpoint_service=self._checkpoint_service,
         )

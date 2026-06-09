@@ -27,6 +27,7 @@ from app.infrastructure.storage.postgres import get_postgres, get_uow
 from app.infrastructure.storage.redis import get_redis
 from app.domain.models.app_config import AgentConfig, A2AConfig, MCPConfig
 from app.domain.models.session import SessionStatus
+from app.domain.services.checkpoint_service import CheckpointService
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,11 @@ class AgentWorker:
             cos=get_cos(),
             uow_factory=get_uow,
         )
+        checkpoint_service = CheckpointService(
+            uow_factory=get_uow,
+            cos=get_cos(),
+            sandbox_cls=DockerSandbox,
+        )
         self._runner_factory = TaskRunnerFactory(
             uow_factory=get_uow,
             llm_model_service=llm_model_service,
@@ -65,6 +71,7 @@ class AgentWorker:
             file_storage=file_storage,
             auto_extract_memory=self._settings.memory_auto_extract_enabled,
             config_provider=self._config_provider,
+            checkpoint_service=checkpoint_service,
         )
 
     async def start(self) -> None:

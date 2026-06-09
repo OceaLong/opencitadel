@@ -85,6 +85,7 @@ class LLMModelService:
 
     async def create_model(self, model: LLMModel) -> LLMModel:
         self._validate_model(model, require_api_key=model.provider != LLMProvider.OLLAMA)
+        model = await self._auto_probe_capabilities(model)
         encrypted = self._cipher.encrypt(model.api_key) if model.api_key else ""
         async with self._uow_factory() as uow:
             if model.is_default:
@@ -101,6 +102,7 @@ class LLMModelService:
             if not updates.api_key.strip() or "****" in updates.api_key:
                 updates.api_key = existing.api_key
             self._validate_model(updates)
+            updates = await self._auto_probe_capabilities(updates)
             encrypted = self._cipher.encrypt(updates.api_key) if updates.api_key else ""
             if updates.is_default:
                 await uow.llm_model.clear_default()
@@ -139,7 +141,37 @@ class LLMModelService:
     async def probe_multimodal(self, model_id: str) -> dict:
         model = await self.get_model(model_id, mask=False)
         self._ensure_invokable(model)
-        if not model.capabilities.vision:
+        return await self._run_vision_probe(model)
+
+    async def _auto_probe_capabilities(self, model: LLMModel) -> LLMModel:
+        """保存模型时自动探测 vision / vision_with_tools 能力。"""
+        if model.provider == LLMProvider.OLLAMA:
+            return model
+        try:
+            self._ensure_invokable(model)
+        except BadRequestError:
+            return model
+
+        if model.extra_params.get("skip_capability_probe"):
+            return model
+
+        caps = model.capabilities
+        if not (caps.vision or model.supports_multimodal):
+            return model
+
+        probe = await self._run_vision_probe(model)
+        if probe.get("status") == "ok":
+            caps = caps.model_copy(update={"vision": True})
+            if probe.get("vision_with_tools") is False:
+                caps = caps.model_copy(update={"vision_with_tools": False})
+        elif probe.get("status") == "error":
+            caps = caps.model_copy(update={"vision": False})
+        model = model.model_copy(update={"capabilities": caps})
+        model.supports_multimodal = caps.vision
+        return model
+
+    async def _run_vision_probe(self, model: LLMModel) -> dict:
+        if not model.capabilities.vision and not model.supports_multimodal:
             return {"status": "skipped", "message": "模型未开启多模态能力"}
 
         llm = LLMFactory.create(model)
@@ -160,7 +192,26 @@ class LLMModelService:
         try:
             result = await llm.invoke(messages)
             if result.get("content") is not None or result.get("tool_calls"):
-                return {"status": "ok", "message": "多模态探测成功"}
+                probe_tools = {"status": "ok", "message": "多模态探测成功", "vision_with_tools": True}
+                try:
+                    tool_result = await llm.invoke(
+                        messages,
+                        tools=[{
+                            "type": "function",
+                            "function": {
+                                "name": "probe_tool",
+                                "description": "probe",
+                                "parameters": {"type": "object", "properties": {}},
+                            },
+                        }],
+                    )
+                    if tool_result.get("tool_calls"):
+                        probe_tools["vision_with_tools"] = True
+                    else:
+                        probe_tools["vision_with_tools"] = bool(tool_result.get("content"))
+                except Exception:
+                    probe_tools["vision_with_tools"] = False
+                return probe_tools
             return {"status": "fallback", "message": "模型返回空内容"}
         except ServerRequestsError as exc:
             message = getattr(exc, "msg", None) or str(exc)

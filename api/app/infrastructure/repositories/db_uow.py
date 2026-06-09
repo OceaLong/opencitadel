@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from core.config import get_settings
+from .db_checkpoint_repository import DBCheckpointRepository
 from .db_file_repository import DBFileRepository
 from .db_llm_model_repository import DBLLMModelRepository
 from .db_llm_token_usage_repository import DBLLMTokenUsageRepository
@@ -42,6 +43,7 @@ class DBUnitOfWork(IUnitOfWork):
 
         # 2.初始化所有数据库仓库
         cipher = ApiKeyCipher(get_settings().api_key_secret)
+        self.checkpoint = DBCheckpointRepository(db_session=self.db_session)
         self.file = DBFileRepository(db_session=self.db_session)
         self.session = DBSessionRepository(db_session=self.db_session)
         self.llm_model = DBLLMModelRepository(db_session=self.db_session, cipher=cipher)

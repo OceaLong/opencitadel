@@ -66,6 +66,9 @@ export function SessionDetailView({
     handleCloseVNC,
     handleStop,
     handleDebugOpen,
+    resolveCheckpoint,
+    handleRestoreCheckpoint,
+    restoringCheckpoint,
   } = useSessionDetailView({
     sessionId,
     initialMessage,
@@ -148,6 +151,13 @@ export function SessionDetailView({
                     onToolClick={handleToolClick}
                     onClarifyAnswer={handleClarifyAnswer}
                     sessionStatus={session.status}
+                    checkpoint={
+                      item.kind === "user" || item.kind === "step"
+                        ? resolveCheckpoint(item.anchorEventId)
+                        : undefined
+                    }
+                    onRestoreCheckpoint={handleRestoreCheckpoint}
+                    restoringCheckpoint={restoringCheckpoint}
                   />
                 ))}
 

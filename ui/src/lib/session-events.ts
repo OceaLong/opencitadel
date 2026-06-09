@@ -123,7 +123,7 @@ export function normalizeEvents(rawList: unknown): SSEEventData[] {
 
 /** 时间线单项：用于渲染对话区的一条记录 */
 export type TimelineItem =
-  | { kind: "user"; id: string; data: ChatMessage }
+  | { kind: "user"; id: string; data: ChatMessage; anchorEventId?: string }
   | { kind: "attachments"; id: string; role: "user" | "assistant"; files: AttachmentFile[] }
   | { kind: "assistant"; id: string; data: ChatMessage }
   | {
@@ -134,7 +134,7 @@ export type TimelineItem =
       interactive: boolean;
     }
   | { kind: "tool"; id: string; data: ToolEvent; timeLabel?: string }
-  | { kind: "step"; id: string; data: StepEvent; tools: ToolEvent[] }
+  | { kind: "step"; id: string; data: StepEvent; tools: ToolEvent[]; anchorEventId?: string }
   | { kind: "wait"; id: string; message: string; timestamp?: number }
   | { kind: "error"; id: string; error: string; timestamp?: number; contextLabel?: string };
 
@@ -346,10 +346,12 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
         if (msg.role === "user") {
           markLatestClarifyAnswered(list);
           lastStepId = null;
+          const anchorEventId = (msg as { event_id?: string }).event_id;
           list.push({
             kind: "user",
             id: stableId("user", messageIndex++, String(list.length)),
             data: msg,
+            anchorEventId,
           });
           if (msg.attachments && msg.attachments.length > 0) {
             list.push({
@@ -394,6 +396,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
       }
       case "step": {
         const step = ev.data as StepEvent;
+        const stepAnchorEventId = (step as { event_id?: string }).event_id;
         lastContextLabel = `步骤：${step.description}`;
 
         // 判断是更新现有 step 还是创建新 step
@@ -417,7 +420,8 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
                 kind: "step",
                 id: existing.id,
                 data: step,
-                tools: existing.tools, // 保留已有的 tools
+                tools: existing.tools,
+                anchorEventId: existing.anchorEventId ?? stepAnchorEventId,
               };
             }
           }
@@ -427,7 +431,8 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
             kind: "step",
             id: stableId("step", stepIndex++, step.id + "_" + String(list.length)),
             data: step,
-            tools: [], // 初始为空，tools 会在后续添加
+            tools: [],
+            anchorEventId: stepAnchorEventId,
           });
         }
 

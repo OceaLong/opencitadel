@@ -16,6 +16,17 @@ _DATA_URL_PATTERN = re.compile(r"^data:([^;]+);base64,(.+)$", re.DOTALL)
 _FALLBACK_IMAGE_NOTE = "原始消息包含图片附件，因模型服务连接异常已省略图片内容。"
 
 
+def _guess_image_mime_from_url(url: str) -> str:
+    lower = url.lower().split("?")[0]
+    if lower.endswith(".jpg") or lower.endswith(".jpeg"):
+        return "image/jpeg"
+    if lower.endswith(".webp"):
+        return "image/webp"
+    if lower.endswith(".gif"):
+        return "image/gif"
+    return "image/png"
+
+
 def _has_multimodal_image_content(messages: List[Dict[str, Any]]) -> bool:
     for message in messages:
         content = message.get("content")
@@ -182,7 +193,8 @@ def openai_content_to_gemini_parts(content: Any) -> List[Dict[str, Any]]:
                 mime_type, data = parse_data_url(url)
                 parts.append({"inlineData": {"mimeType": mime_type, "data": data}})
             elif url.startswith("http://") or url.startswith("https://"):
-                parts.append({"fileData": {"mimeType": "image/png", "fileUri": url}})
+                mime_type = part.get("mime_type") or _guess_image_mime_from_url(url)
+                parts.append({"fileData": {"mimeType": mime_type, "fileUri": url}})
     return parts if parts else [{"text": ""}]
 
 

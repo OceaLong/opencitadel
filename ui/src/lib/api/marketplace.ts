@@ -15,6 +15,11 @@ import type {
   NutritionFollowupParams,
   TranslationData,
   TranslationParams,
+  DocumentConvertData,
+  DocumentConvertParams,
+  WatermarkAddParams,
+  WatermarkRemoveParams,
+  WatermarkResultData,
   VideoSearchData,
   VideoSearchParams,
 } from "./types";
@@ -48,4 +53,13 @@ export const marketplaceApi = {
 
   translate: (params: TranslationParams): Promise<TranslationData> =>
     post<TranslationData>("/marketplace/translation/translate", params),
+
+  convertDocument: (params: DocumentConvertParams): Promise<DocumentConvertData> =>
+    post<DocumentConvertData>("/marketplace/convert", params),
+
+  addWatermark: (params: WatermarkAddParams): Promise<WatermarkResultData> =>
+    post<WatermarkResultData>("/marketplace/watermark/add", params),
+
+  removeWatermark: (params: WatermarkRemoveParams): Promise<WatermarkResultData> =>
+    post<WatermarkResultData>("/marketplace/watermark/remove", params),
 };

@@ -4,6 +4,7 @@ import logging
 from typing import AsyncGenerator, Optional, Callable, List
 
 from app.domain.external.browser import Browser
+from app.domain.external.file_storage import FileStorage
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
@@ -60,6 +61,7 @@ class PlannerReActFlow(BaseFlow):
             long_term_memory_block: str = "",
             extra_tools: Optional[List[BaseTool]] = None,
             model_id: Optional[str] = None,
+            file_storage: Optional[FileStorage] = None,
     ) -> None:
         """构造函数，完成规划与执行流的初始化"""
         # 1.流初始化数据配置
@@ -83,7 +85,7 @@ class PlannerReActFlow(BaseFlow):
             extra_tools=extra_tools,
         )
 
-        allowed_tool_names = skill.allowed_tools if skill else None
+        allowed_tool_names = skill.allowed_tools if (skill and skill.allowed_tools) else None
 
         # 3.创建澄清Agent（agent_params 已在 AgentService 合并）
         self.clarify = ClarifyAgent(
@@ -97,6 +99,7 @@ class PlannerReActFlow(BaseFlow):
             long_term_memory_block=long_term_memory_block,
             allowed_tool_names=allowed_tool_names,
             model_id=model_id,
+            file_storage=file_storage,
         )
         logger.debug(f"创建澄清Agent成功, 会话id: {self._session_id}")
 
@@ -112,6 +115,7 @@ class PlannerReActFlow(BaseFlow):
             long_term_memory_block=long_term_memory_block,
             allowed_tool_names=allowed_tool_names,
             model_id=model_id,
+            file_storage=file_storage,
         )
         logger.debug(f"创建规划Agent成功, 会话id: {self._session_id}")
 
@@ -127,6 +131,7 @@ class PlannerReActFlow(BaseFlow):
             long_term_memory_block=long_term_memory_block,
             allowed_tool_names=allowed_tool_names,
             model_id=model_id,
+            file_storage=file_storage,
         )
         logger.debug(f"创建执行Agent成功, 会话id: {self._session_id}")
 

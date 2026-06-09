@@ -116,9 +116,17 @@ class Memory(BaseModel):
     def compact(self, tool_content_max_chars: int = _DEFAULT_TOOL_CONTENT_MAX) -> None:
         """记忆压缩，将记忆中已经执行的工具(搜索/网页源码获取/浏览器访问结果等)这类已经执行过的消息进行压缩检索"""
         last_image_index: Optional[int] = None
+        seen_image_refs: dict[str, int] = {}
         for index, message in enumerate(self.messages):
             if _message_has_image_part(message):
                 last_image_index = index
+            content = message.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "image_ref":
+                        ref = part.get("ref")
+                        if ref:
+                            seen_image_refs[ref] = index
 
         # 1.循环遍历所有的消息列表
         for index, message in enumerate(self.messages):
@@ -131,9 +139,19 @@ class Memory(BaseModel):
                 else:
                     self._truncate_tool_content(message, function_name, tool_content_max_chars)
 
-            if _message_has_image_part(message) and index != last_image_index:
-                _strip_image_parts_from_message(message)
-                logger.debug("从记忆中压缩历史多模态图片 part: index=%s", index)
+            if _message_has_image_part(message):
+                content = message.get("content")
+                if isinstance(content, list):
+                    refs_in_msg = [
+                        p.get("ref") for p in content
+                        if isinstance(p, dict) and p.get("type") == "image_ref" and p.get("ref")
+                    ]
+                    # 保留最后一条含图消息；相同 ref 仅保留最新出现
+                    if index != last_image_index or any(
+                        seen_image_refs.get(r, index) != index for r in refs_in_msg
+                    ):
+                        _strip_image_parts_from_message(message)
+                        logger.debug("从记忆中压缩历史多模态图片 part: index=%s", index)
 
             # 3.仅移除非 assistant 消息中的 reasoning_content；thinking 模式要求
             #    assistant 历史必须回传 reasoning_content，否则后续 LLM 调用会 400

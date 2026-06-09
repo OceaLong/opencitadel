@@ -142,6 +142,9 @@ async def analyze_image_with_llm(
         image_bytes: bytes,
         mime_type: str,
         prompt: str,
+        *,
+        schema: Optional[Dict[str, Any]] = None,
+        max_retries: int = 2,
 ) -> Dict[str, Any]:
     if not vision_service.vision_enabled(llm):
         raise ValueError("当前默认模型未开启多模态能力，请在设置中选择支持视觉的模型")
@@ -152,20 +155,89 @@ async def analyze_image_with_llm(
             image_bytes, mime_type, capabilities.max_image_bytes,
         )
 
-    image_part = build_image_content_part(image_bytes, mime_type)
-    messages = [{
-        "role": "user",
-        "content": [
-            {"type": "text", "text": prompt},
-            image_part,
-        ],
-    }]
-    response = await llm.invoke(messages)
-    content = response.get("content") or response.get("reasoning_content") or ""
-    if not content:
-        raise ValueError("模型未返回有效分析结果")
     parser = RepairJSONParser()
-    return await parser.invoke(content, default_value={})
+    last_error: Optional[Exception] = None
+    for attempt in range(max_retries + 1):
+        retry_hint = ""
+        if attempt > 0:
+            retry_hint = "\n\n请严格输出合法 JSON，不要包含 markdown 代码块。"
+        image_part = build_image_content_part(image_bytes, mime_type)
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt + retry_hint},
+                image_part,
+            ],
+        }]
+        try:
+            response = await llm.invoke(messages)
+            content = response.get("content") or response.get("reasoning_content") or ""
+            if not content:
+                raise ValueError("模型未返回有效分析结果")
+            parsed = await parser.invoke(content, default_value={})
+            if schema:
+                validated = validate_json_schema(parsed, schema)
+                if validated is not None:
+                    return validated
+                raise ValueError("JSON 结构校验失败")
+            return parsed
+        except Exception as exc:
+            last_error = exc
+            logger.warning("vision LLM 调用失败 attempt=%s: %s", attempt, exc)
+    raise ValueError(str(last_error) if last_error else "模型未返回有效分析结果")
+
+
+def validate_json_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """轻量 JSON schema 校验（required 字段 + 类型）。"""
+    if not isinstance(data, dict):
+        return None
+    required = schema.get("required") or []
+    properties = schema.get("properties") or {}
+    for field in required:
+        if field not in data:
+            return None
+    for field, spec in properties.items():
+        if field not in data:
+            continue
+        expected = spec.get("type")
+        value = data[field]
+        if expected == "array" and not isinstance(value, list):
+            return None
+        if expected == "string" and not isinstance(value, str):
+            return None
+        if expected == "number" and not isinstance(value, (int, float)):
+            return None
+    return data
+
+
+async def analyze_images_with_llm(
+        llm: LLM,
+        images: List[tuple[bytes, str]],
+        prompt: str,
+        *,
+        schema: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """多图 vision 分析。"""
+    if not images:
+        raise ValueError("至少需要一张图片")
+    capabilities = vision_service.resolve_capabilities(llm)
+    parts: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for image_bytes, mime_type in images[: capabilities.max_images_per_request]:
+        if len(image_bytes) > capabilities.max_image_bytes:
+            image_bytes = vision_service._compress_image_bytes(
+                image_bytes, mime_type, capabilities.max_image_bytes,
+            )
+        parts.append(build_image_content_part(image_bytes, mime_type))
+    response = await llm.invoke([{"role": "user", "content": parts}])
+    content = response.get("content") or response.get("reasoning_content") or ""
+    parser = RepairJSONParser()
+    parsed = await parser.invoke(content, default_value={})
+    if schema:
+        validated = validate_json_schema(parsed, schema)
+        if validated is None:
+            raise ValueError("JSON 结构校验失败")
+        return validated
+    return parsed
 
 
 def build_platform_search_links(query: str) -> List[Dict[str, str]]:

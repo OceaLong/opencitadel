@@ -98,6 +98,8 @@ export type Skill = {
   category: string;
   system_prompt: string;
   allowed_tools: string[];
+  mcp_server_refs?: string[];
+  a2a_server_refs?: string[];
   recommended_model_id?: string | null;
   agent_params: SkillAgentParams;
   examples: string[];
@@ -412,6 +414,43 @@ export type TranslationData = {
   notes: string[];
 };
 
+export type DocumentConvertParams = {
+  file_id: string;
+  target_format: "pdf" | "docx" | "md" | "txt";
+};
+
+export type DocumentConvertData = {
+  result_file_id: string;
+  result_filename: string;
+  source_format: string;
+  target_format: string;
+  download_ready: boolean;
+};
+
+export type WatermarkAddParams = {
+  file_id: string;
+  watermark_type?: "text" | "image";
+  text?: string;
+  watermark_file_id?: string;
+  opacity?: number;
+  rotation?: number;
+  tile?: boolean;
+};
+
+export type WatermarkRemoveParams = {
+  file_id: string;
+  watermark_text?: string;
+  mode?: "auto" | "text" | "images";
+  model_id?: string;
+};
+
+export type WatermarkResultData = {
+  result_file_id: string;
+  result_filename: string;
+  download_ready: boolean;
+  method?: string;
+};
+
 // ==================== 文件模块类型 ====================
 
 /**
@@ -675,6 +714,21 @@ export type SSEEventHandler = (event: SSEEventData) => void;
 export type SessionEventsPage = {
   events: SSEEventData[];
   next_cursor?: number | null;
+};
+
+export type CheckpointAnchorType = "user_message" | "step";
+
+export type SessionCheckpoint = {
+  id: string;
+  session_id: string;
+  anchor_type: CheckpointAnchorType;
+  anchor_event_id: string;
+  label: string;
+  created_at: string;
+};
+
+export type SessionCheckpointsData = {
+  checkpoints: SessionCheckpoint[];
 };
 
 /**

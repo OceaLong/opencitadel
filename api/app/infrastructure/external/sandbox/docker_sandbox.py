@@ -512,3 +512,54 @@ class DockerSandbox(Sandbox):
             }
         )
         return ToolResult.from_sandbox(**response.json())
+
+    _CHECKPOINT_SHELL_SESSION = "checkpoint"
+
+    async def create_workspace_snapshot(self, snapshot_id: str) -> bytes:
+        """Create a tar.gz snapshot of /home/ubuntu and return its bytes."""
+        archive_path = f"/tmp/cp_{snapshot_id}.tgz"
+        create_cmd = (
+            f"tar czf {archive_path} -C /home/ubuntu "
+            f"--exclude='.snapshots' --exclude='*.tgz' ."
+        )
+        result = await self.exec_command(
+            self._CHECKPOINT_SHELL_SESSION,
+            "/home/ubuntu",
+            create_cmd,
+        )
+        if not result.success:
+            raise RuntimeError(f"创建沙箱快照失败: {result.message or result.data}")
+
+        try:
+            stream = await self.download_file(archive_path)
+            return stream.read()
+        finally:
+            await self.exec_command(
+                self._CHECKPOINT_SHELL_SESSION,
+                "/home/ubuntu",
+                f"rm -f {archive_path}",
+            )
+
+    async def restore_workspace_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
+        """Restore /home/ubuntu from a tar.gz snapshot."""
+        archive_path = f"/tmp/cp_restore_{snapshot_id}.tgz"
+        upload_result = await self.upload_file(
+            file_data=snapshot_data,
+            filepath=archive_path,
+            filename=f"cp_restore_{snapshot_id}.tgz",
+        )
+        if not upload_result.success:
+            raise RuntimeError(f"上传沙箱快照失败: {upload_result.message or upload_result.data}")
+
+        restore_cmd = (
+            f"find /home/ubuntu -mindepth 1 -maxdepth 1 "
+            f"! -name '.snapshots' -exec rm -rf {{}} + && "
+            f"tar xzf {archive_path} -C /home/ubuntu && rm -f {archive_path}"
+        )
+        result = await self.exec_command(
+            self._CHECKPOINT_SHELL_SESSION,
+            "/home/ubuntu",
+            restore_cmd,
+        )
+        if not result.success:
+            raise RuntimeError(f"恢复沙箱快照失败: {result.message or result.data}")

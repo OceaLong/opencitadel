@@ -5,12 +5,11 @@ import { ArrowLeft, Layers3, Loader2, Search, Sparkles, WandSparkles } from "luc
 import { toast } from "sonner";
 
 import { AppCard } from "@/components/marketplace/app-card";
-import { ConsumptionCalculatorApp } from "@/components/marketplace/consumption-calculator-app";
-import { DocumentQaApp } from "@/components/marketplace/document-qa-app";
-import { NutritionAnalysisApp } from "@/components/marketplace/nutrition-analysis-app";
-import { PromptLabApp } from "@/components/marketplace/prompt-lab-app";
-import { SmartTranslationApp } from "@/components/marketplace/smart-translation-app";
-import { VideoSearchApp } from "@/components/marketplace/video-search-app";
+import {
+  FALLBACK_APPS,
+  type LaunchParams,
+  renderApp,
+} from "@/components/marketplace/app-registry";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,142 +19,7 @@ import { marketplaceApi } from "@/lib/api/marketplace";
 import type { MarketplaceApp } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
-const FALLBACK_APPS: MarketplaceApp[] = [
-  {
-    id: "video-search",
-    name: "影视资源聚合",
-    description: "聚合正版免费观看入口，支持中文/英文剧名搜索",
-    icon: "🎬",
-    category: "娱乐",
-    tags: ["影视", "搜索", "正版资源", "在线播放"],
-    featured: true,
-    accent: "violet",
-    needs_vision: false,
-    examples: ["搜索三体免费观看入口", "帮我找 Breaking Bad 正版播放"],
-  },
-  {
-    id: "nutrition-analysis",
-    name: "AI营养分析",
-    description: "拍照识别餐食营养，减脂/增肌红绿灯评估",
-    icon: "🥗",
-    category: "健康",
-    tags: ["视觉识别", "营养", "健身", "减脂"],
-    featured: true,
-    accent: "emerald",
-    needs_vision: true,
-    examples: ["分析这顿饭适不适合减脂", "看看这张餐食蛋白够不够"],
-  },
-  {
-    id: "consumption-calculator",
-    name: "消耗计算器",
-    description: "识别包装净含量，计算可食用次数",
-    icon: "📦",
-    category: "生活",
-    tags: ["OCR", "计算", "包装识别", "生活效率"],
-    featured: false,
-    accent: "amber",
-    needs_vision: true,
-    examples: ["这包 1.2kg 每次 50g 能吃几次", "识别包装净含量并计算消耗"],
-  },
-  {
-    id: "document-qa",
-    name: "文档/图片问答",
-    description: "上传资料或截图，AI 提炼重点并回答问题",
-    icon: "📄",
-    category: "办公",
-    tags: ["文档", "图片理解", "问答", "总结"],
-    featured: true,
-    accent: "sky",
-    needs_vision: false,
-    examples: ["总结这个文档的重点", "看这张截图告诉我哪里异常"],
-  },
-  {
-    id: "smart-translation",
-    name: "智能翻译",
-    description: "自动识别语种，按正式/口语/技术风格翻译",
-    icon: "🌐",
-    category: "办公",
-    tags: ["翻译", "润色", "多语言", "技术文档"],
-    featured: true,
-    accent: "indigo",
-    needs_vision: false,
-    examples: ["把这段英文翻译成正式中文", "翻译截图里的文字为英文"],
-  },
-  {
-    id: "prompt-lab",
-    name: "提示词工坊",
-    description: "把粗略想法改写为可复用的高质量提示词",
-    icon: "✨",
-    category: "效率",
-    tags: ["提示词", "工作流", "创作", "效率"],
-    featured: false,
-    accent: "rose",
-    needs_vision: false,
-    examples: ["帮我写一个数据分析 Agent 提示词", "优化这段客服回复 prompt"],
-  },
-];
-
-type LaunchParams = Record<string, unknown>;
-
 const RECENT_KEY = "my-manus-marketplace-recent";
-
-function renderApp(appId: string, params: LaunchParams) {
-  switch (appId) {
-    case "video-search":
-      return (
-        <VideoSearchApp
-          initialQuery={typeof params.query === "string" ? params.query : undefined}
-          autoRun={Boolean(params.query)}
-        />
-      );
-    case "nutrition-analysis":
-      return (
-        <NutritionAnalysisApp
-          initialGoal={
-            params.goal === "cut" || params.goal === "bulk" || params.goal === "maintain"
-              ? params.goal
-              : undefined
-          }
-        />
-      );
-    case "consumption-calculator":
-      return (
-        <ConsumptionCalculatorApp
-          initialTotalGrams={typeof params.total_grams === "number" ? params.total_grams : undefined}
-          initialServingGrams={
-            typeof params.serving_grams === "number" ? params.serving_grams : undefined
-          }
-        />
-      );
-    case "document-qa":
-      return (
-        <DocumentQaApp initialQuestion={typeof params.question === "string" ? params.question : ""} />
-      );
-    case "smart-translation":
-      return (
-        <SmartTranslationApp
-          initialText={typeof params.text === "string" ? params.text : ""}
-          initialTargetLanguage={
-            typeof params.target_language === "string" ? params.target_language : undefined
-          }
-          initialStyle={
-            params.style === "formal" || params.style === "casual" || params.style === "technical"
-              ? params.style
-              : undefined
-          }
-        />
-      );
-    case "prompt-lab":
-      return <PromptLabApp initialPrompt={typeof params.text === "string" ? params.text : ""} />;
-    default:
-      return (
-        <div className="text-muted-foreground flex flex-col items-center justify-center py-16 text-center">
-          <Layers3 className="mb-3 size-10 opacity-40" />
-          <p className="text-sm">请选择一个应用开始使用</p>
-        </div>
-      );
-  }
-}
 
 function AppListSkeleton() {
   return (

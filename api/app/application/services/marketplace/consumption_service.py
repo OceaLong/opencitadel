@@ -37,7 +37,16 @@ class ConsumptionService:
         if serving_grams <= 0:
             raise ValueError("单次食用量必须大于 0")
 
-        vision_data = await analyze_image_with_llm(llm, image_bytes, mime_type, OCR_PROMPT)
+        schema = {
+            "required": [],
+            "properties": {
+                "net_content_text": {"type": "string"},
+                "confidence": {"type": "number"},
+            },
+        }
+        vision_data = await analyze_image_with_llm(
+            llm, image_bytes, mime_type, OCR_PROMPT, schema=schema,
+        )
         parsed = self._parse_vision_result(vision_data)
 
         if not parsed:

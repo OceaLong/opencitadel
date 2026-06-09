@@ -16,6 +16,8 @@ class SkillCreateRequest(BaseModel):
     category: str = "general"
     system_prompt: str = ""
     allowed_tools: List[str] = Field(default_factory=list)
+    mcp_server_refs: List[str] = Field(default_factory=list)
+    a2a_server_refs: List[str] = Field(default_factory=list)
     recommended_model_id: Optional[str] = None
     agent_params: SkillAgentParams = Field(default_factory=SkillAgentParams)
     examples: List[str] = Field(default_factory=list)
@@ -30,6 +32,8 @@ class SkillUpdateRequest(BaseModel):
     category: Optional[str] = None
     system_prompt: Optional[str] = None
     allowed_tools: Optional[List[str]] = None
+    mcp_server_refs: Optional[List[str]] = None
+    a2a_server_refs: Optional[List[str]] = None
     recommended_model_id: Optional[str] = None
     agent_params: Optional[SkillAgentParams] = None
     examples: Optional[List[str]] = None
@@ -45,6 +49,8 @@ class SkillResponse(BaseModel):
     category: str
     system_prompt: str
     allowed_tools: List[str]
+    mcp_server_refs: List[str] = Field(default_factory=list)
+    a2a_server_refs: List[str] = Field(default_factory=list)
     recommended_model_id: Optional[str]
     agent_params: SkillAgentParams
     examples: List[str]

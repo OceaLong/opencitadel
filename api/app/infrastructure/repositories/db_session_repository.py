@@ -387,3 +387,63 @@ class DBSessionRepository(SessionRepository):
 
         # 3.如果记忆不存在，则构建一个空记忆后返回
         return Memory(messages=[])
+
+    async def get_max_event_seq(self, session_id: str) -> Optional[int]:
+        stmt = (
+            select(func.max(SessionEventModel.seq))
+            .where(SessionEventModel.session_id == session_id)
+        )
+        result = await self.db_session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_event_seq_by_stream_id(self, session_id: str, stream_id: str) -> Optional[int]:
+        stmt = (
+            select(SessionEventModel.seq)
+            .where(SessionEventModel.session_id == session_id)
+            .where(SessionEventModel.stream_id == stream_id)
+            .order_by(SessionEventModel.seq.asc())
+            .limit(1)
+        )
+        result = await self.db_session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def delete_events_from_seq(
+            self,
+            session_id: str,
+            from_seq: int,
+            inclusive: bool = True,
+    ) -> int:
+        condition = (
+            SessionEventModel.seq >= from_seq
+            if inclusive
+            else SessionEventModel.seq > from_seq
+        )
+        stmt = (
+            delete(SessionEventModel)
+            .where(SessionEventModel.session_id == session_id)
+            .where(condition)
+        )
+        result = await self.db_session.execute(stmt)
+        return result.rowcount or 0
+
+    async def restore_session_snapshot(
+            self,
+            session_id: str,
+            memories: Dict[str, Any],
+            files: List[Dict[str, Any]],
+            status: str,
+            pending_phase: Optional[str],
+    ) -> None:
+        stmt = (
+            update(SessionModel)
+            .where(SessionModel.id == session_id)
+            .values(
+                memories=memories,
+                files=files,
+                status=status,
+                pending_phase=pending_phase,
+            )
+        )
+        result = await self.db_session.execute(stmt)
+        if result.rowcount == 0:
+            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")

@@ -1,7 +1,15 @@
 "use client";
 
 import { memo, useState } from "react";
-import { AlertCircle, CheckIcon, ChevronDown, Clock3, Languages, Loader2 } from "lucide-react";
+import {
+  AlertCircle,
+  CheckIcon,
+  ChevronDown,
+  Clock3,
+  History,
+  Languages,
+  Loader2,
+} from "lucide-react";
 
 import { AttachmentsMessage } from "@/components/attachments-message";
 import { ClarifyQuestions } from "@/components/clarify-questions";
@@ -9,7 +17,7 @@ import { ManusIcon } from "@/components/manus-icon";
 import { MarkdownContent } from "@/components/markdown-content";
 import { ToolUse } from "@/components/tool-use";
 
-import type { SessionStatus, ToolEvent } from "@/lib/api/types";
+import type { SessionCheckpoint, SessionStatus, ToolEvent } from "@/lib/api/types";
 import { type AttachmentFile, getToolTimeLabel, type TimelineItem } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +29,9 @@ export type ChatMessageProps = {
   onToolClick?: (tool: ToolEvent) => void;
   onClarifyAnswer?: (answer: string) => Promise<void> | void;
   sessionStatus?: SessionStatus;
+  checkpoint?: SessionCheckpoint;
+  onRestoreCheckpoint?: (checkpoint: SessionCheckpoint) => Promise<void> | void;
+  restoringCheckpoint?: boolean;
 };
 
 type ToolRowProps = {
@@ -28,6 +39,31 @@ type ToolRowProps = {
   timeLabel?: string;
   children: React.ReactNode;
 };
+
+function RestoreCheckpointButton({
+  checkpoint,
+  onRestore,
+  disabled,
+}: {
+  checkpoint: SessionCheckpoint;
+  onRestore?: (checkpoint: SessionCheckpoint) => Promise<void> | void;
+  disabled?: boolean;
+}) {
+  if (!onRestore) return null;
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onRestore(checkpoint)}
+      className="text-muted-foreground hover:text-foreground border-border/70 bg-card/80 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+      title="回退到此处"
+    >
+      <History className="size-3" />
+      <span>回退到此处</span>
+    </button>
+  );
+}
 
 function ToolRow({ className, timeLabel, children }: ToolRowProps) {
   const [hovered, setHovered] = useState(false);
@@ -58,11 +94,21 @@ function ChatMessageComponent({
   onToolClick,
   onClarifyAnswer,
   sessionStatus,
+  checkpoint,
+  onRestoreCheckpoint,
+  restoringCheckpoint,
 }: ChatMessageProps) {
   if (item.kind === "user") {
     return (
       <div className={cn("group mt-3 flex w-full flex-col items-end justify-end gap-1", className)}>
         <div className="relative flex max-w-[90%] flex-col items-end gap-2">
+          {checkpoint && (
+            <RestoreCheckpointButton
+              checkpoint={checkpoint}
+              onRestore={onRestoreCheckpoint}
+              disabled={restoringCheckpoint || sessionStatus === "running"}
+            />
+          )}
           <div className="border-border/70 bg-card text-foreground relative flex items-center overflow-hidden rounded-2xl border px-3.5 py-2.5 text-sm leading-relaxed shadow-[var(--shadow-card)]">
             {item.data.message ?? ""}
           </div>
@@ -118,7 +164,17 @@ function ChatMessageComponent({
   }
 
   if (item.kind === "step") {
-    return <StepBlock stepItem={item} className={className} onToolClick={onToolClick} />;
+    return (
+      <StepBlock
+        stepItem={item}
+        className={className}
+        onToolClick={onToolClick}
+        checkpoint={checkpoint}
+        onRestoreCheckpoint={onRestoreCheckpoint}
+        restoringCheckpoint={restoringCheckpoint}
+        sessionStatus={sessionStatus}
+      />
+    );
   }
 
   if (item.kind === "wait") {
@@ -209,6 +265,9 @@ export const ChatMessage = memo(ChatMessageComponent, (prev, next) => {
     prev.onFileClick === next.onFileClick &&
     prev.onToolClick === next.onToolClick &&
     prev.onClarifyAnswer === next.onClarifyAnswer &&
+    prev.checkpoint?.id === next.checkpoint?.id &&
+    prev.onRestoreCheckpoint === next.onRestoreCheckpoint &&
+    prev.restoringCheckpoint === next.restoringCheckpoint &&
     itemSignature(prev.item) === itemSignature(next.item)
   );
 });
@@ -217,10 +276,18 @@ function StepBlock({
   stepItem,
   className,
   onToolClick,
+  checkpoint,
+  onRestoreCheckpoint,
+  restoringCheckpoint,
+  sessionStatus,
 }: {
   stepItem: Extract<TimelineItem, { kind: "step" }>;
   className?: string;
   onToolClick?: (tool: ToolEvent) => void;
+  checkpoint?: SessionCheckpoint;
+  onRestoreCheckpoint?: (checkpoint: SessionCheckpoint) => Promise<void> | void;
+  restoringCheckpoint?: boolean;
+  sessionStatus?: SessionStatus;
 }) {
   const [expanded, setExpanded] = useState(true);
   const { data, tools } = stepItem;
@@ -230,6 +297,15 @@ function StepBlock({
 
   return (
     <div className={cn("mt-3 flex flex-col", className)}>
+      {checkpoint && (
+        <div className="mb-1 flex justify-start">
+          <RestoreCheckpointButton
+            checkpoint={checkpoint}
+            onRestore={onRestoreCheckpoint}
+            disabled={restoringCheckpoint || sessionStatus === "running"}
+          />
+        </div>
+      )}
       <div
         role="button"
         tabIndex={0}

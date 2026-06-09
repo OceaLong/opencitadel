@@ -6,6 +6,7 @@ from functools import lru_cache
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.services.a2a_server_service import A2AServerService
 from app.application.services.agent_service import AgentService
 from app.application.services.app_config_service import AppConfigService
 from app.application.services.file_service import FileService
@@ -16,6 +17,7 @@ from app.application.services.memory_service import MemoryService
 from app.application.services.session_service import SessionService
 from app.application.services.skill_service import SkillService
 from app.application.services.status_service import StatusService
+from app.domain.services.checkpoint_service import CheckpointService
 from app.infrastructure.external.file_storage.cos_file_storage import CosFileStorage
 from app.infrastructure.external.health_checker.postgres_health_checker import PostgresHealthChecker
 from app.infrastructure.external.health_checker.redis_health_checker import RedisHealthChecker
@@ -102,6 +104,15 @@ def get_marketplace_service(
 
 
 @lru_cache()
+def get_checkpoint_service() -> CheckpointService:
+    return CheckpointService(
+        uow_factory=get_uow,
+        cos=get_cos(),
+        sandbox_cls=DockerSandbox,
+    )
+
+
+@lru_cache()
 def get_agent_service(
 ) -> AgentService:
     config_provider = get_app_config_provider()
@@ -126,4 +137,14 @@ def get_agent_service(
         file_storage=file_storage,
         auto_extract_memory=settings.memory_auto_extract_enabled,
         config_provider=config_provider,
+        checkpoint_service=get_checkpoint_service(),
+    )
+
+
+@lru_cache()
+def get_a2a_server_service() -> A2AServerService:
+    return A2AServerService(
+        agent_service=get_agent_service(),
+        session_service=get_session_service(),
+        skill_service=get_skill_service(),
     )

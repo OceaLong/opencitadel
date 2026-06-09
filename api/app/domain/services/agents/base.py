@@ -7,6 +7,7 @@ from abc import ABC
 from typing import Optional, List, AsyncGenerator, Dict, Any, Callable
 
 from app.application.errors.exceptions import AppException
+from app.domain.external.file_storage import FileStorage
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
 from app.domain.models.app_config import AgentConfig
@@ -21,7 +22,12 @@ from app.domain.services import vision_service
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agents.token_accountant import TokenAccountant
 from app.domain.services.tools.base import BaseTool
-from app.domain.services.tools.tool_names import normalize_allowed_tool_names, normalize_tool_name
+from app.domain.services.tools.tool_names import (
+    is_tool_allowed,
+    normalize_allowed_tool_names,
+    normalize_tool_name,
+)
+from app.domain.utils.vision_tokens import estimate_messages_tokens
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -70,6 +76,7 @@ class BaseAgent(ABC):
             long_term_memory_block: str = "",
             allowed_tool_names: Optional[List[str]] = None,
             model_id: Optional[str] = None,
+            file_storage: Optional[FileStorage] = None,
     ) -> None:
         """构造函数，完成Agent的初始化"""
         self._uow_factory = uow_factory
@@ -84,6 +91,7 @@ class BaseAgent(ABC):
         self._skill_prompt = skill_prompt
         self._long_term_memory_block = long_term_memory_block
         self._allowed_tool_names = normalize_allowed_tool_names(allowed_tool_names)
+        self._file_storage = file_storage
         self._stateful_tool_lock = asyncio.Lock()
         self._pending_usage_event: Optional[UsageEvent] = None
         self._last_llm_message: Optional[Dict[str, Any]] = None
@@ -96,6 +104,31 @@ class BaseAgent(ABC):
             model_name=llm.model_name,
             model_id=model_id,
         )
+        self._tool_index: Dict[str, BaseTool] = {}
+        self._all_tool_schemas: List[Dict[str, Any]] = []
+        self._cached_available_tools: Optional[List[Dict[str, Any]]] = None
+        self._tool_cache_signature: Optional[int] = None
+
+    def _tool_cache_signature_value(self) -> int:
+        return sum(len(tool.get_tools()) for tool in self._tools)
+
+    def _rebuild_tool_cache(self) -> None:
+        self._tool_index = {}
+        self._all_tool_schemas = []
+        for tool in self._tools:
+            for schema in tool.get_tools():
+                name = schema.get("function", {}).get("name", "")
+                if not name:
+                    continue
+                self._tool_index[name] = tool
+                self._all_tool_schemas.append(schema)
+        self._cached_available_tools = None
+        self._tool_cache_signature = self._tool_cache_signature_value()
+
+    def _ensure_tool_cache(self) -> None:
+        signature = self._tool_cache_signature_value()
+        if self._tool_cache_signature != signature:
+            self._rebuild_tool_cache()
 
     def _collect_registered_tool_names(self) -> List[str]:
         names: List[str] = []
@@ -108,14 +141,17 @@ class BaseAgent(ABC):
 
     def _get_available_tools(self) -> List[Dict[str, Any]]:
         """获取Agent所有可用的工具列表参数声明/Schema"""
-        registered_names = self._collect_registered_tool_names()
+        self._ensure_tool_cache()
+        if self._cached_available_tools is not None:
+            return self._cached_available_tools
+
+        registered_names = [s.get("function", {}).get("name", "") for s in self._all_tool_schemas]
         available_tools = []
-        for tool in self._tools:
-            for schema in tool.get_tools():
-                name = schema.get("function", {}).get("name", "")
-                if self._allowed_tool_names is not None and name not in self._allowed_tool_names:
-                    continue
-                available_tools.append(schema)
+        for schema in self._all_tool_schemas:
+            name = schema.get("function", {}).get("name", "")
+            if self._allowed_tool_names is not None and not is_tool_allowed(name, self._allowed_tool_names):
+                continue
+            available_tools.append(schema)
 
         if self._allowed_tool_names is not None and registered_names:
             if not available_tools:
@@ -125,7 +161,7 @@ class BaseAgent(ABC):
                     self._allowed_tool_names,
                     registered_names,
                 )
-            elif len(available_tools) < len(self._allowed_tool_names):
+            else:
                 available_names = [s.get("function", {}).get("name", "") for s in available_tools]
                 logger.debug(
                     "Skill 工具白名单已过滤: session=%s allowed=%s available=%s",
@@ -133,10 +169,17 @@ class BaseAgent(ABC):
                     self._allowed_tool_names,
                     available_names,
                 )
+        self._cached_available_tools = available_tools
         return available_tools
 
     @classmethod
-    def _messages_for_llm(cls, messages: List[Dict[str, Any]], llm: Optional[LLM] = None) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _messages_for_llm(
+            messages: List[Dict[str, Any]],
+            llm: Optional[LLM] = None,
+            *,
+            strip_images: bool = False,
+    ) -> List[Dict[str, Any]]:
         """发送给 LLM 前移除内部字段，并将 image_ref 还原为 provider 可识别格式。"""
         sanitized: List[Dict[str, Any]] = []
         for message in messages:
@@ -149,27 +192,56 @@ class BaseAgent(ABC):
             else:
                 cleaned = {k: v for k, v in message.items() if not k.startswith("_")}
                 sanitized.append(cleaned)
-        return vision_service.inflate_messages_for_llm(sanitized, llm)
+        inflated = vision_service.inflate_messages_for_llm(sanitized, llm)
+        if strip_images:
+            return vision_service.strip_images_for_tool_call(inflated)
+        return inflated
 
-    def _build_browser_tool_payload(
+    async def _build_browser_tool_payload(
             self,
             function_name: str,
             result: ToolResult,
     ) -> tuple[str, List[Dict[str, Any]]]:
         """构建浏览器截图工具返回给 LLM 的文本与可选截图 user 消息。"""
-        return vision_service.build_screenshot_messages(
+        return await vision_service.build_screenshot_messages(
             function_name,
             result.data or {},
             self._llm,
+            file_storage=self._file_storage,
         )
 
     def _resolve_tool(self, function_name: str) -> BaseTool:
         """获取工具包，兼容旧工具名。"""
+        self._ensure_tool_cache()
         normalized_name = normalize_tool_name(function_name)
-        for tool in self._tools:
-            if tool.has_tool(normalized_name):
-                return tool
+        tool = self._tool_index.get(normalized_name)
+        if tool is not None:
+            return tool
+        for candidate in self._tools:
+            if candidate.has_tool(normalized_name):
+                self._tool_index[normalized_name] = candidate
+                return candidate
         raise ValueError(f"未知工具: {function_name}")
+
+    @staticmethod
+    def _truncate_tool_result(result: ToolResult, max_chars: int) -> ToolResult:
+        """截断过大的工具结果，避免撑爆 LLM 上下文。"""
+        if max_chars <= 0:
+            return result
+        serialized = result.model_dump_json()
+        if len(serialized) <= max_chars:
+            return result
+        notice = (
+            f"\n\n[结果已截断: 原始长度 {len(serialized)} 字符，保留前 {max_chars} 字符。"
+            "如需完整内容请缩小查询范围或使用 read_file 等工具分页获取。]"
+        )
+        budget = max(0, max_chars - len(notice))
+        truncated_payload = serialized[:budget] + notice
+        return ToolResult(
+            success=result.success,
+            message=(result.message or "") + notice if result.message else notice.strip(),
+            data=truncated_payload,
+        )
 
     async def _ensure_memory(self) -> None:
         """确保智能体记忆是存在的"""
@@ -206,18 +278,9 @@ class BaseAgent(ABC):
     def _estimate_memory_tokens(self) -> int:
         if self._last_prompt_tokens > 0:
             return self._last_prompt_tokens
-        total_chars = 0
         if self._memory:
-            for message in self._memory.get_messages():
-                content = message.get("content")
-                if isinstance(content, str):
-                    total_chars += len(content)
-                elif isinstance(content, list):
-                    total_chars += len(str(content))
-                tool_calls = message.get("tool_calls")
-                if tool_calls:
-                    total_chars += len(str(tool_calls))
-        return total_chars // 4
+            return estimate_messages_tokens(self._memory.get_messages())
+        return 0
 
     @staticmethod
     def _align_keep_boundary(messages: List[Dict[str, Any]], split_idx: int) -> int:
@@ -260,6 +323,12 @@ class BaseAgent(ABC):
             logger.debug("工具可用时跳过 json_object response_format，以兼容 tool_calls")
             effective_format = None
         response_format = {"type": effective_format} if effective_format else None
+        capabilities = vision_service.resolve_capabilities(self._llm)
+        strip_images = bool(
+            available_tools
+            and capabilities.vision
+            and not capabilities.vision_with_tools
+        )
 
         error = "调用语言模型发生错误"
         for _ in range(self._agent_config.max_retries):
@@ -276,7 +345,11 @@ class BaseAgent(ABC):
 
                 call_usage: Dict[str, int] = {}
                 async for delta in self._llm.stream_invoke(
-                        messages=self._messages_for_llm(self._memory.get_messages(), self._llm),
+                        messages=self._messages_for_llm(
+                            self._memory.get_messages(),
+                            self._llm,
+                            strip_images=strip_images,
+                        ),
                         tools=available_tools,
                         response_format=response_format,
                         tool_choice=self._tool_choice,
@@ -376,7 +449,10 @@ class BaseAgent(ABC):
                     logger.warning("调用工具[%s]返回失败，准备重试: %s", tool_name, err)
                     await asyncio.sleep(self._retry_interval)
                     continue
-                return result
+                return self._truncate_tool_result(
+                    result,
+                    self._agent_config.tool_result_max_chars,
+                )
             except asyncio.TimeoutError:
                 err = f"调用工具[{tool_name}]超时({timeout_seconds}s)"
                 logger.warning(err)
@@ -527,9 +603,15 @@ class BaseAgent(ABC):
         format = format if format else self._format
 
         # 2.调用语言模型获取响应内容
+        attachments_to_use = vision_attachments
+        if vision_attachments and self._memory:
+            refs = [a.ref_url for a in vision_attachments if a.ref_url]
+            if refs and vision_service.memory_contains_image_refs(self._memory.get_messages(), refs):
+                attachments_to_use = None
+
         user_message = vision_service.build_user_message(
             query,
-            vision_attachments,
+            attachments_to_use,
             llm=self._llm,
         )
         async for event in self._invoke_llm([user_message], format, emit_deltas=emit_deltas):
@@ -562,7 +644,9 @@ class BaseAgent(ABC):
                 else:
                     function_args = await self._json_parser.invoke(raw_arguments)
 
-                if self._allowed_tool_names is not None and function_name not in self._allowed_tool_names:
+                if self._allowed_tool_names is not None and not is_tool_allowed(
+                        function_name, self._allowed_tool_names
+                ):
                     result = ToolResult(success=False, message=f"工具[{function_name}]未被当前Skill授权")
                     events.append(ToolEvent(
                         tool_call_id=tool_call_id,
@@ -631,7 +715,7 @@ class BaseAgent(ABC):
                             and vision_service.vision_enabled(self._llm)
                             and result.success
                     ):
-                        tool_content, extra_messages = self._build_browser_tool_payload(
+                        tool_content, extra_messages = await self._build_browser_tool_payload(
                             function_name,
                             result,
                         )

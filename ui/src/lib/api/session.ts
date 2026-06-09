@@ -4,6 +4,7 @@ import type {
   CreateSessionParams,
   Session,
   SessionDetail,
+  SessionCheckpointsData,
   SessionEventsPage,
   SessionFile,
   SessionsData,
@@ -237,6 +238,23 @@ export const sessionApi = {
     return () => {
       controller.abort();
     };
+  },
+
+  /**
+   * 获取会话还原点列表
+   */
+  listCheckpoints: (sessionId: string): Promise<SessionCheckpointsData> => {
+    return get<SessionCheckpointsData>(`/sessions/${sessionId}/checkpoints`);
+  },
+
+  /**
+   * 回退到指定还原点
+   */
+  restoreCheckpoint: (sessionId: string, checkpointId: string): Promise<{ success: boolean; message: string }> => {
+    return post<{ success: boolean; message: string }>(
+      `/sessions/${sessionId}/checkpoints/${checkpointId}/restore`,
+      {},
+    );
   },
 
   /**

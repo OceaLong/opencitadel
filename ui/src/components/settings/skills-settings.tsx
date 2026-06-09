@@ -26,9 +26,16 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
+import { configApi } from "@/lib/api/config";
 import { modelsApi } from "@/lib/api/models";
 import { skillsApi } from "@/lib/api/skills";
-import type { CreateSkillParams, LLMModel, Skill } from "@/lib/api/types";
+import type {
+  CreateSkillParams,
+  ListA2AServerItem,
+  ListMCPServerItem,
+  LLMModel,
+  Skill,
+} from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 const defaultAgentParams = {
@@ -64,6 +71,12 @@ export function SkillsSettings({ embedded = false }: Props) {
   const [form, setForm] = useState<CreateSkillParams>(emptyForm);
   const [toolsText, setToolsText] = useState("");
   const [examplesText, setExamplesText] = useState("");
+  const [allowMcpTools, setAllowMcpTools] = useState(false);
+  const [allowA2aTools, setAllowA2aTools] = useState(false);
+  const [mcpServers, setMcpServers] = useState<ListMCPServerItem[]>([]);
+  const [a2aServers, setA2aServers] = useState<ListA2AServerItem[]>([]);
+  const [selectedMcpRefs, setSelectedMcpRefs] = useState<string[]>([]);
+  const [selectedA2aRefs, setSelectedA2aRefs] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -83,11 +96,35 @@ export function SkillsSettings({ embedded = false }: Props) {
     load();
   }, [load]);
 
+  const loadServerOptions = useCallback(async () => {
+    try {
+      const [mcpData, a2aData] = await Promise.all([
+        configApi.getMCPServers(),
+        configApi.getA2AServers(),
+      ]);
+      setMcpServers(mcpData.mcp_servers);
+      setA2aServers(a2aData.a2a_servers);
+    } catch {
+      setMcpServers([]);
+      setA2aServers([]);
+    }
+  }, []);
+
+  const resetToolGroupState = (allowedTools: string[] = []) => {
+    setAllowMcpTools(allowedTools.includes("mcp_*"));
+    setAllowA2aTools(allowedTools.includes("a2a"));
+    const manualTools = allowedTools.filter((tool) => tool !== "mcp_*" && tool !== "a2a");
+    setToolsText(manualTools.join(", "));
+  };
+
   const openCreate = () => {
     setEditing(null);
     setForm({ ...emptyForm, agent_params: { ...defaultAgentParams } });
-    setToolsText("");
+    resetToolGroupState();
+    setSelectedMcpRefs([]);
+    setSelectedA2aRefs([]);
     setExamplesText("");
+    void loadServerOptions();
     setDialogOpen(true);
   };
 
@@ -101,6 +138,8 @@ export function SkillsSettings({ embedded = false }: Props) {
       category: s.category,
       system_prompt: s.system_prompt,
       allowed_tools: s.allowed_tools,
+      mcp_server_refs: s.mcp_server_refs ?? [],
+      a2a_server_refs: s.a2a_server_refs ?? [],
       recommended_model_id: s.recommended_model_id,
       agent_params: {
         max_iterations: s.agent_params?.max_iterations,
@@ -111,9 +150,24 @@ export function SkillsSettings({ embedded = false }: Props) {
       examples: s.examples,
       enabled: s.enabled,
     });
-    setToolsText(s.allowed_tools.join(", "));
+    resetToolGroupState(s.allowed_tools);
+    setSelectedMcpRefs(s.mcp_server_refs ?? []);
+    setSelectedA2aRefs(s.a2a_server_refs ?? []);
     setExamplesText(s.examples.join("\n"));
+    void loadServerOptions();
     setDialogOpen(true);
+  };
+
+  const toggleMcpRef = (serverName: string) => {
+    setSelectedMcpRefs((prev) =>
+      prev.includes(serverName) ? prev.filter((item) => item !== serverName) : [...prev, serverName],
+    );
+  };
+
+  const toggleA2aRef = (serverId: string) => {
+    setSelectedA2aRefs((prev) =>
+      prev.includes(serverId) ? prev.filter((item) => item !== serverId) : [...prev, serverId],
+    );
   };
 
   const parseAgentParams = () => {
@@ -136,12 +190,20 @@ export function SkillsSettings({ embedded = false }: Props) {
 
   const handleSave = async () => {
     setSaving(true);
+    const manualTools = toolsText
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const allowedTools = [
+      ...manualTools,
+      ...(allowMcpTools ? ["mcp_*"] : []),
+      ...(allowA2aTools ? ["a2a"] : []),
+    ];
     const payload = {
       ...form,
-      allowed_tools: toolsText
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean),
+      allowed_tools: allowedTools,
+      mcp_server_refs: selectedMcpRefs,
+      a2a_server_refs: selectedA2aRefs,
       examples: examplesText
         .split("\n")
         .map((t) => t.trim())
@@ -292,8 +354,62 @@ export function SkillsSettings({ embedded = false }: Props) {
               <Input
                 value={toolsText}
                 onChange={(e) => setToolsText(e.target.value)}
-                placeholder="read_file, shell_execute, search_web"
+                placeholder="read_file, shell_execute, search_web, mcp_jina_*"
               />
+              <p className="text-muted-foreground text-xs">
+                支持通配符，例如 <code>mcp_*</code>（全部 MCP）、<code>mcp_jina_*</code>（指定 MCP 服务）
+              </p>
+            </div>
+            <div className="border-border/70 bg-muted/20 space-y-3 rounded-xl border p-3">
+              <Label>动态工具组</Label>
+              <div className="flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch checked={allowMcpTools} onCheckedChange={setAllowMcpTools} />
+                  允许所有 MCP 工具 (mcp_*)
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch checked={allowA2aTools} onCheckedChange={setAllowA2aTools} />
+                  允许 A2A 远程 Agent (a2a)
+                </label>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>绑定的 MCP 服务（空=使用全部已启用服务）</Label>
+              <div className="flex flex-wrap gap-2">
+                {mcpServers.map((server) => (
+                  <Button
+                    key={server.server_name}
+                    type="button"
+                    size="sm"
+                    variant={selectedMcpRefs.includes(server.server_name) ? "default" : "outline"}
+                    onClick={() => toggleMcpRef(server.server_name)}
+                  >
+                    {server.server_name}
+                  </Button>
+                ))}
+                {mcpServers.length === 0 && (
+                  <span className="text-muted-foreground text-sm">暂无 MCP 服务</span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>绑定的 A2A 服务（空=使用全部已启用服务）</Label>
+              <div className="flex flex-wrap gap-2">
+                {a2aServers.map((server) => (
+                  <Button
+                    key={server.id}
+                    type="button"
+                    size="sm"
+                    variant={selectedA2aRefs.includes(server.id) ? "default" : "outline"}
+                    onClick={() => toggleA2aRef(server.id)}
+                  >
+                    {server.name || server.id}
+                  </Button>
+                ))}
+                {a2aServers.length === 0 && (
+                  <span className="text-muted-foreground text-sm">暂无 A2A 服务</span>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">

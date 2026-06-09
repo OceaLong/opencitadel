@@ -25,6 +25,12 @@ class SkillORM(Base):
     allowed_tools: Mapped[List[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    mcp_server_refs: Mapped[List[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    a2a_server_refs: Mapped[List[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
     recommended_model_id: Mapped[Optional[str]] = mapped_column(
         String(255),
         ForeignKey("llm_models.id", ondelete="SET NULL"),
@@ -56,6 +62,8 @@ class SkillORM(Base):
             category=skill.category,
             system_prompt=skill.system_prompt,
             allowed_tools=skill.allowed_tools,
+            mcp_server_refs=skill.mcp_server_refs,
+            a2a_server_refs=skill.a2a_server_refs,
             recommended_model_id=skill.recommended_model_id,
             agent_params=skill.agent_params.model_dump(),
             examples=skill.examples,
@@ -73,6 +81,8 @@ class SkillORM(Base):
             category=self.category,
             system_prompt=self.system_prompt,
             allowed_tools=self.allowed_tools or [],
+            mcp_server_refs=self.mcp_server_refs or [],
+            a2a_server_refs=self.a2a_server_refs or [],
             recommended_model_id=self.recommended_model_id,
             agent_params=SkillAgentParams(**(self.agent_params or {})),
             examples=self.examples or [],

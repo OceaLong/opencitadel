@@ -16,6 +16,7 @@ from app.domain.services.tools.message import MessageTool
 from app.domain.services.tools.search import SearchTool
 from app.domain.services.tools.shell import ShellTool
 from app.domain.services.tools.vision import VisionTool
+from app.domain.services.tools.vision_grounding import VisionGroundingTool
 
 
 class ToolRegistry:
@@ -39,6 +40,7 @@ class ToolRegistry:
             SearchTool(search_engine=search_engine),
             MessageTool(),
             VisionTool(sandbox=sandbox, llm=llm),
+            VisionGroundingTool(sandbox=sandbox, llm=llm),
             mcp_tool,
             a2a_tool,
         ]

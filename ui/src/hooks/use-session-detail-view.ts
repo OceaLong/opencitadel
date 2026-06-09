@@ -9,7 +9,7 @@ import { getToolKind } from "@/components/tool-use/utils";
 
 import { useSessionDetail } from "@/hooks/use-session-detail";
 import { sessionApi } from "@/lib/api/session";
-import type { FileInfo, Skill, ToolEvent } from "@/lib/api/types";
+import type { FileInfo, SessionCheckpoint, Skill, ToolEvent } from "@/lib/api/types";
 import type { AttachmentFile, TimelineItem } from "@/lib/session-events";
 import {
   eventsToTimeline,
@@ -54,6 +54,7 @@ export function useSessionDetailView({
     session,
     files,
     events,
+    checkpoints,
     loading,
     error,
     refresh,
@@ -68,6 +69,7 @@ export function useSessionDetailView({
   const [previewFile, setPreviewFile] = useState<AttachmentFile | null>(null);
   const [previewTool, setPreviewTool] = useState<ToolEvent | null>(null);
   const [vncOpen, setVncOpen] = useState(false);
+  const [restoringCheckpoint, setRestoringCheckpoint] = useState(false);
   const initialMessageSentRef = useRef(false);
   const chatInputRef = useRef<ChatInputRef>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -75,6 +77,13 @@ export function useSessionDetailView({
 
   const configEditable = session?.status === "pending" || session?.status === "completed";
   const timeline = useMemo(() => eventsToTimeline(events), [events]);
+  const checkpointByAnchor = useMemo(() => {
+    const map = new Map<string, SessionCheckpoint>();
+    for (const checkpoint of checkpoints) {
+      map.set(checkpoint.anchor_event_id, checkpoint);
+    }
+    return map;
+  }, [checkpoints]);
   const planSteps = useMemo(() => getLatestPlanFromEvents(events), [events]);
   const observationSummary = useMemo(
     () => getTaskObservationSummary(events, session?.status),
@@ -266,6 +275,40 @@ export function useSessionDetailView({
     setIncludeDebug(true);
   }, []);
 
+  const handleRestoreCheckpoint = useCallback(
+    async (checkpoint: SessionCheckpoint) => {
+      if (!session) return;
+      const confirmed = window.confirm(
+        `确定要回退到「${checkpoint.label || "此处"}」吗？\n\n将删除该点之后的所有对话、Agent 记忆、沙箱文件与 COS 文件记录。`,
+      );
+      if (!confirmed) return;
+
+      setRestoringCheckpoint(true);
+      try {
+        if (session.status === "running") {
+          await sessionApi.stopSession(sessionId);
+        }
+        await sessionApi.restoreCheckpoint(sessionId, checkpoint.id);
+        toast.success("已回退到指定还原点");
+        await refresh();
+        await refreshFiles();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "回退失败");
+      } finally {
+        setRestoringCheckpoint(false);
+      }
+    },
+    [session, sessionId, refresh, refreshFiles],
+  );
+
+  const resolveCheckpoint = useCallback(
+    (anchorEventId?: string) => {
+      if (!anchorEventId) return undefined;
+      return checkpointByAnchor.get(anchorEventId);
+    },
+    [checkpointByAnchor],
+  );
+
   return {
     session,
     files,
@@ -303,5 +346,8 @@ export function useSessionDetailView({
     handleCloseVNC,
     handleStop,
     handleDebugOpen,
+    resolveCheckpoint,
+    handleRestoreCheckpoint,
+    restoringCheckpoint,
   };
 }

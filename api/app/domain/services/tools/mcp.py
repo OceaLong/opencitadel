@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import hashlib
 import logging
 import os
+import re
 import asyncio
 from contextlib import AsyncExitStack
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 
 from mcp import ClientSession, Tool, StdioServerParameters, stdio_client
 from mcp.client.sse import sse_client
@@ -41,6 +43,31 @@ MCP客户端管理器的开发思路:
 
 logger = logging.getLogger(__name__)
 
+_MAX_TOOL_NAME_LEN = 64
+_INVALID_TOOL_NAME_CHARS = re.compile(r"[^a-zA-Z0-9_-]")
+
+
+def _sanitize_segment(segment: str) -> str:
+    return _INVALID_TOOL_NAME_CHARS.sub("_", segment)
+
+
+def build_mcp_tool_name(server_name: str, tool_name: str) -> str:
+    """生成符合 OpenAI 函数名约束的 MCP 工具名，并保证唯一性。"""
+    if server_name.startswith("mcp_"):
+        prefix = _sanitize_segment(server_name)
+    else:
+        prefix = f"mcp_{_sanitize_segment(server_name)}"
+    sanitized_tool = _sanitize_segment(tool_name)
+    candidate = f"{prefix}_{sanitized_tool}"
+    if len(candidate) <= _MAX_TOOL_NAME_LEN:
+        return candidate
+
+    server_hash = hashlib.sha256(server_name.encode("utf-8")).hexdigest()[:8]
+    compact_prefix = f"mcp_{server_hash}"
+    max_tool_len = _MAX_TOOL_NAME_LEN - len(compact_prefix) - 1
+    truncated_tool = sanitized_tool[:max(1, max_tool_len)]
+    return f"{compact_prefix}_{truncated_tool}"
+
 
 class MCPClientManager:
     """MCP客户端管理器"""
@@ -51,6 +78,7 @@ class MCPClientManager:
         self._exit_stack: AsyncExitStack = AsyncExitStack()  # 异步上下文管理器
         self._clients: Dict[str, ClientSession] = {}  # 缓存的客户端会话
         self._tools: Dict[str, List[Tool]] = {}  # 缓存的MCP工具参数声明
+        self._canonical_to_source: Dict[str, Tuple[str, str]] = {}  # 规范名 -> (server, 原始工具名)
         self._initialized: bool = False  # 是否初始化标识
 
     @property
@@ -243,20 +271,20 @@ class MCPClientManager:
 
     async def get_all_tools(self) -> List[Dict[str, Any]]:
         """获取所有MCP工具列表，返回LLM可以使用的工具参数声明列表并处理MCP的名字"""
-        # 1.定义一个变量存储所有结果
-        all_tools = []
+        all_tools: List[Dict[str, Any]] = []
+        self._canonical_to_source.clear()
 
-        # 2.循环遍历所有缓存的工具
         for server_name, tools in self._tools.items():
-            # 3.循环取出每个MCP服务的工具列表
             for tool in tools:
-                # 4.修改工具名字加上mcp_前缀+服务名字
-                if server_name.startswith("mcp_"):
-                    tool_name = f"{server_name}_{tool.name}"
-                else:
-                    tool_name = f"mcp_{server_name}_{tool.name}"
+                tool_name = build_mcp_tool_name(server_name, tool.name)
+                if tool_name in self._canonical_to_source:
+                    suffix = hashlib.sha256(
+                        f"{server_name}:{tool.name}".encode("utf-8")
+                    ).hexdigest()[:6]
+                    base = tool_name[: max(1, _MAX_TOOL_NAME_LEN - len(suffix) - 1)]
+                    tool_name = f"{base}_{suffix}"
+                self._canonical_to_source[tool_name] = (server_name, tool.name)
 
-                # 5.生成OpenAI工具描述
                 tool_schema = {
                     "type": "function",
                     "function": {
@@ -269,26 +297,22 @@ class MCPClientManager:
 
         return all_tools
 
+    def _resolve_tool_source(self, tool_name: str) -> Tuple[Optional[str], Optional[str]]:
+        mapped = self._canonical_to_source.get(tool_name)
+        if mapped:
+            return mapped
+
+        for server_name in self._mcp_config.mcpServers.keys():
+            expected_prefix = server_name if server_name.startswith("mcp_") else f"mcp_{server_name}"
+            if tool_name.startswith(f"{expected_prefix}_"):
+                return server_name, tool_name[len(expected_prefix) + 1:]
+        return None, None
+
     async def invoke(self, tool_name: str, arguments: Dict[str, Any]) -> ToolResult:
         """根据传递的工具名字+参数调用MCP工具"""
         try:
-            # 1.定义变量存储原始的服务名字+工具
-            original_server_name = None
-            original_tool_name = None
+            original_server_name, original_tool_name = self._resolve_tool_source(tool_name)
 
-            # 2.循环遍历当前的所有mcp服务配置
-            for server_name in self._mcp_config.mcpServers.keys():
-                # 3.为server_name组装前缀
-                expected_prefix = server_name if server_name.startswith("mcp_") else f"mcp_{server_name}"
-
-                # 4.判断工具名字是否以该服务名字为开头
-                if tool_name.startswith(f"{expected_prefix}_"):
-                    # 5.取出原始的服务名字+工具名字
-                    original_server_name = server_name
-                    original_tool_name = tool_name[len(expected_prefix) + 1:]
-                    break
-
-            # 6.判断服务名字+工具是否都存在
             if not original_server_name or not original_tool_name:
                 raise NotFoundError(f"服务器解析MCP工具不存在: {tool_name}")
 
@@ -352,6 +376,7 @@ class MCPClientManager:
             # 无论aclose()是否成功，都必须清除缓存并重置状态
             self._clients.clear()
             self._tools.clear()
+            self._canonical_to_source.clear()
             self._initialized = False
 
 

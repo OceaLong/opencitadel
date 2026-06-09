@@ -18,6 +18,7 @@ from app.infrastructure.observability.otel import setup_observability
 from app.infrastructure.storage.cos import get_cos
 from app.infrastructure.storage.postgres import get_postgres
 from app.infrastructure.storage.redis import get_redis
+from app.interfaces.endpoints.a2a_routes import a2a_router, well_known_router
 from app.interfaces.endpoints.routes import router
 from app.interfaces.errors.exception_handlers import register_exception_handlers
 from app.application.services.bootstrap_service import bootstrap_data
@@ -162,5 +163,7 @@ app.add_middleware(
 register_exception_handlers(app)
 
 # 7.集成路由
+app.include_router(well_known_router)
+app.include_router(a2a_router, prefix="/api/a2a")
 app.include_router(router, prefix="/api")
 setup_observability(app)

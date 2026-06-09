@@ -17,12 +17,14 @@ from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
 from app.domain.external.task import TaskRunner, Task
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
+from app.domain.models.checkpoint import CheckpointAnchorType
 from app.domain.models.event import ErrorEvent, Event, MessageEvent, BaseEvent, ToolEvent, \
-    TitleEvent, WaitEvent, DoneEvent, AssistantNoticeEvent, StepEvent, ToolEventStatus
+    TitleEvent, WaitEvent, DoneEvent, AssistantNoticeEvent, StepEvent, StepEventStatus, ToolEventStatus
+from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.models.event_policy import should_persist_event
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
-from app.domain.utils.vision import is_image_mime
+from app.domain.utils.vision import is_image_mime, is_video_mime
 from app.domain.services import vision_service
 from app.domain.models.session import SessionStatus
 from app.domain.models.skill import Skill
@@ -60,6 +62,7 @@ class AgentTaskRunner(TaskRunner):
             extra_tools: Optional[list] = None,
             on_complete_callback: Optional[Callable] = None,
             model_id: Optional[str] = None,
+            checkpoint_service: Optional[CheckpointService] = None,
     ) -> None:
         """构造函数，完成Agent任务运行器的创建"""
         self._uow_factory = uow_factory
@@ -79,6 +82,7 @@ class AgentTaskRunner(TaskRunner):
         self._step_started_at: Dict[str, datetime] = {}
         self._tool_started_at: Dict[str, datetime] = {}
         self._last_observable_event_id: Optional[str] = None
+        self._checkpoint_service = checkpoint_service
         self._tool_presenter = ToolEventPresenter(
             sandbox=sandbox,
             browser=browser,
@@ -102,6 +106,7 @@ class AgentTaskRunner(TaskRunner):
             long_term_memory_block=long_term_memory_block,
             extra_tools=extra_tools or [],
             model_id=model_id,
+            file_storage=file_storage,
         )
 
     async def _put_and_add_event(self, task: Task, event: Event) -> None:
@@ -177,12 +182,30 @@ class AgentTaskRunner(TaskRunner):
             logger.exception(f"AgentTaskRunner同步文件[{file_id}]失败: {str(e)}")
 
     async def _build_vision_attachments(self, files: List[File]) -> List[VisionAttachment]:
-        """为多模态模型构建用户图片附件的 vision 数据。"""
-        return await vision_service.prepare_vision_attachments_from_files(
-            files,
-            self._flow.react._llm,
-            self._file_storage,
+        """为多模态模型构建用户附件（图片/音频/视频帧）。"""
+        llm = self._flow.react._llm
+        attachments = await vision_service.prepare_media_attachments_from_files(
+            files, llm, self._file_storage,
         )
+        capabilities = vision_service.resolve_capabilities(llm)
+        if not capabilities.video:
+            return attachments
+
+        for file in files:
+            if not is_video_mime(file.mime_type):
+                continue
+            try:
+                file_data, _ = await self._file_storage.download_file(file.id)
+                from app.domain.services.video_service import extract_video_frames
+                frames = await extract_video_frames(
+                    file_data.read(),
+                    max_frames=capabilities.max_video_frames,
+                    mime_type=file.mime_type,
+                )
+                attachments.extend(frames)
+            except Exception as exc:
+                logger.warning("视频抽帧失败 file_id=%s: %s", file.id, exc)
+        return attachments
 
     async def _sync_message_attachments_to_sandbox(self, event: MessageEvent) -> None:
         """将消息事件中的附件同步到沙箱中"""
@@ -407,12 +430,48 @@ class AgentTaskRunner(TaskRunner):
                     vision_attachments=await self._build_vision_attachments(synced_files),
                 )
 
+                if (
+                    self._checkpoint_service
+                    and isinstance(event, MessageEvent)
+                    and event.role == "user"
+                    and event.id
+                ):
+                    try:
+                        await self._checkpoint_service.create_checkpoint(
+                            session_id=self._session_id,
+                            anchor_type=CheckpointAnchorType.USER_MESSAGE,
+                            anchor_event_id=event.id,
+                            label=(event.message or "用户消息")[:200],
+                            sandbox=self._sandbox,
+                        )
+                    except Exception as exc:
+                        logger.warning("创建用户消息还原点失败: %s", exc)
+
                 async for event in self._run_flow(message_obj):
                     if await self._is_cancelled(task):
                         cancelled = True
                         break
 
                     await self._put_and_add_event(task, event)
+
+                    if (
+                        self._checkpoint_service
+                        and isinstance(event, StepEvent)
+                        and event.status == StepEventStatus.STARTED
+                        and event.id
+                    ):
+                        try:
+                            await self._flush_event_persist_buffer()
+                            step_label = event.step.description if event.step else "执行步骤"
+                            await self._checkpoint_service.create_checkpoint(
+                                session_id=self._session_id,
+                                anchor_type=CheckpointAnchorType.STEP,
+                                anchor_event_id=event.id,
+                                label=step_label[:200],
+                                sandbox=self._sandbox,
+                            )
+                        except Exception as exc:
+                            logger.warning("创建步骤还原点失败: %s", exc)
 
                     if isinstance(event, TitleEvent):
                         async with self._uow:

@@ -106,21 +106,16 @@ def _resolve_request_timeout(extra: Dict[str, Any]) -> float:
 
 
 def _log_multimodal_request_summary(messages: List[Dict[str, Any]]) -> None:
-    image_count = 0
-    image_bytes = 0
-    for message in messages:
-        content = message.get("content")
-        if not isinstance(content, list):
-            continue
-        for part in content:
-            if isinstance(part, dict) and part.get("type") in {"image_url", "image_ref"}:
-                image_count += 1
+    from app.domain.utils.vision_tokens import count_message_image_stats
+
+    image_count, image_bytes, _ = count_message_image_stats(messages)
     if image_count:
         record_multimodal_request(image_bytes=image_bytes, image_count=image_count)
         logger.info(
-            "OpenAI多模态请求摘要: message_count=%s image_part_count=%s",
+            "OpenAI多模态请求摘要: message_count=%s image_part_count=%s image_bytes=%s",
             len(messages),
             image_count,
+            image_bytes,
         )
 
 
@@ -354,8 +349,28 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
                 **request_kwargs,
                 **tool_kwargs,
             )
+        except ServerRequestsError:
+            raise
         except Exception as error:
-            self._raise_llm_error(error, request_model)
+            if _has_multimodal_image_content(messages) and is_retriable_multimodal_error(error):
+                async def _create_stream_with_kwargs(kwargs: Dict[str, Any]):
+                    return await self._client.chat.completions.create(
+                        **kwargs,
+                        **tool_kwargs,
+                    )
+
+                try:
+                    stream = await self._apply_multimodal_fallback(
+                        error,
+                        request_kwargs,
+                        _create_stream_with_kwargs,
+                    )
+                except Exception as retry_error:
+                    if retry_error is error:
+                        self._raise_llm_error(error, request_model)
+                    self._raise_llm_error(retry_error, request_model)
+            else:
+                self._raise_llm_error(error, request_model)
 
         stream_usage: Dict[str, int] = {}
         async for chunk in stream:

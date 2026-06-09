@@ -37,6 +37,11 @@ from app.interfaces.schemas.session import (
 from app.interfaces.schemas.llm_model import LLMModelResponse
 from app.interfaces.schemas.skill import SkillSummaryResponse
 from app.interfaces.schemas.memory import SessionMemoryResponse, ClearMemoryRequest
+from app.interfaces.schemas.checkpoint import (
+    CheckpointItemResponse,
+    ListCheckpointsResponse,
+    RestoreCheckpointResponse,
+)
 from app.interfaces.endpoints.llm_model_routes import _to_response as llm_to_response
 from app.interfaces.service_dependencies import (
     get_session_service,
@@ -517,6 +522,51 @@ async def delete_session_memory_message(
 ) -> Response[Optional[Dict]]:
     await memory_service.delete_session_memory_message(session_id, agent_name, index)
     return Response.success(msg="删除消息成功")
+
+
+@router.get(
+    path="/{session_id}/checkpoints",
+    response_model=Response[ListCheckpointsResponse],
+    summary="获取会话还原点列表",
+)
+async def list_session_checkpoints(
+        session_id: str,
+        agent_service: AgentService = Depends(get_agent_service),
+) -> Response[ListCheckpointsResponse]:
+    checkpoints = await agent_service.list_checkpoints(session_id)
+    return Response.success(
+        msg="获取还原点列表成功",
+        data=ListCheckpointsResponse(
+            checkpoints=[
+                CheckpointItemResponse(
+                    id=item.id,
+                    session_id=item.session_id,
+                    anchor_type=item.anchor_type,
+                    anchor_event_id=item.anchor_event_id,
+                    label=item.label,
+                    created_at=item.created_at,
+                )
+                for item in checkpoints
+            ]
+        ),
+    )
+
+
+@router.post(
+    path="/{session_id}/checkpoints/{checkpoint_id}/restore",
+    response_model=Response[RestoreCheckpointResponse],
+    summary="回退到指定还原点",
+)
+async def restore_session_checkpoint(
+        session_id: str,
+        checkpoint_id: str,
+        agent_service: AgentService = Depends(get_agent_service),
+) -> Response[RestoreCheckpointResponse]:
+    await agent_service.restore_checkpoint(session_id, checkpoint_id)
+    return Response.success(
+        msg="回退成功",
+        data=RestoreCheckpointResponse(),
+    )
 
 
 @router.post(

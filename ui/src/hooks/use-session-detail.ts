@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { sessionApi } from "@/lib/api/session";
 import type {
+  SessionCheckpoint,
   SessionDetail,
   SessionFile,
   SSEEventData,
@@ -31,6 +32,7 @@ export type UseSessionDetailResult = {
   session: SessionDetail | null;
   files: SessionFile[];
   events: SSEEventData[];
+  checkpoints: SessionCheckpoint[];
   loading: boolean;
   error: Error | null;
   refresh: () => Promise<void>;
@@ -56,6 +58,7 @@ export function useSessionDetail(
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [files, setFiles] = useState<SessionFile[]>([]);
   const [events, setEvents] = useState<SSEEventData[]>([]);
+  const [checkpoints, setCheckpoints] = useState<SessionCheckpoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [streaming, setStreaming] = useState(false);
@@ -285,10 +288,12 @@ export function useSessionDetail(
     if (!sessionId) return;
     setError(null);
     try {
-      const [detail, fileListRaw] = await Promise.all([
+      const [detail, fileListRaw, checkpointData] = await Promise.all([
         sessionApi.getSessionDetail(sessionId, { include_debug: includeDebug, events_limit: 100 }),
         sessionApi.getSessionFiles(sessionId),
+        sessionApi.listCheckpoints(sessionId).catch(() => ({ checkpoints: [] })),
       ]);
+      setCheckpoints(checkpointData.checkpoints ?? []);
       setSession(detail);
       setFiles(normalizeFileList(fileListRaw));
       const rawEvents = (detail as { events?: unknown }).events;
@@ -341,6 +346,7 @@ export function useSessionDetail(
       setSession(null);
       setFiles([]);
       setEvents([]);
+      setCheckpoints([]);
       setError(null);
       sessionMissingRef.current = false;
       stopEmptyStream();
@@ -493,6 +499,7 @@ export function useSessionDetail(
     session,
     files,
     events,
+    checkpoints,
     loading,
     error,
     refresh,

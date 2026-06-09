@@ -164,3 +164,40 @@ class TranslationResponse(BaseModel):
     target_language: str
     translated_text: str
     notes: List[str] = Field(default_factory=list)
+
+
+class DocumentConvertRequest(BaseModel):
+    file_id: str
+    target_format: Literal["pdf", "docx", "md", "txt"]
+
+
+class DocumentConvertResponse(BaseModel):
+    result_file_id: str
+    result_filename: str
+    source_format: str
+    target_format: str
+    download_ready: bool = True
+
+
+class WatermarkAddRequest(BaseModel):
+    file_id: str
+    watermark_type: Literal["text", "image"] = "text"
+    text: Optional[str] = Field(default=None, max_length=200)
+    watermark_file_id: Optional[str] = None
+    opacity: float = Field(default=0.3, ge=0.05, le=1.0)
+    rotation: float = Field(default=45.0, ge=-180, le=180)
+    tile: bool = True
+
+
+class WatermarkRemoveRequest(BaseModel):
+    file_id: str
+    watermark_text: Optional[str] = Field(default=None, max_length=200)
+    mode: Literal["auto", "text", "images"] = "auto"
+    model_id: Optional[str] = None
+
+
+class WatermarkResultResponse(BaseModel):
+    result_file_id: str
+    result_filename: str
+    download_ready: bool = True
+    method: Optional[str] = None

@@ -37,7 +37,13 @@ class NutritionService:
             goal: Optional[str] = None,
     ) -> Dict[str, Any]:
         validate_image(mime_type, len(image_bytes))
-        vision_data = await analyze_image_with_llm(llm, image_bytes, mime_type, NUTRITION_PROMPT)
+        schema = {
+            "required": ["items"],
+            "properties": {"items": {"type": "array"}, "meal_summary": {"type": "string"}},
+        }
+        vision_data = await analyze_image_with_llm(
+            llm, image_bytes, mime_type, NUTRITION_PROMPT, schema=schema,
+        )
         items = vision_data.get("items") or []
         if not items and vision_data.get("name"):
             items = [vision_data]

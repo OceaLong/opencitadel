@@ -21,8 +21,10 @@ from app.domain.external.task import Task
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
 from app.domain.models.event import BaseEvent, ErrorEvent, MessageEvent, Event, DoneEvent, WaitEvent
 from app.domain.models.event_upgrader import upgrade_event_payload
+from app.domain.models.checkpoint import Checkpoint
 from app.domain.models.session import Session, SessionStatus
 from app.domain.repositories.uow import IUnitOfWork
+from app.domain.services.checkpoint_service import CheckpointService
 from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
 from app.infrastructure.external.task.task_state import get_task_state
@@ -51,10 +53,12 @@ class AgentService:
             file_storage: FileStorage,
             auto_extract_memory: bool = True,
             config_provider: Optional[AppConfigProvider] = None,
+            checkpoint_service: Optional[CheckpointService] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._task_cls = task_cls
         self._task_state = get_task_state()
+        self._checkpoint_service = checkpoint_service
         self._runner_factory = TaskRunnerFactory(
             uow_factory=uow_factory,
             llm_model_service=llm_model_service,
@@ -69,6 +73,7 @@ class AgentService:
             file_storage=file_storage,
             auto_extract_memory=auto_extract_memory,
             config_provider=config_provider or get_app_config_provider(),
+            checkpoint_service=checkpoint_service,
         )
         logger.info("AgentService初始化成功")
 
@@ -226,6 +231,16 @@ class AgentService:
                     asyncio.create_task(self._safe_update_unread_count(session_id))
                 except RuntimeError:
                     logger.warning(f"会话[{session_id}]无法创建后台任务更新未读消息计数")
+
+    async def list_checkpoints(self, session_id: str) -> List[Checkpoint]:
+        if not self._checkpoint_service:
+            return []
+        return await self._checkpoint_service.list_checkpoints(session_id)
+
+    async def restore_checkpoint(self, session_id: str, checkpoint_id: str) -> None:
+        if not self._checkpoint_service:
+            raise RuntimeError("还原点服务未启用")
+        await self._checkpoint_service.restore(session_id, checkpoint_id)
 
     async def stop_session(self, session_id: str) -> None:
         async with self._uow_factory() as uow:

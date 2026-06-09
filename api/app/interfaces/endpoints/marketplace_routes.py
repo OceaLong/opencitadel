@@ -24,6 +24,11 @@ from app.interfaces.schemas.marketplace import (
     NutritionFollowupResponse,
     TranslationRequest,
     TranslationResponse,
+    DocumentConvertRequest,
+    DocumentConvertResponse,
+    WatermarkAddRequest,
+    WatermarkRemoveRequest,
+    WatermarkResultResponse,
     VideoSearchRequest,
     VideoSearchResponse,
 )
@@ -174,5 +179,57 @@ async def translate(
             model_id=request.model_id,
         )
         return Response.success(data=TranslationResponse(**data))
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+
+
+@router.post("/convert", response_model=Response[DocumentConvertResponse])
+async def convert_document(
+        request: DocumentConvertRequest,
+        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
+) -> Response[DocumentConvertResponse]:
+    try:
+        data = await marketplace_service.convert_document(
+            request.file_id,
+            request.target_format,
+        )
+        return Response.success(data=DocumentConvertResponse(**data))
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+
+
+@router.post("/watermark/add", response_model=Response[WatermarkResultResponse])
+async def add_watermark(
+        request: WatermarkAddRequest,
+        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
+) -> Response[WatermarkResultResponse]:
+    try:
+        data = await marketplace_service.add_watermark(
+            request.file_id,
+            watermark_type=request.watermark_type,
+            text=request.text,
+            watermark_file_id=request.watermark_file_id,
+            opacity=request.opacity,
+            rotation=request.rotation,
+            tile=request.tile,
+        )
+        return Response.success(data=WatermarkResultResponse(**data))
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+
+
+@router.post("/watermark/remove", response_model=Response[WatermarkResultResponse])
+async def remove_watermark(
+        request: WatermarkRemoveRequest,
+        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
+) -> Response[WatermarkResultResponse]:
+    try:
+        data = await marketplace_service.remove_watermark(
+            request.file_id,
+            watermark_text=request.watermark_text,
+            mode=request.mode,
+            model_id=request.model_id,
+        )
+        return Response.success(data=WatermarkResultResponse(**data))
     except ValueError as exc:
         raise BadRequestError(str(exc)) from exc

@@ -5,6 +5,7 @@ from functools import lru_cache
 from typing import Optional
 
 from qcloud_cos import CosS3Client, CosConfig
+from starlette.concurrency import run_in_threadpool
 
 from core.config import Settings, get_settings
 
@@ -55,6 +56,29 @@ class Cos:
         if self._client is None:
             raise RuntimeError("腾讯云Cos对象存储未初始化，请调用init()完成初始化")
         return self._client
+
+    @property
+    def bucket(self) -> str:
+        return self._settings.cos_bucket
+
+    async def put_bytes(self, key: str, data: bytes) -> None:
+        """Upload raw bytes to COS without creating a file record."""
+        await run_in_threadpool(
+            self.client.put_object,
+            Bucket=self.bucket,
+            Body=data,
+            Key=key,
+        )
+
+    async def get_bytes(self, key: str) -> bytes:
+        """Download raw bytes from COS."""
+        response = await run_in_threadpool(
+            self.client.get_object,
+            Bucket=self.bucket,
+            Key=key,
+        )
+        body = response["Body"]
+        return body.read() if hasattr(body, "read") else bytes(body)
 
 
 @lru_cache()

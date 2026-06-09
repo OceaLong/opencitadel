@@ -22,6 +22,7 @@ class AgentConfig(BaseModel):
     max_retries: int = Field(default=3, gt=1, lt=10)  # 最大重试次数
     max_search_results: int = Field(default=10, gt=1, lt=30)  # 最大搜索结果条数
     max_flow_steps: int = Field(default=50, gt=0, lt=500)  # Flow 级步骤/状态转换上限
+    tool_result_max_chars: int = Field(default=8000, gt=0, lt=200_000)  # 单次工具结果回填上限
 
 
 class MCPTransport(str, Enum):
