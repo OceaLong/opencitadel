@@ -260,6 +260,11 @@ export type MarketplaceApp = {
   description: string;
   icon: string;
   category: string;
+  tags: string[];
+  featured: boolean;
+  accent: string;
+  needs_vision: boolean;
+  examples: string[];
 };
 
 export type MarketplaceAppsData = {
@@ -279,6 +284,7 @@ export type VideoSearchResult = {
   condition: string;
   trust_score: number;
   source_type?: string;
+  recommendation_reason?: string | null;
 };
 
 export type VideoSearchData = {
@@ -330,6 +336,29 @@ export type NutritionAnalysisData = {
   };
 };
 
+export type MarketplaceRouteParams = {
+  query: string;
+  model_id?: string;
+};
+
+export type MarketplaceRouteData = {
+  app_id: string;
+  confidence: number;
+  reason: string;
+  params: Record<string, unknown>;
+  suggestions: string[];
+};
+
+export type NutritionFollowupParams = {
+  analysis: NutritionAnalysisData;
+  question: string;
+  model_id?: string;
+};
+
+export type NutritionFollowupData = {
+  answer: string;
+};
+
 export type ConsumptionAnalysisParams = {
   file_id: string;
   serving_grams: number;
@@ -338,6 +367,11 @@ export type ConsumptionAnalysisParams = {
 
 export type ConsumptionManualParams = {
   total_grams: number;
+  serving_grams: number;
+};
+
+export type ConsumptionCorrectionParams = {
+  text: string;
   serving_grams: number;
 };
 
@@ -350,6 +384,32 @@ export type ConsumptionAnalysisData = {
   servings?: number | null;
   full_servings?: number | null;
   message: string;
+};
+
+export type DocumentQaParams = {
+  file_id: string;
+  question: string;
+  model_id?: string;
+};
+
+export type DocumentQaData = {
+  answer: string;
+  source_summary: string;
+};
+
+export type TranslationParams = {
+  text?: string;
+  file_id?: string;
+  target_language: string;
+  style: "plain" | "formal" | "casual" | "technical";
+  model_id?: string;
+};
+
+export type TranslationData = {
+  detected_language: string;
+  target_language: string;
+  translated_text: string;
+  notes: string[];
 };
 
 // ==================== 文件模块类型 ====================

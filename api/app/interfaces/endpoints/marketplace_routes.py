@@ -10,11 +10,20 @@ from app.interfaces.schemas.base import Response
 from app.interfaces.schemas.marketplace import (
     ConsumptionAnalysisRequest,
     ConsumptionAnalysisResponse,
+    ConsumptionCorrectionRequest,
     ConsumptionManualRequest,
+    DocumentQaRequest,
+    DocumentQaResponse,
     MarketplaceAppsResponse,
     MarketplaceAppResponse,
+    MarketplaceRouteRequest,
+    MarketplaceRouteResponse,
     NutritionAnalysisRequest,
     NutritionAnalysisResponse,
+    NutritionFollowupRequest,
+    NutritionFollowupResponse,
+    TranslationRequest,
+    TranslationResponse,
     VideoSearchRequest,
     VideoSearchResponse,
 )
@@ -44,6 +53,21 @@ async def search_videos(
         raise BadRequestError(str(exc)) from exc
 
 
+@router.post("/assistant/route", response_model=Response[MarketplaceRouteResponse])
+async def route_marketplace_request(
+        request: MarketplaceRouteRequest,
+        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
+) -> Response[MarketplaceRouteResponse]:
+    try:
+        data = await marketplace_service.route_request(
+            request.query,
+            model_id=request.model_id,
+        )
+        return Response.success(data=MarketplaceRouteResponse(**data))
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+
+
 @router.post("/nutrition/analyze", response_model=Response[NutritionAnalysisResponse])
 async def analyze_nutrition(
         request: NutritionAnalysisRequest,
@@ -57,6 +81,22 @@ async def analyze_nutrition(
             goal=request.goal,
         )
         return Response.success(data=NutritionAnalysisResponse(**data))
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+
+
+@router.post("/nutrition/followup", response_model=Response[NutritionFollowupResponse])
+async def answer_nutrition_followup(
+        request: NutritionFollowupRequest,
+        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
+) -> Response[NutritionFollowupResponse]:
+    try:
+        data = await marketplace_service.answer_nutrition_followup(
+            request.analysis.model_dump(),
+            request.question,
+            model_id=request.model_id,
+        )
+        return Response.success(data=NutritionFollowupResponse(**data))
     except ValueError as exc:
         raise BadRequestError(str(exc)) from exc
 
@@ -88,5 +128,51 @@ async def calculate_consumption(
             request.serving_grams,
         )
         return Response.success(data=ConsumptionAnalysisResponse(**data))
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+
+
+@router.post("/consumption/correct", response_model=Response[ConsumptionAnalysisResponse])
+async def correct_consumption(
+        request: ConsumptionCorrectionRequest,
+        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
+) -> Response[ConsumptionAnalysisResponse]:
+    try:
+        data = marketplace_service.correct_consumption(request.text, request.serving_grams)
+        return Response.success(data=ConsumptionAnalysisResponse(**data))
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+
+
+@router.post("/document-qa/ask", response_model=Response[DocumentQaResponse])
+async def ask_document_question(
+        request: DocumentQaRequest,
+        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
+) -> Response[DocumentQaResponse]:
+    try:
+        data = await marketplace_service.answer_document_question(
+            request.file_id,
+            request.question,
+            model_id=request.model_id,
+        )
+        return Response.success(data=DocumentQaResponse(**data))
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+
+
+@router.post("/translation/translate", response_model=Response[TranslationResponse])
+async def translate(
+        request: TranslationRequest,
+        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
+) -> Response[TranslationResponse]:
+    try:
+        data = await marketplace_service.translate(
+            text=request.text,
+            file_id=request.file_id,
+            target_language=request.target_language,
+            style=request.style,
+            model_id=request.model_id,
+        )
+        return Response.success(data=TranslationResponse(**data))
     except ValueError as exc:
         raise BadRequestError(str(exc)) from exc

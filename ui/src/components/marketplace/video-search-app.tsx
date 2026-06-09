@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ExternalLink,
   Film,
@@ -84,12 +84,19 @@ function VideoPlayerPanel({ item, onClose }: { item: VideoSearchResult; onClose:
   );
 }
 
-export function VideoSearchApp() {
-  const [query, setQuery] = useState("");
+export function VideoSearchApp({
+  initialQuery = "",
+  autoRun = false,
+}: {
+  initialQuery?: string;
+  autoRun?: boolean;
+}) {
+  const [query, setQuery] = useState(initialQuery);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<VideoSearchData | null>(null);
   const [searched, setSearched] = useState(false);
   const [active, setActive] = useState<VideoSearchResult | null>(null);
+  const autoRunRef = useRef(false);
 
   const handleSearch = async () => {
     if (!query.trim()) {
@@ -109,6 +116,14 @@ export function VideoSearchApp() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!autoRun || autoRunRef.current || !initialQuery.trim()) return;
+    autoRunRef.current = true;
+    void handleSearch();
+    // handleSearch intentionally reads the initial query set above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRun, initialQuery]);
 
   const handleClear = () => {
     setQuery("");
@@ -229,6 +244,11 @@ export function VideoSearchApp() {
                           {embeddable && (
                             <Badge className="bg-emerald-600 text-[11px] hover:bg-emerald-600">
                               可页内播放
+                            </Badge>
+                          )}
+                          {item.recommendation_reason && (
+                            <Badge variant="secondary" className="text-[11px]">
+                              {item.recommendation_reason}
                             </Badge>
                           )}
                         </div>

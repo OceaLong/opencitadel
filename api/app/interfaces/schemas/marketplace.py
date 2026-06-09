@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,11 @@ class MarketplaceAppResponse(BaseModel):
     description: str
     icon: str
     category: str
+    tags: List[str] = Field(default_factory=list)
+    featured: bool = False
+    accent: str = "blue"
+    needs_vision: bool = False
+    examples: List[str] = Field(default_factory=list)
 
 
 class MarketplaceAppsResponse(BaseModel):
@@ -30,6 +35,7 @@ class VideoSearchResultItem(BaseModel):
     condition: str
     trust_score: float
     source_type: Optional[str] = None
+    recommendation_reason: Optional[str] = None
 
 
 class VideoSearchStats(BaseModel):
@@ -43,6 +49,19 @@ class VideoSearchResponse(BaseModel):
     copyright_notice: str
     results: List[VideoSearchResultItem]
     stats: VideoSearchStats
+
+
+class MarketplaceRouteRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=500)
+    model_id: Optional[str] = None
+
+
+class MarketplaceRouteResponse(BaseModel):
+    app_id: str
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    reason: str
+    params: Dict[str, Any] = Field(default_factory=dict)
+    suggestions: List[str] = Field(default_factory=list)
 
 
 class NutritionAnalysisRequest(BaseModel):
@@ -84,6 +103,16 @@ class NutritionAnalysisResponse(BaseModel):
     assessment: NutritionAssessment
 
 
+class NutritionFollowupRequest(BaseModel):
+    analysis: NutritionAnalysisResponse
+    question: str = Field(..., min_length=1, max_length=500)
+    model_id: Optional[str] = None
+
+
+class NutritionFollowupResponse(BaseModel):
+    answer: str
+
+
 class ConsumptionAnalysisRequest(BaseModel):
     file_id: str
     serving_grams: float = Field(..., gt=0, le=10000)
@@ -104,3 +133,34 @@ class ConsumptionAnalysisResponse(BaseModel):
     servings: Optional[float] = None
     full_servings: Optional[int] = None
     message: str
+
+
+class ConsumptionCorrectionRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=300)
+    serving_grams: float = Field(..., gt=0, le=10000)
+
+
+class DocumentQaRequest(BaseModel):
+    file_id: str
+    question: str = Field(..., min_length=1, max_length=1000)
+    model_id: Optional[str] = None
+
+
+class DocumentQaResponse(BaseModel):
+    answer: str
+    source_summary: str
+
+
+class TranslationRequest(BaseModel):
+    text: Optional[str] = Field(default=None, max_length=10000)
+    file_id: Optional[str] = None
+    target_language: str = Field(default="中文", max_length=50)
+    style: Literal["plain", "formal", "casual", "technical"] = "plain"
+    model_id: Optional[str] = None
+
+
+class TranslationResponse(BaseModel):
+    detected_language: str
+    target_language: str
+    translated_text: str
+    notes: List[str] = Field(default_factory=list)

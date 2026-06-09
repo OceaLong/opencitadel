@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Salad } from "lucide-react";
+import { MessageCircle, Salad, Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { ImageUploadZone } from "@/components/marketplace/image-upload-zone";
 import { TrafficLight } from "@/components/marketplace/traffic-light";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 
 import { fileApi } from "@/lib/api/file";
 import { marketplaceApi } from "@/lib/api/marketplace";
@@ -37,12 +39,19 @@ function MetricCard({ label, value, unit }: { label: string; value: number; unit
   );
 }
 
-export function NutritionAnalysisApp() {
+export function NutritionAnalysisApp({
+  initialGoal = "maintain",
+}: {
+  initialGoal?: "cut" | "bulk" | "maintain";
+}) {
   const [preview, setPreview] = useState<string | null>(null);
   const [weightKg, setWeightKg] = useState("");
-  const [goal, setGoal] = useState<string>("maintain");
+  const [goal, setGoal] = useState<string>(initialGoal);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<NutritionAnalysisData | null>(null);
+  const [followupQuestion, setFollowupQuestion] = useState("");
+  const [followupAnswer, setFollowupAnswer] = useState("");
+  const [followupLoading, setFollowupLoading] = useState(false);
 
   const handleFile = async (file: File) => {
     if (!ALLOWED_TYPES.includes(file.type)) {
@@ -70,6 +79,26 @@ export function NutritionAnalysisApp() {
       toast.error(e instanceof Error ? e.message : "分析失败");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFollowup = async () => {
+    if (!result || !followupQuestion.trim()) {
+      toast.error("请输入想追问的问题");
+      return;
+    }
+    setFollowupLoading(true);
+    setFollowupAnswer("");
+    try {
+      const data = await marketplaceApi.answerNutritionFollowup({
+        analysis: result,
+        question: followupQuestion.trim(),
+      });
+      setFollowupAnswer(data.answer);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "追问失败");
+    } finally {
+      setFollowupLoading(false);
     }
   };
 
@@ -200,6 +229,36 @@ export function NutritionAnalysisApp() {
               ))}
             </div>
           </div>
+
+          <Card className="border-primary/20 bg-primary/5">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <MessageCircle className="size-4" />
+                追问营养建议
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Textarea
+                value={followupQuestion}
+                onChange={(e) => setFollowupQuestion(e.target.value)}
+                placeholder="例如：这顿饭减脂期要怎么调整？蛋白质够吗？"
+                className="min-h-20 bg-background/70"
+              />
+              <Button onClick={handleFollowup} disabled={followupLoading}>
+                {followupLoading ? (
+                  <Skeleton className="size-4 rounded-full" />
+                ) : (
+                  <Send className="size-4" />
+                )}
+                生成建议
+              </Button>
+              {followupAnswer && (
+                <div className="border-border/70 bg-background/80 text-foreground rounded-xl border p-3 text-sm leading-relaxed whitespace-pre-wrap">
+                  {followupAnswer}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Calculator, Package } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Calculator, MessageSquareText, Package } from "lucide-react";
 import { toast } from "sonner";
 
 import { ImageUploadZone } from "@/components/marketplace/image-upload-zone";
@@ -18,12 +18,20 @@ import type { ConsumptionAnalysisData } from "@/lib/api/types";
 const MAX_SIZE = 5 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/jpg", "image/png"];
 
-export function ConsumptionCalculatorApp() {
+export function ConsumptionCalculatorApp({
+  initialTotalGrams,
+  initialServingGrams,
+}: {
+  initialTotalGrams?: number;
+  initialServingGrams?: number;
+}) {
   const [preview, setPreview] = useState<string | null>(null);
-  const [servingGrams, setServingGrams] = useState("50");
-  const [manualTotal, setManualTotal] = useState("");
+  const [servingGrams, setServingGrams] = useState(String(initialServingGrams ?? 50));
+  const [manualTotal, setManualTotal] = useState(initialTotalGrams ? String(initialTotalGrams) : "");
+  const [correction, setCorrection] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ConsumptionAnalysisData | null>(null);
+  const autoCalculatedRef = useRef(false);
 
   const handleFile = async (file: File) => {
     if (!ALLOWED_TYPES.includes(file.type)) {
@@ -81,6 +89,34 @@ export function ConsumptionCalculatorApp() {
       setLoading(false);
     }
   };
+
+  const handleCorrection = async () => {
+    const serving = Number(servingGrams);
+    if (!correction.trim() || !serving || serving <= 0) {
+      toast.error("请输入修正说明和有效单次食用量");
+      return;
+    }
+    setLoading(true);
+    try {
+      const data = await marketplaceApi.correctConsumption({
+        text: correction.trim(),
+        serving_grams: serving,
+      });
+      setResult(data);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "修正失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!initialTotalGrams || autoCalculatedRef.current) return;
+    autoCalculatedRef.current = true;
+    void handleManualCalculate();
+    // handleManualCalculate intentionally uses initialized fields.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTotalGrams]);
 
   return (
     <div className="space-y-5">
@@ -192,6 +228,22 @@ export function ConsumptionCalculatorApp() {
                 识别: {result.ocr_text}
               </p>
             )}
+            <div className="border-border/70 bg-background/70 space-y-2 rounded-xl border p-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <MessageSquareText className="size-4" />
+                自然语言修正
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  value={correction}
+                  onChange={(e) => setCorrection(e.target.value)}
+                  placeholder="如：其实净含量是 1.2kg"
+                />
+                <Button onClick={handleCorrection} disabled={loading} className="shrink-0">
+                  重新计算
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}

@@ -2,14 +2,18 @@
 # -*- coding: utf-8 -*-
 import logging
 import asyncio
-from typing import Optional
+import json
+import re
+from typing import Any, Dict, Optional
 
 from app.application.services.file_service import FileService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.marketplace.consumption_service import ConsumptionService
 from app.application.services.marketplace.nutrition_service import NutritionService
 from app.application.services.marketplace.video_search_service import VideoSearchService
+from app.domain.utils.vision import build_image_content_part, is_image_mime
 from app.infrastructure.external.llm.factory import LLMFactory
+from app.infrastructure.external.json_parser.repair_json_parser import RepairJSONParser
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +24,11 @@ MARKETPLACE_APPS = [
         "description": "聚合正版免费观看入口，支持中文/英文剧名搜索",
         "icon": "🎬",
         "category": "娱乐",
+        "tags": ["影视", "搜索", "正版资源", "在线播放"],
+        "featured": True,
+        "accent": "violet",
+        "needs_vision": False,
+        "examples": ["搜索三体免费观看入口", "帮我找 Breaking Bad 正版播放"],
     },
     {
         "id": "nutrition-analysis",
@@ -27,6 +36,11 @@ MARKETPLACE_APPS = [
         "description": "拍照识别餐食营养，减脂/增肌红绿灯评估",
         "icon": "🥗",
         "category": "健康",
+        "tags": ["视觉识别", "营养", "健身", "减脂"],
+        "featured": True,
+        "accent": "emerald",
+        "needs_vision": True,
+        "examples": ["分析这顿饭适不适合减脂", "看看这张餐食蛋白够不够"],
     },
     {
         "id": "consumption-calculator",
@@ -34,8 +48,96 @@ MARKETPLACE_APPS = [
         "description": "识别包装净含量，计算可食用次数",
         "icon": "📦",
         "category": "生活",
+        "tags": ["OCR", "计算", "包装识别", "生活效率"],
+        "featured": False,
+        "accent": "amber",
+        "needs_vision": True,
+        "examples": ["这包 1.2kg 每次 50g 能吃几次", "识别包装净含量并计算消耗"],
+    },
+    {
+        "id": "document-qa",
+        "name": "文档/图片问答",
+        "description": "上传资料或截图，AI 提炼重点并回答问题",
+        "icon": "📄",
+        "category": "办公",
+        "tags": ["文档", "图片理解", "问答", "总结"],
+        "featured": True,
+        "accent": "sky",
+        "needs_vision": False,
+        "examples": ["总结这个文档的重点", "看这张截图告诉我哪里异常"],
+    },
+    {
+        "id": "smart-translation",
+        "name": "智能翻译",
+        "description": "自动识别语种，按正式/口语/技术风格翻译",
+        "icon": "🌐",
+        "category": "办公",
+        "tags": ["翻译", "润色", "多语言", "技术文档"],
+        "featured": True,
+        "accent": "indigo",
+        "needs_vision": False,
+        "examples": ["把这段英文翻译成正式中文", "翻译截图里的文字为英文"],
+    },
+    {
+        "id": "prompt-lab",
+        "name": "提示词工坊",
+        "description": "把粗略想法改写为可复用的高质量提示词",
+        "icon": "✨",
+        "category": "效率",
+        "tags": ["提示词", "工作流", "创作", "效率"],
+        "featured": False,
+        "accent": "rose",
+        "needs_vision": False,
+        "examples": ["帮我写一个数据分析 Agent 提示词", "优化这段客服回复 prompt"],
     },
 ]
+
+APP_IDS = {app["id"] for app in MARKETPLACE_APPS}
+
+ROUTE_PROMPT = """你是应用市场的智能分发助手。根据用户输入，从候选应用中选择最合适的一个，并抽取可直接预填的参数。
+候选应用：
+{apps}
+
+仅返回 JSON：
+{{
+  "app_id": "video-search | nutrition-analysis | consumption-calculator | document-qa | smart-translation | prompt-lab",
+  "confidence": 0.0,
+  "reason": "一句中文理由",
+  "params": {{}},
+  "suggestions": ["可选的下一步建议"]
+}}
+
+抽参规则：
+- video-search: params.query = 剧名/片名。
+- consumption-calculator: params.serving_grams 和 params.total_grams 可从文本提取。
+- smart-translation: params.text / params.target_language / params.style。
+- document-qa: params.question。
+- nutrition-analysis: params.goal 可为 cut/bulk/maintain。"""
+
+VIDEO_RANK_PROMPT = """请为正版影视搜索结果排序并补充推荐理由。仅返回 JSON：
+{{"items": [{{"url": "原 url", "recommendation_reason": "不超过 24 字"}}]}}
+偏好：官方来源、可页内播放、trust_score 高、标题和查询更相关。
+查询：{query}
+结果：{results}"""
+
+NUTRITION_FOLLOWUP_PROMPT = """你是营养教练。基于已结构化的餐食分析回答用户追问，简洁、可执行，不要编造图片外信息。
+餐食分析 JSON：
+{analysis}
+
+用户问题：{question}"""
+
+DOC_QA_PROMPT = """你是资料问答助手。请基于用户提供的内容回答问题；如果资料不足，明确说明缺失信息。
+问题：{question}
+
+资料：
+{content}"""
+
+TRANSLATION_PROMPT = """你是专业翻译助手。请自动识别输入语言，并按目标语言和风格翻译。仅返回 JSON：
+{{"detected_language": "识别到的语言", "translated_text": "译文", "notes": ["简短说明"]}}
+目标语言：{target_language}
+风格：{style}
+文本：
+{text}"""
 
 
 class MarketplaceService:
@@ -49,12 +151,41 @@ class MarketplaceService:
         self._video = VideoSearchService()
         self._nutrition = NutritionService()
         self._consumption = ConsumptionService()
+        self._json_parser = RepairJSONParser()
 
     def list_apps(self) -> list[dict]:
         return MARKETPLACE_APPS
 
     async def search_videos(self, query: str) -> dict:
-        return await self._video.search(query)
+        data = await self._video.search(query)
+        try:
+            llm = await self._resolve_text_llm(None)
+            return await self._rank_video_results(llm, data)
+        except Exception as exc:
+            logger.info("影视结果智能排序跳过: %s", exc)
+            for result in data.get("results", []):
+                result.setdefault("recommendation_reason", "正版来源优先推荐")
+            return data
+
+    async def route_request(self, query: str, *, model_id: Optional[str] = None) -> dict:
+        query = (query or "").strip()
+        if not query:
+            raise ValueError("请输入想完成的任务")
+
+        heuristic = self._route_by_rules(query)
+        try:
+            llm = await self._resolve_text_llm(model_id)
+            apps = json.dumps(MARKETPLACE_APPS, ensure_ascii=False)
+            content = await self._invoke_text(
+                llm,
+                ROUTE_PROMPT.format(apps=apps) + f"\n\n用户输入：{query}",
+            )
+            parsed = await self._json_parser.invoke(content, default_value={})
+            route = self._normalize_route(parsed, fallback=heuristic)
+        except Exception as exc:
+            logger.info("应用市场 LLM 分发降级为规则匹配: %s", exc)
+            route = heuristic
+        return route
 
     async def analyze_nutrition(
             self,
@@ -74,6 +205,21 @@ class MarketplaceService:
             goal=goal,
         )
 
+    async def answer_nutrition_followup(
+            self,
+            analysis: dict,
+            question: str,
+            *,
+            model_id: Optional[str] = None,
+    ) -> dict:
+        llm = await self._resolve_text_llm(model_id)
+        prompt = NUTRITION_FOLLOWUP_PROMPT.format(
+            analysis=json.dumps(analysis, ensure_ascii=False),
+            question=question.strip(),
+        )
+        answer = await self._invoke_text(llm, prompt)
+        return {"answer": answer.strip()}
+
     async def analyze_consumption(
             self,
             file_id: str,
@@ -90,13 +236,254 @@ class MarketplaceService:
     def calculate_consumption_manual(self, total_grams: float, serving_grams: float) -> dict:
         return self._consumption.calculate_manual(total_grams, serving_grams)
 
+    def correct_consumption(self, text: str, serving_grams: float) -> dict:
+        total_grams = self._extract_grams(text)
+        if total_grams is None:
+            raise ValueError("未识别到总量，请输入如 1.2kg、500g")
+        return self._consumption.calculate_manual(total_grams, serving_grams)
+
+    async def answer_document_question(
+            self,
+            file_id: str,
+            question: str,
+            *,
+            model_id: Optional[str] = None,
+    ) -> dict:
+        file_bytes, file_info = await self._load_file_bytes(file_id)
+        mime_type = file_info.mime_type or "application/octet-stream"
+        llm = await self._resolve_vision_llm(model_id) if is_image_mime(mime_type) else await self._resolve_text_llm(model_id)
+
+        if is_image_mime(mime_type):
+            messages = [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"请阅读这张图片并回答问题：{question}"},
+                    build_image_content_part(file_bytes, mime_type),
+                ],
+            }]
+            response = await llm.invoke(messages)
+            answer = response.get("content") or response.get("reasoning_content") or ""
+            return {"answer": answer.strip(), "source_summary": "基于上传图片回答"}
+
+        text = self._decode_text(file_bytes)
+        if not text:
+            raise ValueError("当前仅支持图片或可读取文本文件问答")
+        prompt = DOC_QA_PROMPT.format(question=question.strip(), content=text[:12000])
+        answer = await self._invoke_text(llm, prompt)
+        return {"answer": answer.strip(), "source_summary": f"已读取约 {min(len(text), 12000)} 个字符"}
+
+    async def translate(
+            self,
+            *,
+            text: Optional[str],
+            file_id: Optional[str],
+            target_language: str,
+            style: str,
+            model_id: Optional[str] = None,
+    ) -> dict:
+        if not text and not file_id:
+            raise ValueError("请输入文本或上传图片/文本文件")
+
+        source_text = (text or "").strip()
+        llm = await self._resolve_text_llm(model_id)
+        if file_id:
+            file_bytes, file_info = await self._load_file_bytes(file_id)
+            mime_type = file_info.mime_type or "application/octet-stream"
+            if is_image_mime(mime_type):
+                llm = await self._resolve_vision_llm(model_id)
+                messages = [{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "请识别图片中的文字并翻译。仅返回 JSON："
+                                "{\"detected_language\":\"识别到的语言\",\"translated_text\":\"译文\",\"notes\":[\"说明\"]}"
+                                f"\n目标语言：{target_language}\n风格：{style}"
+                            ),
+                        },
+                        build_image_content_part(file_bytes, mime_type),
+                    ],
+                }]
+                response = await llm.invoke(messages)
+                parsed = await self._json_parser.invoke(
+                    response.get("content") or response.get("reasoning_content") or "",
+                    default_value={},
+                )
+                return self._normalize_translation(parsed, target_language)
+            decoded = self._decode_text(file_bytes)
+            source_text = "\n\n".join(part for part in [source_text, decoded] if part)
+
+        if not source_text:
+            raise ValueError("未读取到可翻译文本")
+
+        content = await self._invoke_text(
+            llm,
+            TRANSLATION_PROMPT.format(
+                target_language=target_language,
+                style=style,
+                text=source_text[:12000],
+            ),
+        )
+        parsed = await self._json_parser.invoke(content, default_value={})
+        return self._normalize_translation(parsed, target_language)
+
     async def _load_image(self, file_id: str):
+        file_bytes, file_info = await self._load_file_bytes(file_id)
+        return file_bytes, file_info
+
+    async def _load_file_bytes(self, file_id: str):
         file_data, file_info = await self._file_service.download_file(file_id)
-        image_bytes = await asyncio.to_thread(file_data.read)
-        return image_bytes, file_info
+        file_bytes = await asyncio.to_thread(file_data.read)
+        return file_bytes, file_info
 
     async def _resolve_vision_llm(self, model_id: Optional[str]):
         model = await self._llm_model_service.resolve_model(model_id)
         if not model.capabilities.vision and not model.supports_multimodal:
             raise ValueError("请选择支持多模态能力的模型，或在模型设置中开启视觉能力")
         return LLMFactory.create(model)
+
+    async def _resolve_text_llm(self, model_id: Optional[str]):
+        model = await self._llm_model_service.resolve_model(model_id)
+        return LLMFactory.create(model)
+
+    async def _invoke_text(self, llm, prompt: str) -> str:
+        response = await llm.invoke([{"role": "user", "content": prompt}])
+        content = response.get("content") or response.get("reasoning_content") or ""
+        if not content:
+            raise ValueError("模型未返回有效内容")
+        return str(content)
+
+    async def _rank_video_results(self, llm, data: dict) -> dict:
+        compact_results = [
+            {
+                "title": item.get("title"),
+                "url": item.get("url"),
+                "platform": item.get("platform"),
+                "trust_score": item.get("trust_score"),
+                "source_type": item.get("source_type"),
+            }
+            for item in data.get("results", [])[:12]
+        ]
+        if not compact_results:
+            return data
+        content = await self._invoke_text(
+            llm,
+            VIDEO_RANK_PROMPT.format(
+                query=data.get("query", ""),
+                results=json.dumps(compact_results, ensure_ascii=False),
+            ),
+        )
+        parsed = await self._json_parser.invoke(content, default_value={})
+        ranked = parsed.get("items") if isinstance(parsed, dict) else []
+        reasons = {
+            item.get("url"): item.get("recommendation_reason")
+            for item in ranked
+            if isinstance(item, dict) and item.get("url")
+        }
+        order = {item.get("url"): idx for idx, item in enumerate(ranked) if isinstance(item, dict)}
+        for item in data.get("results", []):
+            item["recommendation_reason"] = reasons.get(item.get("url")) or "正版来源优先推荐"
+        data["results"] = sorted(
+            data.get("results", []),
+            key=lambda item: (order.get(item.get("url"), 999), -float(item.get("trust_score") or 0)),
+        )
+        return data
+
+    def _route_by_rules(self, query: str) -> dict:
+        lowered = query.lower()
+        app_id = "prompt-lab"
+        params: Dict[str, Any] = {}
+        if any(word in lowered for word in ["电影", "电视剧", "影视", "剧名", "播放", "观看", "video", "movie"]):
+            app_id = "video-search"
+            params["query"] = self._strip_intent_words(query)
+        elif any(word in query for word in ["营养", "热量", "蛋白", "减脂", "增肌", "餐食"]):
+            app_id = "nutrition-analysis"
+            if "减脂" in query:
+                params["goal"] = "cut"
+            elif "增肌" in query:
+                params["goal"] = "bulk"
+        elif any(word in query for word in ["净含量", "食用", "能吃", "消耗", "包装"]):
+            app_id = "consumption-calculator"
+            grams = self._extract_grams(query)
+            if grams:
+                params["total_grams"] = grams
+        elif any(word in query for word in ["翻译", "译成", "英文", "中文", "日文"]):
+            app_id = "smart-translation"
+            params["text"] = re.sub(r"^(请|帮我)?(翻译|把)", "", query).strip()
+        elif any(word in query for word in ["文档", "总结", "问答", "截图", "资料"]):
+            app_id = "document-qa"
+            params["question"] = query
+        return {
+            "app_id": app_id,
+            "confidence": 0.72,
+            "reason": "根据关键词为你匹配最合适的小应用",
+            "params": params,
+            "suggestions": self._app_examples(app_id)[:2],
+        }
+
+    def _normalize_route(self, parsed: dict, *, fallback: dict) -> dict:
+        if not isinstance(parsed, dict):
+            return fallback
+        app_id = parsed.get("app_id")
+        if app_id not in APP_IDS:
+            return fallback
+        confidence = parsed.get("confidence")
+        try:
+            confidence = max(0.0, min(1.0, float(confidence)))
+        except (TypeError, ValueError):
+            confidence = fallback["confidence"]
+        params = parsed.get("params") if isinstance(parsed.get("params"), dict) else {}
+        suggestions = parsed.get("suggestions") if isinstance(parsed.get("suggestions"), list) else []
+        return {
+            "app_id": app_id,
+            "confidence": confidence,
+            "reason": str(parsed.get("reason") or fallback["reason"]),
+            "params": params,
+            "suggestions": [str(item) for item in suggestions[:3]] or self._app_examples(app_id)[:2],
+        }
+
+    def _app_examples(self, app_id: str) -> list[str]:
+        for app in MARKETPLACE_APPS:
+            if app["id"] == app_id:
+                return app.get("examples", [])
+        return []
+
+    @staticmethod
+    def _strip_intent_words(query: str) -> str:
+        cleaned = query
+        for word in ["搜索", "查找", "帮我找", "免费观看入口", "正版播放", "播放", "观看"]:
+            cleaned = cleaned.replace(word, "")
+        return cleaned.strip(" ，。") or query
+
+    @staticmethod
+    def _extract_grams(text: str) -> Optional[float]:
+        match = re.search(r"(\d+(?:\.\d+)?)\s*(kg|千克|g|克|ml|毫升|l|升)", text, re.IGNORECASE)
+        if not match:
+            return None
+        value = float(match.group(1))
+        unit = match.group(2).lower()
+        if unit in {"kg", "千克", "l", "升"}:
+            return value * 1000
+        return value
+
+    @staticmethod
+    def _decode_text(file_bytes: bytes) -> str:
+        for encoding in ("utf-8", "utf-8-sig", "gb18030"):
+            try:
+                return file_bytes.decode(encoding).strip()
+            except UnicodeDecodeError:
+                continue
+        return ""
+
+    @staticmethod
+    def _normalize_translation(parsed: dict, target_language: str) -> dict:
+        if not isinstance(parsed, dict):
+            parsed = {}
+        translated = parsed.get("translated_text") or parsed.get("translation") or ""
+        return {
+            "detected_language": str(parsed.get("detected_language") or "自动识别"),
+            "target_language": target_language,
+            "translated_text": str(translated).strip(),
+            "notes": [str(item) for item in (parsed.get("notes") or [])],
+        }
