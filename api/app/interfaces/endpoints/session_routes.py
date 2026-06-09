@@ -156,6 +156,8 @@ async def create_session(
         model_id=request.model_id,
         skill_id=request.skill_id,
         thinking_enabled=bool(request.thinking_enabled) if request.thinking_enabled is not None else False,
+        codebase_id=request.codebase_id,
+        mode=request.mode,
     )
     return Response.success(
         msg="创建任务会话成功",
@@ -295,6 +297,7 @@ async def chat(
                 model_id=request.model_id,
                 skill_id=request.skill_id,
                 thinking_enabled=request.thinking_enabled,
+                mode=request.mode,
         ):
             if not should_project_event(event, include_transient=True, include_debug=include_debug):
                 continue

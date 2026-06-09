@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Code2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { ChatHeader } from "@/components/chat-header";
@@ -98,6 +100,20 @@ export default function Page() {
               </>
             }
           />
+          <Link
+            href="/codebase"
+            className="border-border bg-card hover:bg-muted/60 mb-4 flex items-center gap-3 rounded-xl border p-4 shadow-[var(--shadow-card)] transition-colors sm:mb-6"
+          >
+            <div className="bg-primary/10 flex size-10 items-center justify-center rounded-lg">
+              <Code2 className="text-primary size-5" />
+            </div>
+            <div className="text-left">
+              <div className="text-sm font-semibold">代码知识库</div>
+              <div className="text-muted-foreground text-xs">
+                上传代码库，生成架构图与调用链，Ask 问答 / Agent 改码
+              </div>
+            </div>
+          </Link>
           {/* 推荐对话内容 */}
           <SuggestedQuestions onQuestionClick={handleQuestionClick} />
         </div>

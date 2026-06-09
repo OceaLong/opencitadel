@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { LayoutGrid } from "lucide-react";
+import { Code2, LayoutGrid } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import { ManusIcon } from "@/components/manus-icon";
@@ -27,6 +27,11 @@ export function ChatHeader() {
         </Link>
       </div>
       <div className="flex items-center gap-1">
+        <Button variant="outline" size="icon-sm" asChild title="代码知识库">
+          <Link href="/codebase">
+            <Code2 className="size-4" />
+          </Link>
+        </Button>
         <Button variant="outline" size="icon-sm" asChild title="应用市场">
           <Link href="/marketplace">
             <LayoutGrid className="size-4" />

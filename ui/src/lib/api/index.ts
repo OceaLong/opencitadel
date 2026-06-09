@@ -23,9 +23,13 @@ export type {
   ApiResponse,
   ChatMessage,
   ChatParams,
+  Codebase,
+  CodebaseArtifact,
   ConsumptionAnalysisData,
   CreateA2AServerParams,
+  CreateCodebaseParams,
   CreateSessionParams,
+  SessionMode,
   ExecutionStatus,
   FileInfo,
   FileUploadParams,
@@ -58,6 +62,7 @@ export type {
 } from "./types";
 
 // 模块 API
+export { codebaseApi } from "./codebase";
 export { configApi } from "./config";
 export { fileApi } from "./file";
 export { marketplaceApi } from "./marketplace";

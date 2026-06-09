@@ -28,6 +28,7 @@ from app.infrastructure.storage.redis import get_redis
 from app.domain.models.app_config import AgentConfig, A2AConfig, MCPConfig
 from app.domain.models.session import SessionStatus
 from app.domain.services.checkpoint_service import CheckpointService
+from app.domain.services.codebase.ingestion_task_runner import CodebaseIngestionTaskRunner
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,11 @@ class AgentWorker:
             await self._task_state.set_status(task_id, TaskStatus.CANCELLED)
             return
 
+        meta = await self._task_state.get_task_meta(task_id) or {}
+        if meta.get("task_type") == "codebase_ingest":
+            await self._execute_ingest_job(task_id, meta.get("resource_id", ""))
+            return
+
         async with get_uow() as uow:
             session = await uow.session.get_by_id(session_id)
         if not session:
@@ -150,6 +156,24 @@ class AgentWorker:
             await runner.cleanup()
             await MCPConnectionPool.release_stale()
             await A2AConnectionPool.release_stale()
+
+    async def _execute_ingest_job(self, task_id: str, codebase_id: str) -> None:
+        if not codebase_id:
+            await self._task_state.set_status(task_id, TaskStatus.FAILED)
+            raise RuntimeError("代码库摄取任务缺少 resource_id")
+        file_storage = CosFileStorage(
+            bucket=self._settings.cos_bucket,
+            cos=get_cos(),
+            uow_factory=get_uow,
+        )
+        runner = CodebaseIngestionTaskRunner(
+            uow_factory=get_uow,
+            sandbox_cls=DockerSandbox,
+            file_storage=file_storage,
+            codebase_id=codebase_id,
+        )
+        task = RedisStreamTask(task_id=task_id, session_id=f"codebase-ingest:{codebase_id}", task_runner=runner)
+        await task.execute_locally()
 
     async def shutdown(self) -> None:
         self._running = False

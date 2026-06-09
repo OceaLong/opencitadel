@@ -12,6 +12,7 @@ from .file import File
 from .memory import Memory
 from .plan import Plan
 from .skill import SkillSummary
+from .codebase import SessionMode
 
 
 class SessionStatus(str, Enum):
@@ -38,6 +39,8 @@ class Session(BaseModel):
     model_id: Optional[str] = None  # 会话级模型id，null使用全局默认
     skill_id: Optional[str] = None  # 会话级Skill id，null表示不启用
     thinking_enabled: bool = False  # 会话级思考模式，默认关闭
+    codebase_id: Optional[str] = None  # 关联代码库
+    mode: SessionMode = SessionMode.AGENT  # ask=快速问答, agent=规划改码
     pending_phase: Optional[str] = None  # 等待恢复的内部阶段
     status: SessionStatus = SessionStatus.PENDING  # 状态
     updated_at: datetime = Field(default_factory=datetime.now)  # 更新时间

@@ -16,7 +16,9 @@ from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
 from app.domain.utils.app_config_filter import filter_a2a_config_by_refs, filter_mcp_config_by_refs
+from app.domain.models.codebase import SessionMode
 from app.domain.models.session import Session
+from app.domain.services.tools.codebase_tools import CodebaseTool
 from app.domain.models.skill import Skill
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agent_task_runner import AgentTaskRunner
@@ -26,6 +28,15 @@ from app.domain.services.tools.memory import MemoryTool
 from app.infrastructure.external.llm.factory import LLMFactory
 
 logger = logging.getLogger(__name__)
+
+CODE_AGENT_SKILL_PROMPT = """
+你是代码改造 Agent。用户已上传并索引了一个代码库，你可以：
+1. 使用 codebase 工具检索、理解代码
+2. 使用 file/shell 工具在沙箱工作区修改代码
+3. 修改前通过澄清步骤确认需求细节
+4. 每次修改后说明变更的文件与行号
+工作目录为代码库沙箱路径，请在该目录下进行所有改码操作。
+"""
 
 
 class TaskRunnerFactory:
@@ -144,6 +155,24 @@ class TaskRunnerFactory:
             return {"id": entry.id}
 
         extra_tools = [MemoryTool(save_fn=save_memory_fn, session_id=session.id)]
+
+        codebase_prompt = ""
+        if session.codebase_id:
+            async with self._uow_factory() as uow:
+                codebase = await uow.codebase.get_by_id(session.codebase_id)
+            if codebase:
+                if session.mode == SessionMode.AGENT:
+                    codebase_prompt = CODE_AGENT_SKILL_PROMPT
+                extra_tools.append(
+                    CodebaseTool(
+                        uow_factory=self._uow_factory,
+                        codebase_id=codebase.id,
+                        sandbox=sandbox,
+                        workspace_path=codebase.workspace_path,
+                    )
+                )
+        if codebase_prompt:
+            skill_prompt = f"{skill_prompt}\n\n{codebase_prompt}".strip() if skill_prompt else codebase_prompt
         caps = llm_model.capabilities
         if caps and caps.image_generation:
             extra_tools.append(
@@ -191,4 +220,6 @@ class TaskRunnerFactory:
             on_complete_callback=on_complete if self._auto_extract_memory else None,
             model_id=model_id,
             checkpoint_service=self._checkpoint_service,
+            mode=session.mode,
+            codebase_id=session.codebase_id,
         )

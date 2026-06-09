@@ -128,6 +128,8 @@ export type CreateSkillParams = {
   category?: string;
   system_prompt?: string;
   allowed_tools?: string[];
+  mcp_server_refs?: string[];
+  a2a_server_refs?: string[];
   recommended_model_id?: string | null;
   agent_params?: SkillAgentParams;
   examples?: string[];
@@ -500,11 +502,15 @@ export type SessionsData = {
 /**
  * 创建会话请求参数
  */
+export type SessionMode = "ask" | "agent";
+
 export type CreateSessionParams = {
   title?: string;
   model_id?: string;
   skill_id?: string;
   thinking_enabled?: boolean;
+  codebase_id?: string;
+  mode?: SessionMode;
   [key: string]: unknown;
 };
 
@@ -533,6 +539,7 @@ export type ChatParams = {
   model_id?: string;
   skill_id?: string;
   thinking_enabled?: boolean;
+  mode?: SessionMode;
   [key: string]: unknown;
 };
 
@@ -759,4 +766,124 @@ export type ViewFileParams = {
 export type ViewShellParams = {
   shell_session_id: string;
   [key: string]: unknown;
+};
+
+// ==================== 代码知识库 ====================
+
+export type CodebaseStatus =
+  | "pending"
+  | "materializing"
+  | "analyzing"
+  | "indexing"
+  | "generating"
+  | "ready"
+  | "failed";
+
+export type CodebaseSourceType = "zip" | "git" | "files";
+
+export type ArtifactKind =
+  | "architecture"
+  | "data_flow"
+  | "module_dir"
+  | "flowchart"
+  | "call_chain"
+  | "overview";
+
+export type Codebase = {
+  id: string;
+  name: string;
+  source_type: CodebaseSourceType;
+  source_ref?: string;
+  status: CodebaseStatus;
+  language_stats?: Record<string, number>;
+  file_count?: number;
+  sandbox_id?: string | null;
+  workspace_path?: string;
+  ingest_task_id?: string | null;
+  error?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CodebasesData = {
+  codebases: Codebase[];
+};
+
+export type FileTreeNode = {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  language?: string;
+  children?: FileTreeNode[];
+};
+
+export type FileTreeData = {
+  tree: FileTreeNode[];
+};
+
+export type CodebaseSymbol = {
+  id: string;
+  name: string;
+  kind: string;
+  file_id: string;
+  signature?: string;
+  start_line?: number;
+  end_line?: number;
+  parent_id?: string | null;
+};
+
+export type CodebaseSymbolsData = {
+  symbols: CodebaseSymbol[];
+};
+
+export type CodebaseArtifact = {
+  id: string;
+  kind: ArtifactKind;
+  format: "mermaid" | "markdown";
+  title: string;
+  content: string;
+  meta?: Record<string, unknown>;
+  created_at?: string;
+};
+
+export type CodebaseArtifactsData = {
+  artifacts: CodebaseArtifact[];
+};
+
+export type CreateCodebaseParams = {
+  name?: string;
+  source_type: CodebaseSourceType;
+  file_id?: string;
+  git_url?: string;
+  file_ids?: string[];
+};
+
+export type CreateCodebaseSessionParams = {
+  mode?: SessionMode;
+  model_id?: string;
+  skill_id?: string;
+};
+
+export type CodebaseSessionData = {
+  session_id: string;
+  codebase_id: string;
+  mode: SessionMode;
+};
+
+export type ReadSourceParams = {
+  path: string;
+  start_line?: number;
+  end_line?: number;
+};
+
+export type ReadSourceData = {
+  path: string;
+  content: string;
+  start_line?: number;
+  end_line?: number;
+};
+
+export type DownloadCodebaseData = {
+  snapshot_key: string;
+  download_url?: string;
 };

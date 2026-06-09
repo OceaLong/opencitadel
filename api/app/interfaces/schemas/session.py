@@ -6,6 +6,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from app.domain.models.file import File
+from app.domain.models.codebase import SessionMode
 from app.domain.models.session import SessionStatus
 from app.interfaces.schemas.event import AgentSSEEvent
 from app.interfaces.schemas.skill import SkillSummaryResponse
@@ -18,6 +19,8 @@ class CreateSessionRequest(BaseModel):
     model_id: Optional[str] = None
     skill_id: Optional[str] = None
     thinking_enabled: Optional[bool] = None
+    codebase_id: Optional[str] = None
+    mode: Optional[SessionMode] = None
 
 
 class CreateSessionResponse(BaseModel):
@@ -49,6 +52,7 @@ class ChatRequest(BaseModel):
     model_id: Optional[str] = None  # 会话级模型切换
     skill_id: Optional[str] = None  # 会话级Skill切换，空字符串表示禁用
     thinking_enabled: Optional[bool] = None  # 会话级思考模式切换
+    mode: Optional[SessionMode] = None  # ask/agent 模式切换
 
 
 class UpdateSessionConfigRequest(BaseModel):

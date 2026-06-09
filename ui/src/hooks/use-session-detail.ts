@@ -40,7 +40,12 @@ export type UseSessionDetailResult = {
   sendMessage: (
     message: string,
     attachmentIds: string[],
-    options?: { model_id?: string; skill_id?: string; thinking_enabled?: boolean },
+    options?: {
+      model_id?: string;
+      skill_id?: string;
+      thinking_enabled?: boolean;
+      mode?: import("@/lib/api/types").SessionMode;
+    },
   ) => Promise<void>;
   updateSessionConfig: (params: UpdateSessionConfigParams) => Promise<void>;
   streaming: boolean;
@@ -400,7 +405,12 @@ export function useSessionDetail(
     async (
       message: string,
       attachmentIds: string[],
-      options?: { model_id?: string; skill_id?: string; thinking_enabled?: boolean },
+      options?: {
+        model_id?: string;
+        skill_id?: string;
+        thinking_enabled?: boolean;
+        mode?: import("@/lib/api/types").SessionMode;
+      },
     ) => {
       if (!sessionId) return;
       stopEmptyStream();
@@ -447,6 +457,7 @@ export function useSessionDetail(
           model_id: options?.model_id,
           skill_id: options?.skill_id,
           thinking_enabled: options?.thinking_enabled,
+          mode: options?.mode,
         },
         onEvent,
         (err) => {

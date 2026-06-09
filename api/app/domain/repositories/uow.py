@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import TypeVar
 
 from .checkpoint_repository import CheckpointRepository
+from .codebase_repository import CodebaseRepository
 from .file_repository import FileRepository
 from .llm_model_repository import LLMModelRepository
 from .llm_token_usage_repository import LLMTokenUsageRepository
@@ -17,6 +18,7 @@ T = TypeVar("T", bound="IUnitOfWork")
 class IUnitOfWork(ABC):
     """Uow模式协议接口"""
     checkpoint: CheckpointRepository
+    codebase: CodebaseRepository
     file: FileRepository
     session: SessionRepository
     llm_model: LLMModelRepository

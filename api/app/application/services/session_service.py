@@ -7,6 +7,7 @@ from app.application.dto.session_io import FileReadResult, ShellReadResult
 from app.application.errors.exceptions import NotFoundError, ServerRequestsError
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.file import File
+from app.domain.models.codebase import SessionMode
 from app.domain.models.session import Session
 from app.domain.models.event import BaseEvent
 from app.domain.repositories.uow import IUnitOfWork
@@ -32,6 +33,8 @@ class SessionService:
             model_id: Optional[str] = None,
             skill_id: Optional[str] = None,
             thinking_enabled: bool = False,
+            codebase_id: Optional[str] = None,
+            mode: Optional[SessionMode] = None,
     ) -> Session:
         """创建一个空白的新任务会话"""
         logger.info(f"创建一个空白新任务会话")
@@ -40,6 +43,8 @@ class SessionService:
             model_id=model_id,
             skill_id=skill_id,
             thinking_enabled=thinking_enabled,
+            codebase_id=codebase_id,
+            mode=mode or SessionMode.AGENT,
         )
         async with self._uow_factory() as uow:
             await uow.session.save(session)

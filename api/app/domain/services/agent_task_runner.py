@@ -26,10 +26,12 @@ from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.utils.vision import is_image_mime, is_video_mime
 from app.domain.services import vision_service
+from app.domain.models.codebase import SessionMode
 from app.domain.models.session import SessionStatus
 from app.domain.models.skill import Skill
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.flows.planner_react import PlannerReActFlow
+from app.domain.services.flows.code_ask_flow import CodeAskFlow
 from app.domain.services.tool_event_presenter import FILE_MUTATING_FUNCTIONS, ToolEventPresenter
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.mcp import MCPTool
@@ -63,6 +65,8 @@ class AgentTaskRunner(TaskRunner):
             on_complete_callback: Optional[Callable] = None,
             model_id: Optional[str] = None,
             checkpoint_service: Optional[CheckpointService] = None,
+            mode: SessionMode = SessionMode.AGENT,
+            codebase_id: Optional[str] = None,
     ) -> None:
         """构造函数，完成Agent任务运行器的创建"""
         self._uow_factory = uow_factory
@@ -90,24 +94,42 @@ class AgentTaskRunner(TaskRunner):
             sync_file_to_storage=self._sync_file_to_storage,
             get_stream_size=self._get_stream_size,
         )
-        self._flow = PlannerReActFlow(
-            uow_factory=uow_factory,
-            llm=llm,
-            agent_config=agent_config,
-            session_id=session_id,
-            json_parser=json_parser,
-            browser=browser,
-            sandbox=sandbox,
-            search_engine=search_engine,
-            mcp_tool=self._mcp_tool,
-            a2a_tool=self._a2a_tool,
-            skill=skill,
-            skill_prompt=skill_prompt,
-            long_term_memory_block=long_term_memory_block,
-            extra_tools=extra_tools or [],
-            model_id=model_id,
-            file_storage=file_storage,
-        )
+        self._mode = mode
+        self._codebase_id = codebase_id
+        if codebase_id and mode == SessionMode.ASK:
+            self._flow = CodeAskFlow(
+                uow_factory=uow_factory,
+                llm=llm,
+                agent_config=agent_config,
+                session_id=session_id,
+                json_parser=json_parser,
+                browser=browser,
+                sandbox=sandbox,
+                search_engine=search_engine,
+                mcp_tool=self._mcp_tool,
+                a2a_tool=self._a2a_tool,
+                extra_tools=extra_tools or [],
+                model_id=model_id,
+            )
+        else:
+            self._flow = PlannerReActFlow(
+                uow_factory=uow_factory,
+                llm=llm,
+                agent_config=agent_config,
+                session_id=session_id,
+                json_parser=json_parser,
+                browser=browser,
+                sandbox=sandbox,
+                search_engine=search_engine,
+                mcp_tool=self._mcp_tool,
+                a2a_tool=self._a2a_tool,
+                skill=skill,
+                skill_prompt=skill_prompt,
+                long_term_memory_block=long_term_memory_block,
+                extra_tools=extra_tools or [],
+                model_id=model_id,
+                file_storage=file_storage,
+            )
 
     async def _put_and_add_event(self, task: Task, event: Event) -> None:
         """往指定任务的消息队列中添加事件"""
@@ -359,6 +381,32 @@ class AgentTaskRunner(TaskRunner):
         if isinstance(event, ErrorEvent):
             event.parent_event_id = event.parent_event_id or self._last_observable_event_id
 
+    async def _emit_code_diff_if_needed(self, task: Task) -> None:
+        """After agent code changes, emit git diff summary."""
+        try:
+            async with self._uow:
+                codebase = await self._uow.codebase.get_by_id(self._codebase_id)
+            if not codebase or not codebase.workspace_path:
+                return
+            workspace = codebase.workspace_path
+            result = await self._sandbox.exec_command(
+                "diff",
+                workspace,
+                f"cd {workspace} && git diff 2>/dev/null || diff -ruN /dev/null . 2>/dev/null | head -500",
+            )
+            if result.success and result.data and result.data.strip():
+                diff_text = result.data[:12000]
+                await self._put_and_add_event(
+                    task,
+                    MessageEvent(
+                        role="assistant",
+                        message=f"## 代码变更 Diff\n\n```diff\n{diff_text}\n```\n\n"
+                                f"可使用代码库下载接口获取完整项目包。",
+                    ),
+                )
+        except Exception as exc:
+            logger.warning("生成代码 diff 失败: %s", exc)
+
     async def _run_flow(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         """根据消息对象运行PlannerReActFlow"""
         # 1.判断传递的消息是否为空
@@ -494,6 +542,9 @@ class AgentTaskRunner(TaskRunner):
 
                 if cancelled:
                     break
+
+                if self._codebase_id and self._mode == SessionMode.AGENT:
+                    await self._emit_code_diff_if_needed(task)
 
             if cancelled:
                 await self._put_and_add_event(task, DoneEvent())

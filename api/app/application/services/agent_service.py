@@ -22,6 +22,7 @@ from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
 from app.domain.models.event import BaseEvent, ErrorEvent, MessageEvent, Event, DoneEvent, WaitEvent
 from app.domain.models.event_upgrader import upgrade_event_payload
 from app.domain.models.checkpoint import Checkpoint
+from app.domain.models.codebase import SessionMode
 from app.domain.models.session import Session, SessionStatus
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.checkpoint_service import CheckpointService
@@ -147,6 +148,7 @@ class AgentService:
             model_id: Optional[str] = None,
             skill_id: Optional[str] = None,
             thinking_enabled: Optional[bool] = None,
+            mode: Optional[SessionMode] = None,
     ) -> AsyncGenerator[BaseEvent, None]:
         session_missing = False
         try:
@@ -158,7 +160,12 @@ class AgentService:
                 yield ErrorEvent(error=_SESSION_NOT_FOUND_MSG)
                 return
 
-            if model_id is not None or skill_id is not None or thinking_enabled is not None:
+            if (
+                model_id is not None
+                or skill_id is not None
+                or thinking_enabled is not None
+                or mode is not None
+            ):
                 async with self._uow_factory() as uow:
                     await uow.session.update_session_config(
                         session_id,
@@ -168,6 +175,11 @@ class AgentService:
                         clear_model=model_id == "",
                         clear_skill=skill_id == "",
                     )
+                    if mode is not None:
+                        session = await uow.session.get_by_id(session_id)
+                        if session:
+                            session.mode = mode
+                            await uow.session.save(session)
                     session = await uow.session.get_by_id(session_id)
 
             task = await self._get_task(session)

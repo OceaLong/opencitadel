@@ -32,6 +32,7 @@ export type ChatMessageProps = {
   checkpoint?: SessionCheckpoint;
   onRestoreCheckpoint?: (checkpoint: SessionCheckpoint) => Promise<void> | void;
   restoringCheckpoint?: boolean;
+  onSourceClick?: (path: string, line?: number) => void;
 };
 
 type ToolRowProps = {
@@ -97,6 +98,7 @@ function ChatMessageComponent({
   checkpoint,
   onRestoreCheckpoint,
   restoringCheckpoint,
+  onSourceClick,
 }: ChatMessageProps) {
   if (item.kind === "user") {
     return (
@@ -127,7 +129,7 @@ function ChatMessageComponent({
           </div>
         </div>
         <div className="text-foreground m-0 max-w-none p-0">
-          <MarkdownContent content={item.data.message ?? ""} />
+          <MarkdownContent content={item.data.message ?? ""} onSourceClick={onSourceClick} />
         </div>
       </div>
     );

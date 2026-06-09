@@ -4,11 +4,13 @@ import { useDeferredValue, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { MermaidDiagram } from "@/components/mermaid-diagram";
 import { cn } from "@/lib/utils";
 
 export type MarkdownContentProps = {
   content: string;
   className?: string;
+  onSourceClick?: (path: string, line?: number) => void;
 };
 
 /**
@@ -32,7 +34,10 @@ const headingClasses: Record<string, string> = {
   h6: "text-sm font-medium mt-1 mb-0.5 first:mt-0 text-foreground",
 };
 
-const components: React.ComponentProps<typeof ReactMarkdown>["components"] = {
+function buildComponents(
+  onSourceClick?: (path: string, line?: number) => void,
+): React.ComponentProps<typeof ReactMarkdown>["components"] {
+  return {
   h1: ({ className, ...props }) => <h1 className={cn(headingClasses.h1, className)} {...props} />,
   h2: ({ className, ...props }) => <h2 className={cn(headingClasses.h2, className)} {...props} />,
   h3: ({ className, ...props }) => <h3 className={cn(headingClasses.h3, className)} {...props} />,
@@ -62,8 +67,12 @@ const components: React.ComponentProps<typeof ReactMarkdown>["components"] = {
     <strong className={cn("text-foreground font-semibold", className)} {...props} />
   ),
   code: ({ className, children, ...props }) => {
-    const text = typeof children === "string" ? children : "";
-    const isBlock = text.includes("\n");
+    const text = typeof children === "string" ? children : String(children ?? "");
+    const lang = className?.replace("language-", "") ?? "";
+    if (lang === "mermaid") {
+      return <MermaidDiagram chart={text.trim()} />;
+    }
+    const isBlock = text.includes("\n") || lang.length > 0;
     return (
       <code
         className={cn(
@@ -91,6 +100,19 @@ const components: React.ComponentProps<typeof ReactMarkdown>["components"] = {
     />
   ),
   a: ({ className, href, children, ...props }) => {
+    const childText = String(children ?? "");
+    const locMatch = childText.match(/^([^:]+):(\d+)$/);
+    if (locMatch && onSourceClick) {
+      return (
+        <button
+          type="button"
+          className="text-sm text-blue-600 hover:underline"
+          onClick={() => onSourceClick(locMatch[1], Number(locMatch[2]))}
+        >
+          {childText}
+        </button>
+      );
+    }
     // 安全兜底：如果 href 包含 CJK 字符，说明 autolink 仍然误判，降级为纯文本
     if (href && /[\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/.test(href)) {
       return <span className="text-foreground text-sm">{children}</span>;
@@ -107,11 +129,13 @@ const components: React.ComponentProps<typeof ReactMarkdown>["components"] = {
       </a>
     );
   },
-};
+  };
+}
 
-export function MarkdownContent({ content, className }: MarkdownContentProps) {
+export function MarkdownContent({ content, className, onSourceClick }: MarkdownContentProps) {
   const deferredContent = useDeferredValue(content);
   const normalized = useMemo(() => normalizeAutolinks(deferredContent), [deferredContent]);
+  const components = useMemo(() => buildComponents(onSourceClick), [onSourceClick]);
 
   return (
     <div className={cn("markdown-content break-words", className)}>

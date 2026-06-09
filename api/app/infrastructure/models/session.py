@@ -86,6 +86,16 @@ class SessionModel(Base):
         nullable=False,
         server_default=text("false"),
     )  # 会话级思考模式
+    codebase_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("codebases.id", ondelete="SET NULL"),
+        nullable=True,
+    )  # 关联代码库
+    mode: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        server_default=text("'agent'"),
+    )  # ask/agent
     pending_phase: Mapped[Optional[str]] = mapped_column(
         String(32),
         nullable=True,
@@ -139,6 +149,8 @@ class SessionModel(Base):
             "model_id": self.model_id,
             "skill_id": self.skill_id,
             "thinking_enabled": self.thinking_enabled,
+            "codebase_id": self.codebase_id,
+            "mode": self.mode,
             "pending_phase": self.pending_phase,
             "status": self.status,
             "updated_at": self.updated_at,

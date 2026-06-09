@@ -7,6 +7,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.services.a2a_server_service import A2AServerService
+from app.application.services.codebase_service import CodebaseService
 from app.application.services.agent_service import AgentService
 from app.application.services.app_config_service import AppConfigService
 from app.application.services.file_service import FileService
@@ -138,6 +139,20 @@ def get_agent_service(
         auto_extract_memory=settings.memory_auto_extract_enabled,
         config_provider=config_provider,
         checkpoint_service=get_checkpoint_service(),
+    )
+
+
+@lru_cache()
+def get_codebase_service() -> CodebaseService:
+    file_storage = CosFileStorage(
+        bucket=settings.cos_bucket,
+        cos=get_cos(),
+        uow_factory=get_uow,
+    )
+    return CodebaseService(
+        uow_factory=get_uow,
+        sandbox_cls=DockerSandbox,
+        file_storage=file_storage,
     )
 
 

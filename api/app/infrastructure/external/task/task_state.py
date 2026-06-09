@@ -54,10 +54,18 @@ class TaskStateService:
             if "BUSYGROUP" not in str(exc):
                 raise
 
-    async def register_task(self, task_id: str, session_id: str) -> None:
+    async def register_task(
+            self,
+            task_id: str,
+            session_id: str,
+            task_type: str = "agent",
+            resource_id: str = "",
+    ) -> None:
         payload = {
             "task_id": task_id,
             "session_id": session_id,
+            "task_type": task_type,
+            "resource_id": resource_id,
             "status": TaskStatus.PENDING.value,
             "retry_count": 0,
         }
