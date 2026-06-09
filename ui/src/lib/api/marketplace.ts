@@ -4,8 +4,12 @@ import type {
   ConsumptionAnalysisParams,
   ConsumptionCorrectionParams,
   ConsumptionManualParams,
+  DocumentConvertData,
+  DocumentConvertParams,
   DocumentQaData,
   DocumentQaParams,
+  FortunePredictionData,
+  FortunePredictionParams,
   MarketplaceAppsData,
   MarketplaceRouteData,
   MarketplaceRouteParams,
@@ -15,13 +19,11 @@ import type {
   NutritionFollowupParams,
   TranslationData,
   TranslationParams,
-  DocumentConvertData,
-  DocumentConvertParams,
+  VideoSearchData,
+  VideoSearchParams,
   WatermarkAddParams,
   WatermarkRemoveParams,
   WatermarkResultData,
-  VideoSearchData,
-  VideoSearchParams,
 } from "./types";
 
 export const marketplaceApi = {
@@ -62,4 +64,10 @@ export const marketplaceApi = {
 
   removeWatermark: (params: WatermarkRemoveParams): Promise<WatermarkResultData> =>
     post<WatermarkResultData>("/marketplace/watermark/remove", params),
+
+  predictFortune: (params: FortunePredictionParams): Promise<FortunePredictionData> =>
+    post<FortunePredictionData>("/marketplace/fortune/predict", params),
+
+  getFortuneShare: (shareId: string): Promise<FortunePredictionData> =>
+    get<FortunePredictionData>(`/marketplace/fortune/share/${shareId}`),
 };

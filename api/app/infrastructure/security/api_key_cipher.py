@@ -16,11 +16,16 @@ def _derive_fernet_key(secret: str) -> bytes:
     return base64.urlsafe_b64encode(digest)
 
 
+_DEFAULT_DEV_SECRET = "my-manus-api-key-secret-change-in-production"
+
+
 class ApiKeyCipher:
     """API Key加解密工具"""
 
     def __init__(self, secret: str) -> None:
-        self._fernet = Fernet(_derive_fernet_key(secret or "my-manus-default-secret"))
+        if not secret:
+            raise ValueError("API_KEY_SECRET 未配置，无法初始化密钥加密器")
+        self._fernet = Fernet(_derive_fernet_key(secret))
 
     def encrypt(self, plain: str) -> str:
         if not plain:

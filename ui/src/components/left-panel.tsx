@@ -12,7 +12,12 @@ export function LeftPanel() {
   const router = useRouter();
   const pathname = usePathname();
 
-  if (pathname.startsWith("/marketplace")) {
+  if (
+    pathname.startsWith("/marketplace") ||
+    pathname.startsWith("/q/") ||
+    pathname.startsWith("/room/") ||
+    pathname.startsWith("/share/")
+  ) {
     return null;
   }
 

@@ -14,6 +14,8 @@ from app.application.services.file_service import FileService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.marketplace_service import MarketplaceService
+from app.application.services.questionnaire_service import QuestionnaireService
+from app.application.services.room_service import RoomService
 from app.application.services.memory_service import MemoryService
 from app.application.services.session_service import SessionService
 from app.application.services.skill_service import SkillService
@@ -94,6 +96,17 @@ def get_session_service() -> SessionService:
     return SessionService(uow_factory=get_uow, sandbox_cls=DockerSandbox)
 
 
+@lru_cache()
+def get_questionnaire_service() -> QuestionnaireService:
+    return QuestionnaireService(uow_factory=get_uow)
+
+
+def get_room_service(
+        redis_client: RedisClient = Depends(get_redis),
+) -> RoomService:
+    return RoomService(uow_factory=get_uow, redis_client=redis_client)
+
+
 def get_marketplace_service(
         llm_model_service: LLMModelService = Depends(get_llm_model_service),
         file_service: FileService = Depends(get_file_service),
@@ -101,6 +114,7 @@ def get_marketplace_service(
     return MarketplaceService(
         llm_model_service=llm_model_service,
         file_service=file_service,
+        uow_factory=get_uow,
     )
 
 

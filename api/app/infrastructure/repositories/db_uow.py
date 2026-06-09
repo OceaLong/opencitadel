@@ -15,6 +15,9 @@ from .db_file_repository import DBFileRepository
 from .db_llm_model_repository import DBLLMModelRepository
 from .db_llm_token_usage_repository import DBLLMTokenUsageRepository
 from .db_memory_entry_repository import DBMemoryEntryRepository
+from .db_fortune_prediction_repository import DBFortunePredictionRepository
+from .db_questionnaire_repository import DBQuestionnaireRepository
+from .db_room_repository import DBRoomRepository
 from .db_session_repository import DBSessionRepository
 from .db_skill_repository import DBSkillRepository
 
@@ -51,6 +54,9 @@ class DBUnitOfWork(IUnitOfWork):
         self.llm_model = DBLLMModelRepository(db_session=self.db_session, cipher=cipher)
         self.skill = DBSkillRepository(db_session=self.db_session)
         self.memory_entry = DBMemoryEntryRepository(db_session=self.db_session)
+        self.questionnaire = DBQuestionnaireRepository(db_session=self.db_session)
+        self.fortune_prediction = DBFortunePredictionRepository(db_session=self.db_session)
+        self.room = DBRoomRepository(db_session=self.db_session)
         self.llm_token_usage = DBLLMTokenUsageRepository(db_session=self.db_session)
 
         return self

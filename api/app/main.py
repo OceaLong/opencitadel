@@ -21,6 +21,7 @@ from app.infrastructure.storage.redis import get_redis
 from app.interfaces.endpoints.a2a_routes import a2a_router, well_known_router
 from app.interfaces.endpoints.routes import router
 from app.interfaces.errors.exception_handlers import register_exception_handlers
+from app.interfaces.middleware.rate_limit import maybe_install_rate_limit
 from app.application.services.bootstrap_service import bootstrap_data
 from app.interfaces.service_dependencies import (
     get_agent_service,
@@ -60,6 +61,21 @@ openapi_tags = [
 ]
 
 
+def _verify_production_secrets() -> None:
+    if settings.env in {"test", "development"}:
+        return
+    weak = {
+        "",
+        "my-manus-api-key-secret-change-in-production",
+        "my-manus-default-secret",
+    }
+    if settings.api_key_secret in weak:
+        raise RuntimeError(
+            "Production requires a strong API_KEY_SECRET. "
+            "Set a unique value in environment variables before starting the API."
+        )
+
+
 def _verify_db_migrations() -> None:
     """Ensure DB schema is at head; fail fast if migrate job was not run."""
     if settings.env == "test":
@@ -68,23 +84,26 @@ def _verify_db_migrations() -> None:
     try:
         alembic_cfg = Config("alembic.ini")
         script = ScriptDirectory.from_config(alembic_cfg)
-        head_revision = script.get_current_head()
+        heads = set(script.get_heads())
         sync_url = settings.sqlalchemy_database_uri.replace("+asyncpg", "")
         engine = create_engine(sync_url)
         with engine.connect() as conn:
             context = MigrationContext.configure(conn)
-            current = context.get_current_revision()
+            current_heads = set(context.get_current_heads() or [])
     except Exception as exc:
         if settings.env == "development":
             logger.warning("Migration verification skipped (DB unavailable): %s", exc)
             return
         raise
-    if current != head_revision:
+    if not heads:
+        raise RuntimeError("No Alembic heads found in migration scripts")
+    if current_heads != heads:
         raise RuntimeError(
-            f"Database migration required: current={current}, head={head_revision}. "
+            f"Database migration required: current_heads={sorted(current_heads)}, "
+            f"expected_heads={sorted(heads)}. "
             "Run `./migrate.sh' or `python -m app.migrate' before starting the API."
         )
-    logger.info("Database schema verified at revision %s", head_revision)
+    logger.info("Database schema verified at heads %s", sorted(heads))
 
 
 @asynccontextmanager
@@ -97,7 +116,8 @@ async def lifespan(app: FastAPI):
     # 1.日志打印代码已经开始执行了
     logger.info("MyManus正在初始化")
 
-    # 2.校验数据库迁移版本（迁移由独立 migrate job 执行）
+    # 2.校验生产密钥与数据库迁移版本（迁移由独立 migrate job 执行）
+    _verify_production_secrets()
     _verify_db_migrations()
 
     # 3.初始化Redis/Postgres/Cos客户端
@@ -151,16 +171,21 @@ app = FastAPI(
 )
 
 # 5.配置CORS中间件，解决跨域问题
+_cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+_allow_all_origins = "*" in _cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["*"] if _allow_all_origins else _cors_origins,
+    allow_credentials=not _allow_all_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # 6.注册错误处理器
 register_exception_handlers(app)
+
+# 6.1 公开接口限流
+maybe_install_rate_limit(app)
 
 # 7.集成路由
 app.include_router(well_known_router)

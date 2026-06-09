@@ -31,6 +31,9 @@ from app.interfaces.schemas.marketplace import (
     WatermarkResultResponse,
     VideoSearchRequest,
     VideoSearchResponse,
+    FortunePredictionRequest,
+    FortunePredictionResponse,
+    FortunePredictionShareResponse,
 )
 from app.interfaces.service_dependencies import get_marketplace_service
 
@@ -214,6 +217,36 @@ async def add_watermark(
             tile=request.tile,
         )
         return Response.success(data=WatermarkResultResponse(**data))
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+
+
+@router.post("/fortune/predict", response_model=Response[FortunePredictionResponse])
+async def predict_fortune(
+        request: FortunePredictionRequest,
+        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
+) -> Response[FortunePredictionResponse]:
+    try:
+        profile = request.input_profile.model_dump(exclude_none=True)
+        data = await marketplace_service.generate_fortune_prediction(
+            mode=request.mode,
+            question=request.question,
+            input_profile=profile,
+            model_id=request.model_id,
+        )
+        return Response.success(data=FortunePredictionResponse(**data))
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+
+
+@router.get("/fortune/share/{share_id}", response_model=Response[FortunePredictionShareResponse])
+async def get_fortune_share(
+        share_id: str,
+        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
+) -> Response[FortunePredictionShareResponse]:
+    try:
+        data = await marketplace_service.get_fortune_prediction_share(share_id)
+        return Response.success(data=FortunePredictionShareResponse(**data))
     except ValueError as exc:
         raise BadRequestError(str(exc)) from exc
 

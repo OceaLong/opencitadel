@@ -70,3 +70,5 @@ export { memoryApi } from "./memory";
 export { modelsApi } from "./models";
 export { sessionApi } from "./session";
 export { skillsApi } from "./skills";
+export { questionnaireApi } from "./questionnaire";
+export { roomApi } from "./room";

@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     app_config_filepath: str = "config.yaml"
     api_key_secret: str = "my-manus-api-key-secret-change-in-production"
+    cors_origins: str = "*"
+    rate_limit_enabled: bool = True
+    rate_limit_per_minute: int = 120
+    sessions_stream_interval_seconds: int = 15
+    marketplace_max_upload_bytes: int = 25 * 1024 * 1024
 
     # 记忆配置
     memory_recall_limit: int = 20

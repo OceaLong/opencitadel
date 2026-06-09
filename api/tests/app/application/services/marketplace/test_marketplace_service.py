@@ -14,11 +14,26 @@ class UnusedFileService:
     pass
 
 
+class FakeUow:
+    fortune_prediction = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+
+def fake_uow_factory():
+    return FakeUow()
+
+
 @pytest.fixture
 def service():
     return MarketplaceService(
         llm_model_service=FailingLLMModelService(),
         file_service=UnusedFileService(),
+        uow_factory=fake_uow_factory,
     )
 
 
@@ -47,3 +62,11 @@ def test_correct_consumption_extracts_natural_language_total(service):
     assert result["recognized"] is True
     assert result["total_grams"] == 1200
     assert result["full_servings"] == 20
+
+
+@pytest.mark.anyio
+async def test_route_request_matches_fortune_keywords(service):
+    route = await service.route_request("帮我测一下近期运势")
+    assert route["app_id"] == "fortune-teller"
+    assert route["params"]["mode"] == "fortune"
+    assert route["params"]["question"]

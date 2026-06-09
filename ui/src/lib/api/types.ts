@@ -275,6 +275,156 @@ export type MarketplaceAppsData = {
   apps: MarketplaceApp[];
 };
 
+// ==================== 问卷 ====================
+
+export type QuestionType = "single" | "multiple" | "rating" | "text";
+
+export type QuestionOption = {
+  id: string;
+  text: string;
+};
+
+export type QuestionItem = {
+  id: string;
+  type: QuestionType;
+  text: string;
+  options?: QuestionOption[];
+  required?: boolean;
+  rating_max?: number;
+};
+
+export type QuestionnaireData = {
+  id: string;
+  title: string;
+  description: string;
+  questions: QuestionItem[];
+  status: "draft" | "published" | "closed";
+  slug: string;
+  manage_token?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CreateQuestionnaireParams = {
+  title: string;
+  description?: string;
+  questions?: QuestionItem[];
+};
+
+export type UpdateQuestionnaireParams = {
+  manage_token: string;
+  title?: string;
+  description?: string;
+  questions?: QuestionItem[];
+};
+
+export type PublishQuestionnaireParams = {
+  manage_token: string;
+};
+
+export type SubmitQuestionnaireResponseParams = {
+  answers: Record<string, unknown>;
+  respondent_name?: string;
+};
+
+export type SubmitQuestionnaireResponseResult = {
+  id: string;
+  message: string;
+};
+
+export type QuestionStats = {
+  text: string;
+  type: string;
+  counts?: Record<string, number>;
+  labels?: Record<string, string>;
+  average?: number;
+  count?: number;
+  distribution?: Record<string, number>;
+  responses?: Array<{ text: string; name?: string | null }>;
+};
+
+export type QuestionnaireStatsData = {
+  questionnaire_id: string;
+  title: string;
+  status: string;
+  slug: string;
+  total_responses: number;
+  per_question: Record<string, QuestionStats>;
+};
+
+// ==================== 房间 ====================
+
+export type RoomParticipant = {
+  id: string;
+  name: string;
+  joined_at?: string;
+  last_seen?: string;
+  online?: boolean;
+};
+
+export type RoomEvent = {
+  id: string;
+  type: string;
+  payload: Record<string, unknown>;
+  created_at?: string;
+};
+
+export type RoomData = {
+  id: string;
+  code: string;
+  name: string;
+  host_participant_id: string;
+  tod_mode: "random" | "custom";
+  turn_order: string[];
+  current_turn_index: number;
+  current_turn_id?: string | null;
+  current_turn_name?: string | null;
+  status: string;
+  participants: RoomParticipant[];
+  recent_events?: RoomEvent[];
+};
+
+export type CreateRoomParams = {
+  name: string;
+  host_name: string;
+  tod_mode?: "random" | "custom";
+};
+
+export type CreateRoomResult = {
+  room: RoomData;
+  participant_id: string;
+};
+
+export type JoinRoomParams = {
+  name: string;
+};
+
+export type JoinRoomResult = {
+  room: RoomData;
+  participant_id: string;
+};
+
+export type RollDiceParams = {
+  participant_id: string;
+  dice_count?: number;
+  dice_faces?: number;
+};
+
+export type DrawTodParams = {
+  participant_id: string;
+  category?: "truth" | "dare";
+};
+
+export type NextTurnParams = {
+  participant_id: string;
+};
+
+export type AddTodPromptParams = {
+  participant_id: string;
+  category: "truth" | "dare";
+  text: string;
+};
+
 export type VideoSearchParams = {
   query: string;
 };
@@ -451,6 +601,52 @@ export type WatermarkResultData = {
   result_filename: string;
   download_ready: boolean;
   method?: string;
+};
+
+export type FortuneMode = "fortune" | "lottery" | "divination" | "astrology";
+
+export type FortuneInputProfile = {
+  nickname?: string;
+  birth_date?: string;
+  birth_time?: string;
+  birth_place?: string;
+};
+
+export type FortunePredictionParams = {
+  mode: FortuneMode;
+  question: string;
+  input_profile?: FortuneInputProfile;
+  model_id?: string;
+};
+
+export type FortuneSection = {
+  heading: string;
+  content: string;
+};
+
+export type FortuneLuckyItems = {
+  color: string;
+  number: string;
+  keyword: string;
+  element?: string;
+};
+
+export type FortunePredictionResult = {
+  mode: FortuneMode;
+  title: string;
+  summary: string;
+  sections: FortuneSection[];
+  lucky_items: FortuneLuckyItems;
+  disclaimer: string;
+};
+
+export type FortunePredictionData = {
+  share_id: string;
+  mode: FortuneMode;
+  question: string;
+  input_profile: FortuneInputProfile;
+  result: FortunePredictionResult;
+  created_at: string;
 };
 
 // ==================== 文件模块类型 ====================

@@ -201,3 +201,56 @@ class WatermarkResultResponse(BaseModel):
     result_filename: str
     download_ready: bool = True
     method: Optional[str] = None
+
+
+class FortuneInputProfile(BaseModel):
+    nickname: Optional[str] = Field(default=None, max_length=50)
+    birth_date: Optional[str] = Field(default=None, max_length=20)
+    birth_time: Optional[str] = Field(default=None, max_length=20)
+    birth_place: Optional[str] = Field(default=None, max_length=100)
+
+
+class FortunePredictionRequest(BaseModel):
+    mode: Literal["fortune", "lottery", "divination", "astrology"] = "fortune"
+    question: str = Field(..., min_length=1, max_length=500)
+    input_profile: FortuneInputProfile = Field(default_factory=FortuneInputProfile)
+    model_id: Optional[str] = None
+
+
+class FortuneSection(BaseModel):
+    heading: str
+    content: str
+
+
+class FortuneLuckyItems(BaseModel):
+    color: str = ""
+    number: str = ""
+    keyword: str = ""
+    element: str = ""
+
+
+class FortunePredictionResult(BaseModel):
+    mode: str
+    title: str
+    summary: str
+    sections: List[FortuneSection] = Field(default_factory=list)
+    lucky_items: FortuneLuckyItems = Field(default_factory=FortuneLuckyItems)
+    disclaimer: str = "本结果仅供娱乐参考，请理性看待。"
+
+
+class FortunePredictionResponse(BaseModel):
+    share_id: str
+    mode: str
+    question: str
+    input_profile: Dict[str, Any] = Field(default_factory=dict)
+    result: FortunePredictionResult
+    created_at: str
+
+
+class FortunePredictionShareResponse(BaseModel):
+    share_id: str
+    mode: str
+    question: str
+    input_profile: Dict[str, Any] = Field(default_factory=dict)
+    result: FortunePredictionResult
+    created_at: str

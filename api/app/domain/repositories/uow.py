@@ -9,6 +9,9 @@ from .file_repository import FileRepository
 from .llm_model_repository import LLMModelRepository
 from .llm_token_usage_repository import LLMTokenUsageRepository
 from .memory_entry_repository import MemoryEntryRepository
+from .fortune_prediction_repository import FortunePredictionRepository
+from .questionnaire_repository import QuestionnaireRepository
+from .room_repository import RoomRepository
 from .session_repository import SessionRepository
 from .skill_repository import SkillRepository
 
@@ -24,6 +27,9 @@ class IUnitOfWork(ABC):
     llm_model: LLMModelRepository
     skill: SkillRepository
     memory_entry: MemoryEntryRepository
+    questionnaire: QuestionnaireRepository
+    fortune_prediction: FortunePredictionRepository
+    room: RoomRepository
     llm_token_usage: LLMTokenUsageRepository
 
     @abstractmethod

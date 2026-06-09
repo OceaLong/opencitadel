@@ -91,6 +91,14 @@ api/
 | POST | `/api/sessions/{id}/memory/clear` | 清空会话 Agent 内存 |
 | DELETE | `/api/sessions/{id}/memory/{agent_name}/messages/{index}` | 删除指定会话内存消息 |
 | WS | `/api/sessions/{id}/vnc` | VNC WebSocket 代理 |
+| GET | `/api/marketplace/apps` | 应用市场目录 |
+| POST | `/api/marketplace/*` | 应用市场 AI 能力（翻译、营养、文档等） |
+| GET/POST | `/api/marketplace/questionnaires` | 问卷创建与管理 |
+| GET/POST | `/api/marketplace/questionnaires/public/{slug}` | 公开问卷填报 |
+| GET/POST | `/api/rooms` | 派对房间创建、加入、事件 |
+| GET | `/api/rooms/{code}/stream` | 房间 SSE 实时事件 |
+| GET/POST | `/api/codebases` | 代码知识库导入与管理 |
+| GET | `/api/codebases/{id}/ingest` | 代码库摄取进度 SSE |
 
 ### SSE 事件类型
 

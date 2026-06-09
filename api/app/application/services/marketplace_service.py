@@ -21,17 +21,21 @@ from app.application.services.marketplace.catalog import (
 )
 from app.application.services.marketplace.consumption_service import ConsumptionService
 from app.application.services.marketplace.conversion_service import ConversionService
+from app.application.services.marketplace.fortune_service import FortuneService
 from app.application.services.marketplace.nutrition_service import NutritionService
 from app.application.services.marketplace.video_search_service import VideoSearchService
 from app.application.services.marketplace.watermark_service import WatermarkService
 from app.application.services.marketplace.utils import analyze_image_with_llm, analyze_images_with_llm
+from app.domain.models.fortune_prediction import FortunePrediction
 from app.domain.services.document_service import document_to_vision_attachments
 from app.domain.services.image_generation_service import edit_image
 from app.domain.utils.vision import build_image_content_part, is_image_mime
 from app.infrastructure.external.llm.factory import LLMFactory
 from app.infrastructure.external.json_parser.repair_json_parser import RepairJSONParser
+from core.config import get_settings
 
 logger = logging.getLogger(__name__)
+_settings = get_settings()
 
 ROUTE_PROMPT = build_route_prompt()
 
@@ -70,14 +74,17 @@ class MarketplaceService:
             self,
             llm_model_service: LLMModelService,
             file_service: FileService,
+            uow_factory,
     ) -> None:
         self._llm_model_service = llm_model_service
         self._file_service = file_service
+        self._uow_factory = uow_factory
         self._video = VideoSearchService()
         self._nutrition = NutritionService()
         self._consumption = ConsumptionService()
         self._conversion = ConversionService()
         self._watermark = WatermarkService()
+        self._fortune = FortuneService()
         self._json_parser = RepairJSONParser()
 
     def list_apps(self) -> list[dict]:
@@ -358,6 +365,60 @@ class MarketplaceService:
             "download_ready": True,
         }
 
+    async def generate_fortune_prediction(
+            self,
+            *,
+            mode: str,
+            question: str,
+            input_profile: Optional[Dict[str, Any]] = None,
+            model_id: Optional[str] = None,
+    ) -> dict:
+        llm = await self._resolve_text_llm(model_id)
+        result = await self._fortune.generate(
+            llm,
+            mode=mode,
+            question=question,
+            input_profile=input_profile,
+        )
+        prediction = FortunePrediction(
+            mode=mode,
+            question=question.strip(),
+            input_profile=input_profile or {},
+            result=result,
+        )
+        async with self._uow_factory() as uow:
+            await uow.fortune_prediction.save(prediction)
+        return self._format_fortune_prediction(prediction)
+
+    async def get_fortune_prediction_share(self, share_id: str) -> dict:
+        share_id = (share_id or "").strip()
+        if not share_id:
+            raise ValueError("分享 ID 无效")
+        async with self._uow_factory() as uow:
+            prediction = await uow.fortune_prediction.get_by_share_id(share_id)
+        if not prediction:
+            raise ValueError("未找到该预测结果")
+        return self._format_fortune_prediction(prediction)
+
+    @staticmethod
+    def _format_fortune_prediction(prediction: FortunePrediction) -> dict:
+        result = prediction.result or {}
+        return {
+            "share_id": prediction.share_id,
+            "mode": prediction.mode,
+            "question": prediction.question,
+            "input_profile": prediction.input_profile,
+            "result": {
+                "mode": result.get("mode", prediction.mode),
+                "title": result.get("title", ""),
+                "summary": result.get("summary", ""),
+                "sections": result.get("sections", []),
+                "lucky_items": result.get("lucky_items", {}),
+                "disclaimer": result.get("disclaimer", "本结果仅供娱乐参考，请理性看待。"),
+            },
+            "created_at": prediction.created_at.isoformat(),
+        }
+
     async def remove_watermark(
             self,
             file_id: str,
@@ -455,6 +516,9 @@ class MarketplaceService:
     async def _load_file_bytes(self, file_id: str):
         file_data, file_info = await self._file_service.download_file(file_id)
         file_bytes = await asyncio.to_thread(file_data.read)
+        max_bytes = _settings.marketplace_max_upload_bytes
+        if len(file_bytes) > max_bytes:
+            raise ValueError(f"文件过大，请上传不超过 {max_bytes // (1024 * 1024)}MB 的文件")
         return file_bytes, file_info
 
     async def _resolve_vision_llm(self, model_id: Optional[str]):
@@ -566,6 +630,17 @@ class MarketplaceService:
                 params["mode"] = "add"
             if text_match := re.search(r"[「\"'](.+?)[」\"']", query):
                 params["text"] = text_match.group(1)
+        elif any(word in query for word in ["运势", "抽签", "算命", "星盘", "塔罗", "占卜", "预测", "星座"]):
+            app_id = "fortune-teller"
+            if any(word in query for word in ["抽签", "签文", "灵签"]):
+                params["mode"] = "lottery"
+            elif any(word in query for word in ["算命", "八字", "卦", "占卜"]):
+                params["mode"] = "divination"
+            elif any(word in query for word in ["星盘", "星座", "占星"]):
+                params["mode"] = "astrology"
+            else:
+                params["mode"] = "fortune"
+            params["question"] = query
         return {
             "app_id": app_id,
             "confidence": 0.72,

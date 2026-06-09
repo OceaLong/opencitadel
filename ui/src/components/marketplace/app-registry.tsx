@@ -7,9 +7,13 @@ import { ConsumptionCalculatorApp } from "@/components/marketplace/consumption-c
 import { DevToolboxApp } from "@/components/marketplace/dev-toolbox-app";
 import { DocumentConverterApp } from "@/components/marketplace/document-converter-app";
 import { DocumentQaApp } from "@/components/marketplace/document-qa-app";
+import { FortuneTellerApp } from "@/components/marketplace/fortune-teller-app";
 import { NutritionAnalysisApp } from "@/components/marketplace/nutrition-analysis-app";
+import { PersonalityTestsApp } from "@/components/marketplace/personality-tests-app";
 import { PromptLabApp } from "@/components/marketplace/prompt-lab-app";
 import { QrGeneratorApp } from "@/components/marketplace/qr-generator-app";
+import { QuestionnaireApp } from "@/components/marketplace/questionnaire-app";
+import { RoomApp } from "@/components/marketplace/room-app";
 import { SecretGeneratorApp } from "@/components/marketplace/secret-generator-app";
 import { SmartTranslationApp } from "@/components/marketplace/smart-translation-app";
 import { UnitConverterApp } from "@/components/marketplace/unit-converter-app";
@@ -248,6 +252,84 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
       <WatermarkToolApp
         initialMode={params.mode === "remove" ? "remove" : "add"}
         initialText={typeof params.text === "string" ? params.text : ""}
+      />
+    ),
+  },
+  {
+    meta: {
+      id: "party-room",
+      name: "派对房间",
+      description: "房间码加入，摇骰子、真心话大冒险，支持多人实时",
+      icon: "🎲",
+      category: "娱乐",
+      tags: ["骰子", "真心话大冒险", "多人", "房间"],
+      featured: true,
+      accent: "rose",
+      needs_vision: false,
+      examples: ["创建派对房间", "加入房间码 123456", "摇骰子真心话大冒险"],
+    },
+    render: (params) => (
+      <RoomApp initialCode={typeof params.code === "string" ? params.code : undefined} />
+    ),
+  },
+  {
+    meta: {
+      id: "questionnaire",
+      name: "自定义问卷",
+      description: "创建问卷、发布分享链接、收集回复并查看统计",
+      icon: "📋",
+      category: "社交",
+      tags: ["问卷", "调查", "统计", "分享"],
+      featured: true,
+      accent: "sky",
+      needs_vision: false,
+      examples: ["创建一份满意度问卷", "发布活动报名表", "查看问卷统计"],
+    },
+    render: () => <QuestionnaireApp />,
+  },
+  {
+    meta: {
+      id: "fortune-teller",
+      name: "AI 运势预测",
+      description: "运势预测、抽签、算命、星盘推演，生成可分享的精美结果",
+      icon: "🔮",
+      category: "娱乐",
+      tags: ["运势", "抽签", "算命", "星盘", "分享"],
+      featured: true,
+      accent: "rose",
+      needs_vision: false,
+      examples: ["帮我测一下近期运势", "抽一支签看看事业", "根据生日做星盘推演"],
+    },
+    render: (params) => (
+      <FortuneTellerApp
+        initialMode={
+          params.mode === "fortune" ||
+          params.mode === "lottery" ||
+          params.mode === "divination" ||
+          params.mode === "astrology"
+            ? params.mode
+            : undefined
+        }
+        initialQuestion={typeof params.question === "string" ? params.question : ""}
+      />
+    ),
+  },
+  {
+    meta: {
+      id: "personality-tests",
+      name: "趣味人格测试",
+      description: "MBTI、九型人格、DISC、爱之语言、EQ、动物人格等 6 套测试",
+      icon: "🎯",
+      category: "娱乐",
+      tags: ["MBTI", "人格", "测试", "分享"],
+      featured: true,
+      accent: "violet",
+      needs_vision: false,
+      examples: ["测一下我的 MBTI", "九型人格测试", "我是哪种动物"],
+    },
+    render: (params) => (
+      <PersonalityTestsApp
+        initialTestId={typeof params.test_id === "string" ? params.test_id : undefined}
       />
     ),
   },

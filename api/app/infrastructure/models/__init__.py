@@ -17,6 +17,9 @@ from .codebase import (
     CodebaseChunkModel,
     CodebaseArtifactModel,
 )
+from .questionnaire import QuestionnaireModel, QuestionnaireResponseModel
+from .fortune_prediction import FortunePredictionModel
+from .room import RoomModel, RoomParticipantModel, RoomEventModel, RoomTodPromptModel
 
 __all__ = [
     "Base",
@@ -34,4 +37,11 @@ __all__ = [
     "CodebaseEdgeModel",
     "CodebaseChunkModel",
     "CodebaseArtifactModel",
+    "QuestionnaireModel",
+    "QuestionnaireResponseModel",
+    "FortunePredictionModel",
+    "RoomModel",
+    "RoomParticipantModel",
+    "RoomEventModel",
+    "RoomTodPromptModel",
 ]
