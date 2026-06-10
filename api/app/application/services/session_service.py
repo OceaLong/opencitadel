@@ -124,8 +124,7 @@ class SessionService:
     ) -> List[Tuple[int, BaseEvent]]:
         """分页获取会话事件"""
         async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(session_id)
-            if not session:
+            if not await uow.session.exists(session_id):
                 raise NotFoundError("该会话不存在，请核实后重试")
             return await uow.session.list_events(
                 session_id,
@@ -143,21 +142,20 @@ class SessionService:
         """根据传递的会话id获取指定会话的文件列表信息"""
         logger.info(f"获取指定会话[{session_id}]下的文件列表信息")
         async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(session_id)
-        if not session:
+            files = await uow.session.get_files(session_id)
+        if files is None:
             raise RuntimeError(f"当前会话不存在[{session_id}], 请核实后重试")
-        return session.files
+        return files
 
     async def read_file(self, session_id: str, filepath: str) -> FileReadResult:
         """根据传递的信息查看会话中指定文件的内容"""
         # 1.检查会话是否存在
         logger.info(f"获取会话[{session_id}]中的文件内容, 文件路径: {filepath}")
         async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(session_id)
+            session = await uow.session.get_metadata(session_id)
         if not session:
             raise RuntimeError(f"当前会话不存在[{session_id}], 请核实后重试")
 
-        # 2.根据沙箱id获取沙箱并判断是否存在
         if not session.sandbox_id:
             raise NotFoundError("当前会话无沙箱环境")
         sandbox = await self._sandbox_cls.get(session.sandbox_id)
@@ -176,11 +174,10 @@ class SessionService:
         # 1.检查会话是否存在
         logger.info(f"获取会话[{session_id}]中的Shell内容输出, Shell标识符: {shell_session_id}")
         async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(session_id)
+            session = await uow.session.get_metadata(session_id)
         if not session:
             raise RuntimeError(f"当前会话不存在[{session_id}], 请核实后重试")
 
-        # 2.根据沙箱id获取沙箱并判断是否存在
         if not session.sandbox_id:
             raise NotFoundError("当前会话无沙箱环境")
         sandbox = await self._sandbox_cls.get(session.sandbox_id)
@@ -199,11 +196,10 @@ class SessionService:
         # 1.检查会话是否存在
         logger.info(f"获取会话[{session_id}]的VNC链接")
         async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(session_id)
+            session = await uow.session.get_metadata(session_id)
         if not session:
             raise RuntimeError(f"当前会话不存在[{session_id}], 请核实后重试")
 
-        # 2.根据沙箱id获取沙箱并判断是否存在
         if not session.sandbox_id:
             raise NotFoundError("当前会话无沙箱环境")
         sandbox = await self._sandbox_cls.get(session.sandbox_id)

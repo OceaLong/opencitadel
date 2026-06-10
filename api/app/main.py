@@ -28,7 +28,7 @@ from app.interfaces.service_dependencies import (
     get_skill_service,
 )
 from app.infrastructure.storage.postgres import get_uow
-from app.application.services.config_provider import get_runtime_config
+from app.application.services.config_provider import get_app_config_provider, get_runtime_config
 from core.config import get_settings
 
 # 1.加载配置信息
@@ -150,6 +150,7 @@ async def lifespan(app: FastAPI):
     from app.infrastructure.external.event_seq_allocator import sync_global_event_seq
 
     await sync_global_event_seq()
+    await get_app_config_provider().get()
 
     # 4.种子化默认模型与内置Skill
     await bootstrap_data(

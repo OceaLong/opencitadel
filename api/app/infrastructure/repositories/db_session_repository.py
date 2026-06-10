@@ -131,14 +131,11 @@ class DBSessionRepository(SessionRepository):
             await self._persist_files(session.id, session.files)
             return
 
-        # 3.会话存在则更新会话
+        # 3.会话存在则仅更新元数据（memories/files 由 save_memory/add_file 等专用路径维护）
         record.update_from_domain(session)
-        await self._persist_memories(session.id, session.memories)
-        await self._persist_files(session.id, session.files)
 
     async def get_all(self, limit: int = 100, offset: int = 0) -> List[Session]:
-        """获取所有会话列表"""
-        # 1.构建sql查询所有记录
+        """获取所有会话列表（列表视图不加载 memories/files，避免 N+1）"""
         stmt = (
             select(SessionModel)
             .order_by(SessionModel.latest_message_at.desc().nullslast())
@@ -147,21 +144,33 @@ class DBSessionRepository(SessionRepository):
         )
         result = await self.db_session.execute(stmt)
         records = result.scalars().all()
+        return [record.to_domain() for record in records]
 
-        # 2.将数据循环遍历成Session
-        return [await self._session_from_record(record) for record in records]
+    async def exists(self, session_id: str) -> bool:
+        stmt = select(SessionModel.id).where(SessionModel.id == session_id).limit(1)
+        result = await self.db_session.execute(stmt)
+        return result.scalar_one_or_none() is not None
 
-    async def get_by_id(self, session_id: str) -> Optional[Session]:
-        """根据id查询会话"""
-        # 1.根据id查询会话是否存在
+    async def get_metadata(self, session_id: str) -> Optional[Session]:
         stmt = select(SessionModel).where(SessionModel.id == session_id)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
-
-        # 2.判断会话记录是否存在并返回
         if record is None:
             return None
+        return record.to_domain()
 
+    async def get_files(self, session_id: str) -> Optional[List[File]]:
+        if not await self.exists(session_id):
+            return None
+        return await self._load_files(session_id)
+
+    async def get_by_id(self, session_id: str) -> Optional[Session]:
+        """根据id查询会话"""
+        stmt = select(SessionModel).where(SessionModel.id == session_id)
+        result = await self.db_session.execute(stmt)
+        record = result.scalar_one_or_none()
+        if record is None:
+            return None
         return await self._session_from_record(record)
 
     async def delete_by_id(self, session_id: str) -> None:
@@ -221,9 +230,11 @@ class DBSessionRepository(SessionRepository):
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 
         payload = dict(event_data or event.model_dump(mode="json"))
-        if seq is not None:
-            payload["id"] = str(seq)
-            event.id = str(seq)
+        if seq is None:
+            from app.infrastructure.external.event_seq_allocator import allocate_event_seq
+            seq = await allocate_event_seq()
+        payload["id"] = str(seq)
+        event.id = str(seq)
         record = SessionEventModel(
             seq=seq,
             session_id=session_id,
@@ -267,11 +278,16 @@ class DBSessionRepository(SessionRepository):
                     seq_value = int(str(event_id))
                 except (TypeError, ValueError):
                     seq_value = None
+            if seq_value is None:
+                from app.infrastructure.external.event_seq_allocator import allocate_event_seq
+                seq_value = await allocate_event_seq()
+            event_data["id"] = str(seq_value)
+            event.id = str(seq_value)
             records.append(
                 SessionEventModel(
                     seq=seq_value,
                     session_id=session_id,
-                    stream_id=str(event_data.get("id")) if event_data.get("id") is not None else None,
+                    stream_id=str(seq_value),
                     type=event_data.get("type", event.type),
                     payload=event_data,
                     created_at=event.created_at,
@@ -279,9 +295,6 @@ class DBSessionRepository(SessionRepository):
             )
         self.db_session.add_all(records)
         await self.db_session.flush()
-        for (event, event_data), record in zip(payloads, records):
-            event.id = str(record.seq)
-            event_data["id"] = str(record.seq)
 
     async def list_events(
             self,

@@ -16,6 +16,23 @@ logger = logging.getLogger(__name__)
 _WINDOW_SECONDS = 60
 _REDIS_KEY_PREFIX = "ratelimit:"
 
+_SLIDING_WINDOW_LUA = """
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local window_start = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+local member = ARGV[4]
+local ttl = tonumber(ARGV[5])
+redis.call('zremrangebyscore', key, 0, window_start)
+local count = redis.call('zcard', key)
+if count >= limit then
+  return 1
+end
+redis.call('zadd', key, now, member)
+redis.call('expire', key, ttl)
+return 0
+"""
+
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Per-IP rate limiter backed by Redis (falls back to in-memory per process)."""
@@ -49,15 +66,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             redis_key = f"{_REDIS_KEY_PREFIX}{key}"
             now = time.time()
             window_start = now - _WINDOW_SECONDS
-            pipe = redis.pipeline()
-            pipe.zremrangebyscore(redis_key, 0, window_start)
-            pipe.zcard(redis_key)
-            _, current_count = await pipe.execute()
-            if int(current_count or 0) >= self._limit:
-                return True
-            await redis.zadd(redis_key, {str(now): now})
-            await redis.expire(redis_key, _WINDOW_SECONDS + 5)
-            return False
+            result = await redis.eval(
+                _SLIDING_WINDOW_LUA,
+                1,
+                redis_key,
+                now,
+                window_start,
+                self._limit,
+                str(now),
+                _WINDOW_SECONDS + 5,
+            )
+            return int(result or 0) == 1
         except Exception as exc:
             logger.debug("Redis rate limit unavailable, using in-memory fallback: %s", exc)
             return await self._is_rate_limited_memory(key)

@@ -18,6 +18,7 @@ TASK_DISPATCH_STREAM = "task:dispatch"
 TASK_DISPATCH_DLQ_STREAM = "task:dispatch:dlq"
 WORKER_CONSUMER_GROUP = "manus-workers"
 TASK_META_TTL_SECONDS = 86400 * 7
+OUTPUT_SEQ_INDEX_PREFIX = "task:output:seq:"
 
 
 class TaskStatus(str, Enum):
@@ -114,6 +115,18 @@ class TaskStateService:
 
     async def is_cancelled(self, task_id: str) -> bool:
         return bool(await self._redis.client.get(self.cancel_key(task_id)))
+
+    @staticmethod
+    def output_seq_index_key(task_id: str) -> str:
+        return f"{OUTPUT_SEQ_INDEX_PREFIX}{task_id}"
+
+    async def set_output_seq_cursor(self, task_id: str, seq: int, stream_id: str) -> None:
+        key = self.output_seq_index_key(task_id)
+        await self._redis.client.hset(key, str(seq), stream_id)
+        await self._redis.client.expire(key, TASK_META_TTL_SECONDS)
+
+    async def get_output_seq_cursor(self, task_id: str, seq: int) -> Optional[str]:
+        return await self._redis.client.hget(self.output_seq_index_key(task_id), str(seq))
 
     async def clear_cancel(self, task_id: str) -> None:
         await self._redis.client.delete(self.cancel_key(task_id))

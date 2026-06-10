@@ -1,6 +1,14 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type { Session } from "@/lib/api";
 import { sessionApi } from "@/lib/api";
@@ -119,7 +127,21 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
           if (!mounted) return;
           retryCount = 0;
           sseReceivedRef.current = true;
-          setSessions(newSessions);
+          setSessions((prev) => {
+            if (
+              prev.length === newSessions.length &&
+              prev.every(
+                (item, index) =>
+                  item.session_id === newSessions[index]?.session_id &&
+                  item.latest_message_at === newSessions[index]?.latest_message_at &&
+                  item.status === newSessions[index]?.status &&
+                  item.unread_message_count === newSessions[index]?.unread_message_count,
+              )
+            ) {
+              return prev;
+            }
+            return newSessions;
+          });
           setLoading(false);
           setError(null);
         },
@@ -170,8 +192,13 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const contextValue = useMemo(
+    () => ({ sessions, loading, error, refresh, deleteSession }),
+    [sessions, loading, error, refresh, deleteSession],
+  );
+
   return (
-    <SessionsContext.Provider value={{ sessions, loading, error, refresh, deleteSession }}>
+    <SessionsContext.Provider value={contextValue}>
       {children}
     </SessionsContext.Provider>
   );

@@ -104,15 +104,14 @@ class AgentWorker:
         )
         while self._running:
             try:
+                claim = await self._task_state.claim_dispatch(
+                    self._consumer_name,
+                    block_ms=5000,
+                )
+                if claim is None:
+                    continue
                 await self._semaphore.acquire()
                 try:
-                    claim = await self._task_state.claim_dispatch(
-                        self._consumer_name,
-                        block_ms=5000,
-                    )
-                    if claim is None:
-                        self._semaphore.release()
-                        continue
                     message_id, task_id, session_id = claim
                     task = asyncio.create_task(
                         self._handle_claimed_job(message_id, task_id, session_id),
@@ -255,6 +254,9 @@ async def main() -> None:
     from app.infrastructure.external.event_seq_allocator import sync_global_event_seq
 
     await sync_global_event_seq()
+    from app.application.services.config_provider import get_app_config_provider
+
+    await get_app_config_provider().get()
     from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
 
     await get_sandbox_pool().start()

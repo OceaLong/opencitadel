@@ -29,6 +29,7 @@ from app.domain.services.tools.tool_names import (
     normalize_tool_name,
 )
 from app.domain.utils.vision_tokens import estimate_messages_tokens
+from app.infrastructure.external.llm.retry import is_retriable_llm_error
 
 logger = logging.getLogger(__name__)
 
@@ -428,6 +429,8 @@ class BaseAgent(ABC):
                 self._last_llm_message = filtered_message
                 return
             except Exception as e:
+                if is_retriable_llm_error(e):
+                    raise
                 error_msg = _format_agent_error(e)
                 logger.error(
                     f"调用语言模型发生错误: {error_msg}",
@@ -605,6 +608,42 @@ class BaseAgent(ABC):
             emit_deltas: bool = True,
     ) -> AsyncGenerator[BaseEvent, None]:
         """传递消息+响应格式调用程序生成异步迭代内容"""
+        try:
+            async for event in self._invoke_inner(
+                    query,
+                    format,
+                    vision_attachments,
+                    emit_deltas,
+            ):
+                yield event
+        finally:
+            await self._token_accountant.flush()
+
+    async def _invoke_inner(
+            self,
+            query: str,
+            format: Optional[str],
+            vision_attachments: Optional[List[VisionAttachment]],
+            emit_deltas: bool,
+    ) -> AsyncGenerator[BaseEvent, None]:
+        try:
+            async for event in self._invoke_inner_body(
+                    query,
+                    format,
+                    vision_attachments,
+                    emit_deltas,
+            ):
+                yield event
+        finally:
+            await self._persist_memory()
+
+    async def _invoke_inner_body(
+            self,
+            query: str,
+            format: Optional[str],
+            vision_attachments: Optional[List[VisionAttachment]],
+            emit_deltas: bool,
+    ) -> AsyncGenerator[BaseEvent, None]:
         # 1.需要判断下是否传递了format
         format = format if format else self._format
 
@@ -756,9 +795,6 @@ class BaseAgent(ABC):
         else:
             # 13.超过最大迭代次数后，则抛出错误
             yield ErrorEvent(error=f"Agent迭代超过最大迭代次数: {self._agent_config.max_iterations}, 任务处理失败")
-
-        await self._token_accountant.flush()
-        await self._persist_memory()
 
         # 14.在指定步骤内完成了迭代则返回消息事件
         if message and message.get("content") is not None:

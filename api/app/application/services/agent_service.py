@@ -20,6 +20,7 @@ from app.domain.external.search import SearchEngine
 from app.domain.external.task import Task
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
 from app.domain.models.event import BaseEvent, ErrorEvent, MessageEvent, Event, DoneEvent, WaitEvent
+from app.domain.models.event_policy import TRANSIENT_EVENT_TYPES
 from app.domain.models.event_upgrader import upgrade_event_payload
 from app.domain.models.checkpoint import Checkpoint
 from app.domain.models.codebase import SessionMode
@@ -29,7 +30,7 @@ from app.domain.services.checkpoint_service import CheckpointService
 from app.infrastructure.external.event_seq_allocator import allocate_event_seq
 from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
-from app.infrastructure.external.task.task_state import get_task_state
+from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,12 @@ class AgentService:
         except Exception:
             return 0
 
+    async def _resolve_redis_cursor(self, task_id: str, last_seq: int) -> str:
+        if last_seq <= 0:
+            return "0"
+        cursor = await get_task_state().get_output_seq_cursor(task_id, last_seq)
+        return cursor or "0"
+
     async def _consume_output_stream(
             self,
             task_id: str,
@@ -129,8 +136,8 @@ class AgentService:
             latest_event_id: Optional[str],
     ) -> AsyncGenerator[BaseEvent, None]:
         output_stream = RedisStreamMessageQueue(f"task:output:{task_id}")
-        redis_cursor = "0"
         last_seq = await self._resolve_last_event_seq(session_id, latest_event_id)
+        redis_cursor = await self._resolve_redis_cursor(task_id, last_seq)
         await self._safe_update_unread_count(session_id)
 
         while True:
@@ -140,16 +147,19 @@ class AgentService:
 
             stream_message_id, event_str = await output_stream.get(
                 start_id=redis_cursor,
-                block_ms=100,
+                block_ms=500,
             )
             if event_str is not None:
                 redis_cursor = stream_message_id
                 event_payload = json.loads(event_str)
                 event = TypeAdapter(Event).validate_python(upgrade_event_payload(event_payload))
+                if event.type in TRANSIENT_EVENT_TYPES:
+                    yield event
+                    continue
                 try:
                     event_seq = int(event.id)
                 except (TypeError, ValueError):
-                    event_seq = 0
+                    continue
                 if event_seq <= last_seq:
                     continue
                 last_seq = event_seq
@@ -160,16 +170,12 @@ class AgentService:
                 continue
 
             if await self._task_state.is_done(task_id):
-                async with self._uow_factory() as uow:
-                    session = await uow.session.get_by_id(session_id)
-                if session and session.status in {
-                    SessionStatus.COMPLETED,
-                    SessionStatus.WAITING,
-                    SessionStatus.CANCELLED,
-                    SessionStatus.FAILED,
+                status = await get_task_state().get_status(task_id)
+                if status in {
+                    TaskStatus.DONE,
+                    TaskStatus.CANCELLED,
+                    TaskStatus.FAILED,
                 }:
-                    return
-                if await output_stream.is_empty():
                     return
 
     async def chat(

@@ -642,6 +642,75 @@ export function patchTimelineForDeltaEvent(
     ];
   }
 
+  if (ev.type === "reasoning_delta") {
+    const deltaData = ev.data as { stream_id?: string; delta?: string; event_id?: string };
+    const streamId = deltaData.stream_id || deltaData.event_id;
+    if (!streamId || !deltaData.delta) return timeline;
+
+    for (let i = timeline.length - 1; i >= 0; i--) {
+      const item = timeline[i];
+      if (item.kind !== "assistant") continue;
+      const itemStreamId = (item.data as { stream_id?: string }).stream_id;
+      if (itemStreamId !== streamId) continue;
+      const next = [...timeline];
+      const currentReasoning = (item.data as { reasoning?: string }).reasoning ?? "";
+      next[i] = {
+        ...item,
+        data: {
+          ...item.data,
+          reasoning: `${currentReasoning}${deltaData.delta}`,
+          stream_id: streamId,
+        },
+      };
+      return next;
+    }
+    return timeline;
+  }
+
+  if (ev.type === "tool_args_delta") {
+    const deltaData = ev.data as {
+      tool_call_id?: string;
+      delta?: string;
+      tool_name?: string;
+    };
+    const toolCallId = deltaData.tool_call_id;
+    if (!toolCallId || !deltaData.delta) return timeline;
+
+    for (let i = timeline.length - 1; i >= 0; i--) {
+      const item = timeline[i];
+      if (item.kind === "tool") {
+        const id = (item.data as { tool_call_id?: string }).tool_call_id;
+        if (id !== toolCallId) continue;
+        const next = [...timeline];
+        const currentArgs = (item.data as { function_args?: string }).function_args ?? "";
+        next[i] = {
+          ...item,
+          data: {
+            ...item.data,
+            function_args: `${currentArgs}${deltaData.delta}`,
+          },
+        };
+        return next;
+      }
+      if (item.kind === "step") {
+        for (let j = item.tools.length - 1; j >= 0; j--) {
+          const tool = item.tools[j];
+          if ((tool as { tool_call_id?: string }).tool_call_id !== toolCallId) continue;
+          const next = [...timeline];
+          const stepItem = { ...next[i], tools: [...item.tools] };
+          const currentArgs = (tool as { function_args?: string }).function_args ?? "";
+          stepItem.tools[j] = {
+            ...tool,
+            function_args: `${currentArgs}${deltaData.delta}`,
+          };
+          next[i] = stepItem;
+          return next;
+        }
+      }
+    }
+    return timeline;
+  }
+
   return timeline;
 }
 

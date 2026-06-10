@@ -6,70 +6,56 @@ import type { ComponentType, ReactNode } from "react";
 
 import type { MarketplaceApp } from "@/lib/api/types";
 
-const lazy = <P extends object>(loader: () => Promise<{ default: ComponentType<P> }>) =>
-  dynamic(loader, { ssr: false });
+const lazy = <P extends object>(loader: () => Promise<ComponentType<P>>) =>
+  dynamic<P>(loader, { ssr: false });
 
 const VideoSearchApp = lazy(() =>
-  import("@/components/marketplace/video-search-app").then((m) => ({ default: m.VideoSearchApp })),
+  import("@/components/marketplace/video-search-app").then((m) => m.VideoSearchApp),
 );
 const NutritionAnalysisApp = lazy(() =>
-  import("@/components/marketplace/nutrition-analysis-app").then((m) => ({
-    default: m.NutritionAnalysisApp,
-  })),
+  import("@/components/marketplace/nutrition-analysis-app").then((m) => m.NutritionAnalysisApp),
 );
 const ConsumptionCalculatorApp = lazy(() =>
-  import("@/components/marketplace/consumption-calculator-app").then((m) => ({
-    default: m.ConsumptionCalculatorApp,
-  })),
+  import("@/components/marketplace/consumption-calculator-app").then((m) => m.ConsumptionCalculatorApp),
 );
 const DocumentQaApp = lazy(() =>
-  import("@/components/marketplace/document-qa-app").then((m) => ({ default: m.DocumentQaApp })),
+  import("@/components/marketplace/document-qa-app").then((m) => m.DocumentQaApp),
 );
 const SmartTranslationApp = lazy(() =>
-  import("@/components/marketplace/smart-translation-app").then((m) => ({
-    default: m.SmartTranslationApp,
-  })),
+  import("@/components/marketplace/smart-translation-app").then((m) => m.SmartTranslationApp),
 );
 const DocumentConverterApp = lazy(() =>
-  import("@/components/marketplace/document-converter-app").then((m) => ({
-    default: m.DocumentConverterApp,
-  })),
+  import("@/components/marketplace/document-converter-app").then((m) => m.DocumentConverterApp),
 );
 const WatermarkToolApp = lazy(() =>
-  import("@/components/marketplace/watermark-tool-app").then((m) => ({
-    default: m.WatermarkToolApp,
-  })),
+  import("@/components/marketplace/watermark-tool-app").then((m) => m.WatermarkToolApp),
 );
 const PromptLabApp = lazy(() =>
-  import("@/components/marketplace/prompt-lab-app").then((m) => ({ default: m.PromptLabApp })),
+  import("@/components/marketplace/prompt-lab-app").then((m) => m.PromptLabApp),
 );
 const QrGeneratorApp = lazy(() =>
-  import("@/components/marketplace/qr-generator-app").then((m) => ({ default: m.QrGeneratorApp })),
+  import("@/components/marketplace/qr-generator-app").then((m) => m.QrGeneratorApp),
 );
 const DevToolboxApp = lazy(() =>
-  import("@/components/marketplace/dev-toolbox-app").then((m) => ({ default: m.DevToolboxApp })),
+  import("@/components/marketplace/dev-toolbox-app").then((m) => m.DevToolboxApp),
 );
 const SecretGeneratorApp = lazy(() =>
-  import("@/components/marketplace/secret-generator-app").then((m) => ({
-    default: m.SecretGeneratorApp,
-  })),
+  import("@/components/marketplace/secret-generator-app").then((m) => m.SecretGeneratorApp),
 );
 const QuestionnaireApp = lazy(() =>
-  import("@/components/marketplace/questionnaire-app").then((m) => ({ default: m.QuestionnaireApp })),
+  import("@/components/marketplace/questionnaire-app").then((m) => m.QuestionnaireApp),
 );
 const RoomApp = lazy(() =>
-  import("@/components/marketplace/room-app").then((m) => ({ default: m.RoomApp })),
+  import("@/components/marketplace/room-app").then((m) => m.RoomApp),
 );
 const FortuneTellerApp = lazy(() =>
-  import("@/components/marketplace/fortune-teller-app").then((m) => ({ default: m.FortuneTellerApp })),
+  import("@/components/marketplace/fortune-teller-app").then((m) => m.FortuneTellerApp),
 );
 const PersonalityTestsApp = lazy(() =>
-  import("@/components/marketplace/personality-tests-app").then((m) => ({
-    default: m.PersonalityTestsApp,
-  })),
+  import("@/components/marketplace/personality-tests-app").then((m) => m.PersonalityTestsApp),
 );
 const UnitConverterApp = lazy(() =>
-  import("@/components/marketplace/unit-converter-app").then((m) => ({ default: m.UnitConverterApp })),
+  import("@/components/marketplace/unit-converter-app").then((m) => m.UnitConverterApp),
 );
 
 export type LaunchParams = Record<string, unknown>;

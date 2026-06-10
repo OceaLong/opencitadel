@@ -8,88 +8,11 @@ import type { ChatInputRef } from "@/components/chat-input";
 import { getToolKind } from "@/components/tool-use/utils";
 
 import { useSessionDetail } from "@/hooks/use-session-detail";
+import { useIncrementalTimeline } from "@/hooks/use-incremental-timeline";
 import { sessionApi } from "@/lib/api/session";
-import type { FileInfo, SessionCheckpoint, Skill, ToolEvent } from "@/lib/api/types";
+import type { FileInfo, SessionCheckpoint, Skill, SSEEventData, ToolEvent } from "@/lib/api/types";
 import type { AttachmentFile, TimelineItem } from "@/lib/session-events";
-import {
-  eventsToTimeline,
-  getLatestPlanFromEvents,
-  getTaskObservationSummary,
-  patchTimelineForDeltaEvent,
-} from "@/lib/session-events";
-
-const TRANSIENT_EVENT_TYPES = new Set(["message_delta", "reasoning_delta", "tool_args_delta"]);
-
-function useIncrementalTimeline(events: SSEEventData[]): TimelineItem[] {
-  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
-  const prevEventsRef = useRef<SSEEventData[]>([]);
-  const timelineRef = useRef<TimelineItem[]>([]);
-
-  useEffect(() => {
-    const prev = prevEventsRef.current;
-    if (events.length === 0) {
-      timelineRef.current = [];
-      setTimeline([]);
-      prevEventsRef.current = [];
-      return;
-    }
-
-    const rebuild = (nextEvents: SSEEventData[]) => {
-      const nextTimeline = eventsToTimeline(nextEvents);
-      timelineRef.current = nextTimeline;
-      setTimeline(nextTimeline);
-      prevEventsRef.current = nextEvents;
-    };
-
-    if (prev.length === 0 || events.length < prev.length || events[0] !== prev[0]) {
-      rebuild(events);
-      return;
-    }
-
-    if (events.length === prev.length) {
-      const last = events[events.length - 1];
-      if (TRANSIENT_EVENT_TYPES.has(last.type)) {
-        const patched = patchTimelineForDeltaEvent(timelineRef.current, last);
-        if (patched) {
-          timelineRef.current = patched;
-          setTimeline(patched);
-          prevEventsRef.current = events;
-          return;
-        }
-      }
-      rebuild(events);
-      return;
-    }
-
-    let nextTimeline = timelineRef.current;
-    let incrementalOk = true;
-    for (let i = prev.length; i < events.length; i++) {
-      const ev = events[i];
-      if (TRANSIENT_EVENT_TYPES.has(ev.type)) {
-        const patched = patchTimelineForDeltaEvent(nextTimeline, ev);
-        if (!patched) {
-          incrementalOk = false;
-          break;
-        }
-        nextTimeline = patched;
-      } else {
-        incrementalOk = false;
-        break;
-      }
-    }
-
-    if (incrementalOk) {
-      timelineRef.current = nextTimeline;
-      setTimeline(nextTimeline);
-      prevEventsRef.current = events;
-      return;
-    }
-
-    rebuild(events);
-  }, [events]);
-
-  return timeline;
-}
+import { getLatestPlanFromEvents, getTaskObservationSummary } from "@/lib/session-events";
 
 export type UseSessionDetailViewOptions = {
   sessionId: string;
@@ -123,7 +46,7 @@ export function useSessionDetailView({
 }: UseSessionDetailViewOptions) {
   const router = useRouter();
   const [includeDebug, setIncludeDebug] = useState(false);
-  const detail = useSessionDetail(sessionId, hasInitialMessage, includeDebug);
+  const detail = useSessionDetail(sessionId, hasInitialMessage);
   const {
     session,
     files,
@@ -139,6 +62,7 @@ export function useSessionDetailView({
     sendMessage,
     updateSessionConfig,
     streaming,
+    enableDebugStream,
   } = detail;
 
   const [activeSkill, setActiveSkill] = useState<Skill | null>(null);
@@ -352,7 +276,8 @@ export function useSessionDetailView({
 
   const handleDebugOpen = useCallback(() => {
     setIncludeDebug(true);
-  }, []);
+    enableDebugStream();
+  }, [enableDebugStream]);
 
   const handleRestoreCheckpoint = useCallback((checkpoint: SessionCheckpoint) => {
     if (!session) return;

@@ -4,6 +4,7 @@ import asyncio
 import io
 import logging
 import socket
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -25,6 +26,16 @@ from core.config import get_settings
 logger = logging.getLogger(__name__)
 
 _sync_redis_client = None
+_docker_client = None
+_docker_client_lock = threading.Lock()
+
+
+def _get_docker_client():
+    global _docker_client
+    with _docker_client_lock:
+        if _docker_client is None:
+            _docker_client = docker.from_env()
+        return _docker_client
 
 
 def _get_sync_redis_client():
@@ -125,8 +136,7 @@ class DockerSandbox(Sandbox):
         container_name = f"{name_prefix}-{str(uuid.uuid4())[:8]}"
 
         try:
-            # 3.创建一个docker客户端
-            docker_client = docker.from_env()
+            docker_client = _get_docker_client()
 
             # 4.预配置容器信息
             container_config = {
@@ -213,15 +223,12 @@ class DockerSandbox(Sandbox):
 
     @classmethod
     def _remove_container(cls, container_name: str) -> None:
-        docker_client = docker.from_env()
-        try:
-            docker_client.containers.get(container_name).remove(force=True)
-        finally:
-            docker_client.close()
+        docker_client = _get_docker_client()
+        docker_client.containers.get(container_name).remove(force=True)
 
     @classmethod
     def _get_running_container_ip(cls, id: str) -> Optional[str]:
-        docker_client = docker.from_env()
+        docker_client = _get_docker_client()
         try:
             container = docker_client.containers.get(id)
             container.reload()
@@ -235,14 +242,12 @@ class DockerSandbox(Sandbox):
         except APIError as e:
             logger.error(f"Docker API出错: {str(e)}")
             return None
-        finally:
-            docker_client.close()
 
     @classmethod
     def _cleanup_orphaned_containers_sync(cls) -> int:
         if get_runtime_config().sandbox.address or not get_runtime_config().sandbox.name_prefix:
             return 0
-        docker_client = docker.from_env()
+        docker_client = _get_docker_client()
         removed = 0
         idle_timeout_seconds = max(60, (get_runtime_config().sandbox.idle_timeout_minutes or 30) * 60)
         now = time.time()
@@ -296,7 +301,7 @@ class DockerSandbox(Sandbox):
                     logger.warning("Failed to remove idle sandbox %s: %s", container_name, exc)
             return removed
         finally:
-            docker_client.close()
+            pass
 
     @classmethod
     async def cleanup_orphaned_containers(cls) -> int:
@@ -591,11 +596,11 @@ class DockerSandbox(Sandbox):
 
     async def create_workspace_snapshot(self, snapshot_id: str) -> bytes:
         """Create a tar.gz snapshot of /home/ubuntu and return its bytes."""
+        from app.domain.services.sandbox_snapshot_excludes import build_tar_exclude_args
+
         archive_path = f"/tmp/cp_{snapshot_id}.tgz"
-        create_cmd = (
-            f"tar czf {archive_path} -C /home/ubuntu "
-            f"--exclude='.snapshots' --exclude='*.tgz' ."
-        )
+        exclude_args = build_tar_exclude_args()
+        create_cmd = f"tar czf {archive_path} -C /home/ubuntu {exclude_args} ."
         result = await self.exec_command(
             self._CHECKPOINT_SHELL_SESSION,
             "/home/ubuntu",

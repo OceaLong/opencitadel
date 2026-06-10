@@ -31,7 +31,7 @@ import type {
   FileTreeNode,
   SessionMode,
 } from "@/lib/api/types";
-import { eventsToTimeline } from "@/lib/session-events";
+import { useIncrementalTimeline } from "@/hooks/use-incremental-timeline";
 import { cn } from "@/lib/utils";
 
 type CodebaseWorkspaceProps = {
@@ -234,7 +234,7 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
   };
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const timeline = useMemo(() => eventsToTimeline(events), [events]);
+  const timeline = useIncrementalTimeline(events);
   const handleSourceClick = useCallback(
     (path: string, line?: number) => {
       void loadSource(path, line);

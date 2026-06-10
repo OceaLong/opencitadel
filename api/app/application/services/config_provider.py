@@ -15,6 +15,11 @@ _provider: Optional["AppConfigProvider"] = None
 _sync_cache: Optional[AppConfig] = None
 
 
+def _blocking_load_config() -> AppConfig:
+    repo = create_app_config_repository()
+    return asyncio.run(repo.load()) or AppConfig()
+
+
 class AppConfigProvider:
     """Load app config from repository with optional refresh."""
 
@@ -31,7 +36,7 @@ class AppConfigProvider:
     async def get(self, *, force_reload: bool = False) -> AppConfig:
         async with self._lock:
             if self._cache is None or force_reload:
-                self._cache = self._repository.load()
+                self._cache = await self._repository.load() or AppConfig()
                 self._version += 1
                 _set_sync_cache(self._cache)
                 logger.debug("AppConfigProvider loaded config version=%s", self._version)
@@ -62,7 +67,12 @@ def get_runtime_config() -> AppConfig:
     """Synchronous accessor for runtime config (cached per process)."""
     global _sync_cache
     if _sync_cache is None:
-        _sync_cache = create_app_config_repository().load()
+        try:
+            asyncio.get_running_loop()
+            logger.warning("Runtime config cache cold inside event loop; using defaults until warmup")
+            return AppConfig()
+        except RuntimeError:
+            _sync_cache = _blocking_load_config()
     return _sync_cache
 
 

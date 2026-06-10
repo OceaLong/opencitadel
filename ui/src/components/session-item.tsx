@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { memo, useCallback } from "react";
 import { AlertCircle, CircuitBoard, Loader2, MoreHorizontal, Trash } from "lucide-react";
 
 import { Avatar, AvatarGroupCount } from "@/components/ui/avatar";
@@ -27,7 +27,12 @@ type SessionItemProps = {
  * 单个会话列表项
  * 展示会话标题、描述、时间及操作菜单
  */
-export function SessionItem({ session, isActive, onClick, onDelete }: SessionItemProps) {
+export const SessionItem = memo(function SessionItem({
+  session,
+  isActive,
+  onClick,
+  onDelete,
+}: SessionItemProps) {
   const handleClick = useCallback(() => {
     onClick(session.session_id);
   }, [onClick, session.session_id]);
@@ -105,4 +110,4 @@ export function SessionItem({ session, isActive, onClick, onDelete }: SessionIte
       </ItemActions>
     </Item>
   );
-}
+});

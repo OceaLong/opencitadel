@@ -24,6 +24,18 @@ class SessionRepository(Protocol):
         """根据传递的会话id查询会话"""
         ...
 
+    async def exists(self, session_id: str) -> bool:
+        """检查会话是否存在"""
+        ...
+
+    async def get_metadata(self, session_id: str) -> Optional[Session]:
+        """仅加载会话元数据（不含 memories/files）"""
+        ...
+
+    async def get_files(self, session_id: str) -> Optional[List[File]]:
+        """仅加载会话文件列表；会话不存在时返回 None"""
+        ...
+
     async def delete_by_id(self, session_id: str) -> None:
         """根据传递的会话id删除会话"""
         ...

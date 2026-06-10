@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Coins, Download, FileSearchCorner, FileText } from "lucide-react";
 import { toast } from "sonner";
 
@@ -59,7 +59,7 @@ export type SessionHeaderProps = {
   observationSummary?: TaskObservationSummary;
 };
 
-export function SessionHeader({
+export const SessionHeader = memo(function SessionHeader({
   title = "",
   files,
   fileListOpen,
@@ -95,22 +95,14 @@ export function SessionHeader({
 
   const fileList = Array.isArray(files) ? files : [];
 
-  // 对相同 filepath 的文件进行去重，保留最新的（数组中最后一个）
-  const uniqueFileList = fileList.reduce((acc, file) => {
-    // 使用 filepath 作为去重的 key，如果为空则使用 filename
-    const key = file.filepath || file.filename;
-    const existingIndex = acc.findIndex((f) => (f.filepath || f.filename) === key);
-
-    if (existingIndex >= 0) {
-      // 如果已存在，替换为当前文件（保留最新的）
-      acc[existingIndex] = file;
-    } else {
-      // 如果不存在，添加到结果中
-      acc.push(file);
+  const uniqueFileList = useMemo(() => {
+    const map = new Map<string, SessionFile>();
+    for (const file of fileList) {
+      const key = file.filepath || file.filename;
+      map.set(key, file);
     }
-
-    return acc;
-  }, [] as SessionFile[]);
+    return Array.from(map.values());
+  }, [fileList]);
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [tokenDetailOpen, setTokenDetailOpen] = useState(false);
@@ -315,4 +307,4 @@ export function SessionHeader({
       </div>
     </header>
   );
-}
+});

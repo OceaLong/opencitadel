@@ -4,6 +4,7 @@ import asyncio
 import io
 import logging
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, AsyncGenerator, Callable, BinaryIO, Optional, Tuple
 
@@ -23,6 +24,7 @@ from app.domain.models.event import ErrorEvent, Event, MessageEvent, BaseEvent, 
     TitleEvent, WaitEvent, DoneEvent, AssistantNoticeEvent, StepEvent, StepEventStatus, ToolEventStatus
 from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.models.event_policy import should_persist_event
+from app.infrastructure.external.task.task_state import get_task_state
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.utils.vision import is_image_mime, is_video_mime
@@ -108,6 +110,8 @@ class AgentTaskRunner(TaskRunner):
         self._step_started_at: Dict[str, datetime] = {}
         self._tool_started_at: Dict[str, datetime] = {}
         self._last_observable_event_id: Optional[str] = None
+        self._last_step_checkpoint_at: float = 0.0
+        self._step_checkpoint_min_interval_seconds = 60.0
         self._checkpoint_service = checkpoint_service
         self._tool_presenter = ToolEventPresenter(
             sandbox=sandbox,
@@ -159,15 +163,20 @@ class AgentTaskRunner(TaskRunner):
 
     async def _put_and_add_event(self, task: Task, event: Event) -> None:
         """往指定任务的消息队列中添加事件"""
-        seq = await self._event_sequence.allocate()
-        event.id = str(seq)
+        persist = should_persist_event(event)
+        if persist:
+            seq = await self._event_sequence.allocate()
+            event.id = str(seq)
+        else:
+            event.id = f"t-{uuid.uuid4()}"
         event_data = event.model_dump(mode="json")
-        await task.output_stream.put(event.model_dump_json())
+        stream_message_id = await task.output_stream.put(event.model_dump_json())
         if isinstance(event, (StepEvent, ToolEvent)):
             self._last_observable_event_id = event.id
 
         # 2.仅持久化稳定、高价值事件，流式 delta 不落库
-        if should_persist_event(event):
+        if persist:
+            await get_task_state().set_output_seq_cursor(task.id, int(event.id), stream_message_id)
             self._event_persist_buffer.append((event, event_data))
             critical = isinstance(event, (DoneEvent, ErrorEvent, WaitEvent, StepEvent, ToolEvent))
             if critical or len(self._event_persist_buffer) >= self._event_persist_batch_size:
@@ -558,7 +567,10 @@ class AgentTaskRunner(TaskRunner):
                         and isinstance(event, StepEvent)
                         and event.status == StepEventStatus.STARTED
                         and event.id
+                        and time.monotonic() - self._last_step_checkpoint_at
+                        >= self._step_checkpoint_min_interval_seconds
                     ):
+                        self._last_step_checkpoint_at = time.monotonic()
                         try:
                             await self._flush_event_persist_buffer()
                             step_label = event.step.description if event.step else "执行步骤"

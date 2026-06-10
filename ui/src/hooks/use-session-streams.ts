@@ -1,0 +1,323 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+
+import { ApiError } from "@/lib/api";
+import { sessionApi } from "@/lib/api/session";
+import type { SessionDetail, SSEEventData, TokenUsageSummary } from "@/lib/api/types";
+
+function isSessionMissingError(err: unknown): boolean {
+  if (err instanceof ApiError && err.code === 404) {
+    return true;
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes("会话不存在") || msg.includes("任务会话不存在");
+}
+
+function getSessionMissingErrorFromEvent(ev: SSEEventData): boolean {
+  if (ev.type !== "error") return false;
+  const errorMsg = (ev.data as { error?: string })?.error;
+  return typeof errorMsg === "string" && isSessionMissingError(new Error(errorMsg));
+}
+
+type StreamDeps = {
+  sessionId: string | null;
+  sessionStatus?: SessionDetail["status"];
+  appendEvent: (ev: SSEEventData) => void;
+  onSessionMissing: (err: unknown) => void;
+  applySessionPatch: (patch: Partial<SessionDetail>) => void;
+  setError: (err: Error | null) => void;
+  lastEventIdRef: MutableRefObject<string | null>;
+  skipEmptyStream?: boolean;
+};
+
+export function useSessionStreams({
+  sessionId,
+  sessionStatus,
+  appendEvent,
+  onSessionMissing,
+  applySessionPatch,
+  setError,
+  lastEventIdRef,
+  skipEmptyStream = false,
+}: StreamDeps) {
+  const [streaming, setStreaming] = useState(false);
+  const streamIncludeDebugRef = useRef(false);
+  const emptyStreamCleanupRef = useRef<(() => void) | null>(null);
+  const messageStreamCleanupRef = useRef<(() => void) | null>(null);
+  const emptyStreamRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const emptyStreamRetryCountRef = useRef(0);
+  const sessionMissingRef = useRef(false);
+  const isSendMessageRef = useRef(false);
+  const startEmptyStreamRef = useRef<(() => void) | null>(null);
+
+  const clearEmptyStreamRetryTimer = useCallback(() => {
+    if (emptyStreamRetryTimerRef.current) {
+      clearTimeout(emptyStreamRetryTimerRef.current);
+      emptyStreamRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const stopEmptyStream = useCallback(() => {
+    clearEmptyStreamRetryTimer();
+    if (emptyStreamCleanupRef.current) {
+      emptyStreamCleanupRef.current();
+      emptyStreamCleanupRef.current = null;
+    }
+  }, [clearEmptyStreamRetryTimer]);
+
+  const handleStreamEvent = useCallback(
+    (ev: SSEEventData) => {
+      appendEvent(ev);
+
+      if (
+        ev.type === "title" &&
+        ev.data &&
+        typeof (ev.data as { title?: string }).title === "string"
+      ) {
+        applySessionPatch({ title: (ev.data as { title: string }).title });
+      }
+
+      if (ev.type === "session_status") {
+        const status = (ev.data as { status?: SessionDetail["status"] }).status;
+        if (status) {
+          applySessionPatch({ status });
+          if (
+            status === "waiting" ||
+            status === "completed" ||
+            status === "cancelled" ||
+            status === "failed"
+          ) {
+            setStreaming(false);
+          }
+        }
+      }
+
+      if (ev.type === "usage") {
+        applySessionPatch({ token_usage: ev.data as TokenUsageSummary });
+      }
+
+      if (ev.type === "done") {
+        applySessionPatch({ status: "completed" });
+      }
+
+      if (ev.type === "error") {
+        if (getSessionMissingErrorFromEvent(ev)) {
+          sessionMissingRef.current = true;
+        }
+        applySessionPatch({ status: "failed" });
+        setStreaming(false);
+      }
+    },
+    [appendEvent, applySessionPatch],
+  );
+
+  const startEmptyStream = useCallback(() => {
+    if (!sessionId || sessionMissingRef.current) return;
+    stopEmptyStream();
+    emptyStreamCleanupRef.current = sessionApi.chat(
+      sessionId,
+      { event_id: lastEventIdRef.current || undefined },
+      (ev) => {
+        emptyStreamRetryCountRef.current = 0;
+        handleStreamEvent(ev);
+        if (getSessionMissingErrorFromEvent(ev)) {
+          onSessionMissing(new Error("会话不存在"));
+        }
+      },
+      (err) => {
+        if (err.name === "AbortError") return;
+        if (isSessionMissingError(err)) {
+          emptyStreamCleanupRef.current = null;
+          onSessionMissing(err);
+          return;
+        }
+        if (err.message === "SSE_STREAM_END") {
+          emptyStreamCleanupRef.current = null;
+          clearEmptyStreamRetryTimer();
+          const retryCount = emptyStreamRetryCountRef.current;
+          const delay = Math.min(30_000, 1000 * 2 ** Math.min(retryCount, 5));
+          emptyStreamRetryCountRef.current = retryCount + 1;
+          emptyStreamRetryTimerRef.current = setTimeout(() => {
+            emptyStreamRetryTimerRef.current = null;
+            if (sessionMissingRef.current) return;
+            if (!emptyStreamCleanupRef.current && !isSendMessageRef.current) {
+              startEmptyStreamRef.current?.();
+            }
+          }, delay);
+          return;
+        }
+        setError(err instanceof Error ? err : new Error("会话流连接异常"));
+      },
+      { include_debug: streamIncludeDebugRef.current },
+    );
+  }, [
+    sessionId,
+    handleStreamEvent,
+    stopEmptyStream,
+    clearEmptyStreamRetryTimer,
+    onSessionMissing,
+    setError,
+    lastEventIdRef,
+  ]);
+
+  useEffect(() => {
+    startEmptyStreamRef.current = startEmptyStream;
+  });
+
+  const enableDebugStream = useCallback(() => {
+    streamIncludeDebugRef.current = true;
+    if (!isSendMessageRef.current) {
+      startEmptyStreamRef.current?.();
+    }
+  }, []);
+
+  const sendMessage = useCallback(
+    async (
+      message: string,
+      attachmentIds: string[],
+      options?: {
+        model_id?: string;
+        skill_id?: string;
+        thinking_enabled?: boolean;
+        mode?: import("@/lib/api/types").SessionMode;
+      },
+    ) => {
+      if (!sessionId) return;
+      stopEmptyStream();
+      if (messageStreamCleanupRef.current) {
+        messageStreamCleanupRef.current();
+        messageStreamCleanupRef.current = null;
+      }
+      isSendMessageRef.current = true;
+      setStreaming(true);
+      applySessionPatch({ status: "running" });
+
+      const onEvent = (ev: SSEEventData) => {
+        handleStreamEvent(ev);
+        if (getSessionMissingErrorFromEvent(ev)) {
+          if (messageStreamCleanupRef.current) {
+            messageStreamCleanupRef.current();
+            messageStreamCleanupRef.current = null;
+          }
+          onSessionMissing(new Error("会话不存在"));
+          return;
+        }
+        if (ev.type === "done") {
+          setStreaming(false);
+          isSendMessageRef.current = false;
+          if (messageStreamCleanupRef.current) {
+            messageStreamCleanupRef.current();
+            messageStreamCleanupRef.current = null;
+          }
+          startEmptyStream();
+        }
+      };
+
+      messageStreamCleanupRef.current = sessionApi.chat(
+        sessionId,
+        {
+          message,
+          attachments: attachmentIds,
+          model_id: options?.model_id,
+          skill_id: options?.skill_id,
+          thinking_enabled: options?.thinking_enabled,
+          mode: options?.mode,
+        },
+        onEvent,
+        (err) => {
+          if (err.name === "AbortError") {
+            setStreaming(false);
+            isSendMessageRef.current = false;
+            return;
+          }
+          if (isSessionMissingError(err)) {
+            if (messageStreamCleanupRef.current) {
+              messageStreamCleanupRef.current();
+              messageStreamCleanupRef.current = null;
+            }
+            onSessionMissing(err);
+            return;
+          }
+          if (err.message === "SSE_STREAM_END") {
+            setStreaming(false);
+            isSendMessageRef.current = false;
+            if (messageStreamCleanupRef.current) {
+              messageStreamCleanupRef.current();
+              messageStreamCleanupRef.current = null;
+            }
+            startEmptyStream();
+            return;
+          }
+          setError(err instanceof Error ? err : new Error("流式响应异常"));
+          setStreaming(false);
+          isSendMessageRef.current = false;
+          applySessionPatch({ status: "completed" });
+          if (messageStreamCleanupRef.current) {
+            messageStreamCleanupRef.current();
+            messageStreamCleanupRef.current = null;
+          }
+          if (!sessionMissingRef.current) {
+            startEmptyStream();
+          }
+        },
+        { include_debug: streamIncludeDebugRef.current },
+      );
+    },
+    [
+      sessionId,
+      handleStreamEvent,
+      startEmptyStream,
+      stopEmptyStream,
+      onSessionMissing,
+      setError,
+      applySessionPatch,
+    ],
+  );
+
+  useEffect(() => {
+    if (!sessionId || !sessionStatus || sessionMissingRef.current) return;
+    const completed =
+      sessionStatus === "completed" ||
+      sessionStatus === "cancelled" ||
+      sessionStatus === "failed";
+    if (!completed && !isSendMessageRef.current && !skipEmptyStream) {
+      startEmptyStream();
+    }
+    return () => {
+      stopEmptyStream();
+    };
+  }, [sessionId, sessionStatus, skipEmptyStream, startEmptyStream, stopEmptyStream]);
+
+  useEffect(() => {
+    return () => {
+      clearEmptyStreamRetryTimer();
+      if (messageStreamCleanupRef.current) {
+        messageStreamCleanupRef.current();
+        messageStreamCleanupRef.current = null;
+      }
+    };
+  }, [clearEmptyStreamRetryTimer]);
+
+  const resetStreams = useCallback(() => {
+    sessionMissingRef.current = false;
+    isSendMessageRef.current = false;
+    streamIncludeDebugRef.current = false;
+    stopEmptyStream();
+    if (messageStreamCleanupRef.current) {
+      messageStreamCleanupRef.current();
+      messageStreamCleanupRef.current = null;
+    }
+    setStreaming(false);
+  }, [stopEmptyStream]);
+
+  return {
+    streaming,
+    sendMessage,
+    enableDebugStream,
+    resetStreams,
+    markSessionMissing: () => {
+      sessionMissingRef.current = true;
+    },
+  };
+}

@@ -6,7 +6,7 @@ from typing import List, Optional
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models.checkpoint import Checkpoint
+from app.domain.models.checkpoint import Checkpoint, CheckpointAnchorType
 from app.domain.repositories.checkpoint_repository import CheckpointRepository
 from app.infrastructure.models.session_checkpoint import SessionCheckpointModel
 
@@ -31,12 +31,29 @@ class DBCheckpointRepository(CheckpointRepository):
 
     async def list_by_session(self, session_id: str) -> List[Checkpoint]:
         stmt = (
-            select(SessionCheckpointModel)
+            select(
+                SessionCheckpointModel.id,
+                SessionCheckpointModel.session_id,
+                SessionCheckpointModel.anchor_type,
+                SessionCheckpointModel.anchor_event_id,
+                SessionCheckpointModel.label,
+                SessionCheckpointModel.created_at,
+            )
             .where(SessionCheckpointModel.session_id == session_id)
             .order_by(SessionCheckpointModel.created_at.asc())
         )
         result = await self.db_session.execute(stmt)
-        return [record.to_domain() for record in result.scalars().all()]
+        return [
+            Checkpoint(
+                id=row.id,
+                session_id=row.session_id,
+                anchor_type=CheckpointAnchorType(row.anchor_type),
+                anchor_event_id=row.anchor_event_id,
+                label=row.label or "",
+                created_at=row.created_at,
+            )
+            for row in result.all()
+        ]
 
     async def delete_from(self, session_id: str, from_created_at: datetime, inclusive: bool = True) -> None:
         condition = (
