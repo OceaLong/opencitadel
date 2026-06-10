@@ -60,7 +60,7 @@ git clone <YOUR_REPOSITORY_URL> my-manus
 cd my-manus
 
 # 创建环境变量文件
-cp api/.env.example .env
+cp .env.example .env
 
 # 编辑配置文件（见下方配置说明）
 vim .env
@@ -82,7 +82,9 @@ docker compose logs -f
 
 ## ⚙️ 核心配置
 
-### 环境变量配置 (.env)
+### 启动引导与密钥 (.env)
+
+`.env` 仅保留进程启动前必须可用的连接串与密钥；行为类配置见 `api/config.yaml`。
 
 ```bash
 # ==================== 基础配置 ====================
@@ -111,52 +113,52 @@ COS_SCHEME=https
 COS_BUCKET=<YOUR_BUCKET_NAME>
 COS_DOMAIN=<YOUR_COS_DOMAIN>
 
-# ==================== 沙箱配置 ====================
-SANDBOX_ADDRESS=http://manus-sandbox:8080
-SANDBOX_IMAGE=manus-sandbox
-SANDBOX_NAME_PREFIX=my-manus-sandbox
-SANDBOX_TTL_MINUTES=60
-SANDBOX_NETWORK=manus-network
-SANDBOX_CHROME_ARGS=--no-sandbox --disable-dev-shm-usage
-SANDBOX_HTTPS_PROXY=
-SANDBOX_HTTP_PROXY=
-SANDBOX_NO_PROXY=localhost,127.0.0.1
+# ==================== 嵌入 / 可观测性密钥（可选） ====================
+EMBEDDING_API_KEY=
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_SECRET_KEY=
+
+# ==================== Vault（可选） ====================
+VAULT_ADDR=
+VAULT_TOKEN=
 
 # ==================== Nginx 端口 ====================
 NGINX_PORT=8088
-
-# ==================== 记忆与向量检索（可选） ====================
-MEMORY_VECTOR_ENABLED=false
-EMBEDDING_API_KEY=
-EMBEDDING_MODEL=text-embedding-3-small
-EMBEDDING_BASE_URL=https://api.openai.com/v1
-
-# ==================== 可观测性（可选） ====================
-OTEL_ENABLED=false
-OTEL_SERVICE_NAME=my-manus-api
-OTEL_EXPORTER_ENDPOINT=
-
-# ==================== 密钥治理（可选） ====================
-VAULT_ADDR=
-USE_DB_APP_CONFIG=false
 ```
 
-### LLM 配置 (api/config.yaml)
+### 运行时配置 (api/config.yaml)
 
-`llm_config` 用于首次启动时种子化默认模型（可选）。仅当 `base_url`、`model_name` 齐全且（非 Ollama 时）提供了 `api_key` 时才会导入；未配置时系统保持无模型，发起对话会提示先在设置中添加模型。服务启动后，请在前端「设置中心 → 模型管理」维护模型配置、设置默认模型，并在新建会话或会话详情页选择会话级模型。
+Docker Compose 将 `./api/config.yaml` 挂载到 API/Worker 容器的 `/app/config.yaml`。
 
 ```yaml
-llm_config:
-  base_url: https://api.deepseek.com/
-  api_key: sk-YOUR_API_KEY_HERE
-  model_name: deepseek-chat
-  temperature: 0.7
-  max_tokens: 8192
+server:
+  cors_origins: '*'
+  rate_limit_enabled: true
+  rate_limit_per_minute: 120
 
 agent_config:
   max_iterations: 100
   max_retries: 3
   max_search_results: 10
+
+sandbox:
+  address: http://manus-sandbox:8080
+  image: manus-sandbox
+  name_prefix: my-manus-sandbox
+  network: manus-network
+  pool_enabled: true
+  pool_size: 2
+
+memory:
+  vector_enabled: false
+  embedding:
+    provider: openai
+    model: text-embedding-3-small
+    base_url: https://api.openai.com/v1
+
+observability:
+  otel_enabled: false
+  otel_service_name: my-manus-api
 
 mcp_config:
   mcpServers:
@@ -164,12 +166,6 @@ mcp_config:
       transport: streamable_http
       enabled: true
       url: https://mcp.amap.com/mcp?key=YOUR_AMAP_KEY
-    jina-mcp-server:
-      transport: streamable_http
-      enabled: true
-      url: https://mcp.jina.ai/v1
-      headers:
-        Authorization: Bearer YOUR_JINA_TOKEN
 
 a2a_config:
   a2a_servers: []
@@ -177,10 +173,10 @@ a2a_config:
 
 ### 模型、Skill 与记忆
 
-- 首次启动且 `llm_config` 配置完整时会自动导入一个默认模型；未配置则保持无模型。后续模型新增、编辑、删除和默认模型切换都在「设置中心 → 模型管理」完成。若数据库已有模型，修改 `api/config.yaml` 不会改变当前运行时默认模型。
+- **首次启动不会自动导入默认模型**，请在前端「设置中心 → 模型管理」添加模型并设置默认项后才能发起对话。模型存储在 PostgreSQL `llm_models` 表，API Key 由 `API_KEY_SECRET` 加密。
 - 系统会自动创建内置 Skill 模板（编程助手、研究分析、数据分析、内容写作），也可在「设置中心 → Skill 模板」维护自定义模板。
 - 长期记忆在「设置中心 → 长期记忆」维护，支持全局和会话两种作用域；任务开始时会自动召回相关记忆（时间衰减 + 可选 pgvector 向量混合检索）。
-- 开启向量记忆需设置 `MEMORY_VECTOR_ENABLED=true` 并配置 `EMBEDDING_API_KEY`；PostgreSQL 使用 `pgvector/pgvector:pg16` 镜像。
+- 开启向量记忆需在 `config.yaml` 设置 `memory.vector_enabled: true`，并在 `.env` 配置 `EMBEDDING_API_KEY`；PostgreSQL 使用 `pgvector/pgvector:pg16` 镜像。
 - 会话详情页可查看 Agent 会话内存，并支持压缩、清空或删除单条内存消息。
 
 ### 数据库迁移
@@ -399,7 +395,7 @@ docker exec -i manus-postgres psql -U postgres manus < backup.sql
 docker-compose logs manus-api
 
 # 检查配置文件
-docker exec -it manus-api cat /app/.env
+docker exec -it manus-api printenv API_KEY_SECRET ENV SQLALCHEMY_DATABASE_URI
 docker exec -it manus-api cat /app/config.yaml
 
 # 验证网络连接
@@ -547,8 +543,9 @@ Chart 特性：
 
 - [ ] 服务器已安装 Docker 和 Docker Compose
 - [ ] 防火墙已配置（仅开放 22、8088 端口）
-- [ ] .env 文件已正确配置（数据库密码、COS 凭证、LLM API Key）
-- [ ] api/config.yaml 已配置用于初始化默认模型的 LLM 接口
+- [ ] .env 已配置数据库/Redis/COS 连接与 `API_KEY_SECRET`
+- [ ] api/config.yaml 已配置沙箱、MCP 等运行时行为
+- [ ] 已在设置页添加至少一个 LLM 模型并设为默认
 - [ ] `manus-migrate` 已成功完成（`docker compose ps` 中状态为 exited(0)）
 - [ ] `manus-api` 与 **`manus-worker`** 均为 running
 - [ ] 已在设置中心确认默认模型、内置 Skill 和长期记忆配置

@@ -133,6 +133,7 @@ class AgentService:
                     SessionStatus.COMPLETED,
                     SessionStatus.WAITING,
                     SessionStatus.CANCELLED,
+                    SessionStatus.FAILED,
                 }:
                     return
                 if await output_stream.is_empty():

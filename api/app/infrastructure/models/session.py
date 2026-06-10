@@ -55,12 +55,6 @@ class SessionModel(Base):
         DateTime,
         nullable=True,
     )  # 最后一条消息时间
-    events: Mapped[List[Dict[str, Any]]] = mapped_column(
-        JSONB,
-        nullable=False,
-        server_default=text("'[]'::jsonb"),
-        deferred=True,
-    )  # 事件列表
     files: Mapped[List[Dict[str, Any]]] = mapped_column(
         JSONB,
         nullable=False,
@@ -124,7 +118,7 @@ class SessionModel(Base):
             # 1.基础字段: 使用BaseModel提供的python字典转换格式
             **session.model_dump(
                 mode="python",
-                exclude={"memories", "files", "events", "updated_at", "created_at"},
+                exclude={"memories", "files", "updated_at", "created_at"},
             ),
             # 2.复杂字段: 使用BaseModel提供的json字典转换格式
             **session.model_dump(
@@ -162,7 +156,7 @@ class SessionModel(Base):
         # 1.基础字段: Python模式
         base_data = session.model_dump(
             mode="python",
-            exclude={"memories", "files", "events", "updated_at", "created_at"},
+            exclude={"memories", "files", "updated_at", "created_at"},
         )
 
         # 2.复杂字段: JSON模式

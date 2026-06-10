@@ -10,6 +10,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from .base import Base
 from ...domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
 
+try:
+    from pgvector.sqlalchemy import Vector
+except ImportError:  # pragma: no cover
+    Vector = None  # type: ignore[misc, assignment]
+
+_EMBEDDING_DIM = 1536
+
 
 class MemoryEntryORM(Base):
     """长期记忆ORM"""
@@ -35,6 +42,10 @@ class MemoryEntryORM(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+    )
+    embedding: Mapped[Optional[List[float]]] = mapped_column(
+        Vector(_EMBEDDING_DIM) if Vector is not None else JSONB,
+        nullable=True,
     )
 
     @classmethod

@@ -10,7 +10,13 @@ export type ApiResponse<T = unknown> = {
 /**
  * 会话状态
  */
-export type SessionStatus = "pending" | "running" | "waiting" | "completed" | "cancelled";
+export type SessionStatus =
+  | "pending"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "cancelled"
+  | "failed";
 
 /**
  * 执行状态
@@ -748,6 +754,24 @@ export type TokenUsageSummary = {
   total_tokens: number;
   estimated_cost_usd: number;
   call_count: number;
+};
+
+export type TokenUsageRecord = {
+  id: string;
+  agent: string;
+  step: string;
+  model_id: string | null;
+  model_name: string;
+  call_type: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  created_at: string;
+};
+
+export type SessionTokenUsageData = {
+  summary: TokenUsageSummary;
+  records: TokenUsageRecord[];
 };
 
 export type SessionDetail = Session & {

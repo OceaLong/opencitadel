@@ -243,7 +243,7 @@ export function useSessionDetail(
       const status = (evToAppend.data as { status?: SessionDetail["status"] }).status;
       if (status) {
         setSession((prev) => (prev ? { ...prev, status } : null));
-        if (status === "waiting" || status === "completed" || status === "cancelled") {
+        if (status === "waiting" || status === "completed" || status === "cancelled" || status === "failed") {
           setStreaming(false);
         }
       }
@@ -264,7 +264,8 @@ export function useSessionDetail(
       if (getSessionMissingErrorFromEvent(evToAppend)) {
         sessionMissingRef.current = true;
       }
-      setSession((prev) => (prev ? { ...prev, status: "completed" } : null));
+      setSession((prev) => (prev ? { ...prev, status: "failed" } : null));
+      setStreaming(false);
     }
   }, []);
 
@@ -351,7 +352,14 @@ export function useSessionDetail(
         }),
       ]);
       setCheckpoints(checkpointData.checkpoints ?? []);
-      setSession(detail);
+      const normalizedDetail =
+        (detail.unread_message_count ?? 0) > 0
+          ? { ...detail, unread_message_count: 0 }
+          : detail;
+      setSession(normalizedDetail);
+      if ((detail.unread_message_count ?? 0) > 0) {
+        sessionApi.clearUnreadMessageCount(sessionId).catch(() => undefined);
+      }
       setFiles(normalizeFileList(fileListRaw));
 
       const pagedEvents = normalizeEvents(eventsPage.events);
@@ -436,7 +444,7 @@ export function useSessionDetail(
 
   useEffect(() => {
     if (!sessionId || !sessionStatus || sessionMissingRef.current) return;
-    const completed = sessionStatus === "completed" || sessionStatus === "cancelled";
+    const completed = sessionStatus === "completed" || sessionStatus === "cancelled" || sessionStatus === "failed";
     // 如果标记了跳过空流（比如有初始消息待发送），则不启动空流
     if (!completed && !isSendMessageRef.current && !skipEmptyStream) {
       startEmptyStream();

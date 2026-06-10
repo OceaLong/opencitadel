@@ -21,8 +21,11 @@ async def transcribe_audio_bytes(
 ) -> str:
     """将音频字节转写为文本。优先使用 OpenAI Whisper API。"""
     if model.provider.value not in {"openai", "azure"}:
-        # 非 OpenAI provider：尝试 OpenAI-compatible whisper endpoint
-        pass
+        logger.warning(
+            "Provider %s 不支持 Whisper 转写，请使用 OpenAI/Azure 模型",
+            model.provider.value,
+        )
+        return ""
 
     base_url = str(model.base_url).rstrip("/")
     if base_url.endswith("/v1"):

@@ -8,7 +8,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Optional
 
-from core.config import get_settings
+from app.application.services.config_provider import get_runtime_config
 
 if TYPE_CHECKING:
     from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
@@ -25,13 +25,13 @@ class SandboxPool:
     _instance: Optional["SandboxPool"] = None
 
     def __init__(self) -> None:
-        settings = get_settings()
+        sandbox = get_runtime_config().sandbox
         self._enabled = bool(
-            not settings.sandbox_address
-            and settings.sandbox_pool_enabled
-            and settings.sandbox_pool_size > 0
+            not sandbox.address
+            and sandbox.pool_enabled
+            and sandbox.pool_size > 0
         )
-        self._pool_size = max(0, settings.sandbox_pool_size)
+        self._pool_size = max(0, sandbox.pool_size)
         self._queue: asyncio.Queue[DockerSandbox] = asyncio.Queue(maxsize=self._pool_size)
         self._warmup_task: Optional[asyncio.Task] = None
         self._started = False

@@ -2,9 +2,8 @@
 # -*- coding: utf-8 -*-
 """OpenTelemetry and Prometheus observability setup."""
 import logging
-from typing import Optional
 
-from core.config import get_settings
+from app.application.services.config_provider import get_runtime_config
 
 logger = logging.getLogger(__name__)
 _initialized = False
@@ -14,9 +13,9 @@ def setup_observability(app=None) -> None:
     global _initialized
     if _initialized:
         return
-    settings = get_settings()
-    if not settings.otel_enabled:
-        logger.info("OpenTelemetry disabled (OTEL_ENABLED=false)")
+    observability = get_runtime_config().observability
+    if not observability.otel_enabled:
+        logger.info("OpenTelemetry disabled (otel_enabled=false in config.yaml)")
         _initialized = True
         return
 
@@ -35,19 +34,19 @@ def setup_observability(app=None) -> None:
         return
 
     resource = Resource.create({
-        "service.name": settings.otel_service_name,
+        "service.name": observability.otel_service_name,
         "service.version": "1.0.0",
     })
     tracer_provider = TracerProvider(resource=resource)
-    if settings.otel_exporter_endpoint:
+    if observability.otel_exporter_endpoint:
         tracer_provider.add_span_processor(
-            BatchSpanProcessor(OTLPSpanExporter(endpoint=settings.otel_exporter_endpoint))
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=observability.otel_exporter_endpoint))
         )
     trace.set_tracer_provider(tracer_provider)
 
     reader = PeriodicExportingMetricReader(
-        OTLPMetricExporter(endpoint=settings.otel_exporter_endpoint)
-        if settings.otel_exporter_endpoint else OTLPMetricExporter()
+        OTLPMetricExporter(endpoint=observability.otel_exporter_endpoint)
+        if observability.otel_exporter_endpoint else OTLPMetricExporter()
     )
     metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[reader]))
 
@@ -59,7 +58,7 @@ def setup_observability(app=None) -> None:
             pass
 
     _initialized = True
-    logger.info("OpenTelemetry initialized: service=%s", settings.otel_service_name)
+    logger.info("OpenTelemetry initialized: service=%s", observability.otel_service_name)
 
 
 def get_tracer(name: str = "my-manus"):

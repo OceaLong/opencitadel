@@ -158,7 +158,7 @@ class AssistantNoticeEvent(BaseEvent):
 class SessionStatusEvent(BaseEvent):
     """服务端权威的会话状态事件"""
     type: Literal["session_status"] = "session_status"
-    status: Literal["pending", "running", "waiting", "completed", "cancelled"] = "running"
+    status: Literal["pending", "running", "waiting", "completed", "cancelled", "failed"] = "running"
 
 
 class DebugItemEvent(BaseEvent):

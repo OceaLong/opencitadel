@@ -111,10 +111,9 @@ class MemoryService:
 
     async def recall_for_session(self, session_id: str) -> str:
         """召回长期记忆并格式化为system块（时间衰减 + 可选向量混合检索）"""
+        from app.application.services.config_provider import get_runtime_config
         from app.application.services.vector_memory_service import get_vector_memory_service
-        from core.config import get_settings
 
-        settings = get_settings()
         query_text = ""
         async with self._uow_factory() as uow:
             session = await uow.session.get_by_id(session_id)
@@ -125,7 +124,7 @@ class MemoryService:
             )
             entries = rank_entries_with_decay(entries, self._recall_limit)
 
-            if settings.memory_vector_enabled and query_text.strip():
+            if get_runtime_config().memory.vector_enabled and query_text.strip():
                 vector_service = get_vector_memory_service()
                 vector_entries = await vector_service.search_similar(
                     query_text,

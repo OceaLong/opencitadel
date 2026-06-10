@@ -7,7 +7,7 @@ from typing import Any, Tuple, Optional, AsyncGenerator
 
 from app.domain.external.message_queue import MessageQueue
 from app.infrastructure.storage.redis import get_redis
-from core.config import get_settings
+from app.application.services.config_provider import get_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +20,13 @@ class RedisStreamMessageQueue(MessageQueue):
         self._stream_name = stream_name
         self._redis = get_redis()
         self._lock_expire_seconds = 10
-        settings = get_settings()
+        streams = get_runtime_config().streams
         if stream_name.startswith("task:output:"):
-            self._maxlen = settings.redis_task_output_stream_maxlen
+            self._maxlen = streams.task_output_maxlen
         elif stream_name.startswith("task:input:"):
-            self._maxlen = settings.redis_task_input_stream_maxlen
+            self._maxlen = streams.task_input_maxlen
         else:
-            self._maxlen = settings.redis_stream_maxlen
+            self._maxlen = streams.stream_maxlen
 
     async def _acquire_lock(self, lock_key: str, timeout_seconds: int = 5) -> Optional[str]:
         """根据传递的lock键构建一个分布式锁"""

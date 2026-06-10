@@ -38,7 +38,7 @@ NON_TIMELINE_UI_EVENT_TYPES = frozenset({
 
 
 def should_persist_event(event: "BaseEvent") -> bool:
-    """Whether an event should be appended to sessions.events."""
+    """Whether an event should be appended to session_events table."""
     if event.type in TRANSIENT_EVENT_TYPES:
         return False
     if getattr(event, "persist", True) is False:

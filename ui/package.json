@@ -10,7 +10,8 @@
     "lint:fix": "eslint --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "codegen:api": "openapi-typescript ${OPENAPI_URL:-http://localhost:8088/openapi.json} -o src/lib/api/generated/schema.d.ts"
   },
   "dependencies": {
     "@novnc/novnc": "^1.5.0",

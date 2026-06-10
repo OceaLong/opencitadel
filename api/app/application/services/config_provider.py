@@ -5,14 +5,14 @@ import asyncio
 import logging
 from typing import Optional
 
+from app.application.services.app_config_repository_factory import create_app_config_repository
 from app.domain.models.app_config import AppConfig
 from app.domain.repositories.app_config_repository import AppConfigRepository
-from app.infrastructure.repositories.file_app_config_repository import FileAppConfigRepository
-from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 _provider: Optional["AppConfigProvider"] = None
+_sync_cache: Optional[AppConfig] = None
 
 
 class AppConfigProvider:
@@ -33,6 +33,7 @@ class AppConfigProvider:
             if self._cache is None or force_reload:
                 self._cache = self._repository.load()
                 self._version += 1
+                _set_sync_cache(self._cache)
                 logger.debug("AppConfigProvider loaded config version=%s", self._version)
             return self._cache
 
@@ -41,13 +42,32 @@ class AppConfigProvider:
 
     def invalidate(self) -> None:
         self._cache = None
+        invalidate_runtime_config()
+
+
+def _set_sync_cache(config: AppConfig) -> None:
+    global _sync_cache
+    _sync_cache = config
+
+
+def invalidate_runtime_config() -> None:
+    """Clear synchronous and async config caches."""
+    global _sync_cache
+    _sync_cache = None
+    if _provider is not None:
+        _provider._cache = None
+
+
+def get_runtime_config() -> AppConfig:
+    """Synchronous accessor for runtime config (cached per process)."""
+    global _sync_cache
+    if _sync_cache is None:
+        _sync_cache = create_app_config_repository().load()
+    return _sync_cache
 
 
 def get_app_config_provider() -> AppConfigProvider:
     global _provider
     if _provider is None:
-        settings = get_settings()
-        _provider = AppConfigProvider(
-            FileAppConfigRepository(settings.app_config_filepath)
-        )
+        _provider = AppConfigProvider(create_app_config_repository())
     return _provider

@@ -25,14 +25,15 @@ from app.interfaces.middleware.rate_limit import maybe_install_rate_limit
 from app.application.services.bootstrap_service import bootstrap_data
 from app.interfaces.service_dependencies import (
     get_agent_service,
-    get_llm_model_service,
     get_skill_service,
 )
 from app.infrastructure.storage.postgres import get_uow
+from app.application.services.config_provider import get_runtime_config
 from core.config import get_settings
 
 # 1.加载配置信息
 settings = get_settings()
+runtime_config = get_runtime_config()
 
 # 2.初始化日志系统
 setup_logging()
@@ -40,7 +41,7 @@ logger = logging.getLogger()
 
 
 async def _sandbox_cleanup_loop() -> None:
-    interval = max(60, settings.sandbox_cleanup_interval_seconds)
+    interval = max(60, runtime_config.sandbox.cleanup_interval_seconds)
     while True:
         try:
             removed = await DockerSandbox.cleanup_orphaned_containers()
@@ -50,6 +51,21 @@ async def _sandbox_cleanup_loop() -> None:
             raise
         except Exception as exc:
             logger.warning("清理孤儿沙箱容器失败: %s", exc)
+        await asyncio.sleep(interval)
+
+
+async def _connection_pool_cleanup_loop() -> None:
+    from app.infrastructure.external.tools.connection_pool import A2AConnectionPool, MCPConnectionPool
+
+    interval = 300
+    while True:
+        try:
+            await MCPConnectionPool.release_stale()
+            await A2AConnectionPool.release_stale()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("连接池回收失败: %s", exc)
         await asyncio.sleep(interval)
 
 # 3.定义FastAPI路由tags标签
@@ -135,13 +151,16 @@ async def lifespan(app: FastAPI):
     # 4.种子化默认模型与内置Skill
     await bootstrap_data(
         uow_factory=get_uow,
-        llm_model_service=get_llm_model_service(),
         skill_service=get_skill_service(),
     )
     from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
 
     await get_sandbox_pool().start()
+    from app.infrastructure.external.app_config_notifier import start_config_invalidate_listener
+
+    await start_config_invalidate_listener()
     sandbox_cleanup_task = asyncio.create_task(_sandbox_cleanup_loop())
+    pool_cleanup_task = asyncio.create_task(_connection_pool_cleanup_loop())
     logger.info("MyManus初始化完成")
 
     try:
@@ -149,8 +168,16 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         sandbox_cleanup_task.cancel()
+        pool_cleanup_task.cancel()
+        from app.infrastructure.external.app_config_notifier import stop_config_invalidate_listener
+
+        await stop_config_invalidate_listener()
         try:
             await sandbox_cleanup_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await pool_cleanup_task
         except asyncio.CancelledError:
             pass
         try:
@@ -185,7 +212,7 @@ app = FastAPI(
 )
 
 # 5.配置CORS中间件，解决跨域问题
-_cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+_cors_origins = [o.strip() for o in runtime_config.server.cors_origins.split(",") if o.strip()]
 _allow_all_origins = "*" in _cors_origins
 app.add_middleware(
     CORSMiddleware,

@@ -19,9 +19,28 @@ from app.domain.external.browser import Browser
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
 from app.infrastructure.external.browser.playwright_browser import PlaywrightBrowser
+from app.application.services.config_provider import get_runtime_config
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_sync_redis_client = None
+
+
+def _get_sync_redis_client():
+    global _sync_redis_client
+    if _sync_redis_client is None:
+        import redis as sync_redis
+
+        settings = get_settings()
+        _sync_redis_client = sync_redis.Redis(
+            host=settings.redis_host,
+            port=settings.redis_port,
+            db=settings.redis_db,
+            password=settings.redis_password,
+            decode_responses=True,
+        )
+    return _sync_redis_client
 
 
 class DockerSandbox(Sandbox):
@@ -100,12 +119,9 @@ class DockerSandbox(Sandbox):
     @classmethod
     def _create_task(cls) -> Self:
         """创建沙箱容器的异步任务"""
-        # 1.获取系统配置信息
-        settings = get_settings()
-
-        # 2.构建容器的名字
-        image = settings.sandbox_image
-        name_prefix = settings.sandbox_name_prefix
+        # 1.构建容器的名字
+        image = get_runtime_config().sandbox.image
+        name_prefix = get_runtime_config().sandbox.name_prefix
         container_name = f"{name_prefix}-{str(uuid.uuid4())[:8]}"
 
         try:
@@ -119,23 +135,23 @@ class DockerSandbox(Sandbox):
                 "detach": True,
                 "remove": True,
                 "environment": {
-                    "SERVER_TIMEOUT_MINUTES": str(settings.sandbox_ttl_minutes or 60),
-                    "CHROME_ARGS": settings.sandbox_chrome_args or "",
-                    "HTTPS_PROXY": settings.sandbox_https_proxy or "",
-                    "HTTP_PROXY": settings.sandbox_http_proxy or "",
-                    "NO_PROXY": settings.sandbox_no_proxy or "",
+                    "SERVER_TIMEOUT_MINUTES": str(get_runtime_config().sandbox.ttl_minutes or 60),
+                    "CHROME_ARGS": get_runtime_config().sandbox.chrome_args or "",
+                    "HTTPS_PROXY": get_runtime_config().sandbox.https_proxy or "",
+                    "HTTP_PROXY": get_runtime_config().sandbox.http_proxy or "",
+                    "NO_PROXY": get_runtime_config().sandbox.no_proxy or "",
                 }
             }
-            if settings.sandbox_memory_limit:
-                container_config["mem_limit"] = settings.sandbox_memory_limit
-            if settings.sandbox_cpu_limit and settings.sandbox_cpu_limit > 0:
-                container_config["nano_cpus"] = int(settings.sandbox_cpu_limit * 1_000_000_000)
-            if settings.sandbox_pids_limit and settings.sandbox_pids_limit > 0:
-                container_config["pids_limit"] = settings.sandbox_pids_limit
+            if get_runtime_config().sandbox.memory_limit:
+                container_config["mem_limit"] = get_runtime_config().sandbox.memory_limit
+            if get_runtime_config().sandbox.cpu_limit and get_runtime_config().sandbox.cpu_limit > 0:
+                container_config["nano_cpus"] = int(get_runtime_config().sandbox.cpu_limit * 1_000_000_000)
+            if get_runtime_config().sandbox.pids_limit and get_runtime_config().sandbox.pids_limit > 0:
+                container_config["pids_limit"] = get_runtime_config().sandbox.pids_limit
 
             # 5.判断是否传递了网络
-            if settings.sandbox_network:
-                container_config["network"] = settings.sandbox_network
+            if get_runtime_config().sandbox.network:
+                container_config["network"] = get_runtime_config().sandbox.network
 
             # 6.调用docker客户端容器运行参数创建沙箱
             container = docker_client.containers.run(**container_config)
@@ -161,18 +177,16 @@ class DockerSandbox(Sandbox):
 
     @classmethod
     async def _create_fresh(cls) -> Self:
-        settings = get_settings()
-        if settings.sandbox_address:
-            ip = await cls._resolve_hostname_to_ip(settings.sandbox_address)
+        if get_runtime_config().sandbox.address:
+            ip = await cls._resolve_hostname_to_ip(get_runtime_config().sandbox.address)
             return DockerSandbox(ip=ip)
         return await asyncio.to_thread(cls._create_task)
 
     @classmethod
     async def create(cls) -> Self:
         """类方法，创建沙箱容器（优先从预热池获取）"""
-        settings = get_settings()
-        if settings.sandbox_address:
-            ip = await cls._resolve_hostname_to_ip(settings.sandbox_address)
+        if get_runtime_config().sandbox.address:
+            ip = await cls._resolve_hostname_to_ip(get_runtime_config().sandbox.address)
             return DockerSandbox(ip=ip)
 
         from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
@@ -226,17 +240,16 @@ class DockerSandbox(Sandbox):
 
     @classmethod
     def _cleanup_orphaned_containers_sync(cls) -> int:
-        settings = get_settings()
-        if settings.sandbox_address or not settings.sandbox_name_prefix:
+        if get_runtime_config().sandbox.address or not get_runtime_config().sandbox.name_prefix:
             return 0
         docker_client = docker.from_env()
         removed = 0
-        idle_timeout_seconds = max(60, (settings.sandbox_idle_timeout_minutes or 30) * 60)
+        idle_timeout_seconds = max(60, (get_runtime_config().sandbox.idle_timeout_minutes or 30) * 60)
         now = time.time()
         try:
             containers = docker_client.containers.list(
                 all=True,
-                filters={"name": f"{settings.sandbox_name_prefix}-"},
+                filters={"name": f"{get_runtime_config().sandbox.name_prefix}-"},
             )
             for container in containers:
                 container.reload()
@@ -258,23 +271,25 @@ class DockerSandbox(Sandbox):
                 if idle_seconds < idle_timeout_seconds:
                     continue
                 try:
-                    import redis as sync_redis
-
-                    redis_client = sync_redis.Redis(
-                        host=settings.redis_host,
-                        port=settings.redis_port,
-                        db=settings.redis_db,
-                        password=settings.redis_password,
-                        decode_responses=True,
-                    )
+                    redis_client = _get_sync_redis_client()
                     last_active_raw = redis_client.get(f"sandbox:last_active:{container_name}")
-                    redis_client.close()
                     if last_active_raw:
                         last_active = int(last_active_raw)
                         if now - last_active < idle_timeout_seconds:
                             continue
-                except Exception:
-                    pass
+                    else:
+                        logger.debug(
+                            "Skip idle cleanup for %s: no Redis activity key",
+                            container_name,
+                        )
+                        continue
+                except Exception as exc:
+                    logger.warning(
+                        "Redis unavailable, skip idle cleanup for running sandbox %s: %s",
+                        container_name,
+                        exc,
+                    )
+                    continue
                 try:
                     container.stop(timeout=10)
                 except Exception:
@@ -296,11 +311,10 @@ class DockerSandbox(Sandbox):
     @classmethod
     async def get(cls, id: str) -> Optional[Self]:
         """根据传递的id获取沙箱实例"""
-        # 1.先获取系统配置并判断是否直连沙箱
-        settings = get_settings()
-        if settings.sandbox_address:
+        # 1.判断是否直连沙箱
+        if get_runtime_config().sandbox.address:
             try:
-                ip = await cls._resolve_hostname_to_ip(settings.sandbox_address)
+                ip = await cls._resolve_hostname_to_ip(get_runtime_config().sandbox.address)
                 return DockerSandbox(ip=ip, container_name=id)
             except Exception as e:
                 logger.error(f"解析沙箱地址失败: {str(e)}")
@@ -323,9 +337,8 @@ class DockerSandbox(Sandbox):
 
     async def ensure_sandbox(self) -> None:
         """确保沙箱一定存在/服务全部都开启了才执行后续步骤"""
-        settings = get_settings()
         max_retries = 30
-        retry_interval = max(0.5, settings.sandbox_warmup_retry_interval_seconds)
+        retry_interval = max(0.5, get_runtime_config().sandbox.warmup_retry_interval_seconds)
 
         # 2.循环请求获取supervisor状态并判断服务是否正常
         for attempt in range(max_retries):

@@ -3,6 +3,7 @@
 import asyncio
 import io
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, AsyncGenerator, Callable, BinaryIO, Optional, Tuple
 
@@ -82,7 +83,9 @@ class AgentTaskRunner(TaskRunner):
         self._on_complete_callback = on_complete_callback
         self._session_state = SessionStateService(uow_factory)
         self._event_persist_buffer: List[Tuple[BaseEvent, Dict[str, Any]]] = []
-        self._event_persist_batch_size = 5
+        self._event_persist_batch_size = 2
+        self._agent_config = agent_config
+        self._run_started_at: Optional[float] = None
         self._step_started_at: Dict[str, datetime] = {}
         self._tool_started_at: Dict[str, datetime] = {}
         self._last_observable_event_id: Optional[str] = None
@@ -142,7 +145,8 @@ class AgentTaskRunner(TaskRunner):
         # 2.仅持久化稳定、高价值事件，流式 delta 不落库
         if should_persist_event(event):
             self._event_persist_buffer.append((event, event.model_dump(mode="json")))
-            if len(self._event_persist_buffer) >= self._event_persist_batch_size:
+            critical = isinstance(event, (DoneEvent, ErrorEvent, WaitEvent, StepEvent, ToolEvent))
+            if critical or len(self._event_persist_buffer) >= self._event_persist_batch_size:
                 await self._flush_event_persist_buffer()
 
     async def _flush_event_persist_buffer(self) -> None:
@@ -162,6 +166,17 @@ class AgentTaskRunner(TaskRunner):
 
     async def _is_cancelled(self, task: Task) -> bool:
         return await get_task_state().is_cancelled(task.id)
+
+    def _is_run_timed_out(self) -> bool:
+        if self._run_started_at is None:
+            return False
+        max_seconds = getattr(self._agent_config, "max_run_seconds", 3600) or 3600
+        return (time.monotonic() - self._run_started_at) >= max_seconds
+
+    async def _handle_run_timeout(self, task: Task) -> None:
+        await self._put_and_add_event(task, ErrorEvent(error="Agent 运行超时，任务已终止"))
+        await self._emit_session_status(task, SessionStatus.FAILED)
+        await self._flush_event_persist_buffer()
 
     @classmethod
     async def _pop_event(cls, task: Task) -> Optional[Event]:
@@ -455,8 +470,12 @@ class AgentTaskRunner(TaskRunner):
             await self._mcp_tool.initialize(self._mcp_config)
             await self._a2a_tool.initialize(self._a2a_config)
             await self._emit_session_status(task, SessionStatus.RUNNING)
+            self._run_started_at = time.monotonic()
 
             while not await task.input_stream.is_empty():
+                if self._is_run_timed_out():
+                    await self._handle_run_timeout(task)
+                    return
                 if await self._is_cancelled(task):
                     cancelled = True
                     break
@@ -496,6 +515,9 @@ class AgentTaskRunner(TaskRunner):
                         logger.warning("创建用户消息还原点失败: %s", exc)
 
                 async for event in self._run_flow(message_obj):
+                    if self._is_run_timed_out():
+                        await self._handle_run_timeout(task)
+                        return
                     if await self._is_cancelled(task):
                         cancelled = True
                         break
@@ -538,6 +560,7 @@ class AgentTaskRunner(TaskRunner):
                         return
 
                     if not await task.input_stream.is_empty():
+                        await self._flush_event_persist_buffer()
                         break
 
                 if cancelled:
@@ -564,7 +587,7 @@ class AgentTaskRunner(TaskRunner):
         except Exception as e:
             logger.exception(f"AgentTaskRunner运行出错: {str(e)}")
             await self._put_and_add_event(task, ErrorEvent(error=f"AgentTaskRunner出错: {str(e)}"))
-            await self._emit_session_status(task, SessionStatus.COMPLETED)
+            await self._emit_session_status(task, SessionStatus.FAILED)
             await self._flush_event_persist_buffer()
         finally:
             await self._flush_event_persist_buffer()

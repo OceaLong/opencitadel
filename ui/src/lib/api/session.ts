@@ -7,6 +7,7 @@ import type {
   SessionCheckpointsData,
   SessionEventsPage,
   SessionFile,
+  SessionTokenUsageData,
   SessionsData,
   SSEEventData,
   SSEEventHandler,
@@ -284,6 +285,13 @@ export const sessionApi = {
    */
   clearUnreadMessageCount: (sessionId: string): Promise<void> => {
     return post<void>(`/sessions/${sessionId}/clear-unread-message-count`, {});
+  },
+
+  /**
+   * 获取会话 Token 用量明细
+   */
+  getTokenUsage: (sessionId: string): Promise<SessionTokenUsageData> => {
+    return get<SessionTokenUsageData>(`/sessions/${sessionId}/token-usage`);
   },
 
   /**

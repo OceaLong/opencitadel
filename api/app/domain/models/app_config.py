@@ -4,16 +4,79 @@ import uuid
 from enum import Enum
 from typing import Dict, Optional, List, Any
 
-from pydantic import BaseModel, HttpUrl, Field, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 
-class LLMConfig(BaseModel):
-    """LLM提供商配置（仅在 config.yaml 显式提供时用于种子化默认模型）"""
-    base_url: HttpUrl = "https://api.deepseek.com"  # 模型基础URL地址
-    api_key: str = ""  # 模型API秘钥
-    model_name: str = "deepseek-chat"  # 模型名字；deepseek-reasoner 在 Agent 携带 tools 时会自动切换到 deepseek-chat
-    temperature: float = Field(0.7)  # 温度，默认设置为0.7
-    max_tokens: int = Field(8192, ge=0)  # 最大输出token数，默认设置为deepseek-chat模型的最大输出限制
+class ServerConfig(BaseModel):
+    """HTTP 服务行为配置"""
+    cors_origins: str = "*"
+    rate_limit_enabled: bool = True
+    rate_limit_per_minute: int = 120
+    sessions_stream_interval_seconds: int = 15
+    marketplace_max_upload_bytes: int = 25 * 1024 * 1024
+
+
+class EmbeddingConfig(BaseModel):
+    """向量嵌入配置（api_key 由环境变量 EMBEDDING_API_KEY 提供）"""
+    provider: str = "openai"
+    model: str = "text-embedding-3-small"
+    base_url: str = "https://api.openai.com/v1"
+
+
+class MemoryConfig(BaseModel):
+    """记忆与上下文压缩配置"""
+    recall_limit: int = 20
+    auto_extract_enabled: bool = True
+    vector_enabled: bool = False
+    compact_strategy: str = "hybrid"  # rule | llm | hybrid
+    compact_token_threshold: int = 32000
+    compact_keep_recent: int = 12
+    compact_tool_content_max_chars: int = 2000
+    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+
+
+class SandboxConfig(BaseModel):
+    """沙箱容器与连接池配置"""
+    address: Optional[str] = None
+    image: Optional[str] = None
+    name_prefix: Optional[str] = None
+    ttl_minutes: Optional[int] = 60
+    network: Optional[str] = None
+    chrome_args: Optional[str] = ""
+    https_proxy: Optional[str] = None
+    http_proxy: Optional[str] = None
+    no_proxy: Optional[str] = None
+    cleanup_interval_seconds: int = 300
+    memory_limit: Optional[str] = "2g"
+    cpu_limit: Optional[float] = 2.0
+    pids_limit: Optional[int] = 512
+    pool_enabled: bool = True
+    pool_size: int = 2
+    idle_timeout_minutes: int = 30
+    warmup_retry_interval_seconds: float = 0.5
+
+
+class WorkerConfig(BaseModel):
+    """Agent Worker 行为配置"""
+    max_concurrent_tasks: int = 4
+    task_dispatch_max_retries: int = 3
+    tool_timeout_seconds: int = 120
+
+
+class StreamsConfig(BaseModel):
+    """Redis Stream 长度限制"""
+    dispatch_maxlen: int = 10000
+    task_input_maxlen: int = 10000
+    task_output_maxlen: int = 50000
+    stream_maxlen: int = 10000
+
+
+class ObservabilityConfig(BaseModel):
+    """可观测性开关（密钥由环境变量提供）"""
+    otel_enabled: bool = False
+    otel_service_name: str = "my-manus-api"
+    otel_exporter_endpoint: str = ""
+    langfuse_enabled: bool = False
 
 
 class AgentConfig(BaseModel):
@@ -23,6 +86,7 @@ class AgentConfig(BaseModel):
     max_search_results: int = Field(default=10, gt=1, lt=30)  # 最大搜索结果条数
     max_flow_steps: int = Field(default=50, gt=0, lt=500)  # Flow 级步骤/状态转换上限
     tool_result_max_chars: int = Field(default=8000, gt=0, lt=200_000)  # 单次工具结果回填上限
+    max_run_seconds: int = Field(default=3600, gt=0, lt=86400)  # 单次 Agent 运行全局超时（秒）
 
 
 class MCPTransport(str, Enum):
@@ -88,11 +152,15 @@ class A2AConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
-    """应用配置信息，包含Agent配置、LLM提供商配置、MCP配置、A2A配置"""
-    llm_config: Optional[LLMConfig] = None  # 可选；显式提供且完整时才会种子化默认模型
-    agent_config: AgentConfig  # Agent通用配置
-    mcp_config: MCPConfig  # MCP服务配置
-    a2a_config: A2AConfig  # A2A服务配置
+    """应用运行时配置（config.yaml）"""
+    server: ServerConfig = Field(default_factory=ServerConfig)
+    agent_config: AgentConfig = Field(default_factory=AgentConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
+    worker: WorkerConfig = Field(default_factory=WorkerConfig)
+    streams: StreamsConfig = Field(default_factory=StreamsConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
+    mcp_config: MCPConfig = Field(default_factory=MCPConfig)
+    a2a_config: A2AConfig = Field(default_factory=A2AConfig)
 
-    # Pydantic配置，允许传递额外的字段初始化
     model_config = ConfigDict(extra="allow")

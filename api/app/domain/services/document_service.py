@@ -74,7 +74,8 @@ def _parse_pdf(data: bytes, max_pages: int) -> Tuple[str, List[Dict[str, Any]]]:
             else:
                 pages.append({"page": idx + 1, "text": "", "image_base64": img_b64, "mime_type": "image/jpeg"})
     except ImportError:
-        pass
+        # pdf2image 为可选依赖；未安装时仅返回文本抽取结果
+        logger.debug("pdf2image 未安装，跳过 PDF 页渲染")
     except Exception as exc:
         logger.debug("PDF 页渲染跳过: %s", exc)
 

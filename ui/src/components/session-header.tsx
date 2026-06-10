@@ -26,8 +26,8 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
-import { fileApi } from "@/lib/api";
-import type { SessionFile, SSEEventData, TokenUsageSummary } from "@/lib/api/types";
+import { fileApi, sessionApi } from "@/lib/api";
+import type { SessionFile, SSEEventData, TokenUsageSummary, TokenUsageRecord } from "@/lib/api/types";
 import type { AttachmentFile, TaskObservationSummary } from "@/lib/session-events";
 import { formatDuration, sessionFileToAttachment } from "@/lib/session-events";
 import { formatFileSize } from "@/lib/utils";
@@ -113,6 +113,25 @@ export function SessionHeader({
   }, [] as SessionFile[]);
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [tokenDetailOpen, setTokenDetailOpen] = useState(false);
+  const [tokenRecords, setTokenRecords] = useState<TokenUsageRecord[]>([]);
+  const [tokenDetailLoading, setTokenDetailLoading] = useState(false);
+
+  const handleOpenTokenDetail = useCallback(async () => {
+    if (!sessionId) return;
+    setTokenDetailOpen(true);
+    setTokenDetailLoading(true);
+    try {
+      const data = await sessionApi.getTokenUsage(sessionId);
+      setTokenRecords(data.records ?? []);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "加载 Token 明细失败";
+      toast.error(msg);
+      setTokenRecords([]);
+    } finally {
+      setTokenDetailLoading(false);
+    }
+  }, [sessionId]);
 
   const handleDownload = useCallback(
     async (file: SessionFile, e: React.MouseEvent) => {
@@ -180,9 +199,11 @@ export function SessionHeader({
             </div>
           )}
         {tokenUsage && tokenUsage.total_tokens > 0 && (
-          <div
-            className="border-border/70 bg-card text-muted-foreground flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)]"
-            title={`Prompt: ${tokenUsage.prompt_tokens.toLocaleString()} · Completion: ${tokenUsage.completion_tokens.toLocaleString()} · Calls: ${tokenUsage.call_count}`}
+          <button
+            type="button"
+            onClick={handleOpenTokenDetail}
+            className="border-border/70 bg-card text-muted-foreground hover:bg-muted/70 flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)] transition-colors"
+            title={`Prompt: ${tokenUsage.prompt_tokens.toLocaleString()} · Completion: ${tokenUsage.completion_tokens.toLocaleString()} · Calls: ${tokenUsage.call_count} · 点击查看明细`}
           >
             <Coins className="size-3.5 shrink-0 text-amber-600" />
             <span>{tokenUsage.total_tokens.toLocaleString()} tok</span>
@@ -191,7 +212,7 @@ export function SessionHeader({
                 · ${tokenUsage.estimated_cost_usd.toFixed(4)}
               </span>
             )}
-          </div>
+          </button>
         )}
         {sessionId && (
           <SessionMemorySheet sessionId={sessionId} editable={memoryEditable} compact />
@@ -256,6 +277,40 @@ export function SessionHeader({
           <Button variant="ghost" size="icon-sm" className="flex-shrink-0 cursor-pointer">
             <FileSearchCorner />
           </Button>
+        )}
+        {sessionId && (
+          <Dialog open={tokenDetailOpen} onOpenChange={setTokenDetailOpen}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Token 用量明细</DialogTitle>
+              </DialogHeader>
+              <ScrollArea className="h-[420px]">
+                {tokenDetailLoading ? (
+                  <p className="text-muted-foreground py-4 text-sm">加载中...</p>
+                ) : tokenRecords.length === 0 ? (
+                  <p className="text-muted-foreground py-4 text-sm">暂无调用记录</p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {tokenRecords.map((record) => (
+                      <div
+                        key={record.id}
+                        className="border-border/60 bg-card rounded-lg border px-3 py-2 text-xs"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium">{record.agent || record.call_type}</span>
+                          <span className="text-muted-foreground">{record.total_tokens} tok</span>
+                        </div>
+                        <div className="text-muted-foreground mt-1">
+                          {record.model_name} · prompt {record.prompt_tokens} · completion{" "}
+                          {record.completion_tokens}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            </DialogContent>
+          </Dialog>
         )}
       </div>
     </header>

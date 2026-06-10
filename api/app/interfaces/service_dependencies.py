@@ -28,8 +28,8 @@ from app.infrastructure.external.json_parser.repair_json_parser import RepairJSO
 from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
 from app.infrastructure.external.search.bing_search import BingSearchEngine
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
-from app.application.services.config_provider import get_app_config_provider
-from app.infrastructure.repositories.file_app_config_repository import FileAppConfigRepository
+from app.application.services.config_provider import get_app_config_provider, get_runtime_config
+from app.application.services.app_config_repository_factory import create_app_config_repository
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.storage.cos import Cos, get_cos
 from app.infrastructure.storage.postgres import get_db_session, get_uow
@@ -47,8 +47,7 @@ def get_cipher() -> ApiKeyCipher:
 @lru_cache()
 def get_app_config_service() -> AppConfigService:
     logger.info("加载获取AppConfigService")
-    file_app_config_repository = FileAppConfigRepository(settings.app_config_filepath)
-    return AppConfigService(app_config_repository=file_app_config_repository)
+    return AppConfigService(app_config_repository=create_app_config_repository())
 
 
 @lru_cache()
@@ -63,7 +62,10 @@ def get_skill_service() -> SkillService:
 
 @lru_cache()
 def get_memory_service() -> MemoryService:
-    return MemoryService(uow_factory=get_uow, recall_limit=settings.memory_recall_limit)
+    return MemoryService(
+        uow_factory=get_uow,
+        recall_limit=get_runtime_config().memory.recall_limit,
+    )
 
 
 @lru_cache()
@@ -150,7 +152,7 @@ def get_agent_service(
         json_parser=RepairJSONParser(),
         search_engine=BingSearchEngine(),
         file_storage=file_storage,
-        auto_extract_memory=settings.memory_auto_extract_enabled,
+        auto_extract_memory=get_runtime_config().memory.auto_extract_enabled,
         config_provider=config_provider,
         checkpoint_service=get_checkpoint_service(),
     )

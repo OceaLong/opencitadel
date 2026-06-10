@@ -1,65 +1,33 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from functools import lru_cache
-from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """MyManus后端中控配置信息，从.env或者环境变量中加载数据"""
+    """启动引导与密钥配置，从 .env 或环境变量加载。行为类配置见 config.yaml。"""
 
-    # 项目基础配置
+    # 项目基础
     env: str = "development"
     log_level: str = "INFO"
     app_config_filepath: str = "config.yaml"
     api_key_secret: str = "my-manus-api-key-secret-change-in-production"
-    cors_origins: str = "*"
-    rate_limit_enabled: bool = True
-    rate_limit_per_minute: int = 120
-    sessions_stream_interval_seconds: int = 15
-    marketplace_max_upload_bytes: int = 25 * 1024 * 1024
 
-    # 记忆配置
-    memory_recall_limit: int = 20
-    memory_auto_extract_enabled: bool = True
-    memory_vector_enabled: bool = False
-    memory_compact_strategy: str = "hybrid"  # rule | llm | hybrid
-    memory_compact_token_threshold: int = 32000
-    memory_compact_keep_recent: int = 12
-    memory_compact_tool_content_max_chars: int = 2000
-    embedding_provider: str = "openai"
-    embedding_model: str = "text-embedding-3-small"
-    embedding_api_key: str = ""
-    embedding_base_url: str = "https://api.openai.com/v1"
-    tool_timeout_seconds: int = 120
-
-    # 数据库相关配置
+    # 数据库连接（引导层，启动前必须可用）
     sqlalchemy_database_uri: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/manus"
     sqlalchemy_echo: bool = False
     postgres_pool_size: int = 10
     postgres_max_overflow: int = 20
     postgres_pool_recycle_seconds: int = 1800
 
-    # Redis缓存配置
+    # Redis 连接
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_db: int = 0
     redis_password: str | None = None
-    redis_stream_maxlen: int = 10000
-    redis_dispatch_stream_maxlen: int = 10000
-    redis_task_input_stream_maxlen: int = 10000
-    redis_task_output_stream_maxlen: int = 50000
-    task_dispatch_max_retries: int = 3
-    worker_max_concurrent_tasks: int = 4
 
-    # Sandbox pool
-    sandbox_pool_enabled: bool = True
-    sandbox_pool_size: int = 2
-    sandbox_idle_timeout_minutes: int = 30
-    sandbox_warmup_retry_interval_seconds: float = 0.5
-
-    # Cos腾讯云对象存储配置
+    # 腾讯云 COS 密钥与桶
     cos_secret_id: str = ""
     cos_secret_key: str = ""
     cos_region: str = ""
@@ -67,35 +35,18 @@ class Settings(BaseSettings):
     cos_bucket: str = ""
     cos_domain: str = ""
 
-    # Sandbox配置
-    sandbox_address: Optional[str] = None
-    sandbox_image: Optional[str] = None
-    sandbox_name_prefix: Optional[str] = None
-    sandbox_ttl_minutes: Optional[int] = 60
-    sandbox_network: Optional[str] = None
-    sandbox_chrome_args: Optional[str] = ""
-    sandbox_https_proxy: Optional[str] = None
-    sandbox_http_proxy: Optional[str] = None
-    sandbox_no_proxy: Optional[str] = None
-    sandbox_cleanup_interval_seconds: int = 300
-    sandbox_memory_limit: Optional[str] = "2g"
-    sandbox_cpu_limit: Optional[float] = 2.0
-    sandbox_pids_limit: Optional[int] = 512
-
-    # Observability
-    otel_enabled: bool = False
-    otel_service_name: str = "my-manus-api"
-    otel_exporter_endpoint: str = ""
-    langfuse_enabled: bool = False
+    # 嵌入 / 可观测性密钥
+    embedding_api_key: str = ""
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
 
-    # Secrets / Vault
+    # Vault（可选）
     vault_addr: str = ""
     vault_token: str = ""
+
+    # 应用配置存储：false=本地 config.yaml，true=PostgreSQL app_configs 表
     use_db_app_config: bool = False
 
-    # 使用pydantic v2的写法来完成环境变量信息的告知
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -105,6 +56,5 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    """获取当前MyManus项目的配置信息，并对内容进行缓存，避免重复读取"""
-    settings = Settings()
-    return settings
+    """获取启动引导配置（进程内缓存）。"""
+    return Settings()

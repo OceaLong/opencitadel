@@ -12,6 +12,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets import ConnectionClosed
 
 from app.application.errors.exceptions import NotFoundError
+from app.application.services.config_provider import get_runtime_config
 from app.application.services.agent_service import AgentService
 from app.application.services.session_service import SessionService
 from app.interfaces.schemas import Response
@@ -43,7 +44,6 @@ from app.interfaces.schemas.checkpoint import (
     RestoreCheckpointResponse,
 )
 from app.interfaces.endpoints.llm_model_routes import _to_response as llm_to_response
-from core.config import get_settings
 from app.interfaces.service_dependencies import (
     get_session_service,
     get_agent_service,
@@ -137,8 +137,8 @@ async def build_get_session_response(
         token_usage=token_usage_resp,
     )
 
-# 流式获取会话详情睡眠间隔（可通过 SESSIONS_STREAM_INTERVAL_SECONDS 配置）
-SESSION_SLEEP_INTERVAL = max(5, get_settings().sessions_stream_interval_seconds)
+# 流式获取会话详情睡眠间隔（config.yaml server.sessions_stream_interval_seconds）
+SESSION_SLEEP_INTERVAL = max(5, get_runtime_config().server.sessions_stream_interval_seconds)
 
 
 @router.post(

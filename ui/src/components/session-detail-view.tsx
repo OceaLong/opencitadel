@@ -164,6 +164,11 @@ export function SessionDetailView({
 
             <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
               <div className="flex w-full flex-col gap-3 pt-3">
+                {session.status === "failed" && (
+                  <div className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-3 py-2 text-sm">
+                    任务执行失败，可修改配置后重新发送消息继续。
+                  </div>
+                )}
                 {hasEarlierHistory && (
                   <div className="flex justify-center">
                     <Button

@@ -32,10 +32,7 @@ from app.domain.services.image_generation_service import edit_image
 from app.domain.utils.vision import build_image_content_part, is_image_mime
 from app.infrastructure.external.llm.factory import LLMFactory
 from app.infrastructure.external.json_parser.repair_json_parser import RepairJSONParser
-from core.config import get_settings
-
 logger = logging.getLogger(__name__)
-_settings = get_settings()
 
 ROUTE_PROMPT = build_route_prompt()
 
@@ -516,7 +513,8 @@ class MarketplaceService:
     async def _load_file_bytes(self, file_id: str):
         file_data, file_info = await self._file_service.download_file(file_id)
         file_bytes = await asyncio.to_thread(file_data.read)
-        max_bytes = _settings.marketplace_max_upload_bytes
+        from app.application.services.config_provider import get_runtime_config
+        max_bytes = get_runtime_config().server.marketplace_max_upload_bytes
         if len(file_bytes) > max_bytes:
             raise ValueError(f"文件过大，请上传不超过 {max_bytes // (1024 * 1024)}MB 的文件")
         return file_bytes, file_info

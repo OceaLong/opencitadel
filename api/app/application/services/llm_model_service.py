@@ -218,13 +218,3 @@ class LLMModelService:
             return {"status": "error", "message": message, "error_code": "server_error"}
         except Exception as exc:
             return {"status": "error", "message": str(exc), "error_code": type(exc).__name__}
-
-    async def sync_from_llm_config(self, llm_config) -> LLMModel:
-        """从config.yaml迁移默认模型"""
-        model = LLMModel.from_llm_config(llm_config)
-        async with self._uow_factory() as uow:
-            count = await uow.llm_model.count()
-            if count > 0:
-                return await uow.llm_model.get_default()
-            await uow.llm_model.save(model, self._cipher.encrypt(model.api_key))
-        return model

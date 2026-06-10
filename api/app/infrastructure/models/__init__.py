@@ -20,6 +20,7 @@ from .codebase import (
 from .questionnaire import QuestionnaireModel, QuestionnaireResponseModel
 from .fortune_prediction import FortunePredictionModel
 from .room import RoomModel, RoomParticipantModel, RoomEventModel, RoomTodPromptModel
+from .app_config import AppConfigModel
 
 __all__ = [
     "Base",
@@ -44,4 +45,5 @@ __all__ = [
     "RoomParticipantModel",
     "RoomEventModel",
     "RoomTodPromptModel",
+    "AppConfigModel",
 ]

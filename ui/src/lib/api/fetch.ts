@@ -68,6 +68,10 @@ async function handleErrorResponse(response: Response): Promise<never> {
   throw new ApiError(errorData.code, errorData.msg, errorData.data);
 }
 
+function isRateLimitError(code: number, msg: string): boolean {
+  return code === 429 || msg.includes("请求过于频繁");
+}
+
 /**
  * 带超时的 fetch
  */
@@ -160,6 +164,10 @@ export async function request<T = unknown>(
     return result.data as T;
   } catch (error) {
     if (error instanceof ApiError) {
+      if (isRateLimitError(error.code, error.msg) && typeof window !== "undefined") {
+        const { toast } = await import("sonner");
+        toast.error("请求过于频繁，请稍后再试");
+      }
       throw error;
     }
 

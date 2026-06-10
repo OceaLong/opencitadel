@@ -9,6 +9,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse
 
+from app.application.services.config_provider import get_runtime_config
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -88,5 +89,9 @@ def maybe_install_rate_limit(app) -> None:
     settings = get_settings()
     if settings.env == "test":
         return
-    if settings.rate_limit_enabled:
-        app.add_middleware(RateLimitMiddleware, requests_per_minute=settings.rate_limit_per_minute)
+    runtime = get_runtime_config()
+    if runtime.server.rate_limit_enabled:
+        app.add_middleware(
+            RateLimitMiddleware,
+            requests_per_minute=runtime.server.rate_limit_per_minute,
+        )

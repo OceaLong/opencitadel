@@ -7,7 +7,7 @@ from openai import AsyncOpenAI
 
 from app.application.errors.exceptions import ServerRequestsError
 from app.domain.external.llm import LLM
-from app.domain.models.app_config import LLMConfig
+from app.domain.models.llm_config import LLMConfig
 from app.domain.models.llm_model import LLMModel, ModelCapabilities
 from app.infrastructure.external.llm.base_llm import (
     MultimodalFallbackMixin,

@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from app.application.services.llm_config_seed import is_seedable_llm_config, is_seedable_llm_config_raw
-from app.domain.models.app_config import LLMConfig
+from app.domain.models.llm_config import LLMConfig
 from app.domain.models.session import Session
 from app.infrastructure.external.llm.openai_llm import (
     _merge_thinking_request_kwargs,
@@ -67,25 +66,14 @@ def test_session_thinking_enabled_default_false():
     assert session.thinking_enabled is False
 
 
-def test_is_seedable_llm_config_raw_requires_explicit_section():
-    assert is_seedable_llm_config_raw({}) is False
-    assert is_seedable_llm_config_raw({"llm_config": {"model_name": "m"}}) is False
-    assert is_seedable_llm_config_raw({
-        "llm_config": {
-            "base_url": "https://api.deepseek.com",
-            "model_name": "deepseek-chat",
-            "api_key": "sk-test",
-        }
-    }) is True
-
-
-def test_is_seedable_llm_config_ollama_without_api_key():
+def test_llm_config_model_defaults():
     llm = LLMConfig(
         base_url="http://localhost:11434/v1",
         model_name="llama3",
         api_key="",
     )
-    assert is_seedable_llm_config(llm) is True
+    assert llm.model_name == "llama3"
+    assert llm.temperature == 0.7
 
 
 def test_resolve_request_timeout_default():

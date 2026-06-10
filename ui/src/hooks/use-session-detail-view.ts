@@ -80,7 +80,7 @@ export function useSessionDetailView({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevToolCountRef = useRef(0);
 
-  const configEditable = session?.status === "pending" || session?.status === "completed";
+  const configEditable = session?.status === "pending" || session?.status === "completed" || session?.status === "failed";
   const timeline = useMemo(() => eventsToTimeline(events), [events]);
   const checkpointByAnchor = useMemo(() => {
     const map = new Map<string, SessionCheckpoint>();

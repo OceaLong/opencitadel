@@ -6,10 +6,12 @@ from collections import OrderedDict
 from typing import List, Optional
 
 from openai import AsyncOpenAI
-from sqlalchemy import text
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.services.config_provider import get_runtime_config
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
+from app.infrastructure.models.memory_entry import MemoryEntryORM
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -23,12 +25,13 @@ class VectorMemoryService:
     """pgvector-backed semantic memory recall."""
 
     def __init__(self) -> None:
+        memory = get_runtime_config().memory
         settings = get_settings()
-        self.enabled = settings.memory_vector_enabled
-        self.embedding_provider = settings.embedding_provider
-        self.embedding_model = settings.embedding_model
+        self.enabled = memory.vector_enabled
+        self.embedding_provider = memory.embedding.provider
+        self.embedding_model = memory.embedding.model
         self._openai_api_key = settings.embedding_api_key or ""
-        self._openai_base_url = settings.embedding_base_url or "https://api.openai.com/v1"
+        self._openai_base_url = memory.embedding.base_url or "https://api.openai.com/v1"
         self._embedding_cache: OrderedDict[str, List[float]] = OrderedDict()
         self._client = AsyncOpenAI(
             api_key=self._openai_api_key or "sk-placeholder",
@@ -101,16 +104,18 @@ class VectorMemoryService:
         vector = await self.embed(f"{content}")
         if not vector:
             return
-        vector_literal = "[" + ",".join(str(v) for v in vector) + "]"
-        stmt = text("UPDATE memory_entries SET embedding = :embedding::vector WHERE id = :id")
-        params = {"embedding": vector_literal, "id": entry_id}
+        stmt = (
+            update(MemoryEntryORM)
+            .where(MemoryEntryORM.id == entry_id)
+            .values(embedding=vector)
+        )
         if db_session is not None:
-            await db_session.execute(stmt, params)
+            await db_session.execute(stmt)
             return
         from app.infrastructure.storage.postgres import get_postgres
         postgres = get_postgres()
         async with postgres.session_factory() as session:
-            await session.execute(stmt, params)
+            await session.execute(stmt)
             await session.commit()
 
     async def search_similar(
@@ -126,6 +131,7 @@ class VectorMemoryService:
         if not query_vector:
             return []
 
+        # 向量距离检索仍使用 pgvector 运算符（ORM 不直接支持 <=>）
         stmt = text("""
             SELECT id, scope, session_id, title, content, tags, source,
                    last_used_at, use_count, created_at, updated_at,

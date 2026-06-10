@@ -6,8 +6,8 @@ import asyncio
 from typing import List
 
 from app.application.errors.exceptions import NotFoundError, BadRequestError
-from app.application.services.config_provider import get_app_config_provider
-from app.domain.models.app_config import AppConfig, LLMConfig, AgentConfig, MCPConfig, A2AConfig, A2AServerConfig
+from app.application.services.config_provider import invalidate_runtime_config
+from app.domain.models.app_config import AppConfig, AgentConfig, MCPConfig, A2AConfig, A2AServerConfig
 from app.domain.repositories.app_config_repository import AppConfigRepository
 from app.infrastructure.external.tools.connection_pool import A2AConnectionPool, MCPConnectionPool
 from app.interfaces.schemas.app_config import ListMCPServerItem, ListA2AServerItem
@@ -26,27 +26,6 @@ class AppConfigService:
         """加载获取所有的应用配置"""
         return self.app_config_repository.load()
 
-    async def get_llm_config(self) -> LLMConfig:
-        """获取LLM提供商配置"""
-        app_config = await self._load_app_config()
-        if not app_config.llm_config:
-            raise BadRequestError("未在 config.yaml 中配置 llm_config")
-        return app_config.llm_config
-
-    async def update_llm_config(self, llm_config: LLMConfig) -> LLMConfig:
-        """根据传递的llm_config更新语言模型提供商配置"""
-        # 1.获取应用配置
-        app_config = await self._load_app_config()
-
-        # 2.判断api_key是否为空
-        if not llm_config.api_key.strip() and app_config.llm_config:
-            llm_config.api_key = app_config.llm_config.api_key
-
-        # 3.调用函数更新app_config
-        app_config.llm_config = llm_config
-        self._save_app_config(app_config)
-        return app_config.llm_config
-
     async def get_agent_config(self) -> AgentConfig:
         """获取Agent通用配置"""
         app_config = await self._load_app_config()
@@ -54,8 +33,18 @@ class AppConfigService:
 
     def _save_app_config(self, app_config: AppConfig) -> None:
         self.app_config_repository.save(app_config)
-        get_app_config_provider().invalidate()
+        invalidate_runtime_config()
         self._invalidate_runtime_pools()
+        self._notify_config_invalidate()
+
+    @staticmethod
+    def _notify_config_invalidate() -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        from app.infrastructure.external.app_config_notifier import publish_config_invalidate
+        loop.create_task(publish_config_invalidate())
 
     @staticmethod
     def _invalidate_runtime_pools() -> None:

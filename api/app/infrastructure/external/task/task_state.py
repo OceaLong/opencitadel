@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any, Dict, Optional, Tuple
 
 from app.infrastructure.storage.redis import get_redis
-from core.config import get_settings
+from app.application.services.config_provider import get_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ class TaskStateService:
         return await self._redis.client.xadd(
             TASK_DISPATCH_STREAM,
             {"task_id": task_id, "session_id": session_id},
-            maxlen=get_settings().redis_dispatch_stream_maxlen,
+            maxlen=get_runtime_config().streams.dispatch_maxlen,
             approximate=True,
         )
 
@@ -190,7 +190,7 @@ class TaskStateService:
             session_id: str,
             error: str,
     ) -> None:
-        settings = get_settings()
+        runtime = get_runtime_config()
         meta = await self.get_task_meta(task_id) or {
             "task_id": task_id,
             "session_id": session_id,
@@ -201,7 +201,7 @@ class TaskStateService:
         meta["retry_count"] = retry_count
         meta["last_error"] = error
 
-        if retry_count >= max(1, settings.task_dispatch_max_retries):
+        if retry_count >= max(1, runtime.worker.task_dispatch_max_retries):
             meta["status"] = TaskStatus.FAILED.value
             await self._redis.client.xadd(
                 TASK_DISPATCH_DLQ_STREAM,
@@ -211,7 +211,7 @@ class TaskStateService:
                     "error": error,
                     "retry_count": retry_count,
                 },
-                maxlen=settings.redis_stream_maxlen,
+                maxlen=runtime.streams.stream_maxlen,
                 approximate=True,
             )
             await self._redis.client.set(

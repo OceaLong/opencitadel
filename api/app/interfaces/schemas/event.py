@@ -248,7 +248,7 @@ class AssistantNoticeSSEEvent(BaseSSEEvent):
 
 class SessionStatusEventData(BaseEventData):
     """会话状态事件数据"""
-    status: Literal["pending", "running", "waiting", "completed", "cancelled"] = "running"
+    status: Literal["pending", "running", "waiting", "completed", "cancelled", "failed"] = "running"
 
 
 class SessionStatusSSEEvent(BaseSSEEvent):

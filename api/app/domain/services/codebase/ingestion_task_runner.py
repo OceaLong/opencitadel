@@ -36,7 +36,9 @@ class CodebaseIngestionTaskRunner(TaskRunner):
         logger.info("代码库摄取任务完成: codebase_id=%s task_id=%s", self._codebase_id, task.id)
 
     async def cleanup(self) -> None:
-        pass
+        """摄取任务无额外资源需释放（沙箱由 CodebaseIngestionRunner 管理）。"""
+        return
 
     async def destroy(self) -> None:
-        pass
+        """摄取任务结束时不销毁共享沙箱。"""
+        return

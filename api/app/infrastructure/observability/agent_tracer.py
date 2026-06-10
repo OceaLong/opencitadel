@@ -4,7 +4,7 @@
 import logging
 from typing import Optional
 
-from core.config import get_settings
+from app.application.services.config_provider import get_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +14,8 @@ class AgentTracer:
 
     def __init__(self, session_id: str) -> None:
         self._session_id = session_id
-        settings = get_settings()
-        self._enabled = settings.langfuse_enabled or settings.otel_enabled
+        observability = get_runtime_config().observability
+        self._enabled = observability.langfuse_enabled or observability.otel_enabled
         self._tracer = None
         if self._enabled:
             try:

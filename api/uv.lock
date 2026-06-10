@@ -69,6 +69,7 @@ dependencies = [
     { name = "opentelemetry-instrumentation-fastapi" },
     { name = "opentelemetry-sdk" },
     { name = "pdf2docx" },
+    { name = "pgvector" },
     { name = "pillow" },
     { name = "playwright" },
     { name = "prometheus-client" },
@@ -111,6 +112,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.50b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.29.0" },
     { name = "pdf2docx", specifier = ">=0.5.13" },
+    { name = "pgvector", specifier = ">=0.3.6" },
     { name = "pillow", specifier = ">=11.0.0" },
     { name = "playwright", specifier = ">=1.56.0" },
     { name = "prometheus-client", specifier = ">=0.21.0" },
@@ -1199,6 +1201,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/96/02/0b97863cc45761f6d076d2973038c79460b4364b49ea4cc2f015a2e8c1d5/pdf2docx-0.5.13.tar.gz", hash = "sha256:75eff485d4fdcd28237783a65c1bc5e9eaf9fbc747fcacee6c5c16c8ffa7a6a9", size = 18315032, upload-time = "2026-05-01T10:55:34.342Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/71/4d/4041fddff079a2cd0c87612afe74a16d2cf032b2aa73ecddbc6bca2a04fe/pdf2docx-0.5.13-py3-none-any.whl", hash = "sha256:a293e9e78d89b12a4a43fcefba1346de220681c3daf20b8a7d3e1fce77f0fe97", size = 123863, upload-time = "2026-05-01T10:55:32.716Z" },
+]
+
+[[package]]
+name = "pgvector"
+version = "0.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/25/6c/6d8b4b03b958c02fa8687ec6063c49d952a189f8c91ebbe51e877dfab8f7/pgvector-0.4.2.tar.gz", hash = "sha256:322cac0c1dc5d41c9ecf782bd9991b7966685dee3a00bc873631391ed949513a", size = 31354, upload-time = "2025-12-05T01:07:17.87Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/26/6cee8a1ce8c43625ec561aff19df07f9776b7525d9002c86bceb3e0ac970/pgvector-0.4.2-py3-none-any.whl", hash = "sha256:549d45f7a18593783d5eec609ea1684a724ba8405c4cb182a0b2b08aeff04e08", size = 27441, upload-time = "2025-12-05T01:07:16.536Z" },
 ]
 
 [[package]]

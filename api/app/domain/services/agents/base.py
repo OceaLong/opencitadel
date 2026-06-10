@@ -28,7 +28,6 @@ from app.domain.services.tools.tool_names import (
     normalize_tool_name,
 )
 from app.domain.utils.vision_tokens import estimate_messages_tokens
-from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -437,7 +436,8 @@ class BaseAgent(ABC):
         """传递工具包+工具名字+对应参数调用指定工具"""
         # 1.执行循环调用工具获取结果
         err = ""
-        timeout_seconds = max(1, get_settings().tool_timeout_seconds)
+        from app.application.services.config_provider import get_runtime_config
+        timeout_seconds = max(1, get_runtime_config().worker.tool_timeout_seconds)
         for _ in range(self._agent_config.max_retries):
             try:
                 result = await asyncio.wait_for(
@@ -491,25 +491,27 @@ class BaseAgent(ABC):
     async def compact_memory(self) -> None:
         """压缩Agent的记忆（仅规则裁剪）。"""
         await self._ensure_memory()
-        settings = get_settings()
-        self._memory.compact(tool_content_max_chars=settings.memory_compact_tool_content_max_chars)
+        from app.application.services.config_provider import get_runtime_config
+        memory_cfg = get_runtime_config().memory
+        self._memory.compact(tool_content_max_chars=memory_cfg.compact_tool_content_max_chars)
         async with self._uow:
             await self._uow.session.save_memory(self._session_id, self.name, self._memory)
 
     async def summarize_and_compact(self) -> None:
         """混合记忆压缩：规则裁剪 + 超阈值时 LLM 摘要。"""
-        settings = get_settings()
-        strategy = (settings.memory_compact_strategy or "hybrid").lower()
+        from app.application.services.config_provider import get_runtime_config
+        memory_cfg = get_runtime_config().memory
+        strategy = (memory_cfg.compact_strategy or "hybrid").lower()
         await self.compact_memory()
         if strategy == "rule":
             return
-        if self._estimate_memory_tokens() < settings.memory_compact_token_threshold:
+        if self._estimate_memory_tokens() < memory_cfg.compact_token_threshold:
             return
         if strategy not in {"llm", "hybrid"}:
             return
         await self._ensure_memory()
         messages = self._memory.get_messages()
-        keep_recent = max(4, settings.memory_compact_keep_recent)
+        keep_recent = max(4, memory_cfg.compact_keep_recent)
         if len(messages) <= keep_recent + 2:
             return
         split_idx = len(messages) - keep_recent

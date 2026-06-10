@@ -1,13 +1,64 @@
-llm_config:
-  base_url: https://api.deepseek.com/
-  api_key: REDACTED_LLM_API_KEY
-  model_name: deepseek-reasoner
-  temperature: 0.7
-  max_tokens: 8192
+server:
+  cors_origins: '*'
+  rate_limit_enabled: true
+  rate_limit_per_minute: 120
+  sessions_stream_interval_seconds: 15
+  marketplace_max_upload_bytes: 26214400
+
 agent_config:
   max_iterations: 100
   max_retries: 3
   max_search_results: 10
+
+memory:
+  recall_limit: 20
+  auto_extract_enabled: true
+  vector_enabled: false
+  compact_strategy: hybrid
+  compact_token_threshold: 32000
+  compact_keep_recent: 12
+  compact_tool_content_max_chars: 2000
+  embedding:
+    provider: openai
+    model: text-embedding-3-small
+    base_url: https://api.openai.com/v1
+
+sandbox:
+  address: null
+  image: manus-sandbox
+  name_prefix: manus-sandbox
+  ttl_minutes: 60
+  network: manus-network
+  chrome_args: ''
+  https_proxy: null
+  http_proxy: null
+  no_proxy: localhost,127.0.0.1,manus-api,manus-ui,manus-redis,manus-postgres
+  cleanup_interval_seconds: 300
+  memory_limit: 2g
+  cpu_limit: 2
+  pids_limit: 512
+  pool_enabled: true
+  pool_size: 2
+  idle_timeout_minutes: 30
+  warmup_retry_interval_seconds: 0.5
+
+worker:
+  max_concurrent_tasks: 4
+  task_dispatch_max_retries: 3
+  tool_timeout_seconds: 120
+
+streams:
+  dispatch_maxlen: 10000
+  task_input_maxlen: 10000
+  task_output_maxlen: 50000
+  stream_maxlen: 10000
+
+observability:
+  otel_enabled: false
+  otel_service_name: my-manus-api
+  otel_exporter_endpoint: ''
+  langfuse_enabled: false
+
 mcp_config:
   mcpServers:
     amap-maps-streamableHTTP:
@@ -29,5 +80,6 @@ mcp_config:
       url: https://mcp.jina.ai/v1
       headers:
         Authorization: Bearer jina_133c673d569840d3b1e379a526eee6d4VKMVBI9J5HYE2xd4ys7i6ehZUNb6
+
 a2a_config:
-  a2a_servers: [ ]
+  a2a_servers: []

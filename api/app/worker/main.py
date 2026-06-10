@@ -19,7 +19,7 @@ from app.infrastructure.external.search.bing_search import BingSearchEngine
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
 from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
 from app.infrastructure.logging import setup_logging
-from app.application.services.config_provider import get_app_config_provider
+from app.application.services.config_provider import get_app_config_provider, get_runtime_config
 from app.infrastructure.external.tools.connection_pool import A2AConnectionPool, MCPConnectionPool
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.storage.cos import get_cos
@@ -40,7 +40,7 @@ class AgentWorker:
         self._task_state = get_task_state()
         self._consumer_name = f"worker-{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
         self._running = True
-        self._max_concurrent = max(1, self._settings.worker_max_concurrent_tasks)
+        self._max_concurrent = max(1, get_runtime_config().worker.max_concurrent_tasks)
         self._semaphore = asyncio.Semaphore(self._max_concurrent)
         self._active_tasks: set[asyncio.Task] = set()
         self._config_provider = get_app_config_provider()
@@ -49,7 +49,7 @@ class AgentWorker:
         skill_service = SkillService(uow_factory=get_uow)
         memory_service = MemoryService(
             uow_factory=get_uow,
-            recall_limit=self._settings.memory_recall_limit,
+            recall_limit=get_runtime_config().memory.recall_limit,
         )
         file_storage = CosFileStorage(
             bucket=self._settings.cos_bucket,
@@ -73,7 +73,7 @@ class AgentWorker:
             json_parser=RepairJSONParser(),
             search_engine=BingSearchEngine(),
             file_storage=file_storage,
-            auto_extract_memory=self._settings.memory_auto_extract_enabled,
+            auto_extract_memory=get_runtime_config().memory.auto_extract_enabled,
             config_provider=self._config_provider,
             checkpoint_service=checkpoint_service,
         )
@@ -228,12 +228,11 @@ async def main() -> None:
     from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
 
     await get_sandbox_pool().start()
+    from app.infrastructure.external.app_config_notifier import start_config_invalidate_listener
+
+    await start_config_invalidate_listener()
     await bootstrap_data(
         uow_factory=get_uow,
-        llm_model_service=LLMModelService(
-            uow_factory=get_uow,
-            cipher=ApiKeyCipher(settings.api_key_secret),
-        ),
         skill_service=SkillService(uow_factory=get_uow),
     )
 
@@ -243,6 +242,9 @@ async def main() -> None:
     except KeyboardInterrupt:
         logger.info("Worker 收到中断信号")
     finally:
+        from app.infrastructure.external.app_config_notifier import stop_config_invalidate_listener
+
+        await stop_config_invalidate_listener()
         await worker.shutdown()
 
 

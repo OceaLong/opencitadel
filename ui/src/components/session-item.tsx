@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { CircuitBoard, Loader2, MoreHorizontal, Trash } from "lucide-react";
+import { AlertCircle, CircuitBoard, Loader2, MoreHorizontal, Trash } from "lucide-react";
 
 import { Avatar, AvatarGroupCount } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,7 @@ export function SessionItem({ session, isActive, onClick, onDelete }: SessionIte
   const description = session.latest_message || "暂无消息";
   const dateLabel = formatRelativeDate(session.latest_message_at);
   const isRunning = session.status === "running" || session.status === "waiting";
+  const isFailed = session.status === "failed";
 
   return (
     <Item
@@ -56,7 +57,13 @@ export function SessionItem({ session, isActive, onClick, onDelete }: SessionIte
       <ItemMedia>
         <Avatar className="size-8">
           <AvatarGroupCount>
-            {isRunning ? <Loader2 className="animate-spin" /> : <CircuitBoard />}
+            {isRunning ? (
+              <Loader2 className="animate-spin" />
+            ) : isFailed ? (
+              <AlertCircle className="text-destructive" />
+            ) : (
+              <CircuitBoard />
+            )}
           </AvatarGroupCount>
         </Avatar>
       </ItemMedia>
@@ -67,6 +74,11 @@ export function SessionItem({ session, isActive, onClick, onDelete }: SessionIte
       </ItemContent>
       {/* 右侧操作区 */}
       <ItemActions className="flex flex-col gap-0 self-start pt-0.5">
+        {session.unread_message_count > 0 && (
+          <span className="bg-primary text-primary-foreground mb-0.5 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-medium">
+            {session.unread_message_count > 99 ? "99+" : session.unread_message_count}
+          </span>
+        )}
         <ItemDescription className="text-xs whitespace-nowrap">{dateLabel}</ItemDescription>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

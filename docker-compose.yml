@@ -83,9 +83,9 @@ services:
     cpus: "2.00"
     env_file:
       - .env
-    # 如需动态创建沙箱容器，取消以下注释以挂载 Docker Socket
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./api/config.yaml:/app/config.yaml
     depends_on:
       manus-redis:
         condition: service_healthy
@@ -116,6 +116,7 @@ services:
       - .env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./api/config.yaml:/app/config.yaml
     depends_on:
       manus-redis:
         condition: service_healthy
