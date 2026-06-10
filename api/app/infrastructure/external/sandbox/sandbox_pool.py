@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from typing import TYPE_CHECKING, Optional
 
@@ -47,6 +48,8 @@ class SandboxPool:
         return self._enabled
 
     async def start(self) -> None:
+        if os.environ.get("MANUS_PROCESS_ROLE", "api") != "worker":
+            return
         if not self._enabled or self._started:
             return
         self._started = True

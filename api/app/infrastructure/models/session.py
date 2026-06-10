@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Optional
 
 from sqlalchemy import (
     String,
@@ -14,7 +14,6 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     ForeignKey,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -55,16 +54,6 @@ class SessionModel(Base):
         DateTime,
         nullable=True,
     )  # 最后一条消息时间
-    files: Mapped[List[Dict[str, Any]]] = mapped_column(
-        JSONB,
-        nullable=False,
-        server_default=text("'[]'::jsonb"),
-    )
-    memories: Mapped[Dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        server_default=text("'{}'::jsonb"),
-    )  # 会话两个Agent的记忆
     model_id: Mapped[str] = mapped_column(
         String(255),
         ForeignKey("llm_models.id", ondelete="SET NULL"),
@@ -115,16 +104,10 @@ class SessionModel(Base):
     def from_domain(cls, session: Session) -> "SessionModel":
         """从会话领域模型构建ORM模型"""
         return cls(
-            # 1.基础字段: 使用BaseModel提供的python字典转换格式
             **session.model_dump(
                 mode="python",
-                exclude={"memories", "files", "updated_at", "created_at"},
+                exclude={"memories", "files", "events", "updated_at", "created_at"},
             ),
-            # 2.复杂字段: 使用BaseModel提供的json字典转换格式
-            **session.model_dump(
-                mode="json",
-                include={"memories", "files"},
-            )
         )
 
     def to_domain(self) -> Session:
@@ -138,8 +121,8 @@ class SessionModel(Base):
             "latest_message": self.latest_message,
             "latest_message_at": self.latest_message_at,
             "events": [],
-            "files": self.files or [],
-            "memories": self.memories or {},
+            "files": [],
+            "memories": {},
             "model_id": self.model_id,
             "skill_id": self.skill_id,
             "thinking_enabled": self.thinking_enabled,
@@ -156,15 +139,8 @@ class SessionModel(Base):
         # 1.基础字段: Python模式
         base_data = session.model_dump(
             mode="python",
-            exclude={"memories", "files", "updated_at", "created_at"},
+            exclude={"memories", "files", "events", "updated_at", "created_at"},
         )
 
-        # 2.复杂字段: JSON模式
-        json_data = session.model_dump(
-            mode="json",
-            include={"memories", "files"},
-        )
-
-        # 3.合并更新
-        for field, value in {**base_data, **json_data}.items():
+        for field, value in base_data.items():
             setattr(self, field, value)

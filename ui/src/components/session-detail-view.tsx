@@ -73,6 +73,7 @@ export function SessionDetailView({
     handleOpenVNC,
     handleCloseVNC,
     handleStop,
+    includeDebug,
     handleDebugOpen,
     resolveCheckpoint,
     handleRestoreCheckpoint,
@@ -156,7 +157,7 @@ export function SessionDetailView({
                 sessionId={sessionId}
                 memoryEditable={configEditable}
                 tokenUsage={session.token_usage}
-                events={events}
+                events={includeDebug ? events : []}
                 observationSummary={observationSummary}
                 onDebugOpen={handleDebugOpen}
               />

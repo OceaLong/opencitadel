@@ -277,12 +277,6 @@ class DockerSandbox(Sandbox):
                         last_active = int(last_active_raw)
                         if now - last_active < idle_timeout_seconds:
                             continue
-                    else:
-                        logger.debug(
-                            "Skip idle cleanup for %s: no Redis activity key",
-                            container_name,
-                        )
-                        continue
                 except Exception as exc:
                     logger.warning(
                         "Redis unavailable, skip idle cleanup for running sandbox %s: %s",

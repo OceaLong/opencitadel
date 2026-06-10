@@ -26,6 +26,7 @@ from app.domain.models.codebase import SessionMode
 from app.domain.models.session import Session, SessionStatus
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.checkpoint_service import CheckpointService
+from app.infrastructure.external.event_seq_allocator import allocate_event_seq
 from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
 from app.infrastructure.external.task.task_state import get_task_state
@@ -100,6 +101,27 @@ class AgentService:
         except Exception as e:
             logger.warning(f"会话[{session_id}]后台更新未读消息计数失败: {e}")
 
+    async def _resolve_last_event_seq(
+            self,
+            session_id: str,
+            latest_event_id: Optional[str],
+    ) -> int:
+        if not latest_event_id:
+            return 0
+        try:
+            return int(latest_event_id)
+        except (TypeError, ValueError):
+            pass
+        try:
+            async with self._uow_factory() as uow:
+                resolved = await uow.session.get_event_seq_by_stream_id(
+                    session_id,
+                    latest_event_id,
+                )
+            return int(resolved or 0)
+        except Exception:
+            return 0
+
     async def _consume_output_stream(
             self,
             task_id: str,
@@ -107,7 +129,8 @@ class AgentService:
             latest_event_id: Optional[str],
     ) -> AsyncGenerator[BaseEvent, None]:
         output_stream = RedisStreamMessageQueue(f"task:output:{task_id}")
-        cursor = latest_event_id or "0"
+        redis_cursor = "0"
+        last_seq = await self._resolve_last_event_seq(session_id, latest_event_id)
         await self._safe_update_unread_count(session_id)
 
         while True:
@@ -115,12 +138,22 @@ class AgentService:
                 yield DoneEvent()
                 break
 
-            event_id, event_str = await output_stream.get(start_id=cursor, block_ms=100)
+            stream_message_id, event_str = await output_stream.get(
+                start_id=redis_cursor,
+                block_ms=100,
+            )
             if event_str is not None:
-                cursor = event_id
+                redis_cursor = stream_message_id
                 event_payload = json.loads(event_str)
                 event = TypeAdapter(Event).validate_python(upgrade_event_payload(event_payload))
-                event.id = event_id
+                try:
+                    event_seq = int(event.id)
+                except (TypeError, ValueError):
+                    event_seq = 0
+                if event_seq <= last_seq:
+                    continue
+                last_seq = event_seq
+                event.id = str(event_seq)
                 yield event
                 if isinstance(event, (DoneEvent, ErrorEvent, WaitEvent)):
                     return
@@ -209,11 +242,12 @@ class AgentService:
                     message=message,
                     attachments=db_attachments,
                 )
-                event_id = await task.input_stream.put(message_event.model_dump_json())
-                message_event.id = event_id
+                seq = await allocate_event_seq()
+                message_event.id = str(seq)
+                await task.input_stream.put(message_event.model_dump_json())
                 yield message_event
                 async with self._uow_factory() as uow:
-                    await uow.session.add_event(session_id, message_event)
+                    await uow.session.add_event(session_id, message_event, seq=seq)
                 if should_dispatch:
                     await task.invoke()
                 logger.info(f"往会话[{session_id}]输入消息队列写入消息: {message[:50]}...")
@@ -233,8 +267,10 @@ class AgentService:
             logger.exception(f"任务会话[{session_id}]对话出错: {str(e)}")
             event = ErrorEvent(error=str(e))
             try:
+                seq = await allocate_event_seq()
+                event.id = str(seq)
                 async with self._uow_factory() as uow:
-                    await uow.session.add_event(session_id, event)
+                    await uow.session.add_event(session_id, event, seq=seq)
             except (asyncio.CancelledError, Exception) as add_err:
                 logger.warning(f"会话[{session_id}]添加错误事件失败: {add_err}")
             yield event

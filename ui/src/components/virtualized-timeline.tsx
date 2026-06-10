@@ -19,6 +19,7 @@ type VirtualizedTimelineProps = {
   onRestoreCheckpoint: (checkpoint: SessionCheckpoint) => void;
   restoringCheckpoint: boolean;
   streaming?: boolean;
+  onSourceClick?: (path: string, line?: number) => void;
 };
 
 export function VirtualizedTimeline({
@@ -33,6 +34,7 @@ export function VirtualizedTimeline({
   onRestoreCheckpoint,
   restoringCheckpoint,
   streaming,
+  onSourceClick,
 }: VirtualizedTimelineProps) {
   const virtualizer = useVirtualizer({
     count: timeline.length,
@@ -68,6 +70,7 @@ export function VirtualizedTimeline({
               onFileClick={onFileClick}
               onToolClick={onToolClick}
               onClarifyAnswer={onClarifyAnswer}
+              onSourceClick={onSourceClick}
               sessionStatus={sessionStatus}
               checkpoint={
                 item.kind === "user" || item.kind === "step"

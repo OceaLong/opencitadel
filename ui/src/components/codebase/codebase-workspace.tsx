@@ -13,8 +13,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { ChatMessage } from "@/components/chat-message";
 import { ChatInput } from "@/components/chat-input";
+import { VirtualizedTimeline } from "@/components/virtualized-timeline";
 import { CreateCodebaseDialog } from "@/components/codebase/create-codebase-dialog";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
 import { SessionModeToggle } from "@/components/session-mode-toggle";
@@ -233,7 +233,14 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
     }
   };
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const timeline = useMemo(() => eventsToTimeline(events), [events]);
+  const handleSourceClick = useCallback(
+    (path: string, line?: number) => {
+      void loadSource(path, line);
+    },
+    [loadSource],
+  );
 
   const activeArtifact = (kind: CodebaseArtifact["kind"]) =>
     artifacts.find((a) => a.kind === kind);
@@ -340,18 +347,24 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
                   ))}
                 </div>
               )}
-              <ScrollArea className="flex-1 px-4 py-4">
-                {timeline.map((item) => (
-                  <ChatMessage
-                    key={item.id}
-                    item={item}
-                    onSourceClick={(path, line) => void loadSource(path, line)}
-                  />
-                ))}
+              <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 py-4">
+                <VirtualizedTimeline
+                  timeline={timeline}
+                  scrollContainerRef={scrollContainerRef}
+                  onViewAllFiles={() => {}}
+                  onFileClick={() => {}}
+                  onToolClick={() => {}}
+                  onClarifyAnswer={() => {}}
+                  resolveCheckpoint={() => undefined}
+                  onRestoreCheckpoint={() => {}}
+                  restoringCheckpoint={false}
+                  streaming={streaming}
+                  onSourceClick={handleSourceClick}
+                />
                 {streaming && (
                   <div className="text-muted-foreground py-2 text-sm">正在思考中...</div>
                 )}
-              </ScrollArea>
+              </div>
               <div className="border-border border-t p-4">
                 <ChatInput
                   sessionId={sessionId}

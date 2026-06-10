@@ -73,8 +73,9 @@ class SessionRepository(Protocol):
             session_id: str,
             event: BaseEvent,
             event_data: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """往会话中新增事件"""
+            seq: Optional[int] = None,
+    ) -> int:
+        """往会话中新增事件，返回全局 seq"""
         ...
 
     async def add_events(self, session_id: str, events: List[BaseEvent]) -> None:

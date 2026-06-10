@@ -7,6 +7,7 @@ import logging
 import os.path
 import re
 import socket
+import time
 import uuid
 from typing import Dict, Optional, List
 
@@ -25,6 +26,10 @@ from app.models.shell import (
 
 logger = logging.getLogger(__name__)
 
+MAX_ACTIVE_SHELLS = 50
+MAX_SHELL_OUTPUT_BYTES = 5 * 1024 * 1024
+SHELL_SESSION_TTL_SECONDS = 3600
+
 
 class ShellService:
     """Shell命令服务"""
@@ -32,6 +37,7 @@ class ShellService:
 
     def __init__(self) -> None:
         self.active_shells = {}
+        self._session_last_active: Dict[str, float] = {}
 
     @classmethod
     def _get_display_path(cls, path: str) -> str:
@@ -98,6 +104,7 @@ class ShellService:
                         shell.output += output
                         if shell.console_records:
                             shell.console_records[-1].output += output
+                        self._truncate_shell_output(shell)
                 except Exception as e:
                     logger.error(f"读取进程输出时错误: {str(e)}")
                     break
@@ -111,6 +118,53 @@ class ShellService:
         """从文本中删除ANSI转义字符"""
         ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
         return ansi_escape.sub("", text)
+
+    def _touch_session(self, session_id: str) -> None:
+        self._session_last_active[session_id] = time.monotonic()
+
+    def _truncate_shell_output(self, shell: Shell) -> None:
+        if len(shell.output.encode("utf-8", errors="replace")) <= MAX_SHELL_OUTPUT_BYTES:
+            return
+        shell.output = shell.output[-MAX_SHELL_OUTPUT_BYTES:]
+        if shell.console_records:
+            last_record = shell.console_records[-1]
+            if len(last_record.output.encode("utf-8", errors="replace")) > MAX_SHELL_OUTPUT_BYTES:
+                last_record.output = last_record.output[-MAX_SHELL_OUTPUT_BYTES:]
+
+    async def _cleanup_expired_sessions(self) -> None:
+        now = time.monotonic()
+        expired_ids = [
+            session_id
+            for session_id, last_active in self._session_last_active.items()
+            if now - last_active > SHELL_SESSION_TTL_SECONDS
+        ]
+        for session_id in expired_ids:
+            await self._remove_session(session_id)
+
+    async def _remove_session(self, session_id: str) -> None:
+        shell = self.active_shells.pop(session_id, None)
+        self._session_last_active.pop(session_id, None)
+        if shell is None:
+            return
+        process = shell.process
+        if process.returncode is None:
+            try:
+                process.terminate()
+                await asyncio.wait_for(process.wait(), timeout=1)
+            except Exception:
+                process.kill()
+
+    async def _ensure_session_capacity(self) -> None:
+        await self._cleanup_expired_sessions()
+        if len(self.active_shells) < MAX_ACTIVE_SHELLS:
+            return
+        oldest_id = min(
+            self._session_last_active,
+            key=self._session_last_active.get,
+            default=None,
+        )
+        if oldest_id:
+            await self._remove_session(oldest_id)
 
     @classmethod
     def create_session_id(cls) -> str:
@@ -213,6 +267,9 @@ class ShellService:
             raise BadRequestException(f"当前目录不存在: {exec_dir}")
 
         try:
+            await self._ensure_session_capacity()
+            self._touch_session(session_id)
+
             # 2.格式化生成ps1格式
             ps1 = self._format_ps1(exec_dir)
 
@@ -229,7 +286,7 @@ class ShellService:
                 )
 
                 # 5.创建后台任务来运行输出读取器
-                await asyncio.create_task(self._start_output_reader(session_id, process))
+                asyncio.create_task(self._start_output_reader(session_id, process))
             else:
                 # 6.该会话已存在则读取数据
                 logger.debug(f"使用现有的Shell会话: {session_id}")
@@ -258,7 +315,7 @@ class ShellService:
                 shell.console_records.append(ConsoleRecord(ps1=ps1, command=command, output=""))
 
                 # 12.创建后台任务来运行输出读取器
-                await asyncio.create_task(self._start_output_reader(session_id, process))
+                asyncio.create_task(self._start_output_reader(session_id, process))
 
             try:
 

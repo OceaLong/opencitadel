@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
+from app.domain.external.observability import ObservabilityPort
 from app.domain.models.event import UsageEvent
 from app.domain.models.llm_token_usage import LLMTokenUsage
 from app.domain.repositories.uow import IUnitOfWork
-from app.infrastructure.observability.otel import record_llm_tokens
 
 
 class TokenAccountant:
@@ -18,6 +18,7 @@ class TokenAccountant:
             agent_name: str,
             model_name: str,
             model_id: Optional[str] = None,
+            observability_port: Optional[ObservabilityPort] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._session_id = session_id
@@ -29,6 +30,19 @@ class TokenAccountant:
         self._total_tokens: Optional[int] = None
         self._call_count: Optional[int] = None
         self._model_price_per_million: Optional[tuple[float, float]] = None
+        self._pending_records: List[LLMTokenUsage] = []
+        self._flush_batch_size = 5
+        if observability_port is None:
+            raise ValueError("TokenAccountant requires observability_port")
+        self._observability = observability_port
+
+    async def flush(self) -> None:
+        if not self._pending_records:
+            return
+        records = self._pending_records
+        self._pending_records = []
+        async with self._uow_factory() as uow:
+            await uow.llm_token_usage.save_many(records)
 
     async def record(self, usage: Dict[str, int], step: str) -> Optional[UsageEvent]:
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
@@ -36,7 +50,7 @@ class TokenAccountant:
         if prompt_tokens <= 0 and completion_tokens <= 0:
             return None
 
-        record_llm_tokens(
+        self._observability.record_llm_tokens(
             self._model_name,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -52,19 +66,20 @@ class TokenAccountant:
             total_tokens=int(usage.get("total_tokens") or (prompt_tokens + completion_tokens)),
         )
 
-        async with self._uow_factory() as uow:
-            await uow.llm_token_usage.save(record)
-            if self._call_count is None:
-                summary = await uow.llm_token_usage.aggregate_by_session(self._session_id)
-                self._prompt_tokens = summary.prompt_tokens
-                self._completion_tokens = summary.completion_tokens
-                self._total_tokens = summary.total_tokens
-                self._call_count = summary.call_count
-            else:
-                self._prompt_tokens = (self._prompt_tokens or 0) + prompt_tokens
-                self._completion_tokens = (self._completion_tokens or 0) + completion_tokens
-                self._total_tokens = (self._total_tokens or 0) + record.total_tokens
-                self._call_count = (self._call_count or 0) + 1
+        self._pending_records.append(record)
+        if self._call_count is None:
+            self._prompt_tokens = prompt_tokens
+            self._completion_tokens = completion_tokens
+            self._total_tokens = record.total_tokens
+            self._call_count = 1
+        else:
+            self._prompt_tokens = (self._prompt_tokens or 0) + prompt_tokens
+            self._completion_tokens = (self._completion_tokens or 0) + completion_tokens
+            self._total_tokens = (self._total_tokens or 0) + record.total_tokens
+            self._call_count = (self._call_count or 0) + 1
+
+        if len(self._pending_records) >= self._flush_batch_size:
+            await self.flush()
 
         cost = await self._estimate_cost()
         return UsageEvent(

@@ -3,8 +3,8 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import select, delete, update, func, cast
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import select, delete, update, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import TypeAdapter
 
@@ -14,7 +14,12 @@ from app.domain.models.file import File
 from app.domain.models.memory import Memory
 from app.domain.models.session import Session, SessionStatus
 from app.domain.repositories.session_repository import SessionRepository
-from app.infrastructure.models import SessionEventModel, SessionModel
+from app.infrastructure.models import (
+    SessionAgentMemoryModel,
+    SessionEventModel,
+    SessionFileAttachmentModel,
+    SessionModel,
+)
 
 
 class DBSessionRepository(SessionRepository):
@@ -23,6 +28,93 @@ class DBSessionRepository(SessionRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         """构造函数，完成数据仓库的初始化"""
         self.db_session = db_session
+
+    async def _load_memories(self, session_id: str) -> Dict[str, Memory]:
+        stmt = select(SessionAgentMemoryModel).where(
+            SessionAgentMemoryModel.session_id == session_id,
+        )
+        result = await self.db_session.execute(stmt)
+        records = result.scalars().all()
+        return {
+            record.agent_name: Memory(**(record.memory_data or {"messages": []}))
+            for record in records
+        }
+
+    async def _load_files(self, session_id: str) -> List[File]:
+        stmt = (
+            select(SessionFileAttachmentModel)
+            .where(SessionFileAttachmentModel.session_id == session_id)
+            .order_by(SessionFileAttachmentModel.created_at.asc())
+        )
+        result = await self.db_session.execute(stmt)
+        records = result.scalars().all()
+        return [
+            File(
+                id=record.file_id,
+                filename=record.filename,
+                filepath=record.filepath,
+                key=record.key,
+                extension=record.extension,
+                mime_type=record.mime_type,
+                size=record.size,
+            )
+            for record in records
+        ]
+
+    async def _session_from_record(self, record: SessionModel) -> Session:
+        session = record.to_domain()
+        session.memories = await self._load_memories(record.id)
+        session.files = await self._load_files(record.id)
+        return session
+
+    async def _persist_memories(self, session_id: str, memories: Dict[str, Memory]) -> None:
+        if not memories:
+            return
+        for agent_name, memory in memories.items():
+            memory_data = memory.model_dump(mode="json")
+            stmt = (
+                pg_insert(SessionAgentMemoryModel)
+                .values(
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    memory_data=memory_data,
+                )
+                .on_conflict_do_update(
+                    index_elements=["session_id", "agent_name"],
+                    set_={"memory_data": memory_data},
+                )
+            )
+            await self.db_session.execute(stmt)
+
+    async def _persist_files(self, session_id: str, files: List[File]) -> None:
+        if not files:
+            return
+        for file in files:
+            stmt = (
+                pg_insert(SessionFileAttachmentModel)
+                .values(
+                    session_id=session_id,
+                    file_id=file.id,
+                    filename=file.filename,
+                    filepath=file.filepath,
+                    key=file.key,
+                    extension=file.extension,
+                    mime_type=file.mime_type,
+                    size=file.size,
+                )
+                .on_conflict_do_update(
+                    index_elements=["session_id", "file_id"],
+                    set_={
+                        "filename": file.filename,
+                        "filepath": file.filepath,
+                        "key": file.key,
+                        "extension": file.extension,
+                        "mime_type": file.mime_type,
+                        "size": file.size,
+                    },
+                )
+            )
+            await self.db_session.execute(stmt)
 
     async def save(self, session: Session) -> None:
         """根据传递的领域模型更新或者新增会话"""
@@ -35,10 +127,14 @@ class DBSessionRepository(SessionRepository):
         if not record:
             record = SessionModel.from_domain(session)
             self.db_session.add(record)
+            await self._persist_memories(session.id, session.memories)
+            await self._persist_files(session.id, session.files)
             return
 
         # 3.会话存在则更新会话
         record.update_from_domain(session)
+        await self._persist_memories(session.id, session.memories)
+        await self._persist_files(session.id, session.files)
 
     async def get_all(self, limit: int = 100, offset: int = 0) -> List[Session]:
         """获取所有会话列表"""
@@ -53,7 +149,7 @@ class DBSessionRepository(SessionRepository):
         records = result.scalars().all()
 
         # 2.将数据循环遍历成Session
-        return [record.to_domain() for record in records]
+        return [await self._session_from_record(record) for record in records]
 
     async def get_by_id(self, session_id: str) -> Optional[Session]:
         """根据id查询会话"""
@@ -66,7 +162,7 @@ class DBSessionRepository(SessionRepository):
         if record is None:
             return None
 
-        return record.to_domain()
+        return await self._session_from_record(record)
 
     async def delete_by_id(self, session_id: str) -> None:
         """根据传递的id删除会话"""
@@ -116,25 +212,31 @@ class DBSessionRepository(SessionRepository):
             session_id: str,
             event: BaseEvent,
             event_data: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """往会话中新增事件"""
-        # 1.检查会话存在，保持与旧 JSONB 更新路径一致的错误语义
+            seq: Optional[int] = None,
+    ) -> int:
+        """往会话中新增事件，返回全局 seq（与 SSE/分页游标一致）"""
         exists_stmt = select(SessionModel.id).where(SessionModel.id == session_id)
         exists = await self.db_session.scalar(exists_stmt)
         if exists is None:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 
-        # 2.追加写入独立事件表，避免重写 sessions.events JSONB 数组
-        payload = event_data or event.model_dump(mode="json")
-        self.db_session.add(
-            SessionEventModel(
-                session_id=session_id,
-                stream_id=payload.get("id"),
-                type=payload.get("type", event.type),
-                payload=payload,
-                created_at=event.created_at,
-            )
+        payload = dict(event_data or event.model_dump(mode="json"))
+        if seq is not None:
+            payload["id"] = str(seq)
+            event.id = str(seq)
+        record = SessionEventModel(
+            seq=seq,
+            session_id=session_id,
+            stream_id=payload.get("id"),
+            type=payload.get("type", event.type),
+            payload=payload,
+            created_at=event.created_at,
         )
+        self.db_session.add(record)
+        await self.db_session.flush()
+        assigned_seq = int(record.seq)
+        event.id = str(assigned_seq)
+        return assigned_seq
 
     async def add_events(self, session_id: str, events: List[BaseEvent]) -> None:
         """批量新增事件"""
@@ -156,16 +258,30 @@ class DBSessionRepository(SessionRepository):
         if exists is None:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 
-        self.db_session.add_all([
-            SessionEventModel(
-                session_id=session_id,
-                stream_id=event_data.get("id"),
-                type=event_data.get("type", event.type),
-                payload=event_data,
-                created_at=event.created_at,
+        records = []
+        for event, event_data in payloads:
+            seq_value: Optional[int] = None
+            event_id = event_data.get("id")
+            if event_id is not None:
+                try:
+                    seq_value = int(str(event_id))
+                except (TypeError, ValueError):
+                    seq_value = None
+            records.append(
+                SessionEventModel(
+                    seq=seq_value,
+                    session_id=session_id,
+                    stream_id=str(event_data.get("id")) if event_data.get("id") is not None else None,
+                    type=event_data.get("type", event.type),
+                    payload=event_data,
+                    created_at=event.created_at,
+                ),
             )
-            for event, event_data in payloads
-        ])
+        self.db_session.add_all(records)
+        await self.db_session.flush()
+        for (event, event_data), record in zip(payloads, records):
+            event.id = str(record.seq)
+            event_data["id"] = str(record.seq)
 
     async def list_events(
             self,
@@ -211,10 +327,12 @@ class DBSessionRepository(SessionRepository):
             result = await self.db_session.execute(stmt)
             records = result.scalars().all()
 
-        return [
-            (record.seq, adapter.validate_python(upgrade_event_payload(record.payload)))
-            for record in records
-        ]
+        events: List[Tuple[int, BaseEvent]] = []
+        for record in records:
+            event = adapter.validate_python(upgrade_event_payload(record.payload))
+            event.id = str(record.seq)
+            events.append((record.seq, event))
+        return events
 
     async def has_events_before(self, session_id: str, seq: int) -> bool:
         stmt = (
@@ -230,64 +348,72 @@ class DBSessionRepository(SessionRepository):
 
     async def add_file(self, session_id: str, file: File) -> None:
         """往会话中新增文件"""
-        # 1.将file序列化为json
-        file_data = file.model_dump(mode="json")
+        exists_stmt = select(SessionModel.id).where(SessionModel.id == session_id)
+        exists_result = await self.db_session.execute(exists_stmt)
+        if exists_result.scalar_one_or_none() is None:
+            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 
-        # 2.构建原子更新语句并执行
         stmt = (
-            update(SessionModel)
-            .where(SessionModel.id == session_id)
+            pg_insert(SessionFileAttachmentModel)
             .values(
-                files=func.coalesce(SessionModel.files, cast([], JSONB)) + cast([file_data], JSONB),
+                session_id=session_id,
+                file_id=file.id,
+                filename=file.filename,
+                filepath=file.filepath,
+                key=file.key,
+                extension=file.extension,
+                mime_type=file.mime_type,
+                size=file.size,
+            )
+            .on_conflict_do_update(
+                index_elements=["session_id", "file_id"],
+                set_={
+                    "filename": file.filename,
+                    "filepath": file.filepath,
+                    "key": file.key,
+                    "extension": file.extension,
+                    "mime_type": file.mime_type,
+                    "size": file.size,
+                },
             )
         )
-        result = await self.db_session.execute(stmt)
-
-        # 3.检查是否新增成功
-        if result.rowcount == 0:
-            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
+        await self.db_session.execute(stmt)
 
     async def remove_file(self, session_id: str, file_id: str) -> None:
         """移除会话中的指定文件"""
-        # 1.查询会话记录并加锁
-        stmt = select(SessionModel).where(SessionModel.id == session_id).with_for_update()
-        result = await self.db_session.execute(stmt)
-        record = result.scalar_one_or_none()
-
-        # 2.检查会话记录是否存在
-        if not record:
+        exists_stmt = select(SessionModel.id).where(SessionModel.id == session_id)
+        exists_result = await self.db_session.execute(exists_stmt)
+        if exists_result.scalar_one_or_none() is None:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 
-        # 3.会话记录存在在，则在内存中过滤files
-        if not record.files:
-            return
-        original_length = len(record.files)
-        new_files = [file for file in record.files if file.get("id") != file_id]
-
-        # 4.判断文件长度是否有变化
-        if len(new_files) == original_length:
-            return
-
-        # 5.更新数据
-        record.files = new_files
+        stmt = (
+            delete(SessionFileAttachmentModel)
+            .where(SessionFileAttachmentModel.session_id == session_id)
+            .where(SessionFileAttachmentModel.file_id == file_id)
+        )
+        await self.db_session.execute(stmt)
 
     async def get_file_by_path(self, session_id: str, filepath: str) -> Optional[File]:
         """根据文件路径获取文件信息"""
-        # 1.构建语句查询文件列表
-        stmt = select(SessionModel.files).where(SessionModel.id == session_id)
+        stmt = (
+            select(SessionFileAttachmentModel)
+            .where(SessionFileAttachmentModel.session_id == session_id)
+            .where(SessionFileAttachmentModel.filepath == filepath)
+            .limit(1)
+        )
         result = await self.db_session.execute(stmt)
-        files = result.scalar_one_or_none()
-
-        # 2.判断是否为空，如果不存在则返回None
-        if not files:
+        record = result.scalar_one_or_none()
+        if record is None:
             return None
-
-        # 3.遍历查找数据，如果最后没找到则返回空
-        for file in files:
-            if file.get("filepath", "") == filepath:
-                return File(**file)
-
-        return None
+        return File(
+            id=record.file_id,
+            filename=record.filename,
+            filepath=record.filepath,
+            key=record.key,
+            extension=record.extension,
+            mime_type=record.mime_type,
+            size=record.size,
+        )
 
     async def update_session_config(
             self,
@@ -392,42 +518,38 @@ class DBSessionRepository(SessionRepository):
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 
     async def save_memory(self, session_id: str, agent_name: str, memory: Memory) -> None:
-        """存储或者更新会话中的记忆(字典直接覆盖)"""
-        # 1.将memory转换成为json结构
+        """存储或者更新会话中的记忆(按 agent_name 单行 upsert)"""
+        exists_stmt = select(SessionModel.id).where(SessionModel.id == session_id)
+        exists_result = await self.db_session.execute(exists_stmt)
+        if exists_result.scalar_one_or_none() is None:
+            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
+
         memory_data = memory.model_dump(mode="json")
-
-        # 2.构建要打补丁的字典
-        patch_data = {agent_name: memory_data}
-
-        # 3.执行合并更新
         stmt = (
-            update(SessionModel)
-            .where(SessionModel.id == session_id)
+            pg_insert(SessionAgentMemoryModel)
             .values(
-                memories=func.coalesce(SessionModel.memories, cast({}, JSONB)) + cast(patch_data, JSONB),
+                session_id=session_id,
+                agent_name=agent_name,
+                memory_data=memory_data,
+            )
+            .on_conflict_do_update(
+                index_elements=["session_id", "agent_name"],
+                set_={"memory_data": memory_data},
             )
         )
-        result = await self.db_session.execute(stmt)
-
-        # 4.检查是否更新成功
-        if result.rowcount == 0:
-            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
+        await self.db_session.execute(stmt)
 
     async def get_memory(self, session_id: str, agent_name: str) -> Memory:
         """获取指定会话的agent记忆信息"""
-        # 1.查询会话记忆信息
         stmt = (
-            select(SessionModel.memories[agent_name])
-            .where(SessionModel.id == session_id)
+            select(SessionAgentMemoryModel.memory_data)
+            .where(SessionAgentMemoryModel.session_id == session_id)
+            .where(SessionAgentMemoryModel.agent_name == agent_name)
         )
         result = await self.db_session.execute(stmt)
         memory_data = result.scalar_one_or_none()
-
-        # 2.如果存在记忆则直接返回
         if memory_data:
             return Memory(**memory_data)
-
-        # 3.如果记忆不存在，则构建一个空记忆后返回
         return Memory(messages=[])
 
     async def get_max_event_seq(self, session_id: str) -> Optional[int]:
@@ -480,8 +602,6 @@ class DBSessionRepository(SessionRepository):
             update(SessionModel)
             .where(SessionModel.id == session_id)
             .values(
-                memories=memories,
-                files=files,
                 status=status,
                 pending_phase=pending_phase,
             )
@@ -489,3 +609,37 @@ class DBSessionRepository(SessionRepository):
         result = await self.db_session.execute(stmt)
         if result.rowcount == 0:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
+
+        await self.db_session.execute(
+            delete(SessionAgentMemoryModel).where(
+                SessionAgentMemoryModel.session_id == session_id,
+            ),
+        )
+        await self.db_session.execute(
+            delete(SessionFileAttachmentModel).where(
+                SessionFileAttachmentModel.session_id == session_id,
+            ),
+        )
+
+        for agent_name, memory_data in (memories or {}).items():
+            await self.db_session.execute(
+                pg_insert(SessionAgentMemoryModel).values(
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    memory_data=memory_data,
+                ),
+            )
+
+        for file_data in files or []:
+            await self.db_session.execute(
+                pg_insert(SessionFileAttachmentModel).values(
+                    session_id=session_id,
+                    file_id=file_data.get("id") or file_data.get("file_id"),
+                    filename=file_data.get("filename", ""),
+                    filepath=file_data.get("filepath", ""),
+                    key=file_data.get("key", ""),
+                    extension=file_data.get("extension", ""),
+                    mime_type=file_data.get("mime_type", ""),
+                    size=int(file_data.get("size") or 0),
+                ),
+            )

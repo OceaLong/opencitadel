@@ -1,26 +1,76 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Layers3 } from "lucide-react";
-import type { ReactNode } from "react";
-
-import { ConsumptionCalculatorApp } from "@/components/marketplace/consumption-calculator-app";
-import { DevToolboxApp } from "@/components/marketplace/dev-toolbox-app";
-import { DocumentConverterApp } from "@/components/marketplace/document-converter-app";
-import { DocumentQaApp } from "@/components/marketplace/document-qa-app";
-import { FortuneTellerApp } from "@/components/marketplace/fortune-teller-app";
-import { NutritionAnalysisApp } from "@/components/marketplace/nutrition-analysis-app";
-import { PersonalityTestsApp } from "@/components/marketplace/personality-tests-app";
-import { PromptLabApp } from "@/components/marketplace/prompt-lab-app";
-import { QrGeneratorApp } from "@/components/marketplace/qr-generator-app";
-import { QuestionnaireApp } from "@/components/marketplace/questionnaire-app";
-import { RoomApp } from "@/components/marketplace/room-app";
-import { SecretGeneratorApp } from "@/components/marketplace/secret-generator-app";
-import { SmartTranslationApp } from "@/components/marketplace/smart-translation-app";
-import { UnitConverterApp } from "@/components/marketplace/unit-converter-app";
-import { VideoSearchApp } from "@/components/marketplace/video-search-app";
-import { WatermarkToolApp } from "@/components/marketplace/watermark-tool-app";
+import type { ComponentType, ReactNode } from "react";
 
 import type { MarketplaceApp } from "@/lib/api/types";
+
+const lazy = <P extends object>(loader: () => Promise<{ default: ComponentType<P> }>) =>
+  dynamic(loader, { ssr: false });
+
+const VideoSearchApp = lazy(() =>
+  import("@/components/marketplace/video-search-app").then((m) => ({ default: m.VideoSearchApp })),
+);
+const NutritionAnalysisApp = lazy(() =>
+  import("@/components/marketplace/nutrition-analysis-app").then((m) => ({
+    default: m.NutritionAnalysisApp,
+  })),
+);
+const ConsumptionCalculatorApp = lazy(() =>
+  import("@/components/marketplace/consumption-calculator-app").then((m) => ({
+    default: m.ConsumptionCalculatorApp,
+  })),
+);
+const DocumentQaApp = lazy(() =>
+  import("@/components/marketplace/document-qa-app").then((m) => ({ default: m.DocumentQaApp })),
+);
+const SmartTranslationApp = lazy(() =>
+  import("@/components/marketplace/smart-translation-app").then((m) => ({
+    default: m.SmartTranslationApp,
+  })),
+);
+const DocumentConverterApp = lazy(() =>
+  import("@/components/marketplace/document-converter-app").then((m) => ({
+    default: m.DocumentConverterApp,
+  })),
+);
+const WatermarkToolApp = lazy(() =>
+  import("@/components/marketplace/watermark-tool-app").then((m) => ({
+    default: m.WatermarkToolApp,
+  })),
+);
+const PromptLabApp = lazy(() =>
+  import("@/components/marketplace/prompt-lab-app").then((m) => ({ default: m.PromptLabApp })),
+);
+const QrGeneratorApp = lazy(() =>
+  import("@/components/marketplace/qr-generator-app").then((m) => ({ default: m.QrGeneratorApp })),
+);
+const DevToolboxApp = lazy(() =>
+  import("@/components/marketplace/dev-toolbox-app").then((m) => ({ default: m.DevToolboxApp })),
+);
+const SecretGeneratorApp = lazy(() =>
+  import("@/components/marketplace/secret-generator-app").then((m) => ({
+    default: m.SecretGeneratorApp,
+  })),
+);
+const QuestionnaireApp = lazy(() =>
+  import("@/components/marketplace/questionnaire-app").then((m) => ({ default: m.QuestionnaireApp })),
+);
+const RoomApp = lazy(() =>
+  import("@/components/marketplace/room-app").then((m) => ({ default: m.RoomApp })),
+);
+const FortuneTellerApp = lazy(() =>
+  import("@/components/marketplace/fortune-teller-app").then((m) => ({ default: m.FortuneTellerApp })),
+);
+const PersonalityTestsApp = lazy(() =>
+  import("@/components/marketplace/personality-tests-app").then((m) => ({
+    default: m.PersonalityTestsApp,
+  })),
+);
+const UnitConverterApp = lazy(() =>
+  import("@/components/marketplace/unit-converter-app").then((m) => ({ default: m.UnitConverterApp })),
+);
 
 export type LaunchParams = Record<string, unknown>;
 

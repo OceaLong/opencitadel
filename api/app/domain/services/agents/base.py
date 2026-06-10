@@ -6,7 +6,8 @@ import uuid
 from abc import ABC
 from typing import Optional, List, AsyncGenerator, Dict, Any, Callable
 
-from app.application.errors.exceptions import AppException
+from app.domain.external.observability import ObservabilityPort
+from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
@@ -47,7 +48,7 @@ STATEFUL_TOOL_NAMES = frozenset({"browser", "shell"})
 
 
 def _format_agent_error(error: Exception) -> str:
-    """提取可读错误信息，兼容 AppException 空 str(e) 问题。"""
+    """提取可读错误信息，兼容自定义异常空 str(e) 问题。"""
     msg = getattr(error, "msg", None)
     if msg:
         return str(msg)
@@ -76,6 +77,8 @@ class BaseAgent(ABC):
             allowed_tool_names: Optional[List[str]] = None,
             model_id: Optional[str] = None,
             file_storage: Optional[FileStorage] = None,
+            observability_port: Optional[ObservabilityPort] = None,
+            runtime_settings: Optional[AgentRuntimeSettings] = None,
     ) -> None:
         """构造函数，完成Agent的初始化"""
         self._uow_factory = uow_factory
@@ -96,12 +99,16 @@ class BaseAgent(ABC):
         self._last_llm_message: Optional[Dict[str, Any]] = None
         self._current_step: str = "default"
         self._last_prompt_tokens: int = 0
+        if observability_port is None or runtime_settings is None:
+            raise ValueError("BaseAgent requires observability_port and runtime_settings")
+        self._runtime_settings = runtime_settings
         self._token_accountant = TokenAccountant(
             uow_factory=uow_factory,
             session_id=session_id,
             agent_name=self.name,
             model_name=llm.model_name,
             model_id=model_id,
+            observability_port=observability_port,
         )
         self._tool_index: Dict[str, BaseTool] = {}
         self._all_tool_schemas: List[Dict[str, Any]] = []
@@ -424,7 +431,7 @@ class BaseAgent(ABC):
                 error_msg = _format_agent_error(e)
                 logger.error(
                     f"调用语言模型发生错误: {error_msg}",
-                    exc_info=not isinstance(e, AppException),
+                    exc_info=not hasattr(e, "msg"),
                 )
                 error = error_msg
                 await asyncio.sleep(self._retry_interval)
@@ -436,8 +443,7 @@ class BaseAgent(ABC):
         """传递工具包+工具名字+对应参数调用指定工具"""
         # 1.执行循环调用工具获取结果
         err = ""
-        from app.application.services.config_provider import get_runtime_config
-        timeout_seconds = max(1, get_runtime_config().worker.tool_timeout_seconds)
+        timeout_seconds = max(1, self._runtime_settings.tool_timeout_seconds)
         for _ in range(self._agent_config.max_retries):
             try:
                 result = await asyncio.wait_for(
@@ -491,16 +497,14 @@ class BaseAgent(ABC):
     async def compact_memory(self) -> None:
         """压缩Agent的记忆（仅规则裁剪）。"""
         await self._ensure_memory()
-        from app.application.services.config_provider import get_runtime_config
-        memory_cfg = get_runtime_config().memory
+        memory_cfg = self._runtime_settings.memory
         self._memory.compact(tool_content_max_chars=memory_cfg.compact_tool_content_max_chars)
         async with self._uow:
             await self._uow.session.save_memory(self._session_id, self.name, self._memory)
 
     async def summarize_and_compact(self) -> None:
         """混合记忆压缩：规则裁剪 + 超阈值时 LLM 摘要。"""
-        from app.application.services.config_provider import get_runtime_config
-        memory_cfg = get_runtime_config().memory
+        memory_cfg = self._runtime_settings.memory
         strategy = (memory_cfg.compact_strategy or "hybrid").lower()
         await self.compact_memory()
         if strategy == "rule":
@@ -753,6 +757,7 @@ class BaseAgent(ABC):
             # 13.超过最大迭代次数后，则抛出错误
             yield ErrorEvent(error=f"Agent迭代超过最大迭代次数: {self._agent_config.max_iterations}, 任务处理失败")
 
+        await self._token_accountant.flush()
         await self._persist_memory()
 
         # 14.在指定步骤内完成了迭代则返回消息事件

@@ -4,6 +4,7 @@ import logging
 from typing import Callable, Dict, List, Optional
 
 from app.application.errors.exceptions import NotFoundError, BadRequestError
+from app.application.services.config_provider import get_runtime_config
 from app.domain.utils.memory_recall import rank_entries_with_decay
 from app.domain.models.memory import Memory
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
@@ -13,9 +14,15 @@ logger = logging.getLogger(__name__)
 
 
 class MemoryService:
-    def __init__(self, uow_factory: Callable[[], IUnitOfWork], recall_limit: int = 20) -> None:
+    def __init__(self, uow_factory: Callable[[], IUnitOfWork], recall_limit: Optional[int] = None) -> None:
         self._uow_factory = uow_factory
-        self._recall_limit = recall_limit
+        self._recall_limit_override = recall_limit
+
+    @property
+    def _recall_limit(self) -> int:
+        if self._recall_limit_override is not None:
+            return self._recall_limit_override
+        return get_runtime_config().memory.recall_limit
 
     # --- Tier 1: session memories ---
     async def get_session_memories(self, session_id: str) -> Dict[str, List[dict]]:

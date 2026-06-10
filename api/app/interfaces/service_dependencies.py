@@ -60,12 +60,8 @@ def get_skill_service() -> SkillService:
     return SkillService(uow_factory=get_uow)
 
 
-@lru_cache()
 def get_memory_service() -> MemoryService:
-    return MemoryService(
-        uow_factory=get_uow,
-        recall_limit=get_runtime_config().memory.recall_limit,
-    )
+    return MemoryService(uow_factory=get_uow)
 
 
 @lru_cache()
@@ -129,11 +125,9 @@ def get_checkpoint_service() -> CheckpointService:
     )
 
 
-@lru_cache()
-def get_agent_service(
-) -> AgentService:
+def get_agent_service() -> AgentService:
     config_provider = get_app_config_provider()
-    app_config = config_provider._cache or config_provider._repository.load()
+    runtime_config = get_runtime_config()
     file_storage = CosFileStorage(
         bucket=settings.cos_bucket,
         cos=get_cos(),
@@ -144,15 +138,15 @@ def get_agent_service(
         llm_model_service=get_llm_model_service(),
         skill_service=get_skill_service(),
         memory_service=get_memory_service(),
-        agent_config=app_config.agent_config,
-        mcp_config=app_config.mcp_config,
-        a2a_config=app_config.a2a_config,
+        agent_config=runtime_config.agent_config,
+        mcp_config=runtime_config.mcp_config,
+        a2a_config=runtime_config.a2a_config,
         sandbox_cls=DockerSandbox,
         task_cls=RedisStreamTask,
         json_parser=RepairJSONParser(),
         search_engine=BingSearchEngine(),
         file_storage=file_storage,
-        auto_extract_memory=get_runtime_config().memory.auto_extract_enabled,
+        auto_extract_memory=runtime_config.memory.auto_extract_enabled,
         config_provider=config_provider,
         checkpoint_service=get_checkpoint_service(),
     )

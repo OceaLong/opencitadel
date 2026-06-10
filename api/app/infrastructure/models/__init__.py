@@ -3,6 +3,8 @@
 from .base import Base
 from .file import FileModel
 from .session import SessionModel
+from .session_agent_memory import SessionAgentMemoryModel
+from .session_file_attachment import SessionFileAttachmentModel
 from .llm_model import LLMModelORM
 from .skill import SkillORM
 from .memory_entry import MemoryEntryORM
@@ -25,6 +27,8 @@ from .app_config import AppConfigModel
 __all__ = [
     "Base",
     "SessionModel",
+    "SessionAgentMemoryModel",
+    "SessionFileAttachmentModel",
     "FileModel",
     "LLMModelORM",
     "SkillORM",

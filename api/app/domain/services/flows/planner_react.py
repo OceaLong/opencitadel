@@ -31,8 +31,8 @@ from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.mcp import MCPTool
 from app.domain.services.tools.tool_registry import ToolRegistry
-from app.infrastructure.observability.agent_tracer import AgentTracer
-from app.infrastructure.observability.otel import record_agent_step
+from app.domain.external.observability import ObservabilityPort
+from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
 from .base import BaseFlow, FlowStatus
 from ...repositories.uow import IUnitOfWork
 
@@ -62,6 +62,8 @@ class PlannerReActFlow(BaseFlow):
             extra_tools: Optional[List[BaseTool]] = None,
             model_id: Optional[str] = None,
             file_storage: Optional[FileStorage] = None,
+            observability_port: Optional[ObservabilityPort] = None,
+            runtime_settings: Optional[AgentRuntimeSettings] = None,
     ) -> None:
         """构造函数，完成规划与执行流的初始化"""
         # 1.流初始化数据配置
@@ -74,6 +76,10 @@ class PlannerReActFlow(BaseFlow):
         self._agent_config = agent_config
         self._flow_step_budget = agent_config.max_flow_steps
         self._flow_steps_used = 0
+        if observability_port is None or runtime_settings is None:
+            raise ValueError("PlannerReActFlow requires observability_port and runtime_settings")
+        self._observability = observability_port
+        self._runtime_settings = runtime_settings
 
         tools = ToolRegistry.build_default_tools(
             sandbox=sandbox,
@@ -100,6 +106,8 @@ class PlannerReActFlow(BaseFlow):
             allowed_tool_names=allowed_tool_names,
             model_id=model_id,
             file_storage=file_storage,
+            observability_port=self._observability,
+            runtime_settings=self._runtime_settings,
         )
         logger.debug(f"创建澄清Agent成功, 会话id: {self._session_id}")
 
@@ -116,6 +124,8 @@ class PlannerReActFlow(BaseFlow):
             allowed_tool_names=allowed_tool_names,
             model_id=model_id,
             file_storage=file_storage,
+            observability_port=self._observability,
+            runtime_settings=self._runtime_settings,
         )
         logger.debug(f"创建规划Agent成功, 会话id: {self._session_id}")
 
@@ -132,17 +142,19 @@ class PlannerReActFlow(BaseFlow):
             allowed_tool_names=allowed_tool_names,
             model_id=model_id,
             file_storage=file_storage,
+            observability_port=self._observability,
+            runtime_settings=self._runtime_settings,
         )
         logger.debug(f"创建执行Agent成功, 会话id: {self._session_id}")
 
     async def invoke(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         """传递消息，运行流，在六中调用planner&react智能体组合完成任务并返回对应事件"""
-        tracer = AgentTracer(self._session_id)
+        tracer = self._observability.create_agent_tracer(self._session_id, "planner_react_flow")
         with tracer.span("planner_react_flow"):
             async for event in self._invoke_flow(message, tracer):
                 yield event
 
-    async def _invoke_flow(self, message: Message, tracer: AgentTracer) -> AsyncGenerator[BaseEvent, None]:
+    async def _invoke_flow(self, message: Message, tracer) -> AsyncGenerator[BaseEvent, None]:
         # 1.调用会话仓库查询会话是否存在
         async with self._uow:
             session = await self._uow.session.get_by_id(self._session_id)
@@ -208,7 +220,7 @@ class PlannerReActFlow(BaseFlow):
                 self.status = FlowStatus.CLARIFYING
             elif self.status == FlowStatus.CLARIFYING:
                 logger.info("Planner&ReAct流开始澄清任务需求")
-                record_agent_step("clarify", "analyze")
+                self._observability.record_agent_step("clarify", "analyze")
                 asked = False
                 with tracer.span("clarify.analyze"):
                     async for event in self.clarify.analyze(message):
@@ -233,7 +245,7 @@ class PlannerReActFlow(BaseFlow):
             elif self.status == FlowStatus.PLANNING:
                 # 10.流状态为规划中，则调用规划Agent
                 logger.info(f"Planner&ReAct流开始创建计划/Plan")
-                record_agent_step("planner", "create_plan")
+                self._observability.record_agent_step("planner", "create_plan")
                 with tracer.span("planner.create_plan"):
                     async for event in self.planner.create_plan(message):
                         # 11.判断规划Agent是否返回规划事件

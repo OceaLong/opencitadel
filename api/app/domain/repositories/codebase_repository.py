@@ -56,7 +56,20 @@ class CodebaseRepository(Protocol):
     async def save_edges(self, edges: List[CodebaseEdge]) -> None:
         ...
 
-    async def list_edges(self, codebase_id: str, src_symbol_id: Optional[str] = None) -> List[CodebaseEdge]:
+    async def list_edges(
+            self,
+            codebase_id: str,
+            src_symbol_id: Optional[str] = None,
+            dst_symbol_id: Optional[str] = None,
+            callee_name: Optional[str] = None,
+    ) -> List[CodebaseEdge]:
+        ...
+
+    async def list_symbols_by_ids(
+            self,
+            codebase_id: str,
+            symbol_ids: List[str],
+    ) -> List[CodebaseSymbol]:
         ...
 
     async def save_chunks(self, chunks: List[CodebaseChunk]) -> None:

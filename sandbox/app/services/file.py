@@ -62,6 +62,8 @@ class FileService:
     ) -> FileReadResult:
         """根据传递的文件路径+起始行号+权限+最大长度读取文件内容"""
         try:
+            filepath = cls._normalize_filepath(filepath)
+
             # 1.检测在当前权限下能否获取该文件
             if not os.path.exists(filepath) and not sudo:
                 logger.error(f"要读取的文件不存在或无权限: {filepath}")
@@ -81,7 +83,7 @@ class FileService:
                 )
 
                 # 5.读取子进程的输出，并等待子进程结束
-                stdout, stderr = process.communicate()
+                stdout, stderr = await process.communicate()
 
                 # 6.判断子进程的状态是否正常结束
                 if process.returncode != 0:

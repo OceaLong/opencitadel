@@ -164,10 +164,31 @@ class DBCodebaseRepository(CodebaseRepository):
             self,
             codebase_id: str,
             src_symbol_id: Optional[str] = None,
+            dst_symbol_id: Optional[str] = None,
+            callee_name: Optional[str] = None,
     ) -> List[CodebaseEdge]:
         stmt = select(CodebaseEdgeModel).where(CodebaseEdgeModel.codebase_id == codebase_id)
         if src_symbol_id:
             stmt = stmt.where(CodebaseEdgeModel.src_symbol_id == src_symbol_id)
+        if dst_symbol_id:
+            stmt = stmt.where(CodebaseEdgeModel.dst_symbol_id == dst_symbol_id)
+        if callee_name:
+            stmt = stmt.where(CodebaseEdgeModel.callee_name == callee_name)
+        result = await self.db_session.execute(stmt)
+        return [r.to_domain() for r in result.scalars().all()]
+
+    async def list_symbols_by_ids(
+            self,
+            codebase_id: str,
+            symbol_ids: List[str],
+    ) -> List[CodebaseSymbol]:
+        if not symbol_ids:
+            return []
+        stmt = (
+            select(CodebaseSymbolModel)
+            .where(CodebaseSymbolModel.codebase_id == codebase_id)
+            .where(CodebaseSymbolModel.id.in_(symbol_ids))
+        )
         result = await self.db_session.execute(stmt)
         return [r.to_domain() for r in result.scalars().all()]
 

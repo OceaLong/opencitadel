@@ -15,6 +15,11 @@ class DBLLMTokenUsageRepository(LLMTokenUsageRepository):
     async def save(self, usage: LLMTokenUsage) -> None:
         self.db_session.add(LLMTokenUsageORM.from_domain(usage))
 
+    async def save_many(self, usages: list[LLMTokenUsage]) -> None:
+        if not usages:
+            return
+        self.db_session.add_all([LLMTokenUsageORM.from_domain(usage) for usage in usages])
+
     async def list_by_session(self, session_id: str) -> list[LLMTokenUsage]:
         stmt = (
             select(LLMTokenUsageORM)

@@ -81,16 +81,39 @@ class CodebaseTool(BaseTool):
     async def find_references(self, name: str) -> str:
         async with self._uow_factory() as uow:
             symbols = await uow.codebase.find_symbol_by_name(self._codebase_id, name)
-            all_edges = await uow.codebase.list_edges(self._codebase_id)
-            all_symbols = await uow.codebase.list_symbols(self._codebase_id)
+            if not symbols:
+                return f"未找到 {name} 的引用"
+            sym_ids = {s.id for s in symbols}
+            refs: list = []
+            for sym_id in sym_ids:
+                refs.extend(
+                    await uow.codebase.list_edges(
+                        self._codebase_id,
+                        dst_symbol_id=sym_id,
+                    ),
+                )
+            refs.extend(
+                await uow.codebase.list_edges(
+                    self._codebase_id,
+                    callee_name=name,
+                ),
+            )
+            seen = set()
+            unique_refs = []
+            for edge in refs:
+                key = (edge.src_symbol_id, edge.dst_symbol_id, edge.callee_name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique_refs.append(edge)
+            if not unique_refs:
+                return f"未找到 {name} 的引用"
+            src_ids = [e.src_symbol_id for e in unique_refs if e.src_symbol_id]
+            src_symbols = await uow.codebase.list_symbols_by_ids(self._codebase_id, src_ids)
+            sym_by_id = {s.id: s for s in src_symbols}
             files = {f.id: f for f in await uow.codebase.list_files(self._codebase_id)}
-        sym_ids = {s.id for s in symbols}
-        sym_by_id = {s.id: s for s in all_symbols}
-        refs = [e for e in all_edges if e.dst_symbol_id in sym_ids or e.callee_name == name]
-        if not refs:
-            return f"未找到 {name} 的引用"
         lines = []
-        for e in refs[:30]:
+        for e in unique_refs[:30]:
             src = sym_by_id.get(e.src_symbol_id)
             if src:
                 path = files[src.file_id].path if src.file_id in files else "?"
@@ -112,10 +135,16 @@ class CodebaseTool(BaseTool):
                 return f"未找到符号: {symbol_name}"
             sym = symbols[0]
             out_edges = await uow.codebase.list_edges(self._codebase_id, src_symbol_id=sym.id)
-            all_edges = await uow.codebase.list_edges(self._codebase_id)
-            in_edges = [e for e in all_edges if e.dst_symbol_id == sym.id]
-            all_symbols = await uow.codebase.list_symbols(self._codebase_id)
-            sym_by_id = {s.id: s for s in all_symbols}
+            in_edges = await uow.codebase.list_edges(self._codebase_id, dst_symbol_id=sym.id)
+            related_ids = {
+                *(e.dst_symbol_id for e in out_edges if e.dst_symbol_id),
+                *(e.src_symbol_id for e in in_edges if e.src_symbol_id),
+            }
+            related_symbols = await uow.codebase.list_symbols_by_ids(
+                self._codebase_id,
+                list(related_ids),
+            )
+            sym_by_id = {s.id: s for s in related_symbols}
         lines = [f"## {symbol_name} 调用链", "### 调用 (outbound)"]
         for e in out_edges[:20]:
             callee = e.callee_name

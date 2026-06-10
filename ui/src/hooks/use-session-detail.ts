@@ -116,6 +116,7 @@ export function useSessionDetail(
   const emptyStreamCleanupRef = useRef<(() => void) | null>(null);
   const messageStreamCleanupRef = useRef<(() => void) | null>(null);
   const emptyStreamRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const emptyStreamRetryCountRef = useRef(0);
   const sessionMissingRef = useRef(false);
   const isSendMessageRef = useRef(false);
   const lastEventIdRef = useRef<string | null>(null);
@@ -276,6 +277,7 @@ export function useSessionDetail(
       sessionId,
       { event_id: lastEventIdRef.current || undefined },
       (ev) => {
+        emptyStreamRetryCountRef.current = 0;
         appendEvent(ev);
         if (getSessionMissingErrorFromEvent(ev)) {
           handleSessionMissing(new Error("会话不存在"));
@@ -294,13 +296,16 @@ export function useSessionDetail(
         if (err.message === "SSE_STREAM_END") {
           emptyStreamCleanupRef.current = null;
           clearEmptyStreamRetryTimer();
+          const retryCount = emptyStreamRetryCountRef.current;
+          const delay = Math.min(30_000, 1000 * 2 ** Math.min(retryCount, 5));
+          emptyStreamRetryCountRef.current = retryCount + 1;
           emptyStreamRetryTimerRef.current = setTimeout(() => {
             emptyStreamRetryTimerRef.current = null;
             if (sessionMissingRef.current) return;
             if (!emptyStreamCleanupRef.current && !isSendMessageRef.current) {
               startEmptyStream();
             }
-          }, 500);
+          }, delay);
           return;
         }
         setError(err instanceof Error ? err : new Error("会话流连接异常"));

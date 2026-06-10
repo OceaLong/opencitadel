@@ -592,6 +592,60 @@ export function getTaskObservationSummary(
 }
 
 /**
+ * 流式 delta 事件增量 patch，避免每 token 全量 eventsToTimeline。
+ * 返回 null 表示需全量重建。
+ */
+export function patchTimelineForDeltaEvent(
+  timeline: TimelineItem[],
+  ev: SSEEventData,
+): TimelineItem[] | null {
+  if (!TRANSIENT_EVENT_TYPES.has(ev.type)) {
+    return null;
+  }
+
+  if (ev.type === "message_delta") {
+    const deltaData = ev.data as {
+      stream_id?: string;
+      delta?: string;
+      role?: string;
+      event_id?: string;
+    };
+    if (deltaData.role && deltaData.role !== "assistant") return timeline;
+    const streamId = deltaData.stream_id || deltaData.event_id;
+    if (!streamId || !deltaData.delta) return timeline;
+
+    for (let i = timeline.length - 1; i >= 0; i--) {
+      const item = timeline[i];
+      if (item.kind !== "assistant") continue;
+      const itemStreamId = (item.data as { stream_id?: string }).stream_id;
+      if (itemStreamId !== streamId) continue;
+      const next = [...timeline];
+      const currentMessage = (item.data as ChatMessage).message ?? "";
+      next[i] = {
+        ...item,
+        data: {
+          ...item.data,
+          message: `${currentMessage}${deltaData.delta}`,
+          stream_id: streamId,
+        },
+      };
+      return next;
+    }
+
+    return [
+      ...timeline,
+      {
+        kind: "assistant" as const,
+        id: `assistant-stream-${streamId}`,
+        data: { role: "assistant" as const, message: deltaData.delta, stream_id: streamId },
+      },
+    ];
+  }
+
+  return timeline;
+}
+
+/**
  * 从事件列表中取最新的 plan 步骤（用于底部任务进度面板）
  */
 export function getLatestPlanFromEvents(events: SSEEventData[]): PlanStep[] {

@@ -1,11 +1,16 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Code2, LayoutGrid } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import { ManusIcon } from "@/components/manus-icon";
-import { ManusSettings } from "@/components/manus-settings";
+
+const ManusSettings = dynamic(
+  () => import("@/components/manus-settings").then((mod) => mod.ManusSettings),
+  { ssr: false },
+);
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";

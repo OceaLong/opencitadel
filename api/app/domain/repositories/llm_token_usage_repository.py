@@ -12,6 +12,10 @@ class LLMTokenUsageRepository(ABC):
         ...
 
     @abstractmethod
+    async def save_many(self, usages: List[LLMTokenUsage]) -> None:
+        ...
+
+    @abstractmethod
     async def list_by_session(self, session_id: str) -> List[LLMTokenUsage]:
         ...
 

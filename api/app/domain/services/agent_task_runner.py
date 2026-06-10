@@ -36,9 +36,11 @@ from app.domain.services.flows.code_ask_flow import CodeAskFlow
 from app.domain.services.tool_event_presenter import FILE_MUTATING_FUNCTIONS, ToolEventPresenter
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.mcp import MCPTool
-from app.application.services.session_state_service import SessionStateService
-from app.infrastructure.observability.otel import record_agent_cancel
-from app.infrastructure.external.task.task_state import get_task_state
+from app.domain.external.event_sequence import EventSequencePort
+from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
+from app.domain.external.observability import ObservabilityPort
+from app.domain.external.session_state import SessionStatePort
+from app.domain.external.task_state_port import TaskStatePort
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +70,11 @@ class AgentTaskRunner(TaskRunner):
             checkpoint_service: Optional[CheckpointService] = None,
             mode: SessionMode = SessionMode.AGENT,
             codebase_id: Optional[str] = None,
+            task_state_port: Optional[TaskStatePort] = None,
+            observability_port: Optional[ObservabilityPort] = None,
+            event_sequence_port: Optional[EventSequencePort] = None,
+            session_state_port: Optional[SessionStatePort] = None,
+            runtime_settings: Optional[AgentRuntimeSettings] = None,
     ) -> None:
         """构造函数，完成Agent任务运行器的创建"""
         self._uow_factory = uow_factory
@@ -81,9 +88,21 @@ class AgentTaskRunner(TaskRunner):
         self._file_storage = file_storage
         self._browser = browser
         self._on_complete_callback = on_complete_callback
-        self._session_state = SessionStateService(uow_factory)
+        if (
+            session_state_port is None
+            or task_state_port is None
+            or observability_port is None
+            or event_sequence_port is None
+            or runtime_settings is None
+        ):
+            raise ValueError("AgentTaskRunner requires runtime ports from the composition root")
+        self._runtime_settings = runtime_settings
+        self._session_state = session_state_port
+        self._task_state_port = task_state_port
+        self._observability = observability_port
+        self._event_sequence = event_sequence_port
         self._event_persist_buffer: List[Tuple[BaseEvent, Dict[str, Any]]] = []
-        self._event_persist_batch_size = 2
+        self._event_persist_batch_size = 10
         self._agent_config = agent_config
         self._run_started_at: Optional[float] = None
         self._step_started_at: Dict[str, datetime] = {}
@@ -113,6 +132,8 @@ class AgentTaskRunner(TaskRunner):
                 a2a_tool=self._a2a_tool,
                 extra_tools=extra_tools or [],
                 model_id=model_id,
+                observability_port=self._observability,
+                runtime_settings=self._runtime_settings,
             )
         else:
             self._flow = PlannerReActFlow(
@@ -132,19 +153,22 @@ class AgentTaskRunner(TaskRunner):
                 extra_tools=extra_tools or [],
                 model_id=model_id,
                 file_storage=file_storage,
+                observability_port=self._observability,
+                runtime_settings=self._runtime_settings,
             )
 
     async def _put_and_add_event(self, task: Task, event: Event) -> None:
         """往指定任务的消息队列中添加事件"""
-        # 1.往任务的输出消息队列中新增事件
-        event_id = await task.output_stream.put(event.model_dump_json())
-        event.id = event_id
+        seq = await self._event_sequence.allocate()
+        event.id = str(seq)
+        event_data = event.model_dump(mode="json")
+        await task.output_stream.put(event.model_dump_json())
         if isinstance(event, (StepEvent, ToolEvent)):
             self._last_observable_event_id = event.id
 
         # 2.仅持久化稳定、高价值事件，流式 delta 不落库
         if should_persist_event(event):
-            self._event_persist_buffer.append((event, event.model_dump(mode="json")))
+            self._event_persist_buffer.append((event, event_data))
             critical = isinstance(event, (DoneEvent, ErrorEvent, WaitEvent, StepEvent, ToolEvent))
             if critical or len(self._event_persist_buffer) >= self._event_persist_batch_size:
                 await self._flush_event_persist_buffer()
@@ -165,7 +189,7 @@ class AgentTaskRunner(TaskRunner):
             await self._put_and_add_event(task, event)
 
     async def _is_cancelled(self, task: Task) -> bool:
-        return await get_task_state().is_cancelled(task.id)
+        return await self._task_state_port.is_cancelled(task.id)
 
     def _is_run_timed_out(self) -> bool:
         if self._run_started_at is None:
@@ -460,6 +484,11 @@ class AgentTaskRunner(TaskRunner):
                 await self._a2a_tool.cleanup()
         except Exception as e:
             logger.warning(f"清理A2A工具资源时出错: {e}")
+        try:
+            if self._browser:
+                await self._browser.cleanup()
+        except Exception as e:
+            logger.warning(f"清理Browser资源时出错: {e}")
 
     async def invoke(self, task: Task) -> None:
         """根据传递的任务处理agent消息队列并运行agent流"""
@@ -573,7 +602,7 @@ class AgentTaskRunner(TaskRunner):
                 await self._put_and_add_event(task, DoneEvent())
                 await self._emit_session_status(task, SessionStatus.CANCELLED)
                 await self._flush_event_persist_buffer()
-                record_agent_cancel(self._session_id)
+                self._observability.record_agent_cancel(self._session_id)
             else:
                 await self._emit_session_status(task, SessionStatus.COMPLETED)
                 await self._flush_event_persist_buffer()
@@ -582,7 +611,7 @@ class AgentTaskRunner(TaskRunner):
             await self._put_and_add_event(task, DoneEvent())
             await self._emit_session_status(task, SessionStatus.CANCELLED)
             await self._flush_event_persist_buffer()
-            record_agent_cancel(self._session_id)
+            self._observability.record_agent_cancel(self._session_id)
             raise
         except Exception as e:
             logger.exception(f"AgentTaskRunner运行出错: {str(e)}")

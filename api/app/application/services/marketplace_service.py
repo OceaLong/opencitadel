@@ -293,7 +293,8 @@ class MarketplaceService:
     ) -> dict:
         file_bytes, file_info = await self._load_file_bytes(file_id)
         source_ext = self._resolve_extension(file_info.filename or "", file_info.mime_type or "")
-        out_bytes, out_mime, out_filename = self._conversion.convert(
+        out_bytes, out_mime, out_filename = await asyncio.to_thread(
+            self._conversion.convert,
             file_bytes,
             source_ext,
             target_format,
@@ -327,8 +328,13 @@ class MarketplaceService:
             if watermark_type == "text":
                 if not text:
                     raise ValueError("请提供水印文字")
-                out_bytes = self._watermark.add_image_text_watermark(
-                    file_bytes, text, opacity=opacity, rotation=rotation, tile=tile,
+                out_bytes = await asyncio.to_thread(
+                    self._watermark.add_image_text_watermark,
+                    file_bytes,
+                    text,
+                    opacity=opacity,
+                    rotation=rotation,
+                    tile=tile,
                 )
                 out_filename = f"{Path(filename).stem}_watermarked.png"
                 out_mime = "image/png"
@@ -338,15 +344,24 @@ class MarketplaceService:
             if watermark_type == "text":
                 if not text:
                     raise ValueError("请提供水印文字")
-                out_bytes = self._watermark.add_pdf_text_watermark(
-                    file_bytes, text, opacity=opacity, rotation=rotation, tile=tile,
+                out_bytes = await asyncio.to_thread(
+                    self._watermark.add_pdf_text_watermark,
+                    file_bytes,
+                    text,
+                    opacity=opacity,
+                    rotation=rotation,
+                    tile=tile,
                 )
             elif watermark_type == "image":
                 if not watermark_file_id:
                     raise ValueError("请上传水印图片")
                 wm_bytes, _ = await self._load_file_bytes(watermark_file_id)
-                out_bytes = self._watermark.add_pdf_image_watermark(
-                    file_bytes, wm_bytes, opacity=opacity, tile=tile,
+                out_bytes = await asyncio.to_thread(
+                    self._watermark.add_pdf_image_watermark,
+                    file_bytes,
+                    wm_bytes,
+                    opacity=opacity,
+                    tile=tile,
                 )
             else:
                 raise ValueError("不支持的水印类型")
@@ -447,8 +462,10 @@ class MarketplaceService:
             out_bytes: Optional[bytes] = None
             try:
                 model = await self._llm_model_service.resolve_model(model_id)
-                mask_bytes = self._watermark.build_mask_from_region(
-                    file_bytes, region or {"x": 0.65, "y": 0.82, "width": 0.3, "height": 0.12},
+                mask_bytes = await asyncio.to_thread(
+                    self._watermark.build_mask_from_region,
+                    file_bytes,
+                    region or {"x": 0.65, "y": 0.82, "width": 0.3, "height": 0.12},
                 )
                 edited = await edit_image(
                     file_bytes,
@@ -465,13 +482,20 @@ class MarketplaceService:
                 logger.info("AI 去水印跳过: %s", exc)
 
             if not out_bytes:
-                out_bytes = self._watermark.remove_image_watermark_fallback(file_bytes, region)
+                out_bytes = await asyncio.to_thread(
+                    self._watermark.remove_image_watermark_fallback,
+                    file_bytes,
+                    region,
+                )
                 method = "blur_fallback"
             out_filename = f"{Path(filename).stem}_dewatermarked.png"
             out_mime = "image/png"
         elif mime_type == "application/pdf" or filename.lower().endswith(".pdf"):
-            out_bytes = self._watermark.remove_pdf_watermark(
-                file_bytes, watermark_text=watermark_text, mode=mode,
+            out_bytes = await asyncio.to_thread(
+                self._watermark.remove_pdf_watermark,
+                file_bytes,
+                watermark_text=watermark_text,
+                mode=mode,
             )
             out_filename = f"{Path(filename).stem}_dewatermarked.pdf"
             out_mime = "application/pdf"

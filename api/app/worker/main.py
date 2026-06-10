@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import os
+import signal
 import socket
 import uuid
 
@@ -33,6 +34,25 @@ from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+SHUTDOWN_GRACE_SECONDS = 30
+
+
+async def _sandbox_cleanup_loop() -> None:
+    from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
+    from app.application.services.config_provider import get_runtime_config
+
+    interval = max(60, get_runtime_config().sandbox.cleanup_interval_seconds)
+    while True:
+        try:
+            removed = await DockerSandbox.cleanup_orphaned_containers()
+            if removed:
+                logger.info("Worker 清理孤儿沙箱容器数量: %s", removed)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Worker 清理孤儿沙箱容器失败: %s", exc)
+        await asyncio.sleep(interval)
+
 
 class AgentWorker:
     def __init__(self) -> None:
@@ -47,10 +67,7 @@ class AgentWorker:
         cipher = ApiKeyCipher(self._settings.api_key_secret)
         llm_model_service = LLMModelService(uow_factory=get_uow, cipher=cipher)
         skill_service = SkillService(uow_factory=get_uow)
-        memory_service = MemoryService(
-            uow_factory=get_uow,
-            recall_limit=get_runtime_config().memory.recall_limit,
-        )
+        memory_service = MemoryService(uow_factory=get_uow)
         file_storage = CosFileStorage(
             bucket=self._settings.cos_bucket,
             cos=get_cos(),
@@ -112,7 +129,16 @@ class AgentWorker:
                 await asyncio.sleep(1)
 
         if self._active_tasks:
-            await asyncio.gather(*self._active_tasks, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._active_tasks, return_exceptions=True),
+                    timeout=SHUTDOWN_GRACE_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Worker 优雅停机超时，仍有 %s 个活跃任务",
+                    len(self._active_tasks),
+                )
 
     def _on_job_task_done(self, task: asyncio.Task) -> None:
         self._active_tasks.discard(task)
@@ -218,6 +244,7 @@ class AgentWorker:
 
 
 async def main() -> None:
+    os.environ["MANUS_PROCESS_ROLE"] = "worker"
     setup_logging()
     settings = get_settings()
     # 必须先初始化基础设施(Postgres/Redis/Cos)，再构造 AgentWorker，
@@ -225,6 +252,9 @@ async def main() -> None:
     await get_redis().init()
     await get_postgres().init()
     await get_cos().init()
+    from app.infrastructure.external.event_seq_allocator import sync_global_event_seq
+
+    await sync_global_event_seq()
     from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
 
     await get_sandbox_pool().start()
@@ -236,12 +266,25 @@ async def main() -> None:
         skill_service=SkillService(uow_factory=get_uow),
     )
 
+    sandbox_cleanup_task = asyncio.create_task(_sandbox_cleanup_loop())
     worker = AgentWorker()
+    loop = asyncio.get_running_loop()
+
+    def _request_shutdown() -> None:
+        logger.info("Worker 收到停机信号")
+        worker._running = False
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, _request_shutdown)
+
     try:
         await worker.start()
-    except KeyboardInterrupt:
-        logger.info("Worker 收到中断信号")
     finally:
+        sandbox_cleanup_task.cancel()
+        try:
+            await sandbox_cleanup_task
+        except asyncio.CancelledError:
+            pass
         from app.infrastructure.external.app_config_notifier import stop_config_invalidate_listener
 
         await stop_config_invalidate_listener()

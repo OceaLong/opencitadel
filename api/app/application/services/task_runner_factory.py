@@ -14,6 +14,9 @@ from app.domain.external.file_storage import FileStorage
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
+from app.application.services.config_provider import get_runtime_config
+from app.application.services.session_state_service import SessionStateService
+from app.domain.models.agent_runtime_settings import AgentMemoryRuntimeSettings, AgentRuntimeSettings
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
 from app.domain.utils.app_config_filter import filter_a2a_config_by_refs, filter_mcp_config_by_refs
 from app.domain.models.codebase import SessionMode
@@ -25,6 +28,11 @@ from app.domain.services.agent_task_runner import AgentTaskRunner
 from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.services.tools.image_generation import ImageGenerationTool
 from app.domain.services.tools.memory import MemoryTool
+from app.infrastructure.adapters.domain_ports import (
+    default_event_sequence,
+    default_observability,
+    default_task_state,
+)
 from app.infrastructure.external.llm.factory import LLMFactory
 
 logger = logging.getLogger(__name__)
@@ -201,6 +209,16 @@ class TaskRunnerFactory:
                 )
                 await extractor.extract_from_session(session_id)
 
+        runtime = get_runtime_config()
+        runtime_settings = AgentRuntimeSettings(
+            tool_timeout_seconds=runtime.worker.tool_timeout_seconds,
+            memory=AgentMemoryRuntimeSettings(
+                compact_tool_content_max_chars=runtime.memory.compact_tool_content_max_chars,
+                compact_strategy=runtime.memory.compact_strategy,
+                compact_token_threshold=runtime.memory.compact_token_threshold,
+            ),
+        )
+
         return AgentTaskRunner(
             uow_factory=self._uow_factory,
             llm=llm,
@@ -222,4 +240,9 @@ class TaskRunnerFactory:
             checkpoint_service=self._checkpoint_service,
             mode=session.mode,
             codebase_id=session.codebase_id,
+            task_state_port=default_task_state(),
+            observability_port=default_observability(),
+            event_sequence_port=default_event_sequence(),
+            session_state_port=SessionStateService(self._uow_factory),
+            runtime_settings=runtime_settings,
         )

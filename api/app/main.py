@@ -147,15 +147,15 @@ async def lifespan(app: FastAPI):
     await get_redis().init()
     await get_postgres().init()
     await get_cos().init()
+    from app.infrastructure.external.event_seq_allocator import sync_global_event_seq
+
+    await sync_global_event_seq()
 
     # 4.种子化默认模型与内置Skill
     await bootstrap_data(
         uow_factory=get_uow,
         skill_service=get_skill_service(),
     )
-    from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
-
-    await get_sandbox_pool().start()
     from app.infrastructure.external.app_config_notifier import start_config_invalidate_listener
 
     await start_config_invalidate_listener()
