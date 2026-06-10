@@ -5,11 +5,9 @@ import os.path
 import uuid
 from datetime import datetime
 from typing import Tuple, BinaryIO, Callable
-
-from fastapi import UploadFile
 from starlette.concurrency import run_in_threadpool
 
-from app.domain.external.file_storage import FileStorage
+from app.domain.external.file_storage import FileStorage, FileUploadPayload
 from app.domain.models.file import File
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.storage.cos import Cos
@@ -32,12 +30,12 @@ class CosFileStorage(FileStorage):
         self._uow_factory = uow_factory
         self._uow = uow_factory()
 
-    async def upload_file(self, upload_file: UploadFile) -> File:
+    async def upload_file(self, payload: FileUploadPayload) -> File:
         """根据传递的文件源将文件上传到腾讯云cos"""
         try:
             # 1.生成随机的uuid作为文件id并获取文件扩展名
             file_id = str(uuid.uuid4())
-            _, file_extension = os.path.splitext(upload_file.filename)
+            _, file_extension = os.path.splitext(payload.filename)
             if not file_extension:
                 file_extension = ""
 
@@ -49,34 +47,34 @@ class CosFileStorage(FileStorage):
             await run_in_threadpool(
                 self.cos.client.put_object,
                 Bucket=self.bucket,
-                Body=upload_file.file,
+                Body=payload.file,
                 Key=cos_key,
             )
-            logger.info(f"文件上传成功: {upload_file.filename} (ID: {file_id})")
+            logger.info(f"文件上传成功: {payload.filename} (ID: {file_id})")
 
             # 4.构建file模型并将数据存储到数据库中
             file = File(
                 id=file_id,
-                filename=upload_file.filename,
+                filename=payload.filename,
                 key=cos_key,
                 extension=file_extension,
-                mime_type=upload_file.content_type or "",
-                size=upload_file.size,
+                mime_type=payload.content_type or "",
+                size=payload.size,
             )
-            async with self._uow:
-                await self._uow.file.save(file)
+            async with self._uow_factory() as uow:
+                await uow.file.save(file)
 
             return file
         except Exception as e:
-            logger.error(f"上传文件[{upload_file.filename}]失败: {str(e)}")
+            logger.error(f"上传文件[{payload.filename}]失败: {str(e)}")
             raise
 
     async def download_file(self, file_id: str) -> Tuple[BinaryIO, File]:
         """根据文件id查询数据并下载文件"""
         try:
             # 1.查询对应的文件记录是否存在
-            async with self._uow:
-                file = await self._uow.file.get_by_id(file_id)
+            async with self._uow_factory() as uow:
+                file = await uow.file.get_by_id(file_id)
             if not file:
                 raise ValueError(f"该文件不存在, 文件id: {file_id}")
 

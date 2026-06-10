@@ -12,7 +12,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.infrastructure.logging import setup_logging
-from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
 from app.infrastructure.observability.logging_context import configure_structured_logging
 from app.infrastructure.observability.otel import setup_observability
 from app.infrastructure.storage.cos import get_cos
@@ -38,20 +37,6 @@ runtime_config = get_runtime_config()
 # 2.初始化日志系统
 setup_logging()
 logger = logging.getLogger()
-
-
-async def _sandbox_cleanup_loop() -> None:
-    interval = max(60, runtime_config.sandbox.cleanup_interval_seconds)
-    while True:
-        try:
-            removed = await DockerSandbox.cleanup_orphaned_containers()
-            if removed:
-                logger.info("清理孤儿沙箱容器数量: %s", removed)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.warning("清理孤儿沙箱容器失败: %s", exc)
-        await asyncio.sleep(interval)
 
 
 async def _connection_pool_cleanup_loop() -> None:
@@ -150,7 +135,18 @@ async def lifespan(app: FastAPI):
     from app.infrastructure.external.event_seq_allocator import sync_global_event_seq
 
     await sync_global_event_seq()
-    await get_app_config_provider().get()
+    app_config = await get_app_config_provider().get()
+    from app.infrastructure.external.runtime_settings import (
+        SandboxRuntimeSettings,
+        TaskQueueRuntimeSettings,
+    )
+    from app.infrastructure.external.sandbox.docker_sandbox import configure_sandbox_runtime
+    from app.infrastructure.external.task.task_state import configure_task_state_runtime
+
+    configure_sandbox_runtime(SandboxRuntimeSettings.from_config(app_config.sandbox))
+    configure_task_state_runtime(
+        TaskQueueRuntimeSettings.from_config(app_config.streams, app_config.worker),
+    )
 
     # 4.种子化默认模型与内置Skill
     await bootstrap_data(
@@ -160,7 +156,6 @@ async def lifespan(app: FastAPI):
     from app.infrastructure.external.app_config_notifier import start_config_invalidate_listener
 
     await start_config_invalidate_listener()
-    sandbox_cleanup_task = asyncio.create_task(_sandbox_cleanup_loop())
     pool_cleanup_task = asyncio.create_task(_connection_pool_cleanup_loop())
     logger.info("MyManus初始化完成")
 
@@ -168,15 +163,10 @@ async def lifespan(app: FastAPI):
         # 4.lifespan分界点
         yield
     finally:
-        sandbox_cleanup_task.cancel()
         pool_cleanup_task.cancel()
         from app.infrastructure.external.app_config_notifier import stop_config_invalidate_listener
 
         await stop_config_invalidate_listener()
-        try:
-            await sandbox_cleanup_task
-        except asyncio.CancelledError:
-            pass
         try:
             await pool_cleanup_task
         except asyncio.CancelledError:

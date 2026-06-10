@@ -5,7 +5,7 @@ from typing import Tuple, BinaryIO, Callable
 from fastapi import UploadFile
 
 from app.application.errors.exceptions import NotFoundError
-from app.domain.external.file_storage import FileStorage
+from app.domain.external.file_storage import FileStorage, FileUploadPayload
 from app.domain.models.file import File
 from app.domain.repositories.uow import IUnitOfWork
 
@@ -24,7 +24,14 @@ class FileService:
 
     async def upload_file(self, upload_file: UploadFile) -> File:
         """将传递的文件上传到腾讯云cos并记录上传数据"""
-        return await self.file_storage.upload_file(upload_file=upload_file)
+        return await self.file_storage.upload_file(
+            FileUploadPayload(
+                file=upload_file.file,
+                filename=upload_file.filename,
+                size=upload_file.size,
+                content_type=upload_file.content_type or "",
+            ),
+        )
 
     async def get_file_info(self, file_id: str) -> File:
         """根据传递的文件id获取文件信息"""

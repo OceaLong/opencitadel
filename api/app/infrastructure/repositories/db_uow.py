@@ -7,6 +7,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from app.domain.repositories.uow import IUnitOfWork
+from app.infrastructure.adapters.domain_ports import default_session_list_notifier
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from core.config import get_settings
 from .db_checkpoint_repository import DBCheckpointRepository
@@ -50,7 +51,10 @@ class DBUnitOfWork(IUnitOfWork):
         self.checkpoint = DBCheckpointRepository(db_session=self.db_session)
         self.codebase = DBCodebaseRepository(db_session=self.db_session)
         self.file = DBFileRepository(db_session=self.db_session)
-        self.session = DBSessionRepository(db_session=self.db_session)
+        self.session = DBSessionRepository(
+            db_session=self.db_session,
+            session_list_notifier=default_session_list_notifier(),
+        )
         self.llm_model = DBLLMModelRepository(db_session=self.db_session, cipher=cipher)
         self.skill = DBSkillRepository(db_session=self.db_session)
         self.memory_entry = DBMemoryEntryRepository(db_session=self.db_session)

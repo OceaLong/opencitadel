@@ -7,8 +7,8 @@ import uuid
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple
 
+from app.infrastructure.external.runtime_settings import TaskQueueRuntimeSettings
 from app.infrastructure.storage.redis import get_redis
-from app.application.services.config_provider import get_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ TASK_DISPATCH_DLQ_STREAM = "task:dispatch:dlq"
 WORKER_CONSUMER_GROUP = "manus-workers"
 TASK_META_TTL_SECONDS = 86400 * 7
 OUTPUT_SEQ_INDEX_PREFIX = "task:output:seq:"
+CANCEL_NOTIFY_CHANNEL_PREFIX = "task:cancel:notify:"
 
 
 class TaskStatus(str, Enum):
@@ -29,11 +30,33 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 
+_TERMINAL_STATUSES = {
+    TaskStatus.DONE.value,
+    TaskStatus.CANCELLED.value,
+    TaskStatus.FAILED.value,
+}
+_task_queue_runtime_settings = TaskQueueRuntimeSettings()
+
+
+def configure_task_state_runtime(settings: TaskQueueRuntimeSettings) -> None:
+    global _task_queue_runtime_settings
+    _task_queue_runtime_settings = settings
+    if _task_state is not None:
+        _task_state.update_runtime_settings(settings)
+
+
 class TaskStateService:
     """Manage task lifecycle metadata in Redis for multi-process deployment."""
 
-    def __init__(self) -> None:
+    def __init__(
+            self,
+            runtime_settings: Optional[TaskQueueRuntimeSettings] = None,
+    ) -> None:
         self._redis = get_redis()
+        self._runtime_settings = runtime_settings or _task_queue_runtime_settings
+
+    def update_runtime_settings(self, settings: TaskQueueRuntimeSettings) -> None:
+        self._runtime_settings = settings
 
     @staticmethod
     def meta_key(task_id: str) -> str:
@@ -103,18 +126,71 @@ class TaskStateService:
         meta = await self.get_task_meta(task_id)
         if not meta:
             return True
-        return meta.get("status") in {
-            TaskStatus.DONE.value,
-            TaskStatus.CANCELLED.value,
-            TaskStatus.FAILED.value,
+        return meta.get("status") in _TERMINAL_STATUSES
+
+    @staticmethod
+    def cancel_notify_channel(task_id: str) -> str:
+        return f"{CANCEL_NOTIFY_CHANNEL_PREFIX}{task_id}"
+
+    async def get_runtime_snapshot(self, task_id: str) -> Dict[str, Any]:
+        """Fetch cancel flag and task meta in a single Redis pipeline round-trip."""
+        pipe = self._redis.client.pipeline()
+        pipe.get(self.cancel_key(task_id))
+        pipe.get(self.meta_key(task_id))
+        cancel_raw, meta_raw = await pipe.execute()
+
+        cancelled = bool(cancel_raw)
+        meta = json.loads(meta_raw) if meta_raw else None
+        status: Optional[TaskStatus] = None
+        is_done = True
+        if meta:
+            status_value = meta.get("status")
+            if status_value:
+                status = TaskStatus(status_value)
+            is_done = status_value in _TERMINAL_STATUSES
+
+        return {
+            "cancelled": cancelled,
+            "status": status,
+            "is_done": is_done,
+            "meta": meta,
         }
 
     async def request_cancel(self, task_id: str) -> None:
         await self._redis.client.set(self.cancel_key(task_id), "1", ex=3600)
         await self.set_status(task_id, TaskStatus.CANCELLED)
+        await self._redis.client.publish(self.cancel_notify_channel(task_id), "1")
 
     async def is_cancelled(self, task_id: str) -> bool:
         return bool(await self._redis.client.get(self.cancel_key(task_id)))
+
+    async def wait_for_cancel(self, task_id: str, timeout_seconds: float = 30.0) -> bool:
+        """Block until cancel is requested or timeout elapses."""
+        if await self.is_cancelled(task_id):
+            return True
+
+        pubsub = None
+        channel = self.cancel_notify_channel(task_id)
+        try:
+            pubsub = self._redis.client.pubsub()
+            await pubsub.subscribe(channel)
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=True,
+                timeout=timeout_seconds,
+            )
+            if message and message.get("type") == "message":
+                return True
+            return await self.is_cancelled(task_id)
+        except Exception as exc:
+            logger.debug("等待任务取消通知失败 task_id=%s: %s", task_id, exc)
+            return await self.is_cancelled(task_id)
+        finally:
+            if pubsub is not None:
+                try:
+                    await pubsub.unsubscribe(channel)
+                    await pubsub.aclose()
+                except Exception:
+                    pass
 
     @staticmethod
     def output_seq_index_key(task_id: str) -> str:
@@ -136,7 +212,7 @@ class TaskStateService:
         return await self._redis.client.xadd(
             TASK_DISPATCH_STREAM,
             {"task_id": task_id, "session_id": session_id},
-            maxlen=get_runtime_config().streams.dispatch_maxlen,
+            maxlen=self._runtime_settings.dispatch_maxlen,
             approximate=True,
         )
 
@@ -203,7 +279,6 @@ class TaskStateService:
             session_id: str,
             error: str,
     ) -> None:
-        runtime = get_runtime_config()
         meta = await self.get_task_meta(task_id) or {
             "task_id": task_id,
             "session_id": session_id,
@@ -214,7 +289,7 @@ class TaskStateService:
         meta["retry_count"] = retry_count
         meta["last_error"] = error
 
-        if retry_count >= max(1, runtime.worker.task_dispatch_max_retries):
+        if retry_count >= max(1, self._runtime_settings.task_dispatch_max_retries):
             meta["status"] = TaskStatus.FAILED.value
             await self._redis.client.xadd(
                 TASK_DISPATCH_DLQ_STREAM,
@@ -224,7 +299,7 @@ class TaskStateService:
                     "error": error,
                     "retry_count": retry_count,
                 },
-                maxlen=runtime.streams.stream_maxlen,
+                maxlen=self._runtime_settings.stream_maxlen,
                 approximate=True,
             )
             await self._redis.client.set(
@@ -251,5 +326,5 @@ _task_state: Optional[TaskStateService] = None
 def get_task_state() -> TaskStateService:
     global _task_state
     if _task_state is None:
-        _task_state = TaskStateService()
+        _task_state = TaskStateService(_task_queue_runtime_settings)
     return _task_state

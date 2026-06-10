@@ -13,6 +13,7 @@ from app.domain.models.event_upgrader import upgrade_event_payload
 from app.domain.models.file import File
 from app.domain.models.memory import Memory
 from app.domain.models.session import Session, SessionStatus
+from app.domain.external.session_list_notifier import NoopSessionListNotifier, SessionListNotifierPort
 from app.domain.repositories.session_repository import SessionRepository
 from app.infrastructure.models import (
     SessionAgentMemoryModel,
@@ -25,9 +26,14 @@ from app.infrastructure.models import (
 class DBSessionRepository(SessionRepository):
     """基于Postgres数据库的会话仓库"""
 
-    def __init__(self, db_session: AsyncSession) -> None:
+    def __init__(
+            self,
+            db_session: AsyncSession,
+            session_list_notifier: Optional[SessionListNotifierPort] = None,
+    ) -> None:
         """构造函数，完成数据仓库的初始化"""
         self.db_session = db_session
+        self._session_list_notifier = session_list_notifier or NoopSessionListNotifier()
 
     async def _load_memories(self, session_id: str) -> Dict[str, Memory]:
         stmt = select(SessionAgentMemoryModel).where(
@@ -212,9 +218,7 @@ class DBSessionRepository(SessionRepository):
         if result.rowcount == 0:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 
-        from app.infrastructure.external.session_list_notifier import notify_sessions_changed
-
-        await notify_sessions_changed()
+        await self._session_list_notifier.notify_sessions_changed()
 
     async def add_event(
             self,

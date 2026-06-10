@@ -6,9 +6,7 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional, Protocol, Union
 
-from fastapi import UploadFile
-
-from app.domain.external.file_storage import FileStorage
+from app.domain.external.file_storage import FileStorage, FileUploadPayload
 from app.domain.external.llm import LLM
 from app.domain.models.file import File
 from app.domain.models.llm_model import ModelCapabilities
@@ -141,7 +139,12 @@ async def upload_image_bytes_to_storage(
     """上传图片到 COS，返回公开 URL。"""
     name = filename or f"{uuid.uuid4()}.png"
     stream = io.BytesIO(image_bytes)
-    upload = UploadFile(file=stream, filename=name, size=len(image_bytes))
+    upload = FileUploadPayload(
+        file=stream,
+        filename=name,
+        size=len(image_bytes),
+        content_type=mime_type,
+    )
     stored = await file_storage.upload_file(upload)
     return build_file_public_url(stored)
 

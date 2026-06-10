@@ -195,10 +195,9 @@ class AgentWorker:
 
         async def cancel_watcher() -> None:
             while not await task.is_done():
-                if await self._task_state.is_cancelled(task_id):
+                if await self._task_state.wait_for_cancel(task_id, timeout_seconds=5.0):
                     task.cancel()
                     break
-                await asyncio.sleep(0.5)
 
         watcher = asyncio.create_task(cancel_watcher())
         try:
@@ -256,7 +255,18 @@ async def main() -> None:
     await sync_global_event_seq()
     from app.application.services.config_provider import get_app_config_provider
 
-    await get_app_config_provider().get()
+    app_config = await get_app_config_provider().get()
+    from app.infrastructure.external.runtime_settings import (
+        SandboxRuntimeSettings,
+        TaskQueueRuntimeSettings,
+    )
+    from app.infrastructure.external.sandbox.docker_sandbox import configure_sandbox_runtime
+    from app.infrastructure.external.task.task_state import configure_task_state_runtime
+
+    configure_sandbox_runtime(SandboxRuntimeSettings.from_config(app_config.sandbox))
+    configure_task_state_runtime(
+        TaskQueueRuntimeSettings.from_config(app_config.streams, app_config.worker),
+    )
     from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
 
     await get_sandbox_pool().start()

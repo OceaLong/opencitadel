@@ -83,7 +83,6 @@ class BaseAgent(ABC):
     ) -> None:
         """构造函数，完成Agent的初始化"""
         self._uow_factory = uow_factory
-        self._uow = uow_factory()
         self._session_id = session_id
         self._agent_config = agent_config
         self._llm = llm
@@ -253,8 +252,8 @@ class BaseAgent(ABC):
     async def _ensure_memory(self) -> None:
         """确保智能体记忆是存在的"""
         if self._memory is None:
-            async with self._uow:
-                self._memory = await self._uow.session.get_memory(self._session_id, self.name)
+            async with self._uow_factory() as uow:
+                self._memory = await uow.session.get_memory(self._session_id, self.name)
 
     def _build_system_content(self) -> str:
         system_content = self._system_prompt
@@ -489,21 +488,21 @@ class BaseAgent(ABC):
 
         # 4.将记忆持久化到数据仓库中
         if persist or system_changed:
-            async with self._uow:
-                await self._uow.session.save_memory(self._session_id, self.name, self._memory)
+            async with self._uow_factory() as uow:
+                await uow.session.save_memory(self._session_id, self.name, self._memory)
 
     async def _persist_memory(self) -> None:
         await self._ensure_memory()
-        async with self._uow:
-            await self._uow.session.save_memory(self._session_id, self.name, self._memory)
+        async with self._uow_factory() as uow:
+            await uow.session.save_memory(self._session_id, self.name, self._memory)
 
     async def compact_memory(self) -> None:
         """压缩Agent的记忆（仅规则裁剪）。"""
         await self._ensure_memory()
         memory_cfg = self._runtime_settings.memory
         self._memory.compact(tool_content_max_chars=memory_cfg.compact_tool_content_max_chars)
-        async with self._uow:
-            await self._uow.session.save_memory(self._session_id, self.name, self._memory)
+        async with self._uow_factory() as uow:
+            await uow.session.save_memory(self._session_id, self.name, self._memory)
 
     async def summarize_and_compact(self) -> None:
         """混合记忆压缩：规则裁剪 + 超阈值时 LLM 摘要。"""
@@ -553,8 +552,8 @@ class BaseAgent(ABC):
                 "role": "user",
                 "content": f"[历史摘要 — 此前对话已压缩]\n{summary_text.strip()}",
             }] + suffix
-            async with self._uow:
-                await self._uow.session.save_memory(self._session_id, self.name, self._memory)
+            async with self._uow_factory() as uow:
+                await uow.session.save_memory(self._session_id, self.name, self._memory)
             logger.info(
                 "Agent[%s] LLM 记忆摘要完成: middle=%s kept=%s tokens_est=%s",
                 self.name,
@@ -597,8 +596,8 @@ class BaseAgent(ABC):
             self._memory.roll_back()
 
         # 6.将记忆持久化
-        async with self._uow:
-            await self._uow.session.save_memory(self._session_id, self.name, self._memory)
+        async with self._uow_factory() as uow:
+            await uow.session.save_memory(self._session_id, self.name, self._memory)
 
     async def invoke(
             self,

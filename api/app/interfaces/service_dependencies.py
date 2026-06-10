@@ -27,6 +27,11 @@ from app.infrastructure.external.health_checker.redis_health_checker import Redi
 from app.infrastructure.external.json_parser.repair_json_parser import RepairJSONParser
 from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
 from app.infrastructure.external.search.bing_search import BingSearchEngine
+from app.infrastructure.adapters.domain_ports import (
+    default_event_sequence,
+    default_session_list_notifier,
+    default_task_state,
+)
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
 from app.application.services.config_provider import get_app_config_provider, get_runtime_config
 from app.application.services.app_config_repository_factory import create_app_config_repository
@@ -91,7 +96,11 @@ def get_file_service() -> FileService:
 
 @lru_cache()
 def get_session_service() -> SessionService:
-    return SessionService(uow_factory=get_uow, sandbox_cls=DockerSandbox)
+    return SessionService(
+        uow_factory=get_uow,
+        sandbox_cls=DockerSandbox,
+        session_list_notifier=default_session_list_notifier(),
+    )
 
 
 @lru_cache()
@@ -149,6 +158,8 @@ def get_agent_service() -> AgentService:
         auto_extract_memory=runtime_config.memory.auto_extract_enabled,
         config_provider=config_provider,
         checkpoint_service=get_checkpoint_service(),
+        task_state_port=default_task_state(),
+        event_sequence_port=default_event_sequence(),
     )
 
 

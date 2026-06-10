@@ -68,7 +68,6 @@ class PlannerReActFlow(BaseFlow):
         """构造函数，完成规划与执行流的初始化"""
         # 1.流初始化数据配置
         self._uow_factory = uow_factory
-        self._uow = uow_factory()
         self._session_id = session_id
         self.status = FlowStatus.IDLE
         self.plan: Optional[Plan] = None
@@ -156,8 +155,8 @@ class PlannerReActFlow(BaseFlow):
 
     async def _invoke_flow(self, message: Message, tracer) -> AsyncGenerator[BaseEvent, None]:
         # 1.调用会话仓库查询会话是否存在
-        async with self._uow:
-            session = await self._uow.session.get_by_id(self._session_id)
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(self._session_id)
         if not session:
             raise ValueError(f"会话[{self._session_id}]不存在, 请核实后尝试")
 
@@ -169,8 +168,8 @@ class PlannerReActFlow(BaseFlow):
         clarify_resume = session.pending_phase == CLARIFY_PENDING_PHASE
         needs_event_history = session.status != SessionStatus.PENDING and not clarify_resume
         if needs_event_history:
-            async with self._uow:
-                event_records = await self._uow.session.list_events(self._session_id, limit=200)
+            async with self._uow_factory() as uow:
+                event_records = await uow.session.list_events(self._session_id, limit=200)
             if event_records:
                 session.events = [event for _, event in event_records]
 

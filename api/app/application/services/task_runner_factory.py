@@ -31,6 +31,7 @@ from app.domain.services.tools.memory import MemoryTool
 from app.infrastructure.adapters.domain_ports import (
     default_event_sequence,
     default_observability,
+    default_session_list_notifier,
     default_task_state,
 )
 from app.infrastructure.external.llm.factory import LLMFactory
@@ -243,6 +244,9 @@ class TaskRunnerFactory:
             task_state_port=default_task_state(),
             observability_port=default_observability(),
             event_sequence_port=default_event_sequence(),
-            session_state_port=SessionStateService(self._uow_factory),
+            session_state_port=SessionStateService(
+                self._uow_factory,
+                session_list_notifier=default_session_list_notifier(),
+            ),
             runtime_settings=runtime_settings,
         )

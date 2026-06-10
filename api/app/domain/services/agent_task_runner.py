@@ -1,14 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import asyncio
-import io
 import logging
 import time
-import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, AsyncGenerator, Callable, BinaryIO, Optional, Tuple
-
-from fastapi import UploadFile
+from typing import Any, Dict, List, AsyncGenerator, Callable, Optional
 from pydantic import TypeAdapter
 
 from app.domain.external.browser import Browser
@@ -19,12 +15,9 @@ from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
 from app.domain.external.task import TaskRunner, Task
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
-from app.domain.models.checkpoint import CheckpointAnchorType
 from app.domain.models.event import ErrorEvent, Event, MessageEvent, BaseEvent, ToolEvent, \
     TitleEvent, WaitEvent, DoneEvent, AssistantNoticeEvent, StepEvent, StepEventStatus, ToolEventStatus
 from app.domain.services.checkpoint_service import CheckpointService
-from app.domain.models.event_policy import should_persist_event
-from app.infrastructure.external.task.task_state import get_task_state
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.utils.vision import is_image_mime, is_video_mime
@@ -33,6 +26,9 @@ from app.domain.models.codebase import SessionMode
 from app.domain.models.session import SessionStatus
 from app.domain.models.skill import Skill
 from app.domain.repositories.uow import IUnitOfWork
+from app.domain.services.agent.attachment_sync import AgentAttachmentSyncer
+from app.domain.services.agent.event_emitter import AgentEventEmitter
+from app.domain.services.agent.sandbox_lifecycle import SandboxLifecycleCoordinator
 from app.domain.services.flows.planner_react import PlannerReActFlow
 from app.domain.services.flows.code_ask_flow import CodeAskFlow
 from app.domain.services.tool_event_presenter import FILE_MUTATING_FUNCTIONS, ToolEventPresenter
@@ -80,7 +76,6 @@ class AgentTaskRunner(TaskRunner):
     ) -> None:
         """构造函数，完成Agent任务运行器的创建"""
         self._uow_factory = uow_factory
-        self._uow = uow_factory()
         self._session_id = session_id
         self._sandbox = sandbox
         self._mcp_config = mcp_config
@@ -102,14 +97,27 @@ class AgentTaskRunner(TaskRunner):
         self._session_state = session_state_port
         self._task_state_port = task_state_port
         self._observability = observability_port
-        self._event_sequence = event_sequence_port
-        self._event_persist_buffer: List[Tuple[BaseEvent, Dict[str, Any]]] = []
-        self._event_persist_batch_size = 10
+        self._event_emitter = AgentEventEmitter(
+            session_id=session_id,
+            uow_factory=uow_factory,
+            event_sequence=event_sequence_port,
+            task_state_port=task_state_port,
+        )
+        self._attachment_sync = AgentAttachmentSyncer(
+            session_id=session_id,
+            uow_factory=uow_factory,
+            sandbox=sandbox,
+            file_storage=file_storage,
+        )
+        self._sandbox_lifecycle = SandboxLifecycleCoordinator(
+            session_id=session_id,
+            sandbox=sandbox,
+            checkpoint_service=checkpoint_service,
+        )
         self._agent_config = agent_config
         self._run_started_at: Optional[float] = None
         self._step_started_at: Dict[str, datetime] = {}
         self._tool_started_at: Dict[str, datetime] = {}
-        self._last_observable_event_id: Optional[str] = None
         self._last_step_checkpoint_at: float = 0.0
         self._step_checkpoint_min_interval_seconds = 60.0
         self._checkpoint_service = checkpoint_service
@@ -117,8 +125,8 @@ class AgentTaskRunner(TaskRunner):
             sandbox=sandbox,
             browser=browser,
             file_storage=file_storage,
-            sync_file_to_storage=self._sync_file_to_storage,
-            get_stream_size=self._get_stream_size,
+            sync_file_to_storage=self._attachment_sync.sync_file_to_storage,
+            get_stream_size=AgentAttachmentSyncer.get_stream_size,
         )
         self._mode = mode
         self._codebase_id = codebase_id
@@ -162,34 +170,10 @@ class AgentTaskRunner(TaskRunner):
             )
 
     async def _put_and_add_event(self, task: Task, event: Event) -> None:
-        """往指定任务的消息队列中添加事件"""
-        persist = should_persist_event(event)
-        if persist:
-            seq = await self._event_sequence.allocate()
-            event.id = str(seq)
-        else:
-            event.id = f"t-{uuid.uuid4()}"
-        event_data = event.model_dump(mode="json")
-        stream_message_id = await task.output_stream.put(event.model_dump_json())
-        if isinstance(event, (StepEvent, ToolEvent)):
-            self._last_observable_event_id = event.id
-
-        # 2.仅持久化稳定、高价值事件，流式 delta 不落库
-        if persist:
-            await get_task_state().set_output_seq_cursor(task.id, int(event.id), stream_message_id)
-            self._event_persist_buffer.append((event, event_data))
-            critical = isinstance(event, (DoneEvent, ErrorEvent, WaitEvent, StepEvent, ToolEvent))
-            if critical or len(self._event_persist_buffer) >= self._event_persist_batch_size:
-                await self._flush_event_persist_buffer()
+        await self._event_emitter.emit(task, event)
 
     async def _flush_event_persist_buffer(self) -> None:
-        """批量刷入已持久化事件，降低数据库往返次数。"""
-        if not self._event_persist_buffer:
-            return
-        payloads = self._event_persist_buffer
-        self._event_persist_buffer = []
-        async with self._uow:
-            await self._uow.session.add_event_payloads(self._session_id, payloads)
+        await self._event_emitter.flush()
 
     async def _emit_session_status(self, task: Task, status: SessionStatus) -> None:
         """推送服务端权威会话状态事件"""
@@ -226,31 +210,6 @@ class AgentTaskRunner(TaskRunner):
 
         return event
 
-    async def _sync_file_to_sandbox(self, file_id: str) -> File:
-        """根据文件id将文件同步到沙箱中"""
-        try:
-            # 1.调用文件存储下载文件信息
-            file_data, file = await self._file_storage.download_file(file_id)
-
-            # 2.组装沙箱文件路径
-            filepath = f"/home/ubuntu/upload/{file.filename}"
-
-            # 3.调用沙箱将文件上传至沙箱
-            tool_result = await self._sandbox.upload_file(
-                file_data=file_data,
-                filepath=filepath,
-                filename=file.filename
-            )
-
-            # 4.判断是否上传成功
-            if tool_result.success:
-                file.filepath = filepath
-                async with self._uow:
-                    await self._uow.file.save(file)  # 可以更新也可以不更新
-                return file
-        except Exception as e:
-            logger.exception(f"AgentTaskRunner同步文件[{file_id}]失败: {str(e)}")
-
     async def _build_vision_attachments(self, files: List[File]) -> List[VisionAttachment]:
         """为多模态模型构建用户附件（图片/音频/视频帧）。"""
         llm = self._flow.react._llm
@@ -276,117 +235,6 @@ class AgentTaskRunner(TaskRunner):
             except Exception as exc:
                 logger.warning("视频抽帧失败 file_id=%s: %s", file.id, exc)
         return attachments
-
-    async def _sync_message_attachments_to_sandbox(self, event: MessageEvent) -> None:
-        """将消息事件中的附件同步到沙箱中"""
-        # 1.定义附件列表
-        attachments: List[str] = []
-
-        try:
-            # 2.判断消息中是否存在附件
-            if event.attachments:
-                # 3.循环遍历所有的消息附件
-                for attachment in event.attachments:
-                    # 4.根据同步文件的id将数据同步到沙箱中
-                    file = await self._sync_file_to_sandbox(attachment.id)
-
-                    # 5.文件是否同步成功
-                    if file:
-                        attachments.append(file)
-                        async with self._uow:
-                            await self._uow.session.add_file(self._session_id, file)
-
-            # 6.更新消息事件中的attachments
-            event.attachments = attachments
-        except Exception as e:
-            logger.exception(f"AgentTaskRunner同步消息附件到沙箱失败: {str(e)}")
-
-    @classmethod
-    def _get_stream_size(cls, f: BinaryIO) -> int:
-        """根据传递的文件流，获取计算文件的大小"""
-        # 1.记录当前文件指针位置
-        current_pos = f.tell()
-
-        # 2.将指针移动到文件末尾, seek，0: 偏移量、2: 相对文件末尾
-        f.seek(0, 2)
-
-        # 3.获取当前位置，也就是文件大小
-        size = f.tell()
-
-        # 4.恢复指针到原始位置
-        f.seek(current_pos)
-
-        return size
-
-    async def _sync_file_to_storage(self, filepath: str) -> Optional[File]:
-        """将沙箱中指定的文件路径数据同步到存储桶中"""
-        try:
-            exists_result = await self._sandbox.check_file_exists(filepath)
-            exists = (exists_result.data or {}).get("exists", False)
-            if not exists_result.success or not exists:
-                logger.warning(
-                    "会话[%s] 跳过附件同步，沙箱文件不存在: %s",
-                    self._session_id,
-                    filepath,
-                )
-                return None
-
-            # 1.根据文件路径从会话中查找文件数据
-            async with self._uow:
-                file = await self._uow.session.get_file_by_path(self._session_id, filepath)
-
-            # 2.从沙箱中下载文件
-            file_data = await self._sandbox.download_file(filepath)
-
-            # 3.判断会话中的文件是否存在
-            if file:
-                async with self._uow:
-                    await self._uow.session.remove_file(self._session_id, file.filepath)
-
-            # 4.提取文件名字、文件信息并更新文件路径
-            filename = filepath.split("/")[-1]
-            upload_file = UploadFile(
-                file=file_data,
-                filename=filename,
-                size=self._get_stream_size(file_data),
-            )
-
-            # 5.上传文件到文件存储桶
-            file = await self._file_storage.upload_file(upload_file)
-            file.filepath = filepath
-
-            # 6.往会话中新增一个文件信息
-            async with self._uow:
-                await self._uow.session.add_file(self._session_id, file)
-            return file
-        except Exception as e:
-            logger.warning(
-                "会话[%s] 同步文件到存储桶失败 filepath=%s error=%s",
-                self._session_id,
-                filepath,
-                e,
-            )
-            return None
-
-    async def _sync_message_attachments_to_storage(self, event: MessageEvent) -> None:
-        """将消息事件的附件同步到文件存储桶中"""
-        # 1.定义附件列表存储数据
-        attachments: List[File] = []
-
-        try:
-            # 2.判断消息中是否存在附件
-            if event.attachments:
-                # 3.循环遍历所有附件
-                for attachment in event.attachments:
-                    # 4.根据文件路径将数据同步到文件存储桶
-                    file = await self._sync_file_to_storage(attachment.filepath)
-                    if file:
-                        attachments.append(file)
-
-            # 5.更新时间中的附件列表资源
-            event.attachments = attachments
-        except Exception as e:
-            logger.exception(f"AgentTaskRunner同步消息附件到存储桶失败: {str(e)}")
 
     async def _handle_tool_event(self, event: ToolEvent) -> None:
         """额外处理工具消息，使其前端交互更友好"""
@@ -427,13 +275,15 @@ class AgentTaskRunner(TaskRunner):
             return
 
         if isinstance(event, ErrorEvent):
-            event.parent_event_id = event.parent_event_id or self._last_observable_event_id
+            event.parent_event_id = (
+                event.parent_event_id or self._event_emitter.last_observable_event_id
+            )
 
     async def _emit_code_diff_if_needed(self, task: Task) -> None:
         """After agent code changes, emit git diff summary."""
         try:
-            async with self._uow:
-                codebase = await self._uow.codebase.get_by_id(self._codebase_id)
+            async with self._uow_factory() as uow:
+                codebase = await uow.codebase.get_by_id(self._codebase_id)
             if not codebase or not codebase.workspace_path:
                 return
             workspace = codebase.workspace_path
@@ -470,7 +320,7 @@ class AgentTaskRunner(TaskRunner):
                 await self._handle_tool_event(event)
             elif isinstance(event, MessageEvent):
                 # 4.如果是消息事件则将AI消息事件中的附件同步到存储中
-                await self._sync_message_attachments_to_storage(event)
+                await self._attachment_sync.sync_message_attachments_to_storage(event)
 
             self._annotate_observable_event(event)
 
@@ -504,13 +354,13 @@ class AgentTaskRunner(TaskRunner):
         cancelled = False
         try:
             logger.info(f"AgentTaskRunner任务处理开始")
-            await self._sandbox.ensure_sandbox()
+            await self._sandbox_lifecycle.ensure_ready()
             await self._mcp_tool.initialize(self._mcp_config)
             await self._a2a_tool.initialize(self._a2a_config)
             await self._emit_session_status(task, SessionStatus.RUNNING)
             self._run_started_at = time.monotonic()
 
-            while not await task.input_stream.is_empty():
+            while True:
                 if self._is_run_timed_out():
                     await self._handle_run_timeout(task)
                     return
@@ -520,12 +370,12 @@ class AgentTaskRunner(TaskRunner):
 
                 event = await self._pop_event(task)
                 if event is None:
-                    continue
+                    break
                 message = ""
 
                 if isinstance(event, MessageEvent):
                     message = event.message or ""
-                    await self._sync_message_attachments_to_sandbox(event)
+                    await self._attachment_sync.sync_message_attachments_to_sandbox(event)
                     logger.info(f"AgentTaskRunner接收到新消息: {message[:50]}...")
 
                 synced_files = event.attachments or []
@@ -535,22 +385,8 @@ class AgentTaskRunner(TaskRunner):
                     vision_attachments=await self._build_vision_attachments(synced_files),
                 )
 
-                if (
-                    self._checkpoint_service
-                    and isinstance(event, MessageEvent)
-                    and event.role == "user"
-                    and event.id
-                ):
-                    try:
-                        await self._checkpoint_service.create_checkpoint(
-                            session_id=self._session_id,
-                            anchor_type=CheckpointAnchorType.USER_MESSAGE,
-                            anchor_event_id=event.id,
-                            label=(event.message or "用户消息")[:200],
-                            sandbox=self._sandbox,
-                        )
-                    except Exception as exc:
-                        logger.warning("创建用户消息还原点失败: %s", exc)
+                if isinstance(event, MessageEvent):
+                    await self._sandbox_lifecycle.create_user_message_checkpoint(event)
 
                 async for event in self._run_flow(message_obj):
                     if self._is_run_timed_out():
@@ -573,34 +409,27 @@ class AgentTaskRunner(TaskRunner):
                         self._last_step_checkpoint_at = time.monotonic()
                         try:
                             await self._flush_event_persist_buffer()
-                            step_label = event.step.description if event.step else "执行步骤"
-                            await self._checkpoint_service.create_checkpoint(
-                                session_id=self._session_id,
-                                anchor_type=CheckpointAnchorType.STEP,
-                                anchor_event_id=event.id,
-                                label=step_label[:200],
-                                sandbox=self._sandbox,
-                            )
+                            await self._sandbox_lifecycle.create_step_checkpoint(event)
                         except Exception as exc:
                             logger.warning("创建步骤还原点失败: %s", exc)
 
                     if isinstance(event, TitleEvent):
-                        async with self._uow:
-                            await self._uow.session.update_title(self._session_id, event.title)
+                        async with self._uow_factory() as uow:
+                            await uow.session.update_title(self._session_id, event.title)
                     elif isinstance(event, (MessageEvent, AssistantNoticeEvent)):
-                        async with self._uow:
-                            await self._uow.session.update_latest_message(
+                        async with self._uow_factory() as uow:
+                            await uow.session.update_latest_message(
                                 self._session_id,
                                 event.message,
                                 event.created_at,
                             )
-                            await self._uow.session.increment_unread_message_count(self._session_id)
+                            await uow.session.increment_unread_message_count(self._session_id)
                     elif isinstance(event, WaitEvent):
                         await self._emit_session_status(task, SessionStatus.WAITING)
                         await self._flush_event_persist_buffer()
                         return
 
-                    if not await task.input_stream.is_empty():
+                    if await task.input_stream.size() > 0:
                         await self._flush_event_persist_buffer()
                         break
 

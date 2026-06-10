@@ -25,12 +25,12 @@ from app.domain.models.event_upgrader import upgrade_event_payload
 from app.domain.models.checkpoint import Checkpoint
 from app.domain.models.codebase import SessionMode
 from app.domain.models.session import Session, SessionStatus
+from app.domain.external.event_sequence import EventSequencePort
+from app.domain.external.task_state_port import TaskStatePort
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.checkpoint_service import CheckpointService
-from app.infrastructure.external.event_seq_allocator import allocate_event_seq
-from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
-from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
-from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
+from app.infrastructure.adapters.domain_ports import default_event_sequence, default_task_state
+from app.infrastructure.external.task.task_state import TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +57,13 @@ class AgentService:
             auto_extract_memory: bool = True,
             config_provider: Optional[AppConfigProvider] = None,
             checkpoint_service: Optional[CheckpointService] = None,
+            task_state_port: Optional[TaskStatePort] = None,
+            event_sequence_port: Optional[EventSequencePort] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._task_cls = task_cls
-        self._task_state = get_task_state()
+        self._task_state = task_state_port or default_task_state()
+        self._event_sequence = event_sequence_port or default_event_sequence()
         self._checkpoint_service = checkpoint_service
         self._runner_factory = TaskRunnerFactory(
             uow_factory=uow_factory,
@@ -80,14 +83,14 @@ class AgentService:
         )
         logger.info("AgentService初始化成功")
 
-    async def _get_task(self, session: Session) -> Optional[RedisStreamTask]:
+    async def _get_task(self, session: Session) -> Optional[Task]:
         task_id = session.task_id
         if not task_id:
             return None
-        return await RedisStreamTask.get(task_id)
+        return await self._task_cls.get(task_id)
 
-    async def _create_task(self, session: Session) -> RedisStreamTask:
-        task = await RedisStreamTask.create_for_session(session.id)
+    async def _create_task(self, session: Session) -> Task:
+        task = await self._task_cls.create_for_session(session.id)
         session.task_id = task.id
         async with self._uow_factory() as uow:
             await uow.session.save(session)
@@ -126,25 +129,28 @@ class AgentService:
     async def _resolve_redis_cursor(self, task_id: str, last_seq: int) -> str:
         if last_seq <= 0:
             return "0"
-        cursor = await get_task_state().get_output_seq_cursor(task_id, last_seq)
+        cursor = await self._task_state.get_output_seq_cursor(task_id, last_seq)
         return cursor or "0"
 
     async def _consume_output_stream(
             self,
-            task_id: str,
+            task: Task,
             session_id: str,
             latest_event_id: Optional[str],
     ) -> AsyncGenerator[BaseEvent, None]:
-        output_stream = RedisStreamMessageQueue(f"task:output:{task_id}")
+        output_stream = task.output_stream
+        task_id = task.id
         last_seq = await self._resolve_last_event_seq(session_id, latest_event_id)
         redis_cursor = await self._resolve_redis_cursor(task_id, last_seq)
         await self._safe_update_unread_count(session_id)
 
-        while True:
-            if await self._task_state.is_cancelled(task_id):
-                yield DoneEvent()
-                break
+        terminal_statuses = {
+            TaskStatus.DONE,
+            TaskStatus.CANCELLED,
+            TaskStatus.FAILED,
+        }
 
+        while True:
             stream_message_id, event_str = await output_stream.get(
                 start_id=redis_cursor,
                 block_ms=500,
@@ -169,14 +175,13 @@ class AgentService:
                     return
                 continue
 
-            if await self._task_state.is_done(task_id):
-                status = await get_task_state().get_status(task_id)
-                if status in {
-                    TaskStatus.DONE,
-                    TaskStatus.CANCELLED,
-                    TaskStatus.FAILED,
-                }:
-                    return
+            snapshot = await self._task_state.get_runtime_snapshot(task_id)
+            if snapshot.get("cancelled"):
+                yield DoneEvent()
+                break
+            status = snapshot.get("status")
+            if snapshot.get("is_done") and status in terminal_statuses:
+                return
 
     async def chat(
             self,
@@ -233,27 +238,23 @@ class AgentService:
                         logger.error(f"会话[{session_id}]创建任务失败")
                         raise RuntimeError(f"会话[{session_id}]创建任务失败")
 
+                message_event = MessageEvent(
+                    role="user",
+                    message=message,
+                )
+                seq = await self._event_sequence.allocate()
+                message_event.id = str(seq)
                 async with self._uow_factory() as uow:
                     await uow.session.update_latest_message(
                         session_id=session_id,
                         message=message,
                         timestamp=timestamp or datetime.now(),
                     )
-
-                async with self._uow_factory() as uow:
                     db_attachments = await uow.file.list_by_ids(attachments or [])
-
-                message_event = MessageEvent(
-                    role="user",
-                    message=message,
-                    attachments=db_attachments,
-                )
-                seq = await allocate_event_seq()
-                message_event.id = str(seq)
+                    message_event.attachments = db_attachments
+                    await uow.session.add_event(session_id, message_event, seq=seq)
                 await task.input_stream.put(message_event.model_dump_json())
                 yield message_event
-                async with self._uow_factory() as uow:
-                    await uow.session.add_event(session_id, message_event, seq=seq)
                 if should_dispatch:
                     await task.invoke()
                 logger.info(f"往会话[{session_id}]输入消息队列写入消息: {message[:50]}...")
@@ -265,7 +266,7 @@ class AgentService:
 
             logger.info(f"会话[{session_id}]已启动, task_id={task.id}")
 
-            async for event in self._consume_output_stream(task.id, session_id, latest_event_id):
+            async for event in self._consume_output_stream(task, session_id, latest_event_id):
                 yield event
 
             logger.info(f"会话[{session_id}]本轮运行结束")
@@ -273,7 +274,7 @@ class AgentService:
             logger.exception(f"任务会话[{session_id}]对话出错: {str(e)}")
             event = ErrorEvent(error=str(e))
             try:
-                seq = await allocate_event_seq()
+                seq = await self._event_sequence.allocate()
                 event.id = str(seq)
                 async with self._uow_factory() as uow:
                     await uow.session.add_event(session_id, event, seq=seq)

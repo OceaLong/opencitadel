@@ -9,7 +9,7 @@ import os
 import time
 from typing import TYPE_CHECKING, Optional
 
-from app.application.services.config_provider import get_runtime_config
+from app.infrastructure.external.sandbox.docker_sandbox import get_sandbox_runtime_settings
 
 if TYPE_CHECKING:
     from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
@@ -26,7 +26,7 @@ class SandboxPool:
     _instance: Optional["SandboxPool"] = None
 
     def __init__(self) -> None:
-        sandbox = get_runtime_config().sandbox
+        sandbox = get_sandbox_runtime_settings()
         self._enabled = bool(
             not sandbox.address
             and sandbox.pool_enabled
@@ -80,7 +80,12 @@ class SandboxPool:
             await self.touch_activity(sandbox.id)
             return sandbox
         except asyncio.QueueEmpty:
-            return await DockerSandbox._create_and_warm()
+            self.refill_background()
+            return await DockerSandbox._create_and_fast_warm()
+
+    def refill_background(self) -> None:
+        if self._started and (self._warmup_task is None or self._warmup_task.done()):
+            self._warmup_task = asyncio.create_task(self._warmup_loop())
 
     async def _warmup_loop(self) -> None:
         from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox

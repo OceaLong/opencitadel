@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 from app.domain.external.event_sequence import EventSequencePort
 from app.domain.external.observability import ObservabilityPort
+from app.domain.external.session_list_notifier import SessionListNotifierPort
 from app.domain.external.task_state_port import TaskStatePort
 from app.infrastructure.external.event_seq_allocator import allocate_event_seq
 from app.infrastructure.external.task.task_state import get_task_state
@@ -45,10 +46,32 @@ class RedisTaskStateAdapter(TaskStatePort):
     async def get_task_meta(self, task_id: str) -> Optional[Dict[str, Any]]:
         return await self._task_state.get_task_meta(task_id)
 
+    async def get_runtime_snapshot(self, task_id: str) -> Dict[str, Any]:
+        return await self._task_state.get_runtime_snapshot(task_id)
+
+    async def set_output_seq_cursor(self, task_id: str, seq: int, stream_id: str) -> None:
+        await self._task_state.set_output_seq_cursor(task_id, seq, stream_id)
+
+    async def get_output_seq_cursor(self, task_id: str, seq: int) -> Optional[str]:
+        return await self._task_state.get_output_seq_cursor(task_id, seq)
+
+    async def request_cancel(self, task_id: str) -> None:
+        await self._task_state.request_cancel(task_id)
+
+    async def wait_for_cancel(self, task_id: str, timeout_seconds: float = 30.0) -> bool:
+        return await self._task_state.wait_for_cancel(task_id, timeout_seconds)
+
 
 class RedisEventSequenceAdapter(EventSequencePort):
     async def allocate(self) -> int:
         return await allocate_event_seq()
+
+
+class RedisSessionListNotifierAdapter(SessionListNotifierPort):
+    async def notify_sessions_changed(self) -> None:
+        from app.infrastructure.external.session_list_notifier import notify_sessions_changed
+
+        await notify_sessions_changed()
 
 
 def default_observability() -> ObservabilityPort:
@@ -61,3 +84,7 @@ def default_task_state() -> TaskStatePort:
 
 def default_event_sequence() -> EventSequencePort:
     return RedisEventSequenceAdapter()
+
+
+def default_session_list_notifier() -> SessionListNotifierPort:
+    return RedisSessionListNotifierAdapter()

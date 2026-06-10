@@ -6,6 +6,7 @@ from typing import List, Callable, Type, Optional, Tuple
 from app.application.dto.session_io import FileReadResult, ShellReadResult
 from app.application.errors.exceptions import NotFoundError, ServerRequestsError
 from app.domain.external.sandbox import Sandbox
+from app.domain.external.session_list_notifier import NoopSessionListNotifier, SessionListNotifierPort
 from app.domain.models.file import File
 from app.domain.models.codebase import SessionMode
 from app.domain.models.session import Session
@@ -22,10 +23,12 @@ class SessionService:
             self,
             uow_factory: Callable[[], IUnitOfWork],
             sandbox_cls: Type[Sandbox],
+            session_list_notifier: Optional[SessionListNotifierPort] = None,
     ) -> None:
         """构造函数，完成会话服务初始化"""
         self._uow_factory = uow_factory
         self._sandbox_cls = sandbox_cls
+        self._session_list_notifier = session_list_notifier or NoopSessionListNotifier()
 
     async def create_session(
             self,
@@ -48,9 +51,7 @@ class SessionService:
         )
         async with self._uow_factory() as uow:
             await uow.session.save(session)
-        from app.infrastructure.external.session_list_notifier import notify_sessions_changed
-
-        await notify_sessions_changed()
+        await self._session_list_notifier.notify_sessions_changed()
         logger.info(f"成功创建一个新任务会话: {session.id}")
         return session
 
@@ -104,9 +105,7 @@ class SessionService:
 
         async with self._uow_factory() as uow:
             await uow.session.delete_by_id(session_id)
-        from app.infrastructure.external.session_list_notifier import notify_sessions_changed
-
-        await notify_sessions_changed()
+        await self._session_list_notifier.notify_sessions_changed()
         logger.info(f"删除会话[{session_id}]成功")
 
     async def get_session(self, session_id: str) -> Session:

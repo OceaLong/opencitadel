@@ -7,10 +7,8 @@ import logging
 import uuid
 from typing import Callable, Optional
 
-from fastapi import UploadFile
-
 from app.domain.external.browser import Browser
-from app.domain.external.file_storage import FileStorage
+from app.domain.external.file_storage import FileStorage, FileUploadPayload
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.event import (
     A2AToolContent,
@@ -142,7 +140,7 @@ class ToolEventPresenter:
             return ""
         screenshot = base64.b64decode(screenshot_base64)
         stream = io.BytesIO(screenshot)
-        file = await self._file_storage.upload_file(UploadFile(
+        file = await self._file_storage.upload_file(FileUploadPayload(
             file=stream,
             filename=f"{uuid.uuid4()}.png",
             size=self._get_stream_size(stream),

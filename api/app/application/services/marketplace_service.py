@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 from fastapi import UploadFile
 
 from app.application.services.file_service import FileService
+from app.domain.external.file_storage import FileUploadPayload
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.marketplace.catalog import (
     APP_IDS,
@@ -513,8 +514,12 @@ class MarketplaceService:
 
     async def _store_output_bytes(self, data: bytes, filename: str, mime_type: str):
         stream = io.BytesIO(data)
-        upload = UploadFile(file=stream, filename=filename, size=len(data))
-        upload.content_type = mime_type
+        upload = FileUploadPayload(
+            file=stream,
+            filename=filename,
+            size=len(data),
+            content_type=mime_type,
+        )
         return await self._file_service.file_storage.upload_file(upload)
 
     @staticmethod

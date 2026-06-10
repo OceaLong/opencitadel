@@ -39,19 +39,26 @@ async def _sync_postgres_seq_counter(value: int) -> None:
 
 
 async def sync_global_event_seq() -> None:
-    max_seq = await get_global_max_event_seq()
     redis = get_redis()
     current = await redis.client.get(GLOBAL_EVENT_SEQ_KEY)
+    if current is not None and int(current) > 0:
+        sync_value = int(current)
+        await _sync_postgres_seq_counter(sync_value)
+        global _local_next, _local_end
+        async with _alloc_lock:
+            _local_next = None
+            _local_end = None
+        logger.info("Restored global event seq counter from Redis: %s", sync_value)
+        return
+
+    max_seq = await get_global_max_event_seq()
     sync_value = max_seq
-    if current is not None:
-        sync_value = max(max_seq, int(current))
     await redis.client.set(GLOBAL_EVENT_SEQ_KEY, sync_value)
     await _sync_postgres_seq_counter(sync_value)
-    global _local_next, _local_end
     async with _alloc_lock:
         _local_next = None
         _local_end = None
-    logger.info("Synced global event seq counter to %s", sync_value)
+    logger.info("Seeded global event seq counter from database: %s", sync_value)
 
 
 async def allocate_event_seq() -> int:
