@@ -7,6 +7,11 @@ from typing import AsyncGenerator, Optional, List
 from app.domain.models.event import MessageEvent
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.services.agents.react import ReActAgent
+from tests.app.domain.services.agents.conftest import (
+    _DummyLLM,
+    agent_test_observability_port,
+    agent_test_runtime_settings,
+)
 
 
 class _FakeJsonParser:
@@ -44,15 +49,23 @@ class _StepAgent(ReActAgent):
         yield MessageEvent(role="assistant", message='{"success":true,"result":"ok","attachments":[]}')
 
 
+def _agent_kwargs(**overrides):
+    defaults = {
+        "uow_factory": lambda: None,
+        "session_id": "session-1",
+        "agent_config": type("Cfg", (), {"max_retries": 1, "max_iterations": 1})(),
+        "llm": _DummyLLM(),
+        "json_parser": _FakeJsonParser(),
+        "tools": [],
+        "observability_port": agent_test_observability_port(),
+        "runtime_settings": agent_test_runtime_settings(),
+    }
+    defaults.update(overrides)
+    return defaults
+
+
 def _build_agent() -> ReActAgent:
-    return _SummarizeAgent(
-        uow_factory=lambda: None,
-        session_id="session-1",
-        agent_config=type("Cfg", (), {"max_retries": 1, "max_iterations": 1})(),
-        llm=object(),
-        json_parser=_FakeJsonParser(),
-        tools=[],
-    )
+    return _SummarizeAgent(**_agent_kwargs())
 
 
 async def _test_summarize_accepts_user_message_and_vision_attachments():
@@ -77,14 +90,7 @@ def test_summarize_accepts_user_message_and_vision_attachments():
 async def _test_execute_step_respects_optional_vision_attachments():
     from app.domain.models.plan import Plan, Step
 
-    agent = _StepAgent(
-        uow_factory=lambda: None,
-        session_id="session-1",
-        agent_config=type("Cfg", (), {"max_retries": 1, "max_iterations": 1})(),
-        llm=object(),
-        json_parser=_FakeJsonParser(),
-        tools=[],
-    )
+    agent = _StepAgent(**_agent_kwargs())
     message = Message(
         message="do task",
         vision_attachments=[VisionAttachment(mime_type="image/png", data_base64="aW1n")],

@@ -10,10 +10,10 @@ from typing import Optional, Dict, Any
 import httpx
 
 from app.application.errors.exceptions import ServerRequestsError
+from app.domain.external.connection_pool import A2AConnectionPoolPort
 from app.domain.models.app_config import A2AConfig
 from app.domain.models.tool_result import ToolResult
 from app.domain.utils.app_config_filter import filter_enabled_a2a_config
-from app.infrastructure.external.tools.connection_pool import A2AConnectionPool
 from .base import BaseTool, tool
 
 logger = logging.getLogger(__name__)
@@ -210,9 +210,10 @@ class A2ATool(BaseTool):
     """A2A工具包，根据传递的完成A2A工具包的初始化"""
     name: str = "a2a"
 
-    def __init__(self) -> None:
+    def __init__(self, connection_pool: A2AConnectionPoolPort) -> None:
         """构造函数，完成工具包初始化"""
         super().__init__()
+        self._connection_pool = connection_pool
         self._initialized: bool = False
         self.manager: Optional[A2AClientManager] = None
         self._uses_pool: bool = False
@@ -222,7 +223,7 @@ class A2ATool(BaseTool):
         if self._initialized:
             return
         filtered = filter_enabled_a2a_config(a2a_config) if a2a_config else A2AConfig()
-        self.manager = await A2AConnectionPool.acquire(filtered)
+        self.manager = await self._connection_pool.acquire(filtered)
         self._uses_pool = True
         self._initialized = True
 

@@ -15,9 +15,9 @@ from app.domain.models.checkpoint import (
 from app.domain.models.event import MessageEvent
 from app.domain.models.memory import Memory
 from app.domain.models.session import Session, SessionStatus
+from app.domain.external.object_storage import ObjectStoragePort
+from app.domain.external.task_state_port import TaskStatePort
 from app.domain.repositories.uow import IUnitOfWork
-from app.infrastructure.external.task.task_state import get_task_state
-from app.infrastructure.storage.cos import Cos
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +28,14 @@ class CheckpointService:
     def __init__(
             self,
             uow_factory: Callable[[], IUnitOfWork],
-            cos: Cos,
+            object_storage: ObjectStoragePort,
             sandbox_cls: Type[Sandbox],
+            task_state_port: TaskStatePort,
     ) -> None:
         self._uow_factory = uow_factory
-        self._cos = cos
+        self._object_storage = object_storage
         self._sandbox_cls = sandbox_cls
-        self._task_state = get_task_state()
+        self._task_state = task_state_port
 
     async def create_checkpoint(
             self,
@@ -62,7 +63,7 @@ class CheckpointService:
                     await active_sandbox.ensure_sandbox()
                     snapshot_bytes = await active_sandbox.create_workspace_snapshot(checkpoint_id)
                     snapshot_key = f"checkpoints/{session_id}/{checkpoint_id}.tgz"
-                    await self._cos.put_bytes(snapshot_key, snapshot_bytes)
+                    await self._object_storage.put_bytes(snapshot_key, snapshot_bytes)
                 except Exception as exc:
                     logger.warning(
                         "会话[%s]创建沙箱快照失败，将仅保存对话状态: %s",
@@ -145,7 +146,7 @@ class CheckpointService:
 
             if sandbox is not None:
                 await sandbox.ensure_sandbox()
-                snapshot_bytes = await self._cos.get_bytes(checkpoint.sandbox_snapshot_key)
+                snapshot_bytes = await self._object_storage.get_bytes(checkpoint.sandbox_snapshot_key)
                 await sandbox.restore_workspace_snapshot(
                     checkpoint_id,
                     io.BytesIO(snapshot_bytes),

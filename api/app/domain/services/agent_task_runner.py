@@ -34,6 +34,7 @@ from app.domain.services.flows.code_ask_flow import CodeAskFlow
 from app.domain.services.tool_event_presenter import FILE_MUTATING_FUNCTIONS, ToolEventPresenter
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.mcp import MCPTool
+from app.domain.external.connection_pool import A2AConnectionPoolPort, MCPConnectionPoolPort
 from app.domain.external.event_sequence import EventSequencePort
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
 from app.domain.external.observability import ObservabilityPort
@@ -59,6 +60,13 @@ class AgentTaskRunner(TaskRunner):
             browser: Browser,  # 浏览器
             search_engine: SearchEngine,  # 搜索引擎
             sandbox: Sandbox,  # 沙箱
+            task_state_port: TaskStatePort,
+            observability_port: ObservabilityPort,
+            event_sequence_port: EventSequencePort,
+            session_state_port: SessionStatePort,
+            runtime_settings: AgentRuntimeSettings,
+            mcp_connection_pool: MCPConnectionPoolPort,
+            a2a_connection_pool: A2AConnectionPoolPort,
             skill: Optional[Skill] = None,
             skill_prompt: str = "",
             long_term_memory_block: str = "",
@@ -68,31 +76,18 @@ class AgentTaskRunner(TaskRunner):
             checkpoint_service: Optional[CheckpointService] = None,
             mode: SessionMode = SessionMode.AGENT,
             codebase_id: Optional[str] = None,
-            task_state_port: Optional[TaskStatePort] = None,
-            observability_port: Optional[ObservabilityPort] = None,
-            event_sequence_port: Optional[EventSequencePort] = None,
-            session_state_port: Optional[SessionStatePort] = None,
-            runtime_settings: Optional[AgentRuntimeSettings] = None,
     ) -> None:
         """构造函数，完成Agent任务运行器的创建"""
         self._uow_factory = uow_factory
         self._session_id = session_id
         self._sandbox = sandbox
         self._mcp_config = mcp_config
-        self._mcp_tool = MCPTool()
+        self._mcp_tool = MCPTool(mcp_connection_pool)
         self._a2a_config = a2a_config
-        self._a2a_tool = A2ATool()
+        self._a2a_tool = A2ATool(a2a_connection_pool)
         self._file_storage = file_storage
         self._browser = browser
         self._on_complete_callback = on_complete_callback
-        if (
-            session_state_port is None
-            or task_state_port is None
-            or observability_port is None
-            or event_sequence_port is None
-            or runtime_settings is None
-        ):
-            raise ValueError("AgentTaskRunner requires runtime ports from the composition root")
         self._runtime_settings = runtime_settings
         self._session_state = session_state_port
         self._task_state_port = task_state_port

@@ -15,11 +15,6 @@ _provider: Optional["AppConfigProvider"] = None
 _sync_cache: Optional[AppConfig] = None
 
 
-def _blocking_load_config() -> AppConfig:
-    repo = create_app_config_repository()
-    return asyncio.run(repo.load()) or AppConfig()
-
-
 class AppConfigProvider:
     """Load app config from repository with optional refresh."""
 
@@ -63,21 +58,28 @@ def invalidate_runtime_config() -> None:
         _provider._cache = None
 
 
-def get_runtime_config() -> AppConfig:
-    """Synchronous accessor for runtime config (cached per process)."""
-    global _sync_cache
-    if _sync_cache is None:
-        try:
-            asyncio.get_running_loop()
-            logger.warning("Runtime config cache cold inside event loop; using defaults until warmup")
-            return AppConfig()
-        except RuntimeError:
-            _sync_cache = _blocking_load_config()
-    return _sync_cache
+def create_app_config_provider() -> AppConfigProvider:
+    """Factory used by the DI container."""
+    global _provider
+    if _provider is None:
+        _provider = AppConfigProvider(create_app_config_repository())
+    return _provider
 
 
 def get_app_config_provider() -> AppConfigProvider:
     global _provider
     if _provider is None:
-        _provider = AppConfigProvider(create_app_config_repository())
+        _provider = create_app_config_provider()
     return _provider
+
+
+def get_runtime_config() -> AppConfig:
+    """Synchronous accessor for runtime config (requires container warmup or prior async load)."""
+    global _sync_cache
+    if _sync_cache is not None:
+        return _sync_cache
+    if _provider is not None and _provider._cache is not None:
+        _sync_cache = _provider._cache
+        return _sync_cache
+    logger.warning("Runtime config cache cold; using AppConfig defaults until warmup completes")
+    return AppConfig()

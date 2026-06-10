@@ -22,9 +22,13 @@ class Cos:
 
     async def init(self) -> None:
         """完成cos腾讯云对象存储客户端的创建"""
-        # 1.判断客户端是否存在，如果存则则记录日志并终止程序
         if self._client is not None:
             logger.warning("Cos腾讯云对象存储已初始化，无需重复操作")
+            return
+
+        if self._settings.env == "test":
+            logger.info("测试环境跳过 Cos 客户端初始化")
+            self._client = object()  # type: ignore[assignment]
             return
 
         try:

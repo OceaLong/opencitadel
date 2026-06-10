@@ -3,6 +3,7 @@
 from app.domain.models.tool_result import ToolResult
 from app.domain.services.agents.base import BaseAgent
 from app.domain.services.tools.tool_names import normalize_allowed_tool_names
+from tests.app.domain.services.agents.conftest import agent_test_observability_port, agent_test_runtime_settings
 
 
 class _DummyTool:
@@ -54,13 +55,22 @@ def _agent_config(**overrides):
     return type("Cfg", (), defaults)()
 
 
+def _make_agent(**kwargs):
+    defaults = {
+        "uow_factory": lambda: None,
+        "session_id": "session-1",
+        "agent_config": _agent_config(),
+        "llm": _DummyLLM(),
+        "json_parser": object(),
+        "observability_port": agent_test_observability_port(),
+        "runtime_settings": agent_test_runtime_settings(),
+    }
+    defaults.update(kwargs)
+    return _TestAgent(**defaults)
+
+
 def test_get_available_tools_respects_normalized_skill_whitelist():
-    agent = _TestAgent(
-        uow_factory=lambda: None,
-        session_id="session-1",
-        agent_config=_agent_config(),
-        llm=_DummyLLM(),
-        json_parser=object(),
+    agent = _make_agent(
         tools=[_DummyTool(["read_file", "write_file", "search_web"])],
         allowed_tool_names=normalize_allowed_tool_names(["file_read", "write_file"]),
     )
@@ -70,12 +80,7 @@ def test_get_available_tools_respects_normalized_skill_whitelist():
 
 
 def test_get_available_tools_empty_whitelist_allows_all():
-    agent = _TestAgent(
-        uow_factory=lambda: None,
-        session_id="session-1",
-        agent_config=_agent_config(),
-        llm=_DummyLLM(),
-        json_parser=object(),
+    agent = _make_agent(
         tools=[_DummyTool(["read_file", "write_file"])],
         allowed_tool_names=[],
     )
@@ -84,12 +89,7 @@ def test_get_available_tools_empty_whitelist_allows_all():
 
 
 def test_get_available_tools_mcp_wildcard():
-    agent = _TestAgent(
-        uow_factory=lambda: None,
-        session_id="session-1",
-        agent_config=_agent_config(),
-        llm=_DummyLLM(),
-        json_parser=object(),
+    agent = _make_agent(
         tools=[_DummyTool(["read_file", "mcp_jina_read_url"])],
         allowed_tool_names=["mcp_*"],
     )
@@ -99,14 +99,7 @@ def test_get_available_tools_mcp_wildcard():
 
 def test_resolve_tool_uses_index():
     tool_pack = _DummyTool(["read_file"])
-    agent = _TestAgent(
-        uow_factory=lambda: None,
-        session_id="session-1",
-        agent_config=_agent_config(),
-        llm=_DummyLLM(),
-        json_parser=object(),
-        tools=[tool_pack],
-    )
+    agent = _make_agent(tools=[tool_pack])
     resolved = agent._resolve_tool("read_file")
     assert resolved is tool_pack
 

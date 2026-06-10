@@ -4,36 +4,32 @@
 import logging
 from typing import Callable, Optional, Type
 
-from app.application.services.config_provider import AppConfigProvider, get_app_config_provider
-
+from app.application.services.config_provider import AppConfigProvider, get_runtime_config
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.memory_extractor_service import MemoryExtractorService
 from app.application.services.memory_service import MemoryService
 from app.application.services.skill_service import SkillService
+from app.domain.external.connection_pool import A2AConnectionPoolPort, MCPConnectionPoolPort
+from app.domain.external.event_sequence import EventSequencePort
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.json_parser import JSONParser
+from app.domain.external.observability import ObservabilityPort
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
-from app.application.services.config_provider import get_runtime_config
-from app.application.services.session_state_service import SessionStateService
+from app.domain.external.session_state import SessionStatePort
+from app.domain.external.task_state_port import TaskStatePort
 from app.domain.models.agent_runtime_settings import AgentMemoryRuntimeSettings, AgentRuntimeSettings
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
-from app.domain.utils.app_config_filter import filter_a2a_config_by_refs, filter_mcp_config_by_refs
 from app.domain.models.codebase import SessionMode
 from app.domain.models.session import Session
-from app.domain.services.tools.codebase_tools import CodebaseTool
 from app.domain.models.skill import Skill
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agent_task_runner import AgentTaskRunner
 from app.domain.services.checkpoint_service import CheckpointService
+from app.domain.services.tools.codebase_tools import CodebaseTool
 from app.domain.services.tools.image_generation import ImageGenerationTool
 from app.domain.services.tools.memory import MemoryTool
-from app.infrastructure.adapters.domain_ports import (
-    default_event_sequence,
-    default_observability,
-    default_session_list_notifier,
-    default_task_state,
-)
+from app.domain.utils.app_config_filter import filter_a2a_config_by_refs, filter_mcp_config_by_refs
 from app.infrastructure.external.llm.factory import LLMFactory
 
 logger = logging.getLogger(__name__)
@@ -57,37 +53,46 @@ class TaskRunnerFactory:
             llm_model_service: LLMModelService,
             skill_service: SkillService,
             memory_service: MemoryService,
-            agent_config: AgentConfig,
-            mcp_config: MCPConfig,
-            a2a_config: A2AConfig,
             sandbox_cls: Type[Sandbox],
             json_parser: JSONParser,
             search_engine: SearchEngine,
             file_storage: FileStorage,
-            auto_extract_memory: bool = True,
-            config_provider: Optional[AppConfigProvider] = None,
-            checkpoint_service: Optional[CheckpointService] = None,
+            config_provider: AppConfigProvider,
+            checkpoint_service: CheckpointService,
+            task_state_port: TaskStatePort,
+            observability_port: ObservabilityPort,
+            event_sequence_port: EventSequencePort,
+            session_state_factory: Callable[[], SessionStatePort],
+            mcp_connection_pool: MCPConnectionPoolPort,
+            a2a_connection_pool: A2AConnectionPoolPort,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm_model_service = llm_model_service
         self._skill_service = skill_service
         self._memory_service = memory_service
-        self._agent_config = agent_config
-        self._mcp_config = mcp_config
-        self._a2a_config = a2a_config
         self._sandbox_cls = sandbox_cls
         self._json_parser = json_parser
         self._search_engine = search_engine
         self._file_storage = file_storage
-        self._auto_extract_memory = auto_extract_memory
-        self._config_provider = config_provider or get_app_config_provider()
+        self._config_provider = config_provider
         self._checkpoint_service = checkpoint_service
+        self._task_state_port = task_state_port
+        self._observability_port = observability_port
+        self._event_sequence_port = event_sequence_port
+        self._session_state_factory = session_state_factory
+        self._mcp_connection_pool = mcp_connection_pool
+        self._a2a_connection_pool = a2a_connection_pool
+        self._agent_config = AgentConfig()
+        self._mcp_config = MCPConfig()
+        self._a2a_config = A2AConfig()
+        self._auto_extract_memory = True
 
     async def _refresh_runtime_config(self) -> None:
         app_config = await self._config_provider.get()
         self._agent_config = app_config.agent_config
         self._mcp_config = app_config.mcp_config
         self._a2a_config = app_config.a2a_config
+        self._auto_extract_memory = app_config.memory.auto_extract_enabled
 
     def _apply_skill_agent_params(self, agent_config: AgentConfig, skill: Skill) -> AgentConfig:
         params = skill.agent_params
@@ -241,12 +246,11 @@ class TaskRunnerFactory:
             checkpoint_service=self._checkpoint_service,
             mode=session.mode,
             codebase_id=session.codebase_id,
-            task_state_port=default_task_state(),
-            observability_port=default_observability(),
-            event_sequence_port=default_event_sequence(),
-            session_state_port=SessionStateService(
-                self._uow_factory,
-                session_list_notifier=default_session_list_notifier(),
-            ),
+            task_state_port=self._task_state_port,
+            observability_port=self._observability_port,
+            event_sequence_port=self._event_sequence_port,
+            session_state_port=self._session_state_factory(),
             runtime_settings=runtime_settings,
+            mcp_connection_pool=self._mcp_connection_pool,
+            a2a_connection_pool=self._a2a_connection_pool,
         )

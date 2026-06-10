@@ -60,10 +60,10 @@ class CodeAskFlow(BaseFlow):
             search_engine: SearchEngine,
             mcp_tool: MCPTool,
             a2a_tool: A2ATool,
+            observability_port: ObservabilityPort,
+            runtime_settings: AgentRuntimeSettings,
             extra_tools: Optional[List[BaseTool]] = None,
             model_id: Optional[str] = None,
-            observability_port: Optional[ObservabilityPort] = None,
-            runtime_settings: Optional[AgentRuntimeSettings] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._session_id = session_id
@@ -77,8 +77,6 @@ class CodeAskFlow(BaseFlow):
             a2a_tool=a2a_tool,
             extra_tools=extra_tools or [],
         )
-        if observability_port is None or runtime_settings is None:
-            raise ValueError("CodeAskFlow requires observability_port and runtime_settings")
         self._agent = CodeAskAgent(
             uow_factory=uow_factory,
             llm=llm,

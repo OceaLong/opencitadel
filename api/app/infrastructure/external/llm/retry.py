@@ -15,24 +15,7 @@ _DEFAULT_MAX_RETRIES = 3
 _DEFAULT_BASE_DELAY_SECONDS = 1.0
 
 
-def is_retriable_llm_error(error: Exception) -> bool:
-    text = str(error).lower()
-    markers = (
-        "429",
-        "rate limit",
-        "ratelimit",
-        "503",
-        "502",
-        "500",
-        "504",
-        "timeout",
-        "timed out",
-        "overloaded",
-        "temporarily unavailable",
-        "connection reset",
-        "connection error",
-    )
-    return any(marker in text for marker in markers)
+from app.domain.utils.llm_retry import is_retriable_llm_error  # noqa: F401 — re-export
 
 
 async def with_llm_retry(

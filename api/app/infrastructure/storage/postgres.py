@@ -8,7 +8,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.domain.repositories.uow import IUnitOfWork
-from app.infrastructure.repositories.db_uow import DBUnitOfWork
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -106,4 +105,6 @@ def get_session_factory():
 
 
 def get_uow() -> IUnitOfWork:
+    from app.infrastructure.repositories.db_uow import DBUnitOfWork
+
     return DBUnitOfWork(session_factory=get_session_factory())

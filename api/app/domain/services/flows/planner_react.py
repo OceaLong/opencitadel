@@ -56,14 +56,14 @@ class PlannerReActFlow(BaseFlow):
             search_engine: SearchEngine,  # 搜索引擎
             mcp_tool: MCPTool,  # mcp工具
             a2a_tool: A2ATool,  # a2a远程agent
+            observability_port: ObservabilityPort,
+            runtime_settings: AgentRuntimeSettings,
             skill: Optional[Skill] = None,
             skill_prompt: str = "",
             long_term_memory_block: str = "",
             extra_tools: Optional[List[BaseTool]] = None,
             model_id: Optional[str] = None,
             file_storage: Optional[FileStorage] = None,
-            observability_port: Optional[ObservabilityPort] = None,
-            runtime_settings: Optional[AgentRuntimeSettings] = None,
     ) -> None:
         """构造函数，完成规划与执行流的初始化"""
         # 1.流初始化数据配置
@@ -75,8 +75,6 @@ class PlannerReActFlow(BaseFlow):
         self._agent_config = agent_config
         self._flow_step_budget = agent_config.max_flow_steps
         self._flow_steps_used = 0
-        if observability_port is None or runtime_settings is None:
-            raise ValueError("PlannerReActFlow requires observability_port and runtime_settings")
         self._observability = observability_port
         self._runtime_settings = runtime_settings
 

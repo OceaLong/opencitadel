@@ -29,7 +29,7 @@ from app.domain.services.tools.tool_names import (
     normalize_tool_name,
 )
 from app.domain.utils.vision_tokens import estimate_messages_tokens
-from app.infrastructure.external.llm.retry import is_retriable_llm_error
+from app.domain.utils.llm_retry import is_retriable_llm_error
 
 logger = logging.getLogger(__name__)
 
@@ -73,13 +73,13 @@ class BaseAgent(ABC):
             llm: LLM,  # 语言模型协议
             json_parser: JSONParser,  # JSON输出解析器
             tools: List[BaseTool],  # 工具列表
+            observability_port: ObservabilityPort,
+            runtime_settings: AgentRuntimeSettings,
             skill_prompt: str = "",
             long_term_memory_block: str = "",
             allowed_tool_names: Optional[List[str]] = None,
             model_id: Optional[str] = None,
             file_storage: Optional[FileStorage] = None,
-            observability_port: Optional[ObservabilityPort] = None,
-            runtime_settings: Optional[AgentRuntimeSettings] = None,
     ) -> None:
         """构造函数，完成Agent的初始化"""
         self._uow_factory = uow_factory
@@ -99,8 +99,6 @@ class BaseAgent(ABC):
         self._last_llm_message: Optional[Dict[str, Any]] = None
         self._current_step: str = "default"
         self._last_prompt_tokens: int = 0
-        if observability_port is None or runtime_settings is None:
-            raise ValueError("BaseAgent requires observability_port and runtime_settings")
         self._runtime_settings = runtime_settings
         self._token_accountant = TokenAccountant(
             uow_factory=uow_factory,

@@ -7,7 +7,6 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from app.domain.repositories.uow import IUnitOfWork
-from app.infrastructure.adapters.domain_ports import default_session_list_notifier
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from core.config import get_settings
 from .db_checkpoint_repository import DBCheckpointRepository
@@ -47,6 +46,8 @@ class DBUnitOfWork(IUnitOfWork):
         self.db_session = self.session_factory()
 
         # 2.初始化所有数据库仓库
+        from app.infrastructure.adapters.domain_ports import default_session_list_notifier
+
         cipher = ApiKeyCipher(get_settings().api_key_secret)
         self.checkpoint = DBCheckpointRepository(db_session=self.db_session)
         self.codebase = DBCodebaseRepository(db_session=self.db_session)

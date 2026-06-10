@@ -6,7 +6,6 @@ from app.domain.external.event_sequence import EventSequencePort
 from app.domain.external.observability import ObservabilityPort
 from app.domain.external.session_list_notifier import SessionListNotifierPort
 from app.domain.external.task_state_port import TaskStatePort
-from app.infrastructure.external.event_seq_allocator import allocate_event_seq
 from app.infrastructure.external.task.task_state import get_task_state
 from app.infrastructure.observability.agent_tracer import AgentTracer
 from app.infrastructure.observability.otel import (
@@ -64,6 +63,8 @@ class RedisTaskStateAdapter(TaskStatePort):
 
 class RedisEventSequenceAdapter(EventSequencePort):
     async def allocate(self) -> int:
+        from app.infrastructure.external.event_seq_allocator import allocate_event_seq
+
         return await allocate_event_seq()
 
 

@@ -11,24 +11,28 @@ from sqlalchemy import create_engine
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.container import get_container, init_container, shutdown_container
+from app.application.services.bootstrap_service import bootstrap_data
+from app.application.services.config_provider import get_runtime_config
 from app.infrastructure.logging import setup_logging
 from app.infrastructure.observability.logging_context import configure_structured_logging
 from app.infrastructure.observability.otel import setup_observability
-from app.infrastructure.storage.cos import get_cos
-from app.infrastructure.storage.postgres import get_postgres
-from app.infrastructure.storage.redis import get_redis
+from app.infrastructure.storage.postgres import get_uow
+from core.config import get_settings
+
+# Wire DI container before route modules resolve FastAPI dependencies.
+get_container().wire(
+    packages=[
+        "app.interfaces",
+        "app.interfaces.endpoints",
+    ],
+)
+
 from app.interfaces.endpoints.a2a_routes import a2a_router, well_known_router
 from app.interfaces.endpoints.routes import router
 from app.interfaces.errors.exception_handlers import register_exception_handlers
 from app.interfaces.middleware.rate_limit import maybe_install_rate_limit
-from app.application.services.bootstrap_service import bootstrap_data
-from app.interfaces.service_dependencies import (
-    get_agent_service,
-    get_skill_service,
-)
-from app.infrastructure.storage.postgres import get_uow
-from app.application.services.config_provider import get_app_config_provider, get_runtime_config
-from core.config import get_settings
+from app.interfaces.service_dependencies import get_agent_service, get_skill_service
 
 # 1.加载配置信息
 settings = get_settings()
@@ -128,68 +132,33 @@ async def lifespan(app: FastAPI):
     _verify_production_secrets()
     _verify_db_migrations()
 
-    # 3.初始化Redis/Postgres/Cos客户端
-    await get_redis().init()
-    await get_postgres().init()
-    await get_cos().init()
-    from app.infrastructure.external.event_seq_allocator import sync_global_event_seq
+    container = await init_container()
 
-    await sync_global_event_seq()
-    app_config = await get_app_config_provider().get()
-    from app.infrastructure.external.runtime_settings import (
-        SandboxRuntimeSettings,
-        TaskQueueRuntimeSettings,
-    )
-    from app.infrastructure.external.sandbox.docker_sandbox import configure_sandbox_runtime
-    from app.infrastructure.external.task.task_state import configure_task_state_runtime
-
-    configure_sandbox_runtime(SandboxRuntimeSettings.from_config(app_config.sandbox))
-    configure_task_state_runtime(
-        TaskQueueRuntimeSettings.from_config(app_config.streams, app_config.worker),
-    )
-
-    # 4.种子化默认模型与内置Skill
     await bootstrap_data(
         uow_factory=get_uow,
         skill_service=get_skill_service(),
     )
-    from app.infrastructure.external.app_config_notifier import start_config_invalidate_listener
-
-    await start_config_invalidate_listener()
     pool_cleanup_task = asyncio.create_task(_connection_pool_cleanup_loop())
     logger.info("MyManus初始化完成")
 
     try:
-        # 4.lifespan分界点
         yield
     finally:
         pool_cleanup_task.cancel()
-        from app.infrastructure.external.app_config_notifier import stop_config_invalidate_listener
-
-        await stop_config_invalidate_listener()
         try:
             await pool_cleanup_task
         except asyncio.CancelledError:
             pass
         try:
-            # 5.等待agent服务关闭
             logger.info("MyManus正在关闭")
             await asyncio.wait_for(get_agent_service().shutdown(), timeout=30.0)
-            logger.info("Agent服务成功关闭")
+            logger.info("AgentService成功关闭")
         except asyncio.TimeoutError:
-            logger.warning("Agent服务关闭超时, 强制关闭, 部分任务将被释放")
+            logger.warning("AgentService关闭超时, 强制关闭, 部分任务将被释放")
         except Exception as e:
-            logger.error(f"Agent服务关闭期间出现错误: {str(e)}")
+            logger.error(f"AgentService关闭期间出现错误: {str(e)}")
 
-        from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
-
-        await get_sandbox_pool().shutdown()
-
-        # 6.关闭其他应用
-        await get_redis().shutdown()
-        await get_postgres().shutdown()
-        await get_cos().shutdown()
-
+        await shutdown_container(container)
         logger.info("Manus应用关闭成功")
 
 

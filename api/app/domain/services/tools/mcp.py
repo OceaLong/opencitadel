@@ -13,10 +13,10 @@ from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 
 from app.application.errors.exceptions import NotFoundError
-from app.domain.utils.app_config_filter import filter_enabled_mcp_config
-from app.infrastructure.external.tools.connection_pool import MCPConnectionPool
+from app.domain.external.connection_pool import MCPConnectionPoolPort
 from app.domain.models.app_config import MCPConfig, MCPServerConfig, MCPTransport
 from app.domain.models.tool_result import ToolResult
+from app.domain.utils.app_config_filter import filter_enabled_mcp_config
 from .base import BaseTool
 
 """
@@ -384,9 +384,10 @@ class MCPTool(BaseTool):
     """MCP工具包，包含所有已配置+已启动的MCP工具"""
     name: str = "mcp"
 
-    def __init__(self) -> None:
+    def __init__(self, connection_pool: MCPConnectionPoolPort) -> None:
         """构造函数，完成MCP工具包的初始化"""
         super().__init__()
+        self._connection_pool = connection_pool
         self._initialized: bool = False
         self._tools = []
         self._manager: MCPClientManager = None
@@ -397,7 +398,7 @@ class MCPTool(BaseTool):
         if self._initialized:
             return
         filtered = filter_enabled_mcp_config(mcp_config) if mcp_config else MCPConfig()
-        self._manager = await MCPConnectionPool.acquire(filtered)
+        self._manager = await self._connection_pool.acquire(filtered)
         self._uses_pool = True
         self._tools = await self._manager.get_all_tools()
         self._initialized = True
