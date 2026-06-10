@@ -1,4 +1,4 @@
-# PyCharm IDE 相关文件
+# IDE
 .idea/
 *.iml
 *.iws
@@ -30,18 +30,16 @@ wheels/
 
 # 测试相关
 tests/
-pytest.ini
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
 .hypothesis/
 
-# 开发脚本
-dev.sh
+# 开发容器（生产镜像不需要）
+.devops/
 
 # 临时文件
-tmp/
 *.tmp
 *.log
 *.swp
@@ -53,11 +51,6 @@ tmp/
 .gitignore
 .gitattributes
 .gitmodules
-
-# 环境变量文件（生产环境由 docker-compose env_file 注入）
-.env
-.env.local
-.env.*.local
 
 # 操作系统相关
 .DS_Store
@@ -75,15 +68,11 @@ Desktop.ini
 *.sublime-workspace
 *.code-workspace
 
-# 文档（可选，如果不需要在容器中保留）
-# README.md
+# 文档
+README.md
 
 # 其他开发工具
 .python-version
 .pip/
 pip-log.txt
 pip-delete-this-directory.txt
-
-
-
-

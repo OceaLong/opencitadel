@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from typing import TYPE_CHECKING, Optional
 
 from app.infrastructure.external.sandbox.docker_sandbox import get_sandbox_runtime_settings
+from app.runtime_role import ProcessRole, get_role
 
 if TYPE_CHECKING:
     from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
@@ -48,7 +48,7 @@ class SandboxPool:
         return self._enabled
 
     async def start(self) -> None:
-        if os.environ.get("MANUS_PROCESS_ROLE", "api") != "worker":
+        if get_role() != ProcessRole.WORKER:
             return
         if not self._enabled or self._started:
             return

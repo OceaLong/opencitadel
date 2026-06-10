@@ -4,6 +4,10 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+from app.runtime_role import ProcessRole, set_role
+
+set_role(ProcessRole.API)
+
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
@@ -11,7 +15,7 @@ from sqlalchemy import create_engine
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.container import get_container, init_container, shutdown_container
+from app.container import get_api_container, init_api_container, shutdown_api_container
 from app.application.services.bootstrap_service import bootstrap_data
 from app.application.services.config_provider import get_runtime_config
 from app.infrastructure.logging import setup_logging
@@ -21,7 +25,7 @@ from app.infrastructure.storage.postgres import get_uow
 from core.config import get_settings
 
 # Wire DI container before route modules resolve FastAPI dependencies.
-get_container().wire(
+get_api_container().wire(
     packages=[
         "app.interfaces",
         "app.interfaces.endpoints",
@@ -132,7 +136,7 @@ async def lifespan(app: FastAPI):
     _verify_production_secrets()
     _verify_db_migrations()
 
-    container = await init_container()
+    container = await init_api_container()
 
     await bootstrap_data(
         uow_factory=get_uow,
@@ -158,7 +162,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"AgentService关闭期间出现错误: {str(e)}")
 
-        await shutdown_container(container)
+        await shutdown_api_container(container)
         logger.info("Manus应用关闭成功")
 
 

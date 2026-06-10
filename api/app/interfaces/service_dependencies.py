@@ -21,7 +21,7 @@ from app.application.services.session_service import SessionService
 from app.application.services.skill_service import SkillService
 from app.application.services.status_service import StatusService
 from app.application.services.task_runner_factory import TaskRunnerFactory
-from app.container import AppContainer
+from app.container import ApiContainer
 from app.infrastructure.external.health_checker.postgres_health_checker import PostgresHealthChecker
 from app.infrastructure.external.health_checker.redis_health_checker import RedisHealthChecker
 from app.infrastructure.storage.postgres import get_db_session
@@ -32,35 +32,35 @@ logger = logging.getLogger(__name__)
 
 @inject
 def get_app_config_service(
-        service: AppConfigService = Depends(Provide[AppContainer.app_config_service]),
+        service: AppConfigService = Depends(Provide[ApiContainer.app_config_service]),
 ) -> AppConfigService:
     return service
 
 
 @inject
 def get_llm_model_service(
-        service: LLMModelService = Depends(Provide[AppContainer.llm_model_service]),
+        service: LLMModelService = Depends(Provide[ApiContainer.llm_model_service]),
 ) -> LLMModelService:
     return service
 
 
 @inject
 def get_skill_service(
-        service: SkillService = Depends(Provide[AppContainer.skill_service]),
+        service: SkillService = Depends(Provide[ApiContainer.skill_service]),
 ) -> SkillService:
     return service
 
 
 @inject
 def get_memory_service(
-        service: MemoryService = Depends(Provide[AppContainer.memory_service]),
+        service: MemoryService = Depends(Provide[ApiContainer.memory_service]),
 ) -> MemoryService:
     return service
 
 
 @inject
 def get_llm_token_usage_service(
-        service: LLMTokenUsageService = Depends(Provide[AppContainer.llm_token_usage_service]),
+        service: LLMTokenUsageService = Depends(Provide[ApiContainer.llm_token_usage_service]),
 ) -> LLMTokenUsageService:
     return service
 
@@ -68,7 +68,7 @@ def get_llm_token_usage_service(
 @inject
 def get_status_service(
         db_session: AsyncSession = Depends(get_db_session),
-        redis_client: RedisClient = Depends(Provide[AppContainer.redis]),
+        redis_client: RedisClient = Depends(Provide[ApiContainer.redis]),
 ) -> StatusService:
     postgres_checker = PostgresHealthChecker(db_session)
     redis_checker = RedisHealthChecker(redis_client)
@@ -77,62 +77,62 @@ def get_status_service(
 
 @inject
 def get_file_service(
-        service: FileService = Depends(Provide[AppContainer.file_service]),
+        service: FileService = Depends(Provide[ApiContainer.file_service]),
 ) -> FileService:
     return service
 
 
 @inject
 def get_session_service(
-        service: SessionService = Depends(Provide[AppContainer.session_service]),
+        service: SessionService = Depends(Provide[ApiContainer.session_service]),
 ) -> SessionService:
     return service
 
 
 @inject
 def get_questionnaire_service(
-        service: QuestionnaireService = Depends(Provide[AppContainer.questionnaire_service]),
+        service: QuestionnaireService = Depends(Provide[ApiContainer.questionnaire_service]),
 ) -> QuestionnaireService:
     return service
 
 
 @inject
 def get_room_service(
-        service: RoomService = Depends(Provide[AppContainer.room_service]),
+        service: RoomService = Depends(Provide[ApiContainer.room_service]),
 ) -> RoomService:
     return service
 
 
 @inject
 def get_marketplace_service(
-        service: MarketplaceService = Depends(Provide[AppContainer.marketplace_service]),
+        service: MarketplaceService = Depends(Provide[ApiContainer.marketplace_service]),
 ) -> MarketplaceService:
     return service
 
 
 @inject
 def get_agent_service(
-        service: AgentService = Depends(Provide[AppContainer.agent_service]),
+        service: AgentService = Depends(Provide[ApiContainer.agent_service]),
 ) -> AgentService:
     return service
 
 
 @inject
 def get_codebase_service(
-        service: CodebaseService = Depends(Provide[AppContainer.codebase_service]),
+        service: CodebaseService = Depends(Provide[ApiContainer.codebase_service]),
 ) -> CodebaseService:
     return service
 
 
 @inject
 def get_a2a_server_service(
-        service: A2AServerService = Depends(Provide[AppContainer.a2a_server_service]),
+        service: A2AServerService = Depends(Provide[ApiContainer.a2a_server_service]),
 ) -> A2AServerService:
     return service
 
 
 @inject
 def get_task_runner_factory(
-        factory: TaskRunnerFactory = Depends(Provide[AppContainer.task_runner_factory]),
+        factory: TaskRunnerFactory = Depends(Provide[ApiContainer.task_runner_factory]),
 ) -> TaskRunnerFactory:
     return factory

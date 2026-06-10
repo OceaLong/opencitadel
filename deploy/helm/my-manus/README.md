@@ -6,7 +6,7 @@ Kubernetes 部署 MyManus 的 Helm Chart，支持 API 与 Agent Worker 独立扩
 
 - Kubernetes 1.24+
 - Helm 3.x
-- 已构建并推送 `manus-api` 镜像（API 与 Worker 共用同一镜像，启动命令不同）
+- 已构建并推送 `manus-api` 与 `manus-worker` 镜像（`api/Dockerfile` 多阶段 target）
 - 集群内可访问 PostgreSQL（pgvector）、Redis
 
 ## 安装
@@ -16,6 +16,8 @@ helm upgrade --install my-manus ./deploy/helm/my-manus \
   --namespace manus --create-namespace \
   --set image.api.repository=your-registry/manus-api \
   --set image.api.tag=latest \
+  --set image.worker.repository=your-registry/manus-worker \
+  --set image.worker.tag=latest \
   --set replicaCount.api=2 \
   --set replicaCount.worker=2
 ```

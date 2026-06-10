@@ -5,7 +5,7 @@
 ## 技术栈
 
 - Ubuntu 22.04
-- Python 3.10 + FastAPI
+- Python 3.10 + FastAPI（依赖管理：uv）
 - Node.js 24 (LTS)
 - Chromium (浏览器自动化)
 - Xvfb + x11vnc + websockify (虚拟显示 + VNC)
@@ -38,6 +38,13 @@
 
 ## 本地开发
 
+### 环境准备
+
+```bash
+pip install uv
+uv sync --frozen
+```
+
 ### 使用开发容器
 
 ```bash
@@ -54,16 +61,15 @@ ssh root@localhost -p 2222
 在容器内或本地：
 
 ```bash
-# 安装依赖
-pip3 install -r requirements.txt
-
 # 启动 API 服务
 uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
 ## Docker 部署
 
-沙箱服务通过根目录的 `docker-compose.yml` 统一部署。生产环境中沙箱作为固定容器运行，API 服务通过 `SANDBOX_ADDRESS=manus-sandbox` 连接。
+沙箱服务通过根目录的 `docker-compose.yml` 统一部署。Dockerfile 使用 `uv sync --frozen` 安装依赖到 `/venv`，运行时通过 `PATH=/venv/bin` 解析 `uvicorn`。
+
+生产环境中沙箱作为固定容器运行，API/Worker 通过 `config.yaml` 的 `sandbox.address` 连接。
 
 ### 超时配置
 
@@ -74,7 +80,7 @@ SERVER_TIMEOUT_MINUTES=60   # 推荐（pydantic-settings 标准名）
 # 兼容旧名: SERVICE_TIMEOUT_MINUTES=60
 ```
 
-API 侧通过 `SANDBOX_TTL_MINUTES` 创建动态沙箱时注入 `SERVER_TIMEOUT_MINUTES`。
+API/Worker 侧通过 `SANDBOX_TTL_MINUTES` 创建动态沙箱时注入 `SERVER_TIMEOUT_MINUTES`。
 
 ### 端口说明
 

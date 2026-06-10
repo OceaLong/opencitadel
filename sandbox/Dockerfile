@@ -29,8 +29,11 @@ RUN add-apt-repository ppa:deadsnakes/ppa && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# 7.为pip3配置阿里云镜像源
-RUN pip3 config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+# 7.安装uv并使用uv同步依赖（venv 放在工作目录外，避免 COPY . . 覆盖）
+RUN pip3 install uv
+ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV UV_PROJECT_ENVIRONMENT=/venv
+ENV UV_LINK_MODE=copy
 
 # 8.安装node.js 24.12.0版本(LTS)
 RUN mkdir -p /etc/apt/keyrings && \
@@ -70,8 +73,8 @@ ENV LANG=zh_CN.UTF-8 \
 WORKDIR /sandbox
 
 # 14.拷贝项目依赖文件到工作空间并安装依赖
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
 
 # 15.拷贝当前整个项目文件
 COPY . .
@@ -85,6 +88,7 @@ EXPOSE 8080 9222 5900 5901
 # 18.额外的环境变量配置
 ENV CHROME_ARGS=""
 ENV UVI_ARGS=""
+ENV PATH="/venv/bin:$PATH"
 
 # 19.使用supervisor管理所有进程
 CMD ["supervisord", "-n", "-c", "/sandbox/supervisord.conf"]

@@ -519,10 +519,15 @@ sudo crontab -e
 Helm Chart 位于 `deploy/helm/my-manus/`，支持 API/Worker 独立 Deployment 与 HPA。
 
 ```bash
-# 构建并推送镜像后
+# 构建并推送镜像（api/Dockerfile 多阶段 target）
+docker build --target api -t your-registry/manus-api ./api
+docker build --target worker -t your-registry/manus-worker ./api
+docker push your-registry/manus-api
+docker push your-registry/manus-worker
+
 helm upgrade --install my-manus ./deploy/helm/my-manus \
   --set image.api.repository=your-registry/manus-api \
-  --set image.worker.repository=your-registry/manus-api \
+  --set image.worker.repository=your-registry/manus-worker \
   --set replicaCount.api=2 \
   --set replicaCount.worker=2 \
   --set autoscaling.api.enabled=true \

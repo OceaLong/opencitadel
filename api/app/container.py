@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Unified dependency-injection composition root for API and Worker."""
+"""Role-scoped dependency-injection composition roots for API and Worker."""
 from __future__ import annotations
 
 import logging
@@ -48,9 +48,15 @@ from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.storage.cos import Cos, get_cos
 from app.infrastructure.storage.postgres import Postgres, get_postgres
 from app.infrastructure.storage.redis import RedisClient, get_redis
+from app.runtime_role import ProcessRole, get_role
 from core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
+
+_WIRE_PACKAGES = [
+    "app.interfaces",
+    "app.interfaces.endpoints",
+]
 
 
 def _uow_factory(postgres: Postgres) -> Callable[[], IUnitOfWork]:
@@ -150,13 +156,8 @@ async def _stop_config_listener(_: None) -> None:
     await stop_config_invalidate_listener()
 
 
-class AppContainer(containers.DeclarativeContainer):
-    wiring_config = containers.WiringConfiguration(
-        packages=[
-            "app.interfaces",
-            "app.interfaces.endpoints",
-        ],
-    )
+class BaseContainer(containers.DeclarativeContainer):
+    """Shared infrastructure and application services for API and Worker."""
 
     config: providers.Singleton[Settings] = providers.Singleton(get_settings)
 
@@ -179,8 +180,9 @@ class AppContainer(containers.DeclarativeContainer):
         _configure_runtime_from_config,
         config_provider=app_config_warmup,
     )
-    sandbox_pool_start = providers.Resource(_start_sandbox_pool, _=runtime_configure)
-    config_listener = providers.Resource(_start_config_listener, _=sandbox_pool_start)
+
+    sandbox_cls = providers.Object(DockerSandbox)
+    task_cls = providers.Object(RedisStreamTask)
 
     cipher = providers.Factory(ApiKeyCipher, secret=config.provided.api_key_secret)
     uow_factory = providers.Callable(_uow_factory, postgres=postgres)
@@ -212,7 +214,7 @@ class AppContainer(containers.DeclarativeContainer):
         CheckpointService,
         uow_factory=uow_factory,
         object_storage=object_storage,
-        sandbox_cls=providers.Object(DockerSandbox),
+        sandbox_cls=sandbox_cls,
         task_state_port=task_state_port,
     )
 
@@ -239,7 +241,7 @@ class AppContainer(containers.DeclarativeContainer):
     session_service = providers.Singleton(
         SessionService,
         uow_factory=uow_factory,
-        sandbox_cls=providers.Object(DockerSandbox),
+        sandbox_cls=sandbox_cls,
         session_list_notifier=session_list_notifier,
     )
     questionnaire_service = providers.Singleton(
@@ -260,7 +262,7 @@ class AppContainer(containers.DeclarativeContainer):
     codebase_service = providers.Singleton(
         CodebaseService,
         uow_factory=uow_factory,
-        sandbox_cls=providers.Object(DockerSandbox),
+        sandbox_cls=sandbox_cls,
         file_storage=file_storage,
     )
 
@@ -270,7 +272,7 @@ class AppContainer(containers.DeclarativeContainer):
         llm_model_service=llm_model_service,
         skill_service=skill_service,
         memory_service=memory_service,
-        sandbox_cls=providers.Object(DockerSandbox),
+        sandbox_cls=sandbox_cls,
         json_parser=json_parser,
         search_engine=search_engine,
         file_storage=file_storage,
@@ -287,7 +289,7 @@ class AppContainer(containers.DeclarativeContainer):
     agent_service = providers.Singleton(
         AgentService,
         uow_factory=uow_factory,
-        task_cls=providers.Object(RedisStreamTask),
+        task_cls=task_cls,
         checkpoint_service=checkpoint_service,
         task_state_port=task_state_port,
         event_sequence_port=event_sequence_port,
@@ -300,31 +302,85 @@ class AppContainer(containers.DeclarativeContainer):
     )
 
 
-_container: AppContainer | None = None
+class ApiContainer(BaseContainer):
+    """HTTP API composition root: wires FastAPI dependencies, no sandbox pre-warm pool."""
 
+    wiring_config = containers.WiringConfiguration(packages=_WIRE_PACKAGES)
 
-def get_container() -> AppContainer:
-    global _container
-    if _container is None:
-        _container = AppContainer()
-    return _container
-
-
-async def init_container(container: AppContainer | None = None) -> AppContainer:
-    c = container or get_container()
-    c.wire(
-        packages=[
-            "app.interfaces",
-            "app.interfaces.endpoints",
-        ],
+    config_listener = providers.Resource(
+        _start_config_listener,
+        _=BaseContainer.runtime_configure,
     )
+
+
+class WorkerContainer(BaseContainer):
+    """Agent worker composition root: sandbox pre-warm pool, no HTTP wiring."""
+
+    sandbox_pool_start = providers.Resource(
+        _start_sandbox_pool,
+        _=BaseContainer.runtime_configure,
+    )
+    config_listener = providers.Resource(
+        _start_config_listener,
+        _=sandbox_pool_start,
+    )
+
+
+# Backward-compatible alias for FastAPI dependency injection.
+AppContainer = ApiContainer
+
+_api_container: ApiContainer | None = None
+_worker_container: WorkerContainer | None = None
+
+
+def get_api_container() -> ApiContainer:
+    global _api_container
+    if _api_container is None:
+        _api_container = ApiContainer()
+    return _api_container
+
+
+def get_worker_container() -> WorkerContainer:
+    global _worker_container
+    if _worker_container is None:
+        _worker_container = WorkerContainer()
+    return _worker_container
+
+
+def get_container() -> ApiContainer | WorkerContainer:
+    if get_role() == ProcessRole.WORKER:
+        return get_worker_container()
+    return get_api_container()
+
+
+async def init_api_container(container: ApiContainer | None = None) -> ApiContainer:
+    c = container or get_api_container()
+    c.wire(packages=_WIRE_PACKAGES)
     await c.init_resources()
-    logger.info("AppContainer resources initialized")
+    logger.info("ApiContainer resources initialized")
     return c
 
 
-async def shutdown_container(container: AppContainer | None = None) -> None:
-    c = container or get_container()
+async def init_worker_container(container: WorkerContainer | None = None) -> WorkerContainer:
+    c = container or get_worker_container()
+    await c.init_resources()
+    logger.info("WorkerContainer resources initialized")
+    return c
+
+
+async def shutdown_api_container(container: ApiContainer | None = None) -> None:
+    c = container or get_api_container()
+    try:
+        await _stop_config_listener(None)
+    except Exception as exc:
+        logger.warning("Config listener shutdown failed: %s", exc)
+    c.unwire()
+    await c.shutdown_resources()
+    logger.info("ApiContainer resources shut down")
+
+
+async def shutdown_worker_container(container: WorkerContainer | None = None) -> None:
+    c = container or get_worker_container()
     try:
         await _stop_config_listener(None)
     except Exception as exc:
@@ -333,6 +389,19 @@ async def shutdown_container(container: AppContainer | None = None) -> None:
         await _stop_sandbox_pool(None)
     except Exception as exc:
         logger.warning("Sandbox pool shutdown failed: %s", exc)
-    c.unwire()
     await c.shutdown_resources()
-    logger.info("AppContainer resources shut down")
+    logger.info("WorkerContainer resources shut down")
+
+
+# Legacy helpers kept for gradual migration.
+async def init_container(container: ApiContainer | WorkerContainer | None = None) -> ApiContainer | WorkerContainer:
+    if get_role() == ProcessRole.WORKER:
+        return await init_worker_container(container if isinstance(container, WorkerContainer) else None)
+    return await init_api_container(container if isinstance(container, ApiContainer) else None)
+
+
+async def shutdown_container(container: ApiContainer | WorkerContainer | None = None) -> None:
+    if get_role() == ProcessRole.WORKER:
+        await shutdown_worker_container(container if isinstance(container, WorkerContainer) else None)
+    else:
+        await shutdown_api_container(container if isinstance(container, ApiContainer) else None)

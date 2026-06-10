@@ -3,14 +3,13 @@
 """Standalone agent worker: consumes task dispatch queue and runs AgentTaskRunner."""
 import asyncio
 import logging
-import os
 import signal
 import socket
 import uuid
 
 from app.application.services.bootstrap_service import bootstrap_data
 from app.application.services.task_runner_factory import TaskRunnerFactory
-from app.container import get_container, init_container, shutdown_container
+from app.container import get_worker_container, init_worker_container, shutdown_worker_container
 from app.domain.models.session import SessionStatus
 from app.domain.services.codebase.ingestion_task_runner import CodebaseIngestionTaskRunner
 from app.infrastructure.external.file_storage.cos_file_storage import CosFileStorage
@@ -19,7 +18,10 @@ from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
 from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
 from app.infrastructure.logging import setup_logging
 from app.infrastructure.storage.postgres import get_uow
+from app.runtime_role import ProcessRole, set_role
 from core.config import get_settings
+
+set_role(ProcessRole.WORKER)
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +45,13 @@ async def _sandbox_cleanup_loop() -> None:
 
 
 class AgentWorker:
-    def __init__(self, runner_factory: TaskRunnerFactory, file_storage: CosFileStorage) -> None:
+    def __init__(
+            self,
+            runner_factory: TaskRunnerFactory,
+            file_storage: CosFileStorage,
+            sandbox_cls: type[DockerSandbox],
+            task_cls: type[RedisStreamTask],
+    ) -> None:
         self._settings = get_settings()
         self._task_state = get_task_state()
         self._consumer_name = f"worker-{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
@@ -55,6 +63,8 @@ class AgentWorker:
         self._active_tasks: set[asyncio.Task] = set()
         self._runner_factory = runner_factory
         self._file_storage = file_storage
+        self._sandbox_cls = sandbox_cls
+        self._task_cls = task_cls
 
     async def start(self) -> None:
         await self._task_state.ensure_consumer_group()
@@ -148,7 +158,7 @@ class AgentWorker:
             await uow.session.update_status(session_id, SessionStatus.RUNNING)
 
         runner = await self._runner_factory.create_runner(session)
-        task = RedisStreamTask(
+        task = self._task_cls(
             task_id=task_id,
             session_id=session_id,
             task_runner=runner,
@@ -170,7 +180,7 @@ class AgentWorker:
             except asyncio.CancelledError:
                 pass
             await runner.cleanup()
-            container = get_container()
+            container = get_worker_container()
             await container.mcp_connection_pool().release_stale()
             await container.a2a_connection_pool().release_stale()
 
@@ -180,11 +190,15 @@ class AgentWorker:
             raise RuntimeError("代码库摄取任务缺少 resource_id")
         runner = CodebaseIngestionTaskRunner(
             uow_factory=get_uow,
-            sandbox_cls=DockerSandbox,
+            sandbox_cls=self._sandbox_cls,
             file_storage=self._file_storage,
             codebase_id=codebase_id,
         )
-        task = RedisStreamTask(task_id=task_id, session_id=f"codebase-ingest:{codebase_id}", task_runner=runner)
+        task = self._task_cls(
+            task_id=task_id,
+            session_id=f"codebase-ingest:{codebase_id}",
+            task_runner=runner,
+        )
         await task.execute_locally()
 
     def request_shutdown(self) -> None:
@@ -192,9 +206,8 @@ class AgentWorker:
 
 
 async def main() -> None:
-    os.environ["MANUS_PROCESS_ROLE"] = "worker"
     setup_logging()
-    container = await init_container()
+    container = await init_worker_container()
     from app.application.services.skill_service import SkillService
 
     await bootstrap_data(
@@ -206,6 +219,8 @@ async def main() -> None:
     worker = AgentWorker(
         runner_factory=container.task_runner_factory(),
         file_storage=container.file_storage(),
+        sandbox_cls=container.sandbox_cls(),
+        task_cls=container.task_cls(),
     )
     loop = asyncio.get_running_loop()
 
@@ -225,7 +240,7 @@ async def main() -> None:
         except asyncio.CancelledError:
             pass
         await RedisStreamTask.destroy()
-        await shutdown_container(container)
+        await shutdown_worker_container(container)
 
 
 if __name__ == "__main__":

@@ -60,6 +60,7 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
+      target: api
     container_name: manus-migrate
     env_file:
       - .env
@@ -77,6 +78,8 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
+      target: api
+    image: manus-api
     container_name: manus-api
     restart: unless-stopped
     mem_limit: 2g
@@ -108,6 +111,8 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
+      target: worker
+    image: manus-worker
     container_name: manus-worker
     restart: unless-stopped
     mem_limit: 4g

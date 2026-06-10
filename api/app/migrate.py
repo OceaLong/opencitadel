@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """Standalone database migration entrypoint (run once per deploy)."""
+from app.runtime_role import ProcessRole, set_role
+
+set_role(ProcessRole.MIGRATE)
+
 from alembic import command
 from alembic.config import Config
 
