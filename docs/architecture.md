@@ -113,6 +113,10 @@ Python 项目统一使用 `pyproject.toml` + `uv.lock`，不再维护 `requireme
 postgres/redis → manus-migrate → manus-api + manus-worker → ui → nginx
 ```
 
+### 构建期镜像源
+
+`docker-compose.yml` 向 API / Worker / Sandbox / UI 传入统一 build args：`PIP_INDEX_URL`、`UV_INDEX_URL`、`UV_VERSION`、`NPM_CONFIG_REGISTRY` 等，默认面向国内网络。仓库无内置 CI/CD；镜像需 `docker compose build` 或外部流水线构建后再部署。
+
 ### Kubernetes / Helm
 
 Chart 位于 `deploy/helm/my-manus/`：

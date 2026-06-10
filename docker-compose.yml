@@ -1,4 +1,7 @@
 services:
+  # ==================== 构建期镜像源（可通过 .env 或环境变量覆盖） ====================
+  # PIP_INDEX_URL / UV_INDEX_URL 默认阿里云 PyPI；NPM_CONFIG_REGISTRY 默认 npmmirror
+
   # ==================== 基础设施 ====================
 
   manus-redis:
@@ -48,6 +51,14 @@ services:
     build:
       context: ./sandbox
       dockerfile: Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-300}
+        PIP_RETRIES: ${PIP_RETRIES:-5}
+        UV_INDEX_URL: ${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        UV_VERSION: ${UV_VERSION:-0.11.19}
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
     image: manus-sandbox
     container_name: manus-sandbox
     restart: "no"
@@ -61,6 +72,13 @@ services:
       context: ./api
       dockerfile: Dockerfile
       target: api
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-300}
+        PIP_RETRIES: ${PIP_RETRIES:-5}
+        UV_INDEX_URL: ${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        UV_VERSION: ${UV_VERSION:-0.11.19}
     container_name: manus-migrate
     env_file:
       - .env
@@ -79,6 +97,13 @@ services:
       context: ./api
       dockerfile: Dockerfile
       target: api
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-300}
+        PIP_RETRIES: ${PIP_RETRIES:-5}
+        UV_INDEX_URL: ${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        UV_VERSION: ${UV_VERSION:-0.11.19}
     image: manus-api
     container_name: manus-api
     restart: unless-stopped
@@ -112,6 +137,13 @@ services:
       context: ./api
       dockerfile: Dockerfile
       target: worker
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-300}
+        PIP_RETRIES: ${PIP_RETRIES:-5}
+        UV_INDEX_URL: ${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        UV_VERSION: ${UV_VERSION:-0.11.19}
     image: manus-worker
     container_name: manus-worker
     restart: unless-stopped
@@ -146,6 +178,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_BASE_URL: /api
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
     container_name: manus-ui
     restart: unless-stopped
     mem_limit: 1g

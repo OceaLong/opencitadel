@@ -212,6 +212,8 @@ docker compose up -d --build
 docker compose logs -f manus-worker
 ```
 
+构建期 `pip install uv` 与 `uv sync` 默认走阿里云 PyPI（见根目录 `docker-compose.yml` 的 build args）。可通过环境变量 `PIP_INDEX_URL`、`UV_INDEX_URL`、`UV_VERSION` 覆盖。
+
 ## Kubernetes
 
 Helm Chart 位于 [`../deploy/helm/my-manus/`](../deploy/helm/my-manus/)，包含 API/Worker Deployment、HPA 与 migrate initContainer。

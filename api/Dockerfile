@@ -1,6 +1,16 @@
 # 1.确认基础镜像源
 FROM python:3.12-slim AS base
 
+# 构建期镜像源与超时（可通过 docker compose build args 覆盖）
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
+ARG PIP_DEFAULT_TIMEOUT=300
+ARG PIP_RETRIES=5
+ARG UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG UV_VERSION=0.11.19
+
+ENV UV_INDEX_URL=${UV_INDEX_URL}
+
 # 2.配置容器工作空间
 WORKDIR /app
 
@@ -11,27 +21,29 @@ RUN apt-get update && apt-get install -y curl
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs
 
-# 5.安装uv, 使用uv来同步依赖环境
-RUN pip install uv
+# 5.安装uv, 使用uv来同步依赖环境（pip 走国内镜像，避免 files.pythonhosted.org 超时）
+RUN pip install --no-cache-dir \
+    -i "${PIP_INDEX_URL}" \
+    --trusted-host "${PIP_TRUSTED_HOST}" \
+    --default-timeout="${PIP_DEFAULT_TIMEOUT}" \
+    --retries="${PIP_RETRIES}" \
+    "uv==${UV_VERSION}"
 
-# 6.配置uv使用阿里云镜像源
-ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-
-# 7.拷贝依赖清单并安装依赖
+# 6.拷贝依赖清单并安装依赖
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# 8.拷贝项目文件(忽略开发环境的库)
+# 7.拷贝项目文件(忽略开发环境的库)
 COPY . .
 
-# 9.为运行脚本配置权限
+# 8.为运行脚本配置权限
 RUN chmod +x run.sh worker.sh migrate.sh
 
-# 10.设置Python路径变量
+# 9.设置Python路径变量
 ENV PYTHONPATH=/app
 ENV PATH="/app/.venv/bin:$PATH"
 
-# 10.1 禁用Python输出缓冲，确保日志实时输出到docker logs
+# 9.1 禁用Python输出缓冲，确保日志实时输出到docker logs
 ENV PYTHONUNBUFFERED=1
 
 # ==================== API 镜像 ====================
@@ -39,10 +51,10 @@ FROM base AS api
 
 ENV MANUS_PROCESS_ROLE=api
 
-# 11.暴露端口号
+# 10.暴露端口号
 EXPOSE 8000
 
-# 12.启动命令脚本
+# 11.启动命令脚本
 CMD ["./run.sh"]
 
 # ==================== Worker 镜像 ====================

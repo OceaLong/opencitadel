@@ -78,6 +78,30 @@ docker compose logs -f
 
 > **Agent Worker 必须运行**：若 `manus-worker` 未启动，对话请求会写入队列但 Agent 不会执行。可通过 `docker compose logs -f manus-worker` 排查。
 
+### 3.1 Docker 构建期镜像源（可选）
+
+`docker-compose.yml` 已为 Python / npm 服务注入统一 build args，默认使用阿里云 PyPI 与 npmmirror，避免 `files.pythonhosted.org` 下载超时。企业内网可在 `.env` 或 shell 中覆盖：
+
+```bash
+# 示例：使用私有 PyPI 代理
+export PIP_INDEX_URL=https://pypi.mycompany.internal/simple/
+export PIP_TRUSTED_HOST=pypi.mycompany.internal
+export UV_INDEX_URL=https://pypi.mycompany.internal/simple/
+export NPM_CONFIG_REGISTRY=https://npm.mycompany.internal/
+
+docker compose build
+docker compose up -d
+```
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PIP_INDEX_URL` | 阿里云 PyPI | `pip install uv` |
+| `UV_INDEX_URL` | 阿里云 PyPI | `uv sync --frozen` |
+| `UV_VERSION` | `0.11.19` | 固定构建期 uv 版本 |
+| `NPM_CONFIG_REGISTRY` | npmmirror | sandbox / ui 的 npm |
+
+> **CI/CD 说明**：本仓库无自动 CI workflow。生产发布流程为：本地或外部流水线 `docker compose build` →（可选）推送到镜像仓库 → `docker compose up` 或 Helm 部署 API/Worker。
+
 ---
 
 ## ⚙️ 核心配置

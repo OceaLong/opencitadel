@@ -1,8 +1,11 @@
 # Stage 1: 安装依赖
 FROM node:22-alpine AS deps
 WORKDIR /app
+
+ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm config set registry "${NPM_CONFIG_REGISTRY}" && npm ci
 
 # Stage 2: 构建应用
 FROM node:22-alpine AS builder

@@ -1,9 +1,21 @@
 # 1.使用ubuntu基础镜像来源
 FROM ubuntu:22.04
 
+# 构建期镜像源与超时（可通过 docker compose build args 覆盖）
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
+ARG PIP_DEFAULT_TIMEOUT=300
+ARG PIP_RETRIES=5
+ARG UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG UV_VERSION=0.11.19
+ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+
 # 2.安装过程避免交互式提示并设置主机名
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HOSTNAME=sandbox
+ENV UV_INDEX_URL=${UV_INDEX_URL}
+ENV UV_PROJECT_ENVIRONMENT=/venv
+ENV UV_LINK_MODE=copy
 
 # 3.将ubuntu默认的apt软件源地址统一换成阿里云镜像源
 RUN sed -i 's|http://archive.ubuntu.com/ubuntu/|http://mirrors.aliyun.com/ubuntu/|g' /etc/apt/sources.list && \
@@ -29,11 +41,13 @@ RUN add-apt-repository ppa:deadsnakes/ppa && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# 7.安装uv并使用uv同步依赖（venv 放在工作目录外，避免 COPY . . 覆盖）
-RUN pip3 install uv
-ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-ENV UV_PROJECT_ENVIRONMENT=/venv
-ENV UV_LINK_MODE=copy
+# 7.安装uv（pip 走国内镜像，避免 files.pythonhosted.org 超时）
+RUN pip3 install --no-cache-dir \
+    -i "${PIP_INDEX_URL}" \
+    --trusted-host "${PIP_TRUSTED_HOST}" \
+    --default-timeout="${PIP_DEFAULT_TIMEOUT}" \
+    --retries="${PIP_RETRIES}" \
+    "uv==${UV_VERSION}"
 
 # 8.安装node.js 24.12.0版本(LTS)
 RUN mkdir -p /etc/apt/keyrings && \
@@ -44,15 +58,15 @@ RUN mkdir -p /etc/apt/keyrings && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# 9.将npm镜像源设置为阿里云镜像源
-RUN npm config set registry https://registry.npmmirror.com
+# 9.将npm镜像源设置为可覆盖的 registry
+RUN npm config set registry "${NPM_CONFIG_REGISTRY}"
 
 # 10.安装Google Chrome浏览器
 RUN add-apt-repository ppa:xtradeb/apps -y && \
     apt-get update && \
     apt-get install -y chromium --no-install-recommends && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # 11.安装中文字体和语言支持
 RUN apt-get update && apt-get install -y \

@@ -67,7 +67,14 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
 ## Docker 部署
 
-沙箱服务通过根目录的 `docker-compose.yml` 统一部署。Dockerfile 使用 `uv sync --frozen` 安装依赖到 `/venv`，运行时通过 `PATH=/venv/bin` 解析 `uvicorn`。
+沙箱服务通过根目录的 `docker-compose.yml` 统一部署。Dockerfile 在 `UV_INDEX_URL` 生效后执行 `uv sync --frozen`，依赖安装到 `/venv`，运行时通过 `PATH=/venv/bin` 解析 `uvicorn`。
+
+`pip install uv` 使用可覆盖的 build args（默认阿里云 PyPI、`UV_VERSION=0.11.19`），避免从 `files.pythonhosted.org` 拉取大 wheel 超时。npm 默认 `registry.npmmirror.com`。
+
+```bash
+# 仅重建沙箱镜像
+docker compose build manus-sandbox
+```
 
 生产环境中沙箱作为固定容器运行，API/Worker 通过 `config.yaml` 的 `sandbox.address` 连接。
 
