@@ -125,7 +125,7 @@ api/
 - **Token 流式**：`LLM.stream_invoke()` 逐 delta 推送至 SSE
 - **并行工具**：单轮多 `tool_calls` 并发；browser/shell 自动加锁
 - **结构化 Planner 输出**：`PlannerPlanSchema` Pydantic 严格校验
-- **向量记忆**：`MEMORY_VECTOR_ENABLED=true` 时启用 pgvector 混合召回
+- **向量记忆**：`api/config.yaml` 中 `memory.vector_enabled: true` 时启用 pgvector 混合召回
 - **多 Provider**：OpenAI 兼容 / Anthropic / Gemini 原生适配
 
 ## 本地开发
@@ -140,21 +140,28 @@ playwright install
 
 ### 配置环境变量
 
-参考 `.env.example`，关键配置：
+参考 `.env.example`（启动引导与密钥）和 `api/config.yaml`（运行时行为）。关键 `.env` 配置：
 
 ```bash
-SQLALCHEMY_DATABASE_URI=postgresql+asyncpg://postgres:postgres@localhost:5432/manus
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=manus
+POSTGRES_HOST=localhost
 REDIS_HOST=localhost
 REDIS_PORT=6379
-SANDBOX_ADDRESS=          # 留空则动态创建沙箱容器
+API_KEY_SECRET=            # 生产环境必须设置强随机值
+EMBEDDING_API_KEY=         # 向量记忆启用时填写
+```
 
-# 可选：向量记忆
-MEMORY_VECTOR_ENABLED=false
-EMBEDDING_API_KEY=
+沙箱地址、向量记忆、OTEL 等开关在 `api/config.yaml`：
 
-# 可选：可观测性
-OTEL_ENABLED=false
-OTEL_EXPORTER_ENDPOINT=
+```yaml
+sandbox:
+  address: null             # 留空则动态创建沙箱容器
+memory:
+  vector_enabled: false
+observability:
+  otel_enabled: false
 ```
 
 ### 启动服务
@@ -188,6 +195,19 @@ alembic upgrade head
 
 > **注意**：API 启动时会校验 DB schema 是否为 Alembic head，未迁移将拒绝启动（test 环境跳过）。
 
+### LLM API Key 加密迁移
+
+生产环境需在 `.env` 设置强随机 `API_KEY_SECRET`（`openssl rand -hex 32`）。`llm_models.api_key_encryption` 标识存储格式：
+
+| 值 | 含义 |
+|----|------|
+| `legacy_plaintext` | 历史明文（兼容读取） |
+| `fernet_v1` | 使用 `API_KEY_SECRET` 加密 |
+
+`python -m app.migrate`（或 Docker Compose 的 `manus-migrate`）会在 Alembic 后自动加密历史明文。单独修复时可运行 `python -m app.migrate_llm_api_keys`。
+
+API 与 Worker 在 `ENV=production` 时都会校验弱密钥并拒绝启动。
+
 ## Docker 部署
 
 `Dockerfile` 为多阶段构建，产出独立镜像：
@@ -201,7 +221,7 @@ alembic upgrade head
 
 | 服务 | 说明 |
 |------|------|
-| `manus-migrate` | 一次性 init job（api target），执行 `alembic upgrade head` |
+| `manus-migrate` | 一次性 init job（api target），执行 Alembic + LLM Key 迁移 |
 | `manus-api` | FastAPI 无状态 API（`target: api`） |
 | `manus-worker` | Agent Worker 池（`target: worker`，可 scale） |
 | `manus-postgres` | `pgvector/pgvector:pg16` |

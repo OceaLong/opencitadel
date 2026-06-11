@@ -63,23 +63,23 @@ mcp_config:
   mcpServers:
     amap-maps-streamableHTTP:
       transport: streamable_http
-      enabled: true
+      enabled: false
       description: null
       env: null
       command: null
       args: null
-      url: https://mcp.amap.com/mcp?key=00b05640cc55c0ba2b7f85e0b3f2e6e7
+      url: https://mcp.amap.com/mcp?key=YOUR_AMAP_KEY
       headers: null
     jina-mcp-server:
       transport: streamable_http
-      enabled: true
+      enabled: false
       description: null
       env: null
       command: null
       args: null
       url: https://mcp.jina.ai/v1
       headers:
-        Authorization: Bearer jina_133c673d569840d3b1e379a526eee6d4VKMVBI9J5HYE2xd4ys7i6ehZUNb6
+        Authorization: Bearer YOUR_JINA_API_KEY
 
 a2a_config:
   a2a_servers: []

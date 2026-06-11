@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.models.llm_model import LLMModel
 from app.domain.repositories.llm_model_repository import LLMModelRepository
 from app.infrastructure.models.llm_model import LLMModelORM
-from app.infrastructure.security.api_key_cipher import ApiKeyCipher
+from app.infrastructure.security.api_key_cipher import ApiKeyCipher, ApiKeyCipherError
+from app.infrastructure.security.api_key_encryption import ApiKeyEncryption
 
 
 class DBLLMModelRepository(LLMModelRepository):
@@ -17,30 +18,43 @@ class DBLLMModelRepository(LLMModelRepository):
         self.db_session = db_session
         self.cipher = cipher
 
-    def _decrypt_key(self, encrypted: str) -> str:
-        return self.cipher.decrypt(encrypted)
+    def _resolve_api_key(self, stored: str, encryption: str) -> str:
+        if not stored:
+            return ""
+        if encryption == ApiKeyEncryption.LEGACY_PLAINTEXT:
+            return stored
+        if encryption == ApiKeyEncryption.FERNET_V1:
+            return self.cipher.decrypt_or_raise(stored)
+        raise ApiKeyCipherError(f"未知的 api_key_encryption 格式: {encryption}")
 
     async def get_all(self) -> List[LLMModel]:
         stmt = select(LLMModelORM).order_by(LLMModelORM.is_default.desc(), LLMModelORM.created_at)
         result = await self.db_session.execute(stmt)
-        return [r.to_domain(self._decrypt_key(r.api_key)) for r in result.scalars().all()]
+        return [
+            r.to_domain(self._resolve_api_key(r.api_key, r.api_key_encryption))
+            for r in result.scalars().all()
+        ]
 
     async def get_by_id(self, model_id: str) -> Optional[LLMModel]:
         stmt = select(LLMModelORM).where(LLMModelORM.id == model_id)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
-        return record.to_domain(self._decrypt_key(record.api_key)) if record else None
+        if not record:
+            return None
+        return record.to_domain(self._resolve_api_key(record.api_key, record.api_key_encryption))
 
     async def get_default(self) -> Optional[LLMModel]:
         stmt = select(LLMModelORM).where(LLMModelORM.is_default.is_(True)).limit(1)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         if record:
-            return record.to_domain(self._decrypt_key(record.api_key))
+            return record.to_domain(self._resolve_api_key(record.api_key, record.api_key_encryption))
         stmt = select(LLMModelORM).order_by(LLMModelORM.created_at).limit(1)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
-        return record.to_domain(self._decrypt_key(record.api_key)) if record else None
+        if not record:
+            return None
+        return record.to_domain(self._resolve_api_key(record.api_key, record.api_key_encryption))
 
     async def save(self, model: LLMModel, encrypted_api_key: str) -> None:
         stmt = select(LLMModelORM).where(LLMModelORM.id == model.id)
@@ -53,6 +67,7 @@ class DBLLMModelRepository(LLMModelRepository):
             record.base_url = model.base_url
             if encrypted_api_key:
                 record.api_key = encrypted_api_key
+                record.api_key_encryption = ApiKeyEncryption.FERNET_V1
             record.model_name = model.model_name
             record.temperature = model.temperature
             record.max_tokens = model.max_tokens
@@ -64,7 +79,14 @@ class DBLLMModelRepository(LLMModelRepository):
             record.is_default = model.is_default
             record.updated_at = model.updated_at
         else:
-            self.db_session.add(LLMModelORM.from_domain(model, encrypted_api_key))
+            encryption = (
+                ApiKeyEncryption.FERNET_V1
+                if encrypted_api_key
+                else ApiKeyEncryption.LEGACY_PLAINTEXT
+            )
+            self.db_session.add(
+                LLMModelORM.from_domain(model, encrypted_api_key, api_key_encryption=encryption)
+            )
 
     async def delete_by_id(self, model_id: str) -> None:
         await self.db_session.execute(delete(LLMModelORM).where(LLMModelORM.id == model_id))

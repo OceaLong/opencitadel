@@ -1,7 +1,14 @@
-services:
-  # ==================== 构建期镜像源（可通过 .env 或环境变量覆盖） ====================
-  # PIP_INDEX_URL / UV_INDEX_URL 默认阿里云 PyPI；NPM_CONFIG_REGISTRY 默认 npmmirror
+# 构建期镜像源（可通过 .env 或环境变量覆盖）
+x-pip-build-args: &pip-build-args
+  PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+  PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+  PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-300}
+  PIP_RETRIES: ${PIP_RETRIES:-5}
+  UV_INDEX_URL: ${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+  UV_VERSION: ${UV_VERSION:-0.11.19}
+  NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
 
+services:
   # ==================== 基础设施 ====================
 
   manus-redis:
@@ -52,13 +59,7 @@ services:
       context: ./sandbox
       dockerfile: Dockerfile
       args:
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
-        PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-300}
-        PIP_RETRIES: ${PIP_RETRIES:-5}
-        UV_INDEX_URL: ${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-        UV_VERSION: ${UV_VERSION:-0.11.19}
-        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
+        <<: *pip-build-args
     image: manus-sandbox
     container_name: manus-sandbox
     restart: "no"
@@ -73,13 +74,7 @@ services:
       dockerfile: Dockerfile
       target: api
       args:
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
-        PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-300}
-        PIP_RETRIES: ${PIP_RETRIES:-5}
-        UV_INDEX_URL: ${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-        UV_VERSION: ${UV_VERSION:-0.11.19}
-    container_name: manus-migrate
+        <<: *pip-build-args
     env_file:
       - .env
     depends_on:
@@ -98,12 +93,7 @@ services:
       dockerfile: Dockerfile
       target: api
       args:
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
-        PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-300}
-        PIP_RETRIES: ${PIP_RETRIES:-5}
-        UV_INDEX_URL: ${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-        UV_VERSION: ${UV_VERSION:-0.11.19}
+        <<: *pip-build-args
     image: manus-api
     container_name: manus-api
     restart: unless-stopped
@@ -138,12 +128,7 @@ services:
       dockerfile: Dockerfile
       target: worker
       args:
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
-        PIP_DEFAULT_TIMEOUT: ${PIP_DEFAULT_TIMEOUT:-300}
-        PIP_RETRIES: ${PIP_RETRIES:-5}
-        UV_INDEX_URL: ${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
-        UV_VERSION: ${UV_VERSION:-0.11.19}
+        <<: *pip-build-args
     image: manus-worker
     container_name: manus-worker
     restart: unless-stopped
@@ -204,13 +189,13 @@ services:
     cpus: "0.50"
     ports:
       - "${NGINX_PORT:-8088}:80"
-      # 如需启用 HTTPS，取消以下注释
-      - "443:443"
+      # 启用 HTTPS 时取消下一行注释，并同步取消 nginx/conf.d/default.conf 顶部 SSL 块注释
+      # - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      # 直接挂载系统 Let's Encrypt 证书目录
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # 启用 HTTPS 时取消下一行注释（需先 certbot 获取证书）
+      # - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       manus-ui:
         condition: service_healthy

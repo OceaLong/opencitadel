@@ -1,8 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from functools import lru_cache
+from urllib.parse import quote_plus
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEFAULT_LOCAL_URI = "postgresql+asyncpg://postgres:postgres@localhost:5432/manus"
 
 
 class Settings(BaseSettings):
@@ -15,7 +19,11 @@ class Settings(BaseSettings):
     api_key_secret: str = "my-manus-api-key-secret-change-in-production"
 
     # 数据库连接（引导层，启动前必须可用）
-    sqlalchemy_database_uri: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/manus"
+    postgres_user: str = "postgres"
+    postgres_password: str = "postgres"
+    postgres_db: str = "manus"
+    postgres_host: str = "localhost"
+    sqlalchemy_database_uri: str = ""
     sqlalchemy_echo: bool = False
     postgres_pool_size: int = 10
     postgres_max_overflow: int = 20
@@ -40,10 +48,6 @@ class Settings(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
 
-    # Vault（可选）
-    vault_addr: str = ""
-    vault_token: str = ""
-
     # 应用配置存储：false=本地 config.yaml，true=PostgreSQL app_configs 表
     use_db_app_config: bool = False
 
@@ -52,6 +56,19 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def derive_sqlalchemy_database_uri(self) -> "Settings":
+        uri = (self.sqlalchemy_database_uri or "").strip()
+        if not uri or uri == _DEFAULT_LOCAL_URI:
+            user = quote_plus(self.postgres_user)
+            password = quote_plus(self.postgres_password)
+            object.__setattr__(
+                self,
+                "sqlalchemy_database_uri",
+                f"postgresql+asyncpg://{user}:{password}@{self.postgres_host}:5432/{self.postgres_db}",
+            )
+        return self
 
 
 @lru_cache()

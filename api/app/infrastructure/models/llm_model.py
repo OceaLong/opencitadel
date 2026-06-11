@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
 from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities
+from app.infrastructure.security.api_key_encryption import ApiKeyEncryption
 
 
 class LLMModelORM(Base):
@@ -20,6 +21,11 @@ class LLMModelORM(Base):
     provider: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'openai'"))
     base_url: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    api_key_encryption: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=text("'legacy_plaintext'"),
+    )
     model_name: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
     temperature: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0.7"))
     max_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("8192"))
@@ -47,13 +53,20 @@ class LLMModelORM(Base):
     )
 
     @classmethod
-    def from_domain(cls, model: LLMModel, encrypted_api_key: str) -> "LLMModelORM":
+    def from_domain(
+        cls,
+        model: LLMModel,
+        encrypted_api_key: str,
+        *,
+        api_key_encryption: str = ApiKeyEncryption.LEGACY_PLAINTEXT,
+    ) -> "LLMModelORM":
         return cls(
             id=model.id,
             display_name=model.display_name,
             provider=model.provider.value,
             base_url=model.base_url,
             api_key=encrypted_api_key,
+            api_key_encryption=api_key_encryption,
             model_name=model.model_name,
             temperature=model.temperature,
             max_tokens=model.max_tokens,

@@ -70,28 +70,6 @@ openapi_tags = [
 ]
 
 
-def _verify_production_secrets() -> None:
-    if settings.env in {"test", "development"}:
-        return
-    secret = (settings.api_key_secret or "").strip()
-    weak = {
-        "",
-        "<strong_secret>",
-        "<generate_with_openssl_rand_hex_32>",
-        "change-me",
-        "changeme",
-        "my-manus-api-key-secret-change-in-production",
-        "my-manus-default-secret",
-        "replace-me",
-        "replace-with-strong-random-secret",
-    }
-    if len(secret) < 32 or secret.lower() in weak or secret.startswith("<"):
-        raise RuntimeError(
-            "Production requires a strong API_KEY_SECRET. "
-            "Set a unique value in environment variables before starting the API."
-        )
-
-
 def _verify_db_migrations() -> None:
     """Ensure DB schema is at head; fail fast if migrate job was not run."""
     if settings.env == "test":
@@ -132,8 +110,7 @@ async def lifespan(app: FastAPI):
     # 1.日志打印代码已经开始执行了
     logger.info("MyManus正在初始化")
 
-    # 2.校验生产密钥与数据库迁移版本（迁移由独立 migrate job 执行）
-    _verify_production_secrets()
+    # 2.校验数据库迁移版本（迁移由独立 migrate job 执行）
     _verify_db_migrations()
 
     container = await init_api_container()

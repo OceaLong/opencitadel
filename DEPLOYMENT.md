@@ -74,7 +74,7 @@ docker compose ps
 docker compose logs -f
 ```
 
-> **服务启动顺序**：`manus-postgres` + `manus-redis` → `manus-migrate`（一次性迁移）→ `manus-api` + `manus-worker` → `manus-ui` → `manus-nginx`
+> **服务启动顺序**：`manus-postgres` + `manus-redis` → `manus-migrate`（Alembic + LLM Key 迁移）→ `manus-api` + `manus-worker` → `manus-ui` → `manus-nginx`
 
 > **Agent Worker 必须运行**：若 `manus-worker` 未启动，对话请求会写入队列但 Agent 不会执行。可通过 `docker compose logs -f manus-worker` 排查。
 
@@ -111,44 +111,42 @@ docker compose up -d
 `.env` 仅保留进程启动前必须可用的连接串与密钥；行为类配置见 `api/config.yaml`。
 
 ```bash
-# ==================== 基础配置 ====================
+# ==================== 必填最小集 ====================
 ENV=production
 LOG_LEVEL=INFO
-APP_CONFIG_FILEPATH=config.yaml
-API_KEY_SECRET=<GENERATE_WITH_OPENSSL_RAND_HEX_32>
+# .env.example 已预填开箱即用示例；生产建议覆盖: openssl rand -hex 32
+API_KEY_SECRET=<from .env.example>
 
-# ==================== 数据库配置 ====================
+# 数据库（未设置 SQLALCHEMY_DATABASE_URI 时由 POSTGRES_* 自动派生）
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=<STRONG_PASSWORD>
 POSTGRES_DB=manus
-SQLALCHEMY_DATABASE_URI=postgresql+asyncpg://postgres:<STRONG_PASSWORD>@manus-postgres:5432/manus
+POSTGRES_HOST=manus-postgres
 
-# ==================== Redis 配置 ====================
+# Redis（未设置密码时留空）
 REDIS_HOST=manus-redis
 REDIS_PORT=6379
 REDIS_DB=0
 REDIS_PASSWORD=
 
-# ==================== 腾讯云 COS 配置 ====================
+# 腾讯云 COS
 COS_SECRET_ID=<YOUR_COS_SECRET_ID>
 COS_SECRET_KEY=<YOUR_COS_SECRET_KEY>
 COS_REGION=ap-guangzhou
-COS_SCHEME=https
 COS_BUCKET=<YOUR_BUCKET_NAME>
 COS_DOMAIN=<YOUR_COS_DOMAIN>
 
-# ==================== 嵌入 / 可观测性密钥（可选） ====================
+# Nginx 端口
+NGINX_PORT=8088
+
+# ==================== 按功能启用的密钥（可选） ====================
+# 向量记忆 / Langfuse：先在 api/config.yaml 启用对应开关后再填写
 EMBEDDING_API_KEY=
 LANGFUSE_PUBLIC_KEY=
 LANGFUSE_SECRET_KEY=
-
-# ==================== Vault（可选） ====================
-VAULT_ADDR=
-VAULT_TOKEN=
-
-# ==================== Nginx 端口 ====================
-NGINX_PORT=8088
 ```
+
+行为类配置（CORS、限流、沙箱、记忆、Worker 并发、OTEL 开关等）统一在 `api/config.yaml` 维护，不要写入 `.env`。
 
 ### 运行时配置 (api/config.yaml)
 
@@ -198,6 +196,7 @@ a2a_config:
 ### 模型、Skill 与记忆
 
 - **首次启动不会自动导入默认模型**，请在前端「设置中心 → 模型管理」添加模型并设置默认项后才能发起对话。模型存储在 PostgreSQL `llm_models` 表，API Key 由 `API_KEY_SECRET` 加密。
+- `llm_models.api_key_encryption` 字段标识存储格式：`legacy_plaintext`（历史明文）或 `fernet_v1`（加密存储）。`manus-migrate` 会在 Alembic 后自动加密历史明文，无需额外命令。
 - 系统会自动创建内置 Skill 模板（编程助手、研究分析、数据分析、内容写作），也可在「设置中心 → Skill 模板」维护自定义模板。
 - 长期记忆在「设置中心 → 长期记忆」维护，支持全局和会话两种作用域；任务开始时会自动召回相关记忆（时间衰减 + 可选 pgvector 向量混合检索）。
 - 开启向量记忆需在 `config.yaml` 设置 `memory.vector_enabled: true`，并在 `.env` 配置 `EMBEDDING_API_KEY`；PostgreSQL 使用 `pgvector/pgvector:pg16` 镜像。
@@ -205,7 +204,7 @@ a2a_config:
 
 ### 数据库迁移
 
-迁移由 **`manus-migrate` 一次性 init job** 自动执行，API 启动时仅校验 schema 版本，不再在 lifespan 内跑 `alembic upgrade`。
+迁移由 **`manus-migrate` 一次性 init job** 自动执行：先跑 Alembic schema 迁移，再加密历史明文 LLM API Key。API 启动时仅校验 schema 版本，不再在 lifespan 内跑 `alembic upgrade`。
 
 ```bash
 # 正常部署：docker compose up 会自动运行 manus-migrate
@@ -406,6 +405,24 @@ docker compose run --rm manus-migrate
 docker exec -i manus-postgres psql -U postgres manus < backup.sql
 ```
 
+### LLM API Key 迁移
+
+常规部署/升级只需 `docker compose up -d --build`，`manus-migrate` 会自动完成历史明文加密。迁移日志只输出统计信息与 `model_id`，不会打印真实 API Key。
+
+若升级后迁移容器未重建，可补救：
+
+```bash
+docker compose up -d --build --force-recreate manus-migrate manus-api manus-worker
+```
+
+极端情况下可单独修复：
+
+```bash
+docker compose run --rm manus-api python -m app.migrate_llm_api_keys
+```
+
+轮换 `API_KEY_SECRET` 后，已加密的模型密钥需在前端重新保存。
+
 ---
 
 ## 🛠️ 故障排查
@@ -416,7 +433,7 @@ docker exec -i manus-postgres psql -U postgres manus < backup.sql
 
 ```bash
 # 查看详细日志
-docker-compose logs manus-api
+docker compose logs manus-api
 
 # 检查配置文件
 docker exec -it manus-api printenv API_KEY_SECRET ENV SQLALCHEMY_DATABASE_URI
@@ -511,29 +528,23 @@ docker-compose restart manus-postgres
 
 ## 🔐 HTTPS 配置（可选）
 
-### 使用 Let's Encrypt
+默认 HTTP 即可使用；需要 HTTPS 时三步启用：
 
 ```bash
-# 安装 Certbot
+# 1. 获取证书
 sudo apt install -y certbot
-
-# 获取证书
 sudo certbot certonly --standalone -d your-domain.com
 
-# 配置 Nginx SSL
-# 取消 nginx/conf.d/default.conf 中的 SSL 注释
-# 修改证书路径为：
-# ssl_certificate     /etc/letsencrypt/live/your-domain.com/fullchain.pem;
-# ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+# 2. 取消注释（将 your-domain.com 替换为实际域名）
+#    - docker-compose.yml: manus-nginx 的 443 端口与 /etc/letsencrypt 挂载
+#    - nginx/conf.d/default.conf: 顶部 SSL server 块
 
-# 挂载证书到容器
-# 在 docker-compose.yml 中添加：
-# volumes:
-#   - /etc/letsencrypt:/etc/letsencrypt:ro
+# 3. 重载 Nginx
+docker compose up -d manus-nginx
+docker compose exec manus-nginx nginx -s reload
 
-# 自动续期
-sudo crontab -e
-# 添加：0 3 1 * * certbot renew --quiet && docker-compose exec manus-nginx nginx -s reload
+# 证书续期（可选 cron）
+# 0 3 1 * * certbot renew --quiet && docker compose exec manus-nginx nginx -s reload
 ```
 
 ---
@@ -560,29 +571,11 @@ helm upgrade --install my-manus ./deploy/helm/my-manus \
 ```
 
 Chart 特性：
-- API Deployment 含 **migrate initContainer**
+- API Deployment 含 **migrate initContainer**（与 `manus-migrate` 等价）
 - Worker Deployment 独立 HPA
 - readiness/liveness 探针分离
 
----
-
-## 📝 检查清单
-
-部署前确认：
-
-- [ ] 服务器已安装 Docker 和 Docker Compose
-- [ ] 防火墙已配置（仅开放 22、8088 端口）
-- [ ] .env 已配置数据库/Redis/COS 连接与 `API_KEY_SECRET`
-- [ ] api/config.yaml 已配置沙箱、MCP 等运行时行为
-- [ ] 已在设置页添加至少一个 LLM 模型并设为默认
-- [ ] `manus-migrate` 已成功完成（`docker compose ps` 中状态为 exited(0)）
-- [ ] `manus-api` 与 **`manus-worker`** 均为 running
-- [ ] 已在设置中心确认默认模型、内置 Skill 和长期记忆配置
-- [ ] 已测试 `/api/status` 与 `/api/metrics`
-- [ ] （可选）已配置 `OTEL_ENABLED` / `MEMORY_VECTOR_ENABLED`
-- [ ] 已配置日志轮转
-- [ ] 已设置自动备份
-- [ ] 已验证健康检查端点
+> Chart 为骨架配置，生产需自行补全 Secret（`API_KEY_SECRET`、数据库/Redis、COS）与 `config.yaml` ConfigMap。
 
 ---
 

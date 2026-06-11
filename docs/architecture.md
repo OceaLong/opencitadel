@@ -105,7 +105,7 @@ Python 项目统一使用 `pyproject.toml` + `uv.lock`，不再维护 `requireme
 | `api` | `manus-api` | `./run.sh` | `api` |
 | `worker` | `manus-worker` | `./worker.sh` | `worker` |
 
-`manus-migrate` 使用 `api` target，命令覆盖为 `python -m app.migrate`。
+`manus-migrate` 使用 `api` target，命令覆盖为 `python -m app.migrate`（Alembic + LLM Key 迁移）。
 
 ### Docker Compose 启动顺序
 

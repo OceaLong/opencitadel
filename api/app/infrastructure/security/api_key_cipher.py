@@ -3,11 +3,13 @@
 import base64
 import hashlib
 import logging
-from typing import Optional
+import re
 
 from cryptography.fernet import Fernet, InvalidToken
 
 logger = logging.getLogger(__name__)
+
+_FERNET_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+=*$")
 
 
 def _derive_fernet_key(secret: str) -> bytes:
@@ -16,7 +18,8 @@ def _derive_fernet_key(secret: str) -> bytes:
     return base64.urlsafe_b64encode(digest)
 
 
-_DEFAULT_DEV_SECRET = "my-manus-api-key-secret-change-in-production"
+class ApiKeyCipherError(Exception):
+    """Raised when encrypted API key data cannot be decrypted."""
 
 
 class ApiKeyCipher:
@@ -32,14 +35,28 @@ class ApiKeyCipher:
             return ""
         return self._fernet.encrypt(plain.encode()).decode()
 
-    def decrypt(self, encrypted: str) -> str:
+    def decrypt_or_raise(self, encrypted: str) -> str:
+        """Decrypt fernet_v1 ciphertext; raise on invalid token."""
         if not encrypted:
             return ""
         try:
             return self._fernet.decrypt(encrypted.encode()).decode()
-        except InvalidToken:
-            # 兼容未加密的旧数据
-            return encrypted
+        except InvalidToken as exc:
+            raise ApiKeyCipherError("无法解密 LLM API Key，请检查 API_KEY_SECRET 是否正确") from exc
+
+    @staticmethod
+    def looks_like_fernet_token(value: str) -> bool:
+        """Heuristic check for Fernet token shape without decrypting."""
+        if not value or len(value) < 44:
+            return False
+        if not _FERNET_TOKEN_RE.fullmatch(value):
+            return False
+        try:
+            padding = b"=" * ((4 - len(value) % 4) % 4)
+            raw = base64.urlsafe_b64decode(value.encode() + padding)
+        except Exception:
+            return False
+        return len(raw) >= 57 and raw[0] == 0x80
 
     @staticmethod
     def mask(api_key: str) -> str:
