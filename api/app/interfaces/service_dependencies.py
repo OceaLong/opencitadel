@@ -31,42 +31,42 @@ logger = logging.getLogger(__name__)
 
 
 @inject
-def get_app_config_service(
+async def get_app_config_service(
         service: AppConfigService = Depends(Provide[ApiContainer.app_config_service]),
 ) -> AppConfigService:
     return service
 
 
 @inject
-def get_llm_model_service(
+async def get_llm_model_service(
         service: LLMModelService = Depends(Provide[ApiContainer.llm_model_service]),
 ) -> LLMModelService:
     return service
 
 
 @inject
-def get_skill_service(
+async def get_skill_service(
         service: SkillService = Depends(Provide[ApiContainer.skill_service]),
 ) -> SkillService:
     return service
 
 
 @inject
-def get_memory_service(
+async def get_memory_service(
         service: MemoryService = Depends(Provide[ApiContainer.memory_service]),
 ) -> MemoryService:
     return service
 
 
 @inject
-def get_llm_token_usage_service(
+async def get_llm_token_usage_service(
         service: LLMTokenUsageService = Depends(Provide[ApiContainer.llm_token_usage_service]),
 ) -> LLMTokenUsageService:
     return service
 
 
 @inject
-def get_status_service(
+async def get_status_service(
         db_session: AsyncSession = Depends(get_db_session),
         redis_client: RedisClient = Depends(Provide[ApiContainer.redis]),
 ) -> StatusService:
@@ -76,63 +76,63 @@ def get_status_service(
 
 
 @inject
-def get_file_service(
+async def get_file_service(
         service: FileService = Depends(Provide[ApiContainer.file_service]),
 ) -> FileService:
     return service
 
 
 @inject
-def get_session_service(
+async def get_session_service(
         service: SessionService = Depends(Provide[ApiContainer.session_service]),
 ) -> SessionService:
     return service
 
 
 @inject
-def get_questionnaire_service(
+async def get_questionnaire_service(
         service: QuestionnaireService = Depends(Provide[ApiContainer.questionnaire_service]),
 ) -> QuestionnaireService:
     return service
 
 
 @inject
-def get_room_service(
+async def get_room_service(
         service: RoomService = Depends(Provide[ApiContainer.room_service]),
 ) -> RoomService:
     return service
 
 
 @inject
-def get_marketplace_service(
+async def get_marketplace_service(
         service: MarketplaceService = Depends(Provide[ApiContainer.marketplace_service]),
 ) -> MarketplaceService:
     return service
 
 
 @inject
-def get_agent_service(
+async def get_agent_service(
         service: AgentService = Depends(Provide[ApiContainer.agent_service]),
 ) -> AgentService:
     return service
 
 
 @inject
-def get_codebase_service(
+async def get_codebase_service(
         service: CodebaseService = Depends(Provide[ApiContainer.codebase_service]),
 ) -> CodebaseService:
     return service
 
 
 @inject
-def get_a2a_server_service(
+async def get_a2a_server_service(
         service: A2AServerService = Depends(Provide[ApiContainer.a2a_server_service]),
 ) -> A2AServerService:
     return service
 
 
 @inject
-def get_task_runner_factory(
+async def get_task_runner_factory(
         factory: TaskRunnerFactory = Depends(Provide[ApiContainer.task_runner_factory]),
 ) -> TaskRunnerFactory:
     return factory

@@ -115,9 +115,10 @@ async def lifespan(app: FastAPI):
 
     container = await init_api_container()
 
+    skill_service = await get_skill_service()
     await bootstrap_data(
         uow_factory=get_uow,
-        skill_service=get_skill_service(),
+        skill_service=skill_service,
     )
     pool_cleanup_task = asyncio.create_task(_connection_pool_cleanup_loop())
     logger.info("MyManus初始化完成")
@@ -132,7 +133,8 @@ async def lifespan(app: FastAPI):
             pass
         try:
             logger.info("MyManus正在关闭")
-            await asyncio.wait_for(get_agent_service().shutdown(), timeout=30.0)
+            agent_service = await get_agent_service()
+            await asyncio.wait_for(agent_service.shutdown(), timeout=30.0)
             logger.info("AgentService成功关闭")
         except asyncio.TimeoutError:
             logger.warning("AgentService关闭超时, 强制关闭, 部分任务将被释放")
