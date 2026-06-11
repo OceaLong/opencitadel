@@ -39,17 +39,17 @@ resources:
   api:
     requests:
       cpu: 500m
-      memory: 1Gi
+      memory: 512Mi
     limits:
       cpu: 2
-      memory: 4Gi
+      memory: 1Gi
   worker:
     requests:
-      cpu: 1
-      memory: 2Gi
+      cpu: 500m
+      memory: 768Mi
     limits:
-      cpu: 4
-      memory: 8Gi
+      cpu: 2
+      memory: 1536Mi
 
 env:
   OTEL_ENABLED: "false"

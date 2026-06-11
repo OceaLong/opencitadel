@@ -50,8 +50,19 @@ kubectl scale deployment my-manus-worker --replicas=4 -n manus
 # 或启用 HPA（values.yaml 中 autoscaling.worker.enabled=true）
 ```
 
+## 架构演进
+
+单机 Compose 稳定后，按阶段拆分计算与沙箱执行面，详见 [docs/architecture-evolution.md](../../../docs/architecture-evolution.md)。
+
+推荐演进顺序：
+
+1. PostgreSQL / Redis 外置（释放主节点内存）
+2. 本 Chart 部署 API + Worker（HPA 按队列深度或 CPU 扩缩）
+3. `sandbox.address` 指向远程沙箱集群（Worker 不再挂载 docker.sock）
+
 ## 相关文档
 
 - 根目录 [README.md](../../README.md) — 架构与配置说明
 - [DEPLOYMENT.md](../../DEPLOYMENT.md) — 生产部署指南
+- [docs/architecture-evolution.md](../../../docs/architecture-evolution.md) — 扩容与沙箱外置
 - [api/README.md](../../api/README.md) — API / Worker 本地开发

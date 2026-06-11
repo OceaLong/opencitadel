@@ -16,6 +16,7 @@ services:
     container_name: manus-redis
     restart: unless-stopped
     mem_limit: 512m
+    mem_reservation: 256m
     cpus: "0.50"
     command: >
       redis-server
@@ -36,12 +37,25 @@ services:
     image: pgvector/pgvector:pg16
     container_name: manus-postgres
     restart: unless-stopped
-    mem_limit: 2g
+    mem_limit: 1536m
+    mem_reservation: 768m
     cpus: "1.50"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-manus}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=384MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_connections=100
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -97,7 +111,8 @@ services:
     image: manus-api
     container_name: manus-api
     restart: unless-stopped
-    mem_limit: 2g
+    mem_limit: 1g
+    mem_reservation: 512m
     cpus: "2.00"
     env_file:
       - .env
@@ -132,7 +147,8 @@ services:
     image: manus-worker
     container_name: manus-worker
     restart: unless-stopped
-    mem_limit: 4g
+    mem_limit: 1536m
+    mem_reservation: 768m
     cpus: "2.00"
     env_file:
       - .env
@@ -166,7 +182,8 @@ services:
         NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
     container_name: manus-ui
     restart: unless-stopped
-    mem_limit: 1g
+    mem_limit: 512m
+    mem_reservation: 256m
     cpus: "1.00"
     depends_on:
       manus-api:
@@ -185,7 +202,8 @@ services:
     image: nginx:alpine
     container_name: manus-nginx
     restart: unless-stopped
-    mem_limit: 256m
+    mem_limit: 128m
+    mem_reservation: 64m
     cpus: "0.50"
     ports:
       - "${NGINX_PORT:-8088}:80"

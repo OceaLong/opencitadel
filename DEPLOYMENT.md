@@ -164,12 +164,16 @@ agent_config:
   max_search_results: 10
 
 sandbox:
-  address: http://manus-sandbox:8080
+  address: null
   image: manus-sandbox
-  name_prefix: my-manus-sandbox
+  name_prefix: manus-sandbox
   network: manus-network
+  memory_limit: 1g
   pool_enabled: true
-  pool_size: 2
+  pool_size: 1          # 只预热 1 个；并发任务按需创建，上限见 worker.max_concurrent_tasks
+  ttl_minutes: 20
+  idle_timeout_minutes: 10
+  cleanup_interval_seconds: 120
 
 memory:
   vector_enabled: false
@@ -456,18 +460,43 @@ docker exec manus-postgres pg_isready -U postgres -d manus
 docker exec -it manus-postgres psql -U postgres -c "ALTER USER postgres WITH PASSWORD 'new_password';"
 ```
 
-#### 3. 内存不足
+#### 3. 内存不足 / Swap 抖动
+
+16GB 单机若内存长期 >95% 且磁盘读 IO 持续高位，多为**超额订阅 + Swap 换页**，而非 CPU 不足。
 
 ```bash
-# 查看内存使用
+# 一键采集调优前后指标（si/so 非零 = swap 抖动）
+bash deploy/scripts/verify-host-health.sh before
+bash deploy/scripts/verify-host-health.sh after
+
+# 查看内存与容器配额
 free -h
+swapon --show
+vmstat 1 5
 docker stats --no-stream
+docker ps -a --filter "name=manus-sandbox-"
 
-# 清理未使用的资源
-docker system prune -a --volumes -f
+# 宿主机调优（4G swap 兜底 + vm.swappiness=10 + Docker 日志轮转）
+sudo bash deploy/scripts/host-tune.sh
 
-# 调整容器内存限制（编辑 docker-compose.yml）
+# 应用右配后的 compose 与 config（见 docker-compose.yml / api/config.yaml）
+cd /opt/my-manus && docker compose up -d --build
+
+# 清理未使用的镜像/容器（勿随意 --volumes，会删数据库卷）
+docker system prune -a -f
 ```
+
+**内存预算（16GB 主机，已右配）**
+
+| 服务 | mem_limit |
+|------|-----------|
+| postgres | 1536m |
+| api | 1g |
+| worker | 1536m |
+| ui | 512m |
+| redis | 512m |
+| nginx | 128m |
+| 沙箱（1 预热 + 最多 3 按需） | 1~4g |
 
 #### 4. Nginx 502 错误
 
@@ -486,43 +515,47 @@ docker exec manus-nginx nginx -s reload
 
 ## 📈 性能优化建议
 
-### 1. 系统层面
+### 1. 宿主机调优（推荐首次部署后执行）
 
 ```bash
-# 优化内核参数
-cat >> /etc/sysctl.conf << 'EOF'
-net.core.somaxconn = 65535
-net.ipv4.tcp_max_syn_backlog = 65535
-vm.swappiness = 10
-EOF
-sysctl -p
+# 一键：vm.swappiness=10、4G swap 兜底、Docker 日志轮转
+sudo bash deploy/scripts/host-tune.sh
 
-# 禁用 Swap（生产环境推荐）
-sudo swapoff -a
-sudo sed -i '/ swap / s/^/#/' /etc/fstab
+# 验证（调优后 si/so 应为 0，内存 idle <80%）
+bash deploy/scripts/verify-host-health.sh after
 ```
 
-### 2. 数据库优化
+> **不要**在内存仍超额订阅时 `swapoff -a`：会从 swap 抖动变为 OOM kill。应先右配 `docker-compose.yml` 与 `api/config.yaml`，再保留小 swap 作兜底。
 
-```bash
-# PostgreSQL 调优（根据 16GB 内存）
-docker exec manus-postgres bash -c "cat >> /var/lib/postgresql/data/postgresql.conf << 'EOF'
-shared_buffers = 4GB
-effective_cache_size = 12GB
-work_mem = 64MB
-maintenance_work_mem = 512MB
-max_connections = 100
-EOF"
+### 2. 容器与沙箱配额
 
-docker-compose restart manus-postgres
-```
+已在 [docker-compose.yml](docker-compose.yml) 与 [api/config.yaml](api/config.yaml) 右配：
 
-### 3. Redis 优化
+- 核心服务 mem_limit 合计约 5.2GB，含 `mem_reservation` 防互相挤占
+- 沙箱：**1 预热 + 按需创建**，`memory_limit: 1g`，`pool_size: 1`
+- 并发沙箱上限 = `worker.max_concurrent_tasks`（默认 4）
+
+### 3. PostgreSQL 调优
+
+Postgres 参数已内置于 `docker-compose.yml` 的 `command`（匹配 1.5GB 容器配额）：
+
+- `shared_buffers = 384MB`
+- `effective_cache_size = 1GB`
+- `work_mem = 16MB`
+- `maintenance_work_mem = 128MB`
+
+修改后执行：`docker compose up -d manus-postgres`
+
+### 4. Redis 优化
 
 已在 docker-compose.yml 中配置：
 - 最大内存：256MB
 - 淘汰策略：allkeys-lru
 - AOF 持久化：开启
+
+### 5. 架构演进
+
+单机稳定后若需水平扩展，见 [docs/architecture-evolution.md](docs/architecture-evolution.md)（DB/Redis 外置、K8s HPA、沙箱外置）。
 
 ---
 
@@ -551,7 +584,7 @@ docker compose exec manus-nginx nginx -s reload
 
 ## ☸️ Kubernetes / Helm 部署
 
-Helm Chart 位于 `deploy/helm/my-manus/`，支持 API/Worker 独立 Deployment 与 HPA。
+Helm Chart 位于 `deploy/helm/my-manus/`，支持 API/Worker 独立 Deployment 与 HPA。完整演进路径（沙箱外置、有状态下沉、背压策略）见 [docs/architecture-evolution.md](docs/architecture-evolution.md)。
 
 ```bash
 # 构建并推送镜像（api/Dockerfile 多阶段 target）
@@ -588,6 +621,6 @@ Chart 特性：
 
 ---
 
-**最后更新时间**: 2026-06-02
+**最后更新时间**: 2026-06-11
 **适用版本**: MyManus v1.0  
 **部署环境**: Ubuntu 24.04 LTS, 8核/16GB/270GB SSD/18Mbps

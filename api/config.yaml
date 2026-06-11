@@ -27,19 +27,19 @@ sandbox:
   address: null
   image: manus-sandbox
   name_prefix: manus-sandbox
-  ttl_minutes: 60
+  ttl_minutes: 20
   network: manus-network
   chrome_args: ''
   https_proxy: null
   http_proxy: null
   no_proxy: localhost,127.0.0.1,manus-api,manus-ui,manus-redis,manus-postgres
-  cleanup_interval_seconds: 300
-  memory_limit: 2g
+  cleanup_interval_seconds: 120
+  memory_limit: 1g
   cpu_limit: 2
   pids_limit: 512
   pool_enabled: true
-  pool_size: 2
-  idle_timeout_minutes: 30
+  pool_size: 1
+  idle_timeout_minutes: 10
   warmup_retry_interval_seconds: 0.5
 
 worker:

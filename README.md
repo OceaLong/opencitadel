@@ -311,8 +311,11 @@ agent_config:
 sandbox:
   image: manus-sandbox
   network: manus-network
+  memory_limit: 1g
   pool_enabled: true
-  pool_size: 2
+  pool_size: 1
+  ttl_minutes: 20
+  idle_timeout_minutes: 10
 ```
 
 **支持的 LLM 提供商：**
@@ -471,35 +474,24 @@ sudo tee -a /etc/security/limits.conf << 'EOF'
 EOF
 ```
 
-#### 2. 禁用 Swap（推荐）
+#### 2. 宿主机内存与 Swap
+
+16GB 单机应先右配容器配额，再保留小 swap 作 OOM 兜底（勿在超配时直接 `swapoff -a`）：
 
 ```bash
-# 临时禁用
-sudo swapoff -a
-
-# 永久禁用
-sudo sed -i '/ swap / s/^/#/' /etc/fstab
+sudo bash deploy/scripts/host-tune.sh
+bash deploy/scripts/verify-host-health.sh after
 ```
 
 #### 3. 数据库性能调优
 
-根据服务器内存调整 PostgreSQL 配置：
+PostgreSQL 参数已内置于 `docker-compose.yml`（匹配 1.5GB 容器：`shared_buffers=384MB`、`effective_cache_size=1GB`、`work_mem=16MB`）。修改 compose 后执行：
 
 ```bash
-# 16GB 内存示例
-docker exec manus-postgres bash -c "cat >> /var/lib/postgresql/data/postgresql.conf << 'EOF'
-shared_buffers = 4GB                    # 内存的 25%
-effective_cache_size = 12GB             # 内存的 75%
-work_mem = 64MB                         # 单个查询工作内存
-maintenance_work_mem = 512MB            # 维护操作内存
-max_connections = 100                   # 最大连接数
-checkpoint_completion_target = 0.9      # Checkpoint 分散写入
-wal_buffers = 16MB                      # WAL 缓冲区
-EOF"
-
-# 重启 PostgreSQL
-docker compose restart manus-postgres
+docker compose up -d manus-postgres
 ```
+
+架构演进见 [docs/architecture-evolution.md](docs/architecture-evolution.md)。
 
 ### 高可用部署
 
