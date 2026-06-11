@@ -449,14 +449,24 @@ docker network inspect manus-network
 
 #### 2. 数据库连接失败
 
+若 `manus-migrate` 报 `password authentication failed for user "postgres"`：
+
+- `manus-postgres` 与 `manus-migrate` 现在都从 `POSTGRES_*` 派生连接串；不要只改 `POSTGRES_PASSWORD` 却保留旧的 `SQLALCHEMY_DATABASE_URI`。
+- PostgreSQL 数据卷只在**首次初始化**时写入密码；之后仅改 `.env` 不会自动更新卷内密码。
+- 让数据库密码与 `.env` 对齐：`ALTER USER postgres WITH PASSWORD '<POSTGRES_PASSWORD>';`
+- 全新环境可 `docker compose down -v` 后重建（会删除数据库数据）。
+
 ```bash
 # 检查数据库状态
-docker-compose logs manus-postgres
+docker compose logs manus-postgres
 
 # 测试连接
 docker exec manus-postgres pg_isready -U postgres -d manus
 
-# 重置密码（紧急情况）
+# 查看 migrate 实际使用的连接参数（URI 由 POSTGRES_* 派生）
+docker compose run --rm manus-migrate python -c "from core.config import get_settings; print(get_settings().sqlalchemy_database_uri)"
+
+# 重置密码（与 .env 中 POSTGRES_PASSWORD 保持一致）
 docker exec -it manus-postgres psql -U postgres -c "ALTER USER postgres WITH PASSWORD 'new_password';"
 ```
 

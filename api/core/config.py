@@ -71,6 +71,12 @@ class Settings(BaseSettings):
         return self
 
 
+def sqlalchemy_sync_database_uri(settings: Settings | None = None) -> str:
+    """Return sync SQLAlchemy URL (psycopg2) from bootstrap settings."""
+    settings = settings or get_settings()
+    return settings.sqlalchemy_database_uri.replace("+asyncpg", "+psycopg2")
+
+
 @lru_cache()
 def get_settings() -> Settings:
     """获取启动引导配置（进程内缓存）。"""
