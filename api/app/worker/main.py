@@ -10,11 +10,18 @@ import uuid
 from app.application.services.bootstrap_service import bootstrap_data
 from app.application.services.task_runner_factory import TaskRunnerFactory
 from app.container import get_worker_container, init_worker_container, shutdown_worker_container
+from app.domain.external.sandbox import Sandbox
 from app.domain.models.session import SessionStatus
 from app.domain.services.codebase.ingestion_task_runner import CodebaseIngestionTaskRunner
 from app.infrastructure.external.file_storage.cos_file_storage import CosFileStorage
-from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
+from app.infrastructure.external.runtime_settings import get_admission_runtime_settings
+from app.infrastructure.external.sandbox.admission import get_sandbox_quota
+from app.infrastructure.external.sandbox.sandbox_maintenance import run_sandbox_maintenance
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
+from app.infrastructure.external.task.task_lease import (
+    release_task_lease,
+    try_acquire_task_lease,
+)
 from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
 from app.infrastructure.logging import setup_logging
 from app.infrastructure.storage.postgres import get_uow
@@ -31,17 +38,26 @@ SHUTDOWN_GRACE_SECONDS = 30
 async def _sandbox_cleanup_loop() -> None:
     from app.application.services.config_provider import get_runtime_config
 
-    interval = max(60, get_runtime_config().sandbox.cleanup_interval_seconds)
+    interval = max(30, get_runtime_config().sandbox.cleanup_interval_seconds)
     while True:
         try:
-            removed = await DockerSandbox.cleanup_orphaned_containers()
+            removed = await run_sandbox_maintenance()
             if removed:
-                logger.info("Worker 清理孤儿沙箱容器数量: %s", removed)
+                logger.info("Worker 沙箱维护回收数量: %s", removed)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.warning("Worker 清理孤儿沙箱容器失败: %s", exc)
+            logger.warning("Worker 沙箱维护失败: %s", exc)
         await asyncio.sleep(interval)
+
+
+async def _startup_reconcile() -> None:
+    from app.infrastructure.external.sandbox.sandbox_driver import get_sandbox_class
+
+    sandbox_cls = get_sandbox_class()
+    live_ids = await sandbox_cls.list_live_sandbox_ids()
+    await get_sandbox_quota().reconcile(live_ids)
+    logger.info("启动 reconcile 完成: live_sandboxes=%s", len(live_ids))
 
 
 class AgentWorker:
@@ -49,7 +65,7 @@ class AgentWorker:
             self,
             runner_factory: TaskRunnerFactory,
             file_storage: CosFileStorage,
-            sandbox_cls: type[DockerSandbox],
+            sandbox_cls: type[Sandbox],
             task_cls: type[RedisStreamTask],
     ) -> None:
         self._settings = get_settings()
@@ -65,16 +81,22 @@ class AgentWorker:
         self._file_storage = file_storage
         self._sandbox_cls = sandbox_cls
         self._task_cls = task_cls
+        self._quota = get_sandbox_quota()
 
     async def start(self) -> None:
         await self._task_state.ensure_consumer_group()
+        admission = get_admission_runtime_settings()
         logger.info(
-            "Agent worker 启动: consumer=%s max_concurrent=%s",
+            "Agent worker 启动: consumer=%s max_concurrent=%s node=%s",
             self._consumer_name,
             self._max_concurrent,
+            self._quota.node_id,
         )
         while self._running:
             try:
+                if not await self._quota.can_admit():
+                    await asyncio.sleep(admission.admission_poll_interval_seconds)
+                    continue
                 claim = await self._task_state.claim_dispatch(
                     self._consumer_name,
                     block_ms=5000,
@@ -120,6 +142,19 @@ class AgentWorker:
             task_id: str,
             session_id: str,
     ) -> None:
+        admission = get_admission_runtime_settings()
+        lease_acquired = await try_acquire_task_lease(
+            task_id,
+            admission.task_execution_lease_seconds,
+        )
+        if not lease_acquired:
+            logger.warning(
+                "任务执行租约冲突，跳过重复执行: task_id=%s session_id=%s",
+                task_id,
+                session_id,
+            )
+            await self._task_state.ack_dispatch(message_id)
+            return
         try:
             await self._execute_job(task_id, session_id)
             await self._task_state.ack_dispatch(message_id)
@@ -136,6 +171,8 @@ class AgentWorker:
                 session_id=session_id,
                 error=str(exc),
             )
+        finally:
+            await release_task_lease(task_id)
 
     async def _execute_job(self, task_id: str, session_id: str) -> None:
         if await self._task_state.is_cancelled(task_id):
@@ -215,6 +252,7 @@ async def main() -> None:
         skill_service=SkillService(uow_factory=get_uow),
     )
 
+    await _startup_reconcile()
     sandbox_cleanup_task = asyncio.create_task(_sandbox_cleanup_loop())
     worker = AgentWorker(
         runner_factory=container.task_runner_factory(),

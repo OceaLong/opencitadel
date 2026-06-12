@@ -1,6 +1,7 @@
 replicaCount:
   api: 2
   worker: 2
+  ui: 1
 
 image:
   api:
@@ -14,6 +15,47 @@ image:
   ui:
     repository: manus-ui
     tag: latest
+    pullPolicy: IfNotPresent
+  sandbox:
+    repository: manus-sandbox
+    tag: latest
+
+ui:
+  enabled: true
+
+rbac:
+  create: true
+
+postgresql:
+  enabled: true
+  image: pgvector/pgvector:pg16
+  user: postgres
+  database: manus
+  storage: 20Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1500m
+      memory: 1Gi
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+  storage: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+resourceQuota:
+  enabled: true
+  maxSandboxPods: "20"
+  requestsMemory: "20Gi"
 
 service:
   type: ClusterIP
@@ -22,6 +64,8 @@ service:
 ingress:
   enabled: false
   host: my-manus.local
+  className: ""
+  annotations: {}
 
 autoscaling:
   api:
@@ -46,14 +90,139 @@ resources:
   worker:
     requests:
       cpu: 500m
-      memory: 768Mi
+      memory: 512Mi
     limits:
       cpu: 2
-      memory: 1536Mi
+      memory: 1024Mi
+  ui:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1
+      memory: 384Mi
 
+# 非敏感环境变量（对应 api/core/config.py Settings）
 env:
+  ENV: production
+  LOG_LEVEL: INFO
+  APP_CONFIG_FILEPATH: config.yaml
+  POSTGRES_HOST: my-manus-postgres
+  POSTGRES_USER: postgres
+  POSTGRES_DB: manus
+  REDIS_HOST: my-manus-redis
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  COS_REGION: ""
+  COS_SCHEME: https
+  COS_BUCKET: ""
+  COS_DOMAIN: ""
   OTEL_ENABLED: "false"
-  OTEL_SERVICE_NAME: "my-manus-api"
+  OTEL_SERVICE_NAME: my-manus-api
+
+# 敏感配置（渲染为 Secret，通过 envFrom 注入）
+secrets:
+  apiKeySecret: replace-with-strong-random-secret
+  postgresPassword: postgres
+  redisPassword: ""
+  cosSecretId: ""
+  cosSecretKey: ""
+  embeddingApiKey: ""
+  langfusePublicKey: ""
+  langfuseSecretKey: ""
+
+# 应用行为配置（渲染为 ConfigMap，挂载为 /app/config.yaml）
+appConfig:
+  server:
+    cors_origins: '*'
+    rate_limit_enabled: true
+    rate_limit_per_minute: 120
+    sessions_stream_interval_seconds: 15
+    marketplace_max_upload_bytes: 26214400
+  agent_config:
+    max_iterations: 100
+    max_retries: 3
+    max_search_results: 10
+  memory:
+    recall_limit: 20
+    auto_extract_enabled: true
+    vector_enabled: false
+    compact_strategy: hybrid
+    compact_token_threshold: 32000
+    compact_keep_recent: 12
+    compact_tool_content_max_chars: 2000
+    embedding:
+      provider: openai
+      model: text-embedding-3-small
+      base_url: https://api.openai.com/v1
+  sandbox:
+    driver: kubernetes
+    address: null
+    image: manus-sandbox
+    name_prefix: manus-sandbox
+    ttl_minutes: 20
+    network: null
+    chrome_args: ''
+    https_proxy: null
+    http_proxy: null
+    no_proxy: localhost,127.0.0.1
+    cleanup_interval_seconds: 60
+    memory_limit: 1g
+    cpu_limit: 2
+    pids_limit: 512
+    pool_enabled: false
+    pool_size: 0
+    idle_timeout_minutes: 10
+    warmup_retry_interval_seconds: 0.5
+    k8s_namespace: default
+    k8s_pod_label: app=manus-sandbox
+  worker:
+    max_concurrent_tasks: 4
+    task_dispatch_max_retries: 3
+    tool_timeout_seconds: 120
+    max_sandboxes_per_node: 4
+    max_dynamic_sandboxes_global: 0
+    admission_min_host_available_mb: 3072
+    admission_reclaim_target_mb: 4096
+    admission_poll_interval_seconds: 2
+    admission_settle_seconds: 8
+    admission_reclaim_enabled: true
+    task_execution_lease_seconds: 60
+    reclaim_leader_lease_seconds: 15
+    memory_probe_source: auto
+  streams:
+    dispatch_maxlen: 10000
+    task_input_maxlen: 10000
+    task_output_maxlen: 50000
+    stream_maxlen: 10000
+  observability:
+    otel_enabled: false
+    otel_service_name: my-manus-api
+    otel_exporter_endpoint: ''
+    langfuse_enabled: false
+  mcp_config:
+    mcpServers:
+      amap-maps-streamableHTTP:
+        transport: streamable_http
+        enabled: false
+        description: null
+        env: null
+        command: null
+        args: null
+        url: https://mcp.amap.com/mcp?key=YOUR_AMAP_KEY
+        headers: null
+      jina-mcp-server:
+        transport: streamable_http
+        enabled: false
+        description: null
+        env: null
+        command: null
+        args: null
+        url: https://mcp.jina.ai/v1
+        headers:
+          Authorization: Bearer YOUR_JINA_API_KEY
+  a2a_config:
+    a2a_servers: []
 
 migrate:
   enabled: true

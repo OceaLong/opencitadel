@@ -328,12 +328,15 @@ sandbox:
 | 场景 | 推荐配置 |
 |------|----------|
 | 本地开发 | `config.yaml` 中 `sandbox.address` 留空，API/Worker 通过 `docker.sock` 按会话动态创建沙箱 |
-| Docker Compose 生产 | 设置 `sandbox.address: http://manus-sandbox:8080`，使用固定沙箱容器 |
-| Kubernetes | 参考 `deploy/helm/my-manus/`（当前 Chart 仅含 API/Worker 计算层） |
+| Docker Compose 生产（推荐） | `sandbox.address` 留空 + `sandbox.driver: auto`，Worker 动态创建 `manus-sandbox-*`；固定沙箱用 `--profile fixed-sandbox` |
+| Kubernetes | `deploy/helm/my-manus/` 全栈 Helm（Postgres/Redis/UI/Ingress + K8s Pod 沙箱 driver） |
 
 #### 4. 启动服务
 
 ```bash
+# 构建沙箱镜像（动态模式需镜像，但默认不启动固定 manus-sandbox 服务）
+docker compose build manus-sandbox manus-api manus-worker manus-ui
+
 # 构建并启动所有服务（首次启动需要 5-10 分钟）
 # 启动顺序: postgres/redis → manus-migrate → api + worker → ui → nginx
 docker compose up -d --build

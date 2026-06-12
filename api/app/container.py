@@ -40,7 +40,7 @@ from app.infrastructure.adapters.domain_ports import (
 from app.infrastructure.adapters.object_storage import CosObjectStorageAdapter
 from app.infrastructure.external.file_storage.cos_file_storage import CosFileStorage
 from app.infrastructure.external.json_parser.repair_json_parser import RepairJSONParser
-from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
+from app.infrastructure.external.sandbox.sandbox_driver import get_sandbox_class
 from app.infrastructure.external.search.bing_search import BingSearchEngine
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
 from app.infrastructure.repositories.db_uow import DBUnitOfWork
@@ -119,14 +119,19 @@ async def _warm_app_config(_postgres: Postgres, config_provider: AppConfigProvid
 
 async def _configure_runtime_from_config(config_provider: AppConfigProvider) -> None:
     from app.infrastructure.external.runtime_settings import (
+        AdmissionRuntimeSettings,
         SandboxRuntimeSettings,
         TaskQueueRuntimeSettings,
+        configure_admission_runtime,
     )
     from app.infrastructure.external.sandbox.docker_sandbox import configure_sandbox_runtime
     from app.infrastructure.external.task.task_state import configure_task_state_runtime
 
     app_config = await config_provider.get()
     configure_sandbox_runtime(SandboxRuntimeSettings.from_config(app_config.sandbox))
+    configure_admission_runtime(
+        AdmissionRuntimeSettings.from_config(app_config.sandbox, app_config.worker),
+    )
     configure_task_state_runtime(
         TaskQueueRuntimeSettings.from_config(app_config.streams, app_config.worker),
     )
@@ -181,7 +186,7 @@ class BaseContainer(containers.DeclarativeContainer):
         config_provider=app_config_warmup,
     )
 
-    sandbox_cls = providers.Object(DockerSandbox)
+    sandbox_cls = providers.Callable(get_sandbox_class)
     task_cls = providers.Object(RedisStreamTask)
 
     cipher = providers.Factory(ApiKeyCipher, secret=config.provided.api_key_secret)

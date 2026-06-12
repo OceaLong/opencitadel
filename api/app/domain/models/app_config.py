@@ -37,6 +37,7 @@ class MemoryConfig(BaseModel):
 
 class SandboxConfig(BaseModel):
     """沙箱容器与连接池配置"""
+    driver: str = "auto"  # auto | docker | kubernetes
     address: Optional[str] = None
     image: Optional[str] = None
     name_prefix: Optional[str] = None
@@ -54,6 +55,8 @@ class SandboxConfig(BaseModel):
     pool_size: int = 2
     idle_timeout_minutes: int = 30
     warmup_retry_interval_seconds: float = 0.5
+    k8s_namespace: str = "default"
+    k8s_pod_label: str = "app=manus-sandbox"
 
 
 class WorkerConfig(BaseModel):
@@ -61,6 +64,16 @@ class WorkerConfig(BaseModel):
     max_concurrent_tasks: int = 4
     task_dispatch_max_retries: int = 3
     tool_timeout_seconds: int = 120
+    max_sandboxes_per_node: int = 4
+    max_dynamic_sandboxes_global: int = 0
+    admission_min_host_available_mb: int = 3072
+    admission_reclaim_target_mb: int = 4096
+    admission_poll_interval_seconds: float = 2.0
+    admission_settle_seconds: float = 8.0
+    admission_reclaim_enabled: bool = True
+    task_execution_lease_seconds: int = 60
+    reclaim_leader_lease_seconds: int = 15
+    memory_probe_source: str = "auto"  # auto | host
 
 
 class StreamsConfig(BaseModel):

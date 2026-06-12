@@ -31,9 +31,12 @@ helm upgrade --install my-manus ./deploy/helm/my-manus \
 | `autoscaling.api.enabled` | true | API HPA |
 | `autoscaling.worker.enabled` | true | Worker HPA |
 | `migrate.enabled` | true | API initContainer 执行迁移 |
+| `env` | 见 values.yaml | 非敏感环境变量（DB/Redis 主机、日志级别等） |
+| `secrets` | 见 values.yaml | 敏感配置，渲染为 Secret 并通过 `envFrom` 注入 |
+| `appConfig` | 见 values.yaml | 应用行为配置，渲染为 ConfigMap 并挂载为 `/app/config.yaml` |
 | `env.OTEL_ENABLED` | false | OpenTelemetry（运行时开关实际以 `config.yaml` 的 `observability.otel_enabled` 为准） |
 
-> **注意**：当前 Helm Chart 为骨架配置，尚未覆盖 Docker Compose 中的完整生产必需项（`API_KEY_SECRET`、数据库/Redis 连接、COS 密钥、`config.yaml` 挂载等）。生产环境请优先使用 Docker Compose，或自行补全 Helm Secrets 与 ConfigMap。
+> **注意**：生产部署前请通过 `--set` 或独立 values 文件覆盖 `secrets.apiKeySecret`、`secrets.postgresPassword` 等敏感项，并确认 `env.POSTGRES_HOST`、`env.REDIS_HOST` 指向集群内实际服务地址。沙箱执行（`sandbox.address` / docker.sock）在 K8s 中需按 [docs/architecture-evolution.md](../../../docs/architecture-evolution.md) 外置配置。
 
 ## 架构
 

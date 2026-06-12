@@ -1,0 +1,27 @@
+{{- if .Values.rbac.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "my-manus.fullname" . }}-worker
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "my-manus.fullname" . }}-worker-sandbox
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "my-manus.fullname" . }}-worker-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "my-manus.fullname" . }}-worker
+roleRef:
+  kind: Role
+  name: {{ include "my-manus.fullname" . }}-worker-sandbox
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

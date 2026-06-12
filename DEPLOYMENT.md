@@ -66,6 +66,9 @@ cp .env.example .env
 vim .env
 vim api/config.yaml
 
+# 构建沙箱镜像（动态模式默认不启动固定 manus-sandbox 服务，但需镜像供 Worker 创建）
+docker compose build manus-sandbox manus-api manus-worker manus-ui
+
 # 构建并启动服务
 docker compose up -d --build
 
@@ -73,6 +76,8 @@ docker compose up -d --build
 docker compose ps
 docker compose logs -f
 ```
+
+> **动态沙箱模式**：`api/config.yaml` 中 `sandbox.address: null` 时，Worker 通过 `docker.sock` 动态创建 `manus-sandbox-*`；compose 中的 `manus-sandbox` 服务已移至 `fixed-sandbox` profile，默认不启动。
 
 > **服务启动顺序**：`manus-postgres` + `manus-redis` → `manus-migrate`（Alembic + LLM Key 迁移）→ `manus-api` + `manus-worker` → `manus-ui` → `manus-nginx`
 
@@ -523,6 +528,47 @@ docker exec manus-nginx nginx -s reload
 
 ---
 
+## 🔄 内存安全架构升级与回滚
+
+### 升级（已有实例）
+
+```bash
+# 1. 备份
+docker exec manus-postgres pg_dump -U postgres manus > backup_$(date +%Y%m%d).sql
+cp .env .env.bak && cp api/config.yaml api/config.yaml.bak
+
+# 2. 拉取代码并重建
+git pull
+docker compose build manus-sandbox manus-api manus-worker manus-ui
+docker compose up -d
+
+# 3. 验证 Worker 启动 reconcile（收编存量 manus-sandbox-*）
+docker compose logs manus-worker | tail -50
+docker stats
+free -m
+```
+
+### 回滚
+
+无数据库 schema 变更，恢复旧配置即可：
+
+```bash
+cp .env.bak .env && cp api/config.yaml.bak api/config.yaml
+docker compose up -d
+```
+
+### 新增配置项（api/config.yaml worker/sandbox 段）
+
+| 配置 | 默认 | 说明 |
+|------|------|------|
+| `sandbox.driver` | `auto` | `docker` / `kubernetes` |
+| `worker.max_sandboxes_per_node` | 4 | 节点沙箱配额硬上限 |
+| `worker.admission_min_host_available_mb` | 3072 | 低于此值不新建沙箱 |
+| `worker.admission_reclaim_enabled` | true | 低内存主动回收空闲沙箱 |
+| `sandbox.pool_enabled` | false | 关闭常驻预热沙箱 |
+
+---
+
 ## 📈 性能优化建议
 
 ### 1. 宿主机调优（推荐首次部署后执行）
@@ -541,18 +587,19 @@ bash deploy/scripts/verify-host-health.sh after
 
 已在 [docker-compose.yml](docker-compose.yml) 与 [api/config.yaml](api/config.yaml) 右配：
 
-- 核心服务 mem_limit 合计约 5.2GB，含 `mem_reservation` 防互相挤占
-- 沙箱：**1 预热 + 按需创建**，`memory_limit: 1g`，`pool_size: 1`
-- 并发沙箱上限 = `worker.max_concurrent_tasks`（默认 4）
+- 核心服务 mem_limit 合计约 **3.7GB**（postgres 1G / worker 1G / api 640M / ui 384M / redis 512M / nginx 128M）
+- 沙箱：**按需创建**（`pool_enabled: false`），`memory_limit: 1g`
+- 沙箱并发由 **Redis 节点配额** `max_sandboxes_per_node` + **内存水位** `admission_min_host_available_mb` 双重控制
+- 任务并发仍由 `worker.max_concurrent_tasks` 控制（与沙箱配额独立）
 
 ### 3. PostgreSQL 调优
 
-Postgres 参数已内置于 `docker-compose.yml` 的 `command`（匹配 1.5GB 容器配额）：
+Postgres 参数已内置于 `docker-compose.yml` 的 `command`（匹配 1GB 容器配额）：
 
-- `shared_buffers = 384MB`
-- `effective_cache_size = 1GB`
-- `work_mem = 16MB`
-- `maintenance_work_mem = 128MB`
+- `shared_buffers = 256MB`
+- `effective_cache_size = 768MB`
+- `work_mem = 8MB`
+- `maintenance_work_mem = 64MB`
 
 修改后执行：`docker compose up -d manus-postgres`
 
@@ -594,31 +641,32 @@ docker compose exec manus-nginx nginx -s reload
 
 ## ☸️ Kubernetes / Helm 部署
 
-Helm Chart 位于 `deploy/helm/my-manus/`，支持 API/Worker 独立 Deployment 与 HPA。完整演进路径（沙箱外置、有状态下沉、背压策略）见 [docs/architecture-evolution.md](docs/architecture-evolution.md)。
+Helm Chart 位于 `deploy/helm/my-manus/`，支持全栈部署（Postgres/Redis/UI/Ingress + API/Worker + K8s Pod 沙箱 driver）。
 
 ```bash
-# 构建并推送镜像（api/Dockerfile 多阶段 target）
+# 构建并推送四镜像
 docker build --target api -t your-registry/manus-api ./api
 docker build --target worker -t your-registry/manus-worker ./api
-docker push your-registry/manus-api
-docker push your-registry/manus-worker
+docker build -t your-registry/manus-ui ./ui
+docker build -t your-registry/manus-sandbox ./sandbox
+docker push your-registry/manus-api your-registry/manus-worker your-registry/manus-ui your-registry/manus-sandbox
 
 helm upgrade --install my-manus ./deploy/helm/my-manus \
   --set image.api.repository=your-registry/manus-api \
   --set image.worker.repository=your-registry/manus-worker \
-  --set replicaCount.api=2 \
-  --set replicaCount.worker=2 \
-  --set autoscaling.api.enabled=true \
-  --set autoscaling.worker.enabled=true \
-  --set migrate.enabled=true
+  --set image.ui.repository=your-registry/manus-ui \
+  --set image.sandbox.repository=your-registry/manus-sandbox \
+  --set appConfig.sandbox.driver=kubernetes \
+  --set ingress.enabled=true \
+  --set replicaCount.worker=2
 ```
 
 Chart 特性：
-- API Deployment 含 **migrate initContainer**（与 `manus-migrate` 等价）
-- Worker Deployment 独立 HPA
-- readiness/liveness 探针分离
-
-> Chart 为骨架配置，生产需自行补全 Secret（`API_KEY_SECRET`、数据库/Redis、COS）与 `config.yaml` ConfigMap。
+- 进集群 **PostgreSQL(pgvector) / Redis**（StatefulSet + PVC）
+- **UI + Ingress**（`/` → UI，`/api` → API）
+- Worker **ServiceAccount + RBAC**（pods create/delete/get/list）供 K8s 沙箱 driver
+- kubernetes driver 下 **不挂载 docker.sock**
+- 准入/回收逻辑与单机 compose **同一套 Redis 节点配额**
 
 ---
 

@@ -12,7 +12,7 @@ from app.infrastructure.external.sandbox.docker_sandbox import get_sandbox_runti
 from app.runtime_role import ProcessRole, get_role
 
 if TYPE_CHECKING:
-    from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
+    from app.domain.external.sandbox import Sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class SandboxPool:
             and sandbox.pool_size > 0
         )
         self._pool_size = max(0, sandbox.pool_size)
-        self._queue: asyncio.Queue[DockerSandbox] = asyncio.Queue(maxsize=self._pool_size)
+        self._queue: asyncio.Queue[Sandbox] = asyncio.Queue(maxsize=self._pool_size)
         self._warmup_task: Optional[asyncio.Task] = None
         self._started = False
 
@@ -69,11 +69,12 @@ class SandboxPool:
             await sandbox.destroy()
         self._started = False
 
-    async def acquire(self) -> "DockerSandbox":
-        from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
+    async def acquire(self) -> "Sandbox":
+        from app.infrastructure.external.sandbox.sandbox_driver import get_sandbox_class
 
+        sandbox_cls = get_sandbox_class()
         if not self._enabled:
-            return await DockerSandbox._create_and_warm()
+            return await sandbox_cls._create_and_warm()
 
         try:
             sandbox = self._queue.get_nowait()
@@ -81,19 +82,20 @@ class SandboxPool:
             return sandbox
         except asyncio.QueueEmpty:
             self.refill_background()
-            return await DockerSandbox._create_and_fast_warm()
+            return await sandbox_cls._create_and_fast_warm()
 
     def refill_background(self) -> None:
         if self._started and (self._warmup_task is None or self._warmup_task.done()):
             self._warmup_task = asyncio.create_task(self._warmup_loop())
 
     async def _warmup_loop(self) -> None:
-        from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
+        from app.infrastructure.external.sandbox.sandbox_driver import get_sandbox_class
 
+        sandbox_cls = get_sandbox_class()
         while True:
             try:
                 if self._queue.qsize() < self._pool_size:
-                    sandbox = await DockerSandbox._create_and_warm()
+                    sandbox = await sandbox_cls._create_and_warm()
                     await self._queue.put(sandbox)
                     logger.debug("Sandbox pool warmed container: %s", sandbox.id)
                 else:

@@ -45,17 +45,6 @@ pip install uv
 uv sync --frozen
 ```
 
-### 使用开发容器
-
-```bash
-cd .devops
-docker compose up -d
-
-# SSH 连接到开发容器
-ssh root@localhost -p 2222
-# 密码: root
-```
-
 ### 启动服务
 
 在容器内或本地：

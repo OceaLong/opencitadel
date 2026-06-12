@@ -24,6 +24,7 @@ memory:
     base_url: https://api.openai.com/v1
 
 sandbox:
+  driver: auto
   address: null
   image: manus-sandbox
   name_prefix: manus-sandbox
@@ -33,19 +34,31 @@ sandbox:
   https_proxy: null
   http_proxy: null
   no_proxy: localhost,127.0.0.1,manus-api,manus-ui,manus-redis,manus-postgres
-  cleanup_interval_seconds: 120
+  cleanup_interval_seconds: 60
   memory_limit: 1g
   cpu_limit: 2
   pids_limit: 512
-  pool_enabled: true
-  pool_size: 1
+  pool_enabled: false
+  pool_size: 0
   idle_timeout_minutes: 10
   warmup_retry_interval_seconds: 0.5
+  k8s_namespace: default
+  k8s_pod_label: app=manus-sandbox
 
 worker:
   max_concurrent_tasks: 4
   task_dispatch_max_retries: 3
   tool_timeout_seconds: 120
+  max_sandboxes_per_node: 4
+  max_dynamic_sandboxes_global: 0
+  admission_min_host_available_mb: 3072
+  admission_reclaim_target_mb: 4096
+  admission_poll_interval_seconds: 2
+  admission_settle_seconds: 8
+  admission_reclaim_enabled: true
+  task_execution_lease_seconds: 60
+  reclaim_leader_lease_seconds: 15
+  memory_probe_source: auto
 
 streams:
   dispatch_maxlen: 10000

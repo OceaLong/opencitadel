@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     postgres_host: str = "localhost"
     sqlalchemy_database_uri: str = ""
     sqlalchemy_echo: bool = False
-    postgres_pool_size: int = 10
-    postgres_max_overflow: int = 20
+    postgres_pool_size: int = 5
+    postgres_max_overflow: int = 5
     postgres_pool_recycle_seconds: int = 1800
 
     # Redis 连接

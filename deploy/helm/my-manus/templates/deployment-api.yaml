@@ -14,11 +14,27 @@ spec:
       labels:
         app.kubernetes.io/component: api
     spec:
+      {{- $secretName := printf "%s-secret" (include "my-manus.fullname" .) }}
+      {{- $configName := printf "%s-config" (include "my-manus.fullname" .) }}
       initContainers:
         {{- if .Values.migrate.enabled }}
         - name: migrate
           image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}"
           command: ["python", "-m", "app.migrate"]
+          envFrom:
+            - secretRef:
+                name: {{ $secretName }}
+          env:
+            {{- range $key, $value := .Values.env }}
+            {{- if and (ne $key "POSTGRES_HOST") (ne $key "REDIS_HOST") }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+            - name: POSTGRES_HOST
+              value: {{ include "my-manus.postgresHost" . | quote }}
+            - name: REDIS_HOST
+              value: {{ include "my-manus.redisHost" . | quote }}
         {{- end }}
       containers:
         - name: api
@@ -40,8 +56,25 @@ spec:
             periodSeconds: 20
           resources:
             {{- toYaml .Values.resources.api | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: {{ $secretName }}
           env:
             {{- range $key, $value := .Values.env }}
+            {{- if and (ne $key "POSTGRES_HOST") (ne $key "REDIS_HOST") }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- end }}
+            - name: POSTGRES_HOST
+              value: {{ include "my-manus.postgresHost" . | quote }}
+            - name: REDIS_HOST
+              value: {{ include "my-manus.redisHost" . | quote }}
+          volumeMounts:
+            - name: app-config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+      volumes:
+        - name: app-config
+          configMap:
+            name: {{ $configName }}

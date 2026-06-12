@@ -14,6 +14,11 @@ spec:
       labels:
         app.kubernetes.io/component: worker
     spec:
+      {{- if .Values.rbac.create }}
+      serviceAccountName: {{ include "my-manus.fullname" . }}-worker
+      {{- end }}
+      {{- $secretName := printf "%s-secret" (include "my-manus.fullname" .) }}
+      {{- $configName := printf "%s-config" (include "my-manus.fullname" .) }}
       containers:
         - name: worker
           image: "{{ .Values.image.worker.repository }}:{{ .Values.image.worker.tag }}"
@@ -31,3 +36,29 @@ spec:
             periodSeconds: 60
           resources:
             {{- toYaml .Values.resources.worker | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: {{ $secretName }}
+          env:
+            {{- range $key, $value := .Values.env }}
+            {{- if and (ne $key "POSTGRES_HOST") (ne $key "REDIS_HOST") }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+            - name: POSTGRES_HOST
+              value: {{ include "my-manus.postgresHost" . | quote }}
+            - name: REDIS_HOST
+              value: {{ include "my-manus.redisHost" . | quote }}
+            - name: MANUS_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: app-config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+      volumes:
+        - name: app-config
+          configMap:
+            name: {{ $configName }}

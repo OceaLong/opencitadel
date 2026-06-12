@@ -37,8 +37,8 @@ services:
     image: pgvector/pgvector:pg16
     container_name: manus-postgres
     restart: unless-stopped
-    mem_limit: 1536m
-    mem_reservation: 768m
+    mem_limit: 1024m
+    mem_reservation: 512m
     cpus: "1.50"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -47,13 +47,13 @@ services:
     command:
       - postgres
       - -c
-      - shared_buffers=384MB
+      - shared_buffers=256MB
       - -c
-      - effective_cache_size=1GB
+      - effective_cache_size=768MB
       - -c
-      - work_mem=16MB
+      - work_mem=8MB
       - -c
-      - maintenance_work_mem=128MB
+      - maintenance_work_mem=64MB
       - -c
       - max_connections=100
     volumes:
@@ -69,6 +69,8 @@ services:
   # ==================== 沙箱服务 ====================
 
   manus-sandbox:
+    profiles:
+      - fixed-sandbox
     build:
       context: ./sandbox
       dockerfile: Dockerfile
@@ -77,6 +79,7 @@ services:
     image: manus-sandbox
     container_name: manus-sandbox
     restart: "no"
+    mem_limit: 1g
     networks:
       - manus-network
 
@@ -89,6 +92,7 @@ services:
       target: api
       args:
         <<: *pip-build-args
+    mem_limit: 512m
     env_file:
       - .env
     depends_on:
@@ -111,8 +115,8 @@ services:
     image: manus-api
     container_name: manus-api
     restart: unless-stopped
-    mem_limit: 1g
-    mem_reservation: 512m
+    mem_limit: 640m
+    mem_reservation: 384m
     cpus: "2.00"
     env_file:
       - .env
@@ -147,8 +151,8 @@ services:
     image: manus-worker
     container_name: manus-worker
     restart: unless-stopped
-    mem_limit: 1536m
-    mem_reservation: 768m
+    mem_limit: 1024m
+    mem_reservation: 512m
     cpus: "2.00"
     env_file:
       - .env
@@ -182,8 +186,8 @@ services:
         NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
     container_name: manus-ui
     restart: unless-stopped
-    mem_limit: 512m
-    mem_reservation: 256m
+    mem_limit: 384m
+    mem_reservation: 192m
     cpus: "1.00"
     depends_on:
       manus-api:

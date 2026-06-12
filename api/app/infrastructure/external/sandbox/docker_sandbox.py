@@ -20,7 +20,11 @@ from app.domain.external.browser import Browser
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
 from app.infrastructure.external.browser.playwright_browser import PlaywrightBrowser
-from app.infrastructure.external.runtime_settings import SandboxRuntimeSettings
+from app.infrastructure.external.runtime_settings import (
+    SandboxRuntimeSettings,
+    configure_sandbox_runtime as _configure_sandbox_runtime_settings,
+    get_sandbox_runtime_settings,
+)
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -28,16 +32,10 @@ logger = logging.getLogger(__name__)
 _sync_redis_client = None
 _docker_client = None
 _docker_client_lock = threading.Lock()
-_sandbox_runtime_settings = SandboxRuntimeSettings()
 
 
 def configure_sandbox_runtime(settings: SandboxRuntimeSettings) -> None:
-    global _sandbox_runtime_settings
-    _sandbox_runtime_settings = settings
-
-
-def get_sandbox_runtime_settings() -> SandboxRuntimeSettings:
-    return _sandbox_runtime_settings
+    _configure_sandbox_runtime_settings(settings)
 
 
 def _get_docker_client():
@@ -138,6 +136,21 @@ class DockerSandbox(Sandbox):
         return ip_address
 
     @classmethod
+    def list_live_sandbox_ids_sync(cls) -> set[str]:
+        settings = get_sandbox_runtime_settings()
+        if settings.address or not settings.name_prefix:
+            return set()
+        docker_client = _get_docker_client()
+        containers = docker_client.containers.list(
+            filters={"name": f"{settings.name_prefix}-", "status": "running"},
+        )
+        return {c.name.lstrip("/") for c in containers}
+
+    @classmethod
+    async def list_live_sandbox_ids(cls) -> set[str]:
+        return await asyncio.to_thread(cls.list_live_sandbox_ids_sync)
+
+    @classmethod
     def _create_task(cls) -> Self:
         """创建沙箱容器的异步任务"""
         # 1.构建容器的名字
@@ -189,11 +202,21 @@ class DockerSandbox(Sandbox):
     @classmethod
     async def _create_and_warm(cls, max_retries: Optional[int] = None) -> Self:
         """Create a sandbox container and wait until supervisor services are ready."""
-        sandbox = await cls._create_fresh()
+        settings = get_sandbox_runtime_settings()
+        if settings.address:
+            return await cls._create_fresh()
+
+        from app.infrastructure.external.sandbox.admission import get_sandbox_quota
+
+        quota = get_sandbox_quota()
+        pre_name = f"{settings.name_prefix}-{str(uuid.uuid4())[:8]}"
+        if not await quota.acquire(pre_name):
+            raise RuntimeError("沙箱准入未通过：节点配额或内存水位不足")
         try:
+            sandbox = await cls._create_fresh_with_name(pre_name)
             await sandbox.ensure_sandbox(max_retries=max_retries)
         except Exception:
-            await sandbox.destroy()
+            await quota.release(pre_name)
             raise
         from app.infrastructure.external.sandbox.sandbox_pool import SandboxPool
 
@@ -204,6 +227,49 @@ class DockerSandbox(Sandbox):
     async def _create_and_fast_warm(cls) -> Self:
         settings = get_sandbox_runtime_settings()
         return await cls._create_and_warm(max_retries=settings.fast_warmup_max_retries)
+
+    @classmethod
+    def _create_task_with_name(cls, container_name: str) -> Self:
+        settings = get_sandbox_runtime_settings()
+        image = settings.image
+        try:
+            docker_client = _get_docker_client()
+            container_config = {
+                "image": image,
+                "name": container_name,
+                "detach": True,
+                "remove": True,
+                "environment": {
+                    "SERVER_TIMEOUT_MINUTES": str(settings.ttl_minutes or 60),
+                    "CHROME_ARGS": settings.chrome_args or "",
+                    "HTTPS_PROXY": settings.https_proxy or "",
+                    "HTTP_PROXY": settings.http_proxy or "",
+                    "NO_PROXY": settings.no_proxy or "",
+                },
+            }
+            if settings.memory_limit:
+                container_config["mem_limit"] = settings.memory_limit
+            if settings.cpu_limit and settings.cpu_limit > 0:
+                container_config["nano_cpus"] = int(settings.cpu_limit * 1_000_000_000)
+            if settings.pids_limit and settings.pids_limit > 0:
+                container_config["pids_limit"] = settings.pids_limit
+            if settings.network:
+                container_config["network"] = settings.network
+            container = docker_client.containers.run(**container_config)
+            container.reload()
+            ip = cls._get_container_ip(container)
+            return DockerSandbox(ip=ip, container_name=container_name)
+        except Exception as e:
+            logger.error(f"创建Docker沙箱容器失败: {str(e)}")
+            raise Exception(f"创建Docker沙箱容器失败: {str(e)}") from e
+
+    @classmethod
+    async def _create_fresh_with_name(cls, container_name: str) -> Self:
+        settings = get_sandbox_runtime_settings()
+        if settings.address:
+            ip = await cls._resolve_hostname_to_ip(settings.address)
+            return DockerSandbox(ip=ip)
+        return await asyncio.to_thread(cls._create_task_with_name, container_name)
 
     @classmethod
     async def _create_fresh(cls) -> Self:
@@ -230,6 +296,7 @@ class DockerSandbox(Sandbox):
 
     async def destroy(self) -> bool:
         """销毁当前的DockerSandbox实例"""
+        holder_id = self._container_name
         try:
             # 1.关闭httpx客户端
             if self.client:
@@ -238,6 +305,10 @@ class DockerSandbox(Sandbox):
             # 2.关闭并移除容器
             if self._container_name:
                 await asyncio.to_thread(self._remove_container, self._container_name)
+            if holder_id:
+                from app.infrastructure.external.sandbox.admission import get_sandbox_quota
+
+                await get_sandbox_quota().release(holder_id)
             return True
         except Exception as e:
             logger.error(f"销毁当前Docker沙箱[{self._container_name}]失败: {str(e)}")

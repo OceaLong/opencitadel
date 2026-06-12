@@ -43,11 +43,34 @@ Client ──SSE──► FastAPI API（无状态）
 ### Worker 职责
 
 - 从 Redis `task:dispatch` 消费组领取任务
+- **准入门控**：`can_admit()` 不满足时不 claim（任务留在 Stream，不进 PEL）
+- **任务幂等锁**：claim 后 `TaskLease`（Redis SET NX EX）防止 XAUTOCLAIM 重复执行
 - 运行 `AgentTaskRunner`（Planner → ReAct）或 `CodebaseIngestionTaskRunner`
 - 写入事件到 `task:output` stream
 - 将可持久化事件追加到 `session_events` 表
-- 沙箱预热门户（`SandboxPool`）与孤儿容器清理
+- 沙箱维护：启动 reconcile、空闲/低内存回收（`ReclaimLeader` 单活协调）
 - 任务结束后释放 MCP/A2A 陈旧连接
+
+## 沙箱准入与按需扩容（单机/多机统一）
+
+```
+Worker claim 前门控 ──► SandboxQuota（Redis 节点分桶）
+                              │
+新建沙箱前 acquire() ◄────────┘
+销毁/回收后 release()
+```
+
+| 组件 | 文件 | 说明 |
+|------|------|------|
+| `SandboxQuota` | `sandbox/admission.py` | 节点分桶配额；Redis 不可用 fail-closed |
+| `TaskLease` | `task/task_lease.py` | 长任务执行去重 |
+| `MemoryProbe` | `sandbox/memory_probe.py` | Docker 模式读宿主机 `/proc/meminfo`；K8s 旁路 |
+| `ReclaimCoordinator` | `sandbox/reclaim_coordinator.py` | Redis leader lease，单活执行回收 |
+| `SandboxDriver` | `sandbox_driver.py` | `auto` 探测 docker/kubernetes |
+
+- **单机**：1 个节点桶，driver=docker，Worker 挂 `docker.sock`
+- **多机 K8s**：N 个节点桶（`MANUS_NODE_NAME`），driver=kubernetes，Pod 沙箱 + ResourceQuota
+- **升级 reconcile**：启动时扫描存量 `manus-sandbox-*` 补登 holder，账实一致后再放行
 
 ## 依赖注入容器
 
@@ -81,8 +104,8 @@ FastAPI 依赖注入通过 `ApiContainer`（`AppContainer` 为其别名）解析
 | 循环 | 归属 | 说明 |
 |------|------|------|
 | MCP/A2A 连接池回收 | API | 每 5 分钟释放陈旧连接 |
-| 沙箱孤儿容器清理 | Worker | 按 `cleanup_interval_seconds` 清理 |
-| 沙箱预热门户 | Worker | `SandboxPool` 仅在 `ProcessRole.WORKER` 时启动 |
+| 沙箱维护（空闲/低内存回收） | Worker | `run_sandbox_maintenance()` + leader lease |
+| 沙箱预热门户 | Worker | `SandboxPool`（默认 `pool_enabled: false`） |
 
 ## 依赖管理规范
 
@@ -119,11 +142,14 @@ postgres/redis → manus-migrate → manus-api + manus-worker → ui → nginx
 
 ### Kubernetes / Helm
 
-Chart 位于 `deploy/helm/my-manus/`：
+Chart 位于 `deploy/helm/my-manus/`（全栈一键部署）：
 
-- API Deployment：`image.api.repository: manus-api`
-- Worker Deployment：`image.worker.repository: manus-worker`
+- 集群内 PostgreSQL（pgvector）/ Redis StatefulSet
+- API / Worker / UI Deployment + Ingress
+- Worker ServiceAccount + RBAC（Pod 沙箱 create/delete）
+- namespace ResourceQuota 限制沙箱 Pod 总量
 - migrate initContainer 使用 API 镜像
+- `sandbox.driver: kubernetes`，Worker 不挂 `docker.sock`
 
 ## 相关文档
 
