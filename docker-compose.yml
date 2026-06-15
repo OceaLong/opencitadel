@@ -6,6 +6,7 @@ x-pip-build-args: &pip-build-args
   PIP_RETRIES: ${PIP_RETRIES:-5}
   UV_INDEX_URL: ${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
   UV_VERSION: ${UV_VERSION:-0.11.19}
+  UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:-300}
   NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
 
 services:
@@ -92,6 +93,7 @@ services:
       target: api
       args:
         <<: *pip-build-args
+    image: manus-migrate
     mem_limit: 512m
     env_file:
       - .env
@@ -184,6 +186,7 @@ services:
       args:
         NEXT_PUBLIC_API_BASE_URL: /api
         NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
+    image: manus-ui
     container_name: manus-ui
     restart: unless-stopped
     mem_limit: 384m
@@ -209,15 +212,18 @@ services:
     mem_limit: 128m
     mem_reservation: 64m
     cpus: "0.50"
+    environment:
+      MANUS_DOMAIN: ${MANUS_DOMAIN:-}
+      HTTPS_ENABLED: ${HTTPS_ENABLED:-false}
     ports:
       - "${NGINX_PORT:-8088}:80"
-      # 启用 HTTPS 时取消下一行注释，并同步取消 nginx/conf.d/default.conf 顶部 SSL 块注释
-      # - "443:443"
+      - "${NGINX_HTTPS_PORT:-443}:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      # 启用 HTTPS 时取消下一行注释（需先 certbot 获取证书）
-      # - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/generate-config.sh:/docker-entrypoint.d/40-generate-config.sh:ro
+      - nginx_conf:/etc/nginx/conf.d
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       manus-ui:
         condition: service_healthy
@@ -236,6 +242,8 @@ volumes:
   redis_data:
     driver: local
   postgres_data:
+    driver: local
+  nginx_conf:
     driver: local
 
 # ==================== 网络 ====================
