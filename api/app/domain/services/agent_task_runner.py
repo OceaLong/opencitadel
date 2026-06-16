@@ -29,6 +29,7 @@ from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agent.attachment_sync import AgentAttachmentSyncer
 from app.domain.services.agent.event_emitter import AgentEventEmitter
 from app.domain.services.agent.sandbox_lifecycle import SandboxLifecycleCoordinator
+from app.domain.services.agent.sandbox_provider import SandboxProvider
 from app.domain.services.flows.planner_react import PlannerReActFlow
 from app.domain.services.flows.code_ask_flow import CodeAskFlow
 from app.domain.services.tool_event_presenter import FILE_MUTATING_FUNCTIONS, ToolEventPresenter
@@ -60,6 +61,7 @@ class AgentTaskRunner(TaskRunner):
             browser: Browser,  # 浏览器
             search_engine: SearchEngine,  # 搜索引擎
             sandbox: Sandbox,  # 沙箱
+            sandbox_provider: SandboxProvider,
             task_state_port: TaskStatePort,
             observability_port: ObservabilityPort,
             event_sequence_port: EventSequencePort,
@@ -81,6 +83,7 @@ class AgentTaskRunner(TaskRunner):
         self._uow_factory = uow_factory
         self._session_id = session_id
         self._sandbox = sandbox
+        self._sandbox_provider = sandbox_provider
         self._mcp_config = mcp_config
         self._mcp_tool = MCPTool(mcp_connection_pool)
         self._a2a_config = a2a_config
@@ -106,7 +109,7 @@ class AgentTaskRunner(TaskRunner):
         )
         self._sandbox_lifecycle = SandboxLifecycleCoordinator(
             session_id=session_id,
-            sandbox=sandbox,
+            sandbox_provider=sandbox_provider,
             checkpoint_service=checkpoint_service,
         )
         self._agent_config = agent_config
@@ -276,6 +279,8 @@ class AgentTaskRunner(TaskRunner):
 
     async def _emit_code_diff_if_needed(self, task: Task) -> None:
         """After agent code changes, emit git diff summary."""
+        if self._sandbox_provider.materialized() is None:
+            return
         try:
             async with self._uow_factory() as uow:
                 codebase = await uow.codebase.get_by_id(self._codebase_id)
@@ -370,7 +375,8 @@ class AgentTaskRunner(TaskRunner):
 
                 if isinstance(event, MessageEvent):
                     message = event.message or ""
-                    await self._attachment_sync.sync_message_attachments_to_sandbox(event)
+                    if self._sandbox_provider.materialized() is not None:
+                        await self._attachment_sync.sync_message_attachments_to_sandbox(event)
                     logger.info(f"AgentTaskRunner接收到新消息: {message[:50]}...")
 
                 synced_files = event.attachments or []
@@ -432,7 +438,8 @@ class AgentTaskRunner(TaskRunner):
                     break
 
                 if self._codebase_id and self._mode == SessionMode.AGENT:
-                    await self._emit_code_diff_if_needed(task)
+                    if self._sandbox_provider.materialized() is not None:
+                        await self._emit_code_diff_if_needed(task)
 
             if cancelled:
                 await self._put_and_add_event(task, DoneEvent())
@@ -466,7 +473,7 @@ class AgentTaskRunner(TaskRunner):
         """销毁任务运行器并释放 sandbox 资源"""
         logger.info(f"开始清除销毁AgentTaskRunner资源")
         await self.cleanup()
-        if self._sandbox:
+        if self._sandbox_provider.materialized() is not None:
             logger.info("销毁AgentTaskRunner中的沙箱环境")
             await self._sandbox.destroy()
 

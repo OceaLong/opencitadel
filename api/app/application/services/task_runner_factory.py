@@ -25,6 +25,7 @@ from app.domain.models.session import Session
 from app.domain.models.skill import Skill
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agent_task_runner import AgentTaskRunner
+from app.domain.services.agent.sandbox_provider import LazyBrowser, LazySandbox, SandboxProvider
 from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.services.tools.codebase_tools import CodebaseTool
 from app.domain.services.tools.image_generation import ImageGenerationTool
@@ -145,22 +146,18 @@ class TaskRunnerFactory:
 
     async def create_runner(self, session: Session) -> AgentTaskRunner:
         await self._refresh_runtime_config()
-        sandbox = None
-        sandbox_id = session.sandbox_id
-        if sandbox_id:
-            sandbox = await self._sandbox_cls.get(sandbox_id)
-        if not sandbox:
-            sandbox = await self._sandbox_cls.create()
-            session.sandbox_id = sandbox.id
-            async with self._uow_factory() as uow:
-                await uow.session.save(session)
 
         llm, agent_config, skill, skill_prompt, ltm_block, llm_model = await self._resolve_llm_and_config(session)
         model_id = llm_model.id
 
-        browser = await sandbox.get_browser(supports_multimodal=llm.supports_multimodal)
-        if not browser:
-            raise RuntimeError(f"获取沙箱[{sandbox.id}]中的浏览器实例失败")
+        sandbox_provider = SandboxProvider(
+            session_id=session.id,
+            sandbox_id=session.sandbox_id,
+            sandbox_cls=self._sandbox_cls,
+            uow_factory=self._uow_factory,
+        )
+        sandbox = LazySandbox(sandbox_provider)
+        browser = LazyBrowser(sandbox_provider, supports_multimodal=llm.supports_multimodal)
 
         async def save_memory_fn(title, content, tags, scope):
             entry = await self._memory_service.save_from_tool(
@@ -237,6 +234,7 @@ class TaskRunnerFactory:
             browser=browser,
             search_engine=self._search_engine,
             sandbox=sandbox,
+            sandbox_provider=sandbox_provider,
             skill=skill,
             skill_prompt=skill_prompt,
             long_term_memory_block=ltm_block,

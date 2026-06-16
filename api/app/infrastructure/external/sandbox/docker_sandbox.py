@@ -117,23 +117,53 @@ class DockerSandbox(Sandbox):
             logger.error(f"解析Docker容器主机地址{hostname}失败: {str(e)}")
             return None
 
+    @staticmethod
+    def _ipv4_from_endpoint(endpoint: dict) -> Optional[str]:
+        ip = (endpoint.get("IPAddress") or "").strip()
+        return ip or None
+
     @classmethod
-    def _get_container_ip(cls, container: Model) -> str:
-        """根据传递的容器获取ip信息"""
-        # 1.获取inspect网络设置
-        network_settings = container.attrs["NetworkSettings"]
-        ip_address = network_settings["IPAddress"]
+    def _get_container_ip(
+            cls,
+            container: Model,
+            preferred_network: Optional[str] = None,
+    ) -> Optional[str]:
+        """根据传递的容器获取 IPv4 地址（兼容自定义 bridge 网络）。"""
+        network_settings = container.attrs.get("NetworkSettings") or {}
+        networks = network_settings.get("Networks") or {}
 
-        # 2.判断容器是否存在ip，如果不存在则从networks中获取
-        if not ip_address and "Networks" in network_settings:
-            networks = network_settings["Networks"]
-            # 3.循环遍历每一项网络配置
-            for network_name, network_config in networks.items():
-                if "IPAddress" in network_config and network_config["IPAddress"]:
-                    ip_address = network_config["IPAddress"]
-                    break
+        if preferred_network:
+            endpoint = networks.get(preferred_network)
+            if endpoint:
+                ip = cls._ipv4_from_endpoint(endpoint)
+                if ip:
+                    return ip
 
-        return ip_address
+        ip = cls._ipv4_from_endpoint(network_settings)
+        if ip:
+            return ip
+
+        for endpoint in networks.values():
+            ip = cls._ipv4_from_endpoint(endpoint)
+            if ip:
+                return ip
+
+        return None
+
+    @classmethod
+    def _require_container_ip(
+            cls,
+            container: Model,
+            container_name: str,
+            preferred_network: Optional[str] = None,
+    ) -> str:
+        ip = cls._get_container_ip(container, preferred_network=preferred_network)
+        if ip:
+            return ip
+        network_label = preferred_network or "default"
+        raise RuntimeError(
+            f"沙箱[{container_name}]在网络[{network_label}]上未分配到 IPv4 地址"
+        )
 
     @classmethod
     def list_live_sandbox_ids_sync(cls) -> set[str]:
@@ -192,12 +222,16 @@ class DockerSandbox(Sandbox):
 
             # 7.重载并刷新容器信息
             container.reload()
-            ip = cls._get_container_ip(container)
+            ip = cls._require_container_ip(
+                container,
+                container_name,
+                preferred_network=settings.network,
+            )
 
             return DockerSandbox(ip=ip, container_name=container_name)
         except Exception as e:
             logger.error(f"创建Docker沙箱容器失败: {str(e)}")
-            raise Exception(f"创建Docker沙箱容器失败: {str(e)}")
+            raise Exception(f"创建Docker沙箱容器失败: {str(e)}") from e
 
     @classmethod
     async def _create_and_warm(cls, max_retries: Optional[int] = None) -> Self:
@@ -257,7 +291,11 @@ class DockerSandbox(Sandbox):
                 container_config["network"] = settings.network
             container = docker_client.containers.run(**container_config)
             container.reload()
-            ip = cls._get_container_ip(container)
+            ip = cls._require_container_ip(
+                container,
+                container_name,
+                preferred_network=settings.network,
+            )
             return DockerSandbox(ip=ip, container_name=container_name)
         except Exception as e:
             logger.error(f"创建Docker沙箱容器失败: {str(e)}")
@@ -328,7 +366,8 @@ class DockerSandbox(Sandbox):
             if container.status != "running":
                 logger.warning(f"容器存在但未运行, 容器名字: {id}")
                 return None
-            return cls._get_container_ip(container)
+            settings = get_sandbox_runtime_settings()
+            return cls._get_container_ip(container, preferred_network=settings.network)
         except NotFound:
             logger.warning(f"该容器找不到可能被销毁: {str(id)}")
             return None
