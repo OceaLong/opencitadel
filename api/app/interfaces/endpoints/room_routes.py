@@ -24,6 +24,7 @@ from app.interfaces.schemas.room import (
     RollDiceRequest,
     RollDiceResponse,
     RoomSnapshotSchema,
+    SendReactionRequest,
 )
 from app.interfaces.service_dependencies import get_room_service
 
@@ -138,6 +139,19 @@ async def add_prompt(
             request.category,
             request.text,
         )
+        return Response.success(data=data)
+    except ValueError as exc:
+        raise BadRequestError(str(exc)) from exc
+
+
+@router.post("/{code}/reaction", response_model=Response[dict])
+async def send_reaction(
+        code: str,
+        request: SendReactionRequest,
+        service: RoomService = Depends(get_room_service),
+) -> Response[dict]:
+    try:
+        data = await service.send_reaction(code, request.participant_id, request.emoji)
         return Response.success(data=data)
     except ValueError as exc:
         raise BadRequestError(str(exc)) from exc

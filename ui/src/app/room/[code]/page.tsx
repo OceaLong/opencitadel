@@ -3,33 +3,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import {
-  ArrowLeft,
-  Copy,
-  Dices,
-  Loader2,
-  MessageCircle,
-  SkipForward,
-  Sparkles,
-  Users,
-} from "lucide-react";
+import { ArrowLeft, Copy, Loader2, SkipForward, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { loadParticipant } from "@/components/marketplace/room-app";
+import { ActivityFeed } from "@/components/room/activity-feed";
+import { ConnectionStatusBadge } from "@/components/room/connection-status";
+import { DiceStage } from "@/components/room/dice-stage";
+import { InviteCard } from "@/components/room/invite-card";
+import { MembersPanel } from "@/components/room/members-panel";
+import { playDiceSound, playTodSound, vibrate } from "@/components/room/room-sounds";
+import { ReactionBar, type FloatingReaction } from "@/components/room/reaction-bar";
+import { TodStage } from "@/components/room/tod-stage";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { useRoomSSE } from "@/hooks/use-room-sse";
 import { roomApi } from "@/lib/api/room";
 import type { RoomData, RoomEvent } from "@/lib/api/types";
-import { cn } from "@/lib/utils";
 
 export default function RoomPage() {
   const params = useParams();
@@ -37,8 +27,10 @@ export default function RoomPage() {
 
   const [room, setRoom] = useState<RoomData | null>(null);
   const [participantId, setParticipantId] = useState<string | null>(null);
+  const [participantName, setParticipantName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [rolling, setRolling] = useState(false);
+  const [drawing, setDrawing] = useState(false);
   const [lastDice, setLastDice] = useState<number[] | null>(null);
   const [lastTod, setLastTod] = useState<{ category: string; text: string } | null>(null);
   const [diceCount, setDiceCount] = useState("1");
@@ -46,8 +38,10 @@ export default function RoomPage() {
   const [customPrompt, setCustomPrompt] = useState("");
   const [customCategory, setCustomCategory] = useState<"truth" | "dare">("truth");
   const [feed, setFeed] = useState<RoomEvent[]>([]);
+  const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
 
-  const esRef = useRef<EventSource | null>(null);
+  const diceRollbackRef = useRef<number[] | null>(null);
+  const todRollbackRef = useRef<{ category: string; text: string } | null>(null);
 
   const applyRoom = useCallback((data: RoomData) => {
     setRoom(data);
@@ -55,6 +49,45 @@ export default function RoomPage() {
       setFeed(data.recent_events.slice(-20));
     }
   }, []);
+
+  const appendFeed = useCallback((event: RoomEvent) => {
+    setFeed((prev) => [...prev.slice(-19), event]);
+  }, []);
+
+  const addFloatingReaction = useCallback(
+    (payload: { emoji: string; participant_name?: string }) => {
+      setFloatingReactions((prev) => [
+        ...prev.slice(-6),
+        { id: `${Date.now()}-${Math.random()}`, emoji: payload.emoji, name: payload.participant_name },
+      ]);
+    },
+    [],
+  );
+
+  const handleTurn = useCallback((payload: Record<string, unknown>) => {
+    setRoom((prev) =>
+      prev
+        ? {
+            ...prev,
+            current_turn_index: payload.current_turn_index as number,
+            current_turn_id: payload.current_turn_id as string,
+            current_turn_name: payload.current_turn_name as string,
+          }
+        : prev,
+    );
+  }, []);
+
+  const { connectionStatus } = useRoomSSE({
+    code,
+    participantId,
+    participantName,
+    onRoom: applyRoom,
+    onDice: setLastDice,
+    onTod: setLastTod,
+    onTurn: handleTurn,
+    onEvent: appendFeed,
+    onReaction: addFloatingReaction,
+  });
 
   const load = useCallback(async () => {
     try {
@@ -69,73 +102,12 @@ export default function RoomPage() {
 
   useEffect(() => {
     const saved = loadParticipant(code);
-    if (saved) setParticipantId(saved.participantId);
-    load();
+    if (saved) {
+      setParticipantId(saved.participantId);
+      setParticipantName(saved.name);
+    }
+    void load();
   }, [code, load]);
-
-  useEffect(() => {
-    const url = roomApi.streamUrl(code);
-    const es = new EventSource(url);
-    esRef.current = es;
-
-    es.addEventListener("snapshot", (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.room) applyRoom(data.room);
-      } catch {
-        /* ignore */
-      }
-    });
-
-    es.addEventListener("room_event", (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.room) applyRoom(data.room);
-        if (data.type === "dice" && data.payload?.results) {
-          setLastDice(data.payload.results as number[]);
-        }
-        if (data.type === "tod_draw" && data.payload) {
-          setLastTod({
-            category: data.payload.category as string,
-            text: data.payload.text as string,
-          });
-        }
-        if (data.type === "turn" && data.payload && !data.room) {
-          setRoom((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  current_turn_index: data.payload.current_turn_index as number,
-                  current_turn_id: data.payload.current_turn_id as string,
-                  current_turn_name: data.payload.current_turn_name as string,
-                }
-              : prev,
-          );
-        }
-        if (data.payload) {
-          setFeed((prev) => [
-            ...prev.slice(-19),
-            {
-              id: (data.event_id as string) || `${Date.now()}`,
-              type: data.type,
-              payload: data.payload,
-            },
-          ]);
-        }
-      } catch {
-        /* ignore */
-      }
-    });
-
-    es.onerror = () => {
-      /* EventSource auto-reconnects */
-    };
-
-    return () => {
-      es.close();
-      esRef.current = null;
-    };
-  }, [code, applyRoom]);
 
   useEffect(() => {
     if (!participantId) return;
@@ -147,20 +119,33 @@ export default function RoomPage() {
     return () => clearInterval(id);
   }, [code, participantId]);
 
-  const roll = async () => {
+  const requireParticipant = () => {
     if (!participantId) {
       toast.error("请先通过应用市场加入房间");
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const roll = async () => {
+    if (!requireParticipant()) return;
+    diceRollbackRef.current = lastDice;
+    const count = parseInt(diceCount, 10);
+    const faces = parseInt(diceFaces, 10);
+    const optimistic = Array.from({ length: count }, () => Math.floor(Math.random() * faces) + 1);
+    setLastDice(optimistic);
     setRolling(true);
+    playDiceSound();
+    vibrate([20, 30, 20]);
     try {
       const result = await roomApi.rollDice(code, {
-        participant_id: participantId,
-        dice_count: parseInt(diceCount, 10),
-        dice_faces: parseInt(diceFaces, 10),
+        participant_id: participantId!,
+        dice_count: count,
+        dice_faces: faces,
       });
       setLastDice(result.results);
     } catch {
+      setLastDice(diceRollbackRef.current);
       toast.error("摇骰子失败");
     } finally {
       setRolling(false);
@@ -168,22 +153,29 @@ export default function RoomPage() {
   };
 
   const drawTod = async (category?: "truth" | "dare") => {
-    if (!participantId) return;
+    if (!requireParticipant()) return;
+    todRollbackRef.current = lastTod;
+    setDrawing(true);
+    playTodSound();
+    vibrate(25);
     try {
       const result = await roomApi.drawTod(code, {
-        participant_id: participantId,
+        participant_id: participantId!,
         category,
       });
       setLastTod({ category: result.category, text: result.text });
     } catch {
+      setLastTod(todRollbackRef.current);
       toast.error("抽题失败");
+    } finally {
+      setDrawing(false);
     }
   };
 
   const nextTurn = async () => {
-    if (!participantId) return;
+    if (!requireParticipant()) return;
     try {
-      await roomApi.nextTurn(code, { participant_id: participantId });
+      await roomApi.nextTurn(code, { participant_id: participantId! });
     } catch {
       toast.error("轮转失败");
     }
@@ -204,6 +196,16 @@ export default function RoomPage() {
     }
   };
 
+  const sendReaction = async (emoji: string) => {
+    if (!requireParticipant()) return;
+    addFloatingReaction({ emoji, participant_name: participantName ?? undefined });
+    try {
+      await roomApi.sendReaction(code, { participant_id: participantId!, emoji });
+    } catch {
+      toast.error("发送表情失败");
+    }
+  };
+
   const copyCode = async () => {
     try {
       await navigator.clipboard.writeText(code);
@@ -214,6 +216,7 @@ export default function RoomPage() {
   };
 
   const isHost = room?.host_participant_id === participantId;
+  const actionsDisabled = connectionStatus === "disconnected" || connectionStatus === "connecting";
 
   if (loading) {
     return (
@@ -236,7 +239,7 @@ export default function RoomPage() {
 
   return (
     <div className="from-background via-background to-muted/30 min-h-screen bg-gradient-to-br">
-      <header className="border-border/70 bg-background/70 flex items-center justify-between border-b px-4 py-3 backdrop-blur">
+      <header className="border-border/70 bg-background/70 sticky top-0 z-20 flex items-center justify-between border-b px-4 py-3 backdrop-blur">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/marketplace">
             <ArrowLeft className="mr-1 size-4" />
@@ -248,189 +251,82 @@ export default function RoomPage() {
           <button
             type="button"
             onClick={copyCode}
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs"
+            className="text-muted-foreground hover:text-foreground flex items-center justify-center gap-1 text-xs"
           >
             房间码 {code}
             <Copy className="size-3" />
           </button>
         </div>
-        <div className="w-16" />
+        <ConnectionStatusBadge status={connectionStatus} />
       </header>
 
-      <main className="mx-auto grid max-w-4xl gap-4 p-4 lg:grid-cols-3">
+      <main className="mx-auto grid max-w-5xl gap-4 p-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
-          {room.current_turn_name && (
-            <Card className="border-primary/30 bg-primary/5">
-              <CardContent className="flex items-center gap-2 pt-4">
+          <InviteCard code={code} participantCount={room.participants.length} />
+
+          {room.current_turn_name ? (
+            <Card className="border-primary/30 bg-gradient-to-r from-primary/10 to-violet-500/5">
+              <CardContent className="flex flex-wrap items-center gap-2 pt-4">
                 <Sparkles className="text-primary size-4" />
                 <span className="text-foreground text-sm">
                   当前轮到：<strong>{room.current_turn_name}</strong>
                 </span>
-                <Button size="sm" variant="outline" className="ml-auto" onClick={nextTurn}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto"
+                  onClick={nextTurn}
+                  disabled={actionsDisabled}
+                >
                   <SkipForward className="mr-1 size-3.5" />
                   下一位
                 </Button>
               </CardContent>
             </Card>
-          )}
+          ) : null}
+
+          <DiceStage
+            diceCount={diceCount}
+            diceFaces={diceFaces}
+            onDiceCountChange={setDiceCount}
+            onDiceFacesChange={setDiceFaces}
+            rolling={rolling}
+            lastDice={lastDice}
+            onRoll={roll}
+            disabled={actionsDisabled}
+          />
+
+          <TodStage
+            lastTod={lastTod}
+            drawing={drawing}
+            onDraw={drawTod}
+            disabled={actionsDisabled}
+            isHost={isHost}
+            customPrompt={customPrompt}
+            customCategory={customCategory}
+            onCustomPromptChange={setCustomPrompt}
+            onCustomCategoryChange={setCustomCategory}
+            onAddPrompt={addPrompt}
+          />
 
           <Card>
-            <CardContent className="space-y-4 pt-5">
-              <div className="flex items-center gap-2">
-                <Dices className="text-primary size-5" />
-                <h2 className="text-foreground text-sm font-semibold">摇骰子</h2>
-              </div>
-              <div className="flex gap-3">
-                <div className="flex-1">
-                  <Label className="text-xs">个数</Label>
-                  <Select value={diceCount} onValueChange={setDiceCount}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {["1", "2", "3", "4", "5", "6"].map((n) => (
-                        <SelectItem key={n} value={n}>{n} 个</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex-1">
-                  <Label className="text-xs">面数</Label>
-                  <Select value={diceFaces} onValueChange={setDiceFaces}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {["6", "8", "10", "12", "20"].map((n) => (
-                        <SelectItem key={n} value={n}>D{n}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <Button className="w-full" onClick={roll} disabled={rolling}>
-                {rolling ? <Loader2 className="size-4 animate-spin" /> : "摇！"}
-              </Button>
-              {lastDice && (
-                <div className="flex flex-wrap justify-center gap-3 py-2">
-                  {lastDice.map((v, i) => (
-                    <div
-                      key={i}
-                      className="bg-primary text-primary-foreground flex size-14 animate-bounce items-center justify-center rounded-xl text-2xl font-bold shadow-lg"
-                      style={{ animationDelay: `${i * 100}ms` }}
-                    >
-                      {v}
-                    </div>
-                  ))}
-                  <p className="text-muted-foreground w-full text-center text-xs">
-                    合计 {lastDice.reduce((a, b) => a + b, 0)}
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="space-y-4 pt-5">
-              <div className="flex items-center gap-2">
-                <MessageCircle className="text-rose-500 size-5" />
-                <h2 className="text-foreground text-sm font-semibold">真心话大冒险</h2>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" className="flex-1" onClick={() => drawTod("truth")}>
-                  真心话
-                </Button>
-                <Button variant="outline" className="flex-1" onClick={() => drawTod("dare")}>
-                  大冒险
-                </Button>
-                <Button className="flex-1" onClick={() => drawTod()}>
-                  随机
-                </Button>
-              </div>
-              {lastTod && (
-                <div className="bg-muted/50 rounded-xl p-4 text-center">
-                  <span className="text-xs font-medium uppercase tracking-wide text-rose-500">
-                    {lastTod.category === "truth" ? "真心话" : "大冒险"}
-                  </span>
-                  <p className="text-foreground mt-2 text-sm leading-relaxed">{lastTod.text}</p>
-                </div>
-              )}
-              {isHost && (
-                <div className="space-y-2 border-t pt-3">
-                  <Label className="text-xs">房主：添加自定义题目</Label>
-                  <Select
-                    value={customCategory}
-                    onValueChange={(v) => setCustomCategory(v as "truth" | "dare")}
-                  >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="truth">真心话</SelectItem>
-                      <SelectItem value="dare">大冒险</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    value={customPrompt}
-                    onChange={(e) => setCustomPrompt(e.target.value)}
-                    placeholder="输入自定义题目"
-                  />
-                  <Button variant="outline" size="sm" onClick={addPrompt}>
-                    添加
-                  </Button>
-                </div>
-              )}
+            <CardContent className="space-y-3 pt-5">
+              <p className="text-muted-foreground text-xs">给当前回合来点气氛</p>
+              <ReactionBar
+                disabled={actionsDisabled}
+                onSend={sendReaction}
+                floating={floatingReactions}
+                onDismiss={(id) =>
+                  setFloatingReactions((prev) => prev.filter((item) => item.id !== id))
+                }
+              />
             </CardContent>
           </Card>
         </div>
 
         <div className="space-y-4">
-          <Card>
-            <CardContent className="space-y-3 pt-5">
-              <div className="flex items-center gap-2">
-                <Users className="text-muted-foreground size-4" />
-                <h3 className="text-foreground text-sm font-semibold">
-                  在线成员 ({room.participants.filter((p) => p.online).length}/{room.participants.length})
-                </h3>
-              </div>
-              <ul className="space-y-2">
-                {room.participants.map((p) => (
-                  <li
-                    key={p.id}
-                    className={cn(
-                      "flex items-center gap-2 rounded-lg px-3 py-2 text-sm",
-                      p.id === room.current_turn_id && "bg-primary/10 ring-primary/30 ring-1",
-                      p.id === participantId && "font-medium",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "size-2 rounded-full",
-                        p.online ? "bg-emerald-500" : "bg-muted-foreground/40",
-                      )}
-                    />
-                    {p.name}
-                    {p.id === room.host_participant_id && (
-                      <span className="text-muted-foreground text-[10px]">房主</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="space-y-2 pt-5">
-              <h3 className="text-foreground text-sm font-semibold">动态</h3>
-              <ul className="max-h-64 space-y-1 overflow-auto text-xs">
-                {feed.slice().reverse().map((ev) => (
-                  <li key={ev.id} className="text-muted-foreground border-b border-dashed py-1.5">
-                    {ev.type === "join" && `${ev.payload.name ?? "有人"} 加入了房间`}
-                    {ev.type === "dice" &&
-                      `${ev.payload.participant_name ?? "有人"} 摇了 ${(ev.payload.results as number[])?.join("+")}`}
-                    {ev.type === "tod_draw" &&
-                      `${ev.payload.participant_name ?? "有人"} 抽到${ev.payload.category === "truth" ? "真心话" : "大冒险"}`}
-                    {ev.type === "turn" && `轮到 ${ev.payload.current_turn_name ?? "下一位"}`}
-                    {ev.type === "prompt_add" && `房主添加了自定义题目`}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
+          <MembersPanel room={room} participantId={participantId} />
+          <ActivityFeed feed={feed} />
         </div>
       </main>
     </div>

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 
 import { ApiError } from "@/lib/api";
 import { sessionApi } from "@/lib/api/session";
-import type { SessionDetail, SSEEventData, TokenUsageSummary } from "@/lib/api/types";
+import type { ClarifyAnswer, SessionDetail, SSEEventData, TokenUsageSummary } from "@/lib/api/types";
 
 function isSessionMissingError(err: unknown): boolean {
   if (err instanceof ApiError && err.code === 404) {
@@ -18,6 +18,10 @@ function getSessionMissingErrorFromEvent(ev: SSEEventData): boolean {
   if (ev.type !== "error") return false;
   const errorMsg = (ev.data as { error?: string })?.error;
   return typeof errorMsg === "string" && isSessionMissingError(new Error(errorMsg));
+}
+
+function shouldMaintainEmptyStream(status?: SessionDetail["status"]): boolean {
+  return status === "running";
 }
 
 type StreamDeps = {
@@ -50,6 +54,11 @@ export function useSessionStreams({
   const sessionMissingRef = useRef(false);
   const isSendMessageRef = useRef(false);
   const startEmptyStreamRef = useRef<(() => void) | null>(null);
+  const sessionStatusRef = useRef(sessionStatus);
+
+  useEffect(() => {
+    sessionStatusRef.current = sessionStatus;
+  }, [sessionStatus]);
 
   const clearEmptyStreamRetryTimer = useCallback(() => {
     if (emptyStreamRetryTimerRef.current) {
@@ -81,6 +90,7 @@ export function useSessionStreams({
       if (ev.type === "session_status") {
         const status = (ev.data as { status?: SessionDetail["status"] }).status;
         if (status) {
+          sessionStatusRef.current = status;
           applySessionPatch({ status });
           if (
             status === "waiting" ||
@@ -98,7 +108,7 @@ export function useSessionStreams({
       }
 
       if (ev.type === "done") {
-        applySessionPatch({ status: "completed" });
+        setStreaming(false);
       }
 
       if (ev.type === "error") {
@@ -114,6 +124,7 @@ export function useSessionStreams({
 
   const startEmptyStream = useCallback(() => {
     if (!sessionId || sessionMissingRef.current) return;
+    if (!shouldMaintainEmptyStream(sessionStatusRef.current)) return;
     stopEmptyStream();
     emptyStreamCleanupRef.current = sessionApi.chat(
       sessionId,
@@ -141,7 +152,11 @@ export function useSessionStreams({
           emptyStreamRetryTimerRef.current = setTimeout(() => {
             emptyStreamRetryTimerRef.current = null;
             if (sessionMissingRef.current) return;
-            if (!emptyStreamCleanupRef.current && !isSendMessageRef.current) {
+            if (
+              shouldMaintainEmptyStream(sessionStatusRef.current) &&
+              !emptyStreamCleanupRef.current &&
+              !isSendMessageRef.current
+            ) {
               startEmptyStreamRef.current?.();
             }
           }, delay);
@@ -181,6 +196,7 @@ export function useSessionStreams({
         skill_id?: string;
         thinking_enabled?: boolean;
         mode?: import("@/lib/api/types").SessionMode;
+        clarify_answers?: ClarifyAnswer[];
       },
     ) => {
       if (!sessionId) return;
@@ -191,6 +207,7 @@ export function useSessionStreams({
       }
       isSendMessageRef.current = true;
       setStreaming(true);
+      sessionStatusRef.current = "running";
       applySessionPatch({ status: "running" });
 
       const onEvent = (ev: SSEEventData) => {
@@ -205,12 +222,6 @@ export function useSessionStreams({
         }
         if (ev.type === "done") {
           setStreaming(false);
-          isSendMessageRef.current = false;
-          if (messageStreamCleanupRef.current) {
-            messageStreamCleanupRef.current();
-            messageStreamCleanupRef.current = null;
-          }
-          startEmptyStream();
         }
       };
 
@@ -223,6 +234,7 @@ export function useSessionStreams({
           skill_id: options?.skill_id,
           thinking_enabled: options?.thinking_enabled,
           mode: options?.mode,
+          clarify_answers: options?.clarify_answers,
         },
         onEvent,
         (err) => {
@@ -246,7 +258,9 @@ export function useSessionStreams({
               messageStreamCleanupRef.current();
               messageStreamCleanupRef.current = null;
             }
-            startEmptyStream();
+            if (shouldMaintainEmptyStream(sessionStatusRef.current)) {
+              startEmptyStream();
+            }
             return;
           }
           setError(err instanceof Error ? err : new Error("流式响应异常"));
@@ -258,7 +272,9 @@ export function useSessionStreams({
             messageStreamCleanupRef.current = null;
           }
           if (!sessionMissingRef.current) {
-            startEmptyStream();
+            if (shouldMaintainEmptyStream(sessionStatusRef.current)) {
+              startEmptyStream();
+            }
           }
         },
         { include_debug: streamIncludeDebugRef.current },
@@ -277,11 +293,7 @@ export function useSessionStreams({
 
   useEffect(() => {
     if (!sessionId || !sessionStatus || sessionMissingRef.current) return;
-    const completed =
-      sessionStatus === "completed" ||
-      sessionStatus === "cancelled" ||
-      sessionStatus === "failed";
-    if (!completed && !isSendMessageRef.current && !skipEmptyStream) {
+    if (shouldMaintainEmptyStream(sessionStatus) && !isSendMessageRef.current && !skipEmptyStream) {
       startEmptyStream();
     }
     return () => {

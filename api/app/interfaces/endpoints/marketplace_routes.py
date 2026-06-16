@@ -2,8 +2,11 @@
 # -*- coding: utf-8 -*-
 import logging
 import time
+import json
+from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, Request
+from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from app.application.errors.exceptions import BadRequestError
 from app.application.services.marketplace_service import MarketplaceService
@@ -250,6 +253,30 @@ async def predict_fortune(
         return Response.success(data=FortunePredictionResponse(**data))
     except ValueError as exc:
         raise BadRequestError(str(exc)) from exc
+
+
+@router.post("/fortune/predict/stream")
+async def predict_fortune_stream(
+        request: FortunePredictionRequest,
+        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
+) -> EventSourceResponse:
+    async def event_generator() -> AsyncGenerator[ServerSentEvent, None]:
+        try:
+            profile = request.input_profile.model_dump(exclude_none=True)
+            async for item in marketplace_service.stream_fortune_prediction(
+                    mode=request.mode,
+                    question=request.question,
+                    input_profile=profile,
+                    model_id=request.model_id,
+            ):
+                yield ServerSentEvent(event=item["event"], data=item["data"])
+        except ValueError as exc:
+            yield ServerSentEvent(
+                event="error",
+                data=json.dumps({"message": str(exc)}, ensure_ascii=False),
+            )
+
+    return EventSourceResponse(event_generator())
 
 
 @router.get("/fortune/share/{share_id}", response_model=Response[FortunePredictionShareResponse])

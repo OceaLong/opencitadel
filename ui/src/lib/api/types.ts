@@ -730,6 +730,14 @@ export type ChatMessage = {
   [key: string]: unknown;
 };
 
+export type ClarifyAnswer = {
+  question_id: string;
+  prompt?: string;
+  option_ids: string[];
+  option_labels: string[];
+  custom_text?: string;
+};
+
 /**
  * 聊天请求参数
  * message 为空时用于流式拉取未完成任务的事件列表
@@ -737,6 +745,7 @@ export type ChatMessage = {
 export type ChatParams = {
   message?: string;
   attachments?: string[];
+  clarify_answers?: ClarifyAnswer[];
   event_id?: string;
   model_id?: string;
   skill_id?: string;

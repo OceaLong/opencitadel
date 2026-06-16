@@ -6,6 +6,7 @@ import { useSessionEventLog } from "@/hooks/use-session-event-log";
 import { useSessionMeta } from "@/hooks/use-session-meta";
 import { useSessionStreams } from "@/hooks/use-session-streams";
 import type {
+  ClarifyAnswer,
   SessionCheckpoint,
   SessionDetail,
   SessionFile,
@@ -33,6 +34,7 @@ export type UseSessionDetailResult = {
       skill_id?: string;
       thinking_enabled?: boolean;
       mode?: import("@/lib/api/types").SessionMode;
+      clarify_answers?: ClarifyAnswer[];
     },
   ) => Promise<void>;
   updateSessionConfig: (params: UpdateSessionConfigParams) => Promise<void>;

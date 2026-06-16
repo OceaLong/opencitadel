@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from app.domain.external.llm import LLM
 from app.infrastructure.external.json_parser.repair_json_parser import RepairJSONParser
@@ -127,6 +127,46 @@ class FortuneService:
 
         result["mode"] = mode
         return result
+
+    async def generate_stream(
+            self,
+            llm: LLM,
+            *,
+            mode: str,
+            question: str,
+            input_profile: Optional[Dict[str, Any]] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        mode = (mode or "fortune").strip().lower()
+        if mode not in FORTUNE_MODES:
+            raise ValueError(f"不支持的预测类型，可选：{', '.join(sorted(FORTUNE_MODES))}")
+
+        question = (question or "").strip()
+        if not question:
+            raise ValueError("请输入你想预测的问题")
+
+        profile = input_profile or {}
+        prompt = FORTUNE_PROMPT.format(
+            mode_label=MODE_LABELS.get(mode, mode),
+            question=question,
+            profile=json.dumps(profile, ensure_ascii=False),
+        )
+
+        accumulated = ""
+        try:
+            async for delta in llm.stream_invoke([{"role": "user", "content": prompt}]):
+                chunk = delta.get("content") or ""
+                if chunk:
+                    accumulated += chunk
+                    yield {"type": "delta", "text": chunk}
+
+            parsed = await self._json_parser.invoke(accumulated, default_value={})
+            result = self._normalize_result(parsed, mode)
+        except Exception as exc:
+            logger.info("运势预测流式 LLM 降级为模板结果: %s", exc)
+            result = dict(FALLBACK_RESULTS.get(mode, FALLBACK_RESULTS["fortune"]))
+
+        result["mode"] = mode
+        yield {"type": "done", "result": result}
 
     def _normalize_result(self, parsed: Any, mode: str) -> Dict[str, Any]:
         if not isinstance(parsed, dict):

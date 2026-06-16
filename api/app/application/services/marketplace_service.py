@@ -443,6 +443,46 @@ class MarketplaceService:
             await uow.fortune_prediction.save(prediction)
         return self._format_fortune_prediction(prediction)
 
+    async def stream_fortune_prediction(
+            self,
+            *,
+            mode: str,
+            question: str,
+            input_profile: Optional[Dict[str, Any]] = None,
+            model_id: Optional[str] = None,
+    ) -> AsyncGenerator[Dict[str, str], None]:
+        llm = await self._resolve_text_llm(model_id)
+        async for event in self._fortune.generate_stream(
+                llm,
+                mode=mode,
+                question=question,
+                input_profile=input_profile,
+        ):
+            if event.get("type") == "delta":
+                yield {
+                    "event": "delta",
+                    "data": json.dumps({"text": event.get("text", "")}, ensure_ascii=False),
+                }
+                continue
+
+            if event.get("type") == "done":
+                result = event.get("result") or {}
+                prediction = FortunePrediction(
+                    mode=mode,
+                    question=question.strip(),
+                    input_profile=input_profile or {},
+                    result=result,
+                )
+                async with self._uow_factory() as uow:
+                    await uow.fortune_prediction.save(prediction)
+                yield {
+                    "event": "done",
+                    "data": json.dumps(
+                        self._format_fortune_prediction(prediction),
+                        ensure_ascii=False,
+                    ),
+                }
+
     async def get_fortune_prediction_share(self, share_id: str) -> dict:
         share_id = (share_id or "").strip()
         if not share_id:

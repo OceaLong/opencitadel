@@ -190,6 +190,18 @@ class AgentWorker:
             logger.error("Worker 找不到会话: session_id=%s task_id=%s", session_id, task_id)
             await self._task_state.set_status(task_id, TaskStatus.FAILED)
             raise RuntimeError(f"任务会话不存在: {session_id}")
+        if session.status in {SessionStatus.CANCELLED, SessionStatus.FAILED}:
+            logger.info(
+                "Worker 跳过终态会话: session_id=%s task_id=%s status=%s",
+                session_id,
+                task_id,
+                session.status.value,
+            )
+            await self._task_state.set_status(
+                task_id,
+                TaskStatus.CANCELLED if session.status == SessionStatus.CANCELLED else TaskStatus.FAILED,
+            )
+            return
 
         async with get_uow() as uow:
             await uow.session.update_status(session_id, SessionStatus.RUNNING)

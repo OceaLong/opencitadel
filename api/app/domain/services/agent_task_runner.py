@@ -445,6 +445,9 @@ class AgentTaskRunner(TaskRunner):
                     if self._sandbox_provider.materialized() is not None:
                         await self._emit_code_diff_if_needed(task)
 
+            if not cancelled and await self._is_cancelled(task):
+                cancelled = True
+
             if cancelled:
                 await self._put_and_add_event(task, DoneEvent())
                 await self._emit_session_status(task, SessionStatus.CANCELLED)

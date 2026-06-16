@@ -90,3 +90,8 @@ class AddTodPromptRequest(BaseModel):
     participant_id: str
     category: str
     text: str
+
+
+class SendReactionRequest(BaseModel):
+    participant_id: str
+    emoji: str = Field(min_length=1, max_length=8)

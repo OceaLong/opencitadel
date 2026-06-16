@@ -120,8 +120,8 @@ export function RoomApp({ initialCode }: RoomAppProps) {
           <Input
             value={joinCode}
             onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-            placeholder="输入 6 位房间码"
-            maxLength={6}
+            placeholder="输入 8 位房间码"
+            maxLength={8}
           />
           <Button variant="outline" className="w-full" onClick={join} disabled={loading}>
             {loading ? <Loader2 className="size-4 animate-spin" /> : <DoorOpen className="mr-1 size-4" />}

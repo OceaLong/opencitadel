@@ -352,6 +352,33 @@ class RoomService:
         })
         return {"id": prompt.id, "category": category, "text": text.strip()}
 
+    async def send_reaction(
+            self,
+            code: str,
+            participant_id: str,
+            emoji: str,
+    ) -> dict:
+        allowed = {"👍", "😂", "🔥", "❤️", "🎉", "😱", "👏", "💯"}
+        emoji = (emoji or "").strip()
+        if emoji not in allowed:
+            raise ValueError("不支持的表情")
+
+        async with self._uow_factory() as uow:
+            room, participant = await self._require_room_participant(uow, code, participant_id)
+            payload = {
+                "participant_id": participant_id,
+                "participant_name": participant.name,
+                "emoji": emoji,
+            }
+            event = await self._record_event(uow, room.id, RoomEventType.REACTION, payload)
+
+        await self._publish(code, {
+            "type": event.type.value,
+            "payload": payload,
+            "event_id": event.id,
+        })
+        return payload
+
     async def get_room_snapshot(self, code: str) -> dict:
         async with self._uow_factory() as uow:
             room = await uow.room.get_room_by_code(code)

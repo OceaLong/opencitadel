@@ -72,7 +72,9 @@ class RedisStreamTask(Task):
         )
 
     async def dispatch_to_worker(self) -> None:
-        await self._task_state.set_status(self._id, TaskStatus.PENDING)
+        snapshot = await self._task_state.get_runtime_snapshot(self._id)
+        if snapshot.get("status") != TaskStatus.RUNNING:
+            await self._task_state.set_status(self._id, TaskStatus.PENDING)
         await self._task_state.dispatch(self._id, self._session_id)
         logger.info(f"任务[{self._id}]已分发到 worker 队列")
 
@@ -141,6 +143,15 @@ class RedisStreamTask(Task):
 
     async def is_done(self) -> bool:
         return await self._task_state.is_done(self._id)
+
+    @classmethod
+    async def destroy_task_resources(
+            cls,
+            task_id: str,
+            task_state: Optional[TaskStateService] = None,
+    ) -> None:
+        state = task_state or get_task_state()
+        await state.delete_task_resources(task_id)
 
     @classmethod
     async def destroy(cls) -> None:

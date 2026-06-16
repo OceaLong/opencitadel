@@ -207,6 +207,16 @@ class TaskStateService:
     async def clear_cancel(self, task_id: str) -> None:
         await self._redis.client.delete(self.cancel_key(task_id))
 
+    async def delete_task_resources(self, task_id: str) -> None:
+        """Delete Redis keys owned by a task after it is no longer active."""
+        await self._redis.client.delete(
+            self.meta_key(task_id),
+            self.cancel_key(task_id),
+            self.output_seq_index_key(task_id),
+            f"task:input:{task_id}",
+            f"task:output:{task_id}",
+        )
+
     async def dispatch(self, task_id: str, session_id: str) -> str:
         await self.ensure_consumer_group()
         return await self._redis.client.xadd(

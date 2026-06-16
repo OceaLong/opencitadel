@@ -9,14 +9,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 
-import type { ClarifyQuestion } from "@/lib/api/types";
+import type { ClarifyAnswer, ClarifyQuestion } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 type ClarifyQuestionsProps = {
   title?: string | null;
   questions: ClarifyQuestion[];
   interactive: boolean;
-  onSubmit?: (answer: string) => Promise<void> | void;
+  onSubmit?: (answer: string, structuredAnswers: ClarifyAnswer[]) => Promise<void> | void;
   className?: string;
 };
 
@@ -84,11 +84,28 @@ export function ClarifyQuestions({
     return lines.join("\n");
   };
 
+  const buildStructuredAnswers = (): ClarifyAnswer[] => {
+    return questions.map((question) => {
+      const selectedIds = selections[question.id] ?? [];
+      const selectedLabels = question.options
+        .filter((option) => selectedIds.includes(option.id))
+        .map((option) => option.label);
+      const custom = (customAnswers[question.id] ?? "").trim();
+      return {
+        question_id: question.id,
+        prompt: question.prompt,
+        option_ids: selectedIds,
+        option_labels: selectedLabels,
+        custom_text: custom || undefined,
+      };
+    });
+  };
+
   const handleSubmit = async () => {
     if (!canSubmit || !onSubmit) return;
     setSubmitting(true);
     try {
-      await onSubmit(buildAnswer());
+      await onSubmit(buildAnswer(), buildStructuredAnswers());
     } finally {
       setSubmitting(false);
     }

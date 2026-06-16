@@ -7,11 +7,14 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 
 import { FortuneResultView } from "@/components/marketplace/fortune/fortune-result-view";
 import { Button } from "@/components/ui/button";
+import { fadeInUp, motion, reducedVariants } from "@/lib/motion";
+import { usePrefersReducedMotion } from "@/lib/motion";
 
 import { marketplaceApi } from "@/lib/api/marketplace";
 import type { FortunePredictionData } from "@/lib/api/types";
 
 function ShareFortuneContent() {
+  const reduced = usePrefersReducedMotion();
   const params = useParams();
   const shareId = typeof params.id === "string" ? params.id : "";
   const [data, setData] = useState<FortunePredictionData | null>(null);
@@ -67,14 +70,19 @@ function ShareFortuneContent() {
         <span className="text-muted-foreground text-sm">运势预测分享</span>
       </header>
       <main className="flex flex-1 justify-center p-6">
-        <div className="w-full max-w-lg">
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          variants={reducedVariants(fadeInUp, reduced)}
+          className="w-full max-w-lg"
+        >
           <FortuneResultView data={data} showReset={false} />
           <div className="mt-4 text-center">
             <Button asChild className="w-full">
               <Link href="/marketplace">我也来测一测</Link>
             </Button>
           </div>
-        </div>
+        </motion.div>
       </main>
     </div>
   );

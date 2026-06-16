@@ -1,17 +1,19 @@
+import { enrichResult, pickTopCode } from "../scoring";
 import type { QuizBank } from "../types";
 
 const ANIMAL_RESULTS: QuizBank["results"] = {
-  cat: { code: "cat", title: "慵懒猫咪", description: "独立又傲娇，享受独处但也渴望被宠爱。", traits: ["独立", "优雅", "神秘"] },
-  dog: { code: "dog", title: "热情修狗", description: "忠诚活泼，是团队里的开心果和粘合剂。", traits: ["忠诚", "热情", "社交"] },
-  owl: { code: "owl", title: "智慧猫头鹰", description: "深夜思考者，喜欢深度思考和安静环境。", traits: ["智慧", "冷静", "观察"] },
-  fox: { code: "fox", title: "机灵狐狸", description: "聪明灵活，善于应变和找到捷径。", traits: ["机智", "灵活", "好奇"] },
-  panda: { code: "panda", title: "佛系熊猫", description: "温和随性，追求舒适和内心的平和。", traits: ["温和", "佛系", "可爱"] },
-  eagle: { code: "eagle", title: "翱翔雄鹰", description: "有野心有视野，喜欢挑战高处和目标。", traits: ["野心", "远见", "果断"] },
+  cat: { code: "cat", title: "慵懒猫咪", description: "独立又傲娇，享受独处但也渴望被宠爱。", traits: ["独立", "优雅", "神秘"], avatar: "🐱" },
+  dog: { code: "dog", title: "热情修狗", description: "忠诚活泼，是团队里的开心果和粘合剂。", traits: ["忠诚", "热情", "社交"], avatar: "🐶" },
+  owl: { code: "owl", title: "智慧猫头鹰", description: "深夜思考者，喜欢深度思考和安静环境。", traits: ["智慧", "冷静", "观察"], avatar: "🦉" },
+  fox: { code: "fox", title: "机灵狐狸", description: "聪明灵活，善于应变和找到捷径。", traits: ["机智", "灵活", "好奇"], avatar: "🦊" },
+  panda: { code: "panda", title: "佛系熊猫", description: "温和随性，追求舒适和内心的平和。", traits: ["温和", "佛系", "可爱"], avatar: "🐼" },
+  eagle: { code: "eagle", title: "翱翔雄鹰", description: "有野心有视野，喜欢挑战高处和目标。", traits: ["野心", "远见", "果断"], avatar: "🦅" },
 };
 
 function computeAnimal(scores: Record<string, number>) {
-  const top = Object.entries(scores).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "panda";
-  return ANIMAL_RESULTS[top] ?? ANIMAL_RESULTS.panda;
+  const top = pickTopCode(scores, "panda");
+  const base = ANIMAL_RESULTS[top] ?? ANIMAL_RESULTS.panda;
+  return enrichResult(base, scores, ANIMAL_RESULTS);
 }
 
 export const funAnimalBank: QuizBank = {
@@ -61,6 +63,26 @@ export const funAnimalBank: QuizBank = {
       { id: "a", text: "冷处理不理他", weights: { cat: 2 } },
       { id: "b", text: "直接说出来", weights: { dog: 2 } },
       { id: "c", text: "记在心里找机会", weights: { fox: 2 } },
+    ]},
+    { id: "q9", text: "周末早起你会？", options: [
+      { id: "a", text: "继续睡，别叫我", weights: { cat: 2, panda: 1 } },
+      { id: "b", text: "已经安排满活动", weights: { dog: 2, eagle: 1 } },
+      { id: "c", text: "安静享受早晨", weights: { owl: 2 } },
+    ]},
+    { id: "q10", text: "团队项目里你更像？", options: [
+      { id: "a", text: "独当一面的高手", weights: { eagle: 2, cat: 1 } },
+      { id: "b", text: "粘合剂开心果", weights: { dog: 2 } },
+      { id: "c", text: "幕后军师", weights: { fox: 2, owl: 1 } },
+    ]},
+    { id: "q11", text: "面对美食你？", options: [
+      { id: "a", text: "慢慢享受不着急", weights: { panda: 2, cat: 1 } },
+      { id: "b", text: "开心就要分享", weights: { dog: 2 } },
+      { id: "c", text: "挑最好的那口", weights: { fox: 2 } },
+    ]},
+    { id: "q12", text: "旅行风格？", options: [
+      { id: "a", text: "打卡热门景点", weights: { dog: 2, eagle: 1 } },
+      { id: "b", text: "小众深度游", weights: { owl: 2, cat: 1 } },
+      { id: "c", text: "随缘躺平游", weights: { panda: 2 } },
     ]},
   ],
 };

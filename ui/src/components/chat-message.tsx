@@ -17,7 +17,7 @@ import { ManusIcon } from "@/components/manus-icon";
 import { MarkdownContent } from "@/components/markdown-content";
 import { ToolUse } from "@/components/tool-use";
 
-import type { SessionCheckpoint, SessionStatus, ToolEvent } from "@/lib/api/types";
+import type { ClarifyAnswer, SessionCheckpoint, SessionStatus, ToolEvent } from "@/lib/api/types";
 import { type AttachmentFile, getToolTimeLabel, type TimelineItem } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +27,7 @@ export type ChatMessageProps = {
   onViewAllFiles?: () => void;
   onFileClick?: (file: AttachmentFile) => void;
   onToolClick?: (tool: ToolEvent) => void;
-  onClarifyAnswer?: (answer: string) => Promise<void> | void;
+  onClarifyAnswer?: (answer: string, clarifyAnswers: ClarifyAnswer[]) => Promise<void> | void;
   sessionStatus?: SessionStatus;
   checkpoint?: SessionCheckpoint;
   onRestoreCheckpoint?: (checkpoint: SessionCheckpoint) => Promise<void> | void;

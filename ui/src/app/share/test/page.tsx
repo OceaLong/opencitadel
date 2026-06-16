@@ -6,8 +6,8 @@ import { useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { BANKS_BY_ID } from "@/components/marketplace/tests/banks";
+import { QuizResultView } from "@/components/marketplace/tests/quiz-result-view";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 
 function ShareTestContent() {
   const params = useSearchParams();
@@ -39,31 +39,13 @@ function ShareTestContent() {
         </Button>
         <span className="text-muted-foreground text-sm">测试结果分享</span>
       </header>
-      <main className="flex flex-1 items-center justify-center p-6">
-        <Card className="w-full max-w-md overflow-hidden">
-          <div className="from-primary/20 via-violet-500/10 bg-gradient-to-br to-transparent px-6 py-8 text-center">
-            <span className="text-5xl">{bank.icon}</span>
-            <p className="text-muted-foreground mt-2 text-xs">{bank.name}</p>
-            <h1 className="text-foreground mt-1 text-2xl font-bold">{result.title}</h1>
-            <p className="text-primary mt-1 text-sm font-medium">{result.code}</p>
-          </div>
-          <CardContent className="space-y-4 pt-6">
-            <p className="text-muted-foreground text-sm leading-relaxed">{result.description}</p>
-            <div className="flex flex-wrap gap-2">
-              {result.traits.map((t) => (
-                <span
-                  key={t}
-                  className="bg-primary/10 text-primary rounded-full px-3 py-1 text-xs font-medium"
-                >
-                  {t}
-                </span>
-              ))}
-            </div>
-            <Button asChild className="w-full">
-              <Link href="/marketplace">我也来测一测</Link>
-            </Button>
-          </CardContent>
-        </Card>
+      <main className="flex flex-1 justify-center p-6">
+        <div className="w-full max-w-lg">
+          <QuizResultView bank={bank} result={result} showActions={false} />
+          <Button asChild className="mt-4 w-full">
+            <Link href="/marketplace">我也来测一测</Link>
+          </Button>
+        </div>
       </main>
     </div>
   );

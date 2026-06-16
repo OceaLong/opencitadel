@@ -11,6 +11,11 @@ from app.domain.repositories.uow import IUnitOfWork
 
 logger = logging.getLogger(__name__)
 
+_PROTECTED_TERMINAL_STATUSES = {
+    SessionStatus.CANCELLED,
+    SessionStatus.FAILED,
+}
+
 
 class SessionStateService:
     """Single authority for persisting session status changes."""
@@ -30,7 +35,24 @@ class SessionStateService:
             *,
             emit_event: bool = False,
     ) -> Optional[SessionStatusEvent]:
+        current_status = None
         async with self._uow_factory() as uow:
+            session = await uow.session.get_metadata(session_id)
+            if session:
+                current_status = session.status
+            if (
+                current_status in _PROTECTED_TERMINAL_STATUSES
+                and status not in _PROTECTED_TERMINAL_STATUSES
+            ):
+                logger.debug(
+                    "Skip session %s transition %s -> %s",
+                    session_id,
+                    current_status.value,
+                    status.value,
+                )
+                if emit_event:
+                    return SessionStatusEvent(status=current_status.value)
+                return None
             await uow.session.update_status(session_id, status)
         await self._session_list_notifier.notify_sessions_changed()
         logger.debug("Session %s -> %s", session_id, status.value)

@@ -64,6 +64,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sessions", tags=["会话模块"])
 
 
+def _format_clarify_answers(request: ChatRequest) -> Optional[str]:
+    """Build the model-facing text summary for structured clarify answers."""
+    if request.message:
+        return request.message
+    if not request.clarify_answers:
+        return None
+    lines = ["【澄清回复】"]
+    for answer in request.clarify_answers:
+        parts = list(answer.option_labels or [])
+        custom = (answer.custom_text or "").strip()
+        if custom:
+            parts.append(f"自定义: {custom}")
+        prompt = answer.prompt or answer.question_id
+        lines.append(f"- {prompt}: {'；'.join(parts)}")
+    return "\n".join(lines)
+
+
 async def build_get_session_response(
         session: Session,
         llm_model_service: LLMModelService,
@@ -301,10 +318,11 @@ async def chat(
 
     async def event_generator() -> AsyncGenerator[ServerSentEvent, None]:
         """定义事件生成器，用于配合EventSourceResponse生成流式响应数据"""
+        message = _format_clarify_answers(request)
         # 1.调用Agent服务发起聊天
         async for event in agent_service.chat(
                 session_id=session_id,
-                message=request.message,
+                message=message,
                 attachments=request.attachments,
                 latest_event_id=request.event_id,
                 timestamp=datetime.fromtimestamp(request.timestamp) if request.timestamp else None,

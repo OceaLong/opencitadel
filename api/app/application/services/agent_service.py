@@ -13,7 +13,14 @@ from app.domain.external.task import Task
 from app.domain.external.task_state_port import TaskStatePort
 from app.domain.models.checkpoint import Checkpoint
 from app.domain.models.codebase import SessionMode
-from app.domain.models.event import BaseEvent, ErrorEvent, MessageEvent, Event, DoneEvent, WaitEvent
+from app.domain.models.event import (
+    BaseEvent,
+    ErrorEvent,
+    MessageEvent,
+    Event,
+    DoneEvent,
+    SessionStatusEvent,
+)
 from app.domain.models.event_policy import TRANSIENT_EVENT_TYPES
 from app.domain.models.event_upgrader import upgrade_event_payload
 from app.domain.models.session import Session, SessionStatus
@@ -24,6 +31,7 @@ from app.infrastructure.external.task.task_state import TaskStatus
 logger = logging.getLogger(__name__)
 
 _SESSION_NOT_FOUND_MSG = "任务会话不存在, 请核实后重试"
+_TERMINAL_SESSION_STATUSES = {"waiting", "completed", "cancelled", "failed"}
 
 
 class AgentService:
@@ -50,12 +58,29 @@ class AgentService:
             return None
         return await self._task_cls.get(task_id)
 
+    async def _task_is_terminal(self, task: Task) -> bool:
+        snapshot = await self._task_state.get_runtime_snapshot(task.id)
+        return bool(snapshot.get("cancelled") or snapshot.get("is_done"))
+
+    async def _cleanup_task_resources(self, task_id: Optional[str]) -> None:
+        if not task_id:
+            return
+        cleanup = getattr(self._task_cls, "destroy_task_resources", None)
+        if cleanup is None:
+            return
+        try:
+            await cleanup(task_id)
+        except Exception as exc:
+            logger.warning("清理旧任务 Redis 资源失败 task_id=%s: %s", task_id, exc)
+
     async def _create_task(self, session: Session) -> Task:
+        previous_task_id = session.task_id
         task = await self._task_cls.create_for_session(session.id)
         session.task_id = task.id
         async with self._uow_factory() as uow:
             await uow.session.save(session)
             await uow.session.update_status(session.id, SessionStatus.RUNNING)
+        await self._cleanup_task_resources(previous_task_id)
         return task
 
     async def _safe_update_unread_count(self, session_id: str) -> None:
@@ -111,6 +136,36 @@ class AgentService:
             TaskStatus.FAILED,
         }
 
+        def is_terminal_status_event(event: BaseEvent) -> bool:
+            return (
+                isinstance(event, SessionStatusEvent)
+                and event.status in _TERMINAL_SESSION_STATUSES
+            )
+
+        async def replay_persisted_events():
+            nonlocal last_seq
+            async with self._uow_factory() as uow:
+                records = await uow.session.list_events(session_id, after=last_seq, limit=500)
+            for seq, event in records:
+                if seq <= last_seq:
+                    continue
+                last_seq = seq
+                event.id = str(seq)
+                yield event
+
+        async def current_terminal_status_event() -> Optional[SessionStatusEvent]:
+            async with self._uow_factory() as uow:
+                current_session = await uow.session.get_metadata(session_id)
+            if current_session and current_session.status.value in _TERMINAL_SESSION_STATUSES:
+                return SessionStatusEvent(status=current_session.status.value)
+            return None
+
+        if last_seq > 0 and redis_cursor == "0":
+            async for persisted_event in replay_persisted_events():
+                yield persisted_event
+                if is_terminal_status_event(persisted_event):
+                    return
+
         while True:
             stream_message_id, event_str = await output_stream.get(
                 start_id=redis_cursor,
@@ -132,16 +187,23 @@ class AgentService:
                 last_seq = event_seq
                 event.id = str(event_seq)
                 yield event
-                if isinstance(event, (DoneEvent, ErrorEvent, WaitEvent)):
+                if is_terminal_status_event(event):
                     return
                 continue
 
             snapshot = await self._task_state.get_runtime_snapshot(task_id)
             if snapshot.get("cancelled"):
-                yield DoneEvent()
-                break
+                yield SessionStatusEvent(status="cancelled")
+                return
             status = snapshot.get("status")
             if snapshot.get("is_done") and status in terminal_statuses:
+                async for persisted_event in replay_persisted_events():
+                    yield persisted_event
+                    if is_terminal_status_event(persisted_event):
+                        return
+                terminal_event = await current_terminal_status_event()
+                if terminal_event:
+                    yield terminal_event
                 return
 
     async def chat(
@@ -191,10 +253,12 @@ class AgentService:
             task = await self._get_task(session)
 
             if message:
-                should_dispatch = False
-                if session.status != SessionStatus.RUNNING or task is None:
+                if (
+                    session.status != SessionStatus.RUNNING
+                    or task is None
+                    or await self._task_is_terminal(task)
+                ):
                     task = await self._create_task(session)
-                    should_dispatch = True
                     if not task:
                         logger.error(f"会话[{session_id}]创建任务失败")
                         raise RuntimeError(f"会话[{session_id}]创建任务失败")
@@ -216,8 +280,7 @@ class AgentService:
                     await uow.session.add_event(session_id, message_event, seq=seq)
                 await task.input_stream.put(message_event.model_dump_json())
                 yield message_event
-                if should_dispatch:
-                    await task.invoke()
+                await task.invoke()
                 logger.info(f"往会话[{session_id}]输入消息队列写入消息: {message[:50]}...")
 
             if not task:

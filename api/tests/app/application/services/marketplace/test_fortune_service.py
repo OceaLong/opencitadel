@@ -71,3 +71,31 @@ async def test_generate_rejects_invalid_mode(service):
 async def test_generate_rejects_empty_question(service):
     with pytest.raises(ValueError, match="请输入你想预测的问题"):
         await service.generate(FakeLLM(), mode="fortune", question="   ")
+
+
+class FakeStreamLLM:
+    async def stream_invoke(self, messages):
+        payload = (
+            '{"title":"流式吉兆","summary":"流式生成成功。",'
+            '"sections":[{"heading":"指引","content":"宜顺势而为。"}],'
+            '"lucky_items":{"color":"蓝","number":"3","keyword":"顺","element":"水"},'
+            '"disclaimer":"本结果仅供娱乐参考，请理性看待。"}'
+        )
+        for ch in payload:
+            yield {"content": ch}
+
+
+@pytest.mark.anyio
+async def test_generate_stream_yields_delta_and_done(service):
+    events = []
+    async for event in service.generate_stream(
+        FakeStreamLLM(),
+        mode="fortune",
+        question="近期运势如何？",
+    ):
+        events.append(event)
+
+    assert any(e["type"] == "delta" for e in events)
+    done = next(e for e in events if e["type"] == "done")
+    assert done["result"]["title"] == "流式吉兆"
+    assert done["result"]["mode"] == "fortune"

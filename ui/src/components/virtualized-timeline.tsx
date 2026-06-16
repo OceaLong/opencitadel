@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, type RefObject } from "react";
 
 import { ChatMessage } from "@/components/chat-message";
-import type { SessionCheckpoint, SessionDetail, ToolEvent } from "@/lib/api/types";
+import type { ClarifyAnswer, SessionCheckpoint, SessionDetail, ToolEvent } from "@/lib/api/types";
 import type { AttachmentFile, TimelineItem } from "@/lib/session-events";
 
 type VirtualizedTimelineProps = {
@@ -14,7 +14,7 @@ type VirtualizedTimelineProps = {
   onViewAllFiles: () => void;
   onFileClick: (file: AttachmentFile) => void;
   onToolClick: (tool: ToolEvent) => void;
-  onClarifyAnswer: (answer: string) => void;
+  onClarifyAnswer: (answer: string, clarifyAnswers: ClarifyAnswer[]) => void;
   resolveCheckpoint: (anchorEventId?: string) => SessionCheckpoint | undefined;
   onRestoreCheckpoint: (checkpoint: SessionCheckpoint) => void;
   restoringCheckpoint: boolean;

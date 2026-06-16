@@ -10,7 +10,14 @@ import { getToolKind } from "@/components/tool-use/utils";
 import { useSessionDetail } from "@/hooks/use-session-detail";
 import { useIncrementalTimeline } from "@/hooks/use-incremental-timeline";
 import { sessionApi } from "@/lib/api/session";
-import type { FileInfo, SessionCheckpoint, Skill, SSEEventData, ToolEvent } from "@/lib/api/types";
+import type {
+  ClarifyAnswer,
+  FileInfo,
+  SessionCheckpoint,
+  Skill,
+  SSEEventData,
+  ToolEvent,
+} from "@/lib/api/types";
 import type { AttachmentFile, TimelineItem } from "@/lib/session-events";
 import { getLatestPlanFromEvents, getTaskObservationSummary } from "@/lib/session-events";
 
@@ -182,10 +189,15 @@ export function useSessionDetailView({
   );
 
   const handleClarifyAnswer = useCallback(
-    async (answer: string) => {
-      await handleSend(answer, []);
+    async (answer: string, clarifyAnswers?: ClarifyAnswer[]) => {
+      await sendMessage(answer, [], {
+        model_id: sessionModelId,
+        skill_id: sessionSkillId,
+        thinking_enabled: sessionThinkingEnabled,
+        clarify_answers: clarifyAnswers,
+      });
     },
-    [handleSend],
+    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled],
   );
 
   const handleThinkingChange = useCallback(

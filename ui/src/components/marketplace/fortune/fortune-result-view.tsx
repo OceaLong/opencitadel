@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { fadeInUp, motion, reducedVariants, staggerContainer } from "@/lib/motion";
+import { usePrefersReducedMotion } from "@/lib/motion";
 
 import type { FortunePredictionData } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -25,6 +27,7 @@ type FortuneResultViewProps = {
 };
 
 export function FortuneResultView({ data, onReset, showReset = true }: FortuneResultViewProps) {
+  const reduced = usePrefersReducedMotion();
   const modeMeta = FORTUNE_MODES.find((m) => m.id === data.result.mode);
   const shareUrl = buildFortuneShareUrl(data.share_id);
 
@@ -47,43 +50,60 @@ export function FortuneResultView({ data, onReset, showReset = true }: FortuneRe
   };
 
   return (
-    <div className="mx-auto max-w-lg space-y-6 py-4">
+    <motion.div
+      initial="hidden"
+      animate="visible"
+      variants={reducedVariants(staggerContainer(0.08), reduced)}
+      className="mx-auto max-w-lg space-y-6 py-4"
+    >
       <Card className="overflow-hidden">
-        <div
+        <motion.div
+          variants={reducedVariants(fadeInUp, reduced)}
           className={cn(
             "bg-gradient-to-br to-transparent px-6 py-8 text-center",
             modeAccent(data.result.mode),
           )}
         >
           <span className="text-5xl">{modeMeta?.icon ?? "🔮"}</span>
-          <p className="text-muted-foreground mt-2 text-xs">
-            {MODE_LABELS[data.result.mode]}
-          </p>
+          <p className="text-muted-foreground mt-2 text-xs">{MODE_LABELS[data.result.mode]}</p>
           <h2 className="text-foreground mt-1 text-2xl font-bold">{data.result.title}</h2>
           <p className="text-primary mt-2 text-sm leading-relaxed">{data.result.summary}</p>
-        </div>
+        </motion.div>
         <CardContent className="space-y-5 pt-6">
-          {data.result.sections.map((section) => (
-            <div key={section.heading} className="space-y-1">
+          {data.result.sections.map((section, index) => (
+            <motion.div
+              key={section.heading}
+              variants={reducedVariants(fadeInUp, reduced)}
+              custom={index}
+              className="space-y-1"
+            >
               <h3 className="text-foreground text-sm font-semibold">{section.heading}</h3>
               <p className="text-muted-foreground text-sm leading-relaxed">{section.content}</p>
-            </div>
+            </motion.div>
           ))}
 
-          <div className="bg-muted/40 flex flex-wrap gap-2 rounded-xl p-4">
+          <motion.div
+            variants={reducedVariants(fadeInUp, reduced)}
+            className="bg-muted/40 flex flex-wrap gap-2 rounded-xl p-4"
+          >
             <Badge variant="secondary">幸运色 {data.result.lucky_items.color}</Badge>
             <Badge variant="secondary">数字 {data.result.lucky_items.number}</Badge>
             <Badge variant="secondary">关键词 {data.result.lucky_items.keyword}</Badge>
             {data.result.lucky_items.element ? (
               <Badge variant="secondary">元素 {data.result.lucky_items.element}</Badge>
             ) : null}
-          </div>
+          </motion.div>
 
-          <p className="text-muted-foreground text-xs">{data.result.disclaimer}</p>
+          <motion.p
+            variants={reducedVariants(fadeInUp, reduced)}
+            className="text-muted-foreground text-xs"
+          >
+            {data.result.disclaimer}
+          </motion.p>
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap gap-2">
+      <motion.div variants={reducedVariants(fadeInUp, reduced)} className="flex flex-wrap gap-2">
         <Button variant="outline" onClick={handleCopy}>
           <Copy className="mr-1 size-4" />
           复制分享链接
@@ -101,7 +121,7 @@ export function FortuneResultView({ data, onReset, showReset = true }: FortuneRe
             再测一次
           </Button>
         ) : null}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

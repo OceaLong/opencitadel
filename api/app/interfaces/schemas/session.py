@@ -28,6 +28,15 @@ class CreateSessionResponse(BaseModel):
     session_id: str  # 会话id
 
 
+class ClarifyAnswer(BaseModel):
+    """结构化澄清回答，用于稳定表达用户对澄清问题的选择。"""
+    question_id: str
+    prompt: Optional[str] = None
+    option_ids: List[str] = Field(default_factory=list)
+    option_labels: List[str] = Field(default_factory=list)
+    custom_text: Optional[str] = None
+
+
 class ListSessionItem(BaseModel):
     """会话列表条目基础信息"""
     session_id: str = ""
@@ -47,6 +56,7 @@ class ChatRequest(BaseModel):
     """聊天请求结构"""
     message: Optional[str] = None  # 人类消息
     attachments: Optional[List[str]] = Field(default_factory=list)  # 附件列表(传递的是文件id列表)
+    clarify_answers: Optional[List[ClarifyAnswer]] = None  # 结构化澄清回答
     event_id: Optional[str] = None  # 最新事件id
     timestamp: Optional[int] = None  # 当前时间戳
     model_id: Optional[str] = None  # 会话级模型切换

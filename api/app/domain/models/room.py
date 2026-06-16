@@ -24,6 +24,7 @@ class RoomEventType(str, Enum):
     TURN = "turn"
     PROMPT_ADD = "prompt_add"
     HEARTBEAT = "heartbeat"
+    REACTION = "reaction"
 
 
 @dataclass

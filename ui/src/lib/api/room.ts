@@ -53,6 +53,12 @@ export const roomApi = {
       text: params.text,
     }),
 
+  sendReaction: (
+    code: string,
+    params: { participant_id: string; emoji: string },
+  ): Promise<Record<string, unknown>> =>
+    post(`/rooms/${code}/reaction`, params),
+
   streamUrl: (code: string): string =>
     `${API_CONFIG.baseURL}/rooms/${code}/stream`,
 };
