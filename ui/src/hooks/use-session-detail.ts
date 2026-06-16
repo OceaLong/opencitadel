@@ -82,6 +82,7 @@ export function useSessionDetail(
     loadEarlierEvents: loadEarlier,
     loadingEarlier,
     hasEarlierHistory,
+    initialEventsLoaded,
     lastEventIdRef,
     resetEvents,
   } = useSessionEventLog(sessionId);
@@ -103,6 +104,7 @@ export function useSessionDetail(
     applySessionPatch,
     setError,
     lastEventIdRef,
+    initialEventsLoaded,
     skipEmptyStream: initialSkipEmptyStream,
     onReconnect: refresh,
   });

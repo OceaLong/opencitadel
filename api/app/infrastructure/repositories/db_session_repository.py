@@ -373,7 +373,7 @@ class DBSessionRepository(SessionRepository):
 
     async def has_events_before(self, session_id: str, seq: int) -> bool:
         stmt = (
-            select(SessionEventModel.id)
+            select(SessionEventModel.seq)
             .where(
                 SessionEventModel.session_id == session_id,
                 SessionEventModel.seq < seq,

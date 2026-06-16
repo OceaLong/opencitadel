@@ -219,6 +219,7 @@ class TaskRunnerFactory:
                 compact_tool_content_max_chars=runtime.memory.compact_tool_content_max_chars,
                 compact_strategy=runtime.memory.compact_strategy,
                 compact_token_threshold=runtime.memory.compact_token_threshold,
+                compact_keep_recent=runtime.memory.compact_keep_recent,
             ),
         )
 

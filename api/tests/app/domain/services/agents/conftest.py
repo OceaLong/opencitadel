@@ -38,6 +38,7 @@ def agent_test_runtime_settings(**overrides) -> AgentRuntimeSettings:
         compact_tool_content_max_chars=overrides.pop("compact_tool_content_max_chars", 4000),
         compact_strategy=overrides.pop("compact_strategy", "rule"),
         compact_token_threshold=overrides.pop("compact_token_threshold", 100000),
+        compact_keep_recent=overrides.pop("compact_keep_recent", 12),
     )
     return AgentRuntimeSettings(
         tool_timeout_seconds=overrides.pop("tool_timeout_seconds", 120),

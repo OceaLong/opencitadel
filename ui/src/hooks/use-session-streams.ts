@@ -32,6 +32,7 @@ type StreamDeps = {
   applySessionPatch: (patch: Partial<SessionDetail>) => void;
   setError: (err: Error | null) => void;
   lastEventIdRef: MutableRefObject<string | null>;
+  initialEventsLoaded?: boolean;
   skipEmptyStream?: boolean;
   onReconnect?: () => Promise<void>;
 };
@@ -46,6 +47,7 @@ export function useSessionStreams({
   applySessionPatch,
   setError,
   lastEventIdRef,
+  initialEventsLoaded = false,
   skipEmptyStream = false,
   onReconnect,
 }: StreamDeps) {
@@ -320,13 +322,25 @@ export function useSessionStreams({
 
   useEffect(() => {
     if (!sessionId || !sessionStatus || sessionMissingRef.current) return;
-    if (shouldMaintainEmptyStream(sessionStatus) && !isSendMessageRef.current && !skipEmptyStream) {
+    if (
+      initialEventsLoaded &&
+      shouldMaintainEmptyStream(sessionStatus) &&
+      !isSendMessageRef.current &&
+      !skipEmptyStream
+    ) {
       startEmptyStream();
     }
     return () => {
       stopEmptyStream();
     };
-  }, [sessionId, sessionStatus, skipEmptyStream, startEmptyStream, stopEmptyStream]);
+  }, [
+    sessionId,
+    sessionStatus,
+    initialEventsLoaded,
+    skipEmptyStream,
+    startEmptyStream,
+    stopEmptyStream,
+  ]);
 
   useEffect(() => {
     return () => {

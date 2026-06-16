@@ -1,7 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Brain, Copy, Loader2, Trash2 } from "lucide-react";
+import {
+  Bot,
+  Brain,
+  Copy,
+  HelpCircle,
+  Loader2,
+  Settings2,
+  Trash2,
+  UserRound,
+  Wrench,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -30,11 +41,137 @@ type Props = {
   compact?: boolean;
 };
 
-function formatMessageContent(msg: Record<string, unknown>): string {
-  if (typeof msg.content === "string") {
-    return msg.content.trim();
+type MemoryRole = "system" | "user" | "assistant" | "tool" | "unknown";
+
+type RoleStyle = {
+  label: string;
+  icon: LucideIcon;
+  cardClass: string;
+  headerClass: string;
+  accentClass: string;
+  badgeClass: string;
+  contentClass: string;
+};
+
+const ROLE_STYLES: Record<MemoryRole, RoleStyle> = {
+  system: {
+    label: "系统",
+    icon: Settings2,
+    cardClass: "border-slate-300/70 dark:border-slate-600/50",
+    headerClass: "bg-slate-100/80 dark:bg-slate-800/40",
+    accentClass: "border-l-slate-400 dark:border-l-slate-500",
+    badgeClass:
+      "border-slate-300/60 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-300",
+    contentClass: "bg-slate-50/50 dark:bg-slate-900/20",
+  },
+  user: {
+    label: "用户",
+    icon: UserRound,
+    cardClass: "border-blue-200/70 dark:border-blue-700/40",
+    headerClass: "bg-blue-50/80 dark:bg-blue-950/30",
+    accentClass: "border-l-blue-400 dark:border-l-blue-500",
+    badgeClass:
+      "border-blue-200/60 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-300",
+    contentClass: "bg-blue-50/30 dark:bg-blue-950/15",
+  },
+  assistant: {
+    label: "助手",
+    icon: Bot,
+    cardClass: "border-violet-200/70 dark:border-violet-700/40",
+    headerClass: "bg-violet-50/80 dark:bg-violet-950/30",
+    accentClass: "border-l-violet-400 dark:border-l-violet-500",
+    badgeClass:
+      "border-violet-200/60 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/50 dark:text-violet-300",
+    contentClass: "bg-violet-50/30 dark:bg-violet-950/15",
+  },
+  tool: {
+    label: "工具",
+    icon: Wrench,
+    cardClass: "border-amber-200/70 dark:border-amber-700/40",
+    headerClass: "bg-amber-50/80 dark:bg-amber-950/30",
+    accentClass: "border-l-amber-400 dark:border-l-amber-500",
+    badgeClass:
+      "border-amber-200/60 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300",
+    contentClass: "bg-amber-50/30 dark:bg-amber-950/15",
+  },
+  unknown: {
+    label: "未知",
+    icon: HelpCircle,
+    cardClass: "border-border/70",
+    headerClass: "bg-muted/50",
+    accentClass: "border-l-muted-foreground/40",
+    badgeClass: "border-border text-muted-foreground bg-muted/40",
+    contentClass: "bg-muted/20",
+  },
+};
+
+function normalizeRole(role: unknown): MemoryRole {
+  const raw = String(role ?? "unknown").toLowerCase();
+  if (raw === "system" || raw === "user" || raw === "assistant" || raw === "tool") {
+    return raw;
   }
+  return "unknown";
+}
+
+function getRoleStyle(role: unknown): RoleStyle {
+  return ROLE_STYLES[normalizeRole(role)];
+}
+
+function formatArrayContent(content: unknown[]): string {
+  const parts = content
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (typeof part !== "object" || part === null) return null;
+
+      const item = part as Record<string, unknown>;
+      if (typeof item.text === "string") return item.text;
+      if (typeof item.content === "string") return item.content;
+      if (item.type === "text" && typeof item.text === "string") return item.text;
+      return null;
+    })
+    .filter((part): part is string => Boolean(part));
+
+  if (parts.length > 0) {
+    return parts.join("\n\n").trim();
+  }
+
+  return JSON.stringify(content, null, 2).trim();
+}
+
+function formatMessageContent(msg: Record<string, unknown>): string {
+  const { content } = msg;
+
+  if (typeof content === "string") {
+    return content.trim();
+  }
+
+  if (Array.isArray(content)) {
+    return formatArrayContent(content);
+  }
+
+  if (content != null && typeof content === "object") {
+    return JSON.stringify(content, null, 2).trim();
+  }
+
+  if (content != null) {
+    return String(content).trim();
+  }
+
   return JSON.stringify(msg, null, 2).trim();
+}
+
+function getMessageMeta(msg: Record<string, unknown>): string | null {
+  const fn = msg._function_name ?? msg.function_name;
+  if (typeof fn === "string" && fn.trim()) {
+    return fn.trim();
+  }
+
+  const toolCallId = msg.tool_call_id;
+  if (typeof toolCallId === "string" && toolCallId.trim()) {
+    return toolCallId.length > 16 ? `${toolCallId.slice(0, 16)}…` : toolCallId;
+  }
+
+  return null;
 }
 
 function MemoryMessageCard({
@@ -50,7 +187,9 @@ function MemoryMessageCard({
 }) {
   const content = formatMessageContent(msg);
   const displayContent = content.slice(0, 2000) + (content.length > 2000 ? "\n…" : "");
-  const role = String(msg.role ?? "unknown");
+  const roleStyle = getRoleStyle(msg.role);
+  const RoleIcon = roleStyle.icon;
+  const meta = getMessageMeta(msg);
 
   const handleCopy = async () => {
     try {
@@ -62,17 +201,46 @@ function MemoryMessageCard({
   };
 
   return (
-    <div className="border-border/70 bg-card overflow-hidden rounded-xl border shadow-[var(--shadow-card)]">
-      <div className="border-border/60 bg-muted/50 flex items-center justify-between gap-2 border-b px-3 py-2">
+    <div
+      className={cn(
+        "group overflow-hidden rounded-2xl border border-l-4 bg-card/95 shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-card-hover)]",
+        roleStyle.cardClass,
+        roleStyle.accentClass,
+      )}
+    >
+      <div
+        className={cn(
+          "flex items-center justify-between gap-2 border-b px-3 py-2.5",
+          roleStyle.headerClass,
+        )}
+      >
         <div className="flex min-w-0 items-center gap-2">
-          <span className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
-            {role}
-          </span>
-          <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px]">
-            #{index + 1}
-          </Badge>
+          <div
+            className={cn(
+              "flex size-6 shrink-0 items-center justify-center rounded-md border",
+              roleStyle.badgeClass,
+            )}
+          >
+            <RoleIcon className="size-3.5" />
+          </div>
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <Badge
+                variant="outline"
+                className={cn("px-1.5 py-0 text-[10px] font-medium", roleStyle.badgeClass)}
+              >
+                {roleStyle.label}
+              </Badge>
+              <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px] opacity-70">
+                #{index + 1}
+              </Badge>
+            </div>
+            {meta && (
+              <span className="text-muted-foreground truncate font-mono text-[10px]">{meta}</span>
+            )}
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5 opacity-80 transition-opacity group-hover:opacity-100">
           <Button size="icon" variant="ghost" className="size-7" onClick={handleCopy} title="复制">
             <Copy className="size-3.5" />
           </Button>
@@ -89,7 +257,12 @@ function MemoryMessageCard({
           )}
         </div>
       </div>
-      <pre className="text-foreground/90 max-h-48 overflow-auto p-3 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap">
+      <pre
+        className={cn(
+          "text-foreground/90 max-h-52 overflow-auto p-3.5 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap",
+          roleStyle.contentClass,
+        )}
+      >
         {displayContent || "(empty)"}
       </pre>
     </div>

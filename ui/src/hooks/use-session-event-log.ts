@@ -46,6 +46,7 @@ export function useSessionEventLog(sessionId: string | null) {
   const flushFrameRef = useRef<number | null>(null);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [hasEarlierHistory, setHasEarlierHistory] = useState(false);
+  const [initialEventsLoaded, setInitialEventsLoaded] = useState(false);
   const earlierCursorRef = useRef<number | null>(null);
   const eventIdSetRef = useRef<Set<string>>(new Set());
   const messageDeltaIndexRef = useRef<Map<string, number>>(new Map());
@@ -161,20 +162,24 @@ export function useSessionEventLog(sessionId: string | null) {
   const loadEventsPage = useCallback(
     async (includeDebug: boolean) => {
       if (!sessionId) return;
-      const eventsPage = await sessionApi.getSessionEvents(sessionId, {
-        latest: true,
-        limit: INITIAL_EVENTS_LIMIT,
-        include_debug: includeDebug,
-      });
-      const pagedEvents = normalizeEvents(eventsPage.events);
-      earlierCursorRef.current = eventsPage.prev_cursor ?? null;
-      setHasEarlierHistory(Boolean(eventsPage.has_earlier));
-      if (pagedEvents.length > 0) {
-        const lastEvId = (pagedEvents[pagedEvents.length - 1]?.data as { event_id?: string })
-          ?.event_id;
-        if (lastEvId) lastEventIdRef.current = lastEvId;
+      try {
+        const eventsPage = await sessionApi.getSessionEvents(sessionId, {
+          latest: true,
+          limit: INITIAL_EVENTS_LIMIT,
+          include_debug: includeDebug,
+        });
+        const pagedEvents = normalizeEvents(eventsPage.events);
+        earlierCursorRef.current = eventsPage.prev_cursor ?? null;
+        setHasEarlierHistory(Boolean(eventsPage.has_earlier));
+        if (pagedEvents.length > 0) {
+          const lastEvId = (pagedEvents[pagedEvents.length - 1]?.data as { event_id?: string })
+            ?.event_id;
+          if (lastEvId) lastEventIdRef.current = lastEvId;
+        }
+        bumpEvents(pagedEvents);
+      } finally {
+        setInitialEventsLoaded(true);
       }
-      bumpEvents(pagedEvents);
     },
     [sessionId, bumpEvents],
   );
@@ -210,6 +215,7 @@ export function useSessionEventLog(sessionId: string | null) {
     toolArgsDeltaIndexRef.current.clear();
     lastEventIdRef.current = null;
     setHasEarlierHistory(false);
+    setInitialEventsLoaded(false);
     bumpEvents([]);
   }, [bumpEvents]);
 
@@ -222,6 +228,7 @@ export function useSessionEventLog(sessionId: string | null) {
     loadEarlierEvents,
     loadingEarlier,
     hasEarlierHistory,
+    initialEventsLoaded,
     lastEventIdRef,
     resetEvents,
   };

@@ -716,18 +716,40 @@ export function patchTimelineForDeltaEvent(
 
 /**
  * 从事件列表中取最新的 plan 步骤（用于底部任务进度面板）
+ * 先取最近一次 plan 快照，再合并其后 step 事件的实时状态。
  */
 export function getLatestPlanFromEvents(events: SSEEventData[]): PlanStep[] {
+  let planIndex = -1;
   let steps: PlanStep[] = [];
   for (let i = events.length - 1; i >= 0; i--) {
     const ev = events[i];
     if (ev.type === "plan") {
       const plan = ev.data as PlanEvent;
       if (plan.steps && Array.isArray(plan.steps)) {
-        steps = plan.steps;
+        steps = plan.steps.map((step) => ({ ...step }));
       }
+      planIndex = i;
       break;
     }
+  }
+  if (planIndex < 0 || steps.length === 0) {
+    return steps;
+  }
+
+  const stepById = new Map(steps.map((step) => [step.id, step]));
+  for (let i = planIndex + 1; i < events.length; i++) {
+    const ev = events[i];
+    if (ev.type !== "step") continue;
+    const stepData = ev.data as StepEvent;
+    if (!stepData.id) continue;
+    const existing = stepById.get(stepData.id);
+    if (!existing) continue;
+    existing.status = stepData.status;
+    if (stepData.description) existing.description = stepData.description;
+    if (stepData.started_at !== undefined) existing.started_at = stepData.started_at;
+    if (stepData.ended_at !== undefined) existing.ended_at = stepData.ended_at;
+    if (stepData.duration_ms !== undefined) existing.duration_ms = stepData.duration_ms;
+    if (stepData.error !== undefined) existing.error = stepData.error;
   }
   return steps;
 }
