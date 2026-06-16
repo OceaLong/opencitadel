@@ -26,6 +26,7 @@ class DBRoomRepository(RoomRepository):
         record = result.scalar_one_or_none()
         if record is None:
             self.db_session.add(RoomModel.from_domain(room))
+            await self.db_session.flush()
             return
         record.name = room.name
         record.host_participant_id = room.host_participant_id

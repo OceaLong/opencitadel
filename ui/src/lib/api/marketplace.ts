@@ -30,7 +30,7 @@ export const marketplaceApi = {
   listApps: (): Promise<MarketplaceAppsData> => get<MarketplaceAppsData>("/marketplace/apps"),
 
   searchVideos: (params: VideoSearchParams): Promise<VideoSearchData> =>
-    post<VideoSearchData>("/marketplace/video/search", params),
+    post<VideoSearchData>("/marketplace/video/search", params, { timeout: 90_000 }),
 
   routeRequest: (params: MarketplaceRouteParams): Promise<MarketplaceRouteData> =>
     post<MarketplaceRouteData>("/marketplace/assistant/route", params),

@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -34,6 +35,8 @@ from app.domain.utils.vision import build_image_content_part, is_image_mime
 from app.infrastructure.external.llm.factory import LLMFactory
 from app.infrastructure.external.json_parser.repair_json_parser import RepairJSONParser
 logger = logging.getLogger(__name__)
+
+VIDEO_SEARCH_LLM_RANK_TIMEOUT_SECONDS = 15.0
 
 ROUTE_PROMPT = build_route_prompt()
 
@@ -89,7 +92,15 @@ class MarketplaceService:
         return MARKETPLACE_APPS
 
     async def search_videos(self, query: str, *, analyze_content: bool = False, model_id: Optional[str] = None) -> dict:
+        started_at = time.perf_counter()
+        bing_ms = 0
+        llm_ms = 0
+        rank_status = "skipped"
+
+        bing_started = time.perf_counter()
         data = await self._video.search(query)
+        bing_ms = int((time.perf_counter() - bing_started) * 1000)
+
         if analyze_content:
             try:
                 vision_llm = await self._resolve_vision_llm(model_id)
@@ -103,12 +114,41 @@ class MarketplaceService:
                 logger.info("视频内容理解跳过: %s", exc)
         try:
             llm = await self._resolve_text_llm(None)
-            return await self._rank_video_results(llm, data)
+            llm_started = time.perf_counter()
+            data = await asyncio.wait_for(
+                self._rank_video_results(llm, data),
+                timeout=VIDEO_SEARCH_LLM_RANK_TIMEOUT_SECONDS,
+            )
+            llm_ms = int((time.perf_counter() - llm_started) * 1000)
+            rank_status = "ranked"
+        except asyncio.TimeoutError:
+            llm_ms = int((time.perf_counter() - llm_started) * 1000) if "llm_started" in locals() else 0
+            rank_status = "timeout"
+            logger.warning(
+                "影视结果智能排序超时 query=%s llm_ms=%s budget_s=%s",
+                query,
+                llm_ms,
+                VIDEO_SEARCH_LLM_RANK_TIMEOUT_SECONDS,
+            )
+            for result in data.get("results", []):
+                result.setdefault("recommendation_reason", "正版来源优先推荐")
         except Exception as exc:
+            rank_status = "error"
             logger.info("影视结果智能排序跳过: %s", exc)
             for result in data.get("results", []):
                 result.setdefault("recommendation_reason", "正版来源优先推荐")
-            return data
+
+        total_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.info(
+            "影视搜索完成 query=%s bing_ms=%s llm_ms=%s total_ms=%s rank_status=%s result_count=%s",
+            query,
+            bing_ms,
+            llm_ms,
+            total_ms,
+            rank_status,
+            len(data.get("results", [])),
+        )
+        return data
 
     async def route_request(self, query: str, *, model_id: Optional[str] = None) -> dict:
         query = (query or "").strip()

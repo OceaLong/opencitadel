@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckCircle2, Circle, HelpCircle } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Circle, HelpCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 
 import type { ClarifyQuestion } from "@/lib/api/types";
@@ -19,6 +20,16 @@ type ClarifyQuestionsProps = {
   className?: string;
 };
 
+function isQuestionAnswered(
+  question: ClarifyQuestion,
+  selections: Record<string, string[]>,
+  customAnswers: Record<string, string>,
+) {
+  const selected = selections[question.id] ?? [];
+  const custom = (customAnswers[question.id] ?? "").trim();
+  return selected.length > 0 || custom.length > 0;
+}
+
 export function ClarifyQuestions({
   title,
   questions,
@@ -26,17 +37,22 @@ export function ClarifyQuestions({
   onSubmit,
   className,
 }: ClarifyQuestionsProps) {
+  const [step, setStep] = useState(0);
   const [selections, setSelections] = useState<Record<string, string[]>>({});
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
+  const currentQuestion = questions[step];
+  const progress = questions.length > 0 ? ((step + 1) / questions.length) * 100 : 0;
+
+  const canAdvance = useMemo(() => {
+    if (!interactive || !currentQuestion) return false;
+    return isQuestionAnswered(currentQuestion, selections, customAnswers);
+  }, [currentQuestion, customAnswers, interactive, selections]);
+
   const canSubmit = useMemo(() => {
     if (!interactive || questions.length === 0) return false;
-    return questions.every((question) => {
-      const selected = selections[question.id] ?? [];
-      const custom = (customAnswers[question.id] ?? "").trim();
-      return selected.length > 0 || custom.length > 0;
-    });
+    return questions.every((question) => isQuestionAnswered(question, selections, customAnswers));
   }, [customAnswers, interactive, questions, selections]);
 
   const toggleOption = (question: ClarifyQuestion, optionId: string) => {
@@ -78,23 +94,44 @@ export function ClarifyQuestions({
     }
   };
 
+  const handleNext = () => {
+    if (!canAdvance) return;
+    if (step < questions.length - 1) {
+      setStep((prev) => prev + 1);
+    } else {
+      void handleSubmit();
+    }
+  };
+
+  if (questions.length === 0) {
+    return null;
+  }
+
   return (
     <Card className={cn("gap-4 py-4", className)}>
-      <CardHeader className="gap-1 px-4">
+      <CardHeader className="gap-2 px-4">
         <CardTitle className="flex items-center gap-2 text-sm">
           <HelpCircle className="text-primary size-4" />
           <span>{title || "需要确认几个关键点"}</span>
         </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 px-4">
-        {questions.map((question, index) => (
-          <div key={question.id} className="space-y-2">
-            <div className="text-foreground text-sm font-medium">
-              {index + 1}. {question.prompt}
+        {interactive && questions.length > 1 && (
+          <div className="space-y-2">
+            <div className="text-muted-foreground flex items-center justify-between text-xs">
+              <span>
+                问题 {step + 1} / {questions.length}
+              </span>
             </div>
+            <Progress value={progress} className="h-1.5" />
+          </div>
+        )}
+      </CardHeader>
+      <CardContent className="min-h-[220px] space-y-4 px-4">
+        {currentQuestion && (
+          <div key={currentQuestion.id} className="animate-in fade-in-0 space-y-2 duration-200">
+            <div className="text-foreground text-sm font-medium">{currentQuestion.prompt}</div>
             <div className="flex flex-col gap-2">
-              {question.options.map((option) => {
-                const selected = (selections[question.id] ?? []).includes(option.id);
+              {currentQuestion.options.map((option) => {
+                const selected = (selections[currentQuestion.id] ?? []).includes(option.id);
                 return (
                   <button
                     key={option.id}
@@ -104,13 +141,13 @@ export function ClarifyQuestions({
                       "border-border/70 hover:bg-muted/60 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60",
                       selected && "border-primary/60 bg-primary/5",
                     )}
-                    onClick={() => toggleOption(question, option.id)}
+                    onClick={() => toggleOption(currentQuestion, option.id)}
                   >
-                    {question.allow_multiple ? (
+                    {currentQuestion.allow_multiple ? (
                       <Checkbox
                         checked={selected}
                         disabled={!interactive || submitting}
-                        onCheckedChange={() => toggleOption(question, option.id)}
+                        onCheckedChange={() => toggleOption(currentQuestion, option.id)}
                         onClick={(event) => event.stopPropagation()}
                       />
                     ) : selected ? (
@@ -123,31 +160,53 @@ export function ClarifyQuestions({
                 );
               })}
             </div>
-            {(question.allow_custom ?? true) && (
+            {(currentQuestion.allow_custom ?? true) && (
               <Textarea
-                value={customAnswers[question.id] ?? ""}
+                value={customAnswers[currentQuestion.id] ?? ""}
                 disabled={!interactive || submitting}
                 placeholder="其它 / 自定义回答..."
                 className="min-h-16 text-sm"
                 onChange={(event) =>
                   setCustomAnswers((prev) => ({
                     ...prev,
-                    [question.id]: event.target.value,
+                    [currentQuestion.id]: event.target.value,
                   }))
                 }
               />
             )}
           </div>
-        ))}
+        )}
+
         {interactive ? (
-          <Button
-            type="button"
-            size="sm"
-            disabled={!canSubmit || submitting}
-            onClick={handleSubmit}
-          >
-            提交回答
-          </Button>
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={step === 0 || submitting}
+              onClick={() => setStep((prev) => Math.max(0, prev - 1))}
+            >
+              <ChevronLeft className="size-4" />
+              上一题
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={(!canAdvance && step < questions.length - 1) || (!canSubmit && step === questions.length - 1) || submitting}
+              onClick={handleNext}
+            >
+              {step < questions.length - 1 ? (
+                <>
+                  下一题
+                  <ChevronRight className="size-4" />
+                </>
+              ) : submitting ? (
+                "提交中..."
+              ) : (
+                "提交回答"
+              )}
+            </Button>
+          </div>
         ) : (
           <div className="text-muted-foreground text-xs">已提交回答，继续处理中。</div>
         )}

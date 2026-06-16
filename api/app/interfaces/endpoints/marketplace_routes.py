@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
+import time
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from app.application.errors.exceptions import BadRequestError
 from app.application.services.marketplace_service import MarketplaceService
@@ -52,10 +53,22 @@ async def list_apps(
 @router.post("/video/search", response_model=Response[VideoSearchResponse])
 async def search_videos(
         request: VideoSearchRequest,
+        http_request: Request,
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[VideoSearchResponse]:
+    request_id = http_request.headers.get("x-request-id") or "-"
+    started_at = time.perf_counter()
+    logger.info("影视搜索开始 request_id=%s query=%s", request_id, request.query)
     try:
         data = await marketplace_service.search_videos(request.query)
+        total_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.info(
+            "影视搜索响应 request_id=%s query=%s total_ms=%s result_count=%s",
+            request_id,
+            request.query,
+            total_ms,
+            len(data.get("results", [])),
+        )
         return Response.success(data=VideoSearchResponse(**data))
     except ValueError as exc:
         raise BadRequestError(str(exc)) from exc

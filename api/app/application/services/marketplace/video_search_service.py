@@ -88,7 +88,7 @@ class VideoSearchService:
 
         async with httpx.AsyncClient(
             headers=self.headers,
-            timeout=30,
+            timeout=10,
             follow_redirects=True,
         ) as client:
             response = await client.get("https://www.bing.com/search", params=params)

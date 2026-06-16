@@ -110,7 +110,13 @@ export function VideoSearchApp({
       const result = await marketplaceApi.searchVideos({ query: query.trim() });
       setData(result);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "搜索失败");
+      const message =
+        e instanceof Error && e.message === "请求超时"
+          ? "搜索耗时较长，请稍后重试或直接使用平台直达链接"
+          : e instanceof Error
+            ? e.message
+            : "搜索失败";
+      toast.error(message);
       setData(null);
     } finally {
       setLoading(false);
