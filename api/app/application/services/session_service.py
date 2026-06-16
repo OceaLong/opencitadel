@@ -1,12 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import asyncio
 import logging
+import time
 from typing import List, Callable, Type, Optional, Tuple
 
 from app.application.dto.session_io import FileReadResult, ShellReadResult
 from app.application.errors.exceptions import NotFoundError, ServerRequestsError
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.session_list_notifier import NoopSessionListNotifier, SessionListNotifierPort
+from app.domain.external.task_state_port import TaskStatePort
 from app.domain.models.file import File
 from app.domain.models.codebase import SessionMode
 from app.domain.models.session import Session
@@ -14,6 +17,9 @@ from app.domain.models.event import BaseEvent
 from app.domain.repositories.uow import IUnitOfWork
 
 logger = logging.getLogger(__name__)
+
+_DELETE_TASK_DRAIN_TIMEOUT_SECONDS = 30.0
+_DELETE_TASK_POLL_INTERVAL_SECONDS = 0.5
 
 
 class SessionService:
@@ -24,11 +30,24 @@ class SessionService:
             uow_factory: Callable[[], IUnitOfWork],
             sandbox_cls: Type[Sandbox],
             session_list_notifier: Optional[SessionListNotifierPort] = None,
+            task_state_port: Optional[TaskStatePort] = None,
     ) -> None:
         """构造函数，完成会话服务初始化"""
         self._uow_factory = uow_factory
         self._sandbox_cls = sandbox_cls
         self._session_list_notifier = session_list_notifier or NoopSessionListNotifier()
+        self._task_state = task_state_port
+
+    async def _wait_for_task_drain(self, task_id: str) -> None:
+        if not self._task_state:
+            return
+        deadline = time.monotonic() + _DELETE_TASK_DRAIN_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            snapshot = await self._task_state.get_runtime_snapshot(task_id)
+            if snapshot.get("is_done"):
+                return
+            await asyncio.sleep(_DELETE_TASK_POLL_INTERVAL_SECONDS)
+        logger.warning("等待任务结束超时 task_id=%s", task_id)
 
     async def create_session(
             self,
@@ -93,6 +112,10 @@ class SessionService:
         if not session:
             logger.error(f"会话[{session_id}]不存在, 删除失败")
             raise NotFoundError(f"会话[{session_id}]不存在, 删除失败")
+
+        if session.task_id and self._task_state:
+            await self._task_state.request_cancel(session.task_id)
+            await self._wait_for_task_drain(session.task_id)
 
         # 2.销毁关联 sandbox 后删除会话
         if session.sandbox_id:

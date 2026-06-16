@@ -114,6 +114,7 @@ class AgentTaskRunner(TaskRunner):
         )
         self._agent_config = agent_config
         self._run_started_at: Optional[float] = None
+        self._terminal_session_status: Optional[SessionStatus] = None
         self._step_started_at: Dict[str, datetime] = {}
         self._tool_started_at: Dict[str, datetime] = {}
         self._last_step_checkpoint_at: float = 0.0
@@ -175,6 +176,8 @@ class AgentTaskRunner(TaskRunner):
 
     async def _emit_session_status(self, task: Task, status: SessionStatus) -> None:
         """推送服务端权威会话状态事件"""
+        if status != SessionStatus.RUNNING:
+            self._terminal_session_status = status
         event = await self._session_state.transition(self._session_id, status, emit_event=True)
         if event:
             await self._put_and_add_event(task, event)
@@ -192,6 +195,7 @@ class AgentTaskRunner(TaskRunner):
         await self._put_and_add_event(task, ErrorEvent(error="Agent 运行超时，任务已终止"))
         await self._emit_session_status(task, SessionStatus.FAILED)
         await self._flush_event_persist_buffer()
+        raise RuntimeError("Agent 运行超时")
 
     @classmethod
     async def _pop_event(cls, task: Task) -> Optional[Event]:
@@ -461,6 +465,7 @@ class AgentTaskRunner(TaskRunner):
             await self._put_and_add_event(task, ErrorEvent(error=f"AgentTaskRunner出错: {str(e)}"))
             await self._emit_session_status(task, SessionStatus.FAILED)
             await self._flush_event_persist_buffer()
+            raise
         finally:
             await self._flush_event_persist_buffer()
             await self._cleanup_tools()
@@ -480,8 +485,11 @@ class AgentTaskRunner(TaskRunner):
     async def on_done(self, task: Task) -> None:
         """任务结束时执行的回调函数"""
         logger.info(f"AgentTaskRunner任务执行结束")
-        if self._on_complete_callback:
+        if (
+            self._on_complete_callback
+            and self._terminal_session_status == SessionStatus.COMPLETED
+        ):
             try:
-                asyncio.create_task(self._on_complete_callback(self._session_id))
+                await self._on_complete_callback(self._session_id)
             except Exception as e:
-                logger.warning(f"后台完成回调创建失败: {e}")
+                logger.warning(f"任务完成回调执行失败: {e}", exc_info=True)

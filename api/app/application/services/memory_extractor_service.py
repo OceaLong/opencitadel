@@ -5,6 +5,8 @@ import json
 import logging
 from typing import Callable, List
 
+from sqlalchemy.exc import IntegrityError
+
 from app.domain.external.llm import LLM
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
 from app.domain.repositories.uow import IUnitOfWork
@@ -80,24 +82,49 @@ class MemoryExtractorService:
             return []
 
         entries = []
-        async with self._uow_factory() as uow:
-            for item in parsed[:10]:
-                if not isinstance(item, dict):
-                    continue
-                entry = MemoryEntry(
-                    scope=MemoryScope.SESSION,
-                    session_id=session_id,
-                    title=item.get("title", "")[:200],
-                    content=item.get("content", "")[:2000],
-                    tags=item.get("tags", []) if isinstance(item.get("tags"), list) else [],
-                    source=MemorySource.AUTO_EXTRACTED,
-                )
-                if entry.title and entry.content:
-                    await uow.memory_entry.save(entry)
-                    entries.append(entry)
-        from app.application.services.vector_memory_service import VectorMemoryService
-        vector_service = VectorMemoryService()
-        for entry in entries:
-            await vector_service.store_embedding(entry.id, f"{entry.title}\n{entry.content}")
+        try:
+            async with self._uow_factory() as uow:
+                session = await uow.session.get_by_id(session_id)
+                if not session:
+                    logger.info("会话[%s]已不存在，跳过记忆抽取写入", session_id)
+                    return []
+
+                from app.application.services.vector_memory_service import VectorMemoryService
+                vector_service = VectorMemoryService()
+                db_session = getattr(uow, "db_session", None)
+                for item in parsed[:10]:
+                    if not isinstance(item, dict):
+                        continue
+                    entry = MemoryEntry(
+                        scope=MemoryScope.SESSION,
+                        session_id=session_id,
+                        title=item.get("title", "")[:200],
+                        content=item.get("content", "")[:2000],
+                        tags=item.get("tags", []) if isinstance(item.get("tags"), list) else [],
+                        source=MemorySource.AUTO_EXTRACTED,
+                    )
+                    if entry.title and entry.content:
+                        await uow.memory_entry.save(entry)
+                        try:
+                            await vector_service.store_embedding(
+                                entry.id,
+                                f"{entry.title}\n{entry.content}",
+                                db_session=db_session,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "记忆向量写入失败 entry=%s session=%s: %s",
+                                entry.id,
+                                session_id,
+                                exc,
+                            )
+                        entries.append(entry)
+        except IntegrityError as exc:
+            logger.warning(
+                "会话[%s]记忆抽取写入失败(外键约束): %s",
+                session_id,
+                exc,
+            )
+            return []
         logger.info(f"会话[{session_id}]自动抽取了{len(entries)}条记忆")
         return entries

@@ -248,6 +248,7 @@ class BaseContainer(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         sandbox_cls=sandbox_cls,
         session_list_notifier=session_list_notifier,
+        task_state_port=task_state_port,
     )
     questionnaire_service = providers.Singleton(
         QuestionnaireService,
