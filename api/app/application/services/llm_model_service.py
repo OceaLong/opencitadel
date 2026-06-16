@@ -88,6 +88,9 @@ class LLMModelService:
         model = await self._auto_probe_capabilities(model)
         encrypted = self._cipher.encrypt(model.api_key) if model.api_key else ""
         async with self._uow_factory() as uow:
+            count = await uow.llm_model.count()
+            if count == 0:
+                model.is_default = True
             if model.is_default:
                 await uow.llm_model.clear_default()
             await uow.llm_model.save(model, encrypted)

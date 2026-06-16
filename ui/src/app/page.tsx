@@ -13,6 +13,7 @@ import { SessionSkillPicker } from "@/components/session-skill-picker";
 import { SuggestedQuestions } from "@/components/suggested-questions";
 import { ThinkingToggle } from "@/components/thinking-toggle";
 
+import { invalidateModelsCache, loadModels, resolveDefaultModelId } from "@/lib/api/models-cache";
 import { sessionApi } from "@/lib/api/session";
 import type { FileInfo } from "@/lib/api/types";
 
@@ -23,9 +24,14 @@ export default function Page() {
   const [modelId, setModelId] = useState<string | undefined>();
   const [skillId, setSkillId] = useState<string | undefined>();
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const [hasModels, setHasModels] = useState<boolean | null>(null);
 
   const handleDefaultModelLoaded = useCallback((id: string | undefined) => {
     setModelId((current) => current ?? id);
+  }, []);
+
+  const handleModelsResolved = useCallback((resolved: boolean) => {
+    setHasModels(resolved);
   }, []);
 
   const handleQuestionClick = (question: string) => {
@@ -35,24 +41,40 @@ export default function Page() {
   const handleSend = async (message: string, files: FileInfo[]) => {
     if (sending) return;
 
+    let resolvedModelId = modelId;
+
+    if (!resolvedModelId) {
+      invalidateModelsCache();
+      try {
+        const models = await loadModels();
+        resolvedModelId = resolveDefaultModelId(models);
+        if (resolvedModelId) {
+          setModelId(resolvedModelId);
+        }
+      } catch {
+        resolvedModelId = undefined;
+      }
+    }
+
+    if (hasModels === false || !resolvedModelId) {
+      toast.error("请先在设置中添加模型");
+      return;
+    }
+
     setSending(true);
 
     try {
-      // 1. 创建新会话
       const session = await sessionApi.createSession({
-        model_id: modelId,
+        model_id: resolvedModelId,
         skill_id: skillId,
         thinking_enabled: thinkingEnabled,
       });
       const sessionId = session.session_id;
 
-      // 2. 将消息数据编码到 URL，在详情页发送
       const attachments = files.map((file) => file.id);
       const payload = JSON.stringify({ message, attachments });
-      // 使用 Base64 编码避免 URL 特殊字符问题
       const encoded = btoa(encodeURIComponent(payload));
 
-      // 3. 跳转到详情页，携带编码后的初始消息
       router.push(`/sessions/${sessionId}?init=${encoded}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "创建会话失败";
@@ -64,12 +86,9 @@ export default function Page() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* 顶部header */}
       <ChatHeader />
-      {/* 中间对话框 - 垂直居中，视觉上移一个导航栏高度 */}
       <div className="-mt-12 flex flex-1 items-center justify-center px-4 py-6 sm:-mt-16 sm:py-8">
         <div className="mx-auto w-full max-w-full sm:max-w-[768px] sm:min-w-[390px]">
-          {/* 对话提示内容 */}
           <div className="mb-4 text-center text-[24px] font-bold tracking-tight sm:mb-6 sm:text-left sm:text-[32px]">
             <div className="text-foreground">你好，同学</div>
             <div className="text-muted-foreground">我能为你做什么?</div>
@@ -90,6 +109,7 @@ export default function Page() {
                   value={modelId}
                   onChange={setModelId}
                   onDefaultModelLoaded={handleDefaultModelLoaded}
+                  onModelsResolved={handleModelsResolved}
                   disabled={sending}
                 />
                 <SessionSkillPicker
@@ -114,7 +134,6 @@ export default function Page() {
               </div>
             </div>
           </Link>
-          {/* 推荐对话内容 */}
           <SuggestedQuestions onQuestionClick={handleQuestionClick} />
         </div>
       </div>

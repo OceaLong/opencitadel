@@ -41,16 +41,16 @@ export function AppCard({ app, selected, compact, wide, onClick }: Props) {
           selected
             ? "border-primary/50 bg-primary/5 ring-primary/20 shadow-[var(--shadow-card)] ring-1"
             : "border-border/70 bg-card/90",
-          compact && "min-w-[240px] shrink-0",
-          wide && "min-h-[170px]",
+          compact && "min-w-[200px] shrink-0",
+          wide && "min-h-[140px]",
         )}
       >
-        <div className={cn("absolute inset-x-0 top-0 h-24 bg-gradient-to-br", accent)} />
-        <CardHeader className={cn("relative", compact ? "p-3" : "p-4")}>
-          <div className="flex items-start justify-between gap-3">
+        <div className={cn("absolute inset-x-0 top-0 h-16 bg-gradient-to-br", accent)} />
+        <CardHeader className={cn("relative", compact ? "p-2.5" : "p-3")}>
+          <div className="flex items-start justify-between gap-2">
             <div
               className={cn(
-                "bg-background/80 flex size-12 shrink-0 items-center justify-center rounded-2xl text-2xl shadow-[var(--shadow-card)] ring-1 ring-black/5 backdrop-blur",
+                "bg-background/80 flex size-10 shrink-0 items-center justify-center rounded-xl text-xl shadow-[var(--shadow-card)] ring-1 ring-black/5 backdrop-blur",
                 selected && "ring-primary/30",
               )}
             >
@@ -59,7 +59,7 @@ export function AppCard({ app, selected, compact, wide, onClick }: Props) {
             <ArrowUpRight className="text-muted-foreground size-4 opacity-0 transition-opacity group-hover:opacity-100" />
           </div>
 
-          <div className="mt-4 min-w-0 space-y-2">
+          <div className="mt-2.5 min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-1.5">
               <Badge variant="secondary" className="text-[10px] font-normal">
                 {app.category}
@@ -77,7 +77,7 @@ export function AppCard({ app, selected, compact, wide, onClick }: Props) {
                 </Badge>
               )}
             </div>
-            <CardTitle className="text-base leading-tight font-semibold">{app.name}</CardTitle>
+            <CardTitle className="text-sm leading-tight font-semibold">{app.name}</CardTitle>
             <CardDescription className="line-clamp-2 text-xs leading-relaxed">
               {app.description}
             </CardDescription>

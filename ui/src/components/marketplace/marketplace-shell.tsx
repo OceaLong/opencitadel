@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Layers3, Loader2, Search, Sparkles, WandSparkles } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, Home, Layers3, Loader2, Search, Sparkles, WandSparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { AppCard } from "@/components/marketplace/app-card";
@@ -174,37 +175,44 @@ export function MarketplaceShell() {
           </div>
         </main>
       ) : (
-        <div className="h-full overflow-auto rounded-3xl">
-          <section className="border-border/70 bg-card/80 relative overflow-hidden rounded-3xl border p-5 shadow-[var(--shadow-card)] sm:p-8">
+        <div className="h-full overflow-auto rounded-2xl">
+          <div className="mb-2">
+            <Button variant="ghost" size="icon" className="size-8" asChild>
+              <Link href="/" aria-label="返回主页">
+                <Home className="size-4" />
+              </Link>
+            </Button>
+          </div>
+          <section className="border-border/70 bg-card/80 relative overflow-hidden rounded-2xl border p-4 shadow-[var(--shadow-card)] sm:p-5">
             <div className="from-primary/20 via-sky-500/10 absolute inset-0 bg-gradient-to-br to-transparent" />
             <div className="relative max-w-3xl">
-              <Badge className="bg-primary/10 text-primary hover:bg-primary/10 mb-4">
-                <Sparkles className="size-3.5" />
+              <Badge className="bg-primary/10 text-primary hover:bg-primary/10 mb-2 text-[10px]">
+                <Sparkles className="size-3" />
                 AI Native Marketplace
               </Badge>
-              <h1 className="text-foreground text-3xl font-semibold tracking-tight sm:text-4xl">
+              <h1 className="text-foreground text-xl font-semibold tracking-tight sm:text-2xl">
                 说出目标，直接启动最合适的智能应用
               </h1>
-              <p className="text-muted-foreground mt-3 max-w-2xl text-sm leading-relaxed sm:text-base">
+              <p className="text-muted-foreground mt-1.5 max-w-2xl text-xs leading-relaxed sm:text-sm">
                 搜索、视觉分析、文档问答、翻译与提示词优化集中在一个轻量应用市场中。
               </p>
-              <div className="mt-6 flex flex-col gap-2 rounded-2xl border bg-background/80 p-2 shadow-[var(--shadow-card)] backdrop-blur sm:flex-row">
+              <div className="mt-4 flex flex-col gap-1.5 rounded-xl border bg-background/80 p-1.5 shadow-[var(--shadow-card)] backdrop-blur sm:flex-row">
                 <div className="relative flex-1">
-                  <WandSparkles className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+                  <WandSparkles className="text-muted-foreground absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2" />
                   <Input
                     value={command}
                     onChange={(e) => setCommand(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && routeCommand()}
                     placeholder="想做什么？例如：搜索三体 / 分析餐食 / 翻译这段英文"
-                    className="border-0 bg-transparent pl-9 shadow-none focus-visible:ring-0"
+                    className="h-8 border-0 bg-transparent pl-8 text-sm shadow-none focus-visible:ring-0"
                   />
                 </div>
-                <Button onClick={routeCommand} disabled={routing} className="shrink-0">
-                  {routing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                <Button size="sm" onClick={routeCommand} disabled={routing} className="shrink-0">
+                  {routing ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
                   智能启动
                 </Button>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {displayApps
                   .flatMap((app) => app.examples)
                   .slice(0, 4)
@@ -213,7 +221,7 @@ export function MarketplaceShell() {
                       key={example}
                       type="button"
                       onClick={() => setCommand(example)}
-                      className="text-muted-foreground hover:text-foreground rounded-full border bg-background/70 px-3 py-1 text-xs transition-colors"
+                      className="text-muted-foreground hover:text-foreground rounded-full border bg-background/70 px-2.5 py-0.5 text-[11px] transition-colors"
                     >
                       {example}
                     </button>
@@ -222,19 +230,19 @@ export function MarketplaceShell() {
             </div>
           </section>
 
-          <div className="mt-6 space-y-8 pb-3">
+          <div className="mt-4 space-y-5 pb-2">
             {loading ? (
               <AppListSkeleton />
             ) : (
               <>
-                <section className="space-y-3">
+                <section className="space-y-2">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h2 className="text-foreground text-lg font-semibold">精选应用</h2>
-                      <p className="text-muted-foreground text-sm">高频 AI 小应用，点击即用</p>
+                      <h2 className="text-foreground text-base font-semibold">精选应用</h2>
+                      <p className="text-muted-foreground text-xs">高频 AI 小应用，点击即用</p>
                     </div>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                     {featuredApps.map((app) => (
                       <AppCard key={app.id} app={app} wide onClick={() => openApp(app.id)} />
                     ))}
@@ -242,9 +250,9 @@ export function MarketplaceShell() {
                 </section>
 
                 {recentApps.length > 0 && (
-                  <section className="space-y-3">
-                    <h2 className="text-foreground text-lg font-semibold">猜你想用</h2>
-                    <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+                  <section className="space-y-2">
+                    <h2 className="text-foreground text-base font-semibold">猜你想用</h2>
+                    <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
                       {recentApps.map((app) => (
                         <AppCard
                           key={app.id}

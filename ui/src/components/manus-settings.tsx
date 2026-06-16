@@ -14,7 +14,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { SettingsPageLink } from "@/components/settings/settings-page-link";
+import { MemorySettings } from "@/components/settings/memory-settings";
+import { ModelsSettings } from "@/components/settings/models-settings";
+import { SkillsSettings } from "@/components/settings/skills-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -587,27 +589,9 @@ export function ManusSettings() {
                 )}
               </>
             )}
-            {activeSetting === "models-setting" && (
-              <SettingsPageLink
-                href="/settings/models"
-                title="模型管理"
-                description="在设置中心完整页面中新增、编辑模型并设置默认模型。"
-              />
-            )}
-            {activeSetting === "skills-setting" && (
-              <SettingsPageLink
-                href="/settings/skills"
-                title="Skill 模板"
-                description="在设置中心完整页面中维护系统提示词、工具白名单与示例问题。"
-              />
-            )}
-            {activeSetting === "memory-setting" && (
-              <SettingsPageLink
-                href="/settings/memory"
-                title="长期记忆"
-                description="在设置中心完整页面中管理全局与会话级长期记忆条目。"
-              />
-            )}
+            {activeSetting === "models-setting" && <ModelsSettings embedded />}
+            {activeSetting === "skills-setting" && <SkillsSettings embedded />}
+            {activeSetting === "memory-setting" && <MemorySettings embedded />}
             {activeSetting === "a2a-setting" && (
               <A2ASetting
                 servers={a2aServers}

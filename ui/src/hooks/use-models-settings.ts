@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { modelsApi } from "@/lib/api/models";
+import { invalidateModelsCache } from "@/lib/api/models-cache";
 import type {
   CreateLLMModelParams,
   LLMModel,
@@ -119,6 +120,7 @@ export function useModelsSettings() {
         toast.success("模型已创建");
       }
       setDialogOpen(false);
+      invalidateModelsCache();
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "保存失败");
@@ -131,6 +133,7 @@ export function useModelsSettings() {
     try {
       await modelsApi.delete(id);
       toast.success("已删除");
+      invalidateModelsCache();
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "删除失败");
@@ -141,6 +144,7 @@ export function useModelsSettings() {
     try {
       await modelsApi.setDefault(id);
       toast.success("已设为默认");
+      invalidateModelsCache();
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "操作失败");

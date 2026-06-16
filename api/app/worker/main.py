@@ -255,8 +255,8 @@ async def main() -> None:
     await _startup_reconcile()
     sandbox_cleanup_task = asyncio.create_task(_sandbox_cleanup_loop())
     worker = AgentWorker(
-        runner_factory=container.task_runner_factory(),
-        file_storage=container.file_storage(),
+        runner_factory=await container.task_runner_factory(),
+        file_storage=await container.file_storage(),
         sandbox_cls=container.sandbox_cls(),
         task_cls=container.task_cls(),
     )

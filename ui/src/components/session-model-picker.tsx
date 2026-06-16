@@ -5,30 +5,21 @@ import { Cpu } from "lucide-react";
 
 import { InlineOptionPicker } from "@/components/inline-option-picker";
 
-import { SUPPORTED_PROVIDERS } from "@/hooks/use-models-settings";
-import { modelsApi } from "@/lib/api/models";
+import {
+  filterSupportedModels,
+  loadModels,
+  onModelsCacheInvalidated,
+  resolveDefaultModelId,
+} from "@/lib/api/models-cache";
 import type { LLMModel } from "@/lib/api/types";
-
-let modelsCache: LLMModel[] | null = null;
-let modelsPromise: Promise<LLMModel[]> | null = null;
-
-function loadModels(): Promise<LLMModel[]> {
-  if (modelsCache) return Promise.resolve(modelsCache);
-  if (!modelsPromise) {
-    modelsPromise = modelsApi.list().then((data) => {
-      modelsCache = data.models;
-      modelsPromise = null;
-      return data.models;
-    });
-  }
-  return modelsPromise;
-}
 
 type Props = {
   value?: string | null;
   onChange: (modelId: string | undefined) => void;
   /** 模型列表加载完成后回调默认模型 id，便于父组件创建会话时带上默认模型 */
   onDefaultModelLoaded?: (modelId: string | undefined) => void;
+  /** 加载完成后回报是否存在受支持模型 */
+  onModelsResolved?: (hasModels: boolean) => void;
   disabled?: boolean;
   className?: string;
 };
@@ -37,6 +28,7 @@ export function SessionModelPicker({
   value,
   onChange,
   onDefaultModelLoaded,
+  onModelsResolved,
   disabled,
   className,
 }: Props) {
@@ -44,28 +36,40 @@ export function SessionModelPicker({
 
   useEffect(() => {
     let cancelled = false;
-    loadModels()
-      .then((items) => {
-        if (!cancelled) setModels(items);
-      })
-      .catch(() => {
-        if (!cancelled) setModels([]);
-      });
+
+    const fetchModels = () => {
+      loadModels()
+        .then((items) => {
+          if (!cancelled) setModels(items);
+        })
+        .catch(() => {
+          if (!cancelled) setModels([]);
+        });
+    };
+
+    fetchModels();
+    const unsubscribe = onModelsCacheInvalidated(fetchModels);
+
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
 
-  const supportedModels = useMemo(() => {
-    const supportedSet = new Set(SUPPORTED_PROVIDERS.map((p) => p.value));
-    return models.filter((m) => supportedSet.has(m.provider));
-  }, [models]);
+  const supportedModels = useMemo(() => filterSupportedModels(models), [models]);
 
-  const defaultModel = supportedModels.find((m) => m.is_default);
+  const defaultModelId = useMemo(
+    () => resolveDefaultModelId(models),
+    [models],
+  );
 
   useEffect(() => {
-    onDefaultModelLoaded?.(defaultModel?.id);
-  }, [defaultModel?.id, onDefaultModelLoaded]);
+    onDefaultModelLoaded?.(defaultModelId);
+  }, [defaultModelId, onDefaultModelLoaded]);
+
+  useEffect(() => {
+    onModelsResolved?.(supportedModels.length > 0);
+  }, [supportedModels.length, onModelsResolved]);
 
   const options = useMemo(
     () =>
@@ -79,7 +83,7 @@ export function SessionModelPicker({
     [supportedModels],
   );
 
-  const pickerValue = value ?? defaultModel?.id;
+  const pickerValue = value ?? defaultModelId;
 
   return (
     <InlineOptionPicker
