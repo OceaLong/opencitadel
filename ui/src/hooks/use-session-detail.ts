@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { useSessionEventLog } from "@/hooks/use-session-event-log";
 import { useSessionMeta } from "@/hooks/use-session-meta";
-import { useSessionStreams } from "@/hooks/use-session-streams";
+import { useSessionStreams, type SessionStreamStatus } from "@/hooks/use-session-streams";
 import type {
   ClarifyAnswer,
   SessionCheckpoint,
@@ -39,6 +39,8 @@ export type UseSessionDetailResult = {
   ) => Promise<void>;
   updateSessionConfig: (params: UpdateSessionConfigParams) => Promise<void>;
   streaming: boolean;
+  streamStatus: SessionStreamStatus;
+  streamError: Error | null;
   enableDebugStream: () => void;
 };
 
@@ -84,6 +86,10 @@ export function useSessionDetail(
     resetEvents,
   } = useSessionEventLog(sessionId);
 
+  const refresh = useCallback(async () => {
+    await Promise.all([refreshMeta(), loadEventsPage(false)]);
+  }, [refreshMeta, loadEventsPage]);
+
   const streams = useSessionStreams({
     sessionId,
     sessionStatus: session?.status,
@@ -98,6 +104,7 @@ export function useSessionDetail(
     setError,
     lastEventIdRef,
     skipEmptyStream: initialSkipEmptyStream,
+    onReconnect: refresh,
   });
 
   useEffect(() => {
@@ -106,10 +113,6 @@ export function useSessionDetail(
     resetStreamsRef.current = streams.resetStreams;
     markSessionMissingRef.current = streams.markSessionMissing;
   });
-
-  const refresh = useCallback(async () => {
-    await Promise.all([refreshMeta(), loadEventsPage(false)]);
-  }, [refreshMeta, loadEventsPage]);
 
   const loadEarlierEvents = useCallback(async () => {
     await loadEarlier(false);
@@ -122,6 +125,7 @@ export function useSessionDetail(
       streams.resetStreams();
       return;
     }
+    resetEvents();
     void refresh();
     return () => {
       streams.resetStreams();
@@ -143,6 +147,8 @@ export function useSessionDetail(
     sendMessage: streams.sendMessage,
     updateSessionConfig,
     streaming: streams.streaming,
+    streamStatus: streams.streamStatus,
+    streamError: streams.streamError,
     enableDebugStream: streams.enableDebugStream,
   };
 }

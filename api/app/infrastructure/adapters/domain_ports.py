@@ -48,6 +48,9 @@ class RedisTaskStateAdapter(TaskStatePort):
     async def get_runtime_snapshot(self, task_id: str) -> Dict[str, Any]:
         return await self._task_state.get_runtime_snapshot(task_id)
 
+    async def record_heartbeat(self, task_id: str, worker_id: str) -> None:
+        await self._task_state.record_heartbeat(task_id, worker_id)
+
     async def set_output_seq_cursor(self, task_id: str, seq: int, stream_id: str) -> None:
         await self._task_state.set_output_seq_cursor(task_id, seq, stream_id)
 

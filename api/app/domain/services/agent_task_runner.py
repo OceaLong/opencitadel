@@ -13,7 +13,7 @@ from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
-from app.domain.external.task import TaskRunner, Task
+from app.domain.external.task import RecoverableTaskInputUnavailable, TaskRunner, Task
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
 from app.domain.models.event import ErrorEvent, Event, MessageEvent, BaseEvent, ToolEvent, \
     TitleEvent, WaitEvent, DoneEvent, AssistantNoticeEvent, StepEvent, StepEventStatus, ToolEventStatus
@@ -364,6 +364,7 @@ class AgentTaskRunner(TaskRunner):
             await self._emit_session_status(task, SessionStatus.RUNNING)
             self._run_started_at = time.monotonic()
 
+            processed_input = False
             while True:
                 if self._is_run_timed_out():
                     await self._handle_run_timeout(task)
@@ -374,7 +375,16 @@ class AgentTaskRunner(TaskRunner):
 
                 event = await self._pop_event(task)
                 if event is None:
+                    if not processed_input:
+                        logger.warning(
+                            "任务[%s]在运行态未读取到输入，等待重启恢复对账",
+                            task.id,
+                        )
+                        raise RecoverableTaskInputUnavailable(
+                            f"任务[{task.id}]缺少可执行输入，等待恢复对账",
+                        )
                     break
+                processed_input = True
                 message = ""
 
                 if isinstance(event, MessageEvent):
@@ -462,6 +472,9 @@ class AgentTaskRunner(TaskRunner):
             await self._emit_session_status(task, SessionStatus.CANCELLED)
             await self._flush_event_persist_buffer()
             self._observability.record_agent_cancel(self._session_id)
+            raise
+        except RecoverableTaskInputUnavailable:
+            await self._flush_event_persist_buffer()
             raise
         except Exception as e:
             logger.exception(f"AgentTaskRunner运行出错: {str(e)}")

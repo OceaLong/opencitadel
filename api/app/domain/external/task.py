@@ -6,6 +6,10 @@ from typing import Protocol, Optional
 from app.domain.external.message_queue import MessageQueue
 
 
+class RecoverableTaskInputUnavailable(RuntimeError):
+    """Raised when a reclaimed task has no durable input to process yet."""
+
+
 class TaskRunner(ABC):
     """任务运行器，负责任务的执行、关心的是如何执行任务、销毁任务释放资源"""
 

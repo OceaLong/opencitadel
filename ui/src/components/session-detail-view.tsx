@@ -42,6 +42,8 @@ export function SessionDetailView({
     loadingEarlier,
     hasEarlierHistory,
     error,
+    streamStatus,
+    streamError,
     refresh,
     refreshFiles,
     loadEarlierEvents,
@@ -170,6 +172,28 @@ export function SessionDetailView({
                     任务执行失败，可修改配置后重新发送消息继续。
                   </div>
                 )}
+                {session.status === "running" &&
+                  (streamStatus === "reconnecting" ||
+                    streamStatus === "stale" ||
+                    streamStatus === "error") && (
+                    <div className="border-border bg-muted/60 text-muted-foreground flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm">
+                      <span>
+                        {streamStatus === "stale"
+                          ? "后台任务正在恢复，事件流暂时中断。"
+                          : streamStatus === "error"
+                            ? streamError?.message || "会话流连接异常，正在尝试恢复。"
+                            : "会话流正在重新连接..."}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => refresh()}
+                      >
+                        重新同步
+                      </Button>
+                    </div>
+                  )}
                 {hasEarlierHistory && (
                   <div className="flex justify-center">
                     <Button

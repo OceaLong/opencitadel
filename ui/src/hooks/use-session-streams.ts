@@ -33,7 +33,10 @@ type StreamDeps = {
   setError: (err: Error | null) => void;
   lastEventIdRef: MutableRefObject<string | null>;
   skipEmptyStream?: boolean;
+  onReconnect?: () => Promise<void>;
 };
+
+export type SessionStreamStatus = "idle" | "connecting" | "connected" | "reconnecting" | "stale" | "error";
 
 export function useSessionStreams({
   sessionId,
@@ -44,8 +47,11 @@ export function useSessionStreams({
   setError,
   lastEventIdRef,
   skipEmptyStream = false,
+  onReconnect,
 }: StreamDeps) {
   const [streaming, setStreaming] = useState(false);
+  const [streamStatus, setStreamStatus] = useState<SessionStreamStatus>("idle");
+  const [streamError, setStreamError] = useState<Error | null>(null);
   const streamIncludeDebugRef = useRef(false);
   const emptyStreamCleanupRef = useRef<(() => void) | null>(null);
   const messageStreamCleanupRef = useRef<(() => void) | null>(null);
@@ -73,10 +79,15 @@ export function useSessionStreams({
       emptyStreamCleanupRef.current();
       emptyStreamCleanupRef.current = null;
     }
+    if (!messageStreamCleanupRef.current) {
+      setStreamStatus("idle");
+    }
   }, [clearEmptyStreamRetryTimer]);
 
   const handleStreamEvent = useCallback(
     (ev: SSEEventData) => {
+      setStreamStatus("connected");
+      setStreamError(null);
       appendEvent(ev);
 
       if (
@@ -117,6 +128,7 @@ export function useSessionStreams({
         }
         applySessionPatch({ status: "failed" });
         setStreaming(false);
+        setStreamStatus("error");
       }
     },
     [appendEvent, applySessionPatch],
@@ -126,6 +138,7 @@ export function useSessionStreams({
     if (!sessionId || sessionMissingRef.current) return;
     if (!shouldMaintainEmptyStream(sessionStatusRef.current)) return;
     stopEmptyStream();
+    setStreamStatus(emptyStreamRetryCountRef.current > 0 ? "reconnecting" : "connecting");
     emptyStreamCleanupRef.current = sessionApi.chat(
       sessionId,
       { event_id: lastEventIdRef.current || undefined },
@@ -149,6 +162,7 @@ export function useSessionStreams({
           const retryCount = emptyStreamRetryCountRef.current;
           const delay = Math.min(30_000, 1000 * 2 ** Math.min(retryCount, 5));
           emptyStreamRetryCountRef.current = retryCount + 1;
+          setStreamStatus(retryCount >= 2 ? "stale" : "reconnecting");
           emptyStreamRetryTimerRef.current = setTimeout(() => {
             emptyStreamRetryTimerRef.current = null;
             if (sessionMissingRef.current) return;
@@ -157,12 +171,17 @@ export function useSessionStreams({
               !emptyStreamCleanupRef.current &&
               !isSendMessageRef.current
             ) {
-              startEmptyStreamRef.current?.();
+              void (onReconnect?.() ?? Promise.resolve()).finally(() => {
+                startEmptyStreamRef.current?.();
+              });
             }
           }, delay);
           return;
         }
-        setError(err instanceof Error ? err : new Error("会话流连接异常"));
+        const nextError = err instanceof Error ? err : new Error("会话流连接异常");
+        setStreamError(nextError);
+        setStreamStatus("error");
+        setError(nextError);
       },
       { include_debug: streamIncludeDebugRef.current },
     );
@@ -174,6 +193,7 @@ export function useSessionStreams({
     onSessionMissing,
     setError,
     lastEventIdRef,
+    onReconnect,
   ]);
 
   useEffect(() => {
@@ -207,6 +227,8 @@ export function useSessionStreams({
       }
       isSendMessageRef.current = true;
       setStreaming(true);
+      setStreamStatus("connecting");
+      setStreamError(null);
       sessionStatusRef.current = "running";
       applySessionPatch({ status: "running" });
 
@@ -263,17 +285,21 @@ export function useSessionStreams({
             }
             return;
           }
-          setError(err instanceof Error ? err : new Error("流式响应异常"));
+          const nextError = err instanceof Error ? err : new Error("流式响应异常");
+          setError(nextError);
           setStreaming(false);
           isSendMessageRef.current = false;
-          applySessionPatch({ status: "completed" });
+          setStreamError(nextError);
+          setStreamStatus("error");
           if (messageStreamCleanupRef.current) {
             messageStreamCleanupRef.current();
             messageStreamCleanupRef.current = null;
           }
           if (!sessionMissingRef.current) {
             if (shouldMaintainEmptyStream(sessionStatusRef.current)) {
-              startEmptyStream();
+              void (onReconnect?.() ?? Promise.resolve()).finally(() => {
+                startEmptyStream();
+              });
             }
           }
         },
@@ -288,6 +314,7 @@ export function useSessionStreams({
       onSessionMissing,
       setError,
       applySessionPatch,
+      onReconnect,
     ],
   );
 
@@ -315,16 +342,21 @@ export function useSessionStreams({
     sessionMissingRef.current = false;
     isSendMessageRef.current = false;
     streamIncludeDebugRef.current = false;
+    emptyStreamRetryCountRef.current = 0;
     stopEmptyStream();
     if (messageStreamCleanupRef.current) {
       messageStreamCleanupRef.current();
       messageStreamCleanupRef.current = null;
     }
     setStreaming(false);
+    setStreamStatus("idle");
+    setStreamError(null);
   }, [stopEmptyStream]);
 
   return {
     streaming,
+    streamStatus,
+    streamError,
     sendMessage,
     enableDebugStream,
     resetStreams,

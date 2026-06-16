@@ -17,6 +17,10 @@ def _lease_key(task_id: str) -> str:
     return f"{_LEASE_PREFIX}{task_id}"
 
 
+def get_worker_id() -> str:
+    return _worker_id
+
+
 async def try_acquire_task_lease(task_id: str, ttl_seconds: int) -> bool:
     """Acquire exclusive execution lease for task_id. Returns False if held elsewhere."""
     if not task_id:
@@ -57,6 +61,21 @@ async def renew_task_lease(task_id: str, ttl_seconds: int) -> bool:
     except Exception as exc:
         logger.debug("task lease renew failed task_id=%s: %s", task_id, exc)
         return False
+
+
+async def get_task_lease_owner(task_id: str) -> str | None:
+    if not task_id:
+        return None
+    try:
+        from app.infrastructure.storage.redis import get_redis
+
+        owner = await get_redis().client.get(_lease_key(task_id))
+        if isinstance(owner, bytes):
+            return owner.decode()
+        return owner
+    except Exception as exc:
+        logger.debug("task lease owner lookup failed task_id=%s: %s", task_id, exc)
+        return None
 
 
 async def release_task_lease(task_id: str) -> None:

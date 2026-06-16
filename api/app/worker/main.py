@@ -11,7 +11,9 @@ from app.application.services.bootstrap_service import bootstrap_data
 from app.application.services.task_runner_factory import TaskRunnerFactory
 from app.container import get_worker_container, init_worker_container, shutdown_worker_container
 from app.domain.external.sandbox import Sandbox
+from app.domain.models.event import MessageEvent
 from app.domain.models.session import SessionStatus
+from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.services.codebase.ingestion_task_runner import CodebaseIngestionTaskRunner
 from app.infrastructure.external.file_storage.cos_file_storage import CosFileStorage
 from app.infrastructure.external.runtime_settings import get_admission_runtime_settings
@@ -19,7 +21,10 @@ from app.infrastructure.external.sandbox.admission import get_sandbox_quota
 from app.infrastructure.external.sandbox.sandbox_maintenance import run_sandbox_maintenance
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
 from app.infrastructure.external.task.task_lease import (
+    get_task_lease_owner,
+    get_worker_id,
     release_task_lease,
+    renew_task_lease,
     try_acquire_task_lease,
 )
 from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
@@ -33,6 +38,7 @@ set_role(ProcessRole.WORKER)
 logger = logging.getLogger(__name__)
 
 SHUTDOWN_GRACE_SECONDS = 30
+TASK_RECONCILE_INTERVAL_SECONDS = 30
 
 
 async def _sandbox_cleanup_loop() -> None:
@@ -64,6 +70,7 @@ class AgentWorker:
     def __init__(
             self,
             runner_factory: TaskRunnerFactory,
+            checkpoint_service: CheckpointService,
             file_storage: CosFileStorage,
             sandbox_cls: type[Sandbox],
             task_cls: type[RedisStreamTask],
@@ -78,6 +85,7 @@ class AgentWorker:
         self._semaphore = asyncio.Semaphore(self._max_concurrent)
         self._active_tasks: set[asyncio.Task] = set()
         self._runner_factory = runner_factory
+        self._checkpoint_service = checkpoint_service
         self._file_storage = file_storage
         self._sandbox_cls = sandbox_cls
         self._task_cls = task_cls
@@ -86,6 +94,8 @@ class AgentWorker:
     async def start(self) -> None:
         await self._task_state.ensure_consumer_group()
         admission = get_admission_runtime_settings()
+        await self._reconcile_orphaned_tasks("startup")
+        reconcile_task = asyncio.create_task(self._task_reconcile_loop())
         logger.info(
             "Agent worker 启动: consumer=%s max_concurrent=%s node=%s",
             self._consumer_name,
@@ -120,6 +130,12 @@ class AgentWorker:
                 logger.exception("Worker 循环异常: %s", exc)
                 await asyncio.sleep(1)
 
+        reconcile_task.cancel()
+        try:
+            await reconcile_task
+        except asyncio.CancelledError:
+            pass
+
         if self._active_tasks:
             try:
                 await asyncio.wait_for(
@@ -135,6 +151,86 @@ class AgentWorker:
     def _on_job_task_done(self, task: asyncio.Task) -> None:
         self._active_tasks.discard(task)
         self._semaphore.release()
+
+    async def _task_reconcile_loop(self) -> None:
+        while self._running:
+            await asyncio.sleep(TASK_RECONCILE_INTERVAL_SECONDS)
+            await self._reconcile_orphaned_tasks("periodic")
+
+    async def _reconcile_orphaned_tasks(self, reason: str) -> None:
+        admission = get_admission_runtime_settings()
+        stale_after = max(120.0, admission.task_execution_lease_seconds * 2.0)
+        try:
+            async with get_uow() as uow:
+                sessions = await uow.session.list_recoverable_running(limit=100)
+        except Exception as exc:
+            logger.warning("任务恢复对账查询失败 reason=%s: %s", reason, exc)
+            return
+
+        for session in sessions:
+            task_id = session.task_id
+            if not task_id:
+                continue
+            try:
+                snapshot = await self._task_state.get_runtime_snapshot(task_id)
+                if snapshot.get("is_done") or not self._task_state.heartbeat_is_stale(
+                    snapshot.get("meta"),
+                    stale_after,
+                ):
+                    continue
+                lease_owner = await get_task_lease_owner(task_id)
+                if lease_owner:
+                    continue
+
+                checkpoint = await self._checkpoint_service.resume_latest_checkpoint(session.id)
+                task = self._task_cls.from_task_id(
+                    task_id,
+                    session.id,
+                    self._task_state,
+                )
+                if not checkpoint or not await self._requeue_latest_user_message(task, session.id):
+                    logger.warning(
+                        "孤儿任务无可恢复输入，标记失败: session_id=%s task_id=%s",
+                        session.id,
+                        task_id,
+                    )
+                    await self._task_state.set_status(task_id, TaskStatus.FAILED)
+                    async with get_uow() as uow:
+                        await uow.session.update_status(session.id, SessionStatus.FAILED)
+                    continue
+
+                await self._task_state.clear_cancel(task_id)
+                await self._task_state.set_status(task_id, TaskStatus.PENDING)
+                await self._task_state.dispatch(task_id, session.id)
+                logger.warning(
+                    "孤儿任务已从 checkpoint 恢复并重新派发: session_id=%s task_id=%s checkpoint_id=%s reason=%s",
+                    session.id,
+                    task_id,
+                    checkpoint.id,
+                    reason,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "任务恢复对账失败: session_id=%s task_id=%s error=%s",
+                    session.id,
+                    task_id,
+                    exc,
+                )
+
+    async def _requeue_latest_user_message(self, task: RedisStreamTask, session_id: str) -> bool:
+        try:
+            if await task.input_stream.size() > 0:
+                return True
+            async with get_uow() as uow:
+                records = await uow.session.list_events(session_id, limit=500, latest=True)
+            for _, event in reversed(records):
+                if isinstance(event, MessageEvent) and event.role == "user" and event.message:
+                    await task.input_stream.put(event.model_dump_json())
+                    return True
+            return False
+        except Exception as exc:
+            logger.warning("恢复任务输入失败 session_id=%s task_id=%s: %s", session_id, task.id, exc)
+            return False
 
     async def _handle_claimed_job(
             self,
@@ -155,8 +251,13 @@ class AgentWorker:
             )
             await self._task_state.ack_dispatch(message_id)
             return
+        await self._task_state.record_heartbeat(task_id, get_worker_id())
         try:
-            await self._execute_job(task_id, session_id)
+            await self._execute_job_with_lease_renewal(
+                task_id,
+                session_id,
+                admission.task_execution_lease_seconds,
+            )
             await self._task_state.ack_dispatch(message_id)
         except Exception as exc:
             logger.exception(
@@ -173,6 +274,52 @@ class AgentWorker:
             )
         finally:
             await release_task_lease(task_id)
+
+    async def _execute_job_with_lease_renewal(
+            self,
+            task_id: str,
+            session_id: str,
+            lease_ttl_seconds: int,
+    ) -> None:
+        execution = asyncio.create_task(self._execute_job(task_id, session_id))
+        lease_lost = asyncio.Event()
+
+        async def lease_renewer() -> None:
+            interval = max(5.0, lease_ttl_seconds / 3)
+            while not execution.done():
+                await asyncio.sleep(interval)
+                if execution.done():
+                    return
+                if not await renew_task_lease(task_id, lease_ttl_seconds):
+                    logger.warning(
+                        "任务执行租约续期失败，停止当前执行: task_id=%s session_id=%s",
+                        task_id,
+                        session_id,
+                    )
+                    lease_lost.set()
+                    return
+                await self._task_state.record_heartbeat(task_id, get_worker_id())
+
+        renewal = asyncio.create_task(lease_renewer())
+        try:
+            done, _ = await asyncio.wait(
+                {execution, renewal},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if renewal in done and lease_lost.is_set() and not execution.done():
+                execution.cancel()
+                try:
+                    await execution
+                except asyncio.CancelledError:
+                    pass
+                raise RuntimeError("任务执行租约续期失败")
+            await execution
+        finally:
+            renewal.cancel()
+            try:
+                await renewal
+            except asyncio.CancelledError:
+                pass
 
     async def _execute_job(self, task_id: str, session_id: str) -> None:
         if await self._task_state.is_cancelled(task_id):
@@ -268,6 +415,7 @@ async def main() -> None:
     sandbox_cleanup_task = asyncio.create_task(_sandbox_cleanup_loop())
     worker = AgentWorker(
         runner_factory=await container.task_runner_factory(),
+        checkpoint_service=await container.checkpoint_service(),
         file_storage=await container.file_storage(),
         sandbox_cls=container.sandbox_cls(),
         task_cls=container.task_cls(),

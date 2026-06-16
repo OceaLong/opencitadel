@@ -6,7 +6,7 @@ import uuid
 from typing import Optional, Dict
 
 from app.domain.external.message_queue import MessageQueue
-from app.domain.external.task import Task, TaskRunner
+from app.domain.external.task import RecoverableTaskInputUnavailable, Task, TaskRunner
 from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
 from app.infrastructure.external.task.task_state import TaskStateService, TaskStatus, get_task_state
 
@@ -103,6 +103,9 @@ class RedisStreamTask(Task):
     async def _execute_task(self) -> None:
         try:
             await self._task_runner.invoke(self)
+        except RecoverableTaskInputUnavailable as e:
+            logger.warning("任务[%s]等待恢复对账: %s", self._id, e)
+            await self._task_state.set_status(self._id, TaskStatus.PENDING)
         except asyncio.CancelledError:
             logger.info(f"任务[{self._id}]执行被取消")
             await self._task_state.set_status(self._id, TaskStatus.CANCELLED)
@@ -115,7 +118,7 @@ class RedisStreamTask(Task):
             if self._task_runner:
                 await self._task_runner.on_done(self)
             status = await self._task_state.get_status(self._id)
-            if status not in {TaskStatus.CANCELLED, TaskStatus.FAILED}:
+            if status not in {TaskStatus.PENDING, TaskStatus.CANCELLED, TaskStatus.FAILED}:
                 await self._task_state.set_status(self._id, TaskStatus.DONE)
             self._local_executions.pop(self._id, None)
 

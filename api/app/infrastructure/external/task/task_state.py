@@ -3,6 +3,7 @@
 """Redis-backed distributed task metadata, dispatch queue, and cancel control."""
 import json
 import logging
+import time
 import uuid
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple
@@ -92,6 +93,10 @@ class TaskStateService:
             "resource_id": resource_id,
             "status": TaskStatus.PENDING.value,
             "retry_count": 0,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "last_heartbeat_at": None,
+            "worker_id": "",
         }
         await self._redis.client.set(
             self.meta_key(task_id),
@@ -110,6 +115,7 @@ class TaskStateService:
         if not meta:
             return
         meta["status"] = status.value
+        meta["updated_at"] = time.time()
         await self._redis.client.set(
             self.meta_key(task_id),
             json.dumps(meta),
@@ -154,7 +160,35 @@ class TaskStateService:
             "status": status,
             "is_done": is_done,
             "meta": meta,
+            "last_heartbeat_at": meta.get("last_heartbeat_at") if meta else None,
+            "worker_id": meta.get("worker_id") if meta else "",
         }
+
+    async def record_heartbeat(self, task_id: str, worker_id: str) -> None:
+        meta = await self.get_task_meta(task_id)
+        if not meta:
+            return
+        now = time.time()
+        meta["last_heartbeat_at"] = now
+        meta["worker_id"] = worker_id
+        meta["updated_at"] = now
+        await self._redis.client.set(
+            self.meta_key(task_id),
+            json.dumps(meta),
+            ex=TASK_META_TTL_SECONDS,
+        )
+
+    @staticmethod
+    def heartbeat_is_stale(meta: Optional[Dict[str, Any]], stale_after_seconds: float) -> bool:
+        if not meta:
+            return True
+        heartbeat = meta.get("last_heartbeat_at") or meta.get("updated_at")
+        if heartbeat is None:
+            return True
+        try:
+            return time.time() - float(heartbeat) >= stale_after_seconds
+        except (TypeError, ValueError):
+            return True
 
     async def request_cancel(self, task_id: str) -> None:
         await self._redis.client.set(self.cancel_key(task_id), "1", ex=3600)

@@ -20,6 +20,14 @@ class SessionRepository(Protocol):
         """获取所有会话列表信息"""
         ...
 
+    async def list_recoverable_running(
+            self,
+            limit: int = 100,
+            updated_before: Optional[datetime] = None,
+    ) -> List[Session]:
+        """List RUNNING sessions with active task ids that may need recovery."""
+        ...
+
     async def get_by_id(self, session_id: str) -> Optional[Session]:
         """根据传递的会话id查询会话"""
         ...

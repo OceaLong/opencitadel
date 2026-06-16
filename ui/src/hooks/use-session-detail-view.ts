@@ -69,6 +69,8 @@ export function useSessionDetailView({
     sendMessage,
     updateSessionConfig,
     streaming,
+    streamStatus,
+    streamError,
     enableDebugStream,
   } = detail;
 
@@ -333,6 +335,8 @@ export function useSessionDetailView({
     loadingEarlier,
     hasEarlierHistory,
     error,
+    streamStatus,
+    streamError,
     refresh,
     loadEarlierEvents,
     refreshFiles,

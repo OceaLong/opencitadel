@@ -152,6 +152,26 @@ class DBSessionRepository(SessionRepository):
         records = result.scalars().all()
         return [record.to_domain() for record in records]
 
+    async def list_recoverable_running(
+            self,
+            limit: int = 100,
+            updated_before: Optional[datetime] = None,
+    ) -> List[Session]:
+        stmt = (
+            select(SessionModel)
+            .where(
+                SessionModel.status == SessionStatus.RUNNING.value,
+                SessionModel.task_id.is_not(None),
+                SessionModel.pending_phase.is_(None),
+            )
+            .order_by(SessionModel.updated_at.asc())
+            .limit(max(1, min(limit, 500)))
+        )
+        if updated_before is not None:
+            stmt = stmt.where(SessionModel.updated_at < updated_before)
+        result = await self.db_session.execute(stmt)
+        return [record.to_domain() for record in result.scalars().all()]
+
     async def exists(self, session_id: str) -> bool:
         stmt = select(SessionModel.id).where(SessionModel.id == session_id).limit(1)
         result = await self.db_session.execute(stmt)

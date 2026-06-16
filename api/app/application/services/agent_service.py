@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import json
+import time
 from datetime import datetime
 from typing import AsyncGenerator, Optional, List, Type, Callable
 
@@ -15,6 +16,7 @@ from app.domain.models.checkpoint import Checkpoint
 from app.domain.models.codebase import SessionMode
 from app.domain.models.event import (
     BaseEvent,
+    AssistantNoticeEvent,
     ErrorEvent,
     MessageEvent,
     Event,
@@ -32,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 _SESSION_NOT_FOUND_MSG = "任务会话不存在, 请核实后重试"
 _TERMINAL_SESSION_STATUSES = {"waiting", "completed", "cancelled", "failed"}
+_STREAM_STALE_IDLE_SECONDS = 120.0
 
 
 class AgentService:
@@ -135,6 +138,7 @@ class AgentService:
             TaskStatus.CANCELLED,
             TaskStatus.FAILED,
         }
+        idle_started_at = time.monotonic()
 
         def is_terminal_status_event(event: BaseEvent) -> bool:
             return (
@@ -160,6 +164,16 @@ class AgentService:
                 return SessionStatusEvent(status=current_session.status.value)
             return None
 
+        def heartbeat_is_stale(snapshot: dict) -> bool:
+            meta = snapshot.get("meta") or {}
+            heartbeat = snapshot.get("last_heartbeat_at") or meta.get("updated_at")
+            if heartbeat is None:
+                return True
+            try:
+                return time.time() - float(heartbeat) >= _STREAM_STALE_IDLE_SECONDS
+            except (TypeError, ValueError):
+                return True
+
         if last_seq > 0 and redis_cursor == "0":
             async for persisted_event in replay_persisted_events():
                 yield persisted_event
@@ -172,6 +186,7 @@ class AgentService:
                 block_ms=500,
             )
             if event_str is not None:
+                idle_started_at = time.monotonic()
                 redis_cursor = stream_message_id
                 event_payload = json.loads(event_str)
                 event = TypeAdapter(Event).validate_python(upgrade_event_payload(event_payload))
@@ -204,6 +219,19 @@ class AgentService:
                 terminal_event = await current_terminal_status_event()
                 if terminal_event:
                     yield terminal_event
+                return
+            if (
+                status in {TaskStatus.PENDING, TaskStatus.RUNNING}
+                and time.monotonic() - idle_started_at >= _STREAM_STALE_IDLE_SECONDS
+                and heartbeat_is_stale(snapshot)
+            ):
+                async for persisted_event in replay_persisted_events():
+                    yield persisted_event
+                    if is_terminal_status_event(persisted_event):
+                        return
+                yield AssistantNoticeEvent(
+                    message="任务连接暂时中断，正在等待后台恢复并重新连接。",
+                )
                 return
 
     async def chat(

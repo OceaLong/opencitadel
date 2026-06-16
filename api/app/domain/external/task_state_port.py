@@ -15,6 +15,9 @@ class TaskStatePort(Protocol):
         """Single round-trip snapshot: cancelled flag, status, is_done."""
         ...
 
+    async def record_heartbeat(self, task_id: str, worker_id: str) -> None:
+        ...
+
     async def set_output_seq_cursor(self, task_id: str, seq: int, stream_id: str) -> None:
         ...
 

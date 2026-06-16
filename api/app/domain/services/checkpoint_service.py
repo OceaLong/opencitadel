@@ -170,3 +170,52 @@ class CheckpointService:
             await uow.session.update_latest_message(session_id, latest_message, latest_timestamp)
         else:
             await uow.session.update_latest_message(session_id, "", datetime.now())
+
+    async def resume_latest_checkpoint(self, session_id: str) -> Optional[Checkpoint]:
+        """Restore the latest checkpoint boundary without deleting events.
+
+        Automated crash recovery uses this as an at-least-once replay boundary:
+        durable UI history remains intact, while agent memory/files/sandbox are
+        moved back to the latest safe execution point before re-dispatch.
+        """
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(session_id)
+            if not session:
+                return None
+
+            checkpoints = await uow.checkpoint.list_by_session(session_id)
+            if not checkpoints:
+                return None
+            checkpoint = await uow.checkpoint.get_by_id(checkpoints[-1].id)
+            if not checkpoint:
+                return None
+
+            await uow.session.restore_session_snapshot(
+                session_id=session_id,
+                memories=checkpoint.memories_snapshot,
+                files=checkpoint.files_snapshot,
+                status=SessionStatus.RUNNING.value,
+                pending_phase=checkpoint.session_state.pending_phase,
+            )
+            restored_session = await uow.session.get_by_id(session_id)
+            sandbox_id = restored_session.sandbox_id if restored_session else session.sandbox_id
+
+        if checkpoint.sandbox_snapshot_key and sandbox_id:
+            sandbox = await self._sandbox_cls.get(sandbox_id)
+            if sandbox is None:
+                sandbox = await self._sandbox_cls.create()
+                async with self._uow_factory() as uow:
+                    restored = await uow.session.get_by_id(session_id)
+                    if restored:
+                        restored.sandbox_id = sandbox.id
+                        await uow.session.save(restored)
+
+            if sandbox is not None:
+                await sandbox.ensure_sandbox()
+                snapshot_bytes = await self._object_storage.get_bytes(checkpoint.sandbox_snapshot_key)
+                await sandbox.restore_workspace_snapshot(
+                    checkpoint.id,
+                    io.BytesIO(snapshot_bytes),
+                )
+
+        return checkpoint

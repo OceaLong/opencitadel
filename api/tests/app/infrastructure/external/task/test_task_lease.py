@@ -46,3 +46,17 @@ async def _test_release_task_lease_deletes_key_when_owner_matches():
 
 def test_release_task_lease_deletes_key_when_owner_matches():
     asyncio.run(_test_release_task_lease_deletes_key_when_owner_matches())
+
+
+async def _test_renew_task_lease_extends_when_owner_matches():
+    redis = AsyncMock()
+    redis.get = AsyncMock(return_value=task_lease._worker_id)
+    redis.expire = AsyncMock(return_value=True)
+    with patch("app.infrastructure.storage.redis.get_redis") as get_redis:
+        get_redis.return_value.client = redis
+        assert await task_lease.renew_task_lease("task-1", 60) is True
+    redis.expire.assert_awaited_once()
+
+
+def test_renew_task_lease_extends_when_owner_matches():
+    asyncio.run(_test_renew_task_lease_extends_when_owner_matches())
