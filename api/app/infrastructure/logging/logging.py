@@ -6,7 +6,7 @@ import sys
 from core.config import get_settings
 
 
-def setup_logging():
+def setup_logging() -> None:
     """配置MyManus项目的日志系统，涵盖日志等级、输出格式、输出渠道等"""
     # 1.获取项目配置
     settings = get_settings()
@@ -42,4 +42,7 @@ def setup_logging():
         named_logger.propagate = True
         named_logger.disabled = False
 
+    from app.infrastructure.observability.logging_context import configure_structured_logging
+
+    configure_structured_logging()
     root_logger.info("日志系统初始化完成")

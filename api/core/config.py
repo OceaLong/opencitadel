@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     # 项目基础
     env: str = "development"
     log_level: str = "INFO"
+    log_format: str = "text"  # text | json
     app_config_filepath: str = "config.yaml"
     api_key_secret: str = "my-manus-api-key-secret-change-in-production"
 

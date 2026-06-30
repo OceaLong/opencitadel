@@ -85,12 +85,14 @@ class TaskStateService:
             session_id: str,
             task_type: str = "agent",
             resource_id: str = "",
+            request_id: str = "",
     ) -> None:
         payload = {
             "task_id": task_id,
             "session_id": session_id,
             "task_type": task_type,
             "resource_id": resource_id,
+            "request_id": request_id or "",
             "status": TaskStatus.PENDING.value,
             "retry_count": 0,
             "created_at": time.time(),
@@ -335,6 +337,13 @@ class TaskStateService:
 
         if retry_count >= max(1, self._runtime_settings.task_dispatch_max_retries):
             meta["status"] = TaskStatus.FAILED.value
+            logger.error(
+                "任务派发进入 DLQ: task_id=%s session_id=%s retry_count=%s error=%s",
+                task_id,
+                session_id,
+                retry_count,
+                error,
+            )
             await self._redis.client.xadd(
                 TASK_DISPATCH_DLQ_STREAM,
                 {
@@ -354,6 +363,13 @@ class TaskStateService:
             await self.ack_dispatch(message_id)
             return
 
+        logger.warning(
+            "任务派发失败，准备重试: task_id=%s session_id=%s retry_count=%s error=%s",
+            task_id,
+            session_id,
+            retry_count,
+            error,
+        )
         meta["status"] = TaskStatus.PENDING.value
         await self._redis.client.set(
             self.meta_key(task_id),
@@ -362,6 +378,13 @@ class TaskStateService:
         )
         await self.ack_dispatch(message_id)
         await self.dispatch(task_id, session_id)
+
+    async def count_dlq_messages(self) -> int:
+        try:
+            return int(await self._redis.client.xlen(TASK_DISPATCH_DLQ_STREAM))
+        except Exception as exc:
+            logger.warning("读取 DLQ 积压数量失败: %s", exc)
+            return 0
 
 
 _task_state: Optional[TaskStateService] = None

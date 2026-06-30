@@ -16,7 +16,9 @@ class AgentTracer:
         self._session_id = session_id
         self._agent_name = agent_name
         observability = get_runtime_config().observability
-        self._enabled = observability.langfuse_enabled or observability.otel_enabled
+        # langfuse_enabled is a placeholder; tracing is backed by OTel when otel_enabled=true.
+        self._enabled = observability.otel_enabled
+        self._langfuse_debug = observability.langfuse_enabled
         self._tracer = None
         if self._enabled:
             try:
@@ -39,9 +41,10 @@ class AgentTracer:
     def record_llm_call(self, model: str, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
         from app.infrastructure.observability.otel import record_llm_tokens
         record_llm_tokens(model, prompt_tokens, completion_tokens)
-        if get_runtime_config().observability.langfuse_enabled:
+        if self._langfuse_debug:
             logger.debug(
-                "Langfuse LLM trace session=%s agent=%s model=%s prompt=%s completion=%s",
+                "LLM trace (OTel only; Langfuse SDK not integrated) "
+                "session=%s agent=%s model=%s prompt=%s completion=%s",
                 self._session_id,
                 self._agent_name,
                 model,

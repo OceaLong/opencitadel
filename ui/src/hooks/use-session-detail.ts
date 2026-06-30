@@ -79,17 +79,30 @@ export function useSessionDetail(
     events,
     appendEvent,
     loadEventsPage,
+    syncMissingEvents,
     loadEarlierEvents: loadEarlier,
     loadingEarlier,
     hasEarlierHistory,
     initialEventsLoaded,
     lastEventIdRef,
+    lastPersistedSeqRef,
     resetEvents,
   } = useSessionEventLog(sessionId);
 
   const refresh = useCallback(async () => {
     await Promise.all([refreshMeta(), loadEventsPage(false)]);
   }, [refreshMeta, loadEventsPage]);
+
+  const streamIncludeDebugRef = useRef(false);
+
+  const reconnect = useCallback(async () => {
+    await refreshMeta();
+    try {
+      await syncMissingEvents(streamIncludeDebugRef.current);
+    } catch {
+      await loadEventsPage(false);
+    }
+  }, [refreshMeta, syncMissingEvents, loadEventsPage]);
 
   const streams = useSessionStreams({
     sessionId,
@@ -104,9 +117,13 @@ export function useSessionDetail(
     applySessionPatch,
     setError,
     lastEventIdRef,
+    lastPersistedSeqRef,
     initialEventsLoaded,
     skipEmptyStream: initialSkipEmptyStream,
-    onReconnect: refresh,
+    onReconnect: reconnect,
+    onDebugModeChange: (enabled) => {
+      streamIncludeDebugRef.current = enabled;
+    },
   });
 
   useEffect(() => {

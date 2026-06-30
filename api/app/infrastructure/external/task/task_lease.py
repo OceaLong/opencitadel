@@ -59,7 +59,7 @@ async def renew_task_lease(task_id: str, ttl_seconds: int) -> bool:
         await redis.expire(key, max(10, ttl_seconds))
         return True
     except Exception as exc:
-        logger.debug("task lease renew failed task_id=%s: %s", task_id, exc)
+        logger.warning("task lease renew failed task_id=%s: %s", task_id, exc)
         return False
 
 
@@ -74,7 +74,7 @@ async def get_task_lease_owner(task_id: str) -> str | None:
             return owner.decode()
         return owner
     except Exception as exc:
-        logger.debug("task lease owner lookup failed task_id=%s: %s", task_id, exc)
+        logger.warning("task lease owner lookup failed task_id=%s: %s", task_id, exc)
         return None
 
 
@@ -90,4 +90,4 @@ async def release_task_lease(task_id: str) -> None:
         if owner == _worker_id:
             await redis.delete(key)
     except Exception as exc:
-        logger.debug("task lease release failed task_id=%s: %s", task_id, exc)
+        logger.warning("task lease release failed task_id=%s: %s", task_id, exc)

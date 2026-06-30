@@ -32,9 +32,11 @@ type StreamDeps = {
   applySessionPatch: (patch: Partial<SessionDetail>) => void;
   setError: (err: Error | null) => void;
   lastEventIdRef: MutableRefObject<string | null>;
+  lastPersistedSeqRef?: MutableRefObject<number | null>;
   initialEventsLoaded?: boolean;
   skipEmptyStream?: boolean;
   onReconnect?: () => Promise<void>;
+  onDebugModeChange?: (enabled: boolean) => void;
 };
 
 export type SessionStreamStatus = "idle" | "connecting" | "connected" | "reconnecting" | "stale" | "error";
@@ -47,9 +49,11 @@ export function useSessionStreams({
   applySessionPatch,
   setError,
   lastEventIdRef,
+  lastPersistedSeqRef,
   initialEventsLoaded = false,
   skipEmptyStream = false,
   onReconnect,
+  onDebugModeChange,
 }: StreamDeps) {
   const [streaming, setStreaming] = useState(false);
   const [streamStatus, setStreamStatus] = useState<SessionStreamStatus>("idle");
@@ -141,9 +145,13 @@ export function useSessionStreams({
     if (!shouldMaintainEmptyStream(sessionStatusRef.current)) return;
     stopEmptyStream();
     setStreamStatus(emptyStreamRetryCountRef.current > 0 ? "reconnecting" : "connecting");
+    const resumeEventId =
+      lastPersistedSeqRef?.current != null
+        ? String(lastPersistedSeqRef.current)
+        : lastEventIdRef.current || undefined;
     emptyStreamCleanupRef.current = sessionApi.chat(
       sessionId,
-      { event_id: lastEventIdRef.current || undefined },
+      { event_id: resumeEventId },
       (ev) => {
         emptyStreamRetryCountRef.current = 0;
         handleStreamEvent(ev);
@@ -195,6 +203,7 @@ export function useSessionStreams({
     onSessionMissing,
     setError,
     lastEventIdRef,
+    lastPersistedSeqRef,
     onReconnect,
   ]);
 
@@ -204,10 +213,11 @@ export function useSessionStreams({
 
   const enableDebugStream = useCallback(() => {
     streamIncludeDebugRef.current = true;
+    onDebugModeChange?.(true);
     if (!isSendMessageRef.current) {
       startEmptyStreamRef.current?.();
     }
-  }, []);
+  }, [onDebugModeChange]);
 
   const sendMessage = useCallback(
     async (
@@ -356,6 +366,7 @@ export function useSessionStreams({
     sessionMissingRef.current = false;
     isSendMessageRef.current = false;
     streamIncludeDebugRef.current = false;
+    onDebugModeChange?.(false);
     emptyStreamRetryCountRef.current = 0;
     stopEmptyStream();
     if (messageStreamCleanupRef.current) {
@@ -365,7 +376,7 @@ export function useSessionStreams({
     setStreaming(false);
     setStreamStatus("idle");
     setStreamError(null);
-  }, [stopEmptyStream]);
+  }, [stopEmptyStream, onDebugModeChange]);
 
   return {
     streaming,

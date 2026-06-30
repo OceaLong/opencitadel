@@ -29,6 +29,7 @@ from app.domain.models.session import Session, SessionStatus
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.checkpoint_service import CheckpointService
 from app.infrastructure.external.task.task_state import TaskStatus
+from app.infrastructure.observability.logging_context import bind_context, get_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,10 @@ class AgentService:
 
     async def _create_task(self, session: Session) -> Task:
         previous_task_id = session.task_id
-        task = await self._task_cls.create_for_session(session.id)
+        task = await self._task_cls.create_for_session(
+            session.id,
+            request_id=get_request_id(),
+        )
         session.task_id = task.id
         async with self._uow_factory() as uow:
             await uow.session.save(session)
@@ -247,98 +251,105 @@ class AgentService:
             mode: Optional[SessionMode] = None,
     ) -> AsyncGenerator[BaseEvent, None]:
         session_missing = False
-        try:
-            async with self._uow_factory() as uow:
-                session = await uow.session.get_by_id(session_id)
-            if not session:
-                logger.error(f"尝试与不存在的任务会话[{session_id}]对话")
-                session_missing = True
-                yield ErrorEvent(error=_SESSION_NOT_FOUND_MSG)
-                return
-
-            if (
-                model_id is not None
-                or skill_id is not None
-                or thinking_enabled is not None
-                or mode is not None
-            ):
-                async with self._uow_factory() as uow:
-                    await uow.session.update_session_config(
-                        session_id,
-                        model_id=model_id,
-                        skill_id=skill_id,
-                        thinking_enabled=thinking_enabled,
-                        clear_model=model_id == "",
-                        clear_skill=skill_id == "",
-                    )
-                    if mode is not None:
-                        session = await uow.session.get_by_id(session_id)
-                        if session:
-                            session.mode = mode
-                            await uow.session.save(session)
-                    session = await uow.session.get_by_id(session_id)
-
-            task = await self._get_task(session)
-
-            if message:
-                if (
-                    session.status != SessionStatus.RUNNING
-                    or task is None
-                    or await self._task_is_terminal(task)
-                ):
-                    task = await self._create_task(session)
-                    if not task:
-                        logger.error(f"会话[{session_id}]创建任务失败")
-                        raise RuntimeError(f"会话[{session_id}]创建任务失败")
-
-                message_event = MessageEvent(
-                    role="user",
-                    message=message,
-                )
-                seq = await self._event_sequence.allocate()
-                message_event.id = str(seq)
-                async with self._uow_factory() as uow:
-                    await uow.session.update_latest_message(
-                        session_id=session_id,
-                        message=message,
-                        timestamp=timestamp or datetime.now(),
-                    )
-                    db_attachments = await uow.file.list_by_ids(attachments or [])
-                    message_event.attachments = db_attachments
-                    await uow.session.add_event(session_id, message_event, seq=seq)
-                await task.input_stream.put(message_event.model_dump_json())
-                yield message_event
-                await task.invoke()
-                logger.info(f"往会话[{session_id}]输入消息队列写入消息: {message[:50]}...")
-
-            if not task:
-                task = await self._get_task(session)
-            if not task:
-                return
-
-            logger.info(f"会话[{session_id}]已启动, task_id={task.id}")
-
-            async for event in self._consume_output_stream(task, session_id, latest_event_id):
-                yield event
-
-            logger.info(f"会话[{session_id}]本轮运行结束")
-        except Exception as e:
-            logger.exception(f"任务会话[{session_id}]对话出错: {str(e)}")
-            event = ErrorEvent(error=str(e))
+        with bind_context(session_id=session_id, request_id=get_request_id()):
             try:
-                seq = await self._event_sequence.allocate()
-                event.id = str(seq)
                 async with self._uow_factory() as uow:
-                    await uow.session.add_event(session_id, event, seq=seq)
-            except (asyncio.CancelledError, Exception) as add_err:
-                logger.warning(f"会话[{session_id}]添加错误事件失败: {add_err}")
-            yield event
-        finally:
-            if not session_missing:
+                    session = await uow.session.get_by_id(session_id)
+                if not session:
+                    logger.error("尝试与不存在的任务会话[%s]对话", session_id)
+                    session_missing = True
+                    yield ErrorEvent(error=_SESSION_NOT_FOUND_MSG)
+                    return
+
+                if (
+                    model_id is not None
+                    or skill_id is not None
+                    or thinking_enabled is not None
+                    or mode is not None
+                ):
+                    async with self._uow_factory() as uow:
+                        await uow.session.update_session_config(
+                            session_id,
+                            model_id=model_id,
+                            skill_id=skill_id,
+                            thinking_enabled=thinking_enabled,
+                            clear_model=model_id == "",
+                            clear_skill=skill_id == "",
+                        )
+                        if mode is not None:
+                            session = await uow.session.get_by_id(session_id)
+                            if session:
+                                session.mode = mode
+                                await uow.session.save(session)
+                        session = await uow.session.get_by_id(session_id)
+
+                task = await self._get_task(session)
+
+                if message:
+                    if (
+                        session.status != SessionStatus.RUNNING
+                        or task is None
+                        or await self._task_is_terminal(task)
+                    ):
+                        task = await self._create_task(session)
+                        if not task:
+                            logger.error("会话[%s]创建任务失败", session_id)
+                            raise RuntimeError(f"会话[{session_id}]创建任务失败")
+
+                    message_event = MessageEvent(
+                        role="user",
+                        message=message,
+                    )
+                    seq = await self._event_sequence.allocate()
+                    message_event.id = str(seq)
+                    async with self._uow_factory() as uow:
+                        await uow.session.update_latest_message(
+                            session_id=session_id,
+                            message=message,
+                            timestamp=timestamp or datetime.now(),
+                        )
+                        db_attachments = await uow.file.list_by_ids(attachments or [])
+                        message_event.attachments = db_attachments
+                        await uow.session.add_event(session_id, message_event, seq=seq)
+                    await task.input_stream.put(message_event.model_dump_json())
+                    yield message_event
+                    await task.invoke()
+                    logger.info(
+                        "往会话[%s]输入消息队列写入消息 task_id=%s: %s...",
+                        session_id,
+                        task.id,
+                        message[:50],
+                    )
+
+                if not task:
+                    task = await self._get_task(session)
+                if not task:
+                    return
+
+                with bind_context(task_id=task.id):
+                    logger.info("会话[%s]已启动, task_id=%s", session_id, task.id)
+
+                    async for event in self._consume_output_stream(task, session_id, latest_event_id):
+                        yield event
+
+                    logger.info("会话[%s]本轮运行结束 task_id=%s", session_id, task.id)
+            except Exception as e:
+                logger.exception("任务会话[%s]对话出错: %s", session_id, e)
+                event = ErrorEvent(error=str(e))
                 try:
-                    asyncio.create_task(self._safe_update_unread_count(session_id))
-                except RuntimeError:
-                    logger.warning(f"会话[{session_id}]无法创建后台任务更新未读消息计数")
+                    seq = await self._event_sequence.allocate()
+                    event.id = str(seq)
+                    async with self._uow_factory() as uow:
+                        await uow.session.add_event(session_id, event, seq=seq)
+                except (asyncio.CancelledError, Exception) as add_err:
+                    logger.warning("会话[%s]添加错误事件失败: %s", session_id, add_err)
+                yield event
+            finally:
+                if not session_missing:
+                    try:
+                        asyncio.create_task(self._safe_update_unread_count(session_id))
+                    except RuntimeError:
+                        logger.warning("会话[%s]无法创建后台任务更新未读消息计数", session_id)
 
     async def list_checkpoints(self, session_id: str) -> List[Checkpoint]:
         return await self._checkpoint_service.list_checkpoints(session_id)

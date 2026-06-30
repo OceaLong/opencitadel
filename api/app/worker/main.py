@@ -29,6 +29,7 @@ from app.infrastructure.external.task.task_lease import (
 )
 from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
 from app.infrastructure.logging import setup_logging
+from app.infrastructure.observability.logging_context import bind_context, configure_structured_logging
 from app.infrastructure.storage.postgres import get_uow
 from app.runtime_role import ProcessRole, set_role
 from core.config import get_settings
@@ -238,42 +239,50 @@ class AgentWorker:
             task_id: str,
             session_id: str,
     ) -> None:
-        admission = get_admission_runtime_settings()
-        lease_acquired = await try_acquire_task_lease(
-            task_id,
-            admission.task_execution_lease_seconds,
-        )
-        if not lease_acquired:
-            logger.warning(
-                "任务执行租约冲突，跳过重复执行: task_id=%s session_id=%s",
+        meta = await self._task_state.get_task_meta(task_id) or {}
+        request_id = meta.get("request_id") or ""
+        with bind_context(
+            session_id=session_id,
+            task_id=task_id,
+            worker_id=get_worker_id(),
+            request_id=request_id or None,
+        ):
+            admission = get_admission_runtime_settings()
+            lease_acquired = await try_acquire_task_lease(
                 task_id,
-                session_id,
-            )
-            await self._task_state.ack_dispatch(message_id)
-            return
-        await self._task_state.record_heartbeat(task_id, get_worker_id())
-        try:
-            await self._execute_job_with_lease_renewal(
-                task_id,
-                session_id,
                 admission.task_execution_lease_seconds,
             )
-            await self._task_state.ack_dispatch(message_id)
-        except Exception as exc:
-            logger.exception(
-                "Worker 执行任务失败: task_id=%s session_id=%s error=%s",
-                task_id,
-                session_id,
-                exc,
-            )
-            await self._task_state.mark_dispatch_failure(
-                message_id=message_id,
-                task_id=task_id,
-                session_id=session_id,
-                error=str(exc),
-            )
-        finally:
-            await release_task_lease(task_id)
+            if not lease_acquired:
+                logger.warning(
+                    "任务执行租约冲突，跳过重复执行: task_id=%s session_id=%s",
+                    task_id,
+                    session_id,
+                )
+                await self._task_state.ack_dispatch(message_id)
+                return
+            await self._task_state.record_heartbeat(task_id, get_worker_id())
+            try:
+                await self._execute_job_with_lease_renewal(
+                    task_id,
+                    session_id,
+                    admission.task_execution_lease_seconds,
+                )
+                await self._task_state.ack_dispatch(message_id)
+            except Exception as exc:
+                logger.exception(
+                    "Worker 执行任务失败: task_id=%s session_id=%s error=%s",
+                    task_id,
+                    session_id,
+                    exc,
+                )
+                await self._task_state.mark_dispatch_failure(
+                    message_id=message_id,
+                    task_id=task_id,
+                    session_id=session_id,
+                    error=str(exc),
+                )
+            finally:
+                await release_task_lease(task_id)
 
     async def _execute_job_with_lease_renewal(
             self,
@@ -403,6 +412,7 @@ class AgentWorker:
 
 async def main() -> None:
     setup_logging()
+    configure_structured_logging()
     container = await init_worker_container()
     from app.application.services.skill_service import SkillService
 
@@ -412,6 +422,9 @@ async def main() -> None:
     )
 
     await _startup_reconcile()
+    dlq_count = await get_task_state().count_dlq_messages()
+    if dlq_count:
+        logger.warning("Worker 启动检测到 DLQ 积压: count=%s", dlq_count)
     sandbox_cleanup_task = asyncio.create_task(_sandbox_cleanup_loop())
     worker = AgentWorker(
         runner_factory=await container.task_runner_factory(),

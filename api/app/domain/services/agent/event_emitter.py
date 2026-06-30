@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """Event emission: Redis output stream + batched Postgres persistence."""
+import logging
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -18,6 +19,8 @@ from app.domain.models.event import (
 )
 from app.domain.models.event_policy import should_persist_event
 from app.domain.repositories.uow import IUnitOfWork
+
+logger = logging.getLogger(__name__)
 
 
 class AgentEventEmitter:
@@ -66,6 +69,16 @@ class AgentEventEmitter:
         if not self._persist_buffer:
             return
         payloads = self._persist_buffer
-        self._persist_buffer = []
-        async with self._uow_factory() as uow:
-            await uow.session.add_event_payloads(self._session_id, payloads)
+        try:
+            async with self._uow_factory() as uow:
+                await uow.session.add_event_payloads(self._session_id, payloads)
+            self._persist_buffer = []
+        except Exception as exc:
+            logger.error(
+                "事件批量落库失败 session_id=%s pending_count=%s: %s",
+                self._session_id,
+                len(payloads),
+                exc,
+                exc_info=True,
+            )
+            raise

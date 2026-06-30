@@ -89,7 +89,7 @@ class ObservabilityConfig(BaseModel):
     otel_enabled: bool = False
     otel_service_name: str = "my-manus-api"
     otel_exporter_endpoint: str = ""
-    langfuse_enabled: bool = False
+    langfuse_enabled: bool = False  # debug-only placeholder; no Langfuse SDK integration
 
 
 class AgentConfig(BaseModel):

@@ -36,6 +36,7 @@ from app.interfaces.endpoints.a2a_routes import a2a_router, well_known_router
 from app.interfaces.endpoints.routes import router
 from app.interfaces.errors.exception_handlers import register_exception_handlers
 from app.interfaces.middleware.rate_limit import maybe_install_rate_limit
+from app.interfaces.middleware.request_logging import install_request_logging
 from app.interfaces.service_dependencies import get_agent_service, get_skill_service
 
 # 1.加载配置信息
@@ -167,6 +168,9 @@ app.add_middleware(
 
 # 6.注册错误处理器
 register_exception_handlers(app)
+
+# 6.0 HTTP 请求日志与 request_id
+install_request_logging(app)
 
 # 6.1 公开接口限流
 maybe_install_rate_limit(app)

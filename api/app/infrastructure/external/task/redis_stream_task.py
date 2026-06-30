@@ -42,10 +42,11 @@ class RedisStreamTask(Task):
             cls,
             session_id: str,
             task_state: Optional[TaskStateService] = None,
+            request_id: Optional[str] = None,
     ) -> "RedisStreamTask":
         task_id = str(uuid.uuid4())
         state = task_state or get_task_state()
-        await state.register_task(task_id, session_id)
+        await state.register_task(task_id, session_id, request_id=request_id or "")
         return cls(task_id=task_id, session_id=session_id, task_state=state)
 
     @classmethod

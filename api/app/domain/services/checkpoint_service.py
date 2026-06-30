@@ -178,44 +178,64 @@ class CheckpointService:
         durable UI history remains intact, while agent memory/files/sandbox are
         moved back to the latest safe execution point before re-dispatch.
         """
-        async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(session_id)
-            if not session:
-                return None
+        logger.info("开始恢复最新 checkpoint: session_id=%s", session_id)
+        try:
+            async with self._uow_factory() as uow:
+                session = await uow.session.get_by_id(session_id)
+                if not session:
+                    logger.warning("恢复 checkpoint 失败，会话不存在: session_id=%s", session_id)
+                    return None
 
-            checkpoints = await uow.checkpoint.list_by_session(session_id)
-            if not checkpoints:
-                return None
-            checkpoint = await uow.checkpoint.get_by_id(checkpoints[-1].id)
-            if not checkpoint:
-                return None
+                checkpoints = await uow.checkpoint.list_by_session(session_id)
+                if not checkpoints:
+                    logger.warning("恢复 checkpoint 失败，无可用 checkpoint: session_id=%s", session_id)
+                    return None
+                checkpoint = await uow.checkpoint.get_by_id(checkpoints[-1].id)
+                if not checkpoint:
+                    logger.warning(
+                        "恢复 checkpoint 失败，checkpoint 记录缺失: session_id=%s",
+                        session_id,
+                    )
+                    return None
 
-            await uow.session.restore_session_snapshot(
-                session_id=session_id,
-                memories=checkpoint.memories_snapshot,
-                files=checkpoint.files_snapshot,
-                status=SessionStatus.RUNNING.value,
-                pending_phase=checkpoint.session_state.pending_phase,
-            )
-            restored_session = await uow.session.get_by_id(session_id)
-            sandbox_id = restored_session.sandbox_id if restored_session else session.sandbox_id
-
-        if checkpoint.sandbox_snapshot_key and sandbox_id:
-            sandbox = await self._sandbox_cls.get(sandbox_id)
-            if sandbox is None:
-                sandbox = await self._sandbox_cls.create()
-                async with self._uow_factory() as uow:
-                    restored = await uow.session.get_by_id(session_id)
-                    if restored:
-                        restored.sandbox_id = sandbox.id
-                        await uow.session.save(restored)
-
-            if sandbox is not None:
-                await sandbox.ensure_sandbox()
-                snapshot_bytes = await self._object_storage.get_bytes(checkpoint.sandbox_snapshot_key)
-                await sandbox.restore_workspace_snapshot(
-                    checkpoint.id,
-                    io.BytesIO(snapshot_bytes),
+                await uow.session.restore_session_snapshot(
+                    session_id=session_id,
+                    memories=checkpoint.memories_snapshot,
+                    files=checkpoint.files_snapshot,
+                    status=SessionStatus.RUNNING.value,
+                    pending_phase=checkpoint.session_state.pending_phase,
                 )
+                restored_session = await uow.session.get_by_id(session_id)
+                sandbox_id = restored_session.sandbox_id if restored_session else session.sandbox_id
 
-        return checkpoint
+            if checkpoint.sandbox_snapshot_key and sandbox_id:
+                sandbox = await self._sandbox_cls.get(sandbox_id)
+                if sandbox is None:
+                    sandbox = await self._sandbox_cls.create()
+                    async with self._uow_factory() as uow:
+                        restored = await uow.session.get_by_id(session_id)
+                        if restored:
+                            restored.sandbox_id = sandbox.id
+                            await uow.session.save(restored)
+
+                if sandbox is not None:
+                    await sandbox.ensure_sandbox()
+                    snapshot_bytes = await self._object_storage.get_bytes(checkpoint.sandbox_snapshot_key)
+                    await sandbox.restore_workspace_snapshot(
+                        checkpoint.id,
+                        io.BytesIO(snapshot_bytes),
+                    )
+
+            logger.info(
+                "checkpoint 恢复成功: session_id=%s checkpoint_id=%s",
+                session_id,
+                checkpoint.id,
+            )
+            return checkpoint
+        except Exception as exc:
+            logger.exception(
+                "checkpoint 恢复失败: session_id=%s error=%s",
+                session_id,
+                exc,
+            )
+            raise
