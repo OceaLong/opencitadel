@@ -1,9 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Pure LLM retry classification helpers (no infrastructure dependencies)."""
+"""Pure LLM retry / breaker classification helpers (no infrastructure dependencies)."""
+from typing import Optional
+
+from app.domain.models import error_codes as EC
 
 
 def is_retriable_llm_error(error: Exception) -> bool:
+    """Transient infra errors eligible for retry (not breaker-only)."""
     text = str(error).lower()
     markers = (
         "429",
@@ -21,3 +25,47 @@ def is_retriable_llm_error(error: Exception) -> bool:
         "connection error",
     )
     return any(marker in text for marker in markers)
+
+
+def is_breaker_eligible_error(error: Exception) -> bool:
+    """Only infra-level signals count toward circuit breaker windows."""
+    text = str(error).lower()
+    if not is_retriable_llm_error(error):
+        return False
+    excluded = (
+        "400",
+        "422",
+        "bad request",
+        "validation",
+        "context_length",
+        "context length",
+        "maximum context",
+        "not supported",
+        "unsupported model",
+        "invalid model",
+        "content policy",
+        "content_filter",
+    )
+    return not any(marker in text for marker in excluded)
+
+
+def classify_llm_error_code(error: Exception) -> str:
+    """Map an exception to a graded error code for ErrorEvent / DLQ."""
+    text = str(error).lower()
+    if "not configured" in text or "未配置" in text:
+        return EC.MODEL_NOT_CONFIGURED
+    if "429" in text or "rate limit" in text or "ratelimit" in text:
+        return EC.MODEL_RATE_LIMITED
+    if "timeout" in text or "timed out" in text:
+        return EC.MODEL_TIMEOUT
+    if "model unavailable" in text or "熔断" in text or "circuit" in text:
+        return EC.MODEL_UNAVAILABLE
+    if is_retriable_llm_error(error):
+        return EC.MODEL_UNAVAILABLE
+    return EC.MODEL_UNAVAILABLE
+
+
+def error_code_from_optional(code: Optional[str]) -> Optional[str]:
+    if code and code in EC.ALL_ERROR_CODES:
+        return code
+    return None

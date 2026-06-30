@@ -36,6 +36,7 @@ class CodebaseResponse(BaseModel):
     workspace_path: str = ""
     ingest_task_id: Optional[str] = None
     error: Optional[str] = None
+    vector_degraded: bool = False
     created_at: datetime
     updated_at: datetime
 

@@ -19,7 +19,9 @@ from app.application.services.marketplace.catalog import (
     APP_IDS,
     MARKETPLACE_APPS,
     build_route_prompt,
+    enrich_marketplace_app,
     examples_for,
+    list_marketplace_apps,
 )
 from app.application.services.marketplace.consumption_service import ConsumptionService
 from app.application.services.marketplace.conversion_service import ConversionService
@@ -33,6 +35,7 @@ from app.domain.services.document_service import document_to_vision_attachments
 from app.domain.services.image_generation_service import edit_image
 from app.domain.utils.vision import build_image_content_part, is_image_mime
 from app.infrastructure.external.llm.factory import LLMFactory
+from app.infrastructure.external.llm.resilient_llm import create_resilient_llm
 from app.infrastructure.external.json_parser.repair_json_parser import RepairJSONParser
 logger = logging.getLogger(__name__)
 
@@ -89,7 +92,7 @@ class MarketplaceService:
         self._json_parser = RepairJSONParser()
 
     def list_apps(self) -> list[dict]:
-        return MARKETPLACE_APPS
+        return list_marketplace_apps()
 
     async def search_videos(self, query: str, *, analyze_content: bool = False, model_id: Optional[str] = None) -> dict:
         started_at = time.perf_counter()
@@ -629,14 +632,22 @@ class MarketplaceService:
         return file_bytes, file_info
 
     async def _resolve_vision_llm(self, model_id: Optional[str]):
+        from app.application.services.config_provider import get_runtime_config
+
+        if not get_runtime_config().feature_flags.enable_marketplace_llm_apps:
+            raise ValueError("Marketplace AI 功能已关闭")
         model = await self._llm_model_service.resolve_model(model_id)
         if not model.capabilities.vision and not model.supports_multimodal:
             raise ValueError("请选择支持多模态能力的模型，或在模型设置中开启视觉能力")
-        return LLMFactory.create(model)
+        return create_resilient_llm(model, llm_model_service=self._llm_model_service)
 
     async def _resolve_text_llm(self, model_id: Optional[str]):
+        from app.application.services.config_provider import get_runtime_config
+
+        if not get_runtime_config().feature_flags.enable_marketplace_llm_apps:
+            raise ValueError("Marketplace AI 功能已关闭")
         model = await self._llm_model_service.resolve_model(model_id)
-        return LLMFactory.create(model)
+        return create_resilient_llm(model, llm_model_service=self._llm_model_service)
 
     async def _invoke_text(self, llm, prompt: str) -> str:
         response = await llm.invoke([{"role": "user", "content": prompt}])

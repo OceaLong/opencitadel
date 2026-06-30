@@ -15,6 +15,7 @@ class MarketplaceAppResponse(BaseModel):
     featured: bool = False
     accent: str = "blue"
     needs_vision: bool = False
+    model_dependency: Literal["none", "optional", "required"] = "optional"
     examples: List[str] = Field(default_factory=list)
 
 

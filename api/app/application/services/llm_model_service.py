@@ -85,7 +85,6 @@ class LLMModelService:
 
     async def create_model(self, model: LLMModel) -> LLMModel:
         self._validate_model(model, require_api_key=model.provider != LLMProvider.OLLAMA)
-        model = await self._auto_probe_capabilities(model)
         encrypted = self._cipher.encrypt(model.api_key) if model.api_key else ""
         async with self._uow_factory() as uow:
             count = await uow.llm_model.count()
@@ -105,7 +104,6 @@ class LLMModelService:
             if not updates.api_key.strip() or "****" in updates.api_key:
                 updates.api_key = existing.api_key
             self._validate_model(updates)
-            updates = await self._auto_probe_capabilities(updates)
             encrypted = self._cipher.encrypt(updates.api_key) if updates.api_key else ""
             if updates.is_default:
                 await uow.llm_model.clear_default()
@@ -144,7 +142,19 @@ class LLMModelService:
     async def probe_multimodal(self, model_id: str) -> dict:
         model = await self.get_model(model_id, mask=False)
         self._ensure_invokable(model)
-        return await self._run_vision_probe(model)
+        probe = await self._run_vision_probe(model)
+        if probe.get("status") == "ok":
+            caps = model.capabilities.model_copy(update={"vision": True})
+            if probe.get("vision_with_tools") is False:
+                caps = caps.model_copy(update={"vision_with_tools": False})
+            model = model.model_copy(update={"capabilities": caps, "supports_multimodal": True})
+        elif probe.get("status") == "error":
+            caps = model.capabilities.model_copy(update={"vision": False})
+            model = model.model_copy(update={"capabilities": caps, "supports_multimodal": False})
+        async with self._uow_factory() as uow:
+            encrypted = self._cipher.encrypt(model.api_key) if model.api_key else ""
+            await uow.llm_model.save(model, encrypted)
+        return probe
 
     async def _auto_probe_capabilities(self, model: LLMModel) -> LLMModel:
         """保存模型时自动探测 vision / vision_with_tools 能力。"""

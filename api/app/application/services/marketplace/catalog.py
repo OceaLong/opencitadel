@@ -199,6 +199,39 @@ MARKETPLACE_APPS: list[dict[str, Any]] = [
 
 APP_IDS = {app["id"] for app in MARKETPLACE_APPS}
 
+# model_dependency derived from FeatureTier (L1→none, L2→optional, L3→required)
+_APP_MODEL_DEPENDENCY: dict[str, str] = {
+    "video-search": "optional",
+    "nutrition-analysis": "required",
+    "consumption-calculator": "required",
+    "document-qa": "required",
+    "smart-translation": "required",
+    "prompt-lab": "required",
+    "qr-generator": "none",
+    "dev-toolbox": "none",
+    "secret-generator": "none",
+    "party-room": "none",
+    "questionnaire": "none",
+    "personality-tests": "none",
+    "fortune-teller": "optional",
+    "unit-converter": "none",
+    "document-converter": "none",
+    "watermark-tool": "optional",
+}
+
+
+def enrich_marketplace_app(app: dict) -> dict:
+    enriched = dict(app)
+    enriched.setdefault(
+        "model_dependency",
+        _APP_MODEL_DEPENDENCY.get(app["id"], "optional"),
+    )
+    return enriched
+
+
+def list_marketplace_apps() -> list[dict]:
+    return [enrich_marketplace_app(app) for app in MARKETPLACE_APPS]
+
 
 def app_id_enum() -> str:
     return " | ".join(app["id"] for app in MARKETPLACE_APPS)

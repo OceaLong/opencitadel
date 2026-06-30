@@ -17,6 +17,9 @@ def upgrade_event_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         upgraded.setdefault("persist", _default_persist(upgraded.get("type", "")))
         schema_version = 2
 
+    if upgraded.get("type") == "error":
+        upgraded.setdefault("code", None)
+
     upgraded["schema_version"] = EVENT_SCHEMA_VERSION
     return upgraded
 

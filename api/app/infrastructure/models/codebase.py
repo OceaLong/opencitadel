@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,6 +43,9 @@ class CodebaseModel(Base):
     snapshot_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     ingest_task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    vector_degraded: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
@@ -64,6 +67,7 @@ class CodebaseModel(Base):
             snapshot_key=self.snapshot_key,
             ingest_task_id=self.ingest_task_id,
             error=self.error,
+            vector_degraded=bool(self.vector_degraded),
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -83,6 +87,7 @@ class CodebaseModel(Base):
             snapshot_key=codebase.snapshot_key,
             ingest_task_id=codebase.ingest_task_id,
             error=codebase.error,
+            vector_degraded=codebase.vector_degraded,
             created_at=codebase.created_at,
             updated_at=codebase.updated_at,
         )

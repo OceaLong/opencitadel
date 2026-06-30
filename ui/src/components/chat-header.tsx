@@ -2,10 +2,14 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { Code2, LayoutGrid } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import { ManusIcon } from "@/components/manus-icon";
+import { Badge } from "@/components/ui/badge";
+import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
+import type { LLMStatusData } from "@/lib/api/types";
 
 const ManusSettings = dynamic(
   () => import("@/components/manus-settings").then((mod) => mod.ManusSettings),
@@ -17,6 +21,25 @@ import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
 export function ChatHeader() {
   const { open, isMobile } = useSidebar();
+  const [llmStatus, setLlmStatus] = useState<LLMStatusData["status"]>("unknown");
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const data = await llmStatusApi.getStatus();
+        if (mounted) setLlmStatus(data.status ?? "unknown");
+      } catch {
+        if (mounted) setLlmStatus("unknown");
+      }
+    };
+    void load();
+    const timer = setInterval(load, isModelUnavailableStatus(llmStatus) ? 10_000 : 30_000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [llmStatus]);
 
   return (
     <header className="z-50 flex w-full items-center justify-between px-4 py-2">
@@ -33,6 +56,12 @@ export function ChatHeader() {
         </Link>
       </div>
       <div className="flex items-center gap-1">
+        <Badge
+          variant={isModelUnavailableStatus(llmStatus) ? "destructive" : "secondary"}
+          className="hidden text-[10px] sm:inline-flex"
+        >
+          模型{llmStatus === "unknown" ? "状态未知" : isModelUnavailableStatus(llmStatus) ? "不可用" : "正常"}
+        </Badge>
         <Button variant="outline" size="icon-sm" asChild aria-label="代码知识库" title="代码知识库">
           <Link href="/codebase">
             <Code2 className="size-4" />

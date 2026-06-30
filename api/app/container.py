@@ -305,6 +305,7 @@ class BaseContainer(containers.DeclarativeContainer):
         agent_service=agent_service,
         session_service=session_service,
         skill_service=skill_service,
+        llm_model_service=llm_model_service,
     )
 
 

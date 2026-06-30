@@ -32,6 +32,8 @@ from app.domain.services.tools.image_generation import ImageGenerationTool
 from app.domain.services.tools.memory import MemoryTool
 from app.domain.utils.app_config_filter import filter_a2a_config_by_refs, filter_mcp_config_by_refs
 from app.infrastructure.external.llm.factory import LLMFactory
+from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError, create_resilient_llm
+from app.domain.models.error_codes import MODEL_UNAVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +135,11 @@ class TaskRunnerFactory:
         llm_model = await self._llm_model_service.resolve_model(model_id)
         if temperature_override is not None:
             llm_model = llm_model.model_copy(update={"temperature": temperature_override})
-        llm = LLMFactory.create(llm_model, thinking_enabled=session.thinking_enabled)
+        llm = create_resilient_llm(
+            llm_model,
+            thinking_enabled=session.thinking_enabled,
+            llm_model_service=self._llm_model_service,
+        )
         long_term_memory_block = await self._memory_recall(session.id)
         return llm, agent_config, skill, skill_prompt, long_term_memory_block, llm_model
 

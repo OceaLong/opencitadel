@@ -1,11 +1,11 @@
 "use client";
 
-import { ArrowUpRight, Eye, Sparkles } from "lucide-react";
+import { ArrowUpRight, Bot, Eye, Sparkles, Zap } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-import type { MarketplaceApp } from "@/lib/api/types";
+import type { MarketplaceApp, ModelDependency } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 const ACCENTS: Record<string, string> = {
@@ -26,14 +26,34 @@ type Props = {
   selected?: boolean;
   compact?: boolean;
   wide?: boolean;
+  modelUnavailable?: boolean;
   onClick: () => void;
 };
 
-export function AppCard({ app, selected, compact, wide, onClick }: Props) {
+const DEPENDENCY_BADGE: Record<
+  ModelDependency,
+  { label: string; variant: "secondary" | "outline"; icon: typeof Bot }
+> = {
+  none: { label: "无需模型 · 可直接使用", variant: "secondary", icon: Zap },
+  optional: { label: "AI 增强 · 可降级", variant: "outline", icon: Sparkles },
+  required: { label: "需要模型", variant: "outline", icon: Bot },
+};
+
+export function AppCard({ app, selected, compact, wide, modelUnavailable, onClick }: Props) {
   const accent = ACCENTS[app.accent] ?? ACCENTS.blue;
+  const dependency = app.model_dependency ?? "optional";
+  const depBadge = DEPENDENCY_BADGE[dependency];
+  const DepIcon = depBadge.icon;
+  const disabled = modelUnavailable && dependency === "required";
 
   return (
-    <button type="button" onClick={onClick} className="group w-full text-left">
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={disabled ? "需要模型，当前不可用" : undefined}
+      className="group w-full text-left disabled:cursor-not-allowed disabled:opacity-60"
+    >
       <Card
         className={cn(
           "relative h-full cursor-pointer overflow-hidden border transition-all duration-300",
@@ -76,6 +96,10 @@ export function AppCard({ app, selected, compact, wide, onClick }: Props) {
                   视觉
                 </Badge>
               )}
+              <Badge variant={depBadge.variant} className="text-[10px]">
+                <DepIcon className="size-3" />
+                {depBadge.label}
+              </Badge>
             </div>
             <CardTitle className="text-sm leading-tight font-semibold">{app.name}</CardTitle>
             <CardDescription className="line-clamp-2 text-xs leading-relaxed">

@@ -11,6 +11,7 @@ from app.application.services.agent_service import AgentService
 from app.application.services.app_config_service import AppConfigService
 from app.application.services.codebase_service import CodebaseService
 from app.application.services.file_service import FileService
+from app.application.services.llm_status_service import LLMStatusService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.marketplace_service import MarketplaceService
@@ -73,6 +74,13 @@ async def get_status_service(
     postgres_checker = PostgresHealthChecker(db_session)
     redis_checker = RedisHealthChecker(redis_client)
     return StatusService(checkers=[postgres_checker, redis_checker])
+
+
+@inject
+async def get_llm_status_service(
+        llm_model_service: LLMModelService = Depends(Provide[ApiContainer.llm_model_service]),
+) -> LLMStatusService:
+    return LLMStatusService(llm_model_service=llm_model_service)
 
 
 @inject

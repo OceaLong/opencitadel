@@ -477,8 +477,12 @@ class AgentTaskRunner(TaskRunner):
             await self._flush_event_persist_buffer()
             raise
         except Exception as e:
+            from app.domain.utils.llm_retry import classify_llm_error_code
+            from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError
+
             logger.exception(f"AgentTaskRunner运行出错: {str(e)}")
-            await self._put_and_add_event(task, ErrorEvent(error=f"AgentTaskRunner出错: {str(e)}"))
+            code = e.error_code if isinstance(e, ModelUnavailableError) else classify_llm_error_code(e)
+            await self._put_and_add_event(task, ErrorEvent(error=f"AgentTaskRunner出错: {str(e)}", code=code))
             await self._emit_session_status(task, SessionStatus.FAILED)
             await self._flush_event_persist_buffer()
             raise

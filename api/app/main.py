@@ -177,6 +177,8 @@ maybe_install_rate_limit(app)
 
 # 7.集成路由
 app.include_router(well_known_router)
-app.include_router(a2a_router, prefix="/api/a2a")
+_runtime = get_runtime_config()
+if _runtime.feature_flags.enable_agent_features:
+    app.include_router(a2a_router, prefix="/api/a2a")
 app.include_router(router, prefix="/api")
 setup_observability(app)

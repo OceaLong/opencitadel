@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 
 import { ApiError } from "@/lib/api";
+import { modelErrorMessage } from "@/lib/api/llm-status";
 import { sessionApi } from "@/lib/api/session";
 import type { ClarifyAnswer, SessionDetail, SSEEventData, TokenUsageSummary } from "@/lib/api/types";
 
@@ -131,6 +132,11 @@ export function useSessionStreams({
       if (ev.type === "error") {
         if (getSessionMissingErrorFromEvent(ev)) {
           sessionMissingRef.current = true;
+        }
+        const code = (ev.data as { code?: string | null })?.code;
+        const friendly = modelErrorMessage(code);
+        if (friendly) {
+          setError(new Error(friendly));
         }
         applySessionPatch({ status: "failed" });
         setStreaming(false);

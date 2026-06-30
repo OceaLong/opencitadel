@@ -289,6 +289,23 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
         </div>
       </div>
 
+      {activeCodebase?.vector_degraded && (
+        <div className="border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200 border-b px-4 py-2 text-xs">
+          语义检索不可用（向量索引已降级）。
+          <button
+            type="button"
+            className="ml-1 underline"
+            onClick={async () => {
+              if (!activeId) return;
+              await codebaseApi.reanalyze(activeId);
+              setIngesting(true);
+            }}
+          >
+            点此重建索引
+          </button>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1">
         <aside className="border-border w-56 shrink-0 border-r">
           <ScrollArea className="h-full">

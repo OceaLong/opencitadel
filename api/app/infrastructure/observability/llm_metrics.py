@@ -37,3 +37,15 @@ def record_multimodal_fallback(reason: str) -> None:
 
 def get_llm_metrics_snapshot() -> LLMMetricsSnapshot:
     return _metrics
+
+
+_resilience_counters: Dict[str, int] = {}
+
+
+def record_llm_resilience_event(event: str, model_id: str, provider: str) -> None:
+    key = f"{event}:{provider}:{model_id}"
+    _resilience_counters[key] = _resilience_counters.get(key, 0) + 1
+
+
+def get_resilience_metrics_snapshot() -> Dict[str, int]:
+    return dict(_resilience_counters)

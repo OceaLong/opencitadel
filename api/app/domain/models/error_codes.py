@@ -1,0 +1,48 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""Graded error codes for model / tool / infra failure domains."""
+from typing import Optional
+
+# Chat LLM domain
+MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
+MODEL_RATE_LIMITED = "MODEL_RATE_LIMITED"
+MODEL_TIMEOUT = "MODEL_TIMEOUT"
+MODEL_NOT_CONFIGURED = "MODEL_NOT_CONFIGURED"
+
+# Embedding domain
+EMBEDDING_UNAVAILABLE = "EMBEDDING_UNAVAILABLE"
+
+# Tool / sandbox domains
+TOOL_FAILED = "TOOL_FAILED"
+SANDBOX_UNAVAILABLE = "SANDBOX_UNAVAILABLE"
+
+# Platform infra
+TASK_INFRA_FAILED = "TASK_INFRA_FAILED"
+
+# Independent external services
+AUDIO_TRANSCRIPTION_FAILED = "AUDIO_TRANSCRIPTION_FAILED"
+IMAGE_GENERATION_FAILED = "IMAGE_GENERATION_FAILED"
+
+MODEL_ERROR_CODES = frozenset({
+    MODEL_UNAVAILABLE,
+    MODEL_RATE_LIMITED,
+    MODEL_TIMEOUT,
+    MODEL_NOT_CONFIGURED,
+})
+
+ALL_ERROR_CODES = frozenset({
+    MODEL_UNAVAILABLE,
+    MODEL_RATE_LIMITED,
+    MODEL_TIMEOUT,
+    MODEL_NOT_CONFIGURED,
+    EMBEDDING_UNAVAILABLE,
+    TOOL_FAILED,
+    SANDBOX_UNAVAILABLE,
+    TASK_INFRA_FAILED,
+    AUDIO_TRANSCRIPTION_FAILED,
+    IMAGE_GENERATION_FAILED,
+})
+
+
+def is_model_error_code(code: Optional[str]) -> bool:
+    return code in MODEL_ERROR_CODES if code else False

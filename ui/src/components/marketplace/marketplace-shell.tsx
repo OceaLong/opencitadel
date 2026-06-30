@@ -17,7 +17,8 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { marketplaceApi } from "@/lib/api/marketplace";
-import type { MarketplaceApp } from "@/lib/api/types";
+import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
+import type { LLMStatusData, MarketplaceApp } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 const RECENT_KEY = "my-manus-marketplace-recent";
@@ -42,6 +43,17 @@ export function MarketplaceShell() {
   const [category, setCategory] = useState("全部");
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const [routing, setRouting] = useState(false);
+  const [llmStatus, setLlmStatus] = useState<LLMStatusData["status"]>("unknown");
+  const [offlineOnly, setOfflineOnly] = useState(false);
+
+  const loadLlmStatus = useCallback(async () => {
+    try {
+      const data = await llmStatusApi.getStatus();
+      setLlmStatus(data.status ?? "unknown");
+    } catch {
+      setLlmStatus("unknown");
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,7 +70,13 @@ export function MarketplaceShell() {
 
   useEffect(() => {
     load();
-  }, [load]);
+    void loadLlmStatus();
+    const timer = setInterval(
+      () => void loadLlmStatus(),
+      isModelUnavailableStatus(llmStatus) ? 10_000 : 30_000,
+    );
+    return () => clearInterval(timer);
+  }, [load, loadLlmStatus, llmStatus]);
 
   useEffect(() => {
     try {
@@ -81,12 +99,17 @@ export function MarketplaceShell() {
     const needle = query.trim().toLowerCase();
     return displayApps.filter((app) => {
       const categoryMatch = category === "全部" || app.category === category;
+      if (offlineOnly && (app.model_dependency ?? "optional") !== "none") {
+        return false;
+      }
       const blob = [app.name, app.description, app.category, ...app.tags, ...app.examples]
         .join(" ")
         .toLowerCase();
       return categoryMatch && (!needle || blob.includes(needle));
     });
-  }, [category, displayApps, query]);
+  }, [category, displayApps, offlineOnly, query]);
+
+  const modelUnavailable = isModelUnavailableStatus(llmStatus);
 
   const featuredApps = displayApps.filter((app) => app.featured).slice(0, 4);
   const recentApps = recentIds
@@ -190,6 +213,19 @@ export function MarketplaceShell() {
                 <Sparkles className="size-3" />
                 AI Native Marketplace
               </Badge>
+              <Badge
+                variant={modelUnavailable ? "destructive" : "secondary"}
+                className="mb-2 ml-1 text-[10px]"
+              >
+                模型状态：
+                {llmStatus === "unknown"
+                  ? "未知"
+                  : modelUnavailable
+                    ? "不可用"
+                    : llmStatus === "degraded"
+                      ? "降级"
+                      : "正常"}
+              </Badge>
               <h1 className="text-foreground text-xl font-semibold tracking-tight sm:text-2xl">
                 说出目标，直接启动最合适的智能应用
               </h1>
@@ -244,7 +280,13 @@ export function MarketplaceShell() {
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                     {featuredApps.map((app) => (
-                      <AppCard key={app.id} app={app} wide onClick={() => openApp(app.id)} />
+                      <AppCard
+                        key={app.id}
+                        app={app}
+                        wide
+                        modelUnavailable={modelUnavailable}
+                        onClick={() => openApp(app.id)}
+                      />
                     ))}
                   </div>
                 </section>
@@ -258,6 +300,7 @@ export function MarketplaceShell() {
                           key={app.id}
                           app={app}
                           compact
+                          modelUnavailable={modelUnavailable}
                           onClick={() => openApp(app.id)}
                         />
                       ))}
@@ -282,7 +325,7 @@ export function MarketplaceShell() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2 overflow-x-auto pb-1">
+                  <div className="flex flex-wrap items-center gap-2 overflow-x-auto pb-1">
                     {categories.map((item) => (
                       <Button
                         key={item}
@@ -294,11 +337,25 @@ export function MarketplaceShell() {
                         {item}
                       </Button>
                     ))}
+                    <Button
+                      size="sm"
+                      variant={offlineOnly ? "default" : "outline"}
+                      onClick={() => setOfflineOnly((v) => !v)}
+                      className={cn("shrink-0 rounded-full", !offlineOnly && "bg-background/70")}
+                    >
+                      仅无需模型
+                    </Button>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     {filteredApps.map((app) => (
-                      <AppCard key={app.id} app={app} wide onClick={() => openApp(app.id)} />
+                      <AppCard
+                        key={app.id}
+                        app={app}
+                        wide
+                        modelUnavailable={modelUnavailable}
+                        onClick={() => openApp(app.id)}
+                      />
                     ))}
                   </div>
                   {filteredApps.length === 0 && (

@@ -164,6 +164,31 @@ class A2AConfig(BaseModel):
     a2a_servers: List[A2AServerConfig] = Field(default_factory=list)
 
 
+class ModelResilienceConfig(BaseModel):
+    """LLM resilience: breaker, retry budget, fallback, DLQ replay."""
+    enabled: bool = True
+    fallback_enabled: bool = False
+    allow_cross_provider_fallback: bool = False
+    max_attempts_per_call: int = Field(default=3, gt=0, le=10)
+    max_call_budget_seconds: float = Field(default=120.0, gt=0, le=600)
+    breaker_window_seconds: int = Field(default=60, gt=0, le=3600)
+    breaker_error_threshold: int = Field(default=5, gt=0, le=100)
+    breaker_open_ttl_seconds: int = Field(default=60, gt=0, le=3600)
+    breaker_halfopen_probe_timeout_seconds: int = Field(default=10, gt=0, le=60)
+    fast_fail_on_open_circuit: bool = True
+    dlq_replay_enabled: bool = False
+    dlq_replay_batch_size: int = Field(default=4, gt=0, le=20)
+    dlq_replay_interval_seconds: int = Field(default=5, gt=0, le=60)
+
+
+class FeatureFlagsConfig(BaseModel):
+    """Static feature gates — route visibility, not runtime health."""
+    enable_agent_features: bool = True
+    enable_marketplace_llm_apps: bool = True
+    enable_embeddings: bool = True
+    enable_image_generation: bool = True
+
+
 class AppConfig(BaseModel):
     """应用运行时配置（config.yaml）"""
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -175,5 +200,7 @@ class AppConfig(BaseModel):
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     mcp_config: MCPConfig = Field(default_factory=MCPConfig)
     a2a_config: A2AConfig = Field(default_factory=A2AConfig)
+    model_resilience: ModelResilienceConfig = Field(default_factory=ModelResilienceConfig)
+    feature_flags: FeatureFlagsConfig = Field(default_factory=FeatureFlagsConfig)
 
     model_config = ConfigDict(extra="allow")

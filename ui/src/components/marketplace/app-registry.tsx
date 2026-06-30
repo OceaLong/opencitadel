@@ -4,7 +4,33 @@ import dynamic from "next/dynamic";
 import { Layers3 } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 
-import type { MarketplaceApp } from "@/lib/api/types";
+import type { MarketplaceApp, ModelDependency } from "@/lib/api/types";
+
+const MODEL_DEPENDENCY: Record<string, ModelDependency> = {
+  "video-search": "optional",
+  "nutrition-analysis": "required",
+  "consumption-calculator": "required",
+  "document-qa": "required",
+  "smart-translation": "required",
+  "prompt-lab": "required",
+  "qr-generator": "none",
+  "dev-toolbox": "none",
+  "secret-generator": "none",
+  "party-room": "none",
+  questionnaire: "none",
+  "personality-tests": "none",
+  "fortune-teller": "optional",
+  "unit-converter": "none",
+  "document-converter": "none",
+  "watermark-tool": "optional",
+};
+
+function withModelDependency(meta: MarketplaceApp): MarketplaceApp {
+  return {
+    ...meta,
+    model_dependency: meta.model_dependency ?? MODEL_DEPENDENCY[meta.id] ?? "optional",
+  };
+}
 
 const lazy = <P extends object>(loader: () => Promise<ComponentType<P>>) =>
   dynamic<P>(loader, { ssr: false });
@@ -388,7 +414,7 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
   },
 ];
 
-export const FALLBACK_APPS = MARKETPLACE_REGISTRY.map((entry) => entry.meta);
+export const FALLBACK_APPS = MARKETPLACE_REGISTRY.map((entry) => withModelDependency(entry.meta));
 
 const REGISTRY_BY_ID = new Map(MARKETPLACE_REGISTRY.map((entry) => [entry.meta.id, entry]));
 

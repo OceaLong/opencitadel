@@ -264,6 +264,8 @@ export type CreateA2AServerParams = {
 
 // ==================== 应用市场 ====================
 
+export type ModelDependency = "none" | "optional" | "required";
+
 export type MarketplaceApp = {
   id: string;
   name: string;
@@ -274,7 +276,24 @@ export type MarketplaceApp = {
   featured: boolean;
   accent: string;
   needs_vision: boolean;
+  model_dependency?: ModelDependency;
   examples: string[];
+};
+
+export type LLMStatusData = {
+  status: "not_configured" | "configured" | "ok" | "degraded" | "unknown";
+  default_model?: {
+    model_id: string;
+    display_name: string;
+    provider: string;
+    base_url_configured: boolean;
+    api_key_configured: boolean;
+  } | null;
+  embedding: {
+    api_key_configured: boolean;
+    vector_enabled: boolean;
+    enabled: boolean;
+  };
 };
 
 export type MarketplaceAppsData = {
@@ -940,7 +959,7 @@ export type SSEEventData =
       } & EventMeta;
     }
   | { type: "done"; data: Record<string, unknown> & EventMeta }
-  | { type: "error"; data: { error: string } & EventMeta };
+  | { type: "error"; data: { error: string; code?: string | null } & EventMeta };
 
 /**
  * SSE 事件处理器
@@ -1032,6 +1051,7 @@ export type Codebase = {
   workspace_path?: string;
   ingest_task_id?: string | null;
   error?: string | null;
+  vector_degraded?: boolean;
   created_at?: string;
   updated_at?: string;
 };

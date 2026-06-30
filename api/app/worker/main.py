@@ -8,6 +8,7 @@ import socket
 import uuid
 
 from app.application.services.bootstrap_service import bootstrap_data
+from app.application.services.config_provider import get_runtime_config
 from app.application.services.task_runner_factory import TaskRunnerFactory
 from app.container import get_worker_container, init_worker_container, shutdown_worker_container
 from app.domain.external.sandbox import Sandbox
@@ -27,6 +28,9 @@ from app.infrastructure.external.task.task_lease import (
     renew_task_lease,
     try_acquire_task_lease,
 )
+from app.domain.models.error_codes import MODEL_UNAVAILABLE
+from app.infrastructure.external.llm.circuit_breaker import get_llm_circuit_breaker
+from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError
 from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
 from app.infrastructure.logging import setup_logging
 from app.infrastructure.observability.logging_context import bind_context, configure_structured_logging
@@ -97,6 +101,10 @@ class AgentWorker:
         admission = get_admission_runtime_settings()
         await self._reconcile_orphaned_tasks("startup")
         reconcile_task = asyncio.create_task(self._task_reconcile_loop())
+        runtime = get_runtime_config()
+        dlq_replay_task = None
+        if runtime.model_resilience.dlq_replay_enabled:
+            dlq_replay_task = asyncio.create_task(self._dlq_replay_loop())
         logger.info(
             "Agent worker 启动: consumer=%s max_concurrent=%s node=%s",
             self._consumer_name,
@@ -136,6 +144,12 @@ class AgentWorker:
             await reconcile_task
         except asyncio.CancelledError:
             pass
+        if dlq_replay_task is not None:
+            dlq_replay_task.cancel()
+            try:
+                await dlq_replay_task
+            except asyncio.CancelledError:
+                pass
 
         if self._active_tasks:
             try:
@@ -157,6 +171,40 @@ class AgentWorker:
         while self._running:
             await asyncio.sleep(TASK_RECONCILE_INTERVAL_SECONDS)
             await self._reconcile_orphaned_tasks("periodic")
+
+    async def _dlq_replay_loop(self) -> None:
+        while self._running:
+            runtime = get_runtime_config()
+            cfg = runtime.model_resilience
+            await asyncio.sleep(max(1, cfg.dlq_replay_interval_seconds))
+            if not cfg.dlq_replay_enabled:
+                continue
+            try:
+                batch = await self._task_state.read_dlq_batch(cfg.dlq_replay_batch_size)
+                if not batch:
+                    continue
+                for message_id, fields in batch:
+                    error_code = str(fields.get("error_code") or "")
+                    if not error_code.startswith("MODEL_"):
+                        continue
+                    session_id = fields.get("session_id")
+                    model_id = None
+                    if session_id:
+                        async with get_uow() as uow:
+                            session = await uow.session.get_by_id(session_id)
+                            if session:
+                                model_id = session.model_id
+                    if not model_id:
+                        default = await self._runner_factory._llm_model_service.get_default_model()
+                        model_id = default.id if default else None
+                    if model_id and await get_llm_circuit_breaker().is_open(model_id):
+                        logger.info("DLQ 重放暂停（模型熔断开路）: model_id=%s", model_id)
+                        break
+                    await self._task_state.replay_dlq_entry(message_id, fields)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("DLQ 重放循环异常: %s", exc)
 
     async def _reconcile_orphaned_tasks(self, reason: str) -> None:
         admission = get_admission_runtime_settings()
@@ -181,6 +229,20 @@ class AgentWorker:
                     continue
                 lease_owner = await get_task_lease_owner(task_id)
                 if lease_owner:
+                    continue
+
+                model_id = session.model_id
+                if not model_id:
+                    default_model = await self._runner_factory._llm_model_service.get_default_model()
+                    model_id = default_model.id if default_model else None
+                if model_id and await get_llm_circuit_breaker().is_open(model_id):
+                    logger.info(
+                        "孤儿任务跳过恢复（模型熔断开路）: session_id=%s task_id=%s model_id=%s reason=%s",
+                        session.id,
+                        task_id,
+                        model_id,
+                        reason,
+                    )
                     continue
 
                 checkpoint = await self._checkpoint_service.resume_latest_checkpoint(session.id)
@@ -268,6 +330,24 @@ class AgentWorker:
                     admission.task_execution_lease_seconds,
                 )
                 await self._task_state.ack_dispatch(message_id)
+            except ModelUnavailableError as exc:
+                logger.warning(
+                    "Worker 模型快速失败: task_id=%s session_id=%s code=%s error=%s",
+                    task_id,
+                    session_id,
+                    exc.error_code,
+                    exc,
+                )
+                async with get_uow() as uow:
+                    await uow.session.update_status(session_id, SessionStatus.FAILED)
+                await self._task_state.mark_dispatch_failure(
+                    message_id=message_id,
+                    task_id=task_id,
+                    session_id=session_id,
+                    error=str(exc),
+                    error_code=exc.error_code,
+                    fast_fail=True,
+                )
             except Exception as exc:
                 logger.exception(
                     "Worker 执行任务失败: task_id=%s session_id=%s error=%s",
@@ -361,6 +441,21 @@ class AgentWorker:
 
         async with get_uow() as uow:
             await uow.session.update_status(session_id, SessionStatus.RUNNING)
+
+        model_id = session.model_id
+        if not model_id:
+            default_model = await self._runner_factory._llm_model_service.get_default_model()
+            model_id = default_model.id if default_model else None
+        runtime = get_runtime_config()
+        if (
+            model_id
+            and runtime.model_resilience.fast_fail_on_open_circuit
+            and await get_llm_circuit_breaker().is_open(model_id)
+        ):
+            raise ModelUnavailableError(
+                "模型熔断开路，任务快速失败",
+                error_code=MODEL_UNAVAILABLE,
+            )
 
         runner = await self._runner_factory.create_runner(session)
         task = self._task_cls(

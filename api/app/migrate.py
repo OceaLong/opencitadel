@@ -10,6 +10,7 @@ from alembic.config import Config
 
 from app.infrastructure.logging import setup_logging
 from app.migrate_llm_api_keys import migrate_legacy_plaintext_api_keys
+from app.migrate_app_config_seed import seed_app_config_from_yaml_if_empty
 from app.runtime_role import ProcessRole, set_role
 
 set_role(ProcessRole.MIGRATE)
@@ -23,6 +24,9 @@ def main() -> None:
 
     migrated = asyncio.run(migrate_legacy_plaintext_api_keys())
     print(f"LLM API key migration complete: migrated={migrated}")
+
+    seeded = asyncio.run(seed_app_config_from_yaml_if_empty())
+    print(f"AppConfig YAML seed complete: seeded={seeded}")
 
 
 if __name__ == "__main__":

@@ -335,7 +335,11 @@ class AgentService:
                     logger.info("会话[%s]本轮运行结束 task_id=%s", session_id, task.id)
             except Exception as e:
                 logger.exception("任务会话[%s]对话出错: %s", session_id, e)
-                event = ErrorEvent(error=str(e))
+                code = getattr(e, "error_code", None)
+                if not code:
+                    from app.domain.utils.llm_retry import classify_llm_error_code
+                    code = classify_llm_error_code(e)
+                event = ErrorEvent(error=str(e), code=code)
                 try:
                     seq = await self._event_sequence.allocate()
                     event.id = str(seq)

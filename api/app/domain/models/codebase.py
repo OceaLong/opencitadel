@@ -71,6 +71,7 @@ class Codebase(BaseModel):
     snapshot_key: Optional[str] = None
     ingest_task_id: Optional[str] = None
     error: Optional[str] = None
+    vector_degraded: bool = False
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 

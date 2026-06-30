@@ -10,6 +10,7 @@ from typing import AsyncGenerator, Callable, List, Optional, Tuple, Type
 
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.sandbox import Sandbox
+from app.domain.models.error_codes import EMBEDDING_UNAVAILABLE
 from app.domain.models.codebase import Codebase, CodebaseSourceType, CodebaseStatus
 from app.domain.models.event import BaseEvent, DoneEvent, ErrorEvent, MessageEvent, StepEvent, StepEventStatus
 from app.domain.repositories.uow import IUnitOfWork
@@ -38,7 +39,7 @@ class CodebaseIngestionRunner:
             async with self._uow_factory() as uow:
                 codebase = await uow.codebase.get_by_id(codebase_id)
             if not codebase:
-                yield ErrorEvent(error=f"代码库不存在: {codebase_id}")
+                yield ErrorEvent(error=f"代码库不存在: {codebase_id}", code="TASK_INFRA_FAILED")
                 return
 
             yield StepEvent(
@@ -95,19 +96,37 @@ class CodebaseIngestionRunner:
                 description="正在建立向量索引...",
             )
             await self._set_status(codebase_id, CodebaseStatus.INDEXING)
-            chunks = await self._indexer.build_chunks(
-                codebase_id,
-                analysis.files,
-                analysis.symbols,
-                analysis.file_contents,
-            )
+            vector_degraded = False
+            try:
+                chunks = await self._indexer.build_chunks(
+                    codebase_id,
+                    analysis.files,
+                    analysis.symbols,
+                    analysis.file_contents,
+                )
+            except Exception as exc:
+                logger.warning("向量索引降级（Embedding 不可用）: %s", exc)
+                chunks = []
+                vector_degraded = True
+            if chunks and all(not c.embedding for c in chunks):
+                vector_degraded = True
             async with self._uow_factory() as uow:
                 await uow.codebase.save_chunks(chunks)
+                codebase = await uow.codebase.get_by_id(codebase_id)
+                if codebase:
+                    has_vectors = any(c.embedding for c in chunks)
+                    codebase.vector_degraded = vector_degraded or not has_vectors
+                    if has_vectors and not vector_degraded:
+                        codebase.vector_degraded = False
+                    await uow.codebase.save(codebase)
 
+            index_desc = f"索引完成: {len(chunks)} 块"
+            if vector_degraded:
+                index_desc += "（语义检索已降级，Embedding 恢复后可重建索引）"
             yield StepEvent(
                 status=StepEventStatus.COMPLETED,
                 name="index",
-                description=f"索引完成: {len(chunks)} 块",
+                description=index_desc,
             )
 
             yield StepEvent(
@@ -155,7 +174,7 @@ class CodebaseIngestionRunner:
         except Exception as exc:
             logger.exception("代码库摄取失败: %s", exc)
             await self._set_status(codebase_id, CodebaseStatus.FAILED, str(exc))
-            yield ErrorEvent(error=str(exc))
+            yield ErrorEvent(error=str(exc), code=EMBEDDING_UNAVAILABLE if "embed" in str(exc).lower() else None)
 
     async def _set_status(
             self,

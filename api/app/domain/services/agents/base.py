@@ -29,7 +29,9 @@ from app.domain.services.tools.tool_names import (
     normalize_tool_name,
 )
 from app.domain.utils.vision_tokens import estimate_messages_tokens
+from app.domain.models.error_codes import MODEL_UNAVAILABLE, TASK_INFRA_FAILED
 from app.domain.utils.llm_retry import is_retriable_llm_error
+from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -428,6 +430,8 @@ class BaseAgent(ABC):
             except Exception as e:
                 if is_retriable_llm_error(e):
                     raise
+                if isinstance(e, ModelUnavailableError):
+                    raise
                 error_msg = _format_agent_error(e)
                 logger.error(
                     f"调用语言模型发生错误: {error_msg}",
@@ -791,7 +795,10 @@ class BaseAgent(ABC):
                 self._pending_usage_event = None
         else:
             # 13.超过最大迭代次数后，则抛出错误
-            yield ErrorEvent(error=f"Agent迭代超过最大迭代次数: {self._agent_config.max_iterations}, 任务处理失败")
+            yield ErrorEvent(
+                error=f"Agent迭代超过最大迭代次数: {self._agent_config.max_iterations}, 任务处理失败",
+                code=TASK_INFRA_FAILED,
+            )
 
         # 14.在指定步骤内完成了迭代则返回消息事件
         if message and message.get("content") is not None:
@@ -800,4 +807,4 @@ class BaseAgent(ABC):
                 stream_id=message.get("stream_id"),
             )
         else:
-            yield ErrorEvent(error="Agent未能生成有效回复内容")
+            yield ErrorEvent(error="Agent未能生成有效回复内容", code=MODEL_UNAVAILABLE)

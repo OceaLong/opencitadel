@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Cpu } from "lucide-react";
 
 import { InlineOptionPicker } from "@/components/inline-option-picker";
+import { Badge } from "@/components/ui/badge";
 
 import {
   filterSupportedModels,
@@ -11,6 +13,7 @@ import {
   onModelsCacheInvalidated,
   resolveDefaultModelId,
 } from "@/lib/api/models-cache";
+import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
 import type { LLMModel } from "@/lib/api/types";
 
 type Props = {
@@ -33,6 +36,22 @@ export function SessionModelPicker({
   className,
 }: Props) {
   const [models, setModels] = useState<LLMModel[]>([]);
+  const [llmUnavailable, setLlmUnavailable] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    llmStatusApi
+      .getStatus()
+      .then((data) => {
+        if (!cancelled) setLlmUnavailable(isModelUnavailableStatus(data.status));
+      })
+      .catch(() => {
+        if (!cancelled) setLlmUnavailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,13 +105,24 @@ export function SessionModelPicker({
   const pickerValue = value ?? defaultModelId;
 
   return (
-    <InlineOptionPicker
-      value={pickerValue}
-      options={options}
-      placeholder="暂无模型"
-      onChange={onChange}
-      disabled={disabled || options.length === 0}
-      className={className}
-    />
+    <div className={className}>
+      {options.length === 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <Badge variant="destructive" className="text-[10px]">
+            {llmUnavailable ? "模型暂不可用" : "未配置模型"}
+          </Badge>
+          <Link href="/settings" className="text-primary text-xs underline">
+            前往模型设置
+          </Link>
+        </div>
+      )}
+      <InlineOptionPicker
+        value={pickerValue}
+        options={options}
+        placeholder="暂无模型"
+        onChange={onChange}
+        disabled={disabled || options.length === 0}
+      />
+    </div>
   );
 }

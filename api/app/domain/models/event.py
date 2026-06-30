@@ -237,6 +237,7 @@ class ErrorEvent(BaseEvent):
     """错误事件"""
     type: Literal["error"] = "error"
     error: str = ""  # 错误信息
+    code: Optional[str] = None  # 分级错误码 MODEL_* / TOOL_* / ...
     parent_event_id: Optional[str] = None
     parent_span_id: Optional[str] = None
 

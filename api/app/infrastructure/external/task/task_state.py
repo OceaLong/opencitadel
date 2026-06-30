@@ -324,6 +324,9 @@ class TaskStateService:
             task_id: str,
             session_id: str,
             error: str,
+            *,
+            error_code: Optional[str] = None,
+            fast_fail: bool = False,
     ) -> None:
         meta = await self.get_task_meta(task_id) or {
             "task_id": task_id,
@@ -334,24 +337,33 @@ class TaskStateService:
         retry_count = int(meta.get("retry_count") or 0) + 1
         meta["retry_count"] = retry_count
         meta["last_error"] = error
+        if error_code:
+            meta["error_code"] = error_code
 
-        if retry_count >= max(1, self._runtime_settings.task_dispatch_max_retries):
+        max_retries = max(1, self._runtime_settings.task_dispatch_max_retries)
+        terminal = fast_fail or retry_count >= max_retries
+
+        if terminal:
             meta["status"] = TaskStatus.FAILED.value
+            dlq_fields = {
+                "task_id": task_id,
+                "session_id": session_id,
+                "error": error,
+                "retry_count": retry_count,
+            }
+            if error_code:
+                dlq_fields["error_code"] = error_code
             logger.error(
-                "任务派发进入 DLQ: task_id=%s session_id=%s retry_count=%s error=%s",
+                "任务派发进入 DLQ: task_id=%s session_id=%s retry_count=%s error_code=%s error=%s",
                 task_id,
                 session_id,
                 retry_count,
+                error_code or "",
                 error,
             )
             await self._redis.client.xadd(
                 TASK_DISPATCH_DLQ_STREAM,
-                {
-                    "task_id": task_id,
-                    "session_id": session_id,
-                    "error": error,
-                    "retry_count": retry_count,
-                },
+                dlq_fields,
                 maxlen=self._runtime_settings.stream_maxlen,
                 approximate=True,
             )
@@ -385,6 +397,63 @@ class TaskStateService:
         except Exception as exc:
             logger.warning("读取 DLQ 积压数量失败: %s", exc)
             return 0
+
+    async def read_dlq_batch(self, count: int = 4) -> list[tuple[str, Dict[str, Any]]]:
+        """Return (message_id, fields) pairs from DLQ head."""
+        try:
+            raw = await self._redis.client.xrange(
+                TASK_DISPATCH_DLQ_STREAM,
+                min="-",
+                max="+",
+                count=max(1, count),
+            )
+        except Exception as exc:
+            logger.warning("读取 DLQ 批次失败: %s", exc)
+            return []
+        parsed: list[tuple[str, Dict[str, Any]]] = []
+        for message_id, fields in raw or []:
+            mid = message_id.decode() if isinstance(message_id, bytes) else str(message_id)
+            normalized: Dict[str, Any] = {}
+            for key, value in (fields or {}).items():
+                k = key.decode() if isinstance(key, bytes) else str(key)
+                v = value.decode() if isinstance(value, bytes) else value
+                normalized[k] = v
+            parsed.append((mid, normalized))
+        return parsed
+
+    async def replay_dlq_entry(self, message_id: str, fields: Dict[str, Any]) -> bool:
+        """Re-dispatch a MODEL_* DLQ entry after resetting retry metadata."""
+        error_code = str(fields.get("error_code") or "")
+        if not error_code.startswith("MODEL_"):
+            return False
+        task_id = fields.get("task_id")
+        session_id = fields.get("session_id")
+        if not task_id or not session_id:
+            return False
+        meta = await self.get_task_meta(task_id) or {
+            "task_id": task_id,
+            "session_id": session_id,
+            "status": TaskStatus.PENDING.value,
+        }
+        meta["retry_count"] = 0
+        meta["status"] = TaskStatus.PENDING.value
+        meta.pop("last_error", None)
+        meta.pop("error_code", None)
+        await self._redis.client.set(
+            self.meta_key(task_id),
+            json.dumps(meta),
+            ex=TASK_META_TTL_SECONDS,
+        )
+        await self._redis.client.xdel(TASK_DISPATCH_DLQ_STREAM, message_id)
+        await self.dispatch(task_id, session_id)
+        logger.info(
+            "DLQ 条目已重放: message_id=%s task_id=%s session_id=%s error_code=%s",
+            message_id,
+            task_id,
+            session_id,
+            error_code,
+        )
+        return True
 
 
 _task_state: Optional[TaskStateService] = None

@@ -96,3 +96,25 @@ mcp_config:
 
 a2a_config:
   a2a_servers: []
+
+# 模型韧性治理（行为配置唯一来源：AppConfig）
+model_resilience:
+  enabled: true
+  fallback_enabled: false
+  allow_cross_provider_fallback: false
+  max_attempts_per_call: 3
+  max_call_budget_seconds: 120
+  breaker_window_seconds: 60
+  breaker_error_threshold: 5
+  breaker_open_ttl_seconds: 60
+  breaker_halfopen_probe_timeout_seconds: 10
+  fast_fail_on_open_circuit: true
+  dlq_replay_enabled: false
+  dlq_replay_batch_size: 4
+  dlq_replay_interval_seconds: 5
+
+feature_flags:
+  enable_agent_features: true
+  enable_marketplace_llm_apps: true
+  enable_embeddings: true
+  enable_image_generation: true
