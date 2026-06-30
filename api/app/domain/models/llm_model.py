@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -70,16 +70,3 @@ class LLMModel(BaseModel):
             masked.api_key = masked.api_key[:4] + "****" + masked.api_key[-4:] if len(masked.api_key) > 8 else "****"
         return masked
 
-    @classmethod
-    def from_llm_config(cls, llm_config, display_name: str = "默认模型") -> "LLMModel":
-        """从旧版LLMConfig迁移创建"""
-        return cls(
-            display_name=display_name,
-            provider=LLMProvider.OPENAI,
-            base_url=str(llm_config.base_url),
-            api_key=llm_config.api_key,
-            model_name=llm_config.model_name,
-            temperature=llm_config.temperature,
-            max_tokens=llm_config.max_tokens,
-            is_default=True,
-        )

@@ -65,7 +65,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 docker compose build manus-sandbox
 ```
 
-生产环境中沙箱作为固定容器运行，API/Worker 通过 `config.yaml` 的 `sandbox.address` 连接。
+默认生产路径为动态沙箱：`api/config.yaml` 中 `sandbox.address: null` 时，Worker 通过 Docker/Kubernetes driver 按任务创建 `manus-sandbox-*` 实例。固定容器仅用于 `docker compose --profile fixed-sandbox` 或外部沙箱集群，此时再通过 `sandbox.address` 连接。
 
 ### 超时配置
 

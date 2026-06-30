@@ -173,18 +173,6 @@ export type SessionMemoryData = {
 // ==================== 配置模块类型 ====================
 
 /**
- * LLM 配置
- */
-export type LLMConfig = {
-  base_url?: string;
-  api_key?: string;
-  model_name?: string;
-  temperature?: number;
-  max_tokens?: number;
-  [key: string]: unknown;
-};
-
-/**
  * Agent 通用配置
  */
 export type AgentConfig = {

@@ -497,7 +497,7 @@ bash deploy/scripts/verify-host-health.sh after
 
 #### 3. 数据库性能调优
 
-PostgreSQL 参数已内置于 `docker-compose.yml`（匹配 1.5GB 容器：`shared_buffers=384MB`、`effective_cache_size=1GB`、`work_mem=16MB`）。修改 compose 后执行：
+PostgreSQL 参数已内置于 `docker-compose.yml`（匹配 1GB 容器：`shared_buffers=256MB`、`effective_cache_size=768MB`、`work_mem=8MB`）。修改 compose 后执行：
 
 ```bash
 docker compose up -d manus-postgres
@@ -507,49 +507,7 @@ docker compose up -d manus-postgres
 
 ### 高可用部署
 
-#### 主从复制（PostgreSQL）
-
-```yaml
-# docker-compose.ha.yml
-services:
-  manus-postgres-master:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    volumes:
-      - postgres_master_data:/var/lib/postgresql/data
-    command: >
-      postgres
-      -c wal_level=replica
-      -c max_wal_senders=3
-      -c max_replication_slots=3
-
-  manus-postgres-slave:
-    image: postgres:16-alpine
-    depends_on:
-      - manus-postgres-master
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    command: >
-      bash -c "
-      pg_basebackup -h manus-postgres-master -U ${POSTGRES_USER} -D /var/lib/postgresql/data -Fp -Xs -P -R &&
-      exec postgres
-      "
-```
-
-#### Redis Sentinel
-
-```yaml
-services:
-  manus-redis-sentinel:
-    image: redis:7-alpine
-    command: redis-sentinel /etc/redis/sentinel.conf
-    volumes:
-      - ./redis/sentinel.conf:/etc/redis/sentinel.conf
-```
+仓库当前仅内置单节点 `docker-compose.yml` 与 Helm Chart。高可用演进（PostgreSQL/Redis 外置、API/Worker HPA、沙箱外置）以 [`docs/architecture-evolution.md`](docs/architecture-evolution.md) 为准，避免在 README 中维护未落地的 compose 片段。
 
 ### 负载均衡
 
@@ -568,34 +526,7 @@ upstream manus_backend {
 
 #### 1. 数据库备份
 
-```bash
-#!/bin/bash
-# backup_postgres.sh
-
-BACKUP_DIR="/opt/backups/postgres"
-DATE=$(date +%Y%m%d_%H%M%S)
-RETENTION_DAYS=30
-
-mkdir -p $BACKUP_DIR
-
-# 全量备份
-docker exec manus-postgres pg_dump -U ${POSTGRES_USER} ${POSTGRES_DB} | \
-  gzip > ${BACKUP_DIR}/manus_${DATE}.sql.gz
-
-# 删除过期备份
-find $BACKUP_DIR -name "manus_*.sql.gz" -mtime +${RETENTION_DAYS} -delete
-
-# 同步到远程存储（可选）
-# aws s3 cp ${BACKUP_DIR}/manus_${DATE}.sql.gz s3://your-backup-bucket/
-```
-
-**定时任务：**
-
-```bash
-# 每天凌晨 2 点备份
-crontab -e
-0 2 * * * /opt/scripts/backup_postgres.sh >> /var/log/backup.log 2>&1
-```
+数据库备份策略以 [`DEPLOYMENT.md`](DEPLOYMENT.md) 为准。仓库未内置备份脚本，生产环境请将 `pg_dump`、保留周期与远端同步封装为自己的运维脚本或外部备份任务。
 
 #### 2. 文件备份（COS 跨区域复制）
 
@@ -788,25 +719,7 @@ docker stats manus-api manus-worker manus-postgres manus-redis
 
 #### 4. Prometheus + Grafana（推荐扩展）
 
-```yaml
-# docker-compose.monitoring.yml
-services:
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
-
-  grafana:
-    image: grafana/grafana:latest
-    volumes:
-      - grafana_data:/var/lib/grafana
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-```
+仓库未内置 Prometheus/Grafana compose 文件。接入时请在外部监控栈中 scrape API 的 `/api/metrics`，或在 Helm/Kubernetes 环境使用集群已有的 ServiceMonitor/OTel Collector。
 
 **监控指标：**
 - CPU/内存使用率（API / Worker 分离观测）
@@ -973,7 +886,7 @@ docker compose logs manus-api > api_logs.txt
 
 # 手动执行数据库迁移（通常由 manus-migrate 自动完成）
 docker compose run --rm manus-migrate
-# 或本地: cd api && ./migrate.sh
+# 或本地: cd api && ./migrate.sh（委托 python -m app.migrate）
 
 # 进入 PostgreSQL
 docker exec -it manus-postgres psql -U postgres -d manus
@@ -1021,7 +934,7 @@ playwright install
 # 2. 启动基础设施（PostgreSQL + Redis）
 docker compose up -d manus-postgres manus-redis
 
-# 3. 执行数据库迁移
+# 3. 执行数据库迁移（完整入口：Alembic + 数据迁移/配置种子）
 ./migrate.sh
 
 # 4. 启动 API（终端 1）

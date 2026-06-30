@@ -195,18 +195,3 @@ class BingSearchEngine(SearchEngine):
                 data=error_results,
             )
 
-
-if __name__ == "__main__":
-    import asyncio
-
-
-    async def test():
-        search_engine = BingSearchEngine()
-        result = await search_engine.invoke("小米股价", "past_day")
-
-        print(result)
-        for item in result.data.results:
-            print(item)
-
-
-    asyncio.run(test())

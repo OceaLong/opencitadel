@@ -399,16 +399,3 @@ async def shutdown_worker_container(container: WorkerContainer | None = None) ->
     await c.shutdown_resources()
     logger.info("WorkerContainer resources shut down")
 
-
-# Legacy helpers kept for gradual migration.
-async def init_container(container: ApiContainer | WorkerContainer | None = None) -> ApiContainer | WorkerContainer:
-    if get_role() == ProcessRole.WORKER:
-        return await init_worker_container(container if isinstance(container, WorkerContainer) else None)
-    return await init_api_container(container if isinstance(container, ApiContainer) else None)
-
-
-async def shutdown_container(container: ApiContainer | WorkerContainer | None = None) -> None:
-    if get_role() == ProcessRole.WORKER:
-        await shutdown_worker_container(container if isinstance(container, WorkerContainer) else None)
-    else:
-        await shutdown_api_container(container if isinstance(container, ApiContainer) else None)

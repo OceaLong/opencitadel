@@ -62,16 +62,6 @@ export const LIKERT_LABELS_5 = [
   "非常同意",
 ] as const;
 
-export const LIKERT_LABELS_7 = [
-  "非常不同意",
-  "不同意",
-  "略不同意",
-  "中立",
-  "略同意",
-  "同意",
-  "非常同意",
-] as const;
-
 export function isLikertQuestion(q: QuizQuestion): q is LikertQuestion {
   return q.type === "likert";
 }

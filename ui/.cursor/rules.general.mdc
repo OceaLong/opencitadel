@@ -53,7 +53,7 @@ alwaysApply: true
 - 组件：`src/components/**/*.tsx`
 - 工具函数：`src/lib/**/*.ts`
 - Hooks：`src/hooks/**/*.ts`
-- UI 设计稿：`docs/design/`（仅存放导出的参考图，不提交大体积源文件）
+- UI 参考资料：仅在确有必要时提交轻量图片或链接说明
 
 ### 代码质量
 - 遵循 ESLint 规则（Next.js core-web-vitals + TypeScript）
@@ -79,10 +79,10 @@ alwaysApply: true
 - 图片使用 `next/image`
 - 避免不必要的客户端组件
 
-### UI 设计稿
-- 存放路径：`docs/design/`，按页面/功能模块分子目录
-- 仅提交轻量参考图（PNG/JPG），大体积源文件（Figma/Sketch/PSD）通过在线链接引用
-- 开发组件时应参考 `docs/design/` 中的设计稿还原 UI
+### UI 参考资料
+- 仅提交轻量参考图（PNG/JPG）或在线设计链接说明
+- 大体积源文件（Figma/Sketch/PSD）通过在线链接引用
+- 开发组件时优先参考现有页面和组件库风格，避免依赖已移除的历史设计稿目录
 
 ## 后端接口规范
 
@@ -100,8 +100,8 @@ alwaysApply: true
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/app-config/llm` | 获取 LLM 配置 |
-| POST | `/app-config/llm` | 更新 LLM 配置 |
+| GET | `/llm-models` | 获取模型列表 |
+| POST | `/llm-models` | 新增模型 |
 | GET | `/app-config/agent` | 获取 Agent 通用配置 |
 | POST | `/app-config/agent` | 更新 Agent 通用配置 |
 | GET | `/app-config/mcp-servers` | 获取 MCP 服务器列表 |

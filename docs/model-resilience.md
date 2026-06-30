@@ -57,8 +57,7 @@ flowchart LR
 | MemoryExtractor | 继承 runner 注入的 `llm` | chat LLM |
 | VisionGroundingTool | 继承 Agent 注入的 `llm` | chat LLM |
 | Marketplace LLM | `_resolve_text_llm` / `_resolve_vision_llm` | chat LLM |
-| AudioService | Whisper 转写 | 独立域，错误码 `AUDIO_TRANSCRIPTION_FAILED` |
-| ImageGenerationService | 图片生成 | 独立域，错误码 `IMAGE_GENERATION_FAILED` |
+| ImageGenerationService | 图片生成 | 独立工具域，不经 chat LLM fallback |
 | `LLMModelService._run_vision_probe` | 用户主动探测 | 原始 `LLMFactory.create`，不经韧性层 |
 
 ## 熔断器状态机
@@ -95,7 +94,7 @@ stateDiagram-v2
 
 - `ResilientLLMClient.streaming_started` 在首个 chunk yield 后置位。
 - `stream_invoke` 在 `streaming_started=true` 后遇错直接抛 `ModelUnavailableError`，不切换候选模型。
-- OpenAI 路径不再独立使用 `with_llm_retry`，重试权威集中在 `ResilientLLMClient`。
+- OpenAI 路径不再保留独立重试 helper，chat LLM 重试权威集中在 `ResilientLLMClient`。
 - `allow_cross_provider_fallback=false` 为默认值；跨 Provider fallback 不是 P0 能力。
 
 ## 健康、SLO 与告警

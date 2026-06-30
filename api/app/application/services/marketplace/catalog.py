@@ -187,7 +187,7 @@ MARKETPLACE_APPS: list[dict[str, Any]] = [
 
 APP_IDS = {app["id"] for app in MARKETPLACE_APPS}
 
-# model_dependency derived from FeatureTier (L1→none, L2→optional, L3→required)
+# Keep model_dependency explicit until backend/frontend marketplace metadata is centralized.
 _APP_MODEL_DEPENDENCY: dict[str, str] = {
     "video-search": "optional",
     "nutrition-analysis": "required",

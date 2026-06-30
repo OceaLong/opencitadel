@@ -3,7 +3,6 @@ import type {
   A2AServersData,
   AgentConfig,
   CreateA2AServerParams,
-  LLMConfig,
   MCPConfig,
   MCPServersData,
 } from "./types";
@@ -12,20 +11,6 @@ import type {
  * 配置模块 API
  */
 export const configApi = {
-  /**
-   * 获取 LLM 配置
-   */
-  getLLMConfig: (): Promise<LLMConfig> => {
-    return get<LLMConfig>("/app-config/llm");
-  },
-
-  /**
-   * 更新 LLM 配置
-   */
-  updateLLMConfig: (config: LLMConfig): Promise<LLMConfig> => {
-    return post<LLMConfig>("/app-config/llm", config);
-  },
-
   /**
    * 获取 Agent 通用配置
    */

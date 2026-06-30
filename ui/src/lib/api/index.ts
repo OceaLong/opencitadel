@@ -5,7 +5,6 @@
 // 核心 fetch 封装
 export {
   ApiError,
-  createSSEConnection,
   createSSEStream,
   del,
   get,
@@ -35,7 +34,6 @@ export type {
   FileUploadParams,
   ListA2AServerItem,
   ListMCPServerItem,
-  LLMConfig,
   MarketplaceApp,
   MarketplaceAppsData,
   MCPConfig,

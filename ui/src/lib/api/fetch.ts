@@ -265,20 +265,6 @@ export function del<T = unknown>(endpoint: string, options?: RequestOptions): Pr
 }
 
 /**
- * 创建 SSE 连接
- */
-export function createSSEConnection(endpoint: string, data?: unknown): EventSource {
-  const url = endpoint.startsWith("http") ? endpoint : `${API_CONFIG.baseURL}${endpoint}`;
-
-  // 对于 POST 请求，使用 fetch + ReadableStream 方式
-  if (data !== undefined) {
-    throw new Error("带数据的 SSE 连接请使用 createSSEStream 函数");
-  }
-
-  return new EventSource(url);
-}
-
-/**
  * 创建流式 SSE 连接（支持 POST 请求）
  *
  * @param endpoint  接口路径

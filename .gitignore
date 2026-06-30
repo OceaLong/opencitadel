@@ -4,7 +4,15 @@
 
 .DS_Store
 .idea/
+.vscode/
 
 __pycache__/
 *.py[cod]
+.venv/
 .pytest_cache/
+
+node_modules/
+.next/
+dist/
+build/
+coverage/

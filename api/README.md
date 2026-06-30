@@ -183,14 +183,15 @@ observability:
 ### 数据库迁移
 
 ```bash
-# 推荐：独立迁移脚本
+# 推荐：独立迁移脚本（Alembic + 数据迁移/配置种子）
 ./migrate.sh
 # 或
 python -m app.migrate
 
 # 开发：生成新迁移
 alembic revision --autogenerate -m "描述"
-alembic upgrade head
+# 应用迁移仍使用完整入口
+./migrate.sh
 ```
 
 > **注意**：API 启动时会校验 DB schema 是否为 Alembic head，未迁移将拒绝启动（test 环境跳过）。

@@ -7,7 +7,6 @@ import {
   Code2,
   Download,
   FileCode2,
-  FolderTree,
   Loader2,
   Plus,
   RefreshCw,
@@ -20,7 +19,6 @@ import { MermaidDiagram } from "@/components/mermaid-diagram";
 import { SessionModeToggle } from "@/components/session-mode-toggle";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VirtualizedTimeline } from "@/components/virtualized-timeline";
 
@@ -114,7 +112,6 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
   const [sourceLine, setSourceLine] = useState<number | undefined>();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [mode, setMode] = useState<SessionMode>("ask");
-  const [navigationOpen, setNavigationOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [ingesting, setIngesting] = useState(false);
   const [ingestLog, setIngestLog] = useState<string[]>([]);
@@ -257,7 +254,6 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
         setSourceContent("");
         setSourceLine(undefined);
       }
-      setNavigationOpen(false);
     },
     [activeId],
   );
@@ -265,7 +261,6 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
   const handleNavigationSourceSelect = useCallback(
     (path: string) => {
       void loadSource(path);
-      setNavigationOpen(false);
     },
     [loadSource],
   );
@@ -291,10 +286,6 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
           </h1>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => setNavigationOpen(true)}>
-            <FolderTree className="mr-1 size-4" />
-            代码库 / 目录
-          </Button>
           <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
             <Plus className="mr-1 size-4" />
             新建
@@ -338,14 +329,14 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
         </div>
       )}
 
-      <Sheet open={navigationOpen} onOpenChange={setNavigationOpen}>
-        <SheetContent side="left" className="w-full gap-0 p-0 sm:max-w-[360px]">
-          <SheetHeader className="border-border border-b">
-            <SheetTitle>代码库与目录</SheetTitle>
-            <SheetDescription>
+      <div className="flex min-h-0 flex-1">
+        <aside className="border-border bg-muted/20 flex w-72 shrink-0 flex-col border-r">
+          <div className="border-border border-b px-3 py-2">
+            <h2 className="text-sm font-medium">代码库与目录</h2>
+            <p className="text-muted-foreground truncate text-xs">
               {activeCodebase ? activeCodebase.name : "选择代码库开始分析"}
-            </SheetDescription>
-          </SheetHeader>
+            </p>
+          </div>
           <ScrollArea className="min-h-0 flex-1">
             <div className="p-2">
               <p className="text-muted-foreground mb-2 px-2 text-xs font-medium">代码库</p>
@@ -386,19 +377,14 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
               </div>
             )}
           </ScrollArea>
-        </SheetContent>
-      </Sheet>
+        </aside>
 
-      <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col">
           {!activeId ? (
             <div className="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-4">
               <Code2 className="size-12 opacity-40" />
               <p>选择或新建代码库开始分析</p>
               <div className="flex items-center gap-2">
-                <Button variant="outline" onClick={() => setNavigationOpen(true)}>
-                  选择代码库
-                </Button>
                 <Button onClick={() => setCreateOpen(true)}>新建代码库</Button>
               </div>
             </div>

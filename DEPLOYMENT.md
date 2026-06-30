@@ -1,15 +1,13 @@
 # MyManus 生产环境部署指南
 
-## 📋 服务器信息
+## 📋 服务器建议
 
 | 项目 | 配置 |
 |------|------|
-| **实例ID** | lhins-afu6m4i6 |
-| **实例名称** | Ubuntu-jkDL |
-| **操作系统** | Ubuntu 24.04 LTS |
-| **CPU/内存** | 8核 / 16GB |
-| **系统盘** | 270GB SSD |
-| **带宽** | 18Mbps |
+| **操作系统** | Ubuntu 24.04 LTS 或同等 Linux 发行版 |
+| **CPU/内存** | 生产建议 8 核 / 16GB 起 |
+| **系统盘** | 100GB+ SSD，按文件与日志保留周期扩容 |
+| **带宽** | 按用户规模与文件上传需求评估 |
 
 ---
 
@@ -233,7 +231,7 @@ docker compose run --rm manus-migrate
 # 或进入 api 容器:
 docker compose exec manus-api python -m app.migrate
 
-# 本地开发
+# 本地开发（等价于 python -m app.migrate）
 cd api && ./migrate.sh
 ```
 

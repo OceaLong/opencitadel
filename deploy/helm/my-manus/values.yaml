@@ -118,8 +118,6 @@ env:
   COS_SCHEME: https
   COS_BUCKET: ""
   COS_DOMAIN: ""
-  OTEL_ENABLED: "false"
-  OTEL_SERVICE_NAME: my-manus-api
 
 # 敏感配置（渲染为 Secret，通过 envFrom 注入）
 secrets:
