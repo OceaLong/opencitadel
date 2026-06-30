@@ -160,18 +160,6 @@ MARKETPLACE_APPS: list[dict[str, Any]] = [
         "examples": ["帮我测一下近期运势", "抽一支签看看事业", "根据生日做星盘推演"],
     },
     {
-        "id": "unit-converter",
-        "name": "单位换算器",
-        "description": "长度、重量、温度、存储与面积常用单位互转",
-        "icon": "📏",
-        "category": "生活",
-        "tags": ["换算", "单位", "温度", "存储"],
-        "featured": False,
-        "accent": "amber",
-        "needs_vision": False,
-        "examples": ["100 公里等于多少英里", "32 华氏度转摄氏度", "1GB 等于多少 MB"],
-    },
-    {
         "id": "document-converter",
         "name": "文档格式转换",
         "description": "md/txt 转 PDF、PDF 转 Word、常用文档格式互转",
@@ -214,7 +202,6 @@ _APP_MODEL_DEPENDENCY: dict[str, str] = {
     "questionnaire": "none",
     "personality-tests": "none",
     "fortune-teller": "optional",
-    "unit-converter": "none",
     "document-converter": "none",
     "watermark-tool": "optional",
 }
@@ -267,7 +254,6 @@ def build_route_prompt() -> str:
 - qr-generator: params.text = 要编码的文本或链接。
 - dev-toolbox: params.text = 待处理的 JSON/Base64/URL 文本。
 - secret-generator: params.length = 密码长度（数字）。
-- unit-converter: params.text = 含数值与单位的描述。
 - document-converter: params.target_format 可为 pdf/docx/md/txt。
 - watermark-tool: params.mode 可为 add/remove；params.text = 水印文字。
 - personality-tests: params.test_id 可为 mbti/enneagram/disc/love/eq/fun-animal。

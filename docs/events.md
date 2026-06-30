@@ -2,19 +2,20 @@
 
 本文档是 MyManus 会话事件系统的权威说明，覆盖领域事件、SSE 线上契约、投影策略、持久化与分页重放。
 
-## 数据流
+## 事件链路
 
-```
-Client ──POST /chat SSE──► FastAPI API
-                              │ 写入 task:input / dispatch
-                              ▼
-                          Redis Streams
-                              │
-                              ▼
-                       Agent Worker / Flow
-                              │ 产出 Domain Event
-                              ├── task:output ──► API SSE live
-                              └── session_events ──► GET /sessions/{id}/events replay
+```mermaid
+flowchart TD
+  Client["Client"] -->|"POST chat SSE"| Api["FastAPI API"]
+  Api -->|"write task input and dispatch"| RedisInput["Redis task streams"]
+  RedisInput -->|"consume"| Worker["Agent Worker or Flow"]
+  Worker -->|"create domain event"| DomainEvent["Domain Event"]
+  DomainEvent -->|"live event"| TaskOutput["Redis task:output"]
+  DomainEvent -->|"persistable event"| SessionEvents["session_events table"]
+  TaskOutput -->|"XREAD live"| EventMapperLive["EventMapper live projection"]
+  SessionEvents -->|"page replay"| EventMapperReplay["EventMapper replay projection"]
+  EventMapperLive -->|"SSE"| Client
+  EventMapperReplay -->|"GET session events"| Client
 ```
 
 - **领域事件**定义在 `api/app/domain/models/event.py`，由 Agent、Flow、TaskRunner 创建。
@@ -69,6 +70,27 @@ Client ──POST /chat SSE──► FastAPI API
 
 实时 SSE 与历史 replay 都必须通过同一投影策略，避免 live/replay 行为不一致。
 
+```mermaid
+flowchart TD
+  Event["Domain Event"] --> PersistCheck{"persist true"}
+  PersistCheck -->|"yes"| Persist["write session_events"]
+  PersistCheck -->|"no"| SkipPersist["skip persistence"]
+  Event --> VisibilityCheck{"visibility"}
+  VisibilityCheck -->|"user"| ProjectUser["project to normal UI"]
+  VisibilityCheck -->|"debug"| DebugFlag{"include_debug"}
+  VisibilityCheck -->|"internal"| InternalFlag{"include_internal"}
+  DebugFlag -->|"true"| ProjectDebug["project debug event"]
+  DebugFlag -->|"false"| DropDebug["drop debug event"]
+  InternalFlag -->|"true"| ProjectInternal["project internal event"]
+  InternalFlag -->|"false"| DropInternal["drop internal event"]
+  ProjectUser --> TransientCheck{"transient event"}
+  ProjectDebug --> TransientCheck
+  ProjectInternal --> TransientCheck
+  TransientCheck -->|"live stream"| LiveOut["send SSE"]
+  TransientCheck -->|"replay and include_transient false"| DropTransient["drop transient replay"]
+  TransientCheck -->|"replay and include_transient true"| ReplayOut["return replay page"]
+```
+
 ## 持久化与分页
 
 事件写入使用 `session_events` 追加表：
@@ -97,3 +119,9 @@ Client ──POST /chat SSE──► FastAPI API
 - `EventMeta` 为所有事件 data 的必备字段。
 - `SSEEventData` 是按 `type` 区分的联合类型。
 - `ui/src/hooks/use-session-detail.ts` 会先读取 `GET /sessions/{id}` 的首屏事件，再使用 `events_next_cursor` 分页补齐历史事件，最后通过 `/chat` SSE 追实时事件。
+
+## 相关文档
+
+- [系统架构](architecture.md)
+- [API/SSE 协议兼容策略](contract-compatibility.md)
+- [模型韧性设计](model-resilience.md)

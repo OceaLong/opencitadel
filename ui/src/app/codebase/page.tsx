@@ -6,7 +6,7 @@ import { CodebaseWorkspace } from "@/components/codebase/codebase-workspace";
 export default function CodebasePage() {
   return (
     <div className="flex h-full flex-col">
-      <ChatHeader />
+      <ChatHeader showSidebarTrigger={false} />
       <CodebaseWorkspace />
     </div>
   );

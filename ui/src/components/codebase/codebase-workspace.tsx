@@ -7,6 +7,7 @@ import {
   Code2,
   Download,
   FileCode2,
+  FolderTree,
   Loader2,
   Plus,
   RefreshCw,
@@ -14,14 +15,16 @@ import {
 import { toast } from "sonner";
 
 import { ChatInput } from "@/components/chat-input";
-import { VirtualizedTimeline } from "@/components/virtualized-timeline";
 import { CreateCodebaseDialog } from "@/components/codebase/create-codebase-dialog";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
 import { SessionModeToggle } from "@/components/session-mode-toggle";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { VirtualizedTimeline } from "@/components/virtualized-timeline";
 
+import { useIncrementalTimeline } from "@/hooks/use-incremental-timeline";
 import { useSessionDetail } from "@/hooks/use-session-detail";
 import { codebaseApi } from "@/lib/api/codebase";
 import { sessionApi } from "@/lib/api/session";
@@ -31,7 +34,6 @@ import type {
   FileTreeNode,
   SessionMode,
 } from "@/lib/api/types";
-import { useIncrementalTimeline } from "@/hooks/use-incremental-timeline";
 import { cn } from "@/lib/utils";
 
 type CodebaseWorkspaceProps = {
@@ -112,6 +114,7 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
   const [sourceLine, setSourceLine] = useState<number | undefined>();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [mode, setMode] = useState<SessionMode>("ask");
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [ingesting, setIngesting] = useState(false);
   const [ingestLog, setIngestLog] = useState<string[]>([]);
@@ -167,6 +170,8 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
         toast.error(err instanceof Error ? err.message : "创建会话失败");
       }
     })();
+    // Mode is applied to outgoing messages; changing it should not recreate the codebase session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, loadCodebaseDetail, router]);
 
   useEffect(() => {
@@ -212,7 +217,7 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
   );
 
   const handleSend = useCallback(
-    async (message: string, _files: unknown[]) => {
+    async (message: string) => {
       if (!sessionId) return;
       await sendMessage(message, [], { mode });
     },
@@ -242,6 +247,29 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
     [loadSource],
   );
 
+  const handleCodebaseSelect = useCallback(
+    (id: string) => {
+      if (id !== activeId) {
+        setActiveId(id);
+        setTree([]);
+        setArtifacts([]);
+        setSourcePath(null);
+        setSourceContent("");
+        setSourceLine(undefined);
+      }
+      setNavigationOpen(false);
+    },
+    [activeId],
+  );
+
+  const handleNavigationSourceSelect = useCallback(
+    (path: string) => {
+      void loadSource(path);
+      setNavigationOpen(false);
+    },
+    [loadSource],
+  );
+
   const activeArtifact = (kind: CodebaseArtifact["kind"]) =>
     artifacts.find((a) => a.kind === kind);
 
@@ -263,6 +291,10 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
           </h1>
         </div>
         <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setNavigationOpen(true)}>
+            <FolderTree className="mr-1 size-4" />
+            代码库 / 目录
+          </Button>
           <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
             <Plus className="mr-1 size-4" />
             新建
@@ -306,48 +338,69 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="border-border w-56 shrink-0 border-r">
-          <ScrollArea className="h-full">
+      <Sheet open={navigationOpen} onOpenChange={setNavigationOpen}>
+        <SheetContent side="left" className="w-full gap-0 p-0 sm:max-w-[360px]">
+          <SheetHeader className="border-border border-b">
+            <SheetTitle>代码库与目录</SheetTitle>
+            <SheetDescription>
+              {activeCodebase ? activeCodebase.name : "选择代码库开始分析"}
+            </SheetDescription>
+          </SheetHeader>
+          <ScrollArea className="min-h-0 flex-1">
             <div className="p-2">
               <p className="text-muted-foreground mb-2 px-2 text-xs font-medium">代码库</p>
-              {codebases.map((cb) => (
-                <button
-                  key={cb.id}
-                  type="button"
-                  className={cn(
-                    "hover:bg-muted mb-1 w-full rounded-lg px-2 py-1.5 text-left text-sm",
-                    activeId === cb.id && "bg-muted font-medium",
-                  )}
-                  onClick={() => setActiveId(cb.id)}
-                >
-                  <div className="truncate">{cb.name}</div>
-                  <div className="text-muted-foreground text-xs">{cb.status}</div>
-                </button>
-              ))}
+              {codebases.length > 0 ? (
+                codebases.map((cb) => (
+                  <button
+                    key={cb.id}
+                    type="button"
+                    className={cn(
+                      "hover:bg-muted mb-1 w-full rounded-lg px-2 py-1.5 text-left text-sm",
+                      activeId === cb.id && "bg-muted font-medium",
+                    )}
+                    onClick={() => handleCodebaseSelect(cb.id)}
+                  >
+                    <div className="truncate">{cb.name}</div>
+                    <div className="text-muted-foreground text-xs">{cb.status}</div>
+                  </button>
+                ))
+              ) : (
+                <p className="text-muted-foreground px-2 py-3 text-sm">暂无代码库</p>
+              )}
             </div>
-            {activeId && tree.length > 0 && (
+            {activeId && (
               <div className="border-border border-t p-2">
                 <p className="text-muted-foreground mb-2 px-2 text-xs font-medium">文件目录</p>
-                {tree.map((node) => (
-                  <FileTreeItem
-                    key={node.path}
-                    node={node}
-                    selectedPath={sourcePath}
-                    onSelect={(p) => void loadSource(p)}
-                  />
-                ))}
+                {tree.length > 0 ? (
+                  tree.map((node) => (
+                    <FileTreeItem
+                      key={node.path}
+                      node={node}
+                      selectedPath={sourcePath}
+                      onSelect={handleNavigationSourceSelect}
+                    />
+                  ))
+                ) : (
+                  <p className="text-muted-foreground px-2 py-3 text-sm">暂无文件目录</p>
+                )}
               </div>
             )}
           </ScrollArea>
-        </aside>
+        </SheetContent>
+      </Sheet>
 
+      <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col">
           {!activeId ? (
             <div className="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-4">
               <Code2 className="size-12 opacity-40" />
               <p>选择或新建代码库开始分析</p>
-              <Button onClick={() => setCreateOpen(true)}>新建代码库</Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={() => setNavigationOpen(true)}>
+                  选择代码库
+                </Button>
+                <Button onClick={() => setCreateOpen(true)}>新建代码库</Button>
+              </div>
             </div>
           ) : (
             <>

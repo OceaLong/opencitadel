@@ -1,6 +1,6 @@
 # MyManus 架构演进指南
 
-本文档描述从**单机 Docker Compose** 演进到**可水平扩展生产架构**的路径，与 [DEPLOYMENT.md](../DEPLOYMENT.md) 单机稳定化方案配套使用。
+本文档是 MyManus 从单机 Docker Compose 演进到可水平扩展生产架构的权威说明，与 [DEPLOYMENT.md](../DEPLOYMENT.md) 单机稳定化方案配套使用。
 
 ## 现状与瓶颈
 
@@ -13,7 +13,7 @@
 | **PostgreSQL / Redis** | 有状态 | 托管服务或独立节点 |
 | **任务队列** | Redis Streams 已存在 | 作为 HPA 背压信号 |
 
-单机稳定化（右配 `mem_limit`、1 预热沙箱 + 按需创建、`max_concurrent_tasks` 封顶）可消除 swap 抖动；当并发或租户数增长时，按本文档分阶段演进。
+单机稳定化（右配 `mem_limit`、默认无预热 + 按需创建、`max_concurrent_tasks` 封顶）可消除 swap 抖动；当并发或租户数增长时，按本文档分阶段演进。`pool_enabled=false` 是当前默认值；如需降低首个工具调用延迟，可在内存预算明确时启用 1 个预热沙箱。
 
 ## 目标架构
 
@@ -55,7 +55,7 @@ flowchart LR
 |------|------|
 | 宿主机 + Docker 预留 | ~2GB |
 | 核心服务 mem_limit 合计 | ~5.2GB |
-| 沙箱（1 预热 + 最多 3 按需） | 1~4GB |
+| 沙箱（默认 0 预热 + 最多 3 按需） | 0~3GB |
 | 峰值合计 | ≤ ~11GB（留足余量） |
 
 ## 阶段 1：计算层拆分（推荐第一步）
@@ -135,22 +135,22 @@ sandbox:
 
 ```mermaid
 flowchart TD
-  start[单机16GB稳定?] -->|否| tune[执行host-tune与右配compose]
+  start{"单机16GB稳定?"} -->|"否"| tune["执行host-tune与右配compose"]
   tune --> start
-  start -->|是| q1{并发任务经常打满4?}
-  q1 -->|否| stay[保持单机Compose]
-  q1 -->|是| q2{内存仍偶发>85%?}
-  q2 -->|是| split_db[阶段1: DB/Redis外置]
-  q2 -->|否| k8s[阶段2: K8s HPA扩Worker]
-  split_db --> sandbox[阶段3: 沙箱外置]
+  start -->|"是"| q1{"并发任务经常打满4?"}
+  q1 -->|"否"| stay["保持单机Compose"]
+  q1 -->|"是"| q2{"内存仍偶发超过85%?"}
+  q2 -->|"是"| split_db["阶段1: DB/Redis外置"]
+  q2 -->|"否"| k8s["阶段2: K8s HPA扩Worker"]
+  split_db --> sandbox["阶段3: 沙箱外置"]
   k8s --> sandbox
 ```
 
-## 相关文件
+## 相关文档
 
 - [docker-compose.yml](../docker-compose.yml) — 单机资源配额
 - [api/config.yaml](../api/config.yaml) — 沙箱与 Worker 并发
 - [deploy/scripts/host-tune.sh](../deploy/scripts/host-tune.sh) — 宿主机 Swap/日志轮转
 - [deploy/scripts/verify-host-health.sh](../deploy/scripts/verify-host-health.sh) — 调优验证
 - [deploy/helm/my-manus/](../deploy/helm/my-manus/) — K8s 部署骨架
-- [docs/architecture.md](./architecture.md) — API/Worker 职责与数据流
+- [系统架构](architecture.md)

@@ -23,7 +23,6 @@ FRONTEND_REGISTRY_IDS = {
     "questionnaire",
     "personality-tests",
     "fortune-teller",
-    "unit-converter",
 }
 
 

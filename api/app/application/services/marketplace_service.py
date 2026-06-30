@@ -727,9 +727,6 @@ class MarketplaceService:
             length_match = re.search(r"(\d+)\s*位", query)
             if length_match:
                 params["length"] = int(length_match.group(1))
-        elif any(word in query for word in ["换算", "单位", "公里", "英里", "华氏", "摄氏", "gb", "mb"]):
-            app_id = "unit-converter"
-            params["text"] = query
         elif any(word in query for word in ["转pdf", "转word", "转docx", "格式转换", "文档转换", "pdf转", "word转", "md转"]):
             app_id = "document-converter"
             if "pdf" in lowered:

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 import { LeftPanel } from "@/components/left-panel";
 import { SidebarProvider } from "@/components/ui/sidebar";
+
 import { SessionsProvider } from "@/providers/sessions-provider";
 
 type SidebarLayoutStyle = React.CSSProperties & {
@@ -12,22 +13,26 @@ type SidebarLayoutStyle = React.CSSProperties & {
   "--sidebar-width-icon": string;
 };
 
-const PUBLIC_PREFIXES = ["/q/", "/room/", "/share/"];
+const SHELLLESS_PREFIXES = ["/q/", "/room/", "/share/"];
 
-function isPublicRoute(pathname: string): boolean {
-  return PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+function isShelllessRoute(pathname: string): boolean {
+  return (
+    pathname === "/codebase" ||
+    pathname.startsWith("/codebase/") ||
+    SHELLLESS_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  );
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const publicRoute = isPublicRoute(pathname);
+  const shelllessRoute = isShelllessRoute(pathname);
 
   const sidebarStyle: SidebarLayoutStyle = {
     "--sidebar-width": "300px",
     "--sidebar-width-icon": "300px",
   };
 
-  if (publicRoute) {
+  if (shelllessRoute) {
     return <div className="bg-background min-h-screen">{children}</div>;
   }
 

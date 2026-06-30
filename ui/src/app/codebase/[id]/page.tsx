@@ -13,7 +13,7 @@ export default function CodebaseDetailPage({
   const { id } = use(params);
   return (
     <div className="flex h-full flex-col">
-      <ChatHeader />
+      <ChatHeader showSidebarTrigger={false} />
       <CodebaseWorkspace codebaseId={id} />
     </div>
   );

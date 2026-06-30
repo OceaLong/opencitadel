@@ -1,63 +1,121 @@
 # MyManus 架构说明
 
-本文档是 API / Worker 职责划分、依赖注入、打包部署的单一事实来源。
+本文档是 MyManus 系统架构、API / Worker 职责划分、依赖注入、沙箱生命周期与部署形态的权威说明。
+
+## 总体架构
+
+```mermaid
+flowchart LR
+  Client["Client UI"] -->|"HTTP or SSE"| Api["FastAPI API"]
+  Api -->|"task input and dispatch"| Redis["Redis Streams"]
+  Api -->|"read and write"| Postgres["Postgres pgvector"]
+  Api -->|"objects"| COS["COS Object Storage"]
+  Redis -->|"claim task:dispatch"| Worker["Agent Worker Pool"]
+  Worker -->|"run task runner"| AgentRunner["AgentTaskRunner or IngestionRunner"]
+  AgentRunner -->|"create or attach"| Sandbox["Sandbox Runtime"]
+  AgentRunner -->|"LLM calls"| ModelProvider["Model Providers"]
+  AgentRunner -->|"output events"| Redis
+  Worker -->|"persist events"| Postgres
+  Redis -->|"task output stream"| Api
+```
+
+运行时以 API 无状态、Worker 消费 Redis Streams、Postgres 持久化、沙箱隔离执行为核心边界。API 负责接入和投影，Worker 负责执行和资源治理，Migrate 负责 schema 与配置种子迁移。
 
 ## 进程角色
 
 | 角色 | 入口 | 镜像 target | 职责 |
 |------|------|-------------|------|
-| **API** | `app.main` → `uvicorn` | `api` | HTTP/SSE、任务 dispatch、事件流读取、配置管理 |
-| **Worker** | `app.worker.main` | `worker` | 消费 `task:dispatch`、执行 Agent / 代码库摄取 |
-| **Migrate** | `app.migrate` | `api`（一次性 job） | `alembic upgrade head` |
+| API | `app.main` -> `uvicorn` | `api` | HTTP/SSE、任务 dispatch、事件流读取、配置管理 |
+| Worker | `app.worker.main` | `worker` | 消费 `task:dispatch`、执行 Agent / 代码库摄取 |
+| Migrate | `app.migrate` | `api`，一次性 job | `alembic upgrade head` 与配置种子迁移 |
 
 进程角色通过 `app/runtime_role.py` 的 `ProcessRole` 枚举显式设置，并写入环境变量 `MANUS_PROCESS_ROLE`。
 
 ## 运行时数据流
 
-```
-Client ──SSE──► FastAPI API（无状态）
-                  │ 写入 task:input / dispatch
-                  ▼
-              Redis Streams + 消费组
-                  │
-                  ▼
-           Agent Worker 池
-                  │ Planner → ReAct 循环
-                  ▼
-              写入 task:output ──► API SSE 直读
-                  │
-                  ▼
-             session_events 追加表
+```mermaid
+flowchart TD
+  Client["Client"] -->|"POST chat or SSE"| Api["FastAPI API"]
+  Api -->|"write task:input"| TaskInput["Redis task:input"]
+  Api -->|"dispatch task"| TaskDispatch["Redis task:dispatch"]
+  TaskDispatch -->|"consumer group claim"| Worker["Agent Worker"]
+  Worker -->|"Planner and ReAct loop"| Runner["Task Runner"]
+  Runner -->|"stream events"| TaskOutput["Redis task:output"]
+  Runner -->|"persistable events"| SessionEvents["session_events append table"]
+  TaskOutput -->|"XREAD live events"| Api
+  SessionEvents -->|"replay pages"| Api
+  Api -->|"SSE projection"| Client
 ```
 
 ### API 职责
 
-- 接收 HTTP/WebSocket 请求，返回 SSE 事件流
-- 创建任务、写入用户消息到 Redis `task:input`
-- 通过 `task.invoke()` dispatch 到 `task:dispatch` 消费组
-- 从 `task:output` stream 读取事件并推送给客户端
-- `stop` 通过 Redis cancel 通道通知 Worker
-- 校验 DB schema 版本（拒绝未迁移启动）
-- 维护 MCP/A2A 连接池空闲回收（`_connection_pool_cleanup_loop`）
+- 接收 HTTP / WebSocket 请求，返回 SSE 事件流。
+- 创建任务，写入用户消息到 Redis `task:input`。
+- 通过 `task.invoke()` dispatch 到 `task:dispatch` 消费组。
+- 从 `task:output` stream 读取事件并推送给客户端。
+- `stop` 通过 Redis cancel 通道通知 Worker。
+- 校验 DB schema 版本，拒绝未迁移启动。
+- 维护 MCP / A2A 连接池空闲回收，入口为 `_connection_pool_cleanup_loop`。
 
 ### Worker 职责
 
-- 从 Redis `task:dispatch` 消费组领取任务
-- **准入门控**：`can_admit()` 不满足时不 claim（任务留在 Stream，不进 PEL）
-- **任务幂等锁**：claim 后 `TaskLease`（Redis SET NX EX）防止 XAUTOCLAIM 重复执行
-- 运行 `AgentTaskRunner`（Planner → ReAct）或 `CodebaseIngestionTaskRunner`
-- 写入事件到 `task:output` stream
-- 将可持久化事件追加到 `session_events` 表
-- 沙箱维护：启动 reconcile、空闲/低内存回收（`ReclaimLeader` 单活协调）
-- 任务结束后释放 MCP/A2A 陈旧连接
+- 从 Redis `task:dispatch` 消费组领取任务。
+- 准入门控：`can_admit()` 不满足时不 claim，任务留在 Stream，不进入 PEL。
+- 任务幂等锁：claim 后通过 `TaskLease` 防止 XAUTOCLAIM 重复执行。
+- 运行 `AgentTaskRunner` 或 `CodebaseIngestionTaskRunner`。
+- 写入事件到 `task:output` stream。
+- 将可持久化事件追加到 `session_events` 表。
+- 执行沙箱 reconcile、空闲回收、低内存回收，使用 `ReclaimLeader` 单活协调。
+- 任务结束后释放 MCP / A2A 陈旧连接。
 
-## 沙箱准入与按需扩容（单机/多机统一）
+## 任务执行状态
 
+```mermaid
+stateDiagram-v2
+  [*] --> Dispatched
+  Dispatched --> WaitingAdmission: worker_checks_capacity
+  WaitingAdmission --> Dispatched: admission_denied
+  WaitingAdmission --> Claimed: admission_allowed
+  Claimed --> LeaseAcquired: task_lease_set
+  Claimed --> Dispatched: duplicate_claim_released
+  LeaseAcquired --> Running: runner_started
+  Running --> Completed: done_event
+  Running --> Failed: error_event
+  Running --> Cancelled: cancel_signal
+  Completed --> [*]
+  Failed --> [*]
+  Cancelled --> [*]
 ```
-Worker claim 前门控 ──► SandboxQuota（Redis 节点分桶）
-                              │
-新建沙箱前 acquire() ◄────────┘
-销毁/回收后 release()
+
+`task:dispatch` 是任务分发权威队列。准入失败时 Worker 不 claim，避免任务进入 PEL 后长期占用；claim 成功后以 `TaskLease` 作为执行幂等锁。
+
+## 沙箱准入与生命周期
+
+```mermaid
+flowchart TD
+  Worker["Worker before claim"] --> CanAdmit["SandboxQuota can_admit"]
+  CanAdmit -->|"false"| StayQueued["leave task in stream"]
+  CanAdmit -->|"true"| ClaimTask["claim task"]
+  ClaimTask --> Acquire["SandboxQuota acquire"]
+  Acquire --> Sandbox["create or reuse sandbox"]
+  Sandbox --> Release["release on destroy or reclaim"]
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> Requested
+  Requested --> Admitted: quota_available
+  Requested --> Rejected: quota_unavailable
+  Admitted --> Creating: acquire_holder
+  Creating --> Running: sandbox_ready
+  Running --> Idle: task_finished
+  Running --> Reclaiming: low_memory_or_shutdown
+  Idle --> Reused: next_task
+  Idle --> Reclaiming: idle_timeout
+  Reused --> Running
+  Reclaiming --> Released: destroy_and_release
+  Released --> [*]
+  Rejected --> [*]
 ```
 
 | 组件 | 文件 | 说明 |
@@ -66,24 +124,34 @@ Worker claim 前门控 ──► SandboxQuota（Redis 节点分桶）
 | `TaskLease` | `task/task_lease.py` | 长任务执行去重 |
 | `MemoryProbe` | `sandbox/memory_probe.py` | Docker 模式读宿主机 `/proc/meminfo`；K8s 旁路 |
 | `ReclaimCoordinator` | `sandbox/reclaim_coordinator.py` | Redis leader lease，单活执行回收 |
-| `SandboxDriver` | `sandbox_driver.py` | `auto` 探测 docker/kubernetes |
+| `SandboxDriver` | `sandbox_driver.py` | `auto` 探测 docker / kubernetes |
 
-- **单机**：1 个节点桶，driver=docker，Worker 挂 `docker.sock`
-- **多机 K8s**：N 个节点桶（`MANUS_NODE_NAME`），driver=kubernetes，Pod 沙箱 + ResourceQuota
-- **升级 reconcile**：启动时扫描存量 `manus-sandbox-*` 补登 holder，账实一致后再放行
+### 沙箱运行模式
+
+| 模式 | 典型场景 | 配置 | 说明 |
+|------|----------|------|------|
+| Docker 本地动态沙箱 | 单机 Docker Compose | `sandbox.driver=auto` 或 `docker`，`sandbox.address` 为空 | Worker 挂载 `docker.sock`，动态创建 `manus-sandbox-*` |
+| Kubernetes Pod 沙箱 | Helm 集群部署 | `sandbox.driver=kubernetes`，`sandbox.address` 为空 | Worker 使用 ServiceAccount + RBAC 创建 Pod，ResourceQuota 限制总量 |
+| 远程沙箱网关 | 沙箱执行面外置 | `sandbox.address=http://sandbox-gateway.internal:8080` | Worker 直连远程服务，不再调用本地 Docker 或 K8s API |
+
+`pool_enabled=false` 是当前默认值。预热池是可选优化，只应在内存预算明确且需要降低首个工具调用延迟时开启。
 
 ## 依赖注入容器
 
 ```mermaid
 flowchart TB
-  subgraph base [BaseContainer: shared providers]
-    infra["postgres / redis / cos / config_provider"]
-    svcs["services + task_runner_factory + agent_service"]
+  subgraph baseContainer ["BaseContainer shared providers"]
+    Infra["postgres redis cos config_provider"]
+    Services["application services task_runner_factory agent_service"]
   end
-  ApiContainer["ApiContainer: wires app.interfaces"] --> base
-  WorkerContainer["WorkerContainer: sandbox pre-warm pool"] --> base
-  apiEntry["app.main role=api"] --> ApiContainer
-  workerEntry["app.worker.main role=worker"] --> WorkerContainer
+  ApiEntry["app.main role api"] --> ApiContainer["ApiContainer"]
+  WorkerEntry["app.worker.main role worker"] --> WorkerContainer["WorkerContainer"]
+  ApiContainer --> baseContainer
+  WorkerContainer --> baseContainer
+  ApiContainer --> InterfaceWiring["wires app.interfaces"]
+  ApiContainer --> ApiConfigListener["config hot reload listener"]
+  WorkerContainer --> WorkerConfigListener["config hot reload listener"]
+  WorkerContainer --> SandboxPool["optional SandboxPool"]
 ```
 
 | 容器 | 文件 | HTTP wiring | Sandbox 预热门户 | 配置热更新监听 |
@@ -94,18 +162,28 @@ flowchart TB
 
 初始化入口：
 
-- API：`init_api_container()` / `shutdown_api_container()`
-- Worker：`init_worker_container()` / `shutdown_worker_container()`
+- API：`init_api_container()` / `shutdown_api_container()`。
+- Worker：`init_worker_container()` / `shutdown_worker_container()`。
 
-FastAPI 依赖注入通过 `ApiContainer`（`AppContainer` 为其别名）解析。
+FastAPI 依赖注入通过 `ApiContainer` 解析，`AppContainer` 仅作为兼容别名。
+
+## 配置权威
+
+| 类型 | 权威来源 | 说明 |
+|------|----------|------|
+| 行为配置 | `AppConfig`，由 DB 承载 | `model_resilience`、`feature_flags`、`worker`、`sandbox` 等运行行为 |
+| 初始默认值 | `api/config.yaml` / Helm `appConfig` | migrate job 在 `AppConfig` 为空时写入种子 |
+| 密钥与连接 | `Settings` 环境变量 | DB、Redis、COS、模型密钥等部署私密信息 |
+
+生产环境必须使用 `USE_DB_APP_CONFIG=true`。修改 `AppConfig` 字段时需同步 schema、`config.yaml`、Helm `appConfig` 与相关文档。
 
 ## 后台循环归属
 
 | 循环 | 归属 | 说明 |
 |------|------|------|
-| MCP/A2A 连接池回收 | API | 每 5 分钟释放陈旧连接 |
-| 沙箱维护（空闲/低内存回收） | Worker | `run_sandbox_maintenance()` + leader lease |
-| 沙箱预热门户 | Worker | `SandboxPool`（默认 `pool_enabled: false`） |
+| MCP / A2A 连接池回收 | API | 每 5 分钟释放陈旧连接 |
+| 沙箱维护 | Worker | `run_sandbox_maintenance()` + leader lease |
+| 沙箱预热门户 | Worker | `SandboxPool`，默认 `pool_enabled=false` |
 
 ## 依赖管理规范
 
@@ -128,32 +206,33 @@ Python 项目统一使用 `pyproject.toml` + `uv.lock`，不再维护 `requireme
 | `api` | `manus-api` | `./run.sh` | `api` |
 | `worker` | `manus-worker` | `./worker.sh` | `worker` |
 
-`manus-migrate` 使用 `api` target，镜像名为 `manus-migrate`，命令覆盖为 `python -m app.migrate`（Alembic + LLM Key 迁移）。`manus-ui` 镜像名为 `manus-ui`。
+`manus-migrate` 使用 `api` target，镜像名为 `manus-migrate`，命令覆盖为 `python -m app.migrate`。`manus-ui` 镜像名为 `manus-ui`。
 
 ### Docker Compose 启动顺序
 
-```
-postgres/redis → manus-migrate → manus-api + manus-worker → ui → nginx
+```text
+postgres/redis -> manus-migrate -> manus-api + manus-worker -> ui -> nginx
 ```
 
 ### 构建期镜像源
 
-`docker-compose.yml` 向 API / Worker / Sandbox / UI 传入统一 build args：`PIP_INDEX_URL`、`UV_INDEX_URL`、`UV_VERSION`、`UV_HTTP_TIMEOUT`、`NPM_CONFIG_REGISTRY` 等，默认面向国内网络。Compose 构建后的应用镜像统一为 `manus-api`、`manus-worker`、`manus-migrate`、`manus-ui`、`manus-sandbox`。仓库无内置 CI/CD；镜像需 `docker compose build` 或外部流水线构建后再部署。
+`docker-compose.yml` 向 API / Worker / Sandbox / UI 传入统一 build args：`PIP_INDEX_URL`、`UV_INDEX_URL`、`UV_VERSION`、`UV_HTTP_TIMEOUT`、`NPM_CONFIG_REGISTRY` 等。Compose 构建后的应用镜像统一为 `manus-api`、`manus-worker`、`manus-migrate`、`manus-ui`、`manus-sandbox`。仓库无内置 CI/CD；镜像需 `docker compose build` 或外部流水线构建后再部署。
 
 ### Kubernetes / Helm
 
-Chart 位于 `deploy/helm/my-manus/`（全栈一键部署）：
+Chart 位于 `deploy/helm/my-manus/`，提供全栈一键部署：
 
-- 集群内 PostgreSQL（pgvector）/ Redis StatefulSet
-- API / Worker / UI Deployment + Ingress
-- Worker ServiceAccount + RBAC（Pod 沙箱 create/delete）
-- namespace ResourceQuota 限制沙箱 Pod 总量
-- migrate initContainer 使用 API 镜像
-- `sandbox.driver: kubernetes`，Worker 不挂 `docker.sock`
+- 集群内 PostgreSQL pgvector / Redis StatefulSet。
+- API / Worker / UI Deployment + Ingress。
+- Worker ServiceAccount + RBAC，用于 Pod 沙箱 create / delete。
+- namespace ResourceQuota 限制沙箱 Pod 总量。
+- migrate initContainer 使用 API 镜像。
+- 默认 K8s 沙箱模式为 `sandbox.driver=kubernetes` 且 `sandbox.address` 为空；如接入远程沙箱网关，则改用 `sandbox.address`。
 
 ## 相关文档
 
-- [事件模型](events.md)
-- [API 服务](../api/README.md)
-- [沙箱服务](../sandbox/README.md)
+- [事件系统](events.md)
+- [配置来源治理](config-source-governance.md)
+- [模型韧性设计](model-resilience.md)
+- [架构演进指南](architecture-evolution.md)
 - [生产部署](../DEPLOYMENT.md)

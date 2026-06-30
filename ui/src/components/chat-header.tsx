@@ -1,13 +1,14 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { Code2, LayoutGrid } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import { ManusIcon } from "@/components/manus-icon";
 import { Badge } from "@/components/ui/badge";
+
 import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
 import type { LLMStatusData } from "@/lib/api/types";
 
@@ -19,8 +20,15 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
-export function ChatHeader() {
+function ChatHeaderSidebarTrigger() {
   const { open, isMobile } = useSidebar();
+
+  if (open && !isMobile) return null;
+
+  return <SidebarTrigger className="cursor-pointer" />;
+}
+
+export function ChatHeader({ showSidebarTrigger = true }: { showSidebarTrigger?: boolean }) {
   const [llmStatus, setLlmStatus] = useState<LLMStatusData["status"]>("unknown");
 
   useEffect(() => {
@@ -44,7 +52,7 @@ export function ChatHeader() {
   return (
     <header className="z-50 flex w-full items-center justify-between px-4 py-2">
       <div className="flex items-center gap-2">
-        {(!open || isMobile) && <SidebarTrigger className="cursor-pointer" />}
+        {showSidebarTrigger && <ChatHeaderSidebarTrigger />}
         <Link
           href="/"
           className="border-border/60 bg-card text-foreground hover:bg-muted/60 flex h-9 items-center gap-2 rounded-xl border px-3 shadow-[var(--shadow-card)] transition-colors"

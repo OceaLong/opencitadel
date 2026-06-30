@@ -20,7 +20,6 @@ const MODEL_DEPENDENCY: Record<string, ModelDependency> = {
   questionnaire: "none",
   "personality-tests": "none",
   "fortune-teller": "optional",
-  "unit-converter": "none",
   "document-converter": "none",
   "watermark-tool": "optional",
 };
@@ -79,9 +78,6 @@ const FortuneTellerApp = lazy(() =>
 );
 const PersonalityTestsApp = lazy(() =>
   import("@/components/marketplace/personality-tests-app").then((m) => m.PersonalityTestsApp),
-);
-const UnitConverterApp = lazy(() =>
-  import("@/components/marketplace/unit-converter-app").then((m) => m.UnitConverterApp),
 );
 
 export type LaunchParams = Record<string, unknown>;
@@ -393,23 +389,6 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
       <PersonalityTestsApp
         initialTestId={typeof params.test_id === "string" ? params.test_id : undefined}
       />
-    ),
-  },
-  {
-    meta: {
-      id: "unit-converter",
-      name: "单位换算器",
-      description: "长度、重量、温度、存储与面积常用单位互转",
-      icon: "📏",
-      category: "生活",
-      tags: ["换算", "单位", "温度", "存储"],
-      featured: false,
-      accent: "amber",
-      needs_vision: false,
-      examples: ["100 公里等于多少英里", "32 华氏度转摄氏度", "1GB 等于多少 MB"],
-    },
-    render: (params) => (
-      <UnitConverterApp initialText={typeof params.text === "string" ? params.text : ""} />
     ),
   },
 ];
