@@ -198,10 +198,28 @@ def openai_content_to_gemini_parts(content: Any) -> List[Dict[str, Any]]:
     return parts if parts else [{"text": ""}]
 
 
+def _int_from_path(raw: Dict[str, Any], *path: str) -> int:
+    value: Any = raw
+    for key in path:
+        if not isinstance(value, dict):
+            return 0
+        value = value.get(key)
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def normalize_usage(raw: Optional[Dict[str, Any]]) -> Dict[str, int]:
-    """统一 usage 字段为 prompt/completion/total tokens。"""
+    """统一 usage 字段为 prompt/completion/total/cache tokens。"""
     if not raw:
-        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        return {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cached_tokens": 0,
+            "cache_write_tokens": 0,
+        }
     prompt = int(
         raw.get("prompt_tokens")
         or raw.get("input_tokens")
@@ -216,10 +234,24 @@ def normalize_usage(raw: Optional[Dict[str, Any]]) -> Dict[str, int]:
         or 0
     )
     total = int(raw.get("total_tokens") or raw.get("totalTokenCount") or (prompt + completion))
+    cached = int(
+        _int_from_path(raw, "prompt_tokens_details", "cached_tokens")
+        or raw.get("prompt_cache_hit_tokens")
+        or raw.get("cache_read_input_tokens")
+        or raw.get("cachedContentTokenCount")
+        or 0
+    )
+    cache_write = int(
+        raw.get("prompt_cache_miss_tokens")
+        or raw.get("cache_creation_input_tokens")
+        or 0
+    )
     return {
         "prompt_tokens": prompt,
         "completion_tokens": completion,
         "total_tokens": total,
+        "cached_tokens": cached,
+        "cache_write_tokens": cache_write,
     }
 
 

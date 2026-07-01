@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import json
 import logging
-from typing import Any, AsyncGenerator, Dict, List
+from typing import Any, AsyncGenerator, Dict, List, Union
 
 import httpx
 
@@ -13,6 +13,7 @@ from app.infrastructure.external.llm.base_llm import (
     normalize_usage,
     openai_content_to_gemini_parts,
 )
+from app.infrastructure.external.llm.structured_output import to_gemini_schema
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,9 @@ class GeminiLLM(LLM):
             messages: List[Dict[str, Any]],
             tools: List[Dict[str, Any]] = None,
             response_format: Dict[str, Any] = None,
-            tool_choice: str = None,
+            tool_choice: Union[str, Dict[str, Any], None] = None,
+            response_schema: Dict[str, Any] = None,
+            retry_budget: Any = None,
     ) -> Dict[str, Any]:
         contents = self._convert_messages(messages)
         payload: Dict[str, Any] = {
@@ -122,6 +125,9 @@ class GeminiLLM(LLM):
         }
         if response_format and response_format.get("type") == "json_object":
             payload["generationConfig"]["responseMimeType"] = "application/json"
+        if response_schema and not tools:
+            payload["generationConfig"]["responseMimeType"] = "application/json"
+            payload["generationConfig"]["responseSchema"] = to_gemini_schema(response_schema["model_class"])
         if tools:
             payload["tools"] = [{"functionDeclarations": self._convert_tools(tools)}]
         url = f"{self._base_url}/v1beta/models/{self._model_name}:generateContent?key={self._api_key}"
@@ -157,6 +163,7 @@ class GeminiLLM(LLM):
             "promptTokenCount": usage_meta.get("promptTokenCount"),
             "candidatesTokenCount": usage_meta.get("candidatesTokenCount"),
             "totalTokenCount": usage_meta.get("totalTokenCount"),
+            "cachedContentTokenCount": usage_meta.get("cachedContentTokenCount"),
         })
         if usage.get("total_tokens"):
             message["_usage"] = usage
@@ -167,7 +174,9 @@ class GeminiLLM(LLM):
             messages: List[Dict[str, Any]],
             tools: List[Dict[str, Any]] = None,
             response_format: Dict[str, Any] = None,
-            tool_choice: str = None,
+            tool_choice: Union[str, Dict[str, Any], None] = None,
+            response_schema: Dict[str, Any] = None,
+            retry_budget: Any = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         contents = self._convert_messages(messages)
         payload: Dict[str, Any] = {
@@ -179,6 +188,9 @@ class GeminiLLM(LLM):
         }
         if response_format and response_format.get("type") == "json_object":
             payload["generationConfig"]["responseMimeType"] = "application/json"
+        if response_schema and not tools:
+            payload["generationConfig"]["responseMimeType"] = "application/json"
+            payload["generationConfig"]["responseSchema"] = to_gemini_schema(response_schema["model_class"])
         if tools:
             payload["tools"] = [{"functionDeclarations": self._convert_tools(tools)}]
         url = f"{self._base_url}/v1beta/models/{self._model_name}:streamGenerateContent?alt=sse&key={self._api_key}"
@@ -186,6 +198,7 @@ class GeminiLLM(LLM):
         prompt_tokens = 0
         completion_tokens = 0
         total_tokens = 0
+        cached_tokens = 0
         tool_index_by_name: Dict[str, int] = {}
         async with self._client.stream("POST", url, json=payload) as response:
             if response.status_code >= 400:
@@ -208,6 +221,7 @@ class GeminiLLM(LLM):
                 prompt_tokens = int(usage_meta.get("promptTokenCount") or prompt_tokens)
                 completion_tokens = int(usage_meta.get("candidatesTokenCount") or completion_tokens)
                 total_tokens = int(usage_meta.get("totalTokenCount") or total_tokens)
+                cached_tokens = int(usage_meta.get("cachedContentTokenCount") or cached_tokens)
 
                 for candidate in chunk.get("candidates") or []:
                     parts = candidate.get("content", {}).get("parts") or []
@@ -234,6 +248,7 @@ class GeminiLLM(LLM):
             "promptTokenCount": prompt_tokens,
             "candidatesTokenCount": completion_tokens,
             "totalTokenCount": total_tokens,
+            "cachedContentTokenCount": cached_tokens,
         })
         if usage.get("total_tokens"):
             yield {"usage": usage}

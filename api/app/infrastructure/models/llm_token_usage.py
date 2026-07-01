@@ -32,6 +32,9 @@ class LLMTokenUsageORM(Base):
     prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    cached_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    cache_write_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    cache_metric_source: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("''"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
@@ -49,6 +52,9 @@ class LLMTokenUsageORM(Base):
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,
             total_tokens=usage.total_tokens,
+            cached_tokens=usage.cached_tokens,
+            cache_write_tokens=usage.cache_write_tokens,
+            cache_metric_source=usage.cache_metric_source,
         )
 
     def to_domain(self) -> LLMTokenUsage:

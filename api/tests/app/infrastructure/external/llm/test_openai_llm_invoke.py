@@ -8,9 +8,11 @@ import pytest
 
 from app.application.errors.exceptions import ServerRequestsError
 from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities
+from app.domain.schemas.planner_output import PlannerPlanSchema
 from app.infrastructure.external.llm.base_llm import (
     _has_multimodal_image_content,
     _strip_multimodal_to_text,
+    normalize_usage,
 )
 from app.infrastructure.external.llm.openai_llm import OpenAILLM
 
@@ -225,7 +227,7 @@ async def _test_openai_llm_invoke_multimodal_fallback_preserves_tools():
     )
     second_kwargs = llm._client.chat.completions.create.await_args_list[1].kwargs
     assert second_kwargs["tools"] == tools
-    assert second_kwargs["parallel_tool_calls"] is False
+    assert second_kwargs["parallel_tool_calls"] is True
 
 
 def test_openai_llm_invoke_multimodal_fallback_preserves_tools():
@@ -290,3 +292,62 @@ async def _test_openai_llm_invoke_multimodal_invalid_image_falls_back_to_text():
 
 def test_openai_llm_invoke_multimodal_invalid_image_falls_back_to_text():
     asyncio.run(_test_openai_llm_invoke_multimodal_invalid_image_falls_back_to_text())
+
+
+def test_normalize_usage_extracts_provider_cache_fields():
+    openai_usage = normalize_usage({
+        "prompt_tokens": 100,
+        "completion_tokens": 20,
+        "prompt_tokens_details": {"cached_tokens": 64},
+    })
+    assert openai_usage["cached_tokens"] == 64
+
+    deepseek_usage = normalize_usage({
+        "prompt_cache_hit_tokens": 33,
+        "prompt_cache_miss_tokens": 67,
+    })
+    assert deepseek_usage["cached_tokens"] == 33
+    assert deepseek_usage["cache_write_tokens"] == 67
+
+    anthropic_usage = normalize_usage({
+        "input_tokens": 100,
+        "output_tokens": 10,
+        "cache_read_input_tokens": 40,
+        "cache_creation_input_tokens": 60,
+    })
+    assert anthropic_usage["cached_tokens"] == 40
+    assert anthropic_usage["cache_write_tokens"] == 60
+
+    gemini_usage = normalize_usage({
+        "promptTokenCount": 100,
+        "candidatesTokenCount": 10,
+        "cachedContentTokenCount": 50,
+    })
+    assert gemini_usage["cached_tokens"] == 50
+
+
+async def _test_openai_compatible_schema_uses_json_object_response_format():
+    llm = OpenAILLM(
+        LLMModel(
+            provider=LLMProvider.OPENAI,
+            base_url="https://api.deepseek.com/v1",
+            api_key="sk-test",
+            model_name="deepseek-chat",
+        )
+    )
+    message = SimpleNamespace(model_dump=lambda: {"role": "assistant", "content": "{}"})
+    response = SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="stop")], usage=None)
+    llm._client = MagicMock()
+    llm._client.chat.completions.create = AsyncMock(return_value=response)
+
+    await llm.invoke(
+        [{"role": "user", "content": "plan"}],
+        response_schema={"model_class": PlannerPlanSchema, "schema": {}, "name": "PlannerPlanSchema"},
+    )
+
+    kwargs = llm._client.chat.completions.create.await_args.kwargs
+    assert kwargs["response_format"] == {"type": "json_object"}
+
+
+def test_openai_compatible_schema_uses_json_object_response_format():
+    asyncio.run(_test_openai_compatible_schema_uses_json_object_response_format())

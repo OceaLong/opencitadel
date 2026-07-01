@@ -3,8 +3,9 @@
 import asyncio
 import logging
 import uuid
+from hashlib import sha256
 from abc import ABC
-from typing import Optional, List, AsyncGenerator, Dict, Any, Callable
+from typing import Optional, List, AsyncGenerator, Dict, Any, Callable, Type
 
 from app.domain.external.observability import ObservabilityPort
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
@@ -22,6 +23,7 @@ from app.domain.models.tool_result import ToolResult
 from app.domain.services import vision_service
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agents.token_accountant import TokenAccountant
+from app.domain.services.agents.retry_budget import LLMRetryBudget, RetryBudgetExceeded
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.tool_names import (
     is_tool_allowed,
@@ -32,6 +34,9 @@ from app.domain.utils.vision_tokens import estimate_messages_tokens
 from app.domain.models.error_codes import MODEL_UNAVAILABLE, TASK_INFRA_FAILED
 from app.domain.utils.llm_retry import is_retriable_llm_error
 from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError
+from app.application.services.config_provider import get_runtime_config
+from app.infrastructure.external.llm.structured_output import schema_payload
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +118,20 @@ class BaseAgent(ABC):
         self._tool_index: Dict[str, BaseTool] = {}
         self._all_tool_schemas: List[Dict[str, Any]] = []
         self._cached_available_tools: Optional[List[Dict[str, Any]]] = None
-        self._tool_cache_signature: Optional[int] = None
+        self._tool_cache_signature: Optional[str] = None
+        resilience_cfg = get_runtime_config().model_resilience
+        self._retry_budget = LLMRetryBudget.create(
+            max_calls=self._agent_config.max_retries * resilience_cfg.max_attempts_per_call + 2,
+            max_seconds=resilience_cfg.max_call_budget_seconds,
+        )
 
-    def _tool_cache_signature_value(self) -> int:
-        return sum(len(tool.get_tools()) for tool in self._tools)
+    def _tool_cache_signature_value(self) -> str:
+        names = sorted(
+            schema.get("function", {}).get("name", "")
+            for tool in self._tools
+            for schema in tool.get_tools()
+        )
+        return sha256("|".join(names).encode("utf-8")).hexdigest()
 
     def _rebuild_tool_cache(self) -> None:
         self._tool_index = {}
@@ -128,6 +143,7 @@ class BaseAgent(ABC):
                     continue
                 self._tool_index[name] = tool
                 self._all_tool_schemas.append(schema)
+        self._all_tool_schemas.sort(key=lambda item: item.get("function", {}).get("name", ""))
         self._cached_available_tools = None
         self._tool_cache_signature = self._tool_cache_signature_value()
 
@@ -319,19 +335,23 @@ class BaseAgent(ABC):
             format: Optional[str] = None,
             stream_id: Optional[str] = None,
             emit_deltas: bool = True,
+            response_schema: Optional[Type[BaseModel]] = None,
     ) -> AsyncGenerator[BaseEvent, None]:
         """调用语言模型并处理记忆内容，实时向调用方输出流式 delta 事件。"""
         await self._add_to_memory(messages, persist=False)
 
         available_tools = self._get_available_tools()
+        response_schema_payload = schema_payload(response_schema) if response_schema is not None else None
         effective_format = format
         if effective_format == "json_object" and available_tools:
             logger.debug("工具可用时跳过 json_object response_format，以兼容 tool_calls")
             effective_format = None
         response_format = {"type": effective_format} if effective_format else None
+        effective_tools = [] if response_schema_payload is not None else available_tools
+        effective_tool_choice = None if response_schema_payload is not None else self._tool_choice
         capabilities = vision_service.resolve_capabilities(self._llm)
         strip_images = bool(
-            available_tools
+            effective_tools
             and capabilities.vision
             and not capabilities.vision_with_tools
         )
@@ -356,9 +376,11 @@ class BaseAgent(ABC):
                             self._llm,
                             strip_images=strip_images,
                         ),
-                        tools=available_tools,
+                        tools=effective_tools,
                         response_format=response_format,
-                        tool_choice=self._tool_choice,
+                        tool_choice=effective_tool_choice,
+                        response_schema=response_schema_payload,
+                        retry_budget=self._retry_budget,
                 ):
                     if usage_delta := delta.get("usage"):
                         call_usage = usage_delta
@@ -428,6 +450,8 @@ class BaseAgent(ABC):
                 self._last_llm_message = filtered_message
                 return
             except Exception as e:
+                if isinstance(e, RetryBudgetExceeded):
+                    raise RuntimeError(str(e)) from e
                 if is_retriable_llm_error(e):
                     raise
                 if isinstance(e, ModelUnavailableError):
@@ -607,6 +631,7 @@ class BaseAgent(ABC):
             format: Optional[str] = None,
             vision_attachments: Optional[List[VisionAttachment]] = None,
             emit_deltas: bool = True,
+            response_schema: Optional[Type[BaseModel]] = None,
     ) -> AsyncGenerator[BaseEvent, None]:
         """传递消息+响应格式调用程序生成异步迭代内容"""
         try:
@@ -615,6 +640,7 @@ class BaseAgent(ABC):
                     format,
                     vision_attachments,
                     emit_deltas,
+                    response_schema,
             ):
                 yield event
         finally:
@@ -626,6 +652,7 @@ class BaseAgent(ABC):
             format: Optional[str],
             vision_attachments: Optional[List[VisionAttachment]],
             emit_deltas: bool,
+            response_schema: Optional[Type[BaseModel]],
     ) -> AsyncGenerator[BaseEvent, None]:
         try:
             async for event in self._invoke_inner_body(
@@ -633,6 +660,7 @@ class BaseAgent(ABC):
                     format,
                     vision_attachments,
                     emit_deltas,
+                    response_schema,
             ):
                 yield event
         finally:
@@ -644,6 +672,7 @@ class BaseAgent(ABC):
             format: Optional[str],
             vision_attachments: Optional[List[VisionAttachment]],
             emit_deltas: bool,
+            response_schema: Optional[Type[BaseModel]],
     ) -> AsyncGenerator[BaseEvent, None]:
         # 1.需要判断下是否传递了format
         format = format if format else self._format
@@ -660,7 +689,12 @@ class BaseAgent(ABC):
             attachments_to_use,
             llm=self._llm,
         )
-        async for event in self._invoke_llm([user_message], format, emit_deltas=emit_deltas):
+        async for event in self._invoke_llm(
+                [user_message],
+                format,
+                emit_deltas=emit_deltas,
+                response_schema=response_schema,
+        ):
             yield event
         message = self._last_llm_message
         if self._pending_usage_event:

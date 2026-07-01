@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
-from typing import List, Dict, Any, AsyncGenerator
+from typing import List, Dict, Any, AsyncGenerator, Union
 
 from openai import AsyncOpenAI
 
 from app.application.errors.exceptions import ServerRequestsError
 from app.domain.external.llm import LLM
-from app.domain.models.llm_model import LLMModel, ModelCapabilities
+from app.domain.models.llm_model import LLMModel, ModelCapabilities, LLMProvider
 from app.infrastructure.external.llm.base_llm import (
     MultimodalFallbackMixin,
     _has_multimodal_image_content,
@@ -16,6 +16,7 @@ from app.infrastructure.external.llm.base_llm import (
 )
 from app.infrastructure.external.llm.base_llm import normalize_usage
 from app.infrastructure.observability.llm_metrics import record_multimodal_request
+from app.infrastructure.external.llm.structured_output import to_openai_strict
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,8 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         extra = config.extra_params or {}
         self._capabilities = config.capabilities
         self._supports_multimodal = config.supports_multimodal
+        self._provider = config.provider
+        self._base_url = base_url
 
         self._extra_params = extra
         self._thinking_enabled = thinking_enabled
@@ -177,7 +180,7 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             self,
             request_kwargs: Dict[str, Any],
             tools: List[Dict[str, Any]] | None,
-            tool_choice: str | None,
+            tool_choice: Union[str, Dict[str, Any], None],
             request_model: str,
     ) -> Any:
         if tools:
@@ -225,7 +228,9 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             messages: List[Dict[str, Any]],
             tools: List[Dict[str, Any]] = None,
             response_format: Dict[str, Any] = None,
-            tool_choice: str = None,
+            tool_choice: Union[str, Dict[str, Any], None] = None,
+            response_schema: Dict[str, Any] = None,
+            retry_budget: Any = None,
     ) -> Dict[str, Any]:
         request_model = _resolve_request_model(
             self._model_name,
@@ -242,7 +247,11 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             request_kwargs["temperature"] = self._temperature
         if self._max_tokens is not None and self._max_tokens > 0:
             request_kwargs["max_tokens"] = self._max_tokens
-        if response_format is not None:
+        if response_schema and not tools and self._structured_output_mode() == "json_schema":
+            request_kwargs["response_format"] = to_openai_strict(response_schema["model_class"])
+        elif response_schema and not tools and self._structured_output_mode() == "json_object":
+            request_kwargs["response_format"] = {"type": "json_object"}
+        elif response_format is not None:
             request_kwargs["response_format"] = response_format
         _merge_thinking_request_kwargs(
             request_kwargs,
@@ -296,7 +305,9 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             messages: List[Dict[str, Any]],
             tools: List[Dict[str, Any]] = None,
             response_format: Dict[str, Any] = None,
-            tool_choice: str = None,
+            tool_choice: Union[str, Dict[str, Any], None] = None,
+            response_schema: Dict[str, Any] = None,
+            retry_budget: Any = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         request_model = _resolve_request_model(
             self._model_name,
@@ -315,7 +326,11 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             request_kwargs["temperature"] = self._temperature
         if self._max_tokens is not None and self._max_tokens > 0:
             request_kwargs["max_tokens"] = self._max_tokens
-        if response_format is not None:
+        if response_schema and not tools and self._structured_output_mode() == "json_schema":
+            request_kwargs["response_format"] = to_openai_strict(response_schema["model_class"])
+        elif response_schema and not tools and self._structured_output_mode() == "json_object":
+            request_kwargs["response_format"] = {"type": "json_object"}
+        elif response_format is not None:
             request_kwargs["response_format"] = response_format
         _merge_thinking_request_kwargs(
             request_kwargs,
@@ -393,3 +408,13 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
                 yield payload
         if stream_usage.get("total_tokens"):
             yield {"usage": stream_usage}
+
+    def _structured_output_mode(self) -> str:
+        configured = (self._extra_params.get("structured_output") or self._capabilities.structured_output or "auto")
+        if configured != "auto":
+            return str(configured)
+        if self._provider == LLMProvider.AZURE:
+            return "json_schema"
+        if self._provider == LLMProvider.OPENAI and "openai.com" in (self._base_url or ""):
+            return "json_schema"
+        return "json_object"

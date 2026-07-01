@@ -16,6 +16,7 @@ from app.domain.models.event import (
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.models.plan import Plan, Step, ExecutionStatus
+from app.domain.services.agents.structured_parse import StructuredParseError, parse_structured_output
 from app.domain.services.prompts.react import REACT_SYSTEM_PROMPT, EXECUTION_PROMPT, SUMMARIZE_PROMPT
 from app.domain.services.prompts.system import SYSTEM_PROMPT
 from .base import BaseAgent
@@ -80,8 +81,12 @@ class ReActAgent(BaseAgent):
                 step.status = ExecutionStatus.COMPLETED
 
                 # 9.message中输出的数据结构为json，需要提取并解析
-                parsed_obj = await self._json_parser.invoke(event.message)
-                new_step = Step.model_validate(parsed_obj)
+                new_step = await parse_structured_output(
+                    event.message,
+                    Step,
+                    self._json_parser,
+                    retry_budget=getattr(self, "_retry_budget", None),
+                )
 
                 # 10.更新子步骤的数据
                 step.success = new_step.success
@@ -117,26 +122,42 @@ class ReActAgent(BaseAgent):
         # 1.构建请求query
         query = SUMMARIZE_PROMPT
 
-        # 2.调用invoke方法获取Agent生成的事件（汇总阶段不再重传用户图片）
-        async for event in self.invoke(query, emit_deltas=self._should_emit_deltas()):
-            # 3.判断事件类型是否为消息事件，如果是则表示Agent结构化生成汇总内容
-            if isinstance(event, MessageEvent):
-                # 4.记录日志并解析输出内容
-                logger.info(f"执行Agent生成汇总内容: {event.message}")
-                parsed_obj = await self._json_parser.invoke(event.message)
+        max_repair_attempts = 2
+        current_query = query
+        for attempt in range(max_repair_attempts + 1):
+            # 2.调用invoke方法获取Agent生成的事件（汇总阶段不再重传用户图片）
+            async for event in self.invoke(current_query, emit_deltas=self._should_emit_deltas()):
+                # 3.判断事件类型是否为消息事件，如果是则表示Agent结构化生成汇总内容
+                if isinstance(event, MessageEvent):
+                    # 4.记录日志并解析输出内容
+                    logger.info(f"执行Agent生成汇总内容: {event.message}")
+                    try:
+                        # 5.将解析数据转换为Message对象
+                        summary_message = await parse_structured_output(
+                            event.message,
+                            Message,
+                            self._json_parser,
+                            retry_budget=getattr(self, "_retry_budget", None),
+                        )
+                    except StructuredParseError as exc:
+                        if attempt >= max_repair_attempts:
+                            raise
+                        current_query = (
+                            f"{query}\n\n上次输出不符合结构化 schema，请修正后只返回 JSON。\n"
+                            f"校验错误:\n{exc}"
+                        )
+                        break
 
-                # 5.将解析数据转换为Message对象
-                summary_message = Message.model_validate(parsed_obj)
+                    # 6.提取消息中的附件信息
+                    attachments = [File(filepath=filepath) for filepath in summary_message.attachments]
 
-                # 6.提取消息中的附件信息
-                attachments = [File(filepath=filepath) for filepath in summary_message.attachments]
-
-                # 7.返回消息事件并将消息+附件进行相应
-                yield MessageEvent(
-                    role="assistant",
-                    message=summary_message.message,
-                    attachments=attachments,
-                )
-            else:
-                # 8.其他事件则直接返回
-                yield event
+                    # 7.返回消息事件并将消息+附件进行相应
+                    yield MessageEvent(
+                        role="assistant",
+                        message=summary_message.message,
+                        attachments=attachments,
+                    )
+                    return
+                else:
+                    # 8.其他事件则直接返回
+                    yield event

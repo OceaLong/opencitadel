@@ -19,6 +19,9 @@ class LLMTokenUsage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    cached_tokens: int = 0
+    cache_write_tokens: int = 0
+    cache_metric_source: str = ""
     created_at: datetime = Field(default_factory=datetime.now)
 
 
@@ -28,5 +31,7 @@ class SessionTokenUsageSummary(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    cached_tokens: int = 0
+    cache_write_tokens: int = 0
     estimated_cost_usd: float = 0.0
     call_count: int = 0

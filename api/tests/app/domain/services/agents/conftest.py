@@ -13,6 +13,7 @@ class _NoopObservability:
             *,
             prompt_tokens: int,
             completion_tokens: int,
+            cached_tokens: int = 0,
     ) -> None:
         return None
 

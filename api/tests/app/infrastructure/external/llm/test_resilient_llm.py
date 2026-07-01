@@ -25,13 +25,29 @@ class _FakeLLM:
     def capabilities(self):
         return ModelCapabilities()
 
-    async def invoke(self, messages, tools=None, response_format=None, tool_choice=None):
+    async def invoke(
+            self,
+            messages,
+            tools=None,
+            response_format=None,
+            tool_choice=None,
+            response_schema=None,
+            retry_budget=None,
+    ):
         self.invoke_count += 1
         if self.error is not None:
             raise self.error
         return self.response
 
-    async def stream_invoke(self, messages, tools=None, response_format=None, tool_choice=None):
+    async def stream_invoke(
+            self,
+            messages,
+            tools=None,
+            response_format=None,
+            tool_choice=None,
+            response_schema=None,
+            retry_budget=None,
+    ):
         yield {"content": "hello"}
         raise RuntimeError("503 service unavailable")
 
@@ -176,3 +192,55 @@ async def _test_candidate_chain_is_cached_per_vision_requirement():
 
 def test_candidate_chain_is_cached_per_vision_requirement():
     asyncio.run(_test_candidate_chain_is_cached_per_vision_requirement())
+
+
+async def _test_streaming_started_resets_between_calls():
+    model = _model("m1")
+    client = ResilientLLMClient(_FakeLLM(), model)
+    with pytest.raises(Exception):
+        async for _chunk in client.stream_invoke([{"role": "user", "content": "hi"}]):
+            pass
+    assert client.streaming_started is True
+
+    chunks = []
+    with pytest.raises(Exception):
+        async for chunk in client.stream_invoke([{"role": "user", "content": "again"}]):
+            chunks.append(chunk)
+    assert chunks == [{"content": "hello"}]
+    assert client.streaming_started is True
+
+
+def test_streaming_started_resets_between_calls():
+    asyncio.run(_test_streaming_started_resets_between_calls())
+
+
+class _Budget:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def consume(self, reason: str) -> None:
+        self.calls.append(reason)
+
+
+async def _test_response_schema_and_retry_budget_are_forwarded():
+    primary = _model("m1")
+    llm = _FakeLLM(response={"content": "{}"})
+    client = ResilientLLMClient(llm, primary)
+    budget = _Budget()
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False),
+    ):
+        result = await client.invoke(
+            [{"role": "user", "content": "hi"}],
+            response_schema={"name": "Result", "schema": {}},
+            retry_budget=budget,
+        )
+
+    assert result == {"content": "{}"}
+    assert budget.calls == ["resilient_invoke"]
+
+
+def test_response_schema_and_retry_budget_are_forwarded():
+    asyncio.run(_test_response_schema_and_retry_budget_are_forwarded())

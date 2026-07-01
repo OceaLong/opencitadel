@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import Protocol, List, Dict, Any, AsyncGenerator, TYPE_CHECKING
+from typing import Protocol, List, Dict, Any, AsyncGenerator, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from app.domain.models.llm_model import ModelCapabilities
@@ -14,7 +14,9 @@ class LLM(Protocol):
             messages: List[Dict[str, Any]],
             tools: List[Dict[str, Any]] = None,
             response_format: Dict[str, Any] = None,
-            tool_choice: str = None,
+            tool_choice: Union[str, Dict[str, Any], None] = None,
+            response_schema: Dict[str, Any] = None,
+            retry_budget: Any = None,
     ) -> Dict[str, Any]:
         """传递消息列表、工具列表、响应格式、工具选择策略调用LLM接口"""
         ...
@@ -24,7 +26,9 @@ class LLM(Protocol):
             messages: List[Dict[str, Any]],
             tools: List[Dict[str, Any]] = None,
             response_format: Dict[str, Any] = None,
-            tool_choice: str = None,
+            tool_choice: Union[str, Dict[str, Any], None] = None,
+            response_schema: Dict[str, Any] = None,
+            retry_budget: Any = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """流式调用 LLM，yield delta 字典: content/reasoning_content/tool_calls/index."""
         ...

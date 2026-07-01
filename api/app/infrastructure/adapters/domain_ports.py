@@ -25,8 +25,14 @@ class OtelObservabilityAdapter(ObservabilityPort):
             *,
             prompt_tokens: int,
             completion_tokens: int,
+            cached_tokens: int = 0,
     ) -> None:
-        record_llm_tokens(model, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
+        record_llm_tokens(
+            model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
+        )
 
     def record_agent_step(self, agent_name: str, step: str) -> None:
         record_agent_step(agent_name, step)

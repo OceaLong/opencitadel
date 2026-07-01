@@ -38,9 +38,20 @@ class AgentTracer:
         }
         return self._tracer.start_as_current_span(name, attributes=attrs)
 
-    def record_llm_call(self, model: str, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
+    def record_llm_call(
+            self,
+            model: str,
+            prompt_tokens: int = 0,
+            completion_tokens: int = 0,
+            cached_tokens: int = 0,
+    ) -> None:
         from app.infrastructure.observability.otel import record_llm_tokens
-        record_llm_tokens(model, prompt_tokens, completion_tokens)
+        record_llm_tokens(
+            model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
+        )
         if self._langfuse_debug:
             logger.debug(
                 "LLM trace (OTel only; Langfuse SDK not integrated) "

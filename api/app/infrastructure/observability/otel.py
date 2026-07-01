@@ -77,6 +77,7 @@ class _NoOpTracer:
 
 _agent_step_counter = None
 _llm_token_counter = None
+_llm_cached_token_counter = None
 
 
 def record_agent_step(agent_name: str, step: str) -> None:
@@ -91,17 +92,27 @@ def record_agent_step(agent_name: str, step: str) -> None:
         pass
 
 
-def record_llm_tokens(model: str, prompt_tokens: int = 0, completion_tokens: int = 0) -> None:
-    global _llm_token_counter
+def record_llm_tokens(
+        model: str,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        cached_tokens: int = 0,
+) -> None:
+    global _llm_token_counter, _llm_cached_token_counter
     try:
         from opentelemetry import metrics
         if _llm_token_counter is None:
             meter = metrics.get_meter("my-manus.llm")
             _llm_token_counter = meter.create_counter("llm_tokens_total")
+        if _llm_cached_token_counter is None:
+            meter = metrics.get_meter("my-manus.llm")
+            _llm_cached_token_counter = meter.create_counter("llm_cached_tokens_total")
         if prompt_tokens:
             _llm_token_counter.add(prompt_tokens, {"model": model, "type": "prompt"})
         if completion_tokens:
             _llm_token_counter.add(completion_tokens, {"model": model, "type": "completion"})
+        if cached_tokens:
+            _llm_cached_token_counter.add(cached_tokens, {"model": model})
     except Exception:
         pass
 

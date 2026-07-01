@@ -11,6 +11,7 @@ from app.domain.models.event import (
 )
 from app.domain.models.message import Message
 from app.domain.schemas.clarify_output import ClarifyOutputSchema
+from app.domain.services.agents.structured_parse import StructuredParseError, parse_structured_output
 from app.domain.services.prompts.clarify import CLARIFY_PROMPT, CLARIFY_SYSTEM_PROMPT
 from app.domain.services.prompts.system import SYSTEM_PROMPT
 from .base import BaseAgent
@@ -42,27 +43,44 @@ class ClarifyAgent(BaseAgent):
             attachments="\n".join(message.attachments),
         )
 
-        async for event in self.invoke(
-            query,
-            vision_attachments=message.vision_attachments,
-            emit_deltas=False,
-        ):
-            if isinstance(event, MessageEvent):
-                logger.info("ClarifyAgent生成消息: %s", event.message)
-                parsed_obj = await self._json_parser.invoke(event.message)
-                validated = ClarifyOutputSchema.model_validate(parsed_obj)
+        max_repair_attempts = 2
+        current_query = query
+        for attempt in range(max_repair_attempts + 1):
+            async for event in self.invoke(
+                current_query,
+                vision_attachments=message.vision_attachments if attempt == 0 else None,
+                emit_deltas=False,
+                response_schema=ClarifyOutputSchema,
+            ):
+                if isinstance(event, MessageEvent):
+                    logger.info("ClarifyAgent生成消息: %s", event.message)
+                    try:
+                        validated = await parse_structured_output(
+                            event.message,
+                            ClarifyOutputSchema,
+                            self._json_parser,
+                            retry_budget=getattr(self, "_retry_budget", None),
+                        )
+                    except StructuredParseError as exc:
+                        if attempt >= max_repair_attempts:
+                            raise
+                        current_query = (
+                            f"{query}\n\n上次输出不符合结构化 schema，请修正后只返回 JSON。\n"
+                            f"校验错误:\n{exc}"
+                        )
+                        break
 
-                if validated.needs_clarification and validated.questions:
-                    questions = [
-                        ClarifyQuestion.model_validate(question.model_dump())
-                        for question in validated.questions
-                    ]
-                    yield ClarifyEvent(
-                        title=validated.title,
-                        questions=questions,
-                    )
-                else:
-                    self.last_brief = (validated.brief or message.message).strip()
-                continue
+                    if validated.needs_clarification and validated.questions:
+                        questions = [
+                            ClarifyQuestion.model_validate(question.model_dump())
+                            for question in validated.questions
+                        ]
+                        yield ClarifyEvent(
+                            title=validated.title,
+                            questions=questions,
+                        )
+                    else:
+                        self.last_brief = (validated.brief or message.message).strip()
+                    return
 
-            yield event
+                yield event

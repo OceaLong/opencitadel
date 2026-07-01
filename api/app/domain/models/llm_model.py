@@ -30,6 +30,7 @@ class ModelCapabilities(BaseModel):
     max_images_per_request: int = Field(default=8, ge=1)
     max_video_frames: int = Field(default=8, ge=1)
     image_encoding: Literal["data_url", "url"] = "data_url"
+    structured_output: Literal["auto", "json_schema", "json_object", "none"] = "auto"
 
     @classmethod
     def from_legacy_flag(cls, supports_multimodal: bool) -> "ModelCapabilities":

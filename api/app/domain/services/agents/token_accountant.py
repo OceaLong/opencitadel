@@ -47,13 +47,16 @@ class TokenAccountant:
     async def record(self, usage: Dict[str, int], step: str) -> Optional[UsageEvent]:
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
         completion_tokens = int(usage.get("completion_tokens") or 0)
-        if prompt_tokens <= 0 and completion_tokens <= 0:
+        cached_tokens = int(usage.get("cached_tokens") or 0)
+        cache_write_tokens = int(usage.get("cache_write_tokens") or 0)
+        if prompt_tokens <= 0 and completion_tokens <= 0 and cached_tokens <= 0 and cache_write_tokens <= 0:
             return None
 
         self._observability.record_llm_tokens(
             self._model_name,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
         )
         record = LLMTokenUsage(
             session_id=self._session_id,
@@ -64,6 +67,9 @@ class TokenAccountant:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=int(usage.get("total_tokens") or (prompt_tokens + completion_tokens)),
+            cached_tokens=cached_tokens,
+            cache_write_tokens=cache_write_tokens,
+            cache_metric_source=str(usage.get("cache_metric_source") or ""),
         )
 
         self._pending_records.append(record)

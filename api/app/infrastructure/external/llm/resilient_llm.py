@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
 from app.application.errors.exceptions import ServerRequestsError
 from app.application.services.config_provider import get_runtime_config
@@ -88,7 +88,9 @@ class ResilientLLMClient:
             messages: List[Dict[str, Any]],
             tools: List[Dict[str, Any]] = None,
             response_format: Dict[str, Any] = None,
-            tool_choice: str = None,
+            tool_choice: Union[str, Dict[str, Any], None] = None,
+            response_schema: Dict[str, Any] = None,
+            retry_budget: Any = None,
     ) -> Dict[str, Any]:
         cfg = self._config()
         deadline = time.monotonic() + cfg.max_call_budget_seconds
@@ -109,7 +111,16 @@ class ResilientLLMClient:
                 attempts += 1
                 client = self._client_for(candidate)
                 try:
-                    result = await client.invoke(messages, tools, response_format, tool_choice)
+                    if retry_budget is not None:
+                        retry_budget.consume("resilient_invoke")
+                    result = await client.invoke(
+                        messages,
+                        tools,
+                        response_format,
+                        tool_choice,
+                        response_schema=response_schema,
+                        retry_budget=retry_budget,
+                    )
                     await self._breaker.record_success(candidate.id)
                     if candidate.id != self._model.id:
                         record_llm_resilience_event("fallback_success", candidate.id, candidate.provider.value)
@@ -135,8 +146,11 @@ class ResilientLLMClient:
             messages: List[Dict[str, Any]],
             tools: List[Dict[str, Any]] = None,
             response_format: Dict[str, Any] = None,
-            tool_choice: str = None,
+            tool_choice: Union[str, Dict[str, Any], None] = None,
+            response_schema: Dict[str, Any] = None,
+            retry_budget: Any = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
+        self._streaming_started = False
         cfg = self._config()
         deadline = time.monotonic() + cfg.max_call_budget_seconds
         last_error: Optional[Exception] = None
@@ -158,7 +172,16 @@ class ResilientLLMClient:
                 attempts += 1
                 client = self._client_for(candidate)
                 try:
-                    async for chunk in client.stream_invoke(messages, tools, response_format, tool_choice):
+                    if retry_budget is not None:
+                        retry_budget.consume("resilient_stream_invoke")
+                    async for chunk in client.stream_invoke(
+                        messages,
+                        tools,
+                        response_format,
+                        tool_choice,
+                        response_schema=response_schema,
+                        retry_budget=retry_budget,
+                    ):
                         self._streaming_started = True
                         yield chunk
                     await self._breaker.record_success(candidate.id)
