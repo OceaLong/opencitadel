@@ -46,6 +46,14 @@ function activeWorkspaceId(): string {
 
 let refreshPromise: Promise<unknown> | null = null;
 
+const AUTH_ROUTE_PREFIXES = ["/login", "/register"];
+
+function shouldRedirectToLogin(): boolean {
+  if (typeof window === "undefined") return false;
+  const pathname = window.location.pathname;
+  return !AUTH_ROUTE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
 async function refreshAuthOnce(): Promise<unknown> {
   if (!refreshPromise) {
     refreshPromise = request("/auth/refresh", {
@@ -224,7 +232,7 @@ export async function request<T = unknown>(
           await refreshAuthOnce();
           return request<T>(endpoint, { ...options, skipAuthRefresh: true });
         } catch {
-          if (typeof window !== "undefined") {
+          if (shouldRedirectToLogin()) {
             window.location.href = "/login";
           }
         }

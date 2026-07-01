@@ -1,26 +1,32 @@
 "use client";
 
+import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
 import type { ReactNode } from "react";
 
 import { LeftPanel } from "@/components/left-panel";
 import { SidebarProvider } from "@/components/ui/sidebar";
 
-import { SessionsProvider } from "@/providers/sessions-provider";
 import { useAuth } from "@/providers/auth-provider";
+import { SessionsProvider } from "@/providers/sessions-provider";
 
 type SidebarLayoutStyle = React.CSSProperties & {
   "--sidebar-width": string;
   "--sidebar-width-icon": string;
 };
 
+const AUTH_PREFIXES = ["/login", "/register"];
 const SHELLLESS_PREFIXES = ["/q/", "/room/", "/share/"];
-const PUBLIC_PREFIXES = ["/q/", "/room/", "/share/", "/login", "/register"];
+const PUBLIC_PREFIXES = [...SHELLLESS_PREFIXES, ...AUTH_PREFIXES];
+
+function isAuthRoute(pathname: string): boolean {
+  return AUTH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
 
 function isShelllessRoute(pathname: string): boolean {
   return (
+    isAuthRoute(pathname) ||
     pathname === "/codebase" ||
     pathname.startsWith("/codebase/") ||
     pathname === "/knowledge" ||

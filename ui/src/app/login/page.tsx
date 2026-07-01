@@ -1,13 +1,16 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+
 import { authApi } from "@/lib/api/auth";
 import { useAuth } from "@/providers/auth-provider";
 
 export default function LoginPage() {
+  const router = useRouter();
   const { refresh } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -21,7 +24,7 @@ export default function LoginPage() {
     try {
       await authApi.login(identifier, password);
       await refresh();
-      window.location.href = "/";
+      router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "登录失败");
     } finally {

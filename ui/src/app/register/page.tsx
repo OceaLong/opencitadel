@@ -1,14 +1,16 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+
 import { authApi } from "@/lib/api/auth";
 import { useAuth } from "@/providers/auth-provider";
 
 export default function RegisterPage() {
+  const router = useRouter();
   const params = useSearchParams();
   const inviteToken = useMemo(() => params.get("invite_token") || "", [params]);
   const { refresh } = useAuth();
@@ -25,7 +27,7 @@ export default function RegisterPage() {
     try {
       await authApi.register({ invite_token: inviteToken, email, username, password });
       await refresh();
-      window.location.href = "/";
+      router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "注册失败");
     } finally {

@@ -9,6 +9,7 @@ ARG PIP_RETRIES=5
 ARG UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 ARG UV_VERSION=0.11.19
 ARG UV_HTTP_TIMEOUT=300
+ARG PYPI_FILES_MIRROR=https://mirrors.aliyun.com/pypi/packages/
 
 ENV UV_INDEX_URL=${UV_INDEX_URL}
 ENV UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT}
@@ -33,7 +34,12 @@ RUN pip install --no-cache-dir \
 
 # 6.拷贝依赖清单并安装依赖
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN if [ -n "${PYPI_FILES_MIRROR}" ]; then \
+      sed -i "s|https://files.pythonhosted.org/packages/|${PYPI_FILES_MIRROR}|g" uv.lock; \
+    fi
+ENV UV_LINK_MODE=copy
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
 
 # 7.拷贝项目文件(忽略开发环境的库)
 COPY . .

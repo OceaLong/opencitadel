@@ -28,15 +28,28 @@ async def bootstrap_data(
         logger.warning(f"启动管理员种子化失败(可能数据库未迁移): {e}")
 
 
+def _needs_password_backfill(user: User) -> bool:
+    return not user.password_hash or not user.password_hash.strip()
+
+
 async def bootstrap_admin_user(uow_factory: Callable[[], IUnitOfWork]) -> None:
     settings = get_settings()
     email = (settings.bootstrap_admin_email or "").strip().lower()
     if not email:
         return
     async with uow_factory() as uow:
+        existing = await uow.user.get_by_email(email)
+        if existing:
+            if _needs_password_backfill(existing) and settings.bootstrap_admin_password:
+                existing.password_hash = PasswordHasher().hash(settings.bootstrap_admin_password)
+                await uow.user.save(existing)
+                logger.info("Bootstrap admin password backfilled: %s", email)
+            return
+
         users = await uow.user.list(limit=1)
         if users:
             return
+
         password_hash = ""
         if settings.bootstrap_admin_password:
             password_hash = PasswordHasher().hash(settings.bootstrap_admin_password)
