@@ -210,7 +210,7 @@ export function WatermarkToolApp({
     }
   };
 
-  const downloadResult = () => {
+  const downloadResult = async () => {
     if (resultUrl) {
       const link = document.createElement("a");
       link.href = resultUrl;
@@ -219,10 +219,13 @@ export function WatermarkToolApp({
       return;
     }
     if (resultFileId) {
+      const blob = await fileApi.downloadFile(resultFileId);
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = fileApi.getFileDownloadUrl(resultFileId);
+      link.href = url;
       link.download = resultFilename || "result";
       link.click();
+      URL.revokeObjectURL(url);
     }
   };
 

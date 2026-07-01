@@ -11,16 +11,17 @@ from app.domain.models.knowledge_base import (
     KnowledgeEntity,
     KnowledgeRelation,
 )
+from app.domain.models.scope import OwnerScope
 
 
 class KnowledgeBaseRepository(Protocol):
     async def save_kb(self, kb: KnowledgeBase) -> None:
         ...
 
-    async def get_kb(self, kb_id: str) -> Optional[KnowledgeBase]:
+    async def get_kb(self, kb_id: str, scope: Optional[OwnerScope] = None) -> Optional[KnowledgeBase]:
         ...
 
-    async def list_kbs(self, limit: int = 100, offset: int = 0) -> List[KnowledgeBase]:
+    async def list_kbs(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[KnowledgeBase]:
         ...
 
     async def delete_kb(self, kb_id: str) -> None:

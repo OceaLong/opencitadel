@@ -136,12 +136,15 @@ export function DocumentConverterApp({
     }
   };
 
-  const download = () => {
+  const download = async () => {
     if (!resultFileId) return;
+    const blob = await fileApi.downloadFile(resultFileId);
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = fileApi.getFileDownloadUrl(resultFileId);
+    link.href = url;
     link.download = resultFilename || "converted";
     link.click();
+    URL.revokeObjectURL(url);
   };
 
   return (

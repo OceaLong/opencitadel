@@ -1,6 +1,6 @@
 """add llm token cache columns
 
-Revision ID: t8u9v0w1x2y3
+Revision ID: u8v9w0x1y2z3
 Revises: m3n4o5p6q7r8
 Create Date: 2026-07-02
 
@@ -10,7 +10,7 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "t8u9v0w1x2y3"
+revision: str = "u8v9w0x1y2z3"
 down_revision: Union[str, None] = "m3n4o5p6q7r8"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

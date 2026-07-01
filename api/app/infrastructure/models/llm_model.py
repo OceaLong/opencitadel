@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict
 
-from sqlalchemy import String, Float, Integer, Boolean, DateTime, Text, text
+from sqlalchemy import String, Float, Integer, Boolean, DateTime, Text, text, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,6 +45,12 @@ class LLMModelORM(Base):
         Boolean, nullable=False, server_default=text("false")
     )
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    owner_user_id: Mapped[str | None] = mapped_column(
+        String(255),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    visibility: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'global'"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
@@ -76,6 +82,8 @@ class LLMModelORM(Base):
             capabilities=model.capabilities.model_dump(),
             supports_multimodal=model.supports_multimodal,
             is_default=model.is_default,
+            owner_user_id=model.owner_user_id,
+            visibility=model.visibility.value,
         )
 
     def to_domain(self, decrypted_api_key: str) -> LLMModel:
@@ -99,6 +107,8 @@ class LLMModelORM(Base):
             capabilities=capabilities,
             supports_multimodal=self.supports_multimodal,
             is_default=self.is_default,
+            owner_user_id=self.owner_user_id,
+            visibility=self.visibility,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )

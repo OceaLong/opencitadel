@@ -42,6 +42,8 @@ class Session(BaseModel):
     thinking_enabled: bool = False  # 会话级思考模式，默认关闭
     codebase_id: Optional[str] = None  # 关联代码库
     knowledge_base_id: Optional[str] = None  # 关联文档知识库
+    owner_user_id: Optional[str] = None  # 所属用户
+    team_id: Optional[str] = None  # 所属团队工作区
     mode: SessionMode = SessionMode.AGENT  # ask=快速问答, agent=规划改码
     pending_phase: Optional[str] = None  # 等待恢复的内部阶段
     status: SessionStatus = SessionStatus.PENDING  # 状态

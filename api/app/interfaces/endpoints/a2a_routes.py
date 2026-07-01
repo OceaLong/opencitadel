@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from app.application.services.a2a_server_service import A2AServerService
+from app.interfaces.auth_dependencies import require_service_api_key
 from app.interfaces.service_dependencies import (
     get_a2a_server_service,
 )
@@ -30,14 +31,15 @@ async def get_agent_card(
 async def a2a_jsonrpc(
         request: Request,
         payload: Dict[str, Any],
+        principal=Depends(require_service_api_key),
         a2a_server_service: A2AServerService = Depends(get_a2a_server_service),
 ):
     method = payload.get("method")
     if method == "message/send":
-        return await a2a_server_service.handle_message_send(payload)
+        return await a2a_server_service.handle_message_send(payload, principal=principal)
     if method == "message/stream":
         async def event_generator():
-            async for chunk in a2a_server_service.stream_message_events(payload):
+            async for chunk in a2a_server_service.stream_message_events(payload, principal=principal):
                 yield ServerSentEvent(data=chunk)
 
         return EventSourceResponse(event_generator())

@@ -3,10 +3,11 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import select, delete, update, func
+from sqlalchemy import or_, select, delete, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.llm_model import LLMModel
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.llm_model_repository import LLMModelRepository
 from app.infrastructure.models.llm_model import LLMModelORM
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher, ApiKeyCipherError
@@ -27,16 +28,26 @@ class DBLLMModelRepository(LLMModelRepository):
             return self.cipher.decrypt_or_raise(stored)
         raise ApiKeyCipherError(f"未知的 api_key_encryption 格式: {encryption}")
 
-    async def get_all(self) -> List[LLMModel]:
-        stmt = select(LLMModelORM).order_by(LLMModelORM.is_default.desc(), LLMModelORM.created_at)
+    def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
+        if scope is None:
+            return stmt
+        owner_filter = (
+            LLMModelORM.owner_user_id == scope.user_id
+            if scope.type == OwnerScopeType.PERSONAL
+            else LLMModelORM.owner_user_id == scope.user_id
+        )
+        return stmt.where(or_(LLMModelORM.visibility == "global", owner_filter))
+
+    async def get_all(self, scope: Optional[OwnerScope] = None) -> List[LLMModel]:
+        stmt = self._apply_scope(select(LLMModelORM), scope).order_by(LLMModelORM.is_default.desc(), LLMModelORM.created_at)
         result = await self.db_session.execute(stmt)
         return [
             r.to_domain(self._resolve_api_key(r.api_key, r.api_key_encryption))
             for r in result.scalars().all()
         ]
 
-    async def get_by_id(self, model_id: str) -> Optional[LLMModel]:
-        stmt = select(LLMModelORM).where(LLMModelORM.id == model_id)
+    async def get_by_id(self, model_id: str, scope: Optional[OwnerScope] = None) -> Optional[LLMModel]:
+        stmt = self._apply_scope(select(LLMModelORM).where(LLMModelORM.id == model_id), scope)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         if not record:
@@ -77,6 +88,8 @@ class DBLLMModelRepository(LLMModelRepository):
             record.capabilities = model.capabilities.model_dump()
             record.supports_multimodal = model.capabilities.vision
             record.is_default = model.is_default
+            record.owner_user_id = model.owner_user_id
+            record.visibility = model.visibility.value if hasattr(model.visibility, "value") else model.visibility
             record.updated_at = model.updated_at
         else:
             encryption = (

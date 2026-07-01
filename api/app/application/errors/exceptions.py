@@ -31,6 +31,20 @@ class BadRequestError(AppException):
         super().__init__(status_code=400, code=400, msg=msg)
 
 
+class UnauthorizedError(AppException):
+    """身份认证失败"""
+
+    def __init__(self, msg: str = "未登录或登录已过期，请重新登录"):
+        super().__init__(status_code=401, code=401, msg=msg)
+
+
+class ForbiddenError(AppException):
+    """权限不足"""
+
+    def __init__(self, msg: str = "无权执行该操作"):
+        super().__init__(status_code=403, code=403, msg=msg)
+
+
 class ConflictError(AppException):
     """资源冲突（如并发任务互斥）"""
 

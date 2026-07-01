@@ -1,5 +1,5 @@
 import { get, post } from "./fetch";
-import { API_CONFIG } from "./fetch";
+import { authenticatedFetch } from "./fetch";
 import type {
   ConsumptionAnalysisData,
   ConsumptionAnalysisParams,
@@ -77,7 +77,7 @@ export const marketplaceApi = {
       onError: (message: string) => void;
     },
   ): Promise<void> => {
-    const response = await fetch(`${API_CONFIG.baseURL}/marketplace/fortune/predict/stream`, {
+    const response = await authenticatedFetch("/marketplace/fortune/predict/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
       body: JSON.stringify(params),

@@ -6,7 +6,8 @@ import logging
 from typing import Callable, List, Optional
 
 from app.application.errors.exceptions import NotFoundError, BadRequestError, ServerRequestsError
-from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities
+from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities, ResourceVisibility
+from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.external.llm.factory import LLMFactory
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
@@ -54,14 +55,14 @@ class LLMModelService:
         masked.api_key = ApiKeyCipher.mask(model.api_key)
         return masked
 
-    async def list_models(self, mask: bool = True) -> List[LLMModel]:
+    async def list_models(self, mask: bool = True, scope: Optional[OwnerScope] = None) -> List[LLMModel]:
         async with self._uow_factory() as uow:
-            models = await uow.llm_model.get_all()
+            models = await uow.llm_model.get_all(scope=scope)
         return [self._mask(m) if mask else m for m in models]
 
-    async def get_model(self, model_id: str, mask: bool = True) -> LLMModel:
+    async def get_model(self, model_id: str, mask: bool = True, scope: Optional[OwnerScope] = None) -> LLMModel:
         async with self._uow_factory() as uow:
-            model = await uow.llm_model.get_by_id(model_id)
+            model = await uow.llm_model.get_by_id(model_id, scope=scope)
         if not model:
             raise NotFoundError(f"模型[{model_id}]不存在")
         return self._mask(model) if mask else model
@@ -83,7 +84,10 @@ class LLMModelService:
         self._ensure_invokable(model)
         return model
 
-    async def create_model(self, model: LLMModel) -> LLMModel:
+    async def create_model(self, model: LLMModel, scope: Optional[OwnerScope] = None) -> LLMModel:
+        visibility = model.visibility.value if hasattr(model.visibility, "value") else model.visibility
+        if scope is not None and visibility != "global":
+            model.owner_user_id = scope.user_id
         self._validate_model(model, require_api_key=model.provider != LLMProvider.OLLAMA)
         encrypted = self._cipher.encrypt(model.api_key) if model.api_key else ""
         async with self._uow_factory() as uow:
@@ -95,9 +99,9 @@ class LLMModelService:
             await uow.llm_model.save(model, encrypted)
         return self._mask(model)
 
-    async def update_model(self, model_id: str, updates: LLMModel) -> LLMModel:
+    async def update_model(self, model_id: str, updates: LLMModel, scope: Optional[OwnerScope] = None) -> LLMModel:
         async with self._uow_factory() as uow:
-            existing = await uow.llm_model.get_by_id(model_id)
+            existing = await uow.llm_model.get_by_id(model_id, scope=scope)
             if not existing:
                 raise NotFoundError(f"模型[{model_id}]不存在")
             updates.id = model_id
@@ -110,9 +114,9 @@ class LLMModelService:
             await uow.llm_model.save(updates, encrypted)
         return self._mask(updates)
 
-    async def delete_model(self, model_id: str) -> None:
+    async def delete_model(self, model_id: str, scope: Optional[OwnerScope] = None) -> None:
         async with self._uow_factory() as uow:
-            existing = await uow.llm_model.get_by_id(model_id)
+            existing = await uow.llm_model.get_by_id(model_id, scope=scope)
             if not existing:
                 raise NotFoundError(f"模型[{model_id}]不存在")
             count = await uow.llm_model.count()
@@ -133,6 +137,8 @@ class LLMModelService:
             model = await uow.llm_model.get_by_id(model_id)
             if not model:
                 raise NotFoundError(f"模型[{model_id}]不存在")
+            if model.visibility != ResourceVisibility.GLOBAL:
+                raise BadRequestError("只有全局模型可设为系统默认")
             self._validate_model(model)
             await uow.llm_model.clear_default()
             model.is_default = True

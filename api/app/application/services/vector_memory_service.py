@@ -136,11 +136,24 @@ class VectorMemoryService:
 
         # 向量距离检索仍使用 pgvector 运算符（ORM 不直接支持 <=>）
         stmt = text("""
-            SELECT id, scope, session_id, title, content, tags, source,
-                   last_used_at, use_count, created_at, updated_at,
+            SELECT id, scope, session_id, title, content, tags, owner_user_id,
+                   team_id, source, last_used_at, use_count, created_at, updated_at,
                    embedding <=> :query_vec::vector AS distance
             FROM memory_entries
             WHERE embedding IS NOT NULL
+              AND EXISTS (
+                SELECT 1
+                FROM sessions s
+                WHERE s.id = :session_id
+                  AND (
+                    (s.team_id IS NOT NULL AND memory_entries.team_id = s.team_id)
+                    OR (
+                      s.team_id IS NULL
+                      AND memory_entries.team_id IS NULL
+                      AND memory_entries.owner_user_id = s.owner_user_id
+                    )
+                  )
+              )
               AND (
                 scope = 'global'
                 OR (scope = 'session' AND session_id = :session_id)
@@ -172,6 +185,8 @@ class VectorMemoryService:
                 title=row.title,
                 content=row.content,
                 tags=row.tags or [],
+                owner_user_id=row.owner_user_id,
+                team_id=row.team_id,
                 source=MemorySource(row.source),
                 last_used_at=row.last_used_at,
                 use_count=row.use_count,

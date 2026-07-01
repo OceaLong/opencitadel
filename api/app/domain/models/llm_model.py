@@ -19,6 +19,11 @@ class LLMProvider(str, Enum):
     AZURE = "azure"
 
 
+class ResourceVisibility(str, Enum):
+    GLOBAL = "global"
+    PRIVATE = "private"
+
+
 class ModelCapabilities(BaseModel):
     """模型多模态与图像相关能力描述。"""
     vision: bool = False
@@ -53,6 +58,8 @@ class LLMModel(BaseModel):
     capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     supports_multimodal: bool = False
     is_default: bool = False
+    owner_user_id: str | None = None
+    visibility: ResourceVisibility = ResourceVisibility.GLOBAL
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 

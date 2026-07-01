@@ -12,6 +12,8 @@ from app.application.services.a2a_server_service import A2AServerService
 from app.application.services.agent_service import AgentService
 from app.application.services.app_config_repository_factory import create_app_config_repository
 from app.application.services.app_config_service import AppConfigService
+from app.application.services.auth_service import AuthService
+from app.application.services.audit_service import AuditService
 from app.application.services.codebase_service import CodebaseService
 from app.application.services.config_provider import AppConfigProvider, create_app_config_provider
 from app.application.services.file_service import FileService
@@ -21,10 +23,14 @@ from app.application.services.llm_token_usage_service import LLMTokenUsageServic
 from app.application.services.marketplace_service import MarketplaceService
 from app.application.services.memory_service import MemoryService
 from app.application.services.questionnaire_service import QuestionnaireService
+from app.application.services.quota_service import QuotaService
 from app.application.services.room_service import RoomService
 from app.application.services.session_service import SessionService
 from app.application.services.session_state_service import SessionStateService
+from app.application.services.service_api_key_service import ServiceApiKeyService
 from app.application.services.skill_service import SkillService
+from app.application.services.team_service import TeamService
+from app.application.services.usage_stats_service import UsageStatsService
 from app.application.services.task_runner_factory import TaskRunnerFactory
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.checkpoint_service import CheckpointService
@@ -46,6 +52,12 @@ from app.infrastructure.external.search.bing_search import BingSearchEngine
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
 from app.infrastructure.repositories.db_uow import DBUnitOfWork
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
+from app.infrastructure.security.cookie import AuthCookieManager
+from app.infrastructure.security.csrf import CsrfService
+from app.infrastructure.security.jwt_service import JwtService
+from app.infrastructure.security.oauth_clients import OAuthClients
+from app.infrastructure.security.password_hasher import PasswordHasher
+from app.infrastructure.security.service_api_key import ServiceApiKeyHasher
 from app.infrastructure.storage.cos import Cos, get_cos
 from app.infrastructure.storage.postgres import Postgres, get_postgres
 from app.infrastructure.storage.redis import RedisClient, get_redis
@@ -190,6 +202,29 @@ class BaseContainer(containers.DeclarativeContainer):
     task_cls = providers.Object(RedisStreamTask)
 
     cipher = providers.Factory(ApiKeyCipher, secret=config.provided.api_key_secret)
+    password_hasher = providers.Singleton(PasswordHasher)
+    jwt_service = providers.Singleton(
+        JwtService,
+        secret=config.provided.jwt_secret,
+        access_ttl_seconds=config.provided.access_token_ttl_seconds,
+        refresh_ttl_seconds=config.provided.refresh_token_ttl_seconds,
+    )
+    cookie_manager = providers.Singleton(
+        AuthCookieManager,
+        domain=config.provided.cookie_domain,
+        secure=config.provided.cookie_secure,
+        access_max_age=config.provided.access_token_ttl_seconds,
+        refresh_max_age=config.provided.refresh_token_ttl_seconds,
+    )
+    csrf_service = providers.Singleton(CsrfService)
+    oauth_clients = providers.Singleton(
+        OAuthClients,
+        google_client_id=config.provided.google_client_id,
+        google_client_secret=config.provided.google_client_secret,
+        github_client_id=config.provided.github_client_id,
+        github_client_secret=config.provided.github_client_secret,
+    )
+    service_api_key_hasher = providers.Singleton(ServiceApiKeyHasher)
     uow_factory = providers.Callable(_uow_factory, postgres=postgres)
 
     task_state_port = providers.Singleton(RedisTaskStateAdapter)
@@ -227,12 +262,27 @@ class BaseContainer(containers.DeclarativeContainer):
         AppConfigService,
         app_config_repository=providers.Factory(create_app_config_repository),
     )
+    auth_service = providers.Singleton(
+        AuthService,
+        uow_factory=uow_factory,
+        password_hasher=password_hasher,
+        jwt_service=jwt_service,
+    )
+    audit_service = providers.Singleton(AuditService, uow_factory=uow_factory)
+    usage_stats_service = providers.Singleton(UsageStatsService, uow_factory=uow_factory)
+    quota_service = providers.Singleton(QuotaService, uow_factory=uow_factory)
     llm_model_service = providers.Singleton(
         LLMModelService,
         uow_factory=uow_factory,
         cipher=cipher,
     )
     skill_service = providers.Singleton(SkillService, uow_factory=uow_factory)
+    team_service = providers.Singleton(TeamService, uow_factory=uow_factory)
+    service_api_key_service = providers.Singleton(
+        ServiceApiKeyService,
+        uow_factory=uow_factory,
+        hasher=service_api_key_hasher,
+    )
     memory_service = providers.Factory(MemoryService, uow_factory=uow_factory)
     llm_token_usage_service = providers.Singleton(
         LLMTokenUsageService,

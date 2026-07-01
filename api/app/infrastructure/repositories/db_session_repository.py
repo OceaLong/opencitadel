@@ -12,6 +12,7 @@ from app.domain.models.event import BaseEvent, Event
 from app.domain.models.event_upgrader import upgrade_event_payload
 from app.domain.models.file import File
 from app.domain.models.memory import Memory
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.session import Session, SessionStatus
 from app.domain.external.session_list_notifier import NoopSessionListNotifier, SessionListNotifierPort
 from app.domain.repositories.session_repository import SessionRepository
@@ -34,6 +35,13 @@ class DBSessionRepository(SessionRepository):
         """构造函数，完成数据仓库的初始化"""
         self.db_session = db_session
         self._session_list_notifier = session_list_notifier or NoopSessionListNotifier()
+
+    def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
+        if scope is None:
+            return stmt
+        if scope.type == OwnerScopeType.TEAM:
+            return stmt.where(SessionModel.team_id == scope.team_id)
+        return stmt.where(SessionModel.owner_user_id == scope.user_id, SessionModel.team_id.is_(None))
 
     async def _load_memories(self, session_id: str) -> Dict[str, Memory]:
         stmt = select(SessionAgentMemoryModel).where(
@@ -140,14 +148,10 @@ class DBSessionRepository(SessionRepository):
         # 3.会话存在则仅更新元数据（memories/files 由 save_memory/add_file 等专用路径维护）
         record.update_from_domain(session)
 
-    async def get_all(self, limit: int = 100, offset: int = 0) -> List[Session]:
+    async def get_all(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[Session]:
         """获取所有会话列表（列表视图不加载 memories/files，避免 N+1）"""
-        stmt = (
-            select(SessionModel)
-            .order_by(SessionModel.latest_message_at.desc().nullslast())
-            .offset(max(offset, 0))
-            .limit(max(1, min(limit, 500)))
-        )
+        stmt = self._apply_scope(select(SessionModel), scope)
+        stmt = stmt.order_by(SessionModel.latest_message_at.desc().nullslast()).offset(max(offset, 0)).limit(max(1, min(limit, 500)))
         result = await self.db_session.execute(stmt)
         records = result.scalars().all()
         return [record.to_domain() for record in records]
@@ -177,22 +181,22 @@ class DBSessionRepository(SessionRepository):
         result = await self.db_session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
-    async def get_metadata(self, session_id: str) -> Optional[Session]:
-        stmt = select(SessionModel).where(SessionModel.id == session_id)
+    async def get_metadata(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[Session]:
+        stmt = self._apply_scope(select(SessionModel).where(SessionModel.id == session_id), scope)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         if record is None:
             return None
         return record.to_domain()
 
-    async def get_files(self, session_id: str) -> Optional[List[File]]:
-        if not await self.exists(session_id):
+    async def get_files(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[List[File]]:
+        if await self.get_metadata(session_id, scope=scope) is None:
             return None
         return await self._load_files(session_id)
 
-    async def get_by_id(self, session_id: str) -> Optional[Session]:
+    async def get_by_id(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[Session]:
         """根据id查询会话"""
-        stmt = select(SessionModel).where(SessionModel.id == session_id)
+        stmt = self._apply_scope(select(SessionModel).where(SessionModel.id == session_id), scope)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         if record is None:

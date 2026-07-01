@@ -4,7 +4,7 @@ import type { ApiResponse } from "./types";
  * API 配置
  */
 export const API_CONFIG = {
-  baseURL: process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8088/api",
+  baseURL: process.env.NEXT_PUBLIC_API_BASE_URL || "/api",
   timeout: 30000, // 30秒
 } as const;
 
@@ -25,10 +25,73 @@ export class ApiError extends Error {
 /**
  * 请求选项
  */
-type RequestOptions = RequestInit & {
+export type RequestOptions = RequestInit & {
   timeout?: number;
   skipErrorHandler?: boolean;
+  skipAuthRefresh?: boolean;
 };
+
+function readCookie(name: string): string {
+  if (typeof document === "undefined") return "";
+  const match = document.cookie
+    .split("; ")
+    .find((part) => part.startsWith(`${encodeURIComponent(name)}=`));
+  return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
+}
+
+function activeWorkspaceId(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem("my-manus-active-workspace") || "";
+}
+
+let refreshPromise: Promise<unknown> | null = null;
+
+async function refreshAuthOnce(): Promise<unknown> {
+  if (!refreshPromise) {
+    refreshPromise = request("/auth/refresh", {
+      method: "POST",
+      skipAuthRefresh: true,
+    }).finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
+export function buildAuthHeaders(method: string = "GET", headers: HeadersInit = {}): HeadersInit {
+  const mergedHeaders: HeadersInit = {
+    ...headers,
+  };
+  const upperMethod = method.toUpperCase();
+  const csrfToken = readCookie("csrf_token");
+  if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(upperMethod)) {
+    (mergedHeaders as Record<string, string>)["X-CSRF-Token"] = csrfToken;
+  }
+  const workspaceId = activeWorkspaceId();
+  if (workspaceId) {
+    (mergedHeaders as Record<string, string>)["X-Workspace-Id"] = workspaceId;
+  }
+  return mergedHeaders;
+}
+
+export async function authenticatedFetch(input: string, options: RequestOptions = {}): Promise<Response> {
+  const url = input.startsWith("http") ? input : `${API_CONFIG.baseURL}${input}`;
+  const method = (options.method || "GET").toString().toUpperCase();
+  const response = await fetch(url, {
+    ...options,
+    headers: buildAuthHeaders(method, options.headers || {}),
+    credentials: "include",
+  });
+  if (response.status === 401 && !options.skipAuthRefresh) {
+    await refreshAuthOnce();
+    return fetch(url, {
+      ...options,
+      headers: buildAuthHeaders(method, options.headers || {}),
+      credentials: "include",
+    });
+  }
+  return response;
+}
 
 /**
  * 解析响应
@@ -118,6 +181,7 @@ export async function request<T = unknown>(
   const {
     timeout = API_CONFIG.timeout,
     skipErrorHandler = false,
+    skipAuthRefresh = false,
     headers = {},
     ...fetchOptions
   } = options;
@@ -127,6 +191,15 @@ export async function request<T = unknown>(
     "Content-Type": "application/json",
     ...headers,
   };
+  const method = (fetchOptions.method || "GET").toString().toUpperCase();
+  const csrfToken = readCookie("csrf_token");
+  if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)) {
+    (mergedHeaders as Record<string, string>)["X-CSRF-Token"] = csrfToken;
+  }
+  const workspaceId = activeWorkspaceId();
+  if (workspaceId) {
+    (mergedHeaders as Record<string, string>)["X-Workspace-Id"] = workspaceId;
+  }
 
   // 如果是 FormData，删除 Content-Type 让浏览器自动设置
   if (fetchOptions.body instanceof FormData) {
@@ -139,12 +212,23 @@ export async function request<T = unknown>(
       {
         ...fetchOptions,
         headers: mergedHeaders,
+        credentials: "include",
       },
       timeout,
     );
 
     // 处理 HTTP 错误状态码
     if (!response.ok) {
+      if (response.status === 401 && !skipAuthRefresh) {
+        try {
+          await refreshAuthOnce();
+          return request<T>(endpoint, { ...options, skipAuthRefresh: true });
+        } catch {
+          if (typeof window !== "undefined") {
+            window.location.href = "/login";
+          }
+        }
+      }
       if (skipErrorHandler) {
         return parseResponse<T>(response) as Promise<T>;
       }
@@ -290,6 +374,14 @@ export async function createSSEStream(
     Accept: "text/event-stream",
     ...headers,
   };
+  const csrfToken = readCookie("csrf_token");
+  if (csrfToken) {
+    (mergedHeaders as Record<string, string>)["X-CSRF-Token"] = csrfToken;
+  }
+  const workspaceId = activeWorkspaceId();
+  if (workspaceId) {
+    (mergedHeaders as Record<string, string>)["X-Workspace-Id"] = workspaceId;
+  }
 
   const controller = new AbortController();
   // 只对初始连接设置超时，连接建立后会清除
@@ -316,13 +408,29 @@ export async function createSSEStream(
   }
 
   try {
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       ...fetchOptions,
       method: "POST",
       headers: mergedHeaders,
       body: JSON.stringify(data),
       signal: controller.signal,
+      credentials: "include",
     });
+
+    if (response.status === 401 && !options?.skipAuthRefresh) {
+      await refreshAuthOnce();
+      response = await fetch(url, {
+        ...fetchOptions,
+        method: "POST",
+        headers: {
+          ...mergedHeaders,
+          ...buildAuthHeaders("POST", mergedHeaders),
+        },
+        body: JSON.stringify(data),
+        signal: controller.signal,
+        credentials: "include",
+      });
+    }
 
     // 连接已建立，清除初始连接的超时
     clearTimeout(timeoutId);

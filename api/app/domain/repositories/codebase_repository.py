@@ -12,16 +12,17 @@ from app.domain.models.codebase import (
     CodebaseSymbol,
     ArtifactKind,
 )
+from app.domain.models.scope import OwnerScope
 
 
 class CodebaseRepository(Protocol):
     async def save(self, codebase: Codebase) -> None:
         ...
 
-    async def get_by_id(self, codebase_id: str) -> Optional[Codebase]:
+    async def get_by_id(self, codebase_id: str, scope: Optional[OwnerScope] = None) -> Optional[Codebase]:
         ...
 
-    async def list_all(self, limit: int = 100, offset: int = 0) -> List[Codebase]:
+    async def list_all(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[Codebase]:
         ...
 
     async def delete_by_id(self, codebase_id: str) -> None:

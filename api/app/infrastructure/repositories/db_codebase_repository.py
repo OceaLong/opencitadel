@@ -15,6 +15,7 @@ from app.domain.models.codebase import (
     CodebaseStatus,
     CodebaseSymbol,
 )
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.codebase_repository import CodebaseRepository
 from app.infrastructure.models.codebase import (
     CodebaseArtifactModel,
@@ -29,6 +30,13 @@ from app.infrastructure.models.codebase import (
 class DBCodebaseRepository(CodebaseRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
+
+    def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
+        if scope is None:
+            return stmt
+        if scope.type == OwnerScopeType.TEAM:
+            return stmt.where(CodebaseModel.team_id == scope.team_id)
+        return stmt.where(CodebaseModel.owner_user_id == scope.user_id, CodebaseModel.team_id.is_(None))
 
     async def save(self, codebase: Codebase) -> None:
         stmt = select(CodebaseModel).where(CodebaseModel.id == codebase.id)
@@ -48,17 +56,19 @@ class DBCodebaseRepository(CodebaseRepository):
         record.snapshot_key = codebase.snapshot_key
         record.ingest_task_id = codebase.ingest_task_id
         record.error = codebase.error
+        record.owner_user_id = codebase.owner_user_id
+        record.team_id = codebase.team_id
         record.updated_at = codebase.updated_at
 
-    async def get_by_id(self, codebase_id: str) -> Optional[Codebase]:
-        stmt = select(CodebaseModel).where(CodebaseModel.id == codebase_id)
+    async def get_by_id(self, codebase_id: str, scope: Optional[OwnerScope] = None) -> Optional[Codebase]:
+        stmt = self._apply_scope(select(CodebaseModel).where(CodebaseModel.id == codebase_id), scope)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         return record.to_domain() if record else None
 
-    async def list_all(self, limit: int = 100, offset: int = 0) -> List[Codebase]:
+    async def list_all(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[Codebase]:
         stmt = (
-            select(CodebaseModel)
+            self._apply_scope(select(CodebaseModel), scope)
             .order_by(CodebaseModel.updated_at.desc())
             .offset(max(offset, 0))
             .limit(max(1, min(limit, 500)))

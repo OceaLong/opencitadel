@@ -52,6 +52,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def _is_limited_path(self, path: str) -> bool:
         prefixes = (
+            "/api/auth/",
             "/api/marketplace/",
             "/api/rooms/",
             "/api/files",

@@ -4,15 +4,16 @@ from abc import ABC, abstractmethod
 from typing import List, Optional
 
 from app.domain.models.llm_model import LLMModel
+from app.domain.models.scope import OwnerScope
 
 
 class LLMModelRepository(ABC):
     @abstractmethod
-    async def get_all(self) -> List[LLMModel]:
+    async def get_all(self, scope: Optional[OwnerScope] = None) -> List[LLMModel]:
         ...
 
     @abstractmethod
-    async def get_by_id(self, model_id: str) -> Optional[LLMModel]:
+    async def get_by_id(self, model_id: str, scope: Optional[OwnerScope] = None) -> Optional[LLMModel]:
         ...
 
     @abstractmethod

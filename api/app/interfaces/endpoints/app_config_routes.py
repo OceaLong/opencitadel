@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Body
 
 from app.application.services.app_config_service import AppConfigService
 from app.domain.models.app_config import AgentConfig, MCPConfig
+from app.interfaces.auth_dependencies import require_admin
 from app.interfaces.schemas.app_config import ListMCPServerResponse, ListA2AServerResponse
 from app.interfaces.schemas.base import Response
 from app.interfaces.service_dependencies import get_app_config_service
@@ -37,6 +38,7 @@ async def get_agent_config(
 )
 async def update_agent_config(
         new_agent_config: AgentConfig,
+        _admin=Depends(require_admin),
         app_config_service: AppConfigService = Depends(get_app_config_service)
 ) -> Response[AgentConfig]:
     """更新Agent配置信息"""
@@ -72,6 +74,7 @@ async def get_mcp_servers(
 )
 async def create_mcp_servers(
         mcp_config: MCPConfig,
+        _admin=Depends(require_admin),
         app_config_service: AppConfigService = Depends(get_app_config_service),
 ) -> Response[Optional[Dict]]:
     """根据传递的配置信息创建mcp服务"""
@@ -87,6 +90,7 @@ async def create_mcp_servers(
 )
 async def delete_mcp_server(
         server_name: str,
+        _admin=Depends(require_admin),
         app_config_service: AppConfigService = Depends(get_app_config_service),
 ) -> Response[Optional[Dict]]:
     """根据服务名字删除MCP服务器"""
@@ -103,6 +107,7 @@ async def delete_mcp_server(
 async def set_mcp_server_enabled(
         server_name: str,
         enabled: bool = Body(..., embed=True),
+        _admin=Depends(require_admin),
         app_config_service: AppConfigService = Depends(get_app_config_service),
 ) -> Response[Optional[Dict]]:
     """根据传递的server_name+enabled更新服务的启用状态"""
@@ -135,6 +140,7 @@ async def get_a2a_servers(
 )
 async def create_a2a_server(
         base_url: str = Body(..., embed=True),
+        _admin=Depends(require_admin),
         app_config_service: AppConfigService = Depends(get_app_config_service),
 ) -> Response[Optional[Dict]]:
     """新增a2a服务器"""
@@ -150,6 +156,7 @@ async def create_a2a_server(
 )
 async def delete_a2a_server(
         a2a_id: str,
+        _admin=Depends(require_admin),
         app_config_service: AppConfigService = Depends(get_app_config_service),
 ) -> Response[Optional[Dict]]:
     """删除a2a服务器"""
@@ -166,6 +173,7 @@ async def delete_a2a_server(
 async def set_a2a_server_enabled(
         a2a_id: str,
         enabled: bool = Body(..., embed=True),
+        _admin=Depends(require_admin),
         app_config_service: AppConfigService = Depends(get_app_config_service),
 ) -> Response[Optional[Dict]]:
     """更新A2A服务的启用状态"""

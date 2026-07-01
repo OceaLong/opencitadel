@@ -15,6 +15,8 @@ class LLMTokenUsage(BaseModel):
     step: str = ""
     model_id: Optional[str] = None
     model_name: str = ""
+    owner_user_id: Optional[str] = None
+    team_id: Optional[str] = None
     call_type: str = "stream"
     prompt_tokens: int = 0
     completion_tokens: int = 0

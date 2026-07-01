@@ -8,6 +8,7 @@ from app.application.services.config_provider import get_runtime_config
 from app.domain.utils.memory_recall import rank_entries_with_decay
 from app.domain.models.memory import Memory
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.uow import IUnitOfWork
 
 logger = logging.getLogger(__name__)
@@ -54,16 +55,26 @@ class MemoryService:
             await uow.session.save_memory(session_id, agent_name, memory)
 
     # --- Tier 2: long-term memory entries ---
-    async def _validate_entry(self, entry: MemoryEntry) -> None:
+    def _apply_owner_scope(self, entry: MemoryEntry, owner_scope: OwnerScope | None) -> None:
+        if owner_scope is None:
+            return
+        entry.owner_user_id = owner_scope.user_id
+        entry.team_id = owner_scope.team_id if owner_scope.type == OwnerScopeType.TEAM else None
+
+    async def _validate_entry(self, entry: MemoryEntry, owner_scope: OwnerScope | None = None) -> None:
         if entry.scope == MemoryScope.SESSION:
             if not entry.session_id:
                 raise BadRequestError("scope=session 时必须提供 session_id")
             async with self._uow_factory() as uow:
-                session = await uow.session.get_by_id(entry.session_id)
+                session = await uow.session.get_by_id(entry.session_id, scope=owner_scope)
             if not session:
                 raise NotFoundError(f"会话[{entry.session_id}]不存在")
+            if owner_scope is None:
+                entry.owner_user_id = session.owner_user_id
+                entry.team_id = session.team_id
         elif entry.session_id:
             entry.session_id = None
+        self._apply_owner_scope(entry, owner_scope)
 
     async def list_entries(
             self,
@@ -71,19 +82,26 @@ class MemoryService:
             session_id: Optional[str] = None,
             q: Optional[str] = None,
             tags: Optional[List[str]] = None,
+            owner_scope: OwnerScope | None = None,
     ) -> List[MemoryEntry]:
         async with self._uow_factory() as uow:
-            return await uow.memory_entry.get_all(scope=scope, session_id=session_id, q=q, tags=tags)
+            return await uow.memory_entry.get_all(
+                scope=scope,
+                session_id=session_id,
+                q=q,
+                tags=tags,
+                owner_scope=owner_scope,
+            )
 
-    async def get_entry(self, entry_id: str) -> MemoryEntry:
+    async def get_entry(self, entry_id: str, owner_scope: OwnerScope | None = None) -> MemoryEntry:
         async with self._uow_factory() as uow:
-            entry = await uow.memory_entry.get_by_id(entry_id)
+            entry = await uow.memory_entry.get_by_id(entry_id, owner_scope=owner_scope)
         if not entry:
             raise NotFoundError(f"记忆[{entry_id}]不存在")
         return entry
 
-    async def create_entry(self, entry: MemoryEntry) -> MemoryEntry:
-        await self._validate_entry(entry)
+    async def create_entry(self, entry: MemoryEntry, owner_scope: OwnerScope | None = None) -> MemoryEntry:
+        await self._validate_entry(entry, owner_scope=owner_scope)
         from app.application.services.vector_memory_service import get_vector_memory_service
         vector_service = get_vector_memory_service()
         async with self._uow_factory() as uow:
@@ -95,10 +113,15 @@ class MemoryService:
             )
         return entry
 
-    async def update_entry(self, entry_id: str, updates: MemoryEntry) -> MemoryEntry:
-        await self._validate_entry(updates)
+    async def update_entry(
+            self,
+            entry_id: str,
+            updates: MemoryEntry,
+            owner_scope: OwnerScope | None = None,
+    ) -> MemoryEntry:
+        await self._validate_entry(updates, owner_scope=owner_scope)
         async with self._uow_factory() as uow:
-            existing = await uow.memory_entry.get_by_id(entry_id)
+            existing = await uow.memory_entry.get_by_id(entry_id, owner_scope=owner_scope)
             if not existing:
                 raise NotFoundError(f"记忆[{entry_id}]不存在")
             updates.id = entry_id
@@ -112,9 +135,12 @@ class MemoryService:
             )
         return updates
 
-    async def delete_entry(self, entry_id: str) -> None:
+    async def delete_entry(self, entry_id: str, owner_scope: OwnerScope | None = None) -> None:
         async with self._uow_factory() as uow:
-            await uow.memory_entry.delete_by_id(entry_id)
+            existing = await uow.memory_entry.get_by_id(entry_id, owner_scope=owner_scope)
+            if not existing:
+                raise NotFoundError(f"记忆[{entry_id}]不存在")
+            await uow.memory_entry.delete_by_id(entry_id, owner_scope=owner_scope)
 
     async def recall_for_session(self, session_id: str) -> str:
         """召回长期记忆并格式化为system块（时间衰减 + 可选向量混合检索）"""
@@ -176,4 +202,10 @@ class MemoryService:
             session_id=session_id if scope == "session" else None,
             source=MemorySource.TOOL_SAVE,
         )
+        if session_id:
+            async with self._uow_factory() as uow:
+                session = await uow.session.get_metadata(session_id)
+            if session:
+                entry.owner_user_id = session.owner_user_id
+                entry.team_id = session.team_id
         return await self.create_entry(entry)

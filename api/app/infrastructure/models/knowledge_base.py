@@ -33,6 +33,16 @@ class KnowledgeBaseModel(Base):
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     vector_degraded: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     settings: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    owner_user_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    team_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("teams.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
@@ -51,6 +61,8 @@ class KnowledgeBaseModel(Base):
             error=self.error,
             vector_degraded=bool(self.vector_degraded),
             settings=self.settings or {},
+            owner_user_id=self.owner_user_id,
+            team_id=self.team_id,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -67,6 +79,8 @@ class KnowledgeBaseModel(Base):
             error=kb.error,
             vector_degraded=kb.vector_degraded,
             settings=kb.settings,
+            owner_user_id=kb.owner_user_id,
+            team_id=kb.team_id,
             created_at=kb.created_at,
             updated_at=kb.updated_at,
         )

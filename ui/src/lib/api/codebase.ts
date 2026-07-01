@@ -1,4 +1,4 @@
-import { API_CONFIG, get, parseSSEStream, post } from "./fetch";
+import { authenticatedFetch, get, parseSSEStream, post } from "./fetch";
 import type {
   Codebase,
   CodebaseArtifact,
@@ -69,8 +69,7 @@ export const codebaseApi = {
 
     const start = async () => {
       try {
-        const fullUrl = url.startsWith("http") ? url : `${API_CONFIG.baseURL}${url}`;
-        const response = await fetch(fullUrl, {
+        const response = await authenticatedFetch(url, {
           method: "GET",
           headers: { Accept: "text/event-stream" },
           signal: controller.signal,

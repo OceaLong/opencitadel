@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict
 
-from sqlalchemy import DateTime, Index, String, Text, text
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,6 +27,11 @@ class FortunePredictionModel(Base):
     result: Mapped[Dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    owner_user_id: Mapped[str | None] = mapped_column(
+        String(255),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
@@ -39,6 +44,7 @@ class FortunePredictionModel(Base):
             question=self.question,
             input_profile=self.input_profile or {},
             result=self.result or {},
+            owner_user_id=self.owner_user_id,
             created_at=self.created_at,
         )
 
@@ -51,5 +57,6 @@ class FortunePredictionModel(Base):
             question=prediction.question,
             input_profile=prediction.input_profile,
             result=prediction.result,
+            owner_user_id=prediction.owner_user_id,
             created_at=prediction.created_at,
         )

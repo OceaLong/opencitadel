@@ -428,6 +428,7 @@ class MarketplaceService:
             question: str,
             input_profile: Optional[Dict[str, Any]] = None,
             model_id: Optional[str] = None,
+            owner_user_id: Optional[str] = None,
     ) -> dict:
         llm = await self._resolve_text_llm(model_id)
         result = await self._fortune.generate(
@@ -441,6 +442,7 @@ class MarketplaceService:
             question=question.strip(),
             input_profile=input_profile or {},
             result=result,
+            owner_user_id=owner_user_id,
         )
         async with self._uow_factory() as uow:
             await uow.fortune_prediction.save(prediction)
@@ -453,6 +455,7 @@ class MarketplaceService:
             question: str,
             input_profile: Optional[Dict[str, Any]] = None,
             model_id: Optional[str] = None,
+            owner_user_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, str], None]:
         llm = await self._resolve_text_llm(model_id)
         async for event in self._fortune.generate_stream(
@@ -475,6 +478,7 @@ class MarketplaceService:
                     question=question.strip(),
                     input_profile=input_profile or {},
                     result=result,
+                    owner_user_id=owner_user_id,
                 )
                 async with self._uow_factory() as uow:
                     await uow.fortune_prediction.save(prediction)

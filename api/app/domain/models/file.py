@@ -14,3 +14,5 @@ class File(BaseModel):
     extension: str = ""  # 扩展名
     mime_type: str = ""  # mime-type类型
     size: int = 0  # 文件大小，单位为字节
+    owner_user_id: str | None = None  # 所属用户
+    team_id: str | None = None  # 所属团队

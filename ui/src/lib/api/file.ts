@@ -1,4 +1,4 @@
-import { API_CONFIG, get, post } from "./fetch";
+import { API_CONFIG, authenticatedFetch, get, post } from "./fetch";
 import type { FileInfo, FileUploadParams } from "./types";
 
 /**
@@ -36,7 +36,7 @@ export const fileApi = {
    * @returns Blob 对象
    */
   downloadFile: async (fileId: string): Promise<Blob> => {
-    const response = await fetch(`${API_CONFIG.baseURL}/files/${fileId}/download`);
+    const response = await authenticatedFetch(`/files/${fileId}/download`);
 
     if (!response.ok) {
       throw new Error(`下载失败: ${response.statusText}`);

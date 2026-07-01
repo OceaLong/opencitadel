@@ -9,18 +9,26 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from core.config import get_settings
+from .db_audit_repository import DBAuditRepository
 from .db_checkpoint_repository import DBCheckpointRepository
 from .db_codebase_repository import DBCodebaseRepository
 from .db_file_repository import DBFileRepository
+from .db_invitation_repository import DBInvitationRepository
 from .db_knowledge_base_repository import DBKnowledgeBaseRepository
 from .db_llm_model_repository import DBLLMModelRepository
 from .db_llm_token_usage_repository import DBLLMTokenUsageRepository
 from .db_memory_entry_repository import DBMemoryEntryRepository
+from .db_oauth_identity_repository import DBOAuthIdentityRepository
 from .db_fortune_prediction_repository import DBFortunePredictionRepository
+from .db_quota_repository import DBQuotaRepository
 from .db_questionnaire_repository import DBQuestionnaireRepository
+from .db_refresh_token_repository import DBRefreshTokenRepository
 from .db_room_repository import DBRoomRepository
 from .db_session_repository import DBSessionRepository
+from .db_service_api_key_repository import DBServiceApiKeyRepository
 from .db_skill_repository import DBSkillRepository
+from .db_team_repository import DBTeamRepository
+from .db_user_repository import DBUserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +58,12 @@ class DBUnitOfWork(IUnitOfWork):
         from app.infrastructure.adapters.domain_ports import default_session_list_notifier
 
         cipher = ApiKeyCipher(get_settings().api_key_secret)
+        self.audit = DBAuditRepository(db_session=self.db_session)
         self.checkpoint = DBCheckpointRepository(db_session=self.db_session)
         self.codebase = DBCodebaseRepository(db_session=self.db_session)
         self.knowledge_base = DBKnowledgeBaseRepository(db_session=self.db_session)
         self.file = DBFileRepository(db_session=self.db_session)
+        self.invitation = DBInvitationRepository(db_session=self.db_session)
         self.session = DBSessionRepository(
             db_session=self.db_session,
             session_list_notifier=default_session_list_notifier(),
@@ -61,10 +71,16 @@ class DBUnitOfWork(IUnitOfWork):
         self.llm_model = DBLLMModelRepository(db_session=self.db_session, cipher=cipher)
         self.skill = DBSkillRepository(db_session=self.db_session)
         self.memory_entry = DBMemoryEntryRepository(db_session=self.db_session)
+        self.oauth_identity = DBOAuthIdentityRepository(db_session=self.db_session)
         self.questionnaire = DBQuestionnaireRepository(db_session=self.db_session)
         self.fortune_prediction = DBFortunePredictionRepository(db_session=self.db_session)
+        self.quota = DBQuotaRepository(db_session=self.db_session)
+        self.refresh_token = DBRefreshTokenRepository(db_session=self.db_session)
         self.room = DBRoomRepository(db_session=self.db_session)
+        self.service_api_key = DBServiceApiKeyRepository(db_session=self.db_session)
+        self.team = DBTeamRepository(db_session=self.db_session)
         self.llm_token_usage = DBLLMTokenUsageRepository(db_session=self.db_session)
+        self.user = DBUserRepository(db_session=self.db_session)
 
         return self
 

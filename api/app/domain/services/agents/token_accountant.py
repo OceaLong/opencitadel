@@ -42,6 +42,11 @@ class TokenAccountant:
         records = self._pending_records
         self._pending_records = []
         async with self._uow_factory() as uow:
+            session = await uow.session.get_metadata(self._session_id)
+            if session:
+                for record in records:
+                    record.owner_user_id = session.owner_user_id
+                    record.team_id = session.team_id
             await uow.llm_token_usage.save_many(records)
 
     async def record(self, usage: Dict[str, int], step: str) -> Optional[UsageEvent]:

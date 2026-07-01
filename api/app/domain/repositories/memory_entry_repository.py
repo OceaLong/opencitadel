@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional
 
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope
+from app.domain.models.scope import OwnerScope
 
 
 class MemoryEntryRepository(ABC):
@@ -15,11 +16,12 @@ class MemoryEntryRepository(ABC):
             q: Optional[str] = None,
             tags: Optional[List[str]] = None,
             limit: int = 100,
+            owner_scope: Optional[OwnerScope] = None,
     ) -> List[MemoryEntry]:
         ...
 
     @abstractmethod
-    async def get_by_id(self, entry_id: str) -> Optional[MemoryEntry]:
+    async def get_by_id(self, entry_id: str, owner_scope: Optional[OwnerScope] = None) -> Optional[MemoryEntry]:
         ...
 
     @abstractmethod
@@ -31,7 +33,7 @@ class MemoryEntryRepository(ABC):
         ...
 
     @abstractmethod
-    async def delete_by_id(self, entry_id: str) -> None:
+    async def delete_by_id(self, entry_id: str, owner_scope: Optional[OwnerScope] = None) -> None:
         ...
 
     @abstractmethod

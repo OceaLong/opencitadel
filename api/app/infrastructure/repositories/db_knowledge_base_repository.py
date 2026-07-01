@@ -16,6 +16,7 @@ from app.domain.models.knowledge_base import (
     KnowledgeEntity,
     KnowledgeRelation,
 )
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.knowledge_base_repository import KnowledgeBaseRepository
 from app.infrastructure.models.knowledge_base import (
     KnowledgeBaseModel,
@@ -29,6 +30,13 @@ from app.infrastructure.models.knowledge_base import (
 class DBKnowledgeBaseRepository(KnowledgeBaseRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
+
+    def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
+        if scope is None:
+            return stmt
+        if scope.type == OwnerScopeType.TEAM:
+            return stmt.where(KnowledgeBaseModel.team_id == scope.team_id)
+        return stmt.where(KnowledgeBaseModel.owner_user_id == scope.user_id, KnowledgeBaseModel.team_id.is_(None))
 
     async def save_kb(self, kb: KnowledgeBase) -> None:
         stmt = select(KnowledgeBaseModel).where(KnowledgeBaseModel.id == kb.id)
@@ -45,17 +53,19 @@ class DBKnowledgeBaseRepository(KnowledgeBaseRepository):
         record.error = kb.error
         record.vector_degraded = kb.vector_degraded
         record.settings = kb.settings
+        record.owner_user_id = kb.owner_user_id
+        record.team_id = kb.team_id
         record.updated_at = kb.updated_at
 
-    async def get_kb(self, kb_id: str) -> Optional[KnowledgeBase]:
-        stmt = select(KnowledgeBaseModel).where(KnowledgeBaseModel.id == kb_id)
+    async def get_kb(self, kb_id: str, scope: Optional[OwnerScope] = None) -> Optional[KnowledgeBase]:
+        stmt = self._apply_scope(select(KnowledgeBaseModel).where(KnowledgeBaseModel.id == kb_id), scope)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         return record.to_domain() if record else None
 
-    async def list_kbs(self, limit: int = 100, offset: int = 0) -> List[KnowledgeBase]:
+    async def list_kbs(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[KnowledgeBase]:
         stmt = (
-            select(KnowledgeBaseModel)
+            self._apply_scope(select(KnowledgeBaseModel), scope)
             .order_by(KnowledgeBaseModel.updated_at.desc())
             .offset(max(offset, 0))
             .limit(max(1, min(limit, 500)))

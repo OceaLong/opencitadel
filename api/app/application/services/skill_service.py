@@ -5,6 +5,7 @@ import re
 from typing import Callable, List, Optional
 
 from app.application.errors.exceptions import NotFoundError, BadRequestError
+from app.domain.models.scope import OwnerScope
 from app.domain.models.skill import Skill, SkillSummary
 from app.domain.repositories.uow import IUnitOfWork
 
@@ -67,13 +68,13 @@ class SkillService:
         slug = re.sub(r"[^\w\s-]", "", name.lower())
         return re.sub(r"[-\s]+", "-", slug).strip("-") or "skill"
 
-    async def list_skills(self, enabled_only: bool = False) -> List[Skill]:
+    async def list_skills(self, enabled_only: bool = False, scope: Optional[OwnerScope] = None) -> List[Skill]:
         async with self._uow_factory() as uow:
-            return await uow.skill.get_all(enabled_only=enabled_only)
+            return await uow.skill.get_all(enabled_only=enabled_only, scope=scope)
 
-    async def get_skill(self, skill_id: str) -> Skill:
+    async def get_skill(self, skill_id: str, scope: Optional[OwnerScope] = None) -> Skill:
         async with self._uow_factory() as uow:
-            skill = await uow.skill.get_by_id(skill_id)
+            skill = await uow.skill.get_by_id(skill_id, scope=scope)
         if not skill:
             raise NotFoundError(f"Skill[{skill_id}]不存在")
         return skill
@@ -84,9 +85,12 @@ class SkillService:
         skill = await self.get_skill(skill_id)
         return SkillSummary(id=skill.id, name=skill.name, icon=skill.icon, examples=skill.examples)
 
-    async def create_skill(self, skill: Skill) -> Skill:
+    async def create_skill(self, skill: Skill, scope: Optional[OwnerScope] = None) -> Skill:
         if not skill.slug:
             skill.slug = self._slugify(skill.name)
+        visibility = skill.visibility.value if hasattr(skill.visibility, "value") else skill.visibility
+        if scope is not None and visibility != "global":
+            skill.owner_user_id = scope.user_id
         async with self._uow_factory() as uow:
             existing = await uow.skill.get_by_slug(skill.slug)
             if existing:
@@ -94,9 +98,9 @@ class SkillService:
             await uow.skill.save(skill)
         return skill
 
-    async def update_skill(self, skill_id: str, updates: Skill) -> Skill:
+    async def update_skill(self, skill_id: str, updates: Skill, scope: Optional[OwnerScope] = None) -> Skill:
         async with self._uow_factory() as uow:
-            existing = await uow.skill.get_by_id(skill_id)
+            existing = await uow.skill.get_by_id(skill_id, scope=scope)
             if not existing:
                 raise NotFoundError(f"Skill[{skill_id}]不存在")
             updates.id = skill_id
@@ -108,9 +112,9 @@ class SkillService:
             await uow.skill.save(updates)
         return updates
 
-    async def delete_skill(self, skill_id: str) -> None:
+    async def delete_skill(self, skill_id: str, scope: Optional[OwnerScope] = None) -> None:
         async with self._uow_factory() as uow:
-            existing = await uow.skill.get_by_id(skill_id)
+            existing = await uow.skill.get_by_id(skill_id, scope=scope)
             if not existing:
                 raise NotFoundError(f"Skill[{skill_id}]不存在")
             if existing.is_builtin:

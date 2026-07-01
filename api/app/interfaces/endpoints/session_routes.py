@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from typing import Optional, Dict, AsyncGenerator
 
+import jwt
 import websockets
 from fastapi import APIRouter, Depends, Body, Query
 from sse_starlette import EventSourceResponse, ServerSentEvent
@@ -51,17 +52,70 @@ from app.interfaces.service_dependencies import (
     get_skill_service,
     get_memory_service,
     get_llm_token_usage_service,
+    get_quota_service,
 )
+from app.application.services.quota_service import QuotaService
+from app.interfaces.auth_dependencies import get_workspace_context
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.skill_service import SkillService
 from app.application.services.memory_service import MemoryService
 from app.domain.models.session import Session
+from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
+from app.domain.models.user import UserStatus
 from app.domain.models.event import BaseEvent
 from app.domain.models.event_policy import should_project_event
+from app.infrastructure.security.cookie import ACCESS_COOKIE
+from app.infrastructure.security.jwt_service import JwtService
+from app.infrastructure.storage.postgres import get_uow
+from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sessions", tags=["会话模块"])
+
+
+async def _workspace_context_from_websocket(websocket: WebSocket) -> WorkspaceContext | None:
+    """WebSocket 不经过 AuthContextMiddleware，这里显式从 cookie 构造工作区上下文。"""
+    token = websocket.cookies.get(ACCESS_COOKIE)
+    if not token:
+        return None
+    settings = get_settings()
+    jwt_service = JwtService(
+        secret=settings.jwt_secret,
+        access_ttl_seconds=settings.access_token_ttl_seconds,
+        refresh_ttl_seconds=settings.refresh_token_ttl_seconds,
+    )
+    try:
+        claims = jwt_service.decode(token, expected_type="access")
+    except jwt.PyJWTError:
+        return None
+    user_id = str(claims.get("sub") or "")
+    if not user_id:
+        return None
+    async with get_uow() as uow:
+        user = await uow.user.get_by_id(user_id)
+        if not user or user.status != UserStatus.ACTIVE:
+            return None
+        if int(claims.get("ver", -1)) != user.token_version:
+            return None
+        teams = await uow.team.list_for_user(user_id)
+        team_roles = {}
+        for team in teams:
+            member = await uow.team.get_member(team.id, user_id)
+            if member:
+                team_roles[team.id] = member.role
+    principal = Principal(
+        user_id=user.id,
+        global_role=user.global_role,
+        token_version=user.token_version,
+        team_roles=team_roles,
+    )
+    workspace_id = (websocket.headers.get("x-workspace-id") or "").strip()
+    if workspace_id:
+        if workspace_id not in team_roles:
+            return None
+        return WorkspaceContext(principal=principal, scope=OwnerScope.team(user.id, workspace_id))
+    return WorkspaceContext(principal=principal, scope=OwnerScope.personal(user.id))
 
 
 def _format_clarify_answers(request: ChatRequest) -> Optional[str]:
@@ -166,9 +220,12 @@ SESSION_SLEEP_INTERVAL = max(5, get_runtime_config().server.sessions_stream_inte
 )
 async def create_session(
         request: CreateSessionRequest = Body(default_factory=CreateSessionRequest),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
+        quota_service: QuotaService = Depends(get_quota_service),
 ) -> Response[CreateSessionResponse]:
     """创建一个空白的新任务会话"""
+    await quota_service.check_session_quota(ctx.principal.user_id)
     session = await session_service.create_session(
         title=request.title or "新对话",
         model_id=request.model_id,
@@ -177,6 +234,7 @@ async def create_session(
         codebase_id=request.codebase_id,
         knowledge_base_id=request.knowledge_base_id,
         mode=request.mode,
+        scope=ctx.scope,
     )
     return Response.success(
         msg="创建任务会话成功",
@@ -192,6 +250,7 @@ async def create_session(
 async def stream_sessions(
         limit: int = Query(default=100, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
 ) -> EventSourceResponse:
     """间隔指定时间流式获取所有会话基础信息列表"""
@@ -202,7 +261,7 @@ async def stream_sessions(
         from app.infrastructure.storage.redis import get_redis
 
         async def build_sessions_event() -> ServerSentEvent:
-            sessions = await session_service.get_all_sessions(limit=limit, offset=offset)
+            sessions = await session_service.get_all_sessions(limit=limit, offset=offset, scope=ctx.scope)
             session_items = [
                 ListSessionItem(
                     session_id=session.id,
@@ -249,10 +308,11 @@ async def stream_sessions(
 async def get_all_sessions(
         limit: int = Query(default=100, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
 ) -> Response[ListSessionResponse]:
     """获取MyManus项目中所有任务会话基础信息列表"""
-    sessions = await session_service.get_all_sessions(limit=limit, offset=offset)
+    sessions = await session_service.get_all_sessions(limit=limit, offset=offset, scope=ctx.scope)
     session_items = [
         ListSessionItem(
             session_id=session.id,
@@ -278,9 +338,12 @@ async def get_all_sessions(
 )
 async def clear_unread_message_count(
         session_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
 ) -> Response[Optional[Dict]]:
     """根据传递的会话id清空未读消息数"""
+    if not await session_service.get_session(session_id, scope=ctx.scope):
+        raise NotFoundError("该会话不存在，请核实后重试")
     await session_service.clear_unread_message_count(session_id)
     return Response.success(msg="清除未读消息数成功")
 
@@ -293,10 +356,11 @@ async def clear_unread_message_count(
 )
 async def delete_session(
         session_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
 ) -> Response[Optional[Dict]]:
     """根据传递的会话id删除指定任务会话"""
-    await session_service.delete_session(session_id)
+    await session_service.delete_session(session_id, scope=ctx.scope)
     return Response.success(msg="删除任务会话成功")
 
 
@@ -309,11 +373,12 @@ async def chat(
         session_id: str,
         request: ChatRequest,
         include_debug: bool = Query(default=False),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         agent_service: AgentService = Depends(get_agent_service),
         session_service: SessionService = Depends(get_session_service),
 ) -> EventSourceResponse:
     """根据传递的会话id+chat请求数据向指定会话发起聊天请求"""
-    session = await session_service.get_session(session_id)
+    session = await session_service.get_session(session_id, scope=ctx.scope)
     if not session:
         raise NotFoundError("该会话不存在，请核实后重试")
 
@@ -358,6 +423,7 @@ async def get_session_events(
         latest: bool = Query(default=False),
         limit: int = Query(default=100, ge=1, le=500),
         include_debug: bool = Query(default=False),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
 ) -> Response[GetSessionEventsResponse]:
     records = await session_service.get_session_events(
@@ -366,6 +432,7 @@ async def get_session_events(
         before=before,
         limit=limit,
         latest=latest,
+        scope=ctx.scope,
     )
     projected = [
         event
@@ -397,16 +464,17 @@ async def get_session(
         session_id: str,
         include_debug: bool = Query(default=False),
         events_limit: int = Query(default=100, ge=1, le=500),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
         llm_model_service: LLMModelService = Depends(get_llm_model_service),
         skill_service: SkillService = Depends(get_skill_service),
         token_usage_service: LLMTokenUsageService = Depends(get_llm_token_usage_service),
 ) -> Response[GetSessionResponse]:
     """传递指定会话id获取该会话的对话详情"""
-    session = await session_service.get_session(session_id)
+    session = await session_service.get_session(session_id, scope=ctx.scope)
     if not session:
         raise NotFoundError("该会话不存在，请核实后重试")
-    event_records = await session_service.get_session_events(session_id, limit=events_limit)
+    event_records = await session_service.get_session_events(session_id, limit=events_limit, scope=ctx.scope)
     return Response.success(
         msg="获取会话详情成功",
         data=await build_get_session_response(
@@ -428,11 +496,12 @@ async def get_session(
 )
 async def get_session_token_usage(
         session_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
         llm_model_service: LLMModelService = Depends(get_llm_model_service),
         token_usage_service: LLMTokenUsageService = Depends(get_llm_token_usage_service),
 ) -> Response[GetSessionTokenUsageResponse]:
-    session = await session_service.get_session(session_id)
+    session = await session_service.get_session(session_id, scope=ctx.scope)
     if not session:
         raise NotFoundError("该会话不存在，请核实后重试")
     model_prices = {}
@@ -484,6 +553,7 @@ async def patch_session(
         request: UpdateSessionConfigRequest,
         include_debug: bool = Query(default=False),
         events_limit: int = Query(default=100, ge=1, le=500),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
         llm_model_service: LLMModelService = Depends(get_llm_model_service),
         skill_service: SkillService = Depends(get_skill_service),
@@ -494,11 +564,12 @@ async def patch_session(
         model_id=request.model_id,
         skill_id=request.skill_id,
         thinking_enabled=request.thinking_enabled,
+        scope=ctx.scope,
     )
-    session = await session_service.get_session(session_id)
+    session = await session_service.get_session(session_id, scope=ctx.scope)
     if not session:
         raise NotFoundError("该会话不存在，请核实后重试")
-    event_records = await session_service.get_session_events(session_id, limit=events_limit)
+    event_records = await session_service.get_session_events(session_id, limit=events_limit, scope=ctx.scope)
     return Response.success(
         msg="更新会话配置成功",
         data=await build_get_session_response(
@@ -520,8 +591,12 @@ async def patch_session(
 )
 async def get_session_memory(
         session_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        session_service: SessionService = Depends(get_session_service),
         memory_service: MemoryService = Depends(get_memory_service),
 ) -> Response[SessionMemoryResponse]:
+    if not await session_service.get_session(session_id, scope=ctx.scope):
+        raise NotFoundError("该会话不存在，请核实后重试")
     memories = await memory_service.get_session_memories(session_id)
     return Response.success(
         data=SessionMemoryResponse(
@@ -539,8 +614,12 @@ async def get_session_memory(
 async def compact_session_memory(
         session_id: str,
         request: ClearMemoryRequest,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        session_service: SessionService = Depends(get_session_service),
         memory_service: MemoryService = Depends(get_memory_service),
 ) -> Response[Optional[Dict]]:
+    if not await session_service.get_session(session_id, scope=ctx.scope):
+        raise NotFoundError("该会话不存在，请核实后重试")
     await memory_service.compact_session_memory(session_id, request.agent_name)
     return Response.success(msg="压缩记忆成功")
 
@@ -553,8 +632,12 @@ async def compact_session_memory(
 async def clear_session_memory(
         session_id: str,
         request: ClearMemoryRequest,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        session_service: SessionService = Depends(get_session_service),
         memory_service: MemoryService = Depends(get_memory_service),
 ) -> Response[Optional[Dict]]:
+    if not await session_service.get_session(session_id, scope=ctx.scope):
+        raise NotFoundError("该会话不存在，请核实后重试")
     await memory_service.clear_session_memory(session_id, request.agent_name)
     return Response.success(msg="清空记忆成功")
 
@@ -568,8 +651,12 @@ async def delete_session_memory_message(
         session_id: str,
         agent_name: str,
         index: int,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        session_service: SessionService = Depends(get_session_service),
         memory_service: MemoryService = Depends(get_memory_service),
 ) -> Response[Optional[Dict]]:
+    if not await session_service.get_session(session_id, scope=ctx.scope):
+        raise NotFoundError("该会话不存在，请核实后重试")
     await memory_service.delete_session_memory_message(session_id, agent_name, index)
     return Response.success(msg="删除消息成功")
 
@@ -581,8 +668,12 @@ async def delete_session_memory_message(
 )
 async def list_session_checkpoints(
         session_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        session_service: SessionService = Depends(get_session_service),
         agent_service: AgentService = Depends(get_agent_service),
 ) -> Response[ListCheckpointsResponse]:
+    if not await session_service.get_session(session_id, scope=ctx.scope):
+        raise NotFoundError("该会话不存在，请核实后重试")
     checkpoints = await agent_service.list_checkpoints(session_id)
     return Response.success(
         msg="获取还原点列表成功",
@@ -610,8 +701,12 @@ async def list_session_checkpoints(
 async def restore_session_checkpoint(
         session_id: str,
         checkpoint_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        session_service: SessionService = Depends(get_session_service),
         agent_service: AgentService = Depends(get_agent_service),
 ) -> Response[RestoreCheckpointResponse]:
+    if not await session_service.get_session(session_id, scope=ctx.scope):
+        raise NotFoundError("该会话不存在，请核实后重试")
     await agent_service.restore_checkpoint(session_id, checkpoint_id)
     return Response.success(
         msg="回退成功",
@@ -627,9 +722,13 @@ async def restore_session_checkpoint(
 )
 async def stop_session(
         session_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        session_service: SessionService = Depends(get_session_service),
         agent_service: AgentService = Depends(get_agent_service),
 ) -> Response[Optional[Dict]]:
     """根据传递的指定会话id停止对应任务会话"""
+    if not await session_service.get_session(session_id, scope=ctx.scope):
+        raise NotFoundError("该会话不存在，请核实后重试")
     await agent_service.stop_session(session_id)
     return Response.success(msg="停止任务会话成功")
 
@@ -642,10 +741,11 @@ async def stop_session(
 )
 async def get_session_files(
         session_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
 ) -> Response[GetSessionFilesResponse]:
     """获取指定任务会话文件列表信息"""
-    files = await session_service.get_session_files(session_id)
+    files = await session_service.get_session_files(session_id, scope=ctx.scope)
     return Response.success(
         msg="获取会话文件列表成功",
         data=GetSessionFilesResponse(files=files)
@@ -661,10 +761,11 @@ async def get_session_files(
 async def read_file(
         session_id: str,
         request: FileReadRequest,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
 ) -> Response[FileReadResponse]:
     """根据传递的会话id+文件路径查看沙箱中文件的内容信息"""
-    result = await session_service.read_file(session_id, request.filepath)
+    result = await session_service.read_file(session_id, request.filepath, scope=ctx.scope)
     return Response.success(
         msg="获取会话文件内容成功",
         data=result
@@ -680,10 +781,11 @@ async def read_file(
 async def read_shell_output(
         session_id: str,
         request: ShellReadRequest,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
 ) -> Response[ShellReadResponse]:
     """查看会话的shell内容输出"""
-    result = await session_service.read_shell_output(session_id, request.session_id)
+    result = await session_service.read_shell_output(session_id, request.session_id, scope=ctx.scope)
     return Response.success(
         msg="获取Shell内容输出结果成功",
         data=result,
@@ -699,6 +801,11 @@ async def vnc_websocket(
         session_service: SessionService = Depends(get_session_service),
 ) -> None:
     """VNC Websocket端点，用于建立与沙箱环境的vnc连接，并双向转发数据"""
+    ctx = await _workspace_context_from_websocket(websocket)
+    if ctx is None:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
+
     # 1.从客户端noVNC接收子协议
     protocols_str = websocket.headers.get("sec-websocket-protocol", "")
     protocols = [p.strip() for p in protocols_str.split(",")]
@@ -716,7 +823,7 @@ async def vnc_websocket(
 
     try:
         # 4.获取对应会话的vnc链接
-        sandbox_vnc_url = await session_service.get_vnc_url(session_id)
+        sandbox_vnc_url = await session_service.get_vnc_url(session_id, scope=ctx.scope)
         logger.info(f"连接WebSocket VNC： {sandbox_vnc_url}")
 
         # 5.创建上下文并连接到vnc

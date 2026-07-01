@@ -20,6 +20,7 @@ from app.domain.models.knowledge_base import (
 )
 from app.domain.models.session import Session
 from app.domain.models.codebase import SessionMode
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.knowledge_base.url_guard import validate_public_url
 from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
@@ -53,8 +54,18 @@ class KnowledgeBaseService:
             return KBSourceType.UPLOAD
         return fallback
 
-    async def create_kb(self, name: str = "未命名知识库", settings: Optional[dict] = None) -> KnowledgeBase:
-        kb = KnowledgeBase(name=name or "未命名知识库", settings=settings or {})
+    async def create_kb(
+            self,
+            name: str = "未命名知识库",
+            settings: Optional[dict] = None,
+            scope: Optional[OwnerScope] = None,
+    ) -> KnowledgeBase:
+        kb = KnowledgeBase(
+            name=name or "未命名知识库",
+            settings=settings or {},
+            owner_user_id=scope.user_id if scope else None,
+            team_id=scope.team_id if scope and scope.type == OwnerScopeType.TEAM else None,
+        )
         async with self._uow_factory() as uow:
             await uow.knowledge_base.save_kb(kb)
         return kb
@@ -66,13 +77,14 @@ class KnowledgeBaseService:
             file_ids: Optional[List[str]] = None,
             urls: Optional[List[str]] = None,
             source_type: KBSourceType = KBSourceType.UPLOAD,
+            scope: Optional[OwnerScope] = None,
     ) -> KnowledgeBase:
         file_ids = file_ids or []
         urls = urls or []
         if not file_ids and not urls:
             raise BadRequestError("请至少上传一个文件或提供一个 URL")
 
-        kb = await self.get_kb(kb_id)
+        kb = await self.get_kb(kb_id, scope=scope)
         if await self._ingest_in_progress(kb):
             raise ConflictError("知识库正在索引中，请等待当前任务完成后再添加文档")
 
@@ -111,26 +123,26 @@ class KnowledgeBaseService:
             kb.status = KBStatus.PENDING
             kb.updated_at = datetime.now()
             await uow.knowledge_base.save_kb(kb)
-        return await self.reindex(kb_id)
+        return await self.reindex(kb_id, scope=scope)
 
-    async def get_kb(self, kb_id: str) -> KnowledgeBase:
+    async def get_kb(self, kb_id: str, scope: Optional[OwnerScope] = None) -> KnowledgeBase:
         async with self._uow_factory() as uow:
-            kb = await uow.knowledge_base.get_kb(kb_id)
+            kb = await uow.knowledge_base.get_kb(kb_id, scope=scope)
         if not kb:
             raise NotFoundError(f"知识库[{kb_id}]不存在")
         return kb
 
-    async def list_kbs(self, limit: int = 100, offset: int = 0) -> List[KnowledgeBase]:
+    async def list_kbs(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[KnowledgeBase]:
         async with self._uow_factory() as uow:
-            return await uow.knowledge_base.list_kbs(limit=limit, offset=offset)
+            return await uow.knowledge_base.list_kbs(limit=limit, offset=offset, scope=scope)
 
-    async def list_documents(self, kb_id: str) -> List[KnowledgeDocument]:
-        await self.get_kb(kb_id)
+    async def list_documents(self, kb_id: str, scope: Optional[OwnerScope] = None) -> List[KnowledgeDocument]:
+        await self.get_kb(kb_id, scope=scope)
         async with self._uow_factory() as uow:
             return await uow.knowledge_base.list_documents(kb_id)
 
-    async def reindex(self, kb_id: str) -> KnowledgeBase:
-        kb = await self.get_kb(kb_id)
+    async def reindex(self, kb_id: str, scope: Optional[OwnerScope] = None) -> KnowledgeBase:
+        kb = await self.get_kb(kb_id, scope=scope)
         if await self._ingest_in_progress(kb):
             logger.info("知识库 reindex 幂等返回: kb_id=%s task_id=%s", kb_id, kb.ingest_task_id)
             return kb
@@ -156,8 +168,9 @@ class KnowledgeBaseService:
             self,
             kb_id: str,
             latest_event_id: Optional[str] = None,
+            scope: Optional[OwnerScope] = None,
     ) -> AsyncGenerator[BaseEvent, None]:
-        kb = await self.get_kb(kb_id)
+        kb = await self.get_kb(kb_id, scope=scope)
         if not kb.ingest_task_id:
             return
         output = RedisStreamMessageQueue(f"task:output:{kb.ingest_task_id}")
@@ -185,8 +198,9 @@ class KnowledgeBaseService:
             mode: SessionMode = SessionMode.ASK,
             model_id: Optional[str] = None,
             skill_id: Optional[str] = None,
+            scope: Optional[OwnerScope] = None,
     ) -> Session:
-        kb = await self.get_kb(kb_id)
+        kb = await self.get_kb(kb_id, scope=scope)
         if kb.status != KBStatus.READY:
             raise BadRequestError("知识库尚未就绪，请等待索引完成后再开始问答")
         session = Session(
@@ -195,6 +209,8 @@ class KnowledgeBaseService:
             mode=mode,
             model_id=model_id,
             skill_id=skill_id,
+            owner_user_id=scope.user_id if scope else None,
+            team_id=scope.team_id if scope and scope.type == OwnerScopeType.TEAM else None,
         )
         async with self._uow_factory() as uow:
             await uow.session.save(session)
@@ -207,6 +223,7 @@ class KnowledgeBaseService:
             limit: int = 30,
             *,
             kb_id: Optional[str] = None,
+            scope: Optional[OwnerScope] = None,
     ) -> tuple[KnowledgeDocument, str]:
         async with self._uow_factory() as uow:
             doc = await uow.knowledge_base.get_document(doc_id)
@@ -214,6 +231,8 @@ class KnowledgeBaseService:
                 raise NotFoundError(f"文档[{doc_id}]不存在")
             if kb_id and doc.kb_id != kb_id:
                 raise NotFoundError(f"文档[{doc_id}]不属于知识库[{kb_id}]")
+            if await uow.knowledge_base.get_kb(doc.kb_id, scope=scope) is None:
+                raise NotFoundError(f"知识库[{doc.kb_id}]不存在")
             chunks = await uow.knowledge_base.list_chunks_for_document(doc_id, page_no=page, limit=limit)
         content = "\n\n".join(chunk.content for chunk in chunks if chunk.level.value == "parent")
         return doc, content

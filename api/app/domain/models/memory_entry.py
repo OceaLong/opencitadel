@@ -29,6 +29,8 @@ class MemoryEntry(BaseModel):
     title: str = ""
     content: str = ""
     tags: List[str] = Field(default_factory=list)
+    owner_user_id: Optional[str] = None
+    team_id: Optional[str] = None
     source: MemorySource = MemorySource.MANUAL
     last_used_at: Optional[datetime] = None
     use_count: int = 0

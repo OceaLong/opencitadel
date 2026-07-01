@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.services.a2a_server_service import A2AServerService
 from app.application.services.agent_service import AgentService
 from app.application.services.app_config_service import AppConfigService
+from app.application.services.auth_service import AuthService
+from app.application.services.audit_service import AuditService
 from app.application.services.codebase_service import CodebaseService
 from app.application.services.file_service import FileService
 from app.application.services.knowledge_base_service import KnowledgeBaseService
@@ -18,17 +20,65 @@ from app.application.services.llm_token_usage_service import LLMTokenUsageServic
 from app.application.services.marketplace_service import MarketplaceService
 from app.application.services.memory_service import MemoryService
 from app.application.services.questionnaire_service import QuestionnaireService
+from app.application.services.quota_service import QuotaService
 from app.application.services.room_service import RoomService
 from app.application.services.session_service import SessionService
+from app.application.services.service_api_key_service import ServiceApiKeyService
 from app.application.services.skill_service import SkillService
+from app.application.services.team_service import TeamService
+from app.application.services.usage_stats_service import UsageStatsService
 from app.application.services.status_service import StatusService
 from app.container import ApiContainer
 from app.infrastructure.external.health_checker.postgres_health_checker import PostgresHealthChecker
 from app.infrastructure.external.health_checker.redis_health_checker import RedisHealthChecker
 from app.infrastructure.storage.postgres import get_db_session
 from app.infrastructure.storage.redis import RedisClient
+from app.infrastructure.security.cookie import AuthCookieManager
+from app.infrastructure.security.jwt_service import JwtService
 
 logger = logging.getLogger(__name__)
+
+
+@inject
+async def get_auth_service(
+        service: AuthService = Depends(Provide[ApiContainer.auth_service]),
+) -> AuthService:
+    return service
+
+
+@inject
+async def get_audit_service(
+        service: AuditService = Depends(Provide[ApiContainer.audit_service]),
+) -> AuditService:
+    return service
+
+
+@inject
+async def get_usage_stats_service(
+        service: UsageStatsService = Depends(Provide[ApiContainer.usage_stats_service]),
+) -> UsageStatsService:
+    return service
+
+
+@inject
+async def get_quota_service(
+        service: QuotaService = Depends(Provide[ApiContainer.quota_service]),
+) -> QuotaService:
+    return service
+
+
+@inject
+async def get_cookie_manager(
+        manager: AuthCookieManager = Depends(Provide[ApiContainer.cookie_manager]),
+) -> AuthCookieManager:
+    return manager
+
+
+@inject
+async def get_jwt_service(
+        service: JwtService = Depends(Provide[ApiContainer.jwt_service]),
+) -> JwtService:
+    return service
 
 
 @inject
@@ -49,6 +99,20 @@ async def get_llm_model_service(
 async def get_skill_service(
         service: SkillService = Depends(Provide[ApiContainer.skill_service]),
 ) -> SkillService:
+    return service
+
+
+@inject
+async def get_team_service(
+        service: TeamService = Depends(Provide[ApiContainer.team_service]),
+) -> TeamService:
+    return service
+
+
+@inject
+async def get_service_api_key_service(
+        service: ServiceApiKeyService = Depends(Provide[ApiContainer.service_api_key_service]),
+) -> ServiceApiKeyService:
     return service
 
 

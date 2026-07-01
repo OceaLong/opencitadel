@@ -14,6 +14,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.container import get_api_container, init_api_container, shutdown_api_container
 from app.application.services.bootstrap_service import bootstrap_data
@@ -35,9 +36,12 @@ get_api_container().wire(
 from app.interfaces.endpoints.a2a_routes import a2a_router, well_known_router
 from app.interfaces.endpoints.routes import router
 from app.interfaces.errors.exception_handlers import register_exception_handlers
+from app.interfaces.middleware.auth_context import AuthContextMiddleware
 from app.interfaces.middleware.rate_limit import maybe_install_rate_limit
 from app.interfaces.middleware.request_logging import install_request_logging
 from app.interfaces.service_dependencies import get_agent_service, get_skill_service
+from app.infrastructure.security.csrf import CsrfMiddleware
+from app.infrastructure.security.jwt_service import JwtService
 
 # 1.加载配置信息
 settings = get_settings()
@@ -158,12 +162,19 @@ app = FastAPI(
 # 5.配置CORS中间件，解决跨域问题
 _cors_origins = [o.strip() for o in runtime_config.server.cors_origins.split(",") if o.strip()]
 _allow_all_origins = "*" in _cors_origins
+_effective_cors_origins = [] if _allow_all_origins else _cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if _allow_all_origins else _cors_origins,
-    allow_credentials=not _allow_all_origins,
+    allow_origins=_effective_cors_origins,
+    allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-CSRF-Token", "X-Workspace-Id"],
+)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret,
+    same_site="lax",
+    https_only=settings.cookie_secure,
 )
 
 # 6.注册错误处理器
@@ -171,6 +182,15 @@ register_exception_handlers(app)
 
 # 6.0 HTTP 请求日志与 request_id
 install_request_logging(app)
+app.add_middleware(
+    AuthContextMiddleware,
+    jwt_service=JwtService(
+        secret=settings.jwt_secret,
+        access_ttl_seconds=settings.access_token_ttl_seconds,
+        refresh_ttl_seconds=settings.refresh_token_ttl_seconds,
+    ),
+)
+app.add_middleware(CsrfMiddleware)
 
 # 6.1 公开接口限流
 maybe_install_rate_limit(app)

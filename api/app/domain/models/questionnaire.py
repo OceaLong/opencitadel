@@ -46,6 +46,7 @@ class Questionnaire:
     manage_token: str
     created_at: datetime
     updated_at: datetime
+    owner_user_id: Optional[str] = None
 
 
 @dataclass

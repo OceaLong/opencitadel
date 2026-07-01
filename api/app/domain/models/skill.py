@@ -2,9 +2,15 @@
 # -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+
+class ResourceVisibility(str, Enum):
+    GLOBAL = "global"
+    PRIVATE = "private"
 
 
 class SkillAgentParams(BaseModel):
@@ -32,6 +38,8 @@ class Skill(BaseModel):
     examples: List[str] = Field(default_factory=list)
     is_builtin: bool = False
     enabled: bool = True
+    owner_user_id: Optional[str] = None
+    visibility: str = ResourceVisibility.GLOBAL
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 

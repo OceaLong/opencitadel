@@ -44,6 +44,12 @@ class SkillORM(Base):
     )
     is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    owner_user_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    visibility: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'global'"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
@@ -69,6 +75,8 @@ class SkillORM(Base):
             examples=skill.examples,
             is_builtin=skill.is_builtin,
             enabled=skill.enabled,
+            owner_user_id=skill.owner_user_id,
+            visibility=skill.visibility.value if hasattr(skill.visibility, "value") else skill.visibility,
         )
 
     def to_domain(self) -> Skill:
@@ -88,6 +96,8 @@ class SkillORM(Base):
             examples=self.examples or [],
             is_builtin=self.is_builtin,
             enabled=self.enabled,
+            owner_user_id=self.owner_user_id,
+            visibility=self.visibility,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )

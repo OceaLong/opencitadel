@@ -20,6 +20,7 @@ from app.domain.models.codebase import (
     SessionMode,
 )
 from app.domain.models.event import BaseEvent
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.session import Session
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.codebase.ingestion_task_runner import CodebaseIngestionTaskRunner
@@ -51,6 +52,7 @@ class CodebaseService:
             file_id: Optional[str] = None,
             git_url: Optional[str] = None,
             file_ids: Optional[List[str]] = None,
+            scope: Optional[OwnerScope] = None,
     ) -> Codebase:
         if source_type == CodebaseSourceType.ZIP:
             source_ref = json.dumps({"file_id": file_id})
@@ -64,6 +66,8 @@ class CodebaseService:
             source_type=source_type,
             source_ref=source_ref,
             status=CodebaseStatus.PENDING,
+            owner_user_id=scope.user_id if scope else None,
+            team_id=scope.team_id if scope and scope.type == OwnerScopeType.TEAM else None,
         )
         async with self._uow_factory() as uow:
             await uow.codebase.save(codebase)
@@ -83,18 +87,19 @@ class CodebaseService:
         await task.dispatch_to_worker()
         return codebase
 
-    async def list_codebases(self, limit: int = 100, offset: int = 0) -> List[Codebase]:
+    async def list_codebases(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[Codebase]:
         async with self._uow_factory() as uow:
-            return await uow.codebase.list_all(limit=limit, offset=offset)
+            return await uow.codebase.list_all(limit=limit, offset=offset, scope=scope)
 
-    async def get_codebase(self, codebase_id: str) -> Codebase:
+    async def get_codebase(self, codebase_id: str, scope: Optional[OwnerScope] = None) -> Codebase:
         async with self._uow_factory() as uow:
-            codebase = await uow.codebase.get_by_id(codebase_id)
+            codebase = await uow.codebase.get_by_id(codebase_id, scope=scope)
         if not codebase:
             raise NotFoundError(f"代码库[{codebase_id}]不存在")
         return codebase
 
-    async def get_file_tree(self, codebase_id: str) -> List[FileTreeNode]:
+    async def get_file_tree(self, codebase_id: str, scope: Optional[OwnerScope] = None) -> List[FileTreeNode]:
+        await self.get_codebase(codebase_id, scope=scope)
         async with self._uow_factory() as uow:
             files = await uow.codebase.list_files(codebase_id)
         root: dict = {}
@@ -123,7 +128,8 @@ class CodebaseService:
 
         return build_tree(root)
 
-    async def list_symbols(self, codebase_id: str, name: Optional[str] = None) -> List[CodebaseSymbol]:
+    async def list_symbols(self, codebase_id: str, name: Optional[str] = None, scope: Optional[OwnerScope] = None) -> List[CodebaseSymbol]:
+        await self.get_codebase(codebase_id, scope=scope)
         async with self._uow_factory() as uow:
             return await uow.codebase.list_symbols(codebase_id, name=name)
 
@@ -131,12 +137,14 @@ class CodebaseService:
             self,
             codebase_id: str,
             kind: Optional[ArtifactKind] = None,
+            scope: Optional[OwnerScope] = None,
     ) -> List[CodebaseArtifact]:
+        await self.get_codebase(codebase_id, scope=scope)
         async with self._uow_factory() as uow:
             return await uow.codebase.list_artifacts(codebase_id, kind=kind)
 
-    async def reanalyze(self, codebase_id: str) -> Codebase:
-        codebase = await self.get_codebase(codebase_id)
+    async def reanalyze(self, codebase_id: str, scope: Optional[OwnerScope] = None) -> Codebase:
+        codebase = await self.get_codebase(codebase_id, scope=scope)
         codebase.status = CodebaseStatus.PENDING
         codebase.error = None
         task_id = str(uuid.uuid4())
@@ -157,12 +165,13 @@ class CodebaseService:
             self,
             codebase_id: str,
             latest_event_id: Optional[str] = None,
+            scope: Optional[OwnerScope] = None,
     ) -> AsyncGenerator[BaseEvent, None]:
         import json
         from app.domain.models.event import Event
         from app.domain.models.event_upgrader import upgrade_event_payload
 
-        codebase = await self.get_codebase(codebase_id)
+        codebase = await self.get_codebase(codebase_id, scope=scope)
         if not codebase.ingest_task_id:
             return
         output = RedisStreamMessageQueue(f"task:output:{codebase.ingest_task_id}")
@@ -189,14 +198,17 @@ class CodebaseService:
             mode: SessionMode = SessionMode.ASK,
             model_id: Optional[str] = None,
             skill_id: Optional[str] = None,
+            scope: Optional[OwnerScope] = None,
     ) -> Session:
-        await self.get_codebase(codebase_id)
+        await self.get_codebase(codebase_id, scope=scope)
         session = Session(
             title=f"代码库对话",
             codebase_id=codebase_id,
             mode=mode,
             model_id=model_id,
             skill_id=skill_id,
+            owner_user_id=scope.user_id if scope else None,
+            team_id=scope.team_id if scope and scope.type == OwnerScopeType.TEAM else None,
         )
         async with self._uow_factory() as uow:
             await uow.session.save(session)
@@ -208,8 +220,9 @@ class CodebaseService:
             path: str,
             start_line: Optional[int] = None,
             end_line: Optional[int] = None,
+            scope: Optional[OwnerScope] = None,
     ) -> str:
-        codebase = await self.get_codebase(codebase_id)
+        codebase = await self.get_codebase(codebase_id, scope=scope)
         if not codebase.sandbox_id:
             raise NotFoundError("代码库沙箱未就绪")
         sandbox = await self._sandbox_cls.get(codebase.sandbox_id)
@@ -221,9 +234,9 @@ class CodebaseService:
             raise NotFoundError(result.message or f"无法读取 {path}")
         return result.data or ""
 
-    async def package_download(self, codebase_id: str, cos) -> str:
+    async def package_download(self, codebase_id: str, cos, scope: Optional[OwnerScope] = None) -> str:
         """Create tarball snapshot and store to COS. Returns snapshot key."""
-        codebase = await self.get_codebase(codebase_id)
+        codebase = await self.get_codebase(codebase_id, scope=scope)
         if not codebase.sandbox_id:
             raise NotFoundError("代码库沙箱未就绪")
         sandbox = await self._sandbox_cls.get(codebase.sandbox_id)

@@ -13,6 +13,7 @@ from app.application.services.skill_service import SkillService
 from app.application.services.config_provider import get_runtime_config
 from app.domain.models.error_codes import MODEL_NOT_CONFIGURED, MODEL_UNAVAILABLE
 from app.domain.models.event import DoneEvent, ErrorEvent, MessageEvent, WaitEvent
+from app.domain.models.scope import OwnerScope, Principal
 from app.domain.models.session import SessionStatus
 from app.infrastructure.external.llm.circuit_breaker import get_llm_circuit_breaker
 from app.infrastructure.storage.postgres import get_uow
@@ -126,7 +127,7 @@ class A2AServerService:
             message,
         )
 
-    async def handle_message_send(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_message_send(self, payload: Dict[str, Any], *, principal: Principal) -> Dict[str, Any]:
         request_id = payload.get("id")
         params = payload.get("params") or {}
         query = extract_text_from_a2a_params(params)
@@ -138,7 +139,10 @@ class A2AServerService:
             guard["id"] = request_id
             return guard
 
-        session = await self._session_service.create_session(title="A2A Request")
+        session = await self._session_service.create_session(
+            title="A2A Request",
+            scope=OwnerScope.personal(principal.user_id),
+        )
         final_text = ""
         try:
             async for event in self._agent_service.chat(session.id, message=query):
@@ -169,7 +173,7 @@ class A2AServerService:
             final_text = "任务已完成，但未产生可展示的文本回复。"
         return build_a2a_text_response(request_id, final_text)
 
-    async def stream_message_events(self, payload: Dict[str, Any]):
+    async def stream_message_events(self, payload: Dict[str, Any], *, principal: Principal):
         import json
         import uuid
 
@@ -186,7 +190,10 @@ class A2AServerService:
             yield json.dumps(guard)
             return
 
-        session = await self._session_service.create_session(title="A2A Stream")
+        session = await self._session_service.create_session(
+            title="A2A Stream",
+            scope=OwnerScope.personal(principal.user_id),
+        )
         accumulated = ""
         try:
             async for event in self._agent_service.chat(session.id, message=query):

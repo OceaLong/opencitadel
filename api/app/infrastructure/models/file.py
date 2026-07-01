@@ -7,6 +7,7 @@ from sqlalchemy import (
     String,
     Integer,
     DateTime,
+    ForeignKey,
     text,
     PrimaryKeyConstraint,
 )
@@ -59,6 +60,16 @@ class FileModel(Base):
         nullable=False,
         server_default=text("0"),
     )  # 文件大小
+    owner_user_id: Mapped[str | None] = mapped_column(
+        String(255),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    team_id: Mapped[str | None] = mapped_column(
+        String(255),
+        ForeignKey("teams.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,

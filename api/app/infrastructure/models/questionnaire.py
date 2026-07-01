@@ -26,6 +26,11 @@ class QuestionnaireModel(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'draft'"))
     slug: Mapped[str] = mapped_column(String(64), nullable=False)
     manage_token: Mapped[str] = mapped_column(String(64), nullable=False)
+    owner_user_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
@@ -44,6 +49,7 @@ class QuestionnaireModel(Base):
             manage_token=self.manage_token,
             created_at=self.created_at,
             updated_at=self.updated_at,
+            owner_user_id=self.owner_user_id,
         )
 
     @classmethod
@@ -56,6 +62,7 @@ class QuestionnaireModel(Base):
             status=q.status.value,
             slug=q.slug,
             manage_token=q.manage_token,
+            owner_user_id=q.owner_user_id,
             created_at=q.created_at,
             updated_at=q.updated_at,
         )

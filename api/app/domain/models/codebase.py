@@ -72,6 +72,8 @@ class Codebase(BaseModel):
     ingest_task_id: Optional[str] = None
     error: Optional[str] = None
     vector_degraded: bool = False
+    owner_user_id: Optional[str] = None
+    team_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 

@@ -7,6 +7,7 @@ import { SessionList } from "@/components/session-list";
 import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarTrigger } from "@/components/ui/sidebar";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 
 export function LeftPanel() {
   const router = useRouter();
@@ -29,6 +30,7 @@ export function LeftPanel() {
       </SidebarHeader>
       {/* 中间内容 */}
       <SidebarContent className="p-2">
+        <WorkspaceSwitcher />
         {/* 新建任务 */}
         <Button variant="outline" className="mb-3 cursor-pointer" onClick={() => router.push("/")}>
           <Plus />

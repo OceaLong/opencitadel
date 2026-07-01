@@ -14,4 +14,5 @@ class FortunePrediction(BaseModel):
     question: str
     input_profile: Dict[str, Any] = Field(default_factory=dict)
     result: Dict[str, Any] = Field(default_factory=dict)
+    owner_user_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)

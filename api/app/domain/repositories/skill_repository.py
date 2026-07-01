@@ -3,16 +3,17 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
+from app.domain.models.scope import OwnerScope
 from app.domain.models.skill import Skill
 
 
 class SkillRepository(ABC):
     @abstractmethod
-    async def get_all(self, enabled_only: bool = False) -> List[Skill]:
+    async def get_all(self, enabled_only: bool = False, scope: Optional[OwnerScope] = None) -> List[Skill]:
         ...
 
     @abstractmethod
-    async def get_by_id(self, skill_id: str) -> Optional[Skill]:
+    async def get_by_id(self, skill_id: str, scope: Optional[OwnerScope] = None) -> Optional[Skill]:
         ...
 
     @abstractmethod

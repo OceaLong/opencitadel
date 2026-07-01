@@ -6,6 +6,7 @@ from typing import Protocol, List, Optional, Dict, Any, Tuple
 from app.domain.models.event import BaseEvent
 from app.domain.models.file import File
 from app.domain.models.memory import Memory
+from app.domain.models.scope import OwnerScope
 from app.domain.models.session import Session, SessionStatus
 
 
@@ -16,7 +17,7 @@ class SessionRepository(Protocol):
         """存储或更新传递进来的会话"""
         ...
 
-    async def get_all(self, limit: int = 100, offset: int = 0) -> List[Session]:
+    async def get_all(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[Session]:
         """获取所有会话列表信息"""
         ...
 
@@ -28,7 +29,7 @@ class SessionRepository(Protocol):
         """List RUNNING sessions with active task ids that may need recovery."""
         ...
 
-    async def get_by_id(self, session_id: str) -> Optional[Session]:
+    async def get_by_id(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[Session]:
         """根据传递的会话id查询会话"""
         ...
 
@@ -36,11 +37,11 @@ class SessionRepository(Protocol):
         """检查会话是否存在"""
         ...
 
-    async def get_metadata(self, session_id: str) -> Optional[Session]:
+    async def get_metadata(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[Session]:
         """仅加载会话元数据（不含 memories/files）"""
         ...
 
-    async def get_files(self, session_id: str) -> Optional[List[File]]:
+    async def get_files(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[List[File]]:
         """仅加载会话文件列表；会话不存在时返回 None"""
         ...
 

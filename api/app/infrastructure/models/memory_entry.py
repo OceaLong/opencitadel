@@ -34,6 +34,16 @@ class MemoryEntryORM(Base):
     tags: Mapped[List[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    owner_user_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    team_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("teams.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     source: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'manual'"))
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     use_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
@@ -57,6 +67,8 @@ class MemoryEntryORM(Base):
             title=entry.title,
             content=entry.content,
             tags=entry.tags,
+            owner_user_id=entry.owner_user_id,
+            team_id=entry.team_id,
             source=entry.source.value,
             last_used_at=entry.last_used_at,
             use_count=entry.use_count,
@@ -70,6 +82,8 @@ class MemoryEntryORM(Base):
             title=self.title,
             content=self.content,
             tags=self.tags or [],
+            owner_user_id=self.owner_user_id,
+            team_id=self.team_id,
             source=MemorySource(self.source),
             last_used_at=self.last_used_at,
             use_count=self.use_count,

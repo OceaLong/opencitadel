@@ -12,6 +12,8 @@ class FileUploadPayload:
     filename: str
     size: Optional[int] = None
     content_type: str = ""
+    owner_user_id: Optional[str] = None
+    team_id: Optional[str] = None
 
 
 class FileStorage(Protocol):

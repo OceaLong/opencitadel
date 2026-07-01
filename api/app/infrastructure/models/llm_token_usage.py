@@ -28,6 +28,16 @@ class LLMTokenUsageORM(Base):
         nullable=True,
     )
     model_name: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
+    owner_user_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    team_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("teams.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     call_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'stream'"))
     prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
@@ -48,6 +58,8 @@ class LLMTokenUsageORM(Base):
             step=usage.step,
             model_id=usage.model_id,
             model_name=usage.model_name,
+            owner_user_id=usage.owner_user_id,
+            team_id=usage.team_id,
             call_type=usage.call_type,
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,

@@ -18,6 +18,20 @@ class Settings(BaseSettings):
     log_format: str = "text"  # text | json
     app_config_filepath: str = "config.yaml"
     api_key_secret: str = "my-manus-api-key-secret-change-in-production"
+    jwt_secret: str = "my-manus-jwt-secret-change-in-production"
+    session_secret: str = "my-manus-session-secret-change-in-production"
+    access_token_ttl_seconds: int = 900
+    refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30
+    cookie_domain: str = ""
+    cookie_secure: bool = False
+    oauth_redirect_base: str = "http://localhost:8088/api/auth/oauth"
+    frontend_base_url: str = "http://localhost:3000"
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    bootstrap_admin_email: str = "admin@example.com"
+    bootstrap_admin_password: str = ""
 
     # 数据库连接（引导层，启动前必须可用）
     postgres_user: str = "postgres"
@@ -69,6 +83,19 @@ class Settings(BaseSettings):
                 "sqlalchemy_database_uri",
                 f"postgresql+asyncpg://{user}:{password}@{self.postgres_host}:5432/{self.postgres_db}",
             )
+        if self.env.lower() == "production":
+            insecure_values = {
+                "api_key_secret": "my-manus-api-key-secret-change-in-production",
+                "jwt_secret": "my-manus-jwt-secret-change-in-production",
+                "session_secret": "my-manus-session-secret-change-in-production",
+            }
+            for field, default in insecure_values.items():
+                if getattr(self, field) == default:
+                    raise ValueError(f"{field} must be changed in production")
+            if not self.cookie_secure:
+                raise ValueError("cookie_secure must be true in production")
+            if not self.bootstrap_admin_password:
+                raise ValueError("bootstrap_admin_password must be set in production")
         return self
 
 

@@ -10,11 +10,19 @@ from .knowledge_base_repository import KnowledgeBaseRepository
 from .llm_model_repository import LLMModelRepository
 from .llm_token_usage_repository import LLMTokenUsageRepository
 from .memory_entry_repository import MemoryEntryRepository
+from .audit_repository import AuditRepository
 from .fortune_prediction_repository import FortunePredictionRepository
+from .invitation_repository import InvitationRepository
+from .oauth_identity_repository import OAuthIdentityRepository
+from .quota_repository import QuotaRepository
 from .questionnaire_repository import QuestionnaireRepository
+from .refresh_token_repository import RefreshTokenRepository
 from .room_repository import RoomRepository
 from .session_repository import SessionRepository
+from .service_api_key_repository import ServiceApiKeyRepository
 from .skill_repository import SkillRepository
+from .team_repository import TeamRepository
+from .user_repository import UserRepository
 
 T = TypeVar("T", bound="IUnitOfWork")
 
@@ -22,6 +30,7 @@ T = TypeVar("T", bound="IUnitOfWork")
 class IUnitOfWork(ABC):
     """Uow模式协议接口"""
     checkpoint: CheckpointRepository
+    audit: AuditRepository
     codebase: CodebaseRepository
     knowledge_base: KnowledgeBaseRepository
     file: FileRepository
@@ -33,6 +42,13 @@ class IUnitOfWork(ABC):
     fortune_prediction: FortunePredictionRepository
     room: RoomRepository
     llm_token_usage: LLMTokenUsageRepository
+    invitation: InvitationRepository
+    oauth_identity: OAuthIdentityRepository
+    quota: QuotaRepository
+    refresh_token: RefreshTokenRepository
+    service_api_key: ServiceApiKeyRepository
+    team: TeamRepository
+    user: UserRepository
 
     @abstractmethod
     async def commit(self):

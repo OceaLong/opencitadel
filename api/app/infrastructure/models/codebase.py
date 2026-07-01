@@ -46,6 +46,16 @@ class CodebaseModel(Base):
     vector_degraded: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    owner_user_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    team_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("teams.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
@@ -68,6 +78,8 @@ class CodebaseModel(Base):
             ingest_task_id=self.ingest_task_id,
             error=self.error,
             vector_degraded=bool(self.vector_degraded),
+            owner_user_id=self.owner_user_id,
+            team_id=self.team_id,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -88,6 +100,8 @@ class CodebaseModel(Base):
             ingest_task_id=codebase.ingest_task_id,
             error=codebase.error,
             vector_degraded=codebase.vector_degraded,
+            owner_user_id=codebase.owner_user_id,
+            team_id=codebase.team_id,
             created_at=codebase.created_at,
             updated_at=codebase.updated_at,
         )

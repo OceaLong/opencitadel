@@ -10,6 +10,7 @@ from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from app.application.errors.exceptions import BadRequestError
 from app.application.services.marketplace_service import MarketplaceService
+from app.interfaces.auth_dependencies import get_current_principal
 from app.interfaces.schemas.base import Response
 from app.interfaces.schemas.marketplace import (
     ConsumptionAnalysisRequest,
@@ -57,6 +58,7 @@ async def list_apps(
 async def search_videos(
         request: VideoSearchRequest,
         http_request: Request,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[VideoSearchResponse]:
     request_id = http_request.headers.get("x-request-id") or "-"
@@ -80,6 +82,7 @@ async def search_videos(
 @router.post("/assistant/route", response_model=Response[MarketplaceRouteResponse])
 async def route_marketplace_request(
         request: MarketplaceRouteRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[MarketplaceRouteResponse]:
     try:
@@ -95,6 +98,7 @@ async def route_marketplace_request(
 @router.post("/nutrition/analyze", response_model=Response[NutritionAnalysisResponse])
 async def analyze_nutrition(
         request: NutritionAnalysisRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[NutritionAnalysisResponse]:
     try:
@@ -112,6 +116,7 @@ async def analyze_nutrition(
 @router.post("/nutrition/followup", response_model=Response[NutritionFollowupResponse])
 async def answer_nutrition_followup(
         request: NutritionFollowupRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[NutritionFollowupResponse]:
     try:
@@ -128,6 +133,7 @@ async def answer_nutrition_followup(
 @router.post("/consumption/analyze", response_model=Response[ConsumptionAnalysisResponse])
 async def analyze_consumption(
         request: ConsumptionAnalysisRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[ConsumptionAnalysisResponse]:
     try:
@@ -144,6 +150,7 @@ async def analyze_consumption(
 @router.post("/consumption/calculate", response_model=Response[ConsumptionAnalysisResponse])
 async def calculate_consumption(
         request: ConsumptionManualRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[ConsumptionAnalysisResponse]:
     try:
@@ -159,6 +166,7 @@ async def calculate_consumption(
 @router.post("/consumption/correct", response_model=Response[ConsumptionAnalysisResponse])
 async def correct_consumption(
         request: ConsumptionCorrectionRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[ConsumptionAnalysisResponse]:
     try:
@@ -171,6 +179,7 @@ async def correct_consumption(
 @router.post("/document-qa/ask", response_model=Response[DocumentQaResponse])
 async def ask_document_question(
         request: DocumentQaRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[DocumentQaResponse]:
     try:
@@ -187,6 +196,7 @@ async def ask_document_question(
 @router.post("/translation/translate", response_model=Response[TranslationResponse])
 async def translate(
         request: TranslationRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[TranslationResponse]:
     try:
@@ -205,6 +215,7 @@ async def translate(
 @router.post("/convert", response_model=Response[DocumentConvertResponse])
 async def convert_document(
         request: DocumentConvertRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[DocumentConvertResponse]:
     try:
@@ -220,6 +231,7 @@ async def convert_document(
 @router.post("/watermark/add", response_model=Response[WatermarkResultResponse])
 async def add_watermark(
         request: WatermarkAddRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[WatermarkResultResponse]:
     try:
@@ -240,6 +252,7 @@ async def add_watermark(
 @router.post("/fortune/predict", response_model=Response[FortunePredictionResponse])
 async def predict_fortune(
         request: FortunePredictionRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[FortunePredictionResponse]:
     try:
@@ -249,6 +262,7 @@ async def predict_fortune(
             question=request.question,
             input_profile=profile,
             model_id=request.model_id,
+            owner_user_id=_principal.user_id,
         )
         return Response.success(data=FortunePredictionResponse(**data))
     except ValueError as exc:
@@ -258,6 +272,7 @@ async def predict_fortune(
 @router.post("/fortune/predict/stream")
 async def predict_fortune_stream(
         request: FortunePredictionRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> EventSourceResponse:
     async def event_generator() -> AsyncGenerator[ServerSentEvent, None]:
@@ -268,6 +283,7 @@ async def predict_fortune_stream(
                     question=request.question,
                     input_profile=profile,
                     model_id=request.model_id,
+                    owner_user_id=_principal.user_id,
             ):
                 yield ServerSentEvent(event=item["event"], data=item["data"])
         except ValueError as exc:
@@ -294,6 +310,7 @@ async def get_fortune_share(
 @router.post("/watermark/remove", response_model=Response[WatermarkResultResponse])
 async def remove_watermark(
         request: WatermarkRemoveRequest,
+        _principal=Depends(get_current_principal),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[WatermarkResultResponse]:
     try:

@@ -79,6 +79,16 @@ class SessionModel(Base):
         ForeignKey("knowledge_bases.id", ondelete="SET NULL"),
         nullable=True,
     )  # 关联文档知识库
+    owner_user_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )  # 所属用户
+    team_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("teams.id", ondelete="SET NULL"),
+        nullable=True,
+    )  # 所属团队
     mode: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
@@ -133,6 +143,8 @@ class SessionModel(Base):
             "thinking_enabled": self.thinking_enabled,
             "codebase_id": self.codebase_id,
             "knowledge_base_id": self.knowledge_base_id,
+            "owner_user_id": self.owner_user_id,
+            "team_id": self.team_id,
             "mode": self.mode,
             "pending_phase": self.pending_phase,
             "status": self.status,

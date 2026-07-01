@@ -60,6 +60,8 @@ class CosFileStorage(FileStorage):
                 extension=file_extension,
                 mime_type=payload.content_type or "",
                 size=payload.size,
+                owner_user_id=payload.owner_user_id,
+                team_id=payload.team_id,
             )
             async with self._uow_factory() as uow:
                 await uow.file.save(file)
