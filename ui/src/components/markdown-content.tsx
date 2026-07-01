@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { MermaidDiagram } from "@/components/mermaid-diagram";
+
 import { cn } from "@/lib/utils";
 
 export type MarkdownContentProps = {
@@ -101,6 +102,17 @@ function buildComponents(
   ),
   a: ({ className, href, children, ...props }) => {
     const childText = String(children ?? "");
+    if (href?.startsWith("kbdoc://") && onSourceClick) {
+      return (
+        <button
+          type="button"
+          className="text-sm text-blue-600 hover:underline"
+          onClick={() => onSourceClick(href)}
+        >
+          {children}
+        </button>
+      );
+    }
     const locMatch = childText.match(/^([^:]+):(\d+)$/);
     if (locMatch && onSourceClick) {
       return (

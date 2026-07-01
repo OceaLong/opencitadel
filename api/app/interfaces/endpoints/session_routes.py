@@ -175,6 +175,7 @@ async def create_session(
         skill_id=request.skill_id,
         thinking_enabled=bool(request.thinking_enabled) if request.thinking_enabled is not None else False,
         codebase_id=request.codebase_id,
+        knowledge_base_id=request.knowledge_base_id,
         mode=request.mode,
     )
     return Response.success(

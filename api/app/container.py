@@ -15,6 +15,7 @@ from app.application.services.app_config_service import AppConfigService
 from app.application.services.codebase_service import CodebaseService
 from app.application.services.config_provider import AppConfigProvider, create_app_config_provider
 from app.application.services.file_service import FileService
+from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.marketplace_service import MarketplaceService
@@ -268,6 +269,11 @@ class BaseContainer(containers.DeclarativeContainer):
         CodebaseService,
         uow_factory=uow_factory,
         sandbox_cls=sandbox_cls,
+        file_storage=file_storage,
+    )
+    knowledge_base_service = providers.Singleton(
+        KnowledgeBaseService,
+        uow_factory=uow_factory,
         file_storage=file_storage,
     )
 

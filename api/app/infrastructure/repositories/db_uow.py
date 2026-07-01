@@ -12,6 +12,7 @@ from core.config import get_settings
 from .db_checkpoint_repository import DBCheckpointRepository
 from .db_codebase_repository import DBCodebaseRepository
 from .db_file_repository import DBFileRepository
+from .db_knowledge_base_repository import DBKnowledgeBaseRepository
 from .db_llm_model_repository import DBLLMModelRepository
 from .db_llm_token_usage_repository import DBLLMTokenUsageRepository
 from .db_memory_entry_repository import DBMemoryEntryRepository
@@ -51,6 +52,7 @@ class DBUnitOfWork(IUnitOfWork):
         cipher = ApiKeyCipher(get_settings().api_key_secret)
         self.checkpoint = DBCheckpointRepository(db_session=self.db_session)
         self.codebase = DBCodebaseRepository(db_session=self.db_session)
+        self.knowledge_base = DBKnowledgeBaseRepository(db_session=self.db_session)
         self.file = DBFileRepository(db_session=self.db_session)
         self.session = DBSessionRepository(
             db_session=self.db_session,

@@ -11,6 +11,7 @@ from app.application.services.agent_service import AgentService
 from app.application.services.app_config_service import AppConfigService
 from app.application.services.codebase_service import CodebaseService
 from app.application.services.file_service import FileService
+from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.application.services.llm_status_service import LLMStatusService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
@@ -128,6 +129,13 @@ async def get_agent_service(
 async def get_codebase_service(
         service: CodebaseService = Depends(Provide[ApiContainer.codebase_service]),
 ) -> CodebaseService:
+    return service
+
+
+@inject
+async def get_knowledge_base_service(
+        service: KnowledgeBaseService = Depends(Provide[ApiContainer.knowledge_base_service]),
+) -> KnowledgeBaseService:
     return service
 
 

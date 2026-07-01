@@ -6,6 +6,7 @@ from typing import TypeVar
 from .checkpoint_repository import CheckpointRepository
 from .codebase_repository import CodebaseRepository
 from .file_repository import FileRepository
+from .knowledge_base_repository import KnowledgeBaseRepository
 from .llm_model_repository import LLMModelRepository
 from .llm_token_usage_repository import LLMTokenUsageRepository
 from .memory_entry_repository import MemoryEntryRepository
@@ -22,6 +23,7 @@ class IUnitOfWork(ABC):
     """Uow模式协议接口"""
     checkpoint: CheckpointRepository
     codebase: CodebaseRepository
+    knowledge_base: KnowledgeBaseRepository
     file: FileRepository
     session: SessionRepository
     llm_model: LLMModelRepository

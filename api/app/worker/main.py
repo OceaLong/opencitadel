@@ -16,6 +16,7 @@ from app.domain.models.event import MessageEvent
 from app.domain.models.session import SessionStatus
 from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.services.codebase.ingestion_task_runner import CodebaseIngestionTaskRunner
+from app.domain.services.knowledge_base.ingestion_task_runner import KBIngestionTaskRunner
 from app.infrastructure.external.file_storage.cos_file_storage import CosFileStorage
 from app.infrastructure.external.runtime_settings import get_admission_runtime_settings
 from app.infrastructure.external.sandbox.admission import get_sandbox_quota
@@ -30,7 +31,7 @@ from app.infrastructure.external.task.task_lease import (
 )
 from app.domain.models.error_codes import MODEL_UNAVAILABLE
 from app.infrastructure.external.llm.circuit_breaker import get_llm_circuit_breaker
-from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError
+from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError, create_resilient_llm
 from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
 from app.infrastructure.logging import setup_logging
 from app.infrastructure.observability.logging_context import bind_context, configure_structured_logging
@@ -419,6 +420,9 @@ class AgentWorker:
         if meta.get("task_type") == "codebase_ingest":
             await self._execute_ingest_job(task_id, meta.get("resource_id", ""))
             return
+        if meta.get("task_type") == "kb_ingest":
+            await self._execute_kb_ingest_job(task_id, meta.get("resource_id", ""))
+            return
 
         async with get_uow() as uow:
             session = await uow.session.get_by_id(session_id)
@@ -497,6 +501,35 @@ class AgentWorker:
         task = self._task_cls(
             task_id=task_id,
             session_id=f"codebase-ingest:{codebase_id}",
+            task_runner=runner,
+        )
+        await task.execute_locally()
+
+    async def _execute_kb_ingest_job(self, task_id: str, kb_id: str) -> None:
+        if not kb_id:
+            await self._task_state.set_status(task_id, TaskStatus.FAILED)
+            raise RuntimeError("知识库摄取任务缺少 resource_id")
+        llm = None
+        try:
+            model = await self._runner_factory._llm_model_service.resolve_model(None)
+            llm = create_resilient_llm(
+                model,
+                thinking_enabled=False,
+                llm_model_service=self._runner_factory._llm_model_service,
+            )
+        except Exception as exc:
+            logger.warning("知识库摄取 GraphRAG LLM 不可用，将跳过建图: %s", exc)
+        container = get_worker_container()
+        runner = KBIngestionTaskRunner(
+            uow_factory=get_uow,
+            file_storage=self._file_storage,
+            kb_id=kb_id,
+            llm=llm,
+            json_parser=container.json_parser(),
+        )
+        task = self._task_cls(
+            task_id=task_id,
+            session_id=f"kb-ingest:{kb_id}",
             task_runner=runner,
         )
         await task.execute_locally()

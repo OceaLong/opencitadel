@@ -74,6 +74,11 @@ class SessionModel(Base):
         ForeignKey("codebases.id", ondelete="SET NULL"),
         nullable=True,
     )  # 关联代码库
+    knowledge_base_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("knowledge_bases.id", ondelete="SET NULL"),
+        nullable=True,
+    )  # 关联文档知识库
     mode: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
@@ -127,6 +132,7 @@ class SessionModel(Base):
             "skill_id": self.skill_id,
             "thinking_enabled": self.thinking_enabled,
             "codebase_id": self.codebase_id,
+            "knowledge_base_id": self.knowledge_base_id,
             "mode": self.mode,
             "pending_phase": self.pending_phase,
             "status": self.status,

@@ -31,6 +31,13 @@ class BadRequestError(AppException):
         super().__init__(status_code=400, code=400, msg=msg)
 
 
+class ConflictError(AppException):
+    """资源冲突（如并发任务互斥）"""
+
+    def __init__(self, msg: str = "操作冲突，请稍后重试"):
+        super().__init__(status_code=409, code=409, msg=msg)
+
+
 class NotFoundError(AppException):
     """资源未找到错误"""
 

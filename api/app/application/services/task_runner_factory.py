@@ -29,6 +29,7 @@ from app.domain.services.agent.sandbox_provider import LazyBrowser, LazySandbox,
 from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.services.tools.codebase_tools import CodebaseTool
 from app.domain.services.tools.image_generation import ImageGenerationTool
+from app.domain.services.tools.knowledge_base_tools import KnowledgeBaseTool
 from app.domain.services.tools.memory import MemoryTool
 from app.domain.utils.app_config_filter import filter_a2a_config_by_refs, filter_mcp_config_by_refs
 from app.infrastructure.external.llm.factory import LLMFactory
@@ -44,6 +45,14 @@ CODE_AGENT_SKILL_PROMPT = """
 3. 修改前通过澄清步骤确认需求细节
 4. 每次修改后说明变更的文件与行号
 工作目录为代码库沙箱路径，请在该目录下进行所有改码操作。
+"""
+
+DOC_AGENT_SKILL_PROMPT = """
+你是企业文档知识库 Agent。用户已上传并索引了企业文档知识库，你可以：
+1. 使用 knowledge_base 工具检索、理解文档内容
+2. 结合 file/shell/browser 等工具生成报告、摘要、对比分析等交付物
+3. 引用知识库内容时必须标注文档来源，优先保留 `kbdoc://` 引用链接
+4. 不要编造知识库中没有依据的事实
 """
 
 
@@ -190,6 +199,26 @@ class TaskRunnerFactory:
                 )
         if codebase_prompt:
             skill_prompt = f"{skill_prompt}\n\n{codebase_prompt}".strip() if skill_prompt else codebase_prompt
+        knowledge_base_prompt = ""
+        if session.knowledge_base_id:
+            async with self._uow_factory() as uow:
+                kb = await uow.knowledge_base.get_kb(session.knowledge_base_id)
+            if kb:
+                if session.mode == SessionMode.AGENT:
+                    knowledge_base_prompt = DOC_AGENT_SKILL_PROMPT
+                extra_tools.append(
+                    KnowledgeBaseTool(
+                        uow_factory=self._uow_factory,
+                        kb_id=kb.id,
+                        llm=llm,
+                    )
+                )
+        if knowledge_base_prompt:
+            skill_prompt = (
+                f"{skill_prompt}\n\n{knowledge_base_prompt}".strip()
+                if skill_prompt
+                else knowledge_base_prompt
+            )
         caps = llm_model.capabilities
         if caps and caps.image_generation:
             extra_tools.append(
@@ -251,6 +280,7 @@ class TaskRunnerFactory:
             checkpoint_service=self._checkpoint_service,
             mode=session.mode,
             codebase_id=session.codebase_id,
+            knowledge_base_id=session.knowledge_base_id,
             task_state_port=self._task_state_port,
             observability_port=self._observability_port,
             event_sequence_port=self._event_sequence_port,

@@ -1,0 +1,99 @@
+import { API_CONFIG, get, parseSSEStream, post } from "./fetch";
+import type {
+  AddKnowledgeDocumentsParams,
+  CreateKnowledgeBaseParams,
+  CreateKnowledgeSessionParams,
+  KnowledgeBase,
+  KnowledgeBasesData,
+  KnowledgeDocumentsData,
+  KnowledgeSessionData,
+  ReadKnowledgeDocumentData,
+  SSEEventData,
+  SSEEventHandler,
+} from "./types";
+
+export const knowledgeApi = {
+  create: (params: CreateKnowledgeBaseParams): Promise<KnowledgeBase> => {
+    return post<KnowledgeBase>("/knowledge-bases", params);
+  },
+
+  list: (limit = 100, offset = 0): Promise<KnowledgeBasesData> => {
+    return get<KnowledgeBasesData>("/knowledge-bases", { limit, offset });
+  },
+
+  get: (kbId: string): Promise<KnowledgeBase> => {
+    return get<KnowledgeBase>(`/knowledge-bases/${kbId}`);
+  },
+
+  addDocuments: (kbId: string, params: AddKnowledgeDocumentsParams): Promise<KnowledgeBase> => {
+    return post<KnowledgeBase>(`/knowledge-bases/${kbId}/documents`, params);
+  },
+
+  listDocuments: (kbId: string): Promise<KnowledgeDocumentsData> => {
+    return get<KnowledgeDocumentsData>(`/knowledge-bases/${kbId}/documents`);
+  },
+
+  reindex: (kbId: string): Promise<KnowledgeBase> => {
+    return post<KnowledgeBase>(`/knowledge-bases/${kbId}/reindex`);
+  },
+
+  createSession: (
+    kbId: string,
+    params?: CreateKnowledgeSessionParams,
+  ): Promise<KnowledgeSessionData> => {
+    return post<KnowledgeSessionData>(`/knowledge-bases/${kbId}/sessions`, params || {});
+  },
+
+  readDocument: (kbId: string, docId: string, page?: number): Promise<ReadKnowledgeDocumentData> => {
+    return get<ReadKnowledgeDocumentData>(
+      `/knowledge-bases/${kbId}/documents/${docId}`,
+      page ? { page } : undefined,
+    );
+  },
+
+  ingestStream: (
+    kbId: string,
+    onEvent: SSEEventHandler,
+    onError?: (error: Error) => void,
+    eventId?: string,
+  ): (() => void) => {
+    const controller = new AbortController();
+    const url = `/knowledge-bases/${kbId}/ingest${eventId ? `?event_id=${encodeURIComponent(eventId)}` : ""}`;
+
+    const start = async () => {
+      try {
+        const fullUrl = url.startsWith("http") ? url : `${API_CONFIG.baseURL}${url}`;
+        const response = await fetch(fullUrl, {
+          method: "GET",
+          headers: { Accept: "text/event-stream" },
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`摄取流连接失败: ${response.status}`);
+        }
+        await parseSSEStream(
+          response.body,
+          (messageEvent) => {
+            const data =
+              typeof messageEvent.data === "string"
+                ? JSON.parse(messageEvent.data)
+                : messageEvent.data;
+            onEvent({
+              type: messageEvent.type as SSEEventData["type"],
+              data,
+            } as SSEEventData);
+          },
+          onError,
+        );
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          onError?.(err as Error);
+        }
+      }
+    };
+    void start();
+    return () => controller.abort();
+  },
+};
+
+export type { KnowledgeBase };

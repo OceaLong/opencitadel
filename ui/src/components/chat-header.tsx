@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { Code2, LayoutGrid } from "lucide-react";
+import { BookOpen, Code2, LayoutGrid } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import { ManusIcon } from "@/components/manus-icon";
@@ -73,6 +73,11 @@ export function ChatHeader({ showSidebarTrigger = true }: { showSidebarTrigger?:
         <Button variant="outline" size="icon-sm" asChild aria-label="代码知识库" title="代码知识库">
           <Link href="/codebase">
             <Code2 className="size-4" />
+          </Link>
+        </Button>
+        <Button variant="outline" size="icon-sm" asChild aria-label="文档知识库" title="文档知识库">
+          <Link href="/knowledge">
+            <BookOpen className="size-4" />
           </Link>
         </Button>
         <Button variant="outline" size="icon-sm" asChild aria-label="应用市场" title="应用市场">

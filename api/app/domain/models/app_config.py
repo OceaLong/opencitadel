@@ -189,6 +189,62 @@ class FeatureFlagsConfig(BaseModel):
     enable_image_generation: bool = True
 
 
+class KBChunkConfig(BaseModel):
+    parent_max_chars: int = Field(default=2000, gt=100, le=20000)
+    child_max_chars: int = Field(default=400, gt=50, le=5000)
+    overlap: int = Field(default=50, ge=0, le=1000)
+
+
+class KBRetrievalConfig(BaseModel):
+    vector_top_k: int = Field(default=20, gt=0, le=100)
+    bm25_top_k: int = Field(default=20, gt=0, le=100)
+    rrf_k: int = Field(default=60, gt=0, le=1000)
+    final_top_k: int = Field(default=8, gt=0, le=30)
+
+
+class KBRerankConfig(BaseModel):
+    enabled: bool = True
+    provider: str = "llm"  # llm | api
+    base_url: Optional[str] = None
+    api_key_env: Optional[str] = None
+    model: Optional[str] = None
+    timeout_seconds: float = Field(default=30.0, gt=0, le=180)
+
+
+class KBGraphRAGConfig(BaseModel):
+    enabled: bool = True
+    max_parent_chunks_per_doc: int = Field(default=200, ge=0, le=5000)
+    concurrency: int = Field(default=3, gt=0, le=20)
+
+
+class KBOCRConfig(BaseModel):
+    mode: str = "vision_llm"  # vision_llm | rapidocr | off
+    max_pages: int = Field(default=50, ge=0, le=1000)
+
+
+class KBDocumentConfig(BaseModel):
+    max_bytes: int = Field(default=50 * 1024 * 1024, gt=0, le=500 * 1024 * 1024)
+    max_pages: int = Field(default=1000, gt=0, le=10000)
+
+
+class KBConnectorsConfig(BaseModel):
+    confluence_base_url: Optional[str] = None
+    feishu_base_url: Optional[str] = None
+    url_allowlist: List[str] = Field(default_factory=list)
+    url_denylist: List[str] = Field(default_factory=list)
+
+
+class KnowledgeBaseConfig(BaseModel):
+    vector_enabled: bool = True
+    chunk: KBChunkConfig = Field(default_factory=KBChunkConfig)
+    retrieval: KBRetrievalConfig = Field(default_factory=KBRetrievalConfig)
+    rerank: KBRerankConfig = Field(default_factory=KBRerankConfig)
+    graphrag: KBGraphRAGConfig = Field(default_factory=KBGraphRAGConfig)
+    ocr: KBOCRConfig = Field(default_factory=KBOCRConfig)
+    document: KBDocumentConfig = Field(default_factory=KBDocumentConfig)
+    connectors: KBConnectorsConfig = Field(default_factory=KBConnectorsConfig)
+
+
 class AppConfig(BaseModel):
     """应用运行时配置（config.yaml）"""
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -202,5 +258,6 @@ class AppConfig(BaseModel):
     a2a_config: A2AConfig = Field(default_factory=A2AConfig)
     model_resilience: ModelResilienceConfig = Field(default_factory=ModelResilienceConfig)
     feature_flags: FeatureFlagsConfig = Field(default_factory=FeatureFlagsConfig)
+    knowledge_base: KnowledgeBaseConfig = Field(default_factory=KnowledgeBaseConfig)
 
     model_config = ConfigDict(extra="allow")

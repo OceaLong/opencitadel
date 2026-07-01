@@ -19,6 +19,8 @@ function isShelllessRoute(pathname: string): boolean {
   return (
     pathname === "/codebase" ||
     pathname.startsWith("/codebase/") ||
+    pathname === "/knowledge" ||
+    pathname.startsWith("/knowledge/") ||
     SHELLLESS_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   );
 }

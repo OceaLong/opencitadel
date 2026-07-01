@@ -60,7 +60,10 @@ class VectorMemoryService:
     async def embed_batch(self, contents: List[str]) -> List[List[float]]:
         if not self.enabled:
             return [[] for _ in contents]
+        return await self.embed_batch_unconditional(contents)
 
+    async def embed_batch_unconditional(self, contents: List[str]) -> List[List[float]]:
+        """Embed texts regardless of memory.vector_enabled (for KB indexing)."""
         results: List[Optional[List[float]]] = [None] * len(contents)
         uncached_indices: List[int] = []
         uncached_texts: List[str] = []

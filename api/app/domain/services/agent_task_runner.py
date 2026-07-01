@@ -32,6 +32,7 @@ from app.domain.services.agent.sandbox_lifecycle import SandboxLifecycleCoordina
 from app.domain.services.agent.sandbox_provider import SandboxProvider
 from app.domain.services.flows.planner_react import PlannerReActFlow
 from app.domain.services.flows.code_ask_flow import CodeAskFlow
+from app.domain.services.flows.doc_qa_flow import DocQAFlow
 from app.domain.services.tool_event_presenter import FILE_MUTATING_FUNCTIONS, ToolEventPresenter
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.mcp import MCPTool
@@ -78,6 +79,7 @@ class AgentTaskRunner(TaskRunner):
             checkpoint_service: Optional[CheckpointService] = None,
             mode: SessionMode = SessionMode.AGENT,
             codebase_id: Optional[str] = None,
+            knowledge_base_id: Optional[str] = None,
     ) -> None:
         """构造函数，完成Agent任务运行器的创建"""
         self._uow_factory = uow_factory
@@ -129,8 +131,26 @@ class AgentTaskRunner(TaskRunner):
         )
         self._mode = mode
         self._codebase_id = codebase_id
+        self._knowledge_base_id = knowledge_base_id
         if codebase_id and mode == SessionMode.ASK:
             self._flow = CodeAskFlow(
+                uow_factory=uow_factory,
+                llm=llm,
+                agent_config=agent_config,
+                session_id=session_id,
+                json_parser=json_parser,
+                browser=browser,
+                sandbox=sandbox,
+                search_engine=search_engine,
+                mcp_tool=self._mcp_tool,
+                a2a_tool=self._a2a_tool,
+                extra_tools=extra_tools or [],
+                model_id=model_id,
+                observability_port=self._observability,
+                runtime_settings=self._runtime_settings,
+            )
+        elif knowledge_base_id and mode == SessionMode.ASK:
+            self._flow = DocQAFlow(
                 uow_factory=uow_factory,
                 llm=llm,
                 agent_config=agent_config,

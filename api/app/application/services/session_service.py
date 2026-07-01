@@ -56,6 +56,7 @@ class SessionService:
             skill_id: Optional[str] = None,
             thinking_enabled: bool = False,
             codebase_id: Optional[str] = None,
+            knowledge_base_id: Optional[str] = None,
             mode: Optional[SessionMode] = None,
     ) -> Session:
         """创建一个空白的新任务会话"""
@@ -66,6 +67,7 @@ class SessionService:
             skill_id=skill_id,
             thinking_enabled=thinking_enabled,
             codebase_id=codebase_id,
+            knowledge_base_id=knowledge_base_id,
             mode=mode or SessionMode.AGENT,
         )
         async with self._uow_factory() as uow:

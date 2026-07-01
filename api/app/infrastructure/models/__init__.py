@@ -19,6 +19,13 @@ from .codebase import (
     CodebaseChunkModel,
     CodebaseArtifactModel,
 )
+from .knowledge_base import (
+    KnowledgeBaseModel,
+    KnowledgeDocumentModel,
+    KnowledgeChunkModel,
+    KnowledgeEntityModel,
+    KnowledgeRelationModel,
+)
 from .questionnaire import QuestionnaireModel, QuestionnaireResponseModel
 from .fortune_prediction import FortunePredictionModel
 from .room import RoomModel, RoomParticipantModel, RoomEventModel, RoomTodPromptModel
@@ -42,6 +49,11 @@ __all__ = [
     "CodebaseEdgeModel",
     "CodebaseChunkModel",
     "CodebaseArtifactModel",
+    "KnowledgeBaseModel",
+    "KnowledgeDocumentModel",
+    "KnowledgeChunkModel",
+    "KnowledgeEntityModel",
+    "KnowledgeRelationModel",
     "QuestionnaireModel",
     "QuestionnaireResponseModel",
     "FortunePredictionModel",

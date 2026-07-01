@@ -113,6 +113,40 @@ model_resilience:
   dlq_replay_batch_size: 4
   dlq_replay_interval_seconds: 5
 
+knowledge_base:
+  vector_enabled: true
+  chunk:
+    parent_max_chars: 2000
+    child_max_chars: 400
+    overlap: 50
+  retrieval:
+    vector_top_k: 20
+    bm25_top_k: 20
+    rrf_k: 60
+    final_top_k: 8
+  rerank:
+    enabled: true
+    provider: llm
+    base_url: null
+    api_key_env: null
+    model: null
+    timeout_seconds: 30
+  graphrag:
+    enabled: true
+    max_parent_chunks_per_doc: 200
+    concurrency: 3
+  ocr:
+    mode: vision_llm
+    max_pages: 50
+  document:
+    max_bytes: 52428800
+    max_pages: 1000
+  connectors:
+    confluence_base_url: null
+    feishu_base_url: null
+    url_allowlist: []
+    url_denylist: []
+
 feature_flags:
   enable_agent_features: true
   enable_marketplace_llm_apps: true

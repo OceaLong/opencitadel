@@ -41,6 +41,9 @@ dependencies = [
     "dependency-injector>=4.49.0",
     "psutil>=6.1.0",
     "kubernetes>=31.0.0",
+    "python-pptx>=1.0.2",
+    "openpyxl>=3.1.5",
+    "jieba>=0.42.1",
 ]
 
 [dependency-groups]

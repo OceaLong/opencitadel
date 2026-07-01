@@ -719,6 +719,7 @@ export type CreateSessionParams = {
   skill_id?: string;
   thinking_enabled?: boolean;
   codebase_id?: string;
+  knowledge_base_id?: string;
   mode?: SessionMode;
   [key: string]: unknown;
 };
@@ -1125,4 +1126,83 @@ export type ReadSourceData = {
 export type DownloadCodebaseData = {
   snapshot_key: string;
   download_url?: string;
+};
+
+// ==================== 文档知识库 ====================
+
+export type KnowledgeBaseStatus =
+  | "pending"
+  | "parsing"
+  | "chunking"
+  | "indexing"
+  | "graph_building"
+  | "ready"
+  | "failed";
+
+export type KnowledgeDocumentStatus = "pending" | "parsing" | "ready" | "failed";
+export type KnowledgeSourceType = "upload" | "zip" | "web" | "confluence" | "feishu";
+
+export type KnowledgeBase = {
+  id: string;
+  name: string;
+  status: KnowledgeBaseStatus;
+  doc_count: number;
+  chunk_count: number;
+  ingest_task_id?: string | null;
+  error?: string | null;
+  vector_degraded?: boolean;
+  settings?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type KnowledgeBasesData = {
+  knowledge_bases: KnowledgeBase[];
+};
+
+export type KnowledgeDocument = {
+  id: string;
+  kb_id: string;
+  title: string;
+  source_type: KnowledgeSourceType;
+  mime: string;
+  file_id?: string | null;
+  page_count: number;
+  status: KnowledgeDocumentStatus;
+  error?: string | null;
+  warning?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type KnowledgeDocumentsData = {
+  documents: KnowledgeDocument[];
+};
+
+export type CreateKnowledgeBaseParams = {
+  name?: string;
+  settings?: Record<string, unknown>;
+};
+
+export type AddKnowledgeDocumentsParams = {
+  file_ids?: string[];
+  urls?: string[];
+  source_type?: KnowledgeSourceType;
+};
+
+export type CreateKnowledgeSessionParams = {
+  mode?: SessionMode;
+  model_id?: string;
+  skill_id?: string;
+};
+
+export type KnowledgeSessionData = {
+  session_id: string;
+  knowledge_base_id: string;
+  mode: SessionMode;
+};
+
+export type ReadKnowledgeDocumentData = {
+  document: KnowledgeDocument;
+  content: string;
 };

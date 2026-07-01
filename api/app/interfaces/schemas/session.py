@@ -20,6 +20,7 @@ class CreateSessionRequest(BaseModel):
     skill_id: Optional[str] = None
     thinking_enabled: Optional[bool] = None
     codebase_id: Optional[str] = None
+    knowledge_base_id: Optional[str] = None
     mode: Optional[SessionMode] = None
 
 

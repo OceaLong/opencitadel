@@ -16,6 +16,7 @@ from . import (
     questionnaire_routes,
     room_routes,
     codebase_routes,
+    knowledge_base_routes,
 )
 
 
@@ -38,6 +39,7 @@ def create_api_routes() -> APIRouter:
     api_router.include_router(questionnaire_routes.router)
     api_router.include_router(room_routes.router)
     api_router.include_router(codebase_routes.router)
+    api_router.include_router(knowledge_base_routes.router)
 
     # 3.返回api路由实例
     return api_router
