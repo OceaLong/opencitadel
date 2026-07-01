@@ -33,7 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await authApi.logout();
     } finally {
       setUser(null);
-      window.location.href = "/login";
+      window.location.href = "/";
     }
   }, []);
 

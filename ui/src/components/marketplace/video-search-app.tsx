@@ -22,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import { marketplaceApi } from "@/lib/api/marketplace";
 import type { VideoSearchData, VideoSearchResult } from "@/lib/api/types";
+import { useRequireAuth } from "@/hooks/use-require-auth";
 import { cn } from "@/lib/utils";
 
 function VideoPlayerPanel({ item, onClose }: { item: VideoSearchResult; onClose: () => void }) {
@@ -91,6 +92,7 @@ export function VideoSearchApp({
   initialQuery?: string;
   autoRun?: boolean;
 }) {
+  const { requireAuth } = useRequireAuth();
   const [query, setQuery] = useState(initialQuery);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<VideoSearchData | null>(null);
@@ -103,6 +105,7 @@ export function VideoSearchApp({
       toast.error("请输入剧名");
       return;
     }
+    if (!requireAuth("登录后即可使用 AI 搜索")) return;
     setLoading(true);
     setSearched(true);
     setActive(null);

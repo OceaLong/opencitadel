@@ -23,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { fileApi } from "@/lib/api/file";
 import { marketplaceApi } from "@/lib/api/marketplace";
 import type { NutritionAnalysisData } from "@/lib/api/types";
+import { useRequireAuth } from "@/hooks/use-require-auth";
 
 const MAX_SIZE = 5 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/jpg", "image/png"];
@@ -44,6 +45,7 @@ export function NutritionAnalysisApp({
 }: {
   initialGoal?: "cut" | "bulk" | "maintain";
 }) {
+  const { requireAuth } = useRequireAuth();
   const [preview, setPreview] = useState<string | null>(null);
   const [weightKg, setWeightKg] = useState("");
   const [goal, setGoal] = useState<string>(initialGoal);
@@ -54,6 +56,7 @@ export function NutritionAnalysisApp({
   const [followupLoading, setFollowupLoading] = useState(false);
 
   const handleFile = async (file: File) => {
+    if (!requireAuth("登录后即可使用 AI 营养分析")) return;
     if (!ALLOWED_TYPES.includes(file.type)) {
       toast.error("仅支持 JPG/PNG 图片");
       return;
@@ -87,6 +90,7 @@ export function NutritionAnalysisApp({
       toast.error("请输入想追问的问题");
       return;
     }
+    if (!requireAuth("登录后即可使用 AI 营养分析")) return;
     setFollowupLoading(true);
     setFollowupAnswer("");
     try {

@@ -6,6 +6,7 @@ import { Cpu } from "lucide-react";
 
 import { InlineOptionPicker } from "@/components/inline-option-picker";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 import {
   filterSupportedModels,
@@ -15,6 +16,8 @@ import {
 } from "@/lib/api/models-cache";
 import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
 import type { LLMModel } from "@/lib/api/types";
+import { useAuth } from "@/providers/auth-provider";
+import { useLoginPrompt } from "@/providers/login-prompt-provider";
 
 type Props = {
   value?: string | null;
@@ -35,6 +38,8 @@ export function SessionModelPicker({
   disabled,
   className,
 }: Props) {
+  const { user } = useAuth();
+  const { promptLogin } = useLoginPrompt();
   const [models, setModels] = useState<LLMModel[]>([]);
   const [llmUnavailable, setLlmUnavailable] = useState(false);
 
@@ -54,6 +59,11 @@ export function SessionModelPicker({
   }, []);
 
   useEffect(() => {
+    if (!user) {
+      setModels([]);
+      return;
+    }
+
     let cancelled = false;
 
     const fetchModels = () => {
@@ -73,7 +83,7 @@ export function SessionModelPicker({
       cancelled = true;
       unsubscribe();
     };
-  }, []);
+  }, [user]);
 
   const supportedModels = useMemo(() => filterSupportedModels(models), [models]);
 
@@ -103,6 +113,22 @@ export function SessionModelPicker({
   );
 
   const pickerValue = value ?? defaultModelId;
+
+  if (!user) {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className={className}
+        disabled={disabled}
+        onClick={() => promptLogin("登录后即可选择模型")}
+      >
+        <Cpu className="text-muted-foreground size-4" />
+        登录后选择模型
+      </Button>
+    );
+  }
 
   return (
     <div className={className}>

@@ -22,6 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VirtualizedTimeline } from "@/components/virtualized-timeline";
 
 import { useSessionDetailView } from "@/hooks/use-session-detail-view";
+import { useAuth } from "@/providers/auth-provider";
 import { knowledgeApi } from "@/lib/api/knowledge";
 import type { KnowledgeBase, KnowledgeDocument, SessionMode } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,7 @@ function graphForDocs(documents: KnowledgeDocument[]): string {
 
 export function KnowledgeWorkspace({ knowledgeBaseId }: KnowledgeWorkspaceProps) {
   const router = useRouter();
+  const { user } = useAuth();
   const [items, setItems] = useState<KnowledgeBase[]>([]);
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [activeId, setActiveId] = useState(knowledgeBaseId ?? "");
@@ -58,6 +60,11 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: KnowledgeWorkspaceProps)
   const view = useSessionDetailView({ sessionId: sessionId ?? "", mode });
 
   const loadList = useCallback(async () => {
+    if (!user) {
+      setItems([]);
+      setListLoading(false);
+      return;
+    }
     setListLoading(true);
     try {
       const data = await knowledgeApi.list();
@@ -67,9 +74,10 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: KnowledgeWorkspaceProps)
     } finally {
       setListLoading(false);
     }
-  }, []);
+  }, [user]);
 
   const loadDetail = useCallback(async (id: string, token: number) => {
+    if (!user) return;
     try {
       const [kb, docs] = await Promise.all([knowledgeApi.get(id), knowledgeApi.listDocuments(id)]);
       if (token !== kbSwitchTokenRef.current) return;
@@ -84,7 +92,7 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: KnowledgeWorkspaceProps)
       if (token !== kbSwitchTokenRef.current) return;
       toast.error(err instanceof Error ? err.message : "加载详情失败");
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     void loadList();
@@ -95,7 +103,7 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: KnowledgeWorkspaceProps)
   }, [knowledgeBaseId]);
 
   useEffect(() => {
-    if (!activeId) return;
+    if (!activeId || !user) return;
     const token = ++kbSwitchTokenRef.current;
     setSessionId(null);
     setSourceContent("");
@@ -114,10 +122,10 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: KnowledgeWorkspaceProps)
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, loadDetail, router]);
+  }, [activeId, loadDetail, router, user]);
 
   useEffect(() => {
-    if (!activeId || !ingesting) return;
+    if (!activeId || !ingesting || !user) return;
     ingestCleanupRef.current?.();
     ingestCleanupRef.current = knowledgeApi.ingestStream(
       activeId,
@@ -147,7 +155,7 @@ export function KnowledgeWorkspace({ knowledgeBaseId }: KnowledgeWorkspaceProps)
       },
     );
     return () => ingestCleanupRef.current?.();
-  }, [activeId, ingesting, loadDetail]);
+  }, [activeId, ingesting, loadDetail, user]);
 
   const active = items.find((item) => item.id === activeId);
   const graph = useMemo(() => graphForDocs(documents), [documents]);

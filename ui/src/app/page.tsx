@@ -16,9 +16,11 @@ import { ThinkingToggle } from "@/components/thinking-toggle";
 import { invalidateModelsCache, loadModels, resolveDefaultModelId } from "@/lib/api/models-cache";
 import { sessionApi } from "@/lib/api/session";
 import type { FileInfo } from "@/lib/api/types";
+import { useRequireAuth } from "@/hooks/use-require-auth";
 
 export default function Page() {
   const router = useRouter();
+  const { requireAuth } = useRequireAuth();
   const chatInputRef = useRef<ChatInputRef>(null);
   const [sending, setSending] = useState(false);
   const [modelId, setModelId] = useState<string | undefined>();
@@ -40,6 +42,7 @@ export default function Page() {
 
   const handleSend = async (message: string, files: FileInfo[]) => {
     if (sending) return;
+    if (!requireAuth("登录后即可开始 AI 对话")) return;
 
     let resolvedModelId = modelId;
 

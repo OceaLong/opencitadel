@@ -9,6 +9,7 @@ import { getToolKind } from "@/components/tool-use/utils";
 
 import { useIncrementalTimeline } from "@/hooks/use-incremental-timeline";
 import { useSessionDetail } from "@/hooks/use-session-detail";
+import { useRequireAuth } from "@/hooks/use-require-auth";
 import { sessionApi } from "@/lib/api/session";
 import type {
   ClarifyAnswer,
@@ -54,6 +55,7 @@ export function useSessionDetailView({
   mode,
 }: UseSessionDetailViewOptions) {
   const router = useRouter();
+  const { requireAuth } = useRequireAuth();
   const [includeDebug, setIncludeDebug] = useState(false);
   const detail = useSessionDetail(sessionId, hasInitialMessage);
   const {
@@ -177,6 +179,7 @@ export function useSessionDetailView({
 
   const handleSend = useCallback(
     async (message: string, uploadedFiles: FileInfo[]) => {
+      if (!requireAuth("登录后即可发送消息")) return;
       try {
         const attachmentIds = uploadedFiles.map((file) => file.id);
         await sendMessage(message, attachmentIds, {
@@ -190,11 +193,12 @@ export function useSessionDetailView({
         throw e;
       }
     },
-    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode],
+    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth],
   );
 
   const handleClarifyAnswer = useCallback(
     async (answer: string, clarifyAnswers?: ClarifyAnswer[]) => {
+      if (!requireAuth("登录后即可发送消息")) return;
       await sendMessage(answer, [], {
         model_id: sessionModelId,
         skill_id: sessionSkillId,
@@ -203,7 +207,7 @@ export function useSessionDetailView({
         mode,
       });
     },
-    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode],
+    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth],
   );
 
   const handleThinkingChange = useCallback(

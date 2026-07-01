@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { fileApi } from "@/lib/api/file";
 import { marketplaceApi } from "@/lib/api/marketplace";
+import { useRequireAuth } from "@/hooks/use-require-auth";
 
 const MAX_SIZE = 20 * 1024 * 1024;
 const DOC_ACCEPT =
@@ -85,6 +86,7 @@ export function WatermarkToolApp({
   initialMode?: Mode;
   initialText?: string;
 }) {
+  const { requireAuth } = useRequireAuth();
   const addDocRef = useRef<HTMLInputElement>(null);
   const removeDocRef = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<Mode>(initialMode);
@@ -158,6 +160,10 @@ export function WatermarkToolApp({
 
     setLoading(true);
     try {
+      if (!requireAuth("登录后即可使用 AI 水印处理")) {
+        setLoading(false);
+        return;
+      }
       const uploaded = await fileApi.uploadFile({ file });
       const data = await marketplaceApi.addWatermark({
         file_id: uploaded.id,
@@ -182,6 +188,7 @@ export function WatermarkToolApp({
       toast.error("请先上传文件");
       return;
     }
+    if (!requireAuth("登录后即可使用 AI 水印处理")) return;
     setLoading(true);
     resetResult();
     try {

@@ -12,6 +12,7 @@ import React, {
 
 import type { Session } from "@/lib/api";
 import { sessionApi } from "@/lib/api";
+import { useAuth } from "@/providers/auth-provider";
 
 /** 重连配置 */
 const RETRY_CONFIG = {
@@ -61,6 +62,7 @@ const SessionsContext = createContext<SessionsContextValue | null>(null);
  *  4. refresh() 可手动通过 REST 拉取
  */
 export function SessionsProvider({ children }: { children: React.ReactNode }) {
+  const { user, loading: authLoading } = useAuth();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,8 +88,16 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // ---------- 初始 REST 请求（仅一次） ----------
+  // ---------- 初始 REST 请求（仅一次，登录后） ----------
   useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      setSessions([]);
+      setLoading(false);
+      setError(null);
+      initialFetchedRef.current = false;
+      return;
+    }
     if (initialFetchedRef.current) return;
     initialFetchedRef.current = true;
 
@@ -105,10 +115,12 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         setError(err instanceof Error ? err.message : "获取会话列表失败");
         setLoading(false);
       });
-  }, []);
+  }, [authLoading, user]);
 
   // ---------- SSE 实时订阅 ----------
   useEffect(() => {
+    if (authLoading || !user) return;
+
     let mounted = true;
     let retryCount = 0;
 
@@ -179,7 +191,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         retryTimerRef.current = null;
       }
     };
-  }, []);
+  }, [authLoading, user]);
 
   // ---------- 删除会话 ----------
   const deleteSession = useCallback(async (sessionId: string): Promise<boolean> => {

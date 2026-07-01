@@ -17,6 +17,7 @@ import {
 
 import { fileApi } from "@/lib/api/file";
 import { marketplaceApi } from "@/lib/api/marketplace";
+import { useRequireAuth } from "@/hooks/use-require-auth";
 
 const MAX_SIZE = 20 * 1024 * 1024;
 
@@ -72,6 +73,7 @@ export function DocumentConverterApp({
 }: {
   initialTargetFormat?: "pdf" | "docx" | "md" | "txt";
 }) {
+  const { requireAuth } = useRequireAuth();
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [sourceExt, setSourceExt] = useState("");
@@ -117,6 +119,8 @@ export function DocumentConverterApp({
       printTextAsPdf(text, file.name);
       return;
     }
+
+    if (!requireAuth("登录后即可使用文档格式转换")) return;
 
     setLoading(true);
     setResultFileId(null);

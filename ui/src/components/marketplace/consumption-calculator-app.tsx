@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { fileApi } from "@/lib/api/file";
 import { marketplaceApi } from "@/lib/api/marketplace";
 import type { ConsumptionAnalysisData } from "@/lib/api/types";
+import { useRequireAuth } from "@/hooks/use-require-auth";
 
 const MAX_SIZE = 5 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/jpg", "image/png"];
@@ -25,6 +26,7 @@ export function ConsumptionCalculatorApp({
   initialTotalGrams?: number;
   initialServingGrams?: number;
 }) {
+  const { requireAuth } = useRequireAuth();
   const [preview, setPreview] = useState<string | null>(null);
   const [servingGrams, setServingGrams] = useState(String(initialServingGrams ?? 50));
   const [manualTotal, setManualTotal] = useState(initialTotalGrams ? String(initialTotalGrams) : "");
@@ -34,6 +36,7 @@ export function ConsumptionCalculatorApp({
   const autoCalculatedRef = useRef(false);
 
   const handleFile = async (file: File) => {
+    if (!requireAuth("登录后即可使用 AI 消耗计算")) return;
     if (!ALLOWED_TYPES.includes(file.type)) {
       toast.error("仅支持 JPG/PNG 图片");
       return;
@@ -76,6 +79,7 @@ export function ConsumptionCalculatorApp({
       toast.error("请输入有效的总量和单次食用量");
       return;
     }
+    if (!requireAuth("登录后即可使用 AI 消耗计算")) return;
     setLoading(true);
     try {
       const data = await marketplaceApi.calculateConsumption({
@@ -96,6 +100,7 @@ export function ConsumptionCalculatorApp({
       toast.error("请输入修正说明和有效单次食用量");
       return;
     }
+    if (!requireAuth("登录后即可使用 AI 消耗计算")) return;
     setLoading(true);
     try {
       const data = await marketplaceApi.correctConsumption({

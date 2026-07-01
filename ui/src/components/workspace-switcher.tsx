@@ -3,15 +3,22 @@
 import { useEffect, useState } from "react";
 
 import { teamApi, type Team } from "@/lib/api/team";
+import { useAuth } from "@/providers/auth-provider";
 
 export function WorkspaceSwitcher() {
+  const { user } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
   const [active, setActive] = useState("");
 
   useEffect(() => {
+    if (!user) return;
     setActive(window.localStorage.getItem("my-manus-active-workspace") || "");
     void teamApi.list().then((data) => setTeams(data.teams)).catch(() => setTeams([]));
-  }, []);
+  }, [user]);
+
+  if (!user) {
+    return null;
+  }
 
   function change(value: string) {
     setActive(value);

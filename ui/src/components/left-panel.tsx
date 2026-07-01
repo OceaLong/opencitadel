@@ -4,14 +4,19 @@ import { usePathname, useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 
 import { SessionList } from "@/components/session-list";
+import { AccountMenu } from "@/components/account-menu";
 import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarTrigger } from "@/components/ui/sidebar";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
+import { useLoginPrompt } from "@/providers/login-prompt-provider";
+import { useAuth } from "@/providers/auth-provider";
 
 export function LeftPanel() {
   const router = useRouter();
   const pathname = usePathname();
+  const { user } = useAuth();
+  const { promptLogin } = useLoginPrompt();
 
   if (
     pathname.startsWith("/marketplace") ||
@@ -32,7 +37,17 @@ export function LeftPanel() {
       <SidebarContent className="p-2">
         <WorkspaceSwitcher />
         {/* 新建任务 */}
-        <Button variant="outline" className="mb-3 cursor-pointer" onClick={() => router.push("/")}>
+        <Button
+          variant="outline"
+          className="mb-3 cursor-pointer"
+          onClick={() => {
+            if (!user) {
+              promptLogin("登录后即可创建新任务");
+              return;
+            }
+            router.push("/");
+          }}
+        >
           <Plus />
           新建任务
           <KbdGroup>
@@ -43,6 +58,7 @@ export function LeftPanel() {
         {/* 会话列表 */}
         <SessionList />
       </SidebarContent>
+      <AccountMenu />
     </Sidebar>
   );
 }

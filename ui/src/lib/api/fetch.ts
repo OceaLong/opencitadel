@@ -1,4 +1,5 @@
 import type { ApiResponse } from "./types";
+import { dispatchAuthRequired } from "../auth-events";
 
 /**
  * API 配置
@@ -29,6 +30,7 @@ export type RequestOptions = RequestInit & {
   timeout?: number;
   skipErrorHandler?: boolean;
   skipAuthRefresh?: boolean;
+  skipAuthRedirect?: boolean;
 };
 
 function readCookie(name: string): string {
@@ -46,19 +48,12 @@ function activeWorkspaceId(): string {
 
 let refreshPromise: Promise<unknown> | null = null;
 
-const AUTH_ROUTE_PREFIXES = ["/login", "/register"];
-
-function shouldRedirectToLogin(): boolean {
-  if (typeof window === "undefined") return false;
-  const pathname = window.location.pathname;
-  return !AUTH_ROUTE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
-}
-
 async function refreshAuthOnce(): Promise<unknown> {
   if (!refreshPromise) {
     refreshPromise = request("/auth/refresh", {
       method: "POST",
       skipAuthRefresh: true,
+      skipAuthRedirect: true,
     }).finally(() => {
       refreshPromise = null;
     });
@@ -85,16 +80,24 @@ export function buildAuthHeaders(method: string = "GET", headers: HeadersInit = 
 export async function authenticatedFetch(input: string, options: RequestOptions = {}): Promise<Response> {
   const url = input.startsWith("http") ? input : `${API_CONFIG.baseURL}${input}`;
   const method = (options.method || "GET").toString().toUpperCase();
+  const { skipAuthRefresh = false, skipAuthRedirect = false, ...fetchOptions } = options;
   const response = await fetch(url, {
-    ...options,
-    headers: buildAuthHeaders(method, options.headers || {}),
+    ...fetchOptions,
+    headers: buildAuthHeaders(method, fetchOptions.headers || {}),
     credentials: "include",
   });
-  if (response.status === 401 && !options.skipAuthRefresh) {
-    await refreshAuthOnce();
+  if (response.status === 401 && !skipAuthRefresh) {
+    try {
+      await refreshAuthOnce();
+    } catch {
+      if (!skipAuthRedirect) {
+        dispatchAuthRequired();
+      }
+      return response;
+    }
     return fetch(url, {
-      ...options,
-      headers: buildAuthHeaders(method, options.headers || {}),
+      ...fetchOptions,
+      headers: buildAuthHeaders(method, fetchOptions.headers || {}),
       credentials: "include",
     });
   }
@@ -190,6 +193,7 @@ export async function request<T = unknown>(
     timeout = API_CONFIG.timeout,
     skipErrorHandler = false,
     skipAuthRefresh = false,
+    skipAuthRedirect = false,
     headers = {},
     ...fetchOptions
   } = options;
@@ -232,8 +236,8 @@ export async function request<T = unknown>(
           await refreshAuthOnce();
           return request<T>(endpoint, { ...options, skipAuthRefresh: true });
         } catch {
-          if (shouldRedirectToLogin()) {
-            window.location.href = "/login";
+          if (!skipAuthRedirect) {
+            dispatchAuthRequired();
           }
         }
       }
@@ -374,6 +378,9 @@ export async function createSSEStream(
     timeout = API_CONFIG.timeout,
     headers = {},
     signal: externalSignal,
+    skipAuthRefresh = false,
+    skipAuthRedirect = false,
+    skipErrorHandler: _skipErrorHandler,
     ...fetchOptions
   } = options || {};
 
@@ -425,8 +432,15 @@ export async function createSSEStream(
       credentials: "include",
     });
 
-    if (response.status === 401 && !options?.skipAuthRefresh) {
-      await refreshAuthOnce();
+    if (response.status === 401 && !skipAuthRefresh) {
+      try {
+        await refreshAuthOnce();
+      } catch {
+        if (!skipAuthRedirect) {
+          dispatchAuthRequired();
+        }
+        await handleErrorResponse(response);
+      }
       response = await fetch(url, {
         ...fetchOptions,
         method: "POST",

@@ -29,6 +29,7 @@ import { VirtualizedTimeline } from "@/components/virtualized-timeline";
 import { VNCOverlay } from "@/components/vnc-overlay";
 
 import { useSessionDetailView } from "@/hooks/use-session-detail-view";
+import { useAuth } from "@/providers/auth-provider";
 import { codebaseApi } from "@/lib/api/codebase";
 import type {
   Codebase,
@@ -108,6 +109,7 @@ function FileTreeItem({
 
 export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
   const router = useRouter();
+  const { user } = useAuth();
   const [codebases, setCodebases] = useState<Codebase[]>([]);
   const [activeId, setActiveId] = useState(codebaseId ?? "");
   const [tree, setTree] = useState<FileTreeNode[]>([]);
@@ -154,15 +156,20 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
   } = useSessionDetailView({ sessionId: sessionId ?? "", mode });
 
   const loadCodebases = useCallback(async () => {
+    if (!user) {
+      setCodebases([]);
+      return;
+    }
     try {
       const data = await codebaseApi.list();
       setCodebases(data.codebases);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "加载代码库失败");
     }
-  }, []);
+  }, [user]);
 
   const loadCodebaseDetail = useCallback(async (id: string) => {
+    if (!user) return;
     try {
       const [cb, treeData, artData] = await Promise.all([
         codebaseApi.get(id),
@@ -179,7 +186,7 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "加载详情失败");
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     void loadCodebases();
@@ -190,7 +197,7 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
   }, [codebaseId]);
 
   useEffect(() => {
-    if (!activeId) return;
+    if (!activeId || !user) return;
     router.replace(`/codebase/${activeId}`);
     void loadCodebaseDetail(activeId);
     void (async () => {
@@ -203,10 +210,10 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
     })();
     // Mode is applied to outgoing messages; changing it should not recreate the codebase session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, loadCodebaseDetail, router]);
+  }, [activeId, loadCodebaseDetail, router, user]);
 
   useEffect(() => {
-    if (!activeId || !ingesting) return;
+    if (!activeId || !ingesting || !user) return;
     ingestCleanupRef.current?.();
     ingestCleanupRef.current = codebaseApi.ingestStream(
       activeId,
@@ -226,7 +233,7 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
       () => setIngesting(false),
     );
     return () => ingestCleanupRef.current?.();
-  }, [activeId, ingesting, loadCodebaseDetail]);
+  }, [activeId, ingesting, loadCodebaseDetail, user]);
 
   const loadSource = useCallback(
     async (path: string, line?: number) => {

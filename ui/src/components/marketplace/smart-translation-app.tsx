@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { fileApi } from "@/lib/api/file";
 import { marketplaceApi } from "@/lib/api/marketplace";
 import type { TranslationData, TranslationParams } from "@/lib/api/types";
+import { useRequireAuth } from "@/hooks/use-require-auth";
 
 const MAX_SIZE = 8 * 1024 * 1024;
 
@@ -34,6 +35,7 @@ export function SmartTranslationApp({
   initialTargetLanguage?: string;
   initialStyle?: TranslationStyle;
 }) {
+  const { requireAuth } = useRequireAuth();
   const fileRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState(initialText);
   const [targetLanguage, setTargetLanguage] = useState(initialTargetLanguage);
@@ -45,6 +47,7 @@ export function SmartTranslationApp({
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
+    if (!requireAuth("登录后即可使用 AI 翻译")) return;
     if (file.size > MAX_SIZE) {
       toast.error("文件不能超过 8MB");
       return;
@@ -67,6 +70,7 @@ export function SmartTranslationApp({
       toast.error("请输入文本或上传图片/文本文件");
       return;
     }
+    if (!requireAuth("登录后即可使用 AI 翻译")) return;
     setLoading(true);
     setResult(null);
     try {

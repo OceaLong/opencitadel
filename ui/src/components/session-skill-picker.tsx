@@ -6,6 +6,7 @@ import { InlineOptionPicker } from "@/components/inline-option-picker";
 
 import { skillsApi } from "@/lib/api/skills";
 import type { Skill, SkillSummary } from "@/lib/api/types";
+import { useAuth } from "@/providers/auth-provider";
 
 let skillsCache: Skill[] | null = null;
 let skillsPromise: Promise<Skill[]> | null = null;
@@ -31,9 +32,14 @@ type Props = {
 };
 
 export function SessionSkillPicker({ value, onChange, disabled, onSkillLoaded, className }: Props) {
+  const { user } = useAuth();
   const [skills, setSkills] = useState<Skill[]>([]);
 
   useEffect(() => {
+    if (!user) {
+      setSkills([]);
+      return;
+    }
     let cancelled = false;
     loadSkills()
       .then((items) => {
@@ -45,7 +51,7 @@ export function SessionSkillPicker({ value, onChange, disabled, onSkillLoaded, c
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (!value) {

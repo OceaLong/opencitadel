@@ -17,6 +17,7 @@ import { usePrefersReducedMotion } from "@/lib/motion";
 
 import { marketplaceApi } from "@/lib/api/marketplace";
 import type { FortuneMode, FortunePredictionData } from "@/lib/api/types";
+import { useRequireAuth } from "@/hooks/use-require-auth";
 import { cn } from "@/lib/utils";
 
 type FortuneTellerAppProps = {
@@ -29,6 +30,7 @@ export function FortuneTellerApp({
   initialQuestion = "",
 }: FortuneTellerAppProps) {
   const reduced = usePrefersReducedMotion();
+  const { requireAuth } = useRequireAuth();
   const [mode, setMode] = useState<FortuneMode>(initialMode);
   const [question, setQuestion] = useState(initialQuestion);
   const [nickname, setNickname] = useState("");
@@ -44,6 +46,7 @@ export function FortuneTellerApp({
       toast.error("请输入你想预测的问题");
       return;
     }
+    if (!requireAuth("登录后即可使用 AI 运势预测")) return;
     setLoading(true);
     setStreamText("");
     const params = {

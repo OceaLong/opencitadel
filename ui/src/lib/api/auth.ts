@@ -13,7 +13,7 @@ export type AuthUser = {
 };
 
 export const authApi = {
-  me: () => get<AuthUser>("/auth/me"),
+  me: () => get<AuthUser>("/auth/me", undefined, { skipAuthRedirect: true }),
   login: (email_or_username: string, password: string) =>
     post<AuthUser>("/auth/login", { email_or_username, password }),
   register: (params: { invite_token: string; email: string; username: string; password: string }) =>

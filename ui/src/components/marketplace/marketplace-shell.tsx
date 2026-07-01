@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { marketplaceApi } from "@/lib/api/marketplace";
 import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
 import type { LLMStatusData, MarketplaceApp } from "@/lib/api/types";
+import { useRequireAuth } from "@/hooks/use-require-auth";
 import { cn } from "@/lib/utils";
 
 const RECENT_KEY = "my-manus-marketplace-recent";
@@ -34,6 +35,7 @@ function AppListSkeleton() {
 }
 
 export function MarketplaceShell() {
+  const { requireAuth } = useRequireAuth();
   const [apps, setApps] = useState<MarketplaceApp[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -139,6 +141,7 @@ export function MarketplaceShell() {
       toast.error("请输入想完成的任务");
       return;
     }
+    if (!requireAuth("登录后即可使用 AI 智能启动")) return;
     setRouting(true);
     try {
       const route = await marketplaceApi.routeRequest({ query: trimmed });
@@ -161,7 +164,7 @@ export function MarketplaceShell() {
     } finally {
       setRouting(false);
     }
-  }, [command, displayApps, openApp]);
+  }, [command, displayApps, openApp, requireAuth]);
 
   return (
     <div className="h-full min-h-0 overflow-hidden">

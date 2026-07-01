@@ -11,10 +11,12 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { fileApi } from "@/lib/api/file";
 import { marketplaceApi } from "@/lib/api/marketplace";
+import { useRequireAuth } from "@/hooks/use-require-auth";
 
 const MAX_SIZE = 8 * 1024 * 1024;
 
 export function DocumentQaApp({ initialQuestion = "" }: { initialQuestion?: string }) {
+  const { requireAuth } = useRequireAuth();
   const fileRef = useRef<HTMLInputElement>(null);
   const [fileId, setFileId] = useState("");
   const [fileName, setFileName] = useState("");
@@ -25,6 +27,7 @@ export function DocumentQaApp({ initialQuestion = "" }: { initialQuestion?: stri
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
+    if (!requireAuth("登录后即可使用 AI 文档问答")) return;
     if (file.size > MAX_SIZE) {
       toast.error("文件不能超过 8MB");
       return;
@@ -48,6 +51,7 @@ export function DocumentQaApp({ initialQuestion = "" }: { initialQuestion?: stri
       toast.error("请先上传资料并输入问题");
       return;
     }
+    if (!requireAuth("登录后即可使用 AI 文档问答")) return;
     setLoading(true);
     setAnswer("");
     try {
