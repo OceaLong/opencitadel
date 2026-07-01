@@ -1,7 +1,7 @@
 import type { CloseType, QuizBank, QuizQuestion, QuizResult } from "./types";
 import { isChoiceQuestion, isLikertQuestion } from "./types";
 
-export function scoreLikertValue(
+function scoreLikertValue(
   value: number,
   agreeDim: string,
   disagreeDim: string,
@@ -59,7 +59,7 @@ export function toPercentages(scores: Record<string, number>): Record<string, nu
   );
 }
 
-export function computeConfidence(
+function computeConfidence(
   scores: Record<string, number>,
   winnerKey?: string,
 ): number {
@@ -74,7 +74,7 @@ export function computeConfidence(
   return Math.min(98, Math.max(55, base + 40));
 }
 
-export function findCloseTypes(
+function findCloseTypes(
   scores: Record<string, number>,
   results: Record<string, QuizResult>,
   winnerCode: string,

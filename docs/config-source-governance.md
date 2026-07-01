@@ -26,7 +26,7 @@ flowchart TD
 
 ## 生产部署
 
-- **必须** `USE_DB_APP_CONFIG=true`（Helm `env` 已配置）
+- **必须** `USE_DB_APP_CONFIG=true`；Docker Compose 默认不强制设置，需在 `.env` 显式开启，Helm `env` 已配置
 - `config.yaml` / Helm `appConfig` 为初始默认值；migrate job 在表空时种子写入 DB
 
 ## 禁止

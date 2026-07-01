@@ -77,10 +77,6 @@ class SupervisorService:
         """只读属性，返回是否自动保活"""
         return self._expand_enabled
 
-    def enable_expand(self) -> None:
-        """开启自动保活"""
-        self._expand_enabled = True
-
     def disable_expand(self) -> None:
         """关闭自动保活"""
         self._expand_enabled = False
@@ -227,7 +223,7 @@ class SupervisorService:
         """取消超时销毁设置"""
         # 1.判断是否设置了超时销毁
         if not self.timeout_active:
-            return SupervisorTimeout(status="no_timeout_active", activate=False)
+            return SupervisorTimeout(status="no_timeout_active", active=False)
 
         # 2.取消销毁任务
         if self.shutdown_task:

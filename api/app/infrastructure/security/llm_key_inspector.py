@@ -37,19 +37,6 @@ class LLMApiKeyInspectionReport:
         ]
 
 
-def classify_stored_key(stored: str, encryption: str | None) -> str:
-    """Classify a stored key without returning its value."""
-    if not stored:
-        return "empty"
-    if encryption == ApiKeyEncryption.FERNET_V1:
-        return "fernet_v1"
-    if encryption == ApiKeyEncryption.LEGACY_PLAINTEXT:
-        return "legacy_plaintext"
-    if ApiKeyCipher.looks_like_fernet_token(stored):
-        return "suspected_fernet_shape"
-    return "suspected_plaintext"
-
-
 def build_inspection_report(rows: Iterable[tuple[str, str | None]]) -> LLMApiKeyInspectionReport:
     total = 0
     empty_key = 0

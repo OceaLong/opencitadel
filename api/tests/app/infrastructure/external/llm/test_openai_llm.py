@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from app.domain.models.llm_config import LLMConfig
+from app.domain.models.llm_model import LLMModel
 from app.domain.models.session import Session
 from app.infrastructure.external.llm.openai_llm import (
     _merge_thinking_request_kwargs,
@@ -66,8 +66,8 @@ def test_session_thinking_enabled_default_false():
     assert session.thinking_enabled is False
 
 
-def test_llm_config_model_defaults():
-    llm = LLMConfig(
+def test_llm_model_defaults():
+    llm = LLMModel(
         base_url="http://localhost:11434/v1",
         model_name="llama3",
         api_key="",

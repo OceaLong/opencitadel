@@ -47,7 +47,7 @@ function updatePersistedSeqRef(
   }
 }
 
-export function rebuildEventIndexRefs(events: SSEEventData[], refs: EventIndexRefs) {
+function rebuildEventIndexRefs(events: SSEEventData[], refs: EventIndexRefs) {
   refs.eventIds.current = new Set();
   refs.dedupeKeys.current = new Set();
   refs.messageDelta.current.clear();

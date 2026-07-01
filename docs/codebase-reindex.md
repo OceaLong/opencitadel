@@ -26,12 +26,12 @@ flowchart TD
 
 1. 确认 `/api/llm/status` 中 embedding 可用
 2. 调用 `POST /api/codebases/{codebase_id}/reanalyze`
-3. UI 在 `vector_degraded=true` 时展示「语义检索不可用 — 重建索引」
+3. UI 在 `vector_degraded=true` 时展示「语义检索不可用（向量索引已降级）」并提供「点此重建索引」
 
 ## 行为说明
 
 - 静态分析与 artifacts 在降级时仍正常完成
-- 语义检索工具在 `vector_degraded` 期间返回空结果并提示重建索引
+- 当前语义检索工具未读取 `vector_degraded` 状态；向量不可用或无命中时返回「未找到相关代码」
 
 ## 相关文档
 

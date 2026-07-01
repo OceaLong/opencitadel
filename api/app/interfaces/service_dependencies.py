@@ -21,7 +21,6 @@ from app.application.services.room_service import RoomService
 from app.application.services.session_service import SessionService
 from app.application.services.skill_service import SkillService
 from app.application.services.status_service import StatusService
-from app.application.services.task_runner_factory import TaskRunnerFactory
 from app.container import ApiContainer
 from app.infrastructure.external.health_checker.postgres_health_checker import PostgresHealthChecker
 from app.infrastructure.external.health_checker.redis_health_checker import RedisHealthChecker
@@ -137,10 +136,3 @@ async def get_a2a_server_service(
         service: A2AServerService = Depends(Provide[ApiContainer.a2a_server_service]),
 ) -> A2AServerService:
     return service
-
-
-@inject
-async def get_task_runner_factory(
-        factory: TaskRunnerFactory = Depends(Provide[ApiContainer.task_runner_factory]),
-) -> TaskRunnerFactory:
-    return factory

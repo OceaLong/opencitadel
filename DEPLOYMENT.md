@@ -181,11 +181,11 @@ sandbox:
   name_prefix: manus-sandbox
   network: manus-network
   memory_limit: 1g
-  pool_enabled: true
+  pool_enabled: false
   pool_size: 1          # 只预热 1 个；并发任务按需创建，上限见 worker.max_concurrent_tasks
   ttl_minutes: 20
   idle_timeout_minutes: 10
-  cleanup_interval_seconds: 120
+  cleanup_interval_seconds: 60
 
 memory:
   vector_enabled: false
@@ -531,10 +531,10 @@ docker system prune -a -f
 
 | 服务 | mem_limit |
 |------|-----------|
-| postgres | 1536m |
-| api | 1g |
-| worker | 1536m |
-| ui | 512m |
+| postgres | 1024m |
+| api | 640m |
+| worker | 1024m |
+| ui | 384m |
 | redis | 512m |
 | nginx | 128m |
 | 沙箱（1 预热 + 最多 3 按需） | 1~4g |

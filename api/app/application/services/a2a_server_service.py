@@ -75,7 +75,6 @@ class A2AServerService:
         self._skill_service = skill_service
         self._llm_model_service = llm_model_service
         self._breaker = get_llm_circuit_breaker()
-        self._breaker = get_llm_circuit_breaker()
 
     async def build_agent_card(self, base_url: str) -> Dict[str, Any]:
         base = base_url.rstrip("/")

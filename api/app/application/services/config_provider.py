@@ -66,13 +66,6 @@ def create_app_config_provider() -> AppConfigProvider:
     return _provider
 
 
-def get_app_config_provider() -> AppConfigProvider:
-    global _provider
-    if _provider is None:
-        _provider = create_app_config_provider()
-    return _provider
-
-
 def get_runtime_config() -> AppConfig:
     """Synchronous accessor for runtime config (requires container warmup or prior async load)."""
     global _sync_cache

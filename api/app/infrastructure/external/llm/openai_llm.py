@@ -1,13 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
-from typing import List, Dict, Any, Union, AsyncGenerator
+from typing import List, Dict, Any, AsyncGenerator
 
 from openai import AsyncOpenAI
 
 from app.application.errors.exceptions import ServerRequestsError
 from app.domain.external.llm import LLM
-from app.domain.models.llm_config import LLMConfig
 from app.domain.models.llm_model import LLMModel, ModelCapabilities
 from app.infrastructure.external.llm.base_llm import (
     MultimodalFallbackMixin,
@@ -124,28 +123,18 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
 
     def __init__(
             self,
-            config: Union[LLMModel, LLMConfig],
+            config: LLMModel,
             thinking_enabled: bool = False,
             **kwargs,
     ) -> None:
-        if isinstance(config, LLMModel):
-            base_url = config.base_url
-            api_key = config.api_key
-            model_name = config.model_name
-            temperature = config.temperature
-            max_tokens = config.max_tokens
-            extra = config.extra_params or {}
-            self._capabilities = config.capabilities
-            self._supports_multimodal = config.supports_multimodal
-        else:
-            base_url = str(config.base_url)
-            api_key = config.api_key
-            model_name = config.model_name
-            temperature = config.temperature
-            max_tokens = config.max_tokens
-            extra = {}
-            self._capabilities = ModelCapabilities()
-            self._supports_multimodal = False
+        base_url = config.base_url
+        api_key = config.api_key
+        model_name = config.model_name
+        temperature = config.temperature
+        max_tokens = config.max_tokens
+        extra = config.extra_params or {}
+        self._capabilities = config.capabilities
+        self._supports_multimodal = config.supports_multimodal
 
         self._extra_params = extra
         self._thinking_enabled = thinking_enabled

@@ -1,32 +1,16 @@
 "use client";
 
-import {
-  type Transition,
-  type Variants,
-  motion,
-  useReducedMotion as useMotionReducedMotion,
-} from "motion/react";
+import { useReducedMotion as useMotionReducedMotion, type Variants } from "motion/react";
 
-export { motion, AnimatePresence } from "motion/react";
+export { motion } from "motion/react";
 
 export function usePrefersReducedMotion(): boolean {
   return useMotionReducedMotion() ?? false;
 }
 
-const instant: Transition = { duration: 0 };
-
-export function motionTransition(reduced: boolean, transition: Transition): Transition {
-  return reduced ? instant : transition;
-}
-
 export const fadeInUp: Variants = {
   hidden: { opacity: 0, y: 16 },
   visible: { opacity: 1, y: 0 },
-};
-
-export const fadeIn: Variants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1 },
 };
 
 export const scaleIn: Variants = {

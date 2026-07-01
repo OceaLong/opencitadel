@@ -7,15 +7,15 @@ import { toast } from "sonner";
 import type { ChatInputRef } from "@/components/chat-input";
 import { getToolKind } from "@/components/tool-use/utils";
 
-import { useSessionDetail } from "@/hooks/use-session-detail";
 import { useIncrementalTimeline } from "@/hooks/use-incremental-timeline";
+import { useSessionDetail } from "@/hooks/use-session-detail";
 import { sessionApi } from "@/lib/api/session";
 import type {
   ClarifyAnswer,
   FileInfo,
   SessionCheckpoint,
+  SessionMode,
   Skill,
-  SSEEventData,
   ToolEvent,
 } from "@/lib/api/types";
 import type { AttachmentFile, TimelineItem } from "@/lib/session-events";
@@ -26,6 +26,7 @@ export type UseSessionDetailViewOptions = {
   initialMessage?: string;
   initialAttachments?: string[];
   hasInitialMessage?: boolean;
+  mode?: SessionMode;
 };
 
 function findLatestTool(timeline: TimelineItem[]): ToolEvent | null {
@@ -50,6 +51,7 @@ export function useSessionDetailView({
   initialMessage,
   initialAttachments,
   hasInitialMessage,
+  mode,
 }: UseSessionDetailViewOptions) {
   const router = useRouter();
   const [includeDebug, setIncludeDebug] = useState(false);
@@ -181,13 +183,14 @@ export function useSessionDetailView({
           model_id: sessionModelId,
           skill_id: sessionSkillId,
           thinking_enabled: sessionThinkingEnabled,
+          mode,
         });
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "发送失败，请重试");
         throw e;
       }
     },
-    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled],
+    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode],
   );
 
   const handleClarifyAnswer = useCallback(
@@ -197,9 +200,10 @@ export function useSessionDetailView({
         skill_id: sessionSkillId,
         thinking_enabled: sessionThinkingEnabled,
         clarify_answers: clarifyAnswers,
+        mode,
       });
     },
-    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled],
+    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode],
   );
 
   const handleThinkingChange = useCallback(

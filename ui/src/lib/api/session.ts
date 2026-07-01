@@ -3,17 +3,15 @@ import type {
   ChatParams,
   CreateSessionParams,
   Session,
-  SessionDetail,
   SessionCheckpointsData,
+  SessionDetail,
   SessionEventsPage,
   SessionFile,
-  SessionTokenUsageData,
   SessionsData,
+  SessionTokenUsageData,
   SSEEventData,
   SSEEventHandler,
   UpdateSessionConfigParams,
-  ViewFileParams,
-  ViewShellParams,
 } from "./types";
 
 type SessionDetailParams = {
@@ -299,25 +297,5 @@ export const sessionApi = {
    */
   getSessionFiles: (sessionId: string): Promise<SessionFile[]> => {
     return get<SessionFile[]>(`/sessions/${sessionId}/files`);
-  },
-
-  /**
-   * 查看沙箱文件内容
-   */
-  viewFile: (
-    sessionId: string,
-    params: ViewFileParams,
-  ): Promise<{ content: string; [key: string]: unknown }> => {
-    return post<{ content: string; [key: string]: unknown }>(`/sessions/${sessionId}/file`, params);
-  },
-
-  /**
-   * 查看 Shell 输出
-   */
-  viewShell: (
-    sessionId: string,
-    params: ViewShellParams,
-  ): Promise<{ output: string; [key: string]: unknown }> => {
-    return post<{ output: string; [key: string]: unknown }>(`/sessions/${sessionId}/shell`, params);
   },
 };

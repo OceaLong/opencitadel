@@ -43,29 +43,3 @@ async def notify_sessions_changed() -> None:
             _debounce_task = asyncio.create_task(_debounced_publish())
     except Exception as exc:
         logger.debug("Session list notify scheduling failed: %s", exc)
-
-
-async def wait_sessions_changed(timeout_seconds: float = 30.0) -> bool:
-    """Block until a session-list change is published or timeout elapses."""
-    pubsub = None
-    try:
-        from app.infrastructure.storage.redis import get_redis
-
-        redis = get_redis().client
-        pubsub = redis.pubsub()
-        await pubsub.subscribe(SESSION_LIST_CHANNEL)
-        message = await pubsub.get_message(
-            ignore_subscribe_messages=True,
-            timeout=timeout_seconds,
-        )
-        return bool(message and message.get("type") == "message")
-    except Exception as exc:
-        logger.debug("Session list wait failed: %s", exc)
-        return False
-    finally:
-        if pubsub is not None:
-            try:
-                await pubsub.unsubscribe(SESSION_LIST_CHANNEL)
-                await pubsub.aclose()
-            except Exception:
-                pass

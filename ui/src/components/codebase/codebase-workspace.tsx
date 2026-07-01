@@ -10,28 +10,33 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { ChatInput } from "@/components/chat-input";
+import { CheckpointRestoreDialog } from "@/components/checkpoint-restore-dialog";
 import { CreateCodebaseDialog } from "@/components/codebase/create-codebase-dialog";
+import { FilePreviewPanel } from "@/components/file-preview-panel";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
 import { SessionModeToggle } from "@/components/session-mode-toggle";
+import { ToolPreviewPanel } from "@/components/tool-preview-panel";
+import { getToolKind } from "@/components/tool-use/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VirtualizedTimeline } from "@/components/virtualized-timeline";
+import { VNCOverlay } from "@/components/vnc-overlay";
 
-import { useIncrementalTimeline } from "@/hooks/use-incremental-timeline";
-import { useSessionDetail } from "@/hooks/use-session-detail";
+import { useSessionDetailView } from "@/hooks/use-session-detail-view";
 import { codebaseApi } from "@/lib/api/codebase";
-import { sessionApi } from "@/lib/api/session";
 import type {
   Codebase,
   CodebaseArtifact,
   FileTreeNode,
   SessionMode,
 } from "@/lib/api/types";
+import { sessionFileToAttachment } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 
 type CodebaseWorkspaceProps = {
@@ -117,7 +122,36 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
   const [ingestLog, setIngestLog] = useState<string[]>([]);
   const ingestCleanupRef = useRef<(() => void) | null>(null);
 
-  const { events, streaming, sendMessage } = useSessionDetail(sessionId);
+  const {
+    session,
+    files,
+    streaming,
+    timeline,
+    fileListOpen,
+    setFileListOpen,
+    previewFile,
+    resolvedPreviewTool,
+    vncOpen,
+    hasPreview,
+    scrollContainerRef,
+    handleSend,
+    handleViewAllFiles,
+    handleFileClick,
+    handleToolClick,
+    handleClarifyAnswer,
+    handleClosePreview,
+    handleJumpToLatest,
+    handleOpenVNC,
+    handleCloseVNC,
+    handleStop,
+    resolveCheckpoint,
+    handleRestoreCheckpoint,
+    restoringCheckpoint,
+    checkpointDialogOpen,
+    setCheckpointDialogOpen,
+    pendingCheckpoint,
+    confirmRestoreCheckpoint,
+  } = useSessionDetailView({ sessionId: sessionId ?? "", mode });
 
   const loadCodebases = useCallback(async () => {
     try {
@@ -213,18 +247,6 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
     [activeId],
   );
 
-  const handleSend = useCallback(
-    async (message: string) => {
-      if (!sessionId) return;
-      await sendMessage(message, [], { mode });
-    },
-    [sessionId, sendMessage, mode],
-  );
-
-  const handleStop = useCallback(async () => {
-    if (sessionId) await sessionApi.stopSession(sessionId);
-  }, [sessionId]);
-
   const handleDownload = async () => {
     if (!activeId) return;
     try {
@@ -235,8 +257,6 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
     }
   };
 
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const timeline = useIncrementalTimeline(events);
   const handleSourceClick = useCallback(
     (path: string, line?: number) => {
       void loadSource(path, line);
@@ -275,225 +295,283 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
   }, [artifacts]);
 
   const activeCodebase = codebases.find((c) => c.id === activeId);
+  const previewPanel = (
+    <>
+      {previewFile && <FilePreviewPanel file={previewFile} onClose={handleClosePreview} />}
+      {resolvedPreviewTool && (
+        <ToolPreviewPanel
+          tool={resolvedPreviewTool}
+          onClose={handleClosePreview}
+          onJumpToLatest={handleJumpToLatest}
+          onOpenVNC={getToolKind(resolvedPreviewTool) === "browser" ? handleOpenVNC : undefined}
+        />
+      )}
+    </>
+  );
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] flex-col">
-      <div className="border-border flex items-center justify-between border-b px-4 py-2">
-        <div className="flex items-center gap-2">
-          <Code2 className="size-5" />
-          <h1 className="text-sm font-semibold">
-            代码知识库{activeCodebase ? ` · ${activeCodebase.name}` : ""}
-          </h1>
+    <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden">
+      <aside className="border-border bg-muted/20 flex w-72 shrink-0 flex-col border-r">
+        <div className="border-border border-b px-3 py-2">
+          <h2 className="text-sm font-medium">代码库与目录</h2>
+          <p className="text-muted-foreground truncate text-xs">
+            {activeCodebase ? activeCodebase.name : "选择代码库开始分析"}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-1 size-4" />
-            新建
-          </Button>
-          {activeId && (
-            <>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={async () => {
-                  await codebaseApi.reanalyze(activeId);
-                  setIngesting(true);
-                }}
-              >
-                <RefreshCw className="mr-1 size-4" />
-                重新分析
-              </Button>
-              <Button size="sm" variant="outline" onClick={handleDownload}>
-                <Download className="mr-1 size-4" />
-                下载
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {activeCodebase?.vector_degraded && (
-        <div className="border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200 border-b px-4 py-2 text-xs">
-          语义检索不可用（向量索引已降级）。
-          <button
-            type="button"
-            className="ml-1 underline"
-            onClick={async () => {
-              if (!activeId) return;
-              await codebaseApi.reanalyze(activeId);
-              setIngesting(true);
-            }}
-          >
-            点此重建索引
-          </button>
-        </div>
-      )}
-
-      <div className="flex min-h-0 flex-1">
-        <aside className="border-border bg-muted/20 flex w-72 shrink-0 flex-col border-r">
-          <div className="border-border border-b px-3 py-2">
-            <h2 className="text-sm font-medium">代码库与目录</h2>
-            <p className="text-muted-foreground truncate text-xs">
-              {activeCodebase ? activeCodebase.name : "选择代码库开始分析"}
-            </p>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="p-2">
+            <p className="text-muted-foreground mb-2 px-2 text-xs font-medium">代码库</p>
+            {codebases.length > 0 ? (
+              codebases.map((cb) => (
+                <button
+                  key={cb.id}
+                  type="button"
+                  className={cn(
+                    "hover:bg-muted mb-1 w-full rounded-lg px-2 py-1.5 text-left text-sm",
+                    activeId === cb.id && "bg-muted font-medium",
+                  )}
+                  onClick={() => handleCodebaseSelect(cb.id)}
+                >
+                  <div className="truncate">{cb.name}</div>
+                  <div className="text-muted-foreground text-xs">{cb.status}</div>
+                </button>
+              ))
+            ) : (
+              <p className="text-muted-foreground px-2 py-3 text-sm">暂无代码库</p>
+            )}
           </div>
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="p-2">
-              <p className="text-muted-foreground mb-2 px-2 text-xs font-medium">代码库</p>
-              {codebases.length > 0 ? (
-                codebases.map((cb) => (
-                  <button
-                    key={cb.id}
-                    type="button"
-                    className={cn(
-                      "hover:bg-muted mb-1 w-full rounded-lg px-2 py-1.5 text-left text-sm",
-                      activeId === cb.id && "bg-muted font-medium",
-                    )}
-                    onClick={() => handleCodebaseSelect(cb.id)}
-                  >
-                    <div className="truncate">{cb.name}</div>
-                    <div className="text-muted-foreground text-xs">{cb.status}</div>
-                  </button>
+          {activeId && (
+            <div className="border-border border-t p-2">
+              <p className="text-muted-foreground mb-2 px-2 text-xs font-medium">文件目录</p>
+              {tree.length > 0 ? (
+                tree.map((node) => (
+                  <FileTreeItem
+                    key={node.path}
+                    node={node}
+                    selectedPath={sourcePath}
+                    onSelect={handleNavigationSourceSelect}
+                  />
                 ))
               ) : (
-                <p className="text-muted-foreground px-2 py-3 text-sm">暂无代码库</p>
+                <p className="text-muted-foreground px-2 py-3 text-sm">暂无文件目录</p>
               )}
             </div>
-            {activeId && (
-              <div className="border-border border-t p-2">
-                <p className="text-muted-foreground mb-2 px-2 text-xs font-medium">文件目录</p>
-                {tree.length > 0 ? (
-                  tree.map((node) => (
-                    <FileTreeItem
-                      key={node.path}
-                      node={node}
-                      selectedPath={sourcePath}
-                      onSelect={handleNavigationSourceSelect}
-                    />
-                  ))
-                ) : (
-                  <p className="text-muted-foreground px-2 py-3 text-sm">暂无文件目录</p>
-                )}
-              </div>
-            )}
-          </ScrollArea>
-        </aside>
-
-        <main className="flex min-w-0 flex-1 flex-col">
-          {!activeId ? (
-            <div className="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-4">
-              <Code2 className="size-12 opacity-40" />
-              <p>选择或新建代码库开始分析</p>
-              <div className="flex items-center gap-2">
-                <Button onClick={() => setCreateOpen(true)}>新建代码库</Button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {ingesting && (
-                <div className="bg-muted/50 border-border border-b px-4 py-2 text-xs">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="size-3 animate-spin" />
-                    正在分析代码库...
-                  </div>
-                  {ingestLog.slice(-3).map((l, i) => (
-                    <div key={i} className="text-muted-foreground truncate">
-                      {l}
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 py-4">
-                <VirtualizedTimeline
-                  timeline={timeline}
-                  scrollContainerRef={scrollContainerRef}
-                  onViewAllFiles={() => {}}
-                  onFileClick={() => {}}
-                  onToolClick={() => {}}
-                  onClarifyAnswer={() => {}}
-                  resolveCheckpoint={() => undefined}
-                  onRestoreCheckpoint={() => {}}
-                  restoringCheckpoint={false}
-                  streaming={streaming}
-                  onSourceClick={handleSourceClick}
-                />
-                {streaming && (
-                  <div className="text-muted-foreground py-2 text-sm">正在思考中...</div>
-                )}
-              </div>
-              <div className="border-border border-t p-4">
-                <ChatInput
-                  sessionId={sessionId}
-                  isRunning={streaming}
-                  onSend={handleSend}
-                  onStop={handleStop}
-                  toolbarRight={<SessionModeToggle mode={mode} onChange={setMode} />}
-                />
-              </div>
-            </>
           )}
-        </main>
+        </ScrollArea>
+      </aside>
 
-        <aside className="border-border w-96 shrink-0 border-l">
-          <Tabs defaultValue="source" className="flex h-full flex-col">
-            <TabsList className="mx-2 mt-2 grid w-auto grid-cols-2">
-              <TabsTrigger value="source">源码</TabsTrigger>
-              <TabsTrigger value="diagrams">图表</TabsTrigger>
-            </TabsList>
-            <TabsContent value="source" className="min-h-0 flex-1 px-2">
-              <ScrollArea className="h-[calc(100vh-8rem)]">
-                {sourcePath ? (
-                  <pre className="p-2 font-mono text-xs leading-relaxed whitespace-pre-wrap">
-                    {sourceLine && (
-                      <span className="text-muted-foreground mb-2 block">
-                        {sourcePath}:{sourceLine}
-                      </span>
-                    )}
-                    {sourceContent}
-                  </pre>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="border-border flex items-center justify-between border-b px-4 py-2">
+          <div className="flex items-center gap-2">
+            <Code2 className="size-5" />
+            <h1 className="text-sm font-semibold">
+              代码知识库{activeCodebase ? ` · ${activeCodebase.name}` : ""}
+            </h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-1 size-4" />
+              新建
+            </Button>
+            {activeId && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={async () => {
+                    await codebaseApi.reanalyze(activeId);
+                    setIngesting(true);
+                  }}
+                >
+                  <RefreshCw className="mr-1 size-4" />
+                  重新分析
+                </Button>
+                <Button size="sm" variant="outline" onClick={handleDownload}>
+                  <Download className="mr-1 size-4" />
+                  下载
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {activeCodebase?.vector_degraded && (
+          <div className="border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200 border-b px-4 py-2 text-xs">
+            语义检索不可用（向量索引已降级）。
+            <button
+              type="button"
+              className="ml-1 underline"
+              onClick={async () => {
+                if (!activeId) return;
+                await codebaseApi.reanalyze(activeId);
+                setIngesting(true);
+              }}
+            >
+              点此重建索引
+            </button>
+          </div>
+        )}
+
+        <div className="flex min-h-0 flex-1">
+          <main className="flex min-w-0 flex-1 flex-col">
+            {!activeId ? (
+              <div className="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-4">
+                <Code2 className="size-12 opacity-40" />
+                <p>选择或新建代码库开始分析</p>
+                <div className="flex items-center gap-2">
+                  <Button onClick={() => setCreateOpen(true)}>新建代码库</Button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {ingesting && (
+                  <div className="bg-muted/50 border-border border-b px-4 py-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="size-3 animate-spin" />
+                      正在分析代码库...
+                    </div>
+                    {ingestLog.slice(-3).map((l, i) => (
+                      <div key={i} className="text-muted-foreground truncate">
+                        {l}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 py-4">
+                  <VirtualizedTimeline
+                    timeline={timeline}
+                    scrollContainerRef={scrollContainerRef}
+                    sessionStatus={session?.status}
+                    onViewAllFiles={handleViewAllFiles}
+                    onFileClick={handleFileClick}
+                    onToolClick={handleToolClick}
+                    onClarifyAnswer={handleClarifyAnswer}
+                    resolveCheckpoint={resolveCheckpoint}
+                    onRestoreCheckpoint={handleRestoreCheckpoint}
+                    restoringCheckpoint={restoringCheckpoint}
+                    streaming={streaming}
+                    onSourceClick={handleSourceClick}
+                  />
+                  {streaming && (
+                    <div className="text-muted-foreground py-2 text-sm">正在思考中...</div>
+                  )}
+                </div>
+                <div className="border-border border-t p-4">
+                  <ChatInput
+                    sessionId={sessionId}
+                    isRunning={streaming}
+                    onSend={handleSend}
+                    onStop={handleStop}
+                    toolbarRight={<SessionModeToggle mode={mode} onChange={setMode} />}
+                  />
+                </div>
+              </>
+            )}
+          </main>
+
+          <aside className="border-border flex w-96 shrink-0 flex-col border-l">
+            <Tabs defaultValue="source" className="flex min-h-0 flex-1 flex-col">
+              <TabsList className="mx-2 mt-2 grid w-auto grid-cols-2">
+                <TabsTrigger value="source">源码</TabsTrigger>
+                <TabsTrigger value="diagrams">图表</TabsTrigger>
+              </TabsList>
+              <TabsContent value="source" className="min-h-0 flex-1 px-2 pb-2">
+                <ScrollArea className="h-full">
+                  {sourcePath ? (
+                    <pre className="p-2 font-mono text-xs leading-relaxed whitespace-pre-wrap">
+                      {sourceLine && (
+                        <span className="text-muted-foreground mb-2 block">
+                          {sourcePath}:{sourceLine}
+                        </span>
+                      )}
+                      {sourceContent}
+                    </pre>
+                  ) : (
+                    <p className="text-muted-foreground p-4 text-sm">点击文件或回答中的路径定位源码</p>
+                  )}
+                </ScrollArea>
+              </TabsContent>
+              <TabsContent value="diagrams" className="min-h-0 flex-1 px-2 pb-2">
+                <ScrollArea className="h-full">
+                  {ARTIFACT_TABS.map(({ kind, label }) => {
+                    const art = activeArtifact(kind);
+                    if (!art) return null;
+                    return (
+                      <div key={kind} className="mb-4">
+                        <h3 className="mb-2 text-sm font-medium">{art.title || label}</h3>
+                        {art.format === "mermaid" ? (
+                          <MermaidDiagram chart={art.content} />
+                        ) : (
+                          <pre className="text-xs whitespace-pre-wrap">{art.content}</pre>
+                        )}
+                        {kind === "call_chain" && callChainLocations.length > 0 && (
+                          <ul className="mt-2 space-y-1 text-xs">
+                            {callChainLocations.map((loc, i) => (
+                              <li key={i}>
+                                <button
+                                  type="button"
+                                  className="text-blue-600 hover:underline"
+                                  onClick={() => {
+                                    const sym = loc.symbol;
+                                    void loadSource(sym, loc.line);
+                                  }}
+                                >
+                                  {loc.symbol}:{loc.line}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })}
+                </ScrollArea>
+              </TabsContent>
+            </Tabs>
+          </aside>
+
+          {fileListOpen && (
+            <aside className="border-border bg-background flex w-80 shrink-0 flex-col border-l">
+              <div className="border-border flex items-center justify-between border-b px-3 py-2">
+                <h2 className="text-sm font-medium">会话文件</h2>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setFileListOpen(false)}
+                  aria-label="关闭文件列表"
+                >
+                  <X className="size-4" />
+                </Button>
+              </div>
+              <ScrollArea className="min-h-0 flex-1">
+                {files.length === 0 ? (
+                  <p className="text-muted-foreground p-4 text-sm">暂无文件</p>
                 ) : (
-                  <p className="text-muted-foreground p-4 text-sm">点击文件或回答中的路径定位源码</p>
+                  <div className="space-y-1 p-2">
+                    {files.map((file) => (
+                      <button
+                        key={file.id}
+                        type="button"
+                        className="hover:bg-muted w-full rounded px-2 py-1.5 text-left text-xs"
+                        onClick={() => handleFileClick(sessionFileToAttachment(file))}
+                      >
+                        <div className="truncate font-medium">{file.filename}</div>
+                        <div className="text-muted-foreground truncate">{file.filepath}</div>
+                      </button>
+                    ))}
+                  </div>
                 )}
               </ScrollArea>
-            </TabsContent>
-            <TabsContent value="diagrams" className="min-h-0 flex-1 px-2">
-              <ScrollArea className="h-[calc(100vh-8rem)]">
-                {ARTIFACT_TABS.map(({ kind, label }) => {
-                  const art = activeArtifact(kind);
-                  if (!art) return null;
-                  return (
-                    <div key={kind} className="mb-4">
-                      <h3 className="mb-2 text-sm font-medium">{art.title || label}</h3>
-                      {art.format === "mermaid" ? (
-                        <MermaidDiagram chart={art.content} />
-                      ) : (
-                        <pre className="text-xs whitespace-pre-wrap">{art.content}</pre>
-                      )}
-                      {kind === "call_chain" && callChainLocations.length > 0 && (
-                        <ul className="mt-2 space-y-1 text-xs">
-                          {callChainLocations.map((loc, i) => (
-                            <li key={i}>
-                              <button
-                                type="button"
-                                className="text-blue-600 hover:underline"
-                                onClick={() => {
-                                  const sym = loc.symbol;
-                                  void loadSource(sym, loc.line);
-                                }}
-                              >
-                                {loc.symbol}:{loc.line}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  );
-                })}
-              </ScrollArea>
-            </TabsContent>
-          </Tabs>
-        </aside>
+            </aside>
+          )}
+
+          {hasPreview && (
+            <aside className="animate-in slide-in-from-right border-border h-full w-full max-w-[600px] shrink-0 border-l duration-300">
+              {previewPanel}
+            </aside>
+          )}
+        </div>
       </div>
 
       <CreateCodebaseDialog
@@ -504,6 +582,14 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
           setActiveId(cb.id);
           setIngesting(true);
         }}
+      />
+      {vncOpen && sessionId && <VNCOverlay sessionId={sessionId} onClose={handleCloseVNC} />}
+      <CheckpointRestoreDialog
+        checkpoint={pendingCheckpoint}
+        open={checkpointDialogOpen}
+        restoring={restoringCheckpoint}
+        onOpenChange={setCheckpointDialogOpen}
+        onConfirm={confirmRestoreCheckpoint}
       />
     </div>
   );

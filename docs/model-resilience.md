@@ -39,9 +39,9 @@
 flowchart LR
   TaskRunnerFactory["TaskRunnerFactory"] -->|"resolve LLM"| ResilientLLMClient["ResilientLLMClient"]
   MarketplaceService["MarketplaceService"] -->|"resolve text or vision LLM"| ResilientLLMClient
-  AgentRunner["AgentTaskRunner"] --> MemoryExtractor["MemoryExtractor"]
+  AgentRunner["AgentTaskRunner"] --> MemoryExtractorService["MemoryExtractorService"]
   AgentRunner --> VisionGroundingTool["VisionGroundingTool"]
-  MemoryExtractor --> ResilientLLMClient
+  MemoryExtractorService --> ResilientLLMClient
   VisionGroundingTool --> ResilientLLMClient
   ResilientLLMClient --> CircuitBreaker["Redis CircuitBreaker"]
   ResilientLLMClient --> RawLLM["Provider LLM Client"]
@@ -54,10 +54,10 @@ flowchart LR
 | 调用点 | 路径 | 失败域 |
 |--------|------|--------|
 | Agent 主链路 | `TaskRunnerFactory._resolve_llm_and_config` -> `create_resilient_llm` | chat LLM |
-| MemoryExtractor | 继承 runner 注入的 `llm` | chat LLM |
+| MemoryExtractorService | 继承 runner 注入的 `llm` | chat LLM |
 | VisionGroundingTool | 继承 Agent 注入的 `llm` | chat LLM |
 | Marketplace LLM | `_resolve_text_llm` / `_resolve_vision_llm` | chat LLM |
-| ImageGenerationService | 图片生成 | 独立工具域，不经 chat LLM fallback |
+| ImageGenerationTool / `generate_image()` | 图片生成 | 独立工具域，不经 chat LLM fallback |
 | `LLMModelService._run_vision_probe` | 用户主动探测 | 原始 `LLMFactory.create`，不经韧性层 |
 
 ## 熔断器状态机
@@ -80,7 +80,7 @@ stateDiagram-v2
 | `open` | 不调用 Provider，直接返回模型不可用错误 |
 | `half-open` | 放行少量探测请求，成功关闭，失败重新打开 |
 
-熔断状态保存在 Redis `cb:state:*`，窗口阈值来自 `AppConfig.model_resilience`。熔断错误分类只统计 429、5xx、timeout 等可恢复故障；认证、配置缺失等不可恢复错误应快速暴露，不参与 fallback。
+熔断状态保存在 Redis `cb:open_until:*`、`cb:errors:*`、`cb:probe:*`，窗口阈值来自 `AppConfig.model_resilience`。熔断错误分类只统计 429、5xx、timeout 等可恢复故障；认证、配置缺失等不可恢复错误应快速暴露，不参与 fallback。
 
 ## Fallback 与重试边界
 
@@ -112,7 +112,7 @@ stateDiagram-v2
 |------|------|
 | 按 provider / model_id 成功率 | 来自 resilience_events |
 | 429 / 5xx / timeout 比例 | 计入熔断窗口 |
-| 熔断开路时长 | Redis `cb:state:*` TTL |
+| 熔断开路时长 | Redis `cb:open_until:*` TTL |
 | fallback 命中率 | `fallback_success` 事件 |
 
 ### Embedding 域
@@ -179,11 +179,12 @@ stateDiagram-v2
 | 测试 | 覆盖 |
 |------|------|
 | `test_model_error_fixes.py` | 模型错误分类与前后端兼容 |
-| `test_reconcile.py` | reconcile 与熔断联动 |
-| `test_status_routes.py` | `/api/status` 与 `/api/llm/status` |
-| `test_circuit_breaker.py` | Redis 熔断状态转换 |
-| `test_event_upgrader.py` | 旧事件 `ErrorEvent.code` 兼容 |
-| `test_marketplace_catalog.py` | `model_dependency` 与懒解析 |
+| `test_reconcile.py` | 孤儿任务 reconcile |
+| `test_reconcile_circuit.py` | reconcile 与熔断联动 |
+| `test_status_routes.py` | `/api/status` |
+| `api/tests/app/infrastructure/external/llm/test_circuit_breaker.py` | Redis 熔断状态转换 |
+| `api/tests/app/domain/models/test_event_upgrader.py` | 旧事件 `ErrorEvent.code` 兼容 |
+| `test_marketplace_catalog.py` | `model_dependency` 字段校验 |
 
 ## 相关文档
 

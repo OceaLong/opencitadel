@@ -78,17 +78,5 @@ class RedisSessionListNotifierAdapter(SessionListNotifierPort):
         await notify_sessions_changed()
 
 
-def default_observability() -> ObservabilityPort:
-    return OtelObservabilityAdapter()
-
-
-def default_task_state() -> TaskStatePort:
-    return RedisTaskStateAdapter()
-
-
-def default_event_sequence() -> EventSequencePort:
-    return RedisEventSequenceAdapter()
-
-
 def default_session_list_notifier() -> SessionListNotifierPort:
     return RedisSessionListNotifierAdapter()

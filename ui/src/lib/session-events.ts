@@ -39,7 +39,7 @@ function syntheticDebugMeta(): EventMeta {
 }
 
 /** 判断 assistant 文本是否像 planner 结构化 JSON（历史数据兼容） */
-export function looksLikePlannerJson(text: string): boolean {
+function looksLikePlannerJson(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed.startsWith("{")) return false;
   try {

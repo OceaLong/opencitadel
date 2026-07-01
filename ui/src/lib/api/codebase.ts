@@ -3,15 +3,14 @@ import type {
   Codebase,
   CodebaseArtifact,
   CodebaseArtifactsData,
-  CodebaseSessionData,
   CodebasesData,
-  CodebaseSymbolsData,
+  CodebaseSessionData,
   CreateCodebaseParams,
   CreateCodebaseSessionParams,
   DownloadCodebaseData,
   FileTreeData,
-  ReadSourceParams,
   ReadSourceData,
+  ReadSourceParams,
   SSEEventData,
   SSEEventHandler,
 } from "./types";
@@ -31,10 +30,6 @@ export const codebaseApi = {
 
   getTree: (codebaseId: string): Promise<FileTreeData> => {
     return get<FileTreeData>(`/codebases/${codebaseId}/tree`);
-  },
-
-  getSymbols: (codebaseId: string, name?: string): Promise<CodebaseSymbolsData> => {
-    return get<CodebaseSymbolsData>(`/codebases/${codebaseId}/symbols`, name ? { name } : undefined);
   },
 
   getArtifacts: (codebaseId: string, kind?: string): Promise<CodebaseArtifactsData> => {

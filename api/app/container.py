@@ -48,7 +48,6 @@ from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.storage.cos import Cos, get_cos
 from app.infrastructure.storage.postgres import Postgres, get_postgres
 from app.infrastructure.storage.redis import RedisClient, get_redis
-from app.runtime_role import ProcessRole, get_role
 from core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -333,9 +332,6 @@ class WorkerContainer(BaseContainer):
     )
 
 
-# Backward-compatible alias for FastAPI dependency injection.
-AppContainer = ApiContainer
-
 _api_container: ApiContainer | None = None
 _worker_container: WorkerContainer | None = None
 
@@ -352,12 +348,6 @@ def get_worker_container() -> WorkerContainer:
     if _worker_container is None:
         _worker_container = WorkerContainer()
     return _worker_container
-
-
-def get_container() -> ApiContainer | WorkerContainer:
-    if get_role() == ProcessRole.WORKER:
-        return get_worker_container()
-    return get_api_container()
 
 
 async def init_api_container(container: ApiContainer | None = None) -> ApiContainer:
