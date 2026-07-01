@@ -842,6 +842,16 @@ export type StepEvent = {
   [key: string]: unknown;
 };
 
+/** 子 Agent 委派事件 */
+export type SubAgentEvent = {
+  subagent_id: string;
+  goal: string;
+  status: "started" | "completed" | "failed";
+  result_preview?: string | null;
+  error?: string | null;
+  [key: string]: unknown;
+};
+
 /**
  * 工具调用事件
  */
@@ -938,6 +948,7 @@ export type SSEEventData =
   | { type: "title"; data: { title: string } & EventMeta }
   | { type: "plan"; data: PlanEvent & EventMeta }
   | { type: "step"; data: StepEvent & EventMeta }
+  | { type: "subagent"; data: SubAgentEvent & EventMeta }
   | { type: "tool"; data: ToolEvent & EventMeta }
   | { type: "wait"; data: Record<string, unknown> & EventMeta }
   | {

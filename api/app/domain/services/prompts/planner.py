@@ -23,12 +23,13 @@ CREATE_PLAN_PROMPT = """
 - 你的计划必须简洁明了，不要添加任何不必要的细节
 - 你的步骤必须是原子性且独立的，以便下一个执行者可以使用工具逐一执行它们
 - 你需要判断任务是否可以拆分为多个步骤，如果可以，返回多个步骤；否则，返回单个步骤
+- 若多个步骤彼此独立、无先后依赖（例如同时检索多个主题、并行收集多源信息），可将对应步骤标记 `parallelizable: true`；有依赖关系的步骤必须为 `false`
 - 只输出 JSON，不要输出 Markdown 代码块或解释文字
 
 返回格式要求：
 - 必须返回符合以下 TypeScript 接口定义的 JSON 格式
 - 必须包含指定的所有必填字段
-- 如果判定任务不可行, 则"steps"返回空数组，"goal"返回空字符串
+- 如果判定任务不可直接执行，请返回一个步骤说明需要澄清或无法执行的原因，不要返回空 steps
 
 TypeScript 接口定义：
 ```typescript
@@ -41,6 +42,8 @@ interface CreatePlanResponse {{
     id: string;
     /** 步骤描述 **/
     description: string;
+    /** 是否可与其他独立步骤并行执行（默认 false） **/
+    parallelizable?: boolean;
   }}>;
   /** 根据上下文生成的计划目标 **/
   goal: string;
@@ -89,6 +92,7 @@ UPDATE_PLAN_PROMPT = """
 - 如果步骤已完成或者不再必要，请将其删除
 - 仔细阅读步骤结果以确定是否成功，如果不成功，请更改后续步骤
 - 根据步骤结果，你需要相应地更新计划步骤
+- 更新时保留或调整 `parallelizable`：仅当步骤彼此独立且无顺序依赖时设为 true
 - 只输出 JSON，不要输出 Markdown 代码块或解释文字
 
 返回格式要求：
@@ -104,6 +108,8 @@ interface UpdatePlanResponse {{
     id: string;
     /** 步骤描述 **/
     description: string;
+    /** 是否可与其他独立步骤并行执行（默认 false） **/
+    parallelizable?: boolean;
   }}>;
 }}
 ```

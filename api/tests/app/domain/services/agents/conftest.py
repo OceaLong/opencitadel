@@ -40,6 +40,10 @@ def agent_test_runtime_settings(**overrides) -> AgentRuntimeSettings:
         compact_strategy=overrides.pop("compact_strategy", "rule"),
         compact_token_threshold=overrides.pop("compact_token_threshold", 100000),
         compact_keep_recent=overrides.pop("compact_keep_recent", 12),
+        compact_always_on_step_boundary=overrides.pop("compact_always_on_step_boundary", True),
+        compact_rule_trigger_threshold=overrides.pop("compact_rule_trigger_threshold", 16000),
+        tool_output_offload_enabled=overrides.pop("tool_output_offload_enabled", False),
+        tool_output_offload_threshold_chars=overrides.pop("tool_output_offload_threshold_chars", 4000),
     )
     return AgentRuntimeSettings(
         tool_timeout_seconds=overrides.pop("tool_timeout_seconds", 120),

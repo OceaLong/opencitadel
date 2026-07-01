@@ -8,6 +8,10 @@ class AgentMemoryRuntimeSettings(BaseModel):
     compact_strategy: str = "hybrid"
     compact_token_threshold: int = 32000
     compact_keep_recent: int = 12
+    compact_always_on_step_boundary: bool = True
+    compact_rule_trigger_threshold: int = 16000
+    tool_output_offload_enabled: bool = False
+    tool_output_offload_threshold_chars: int = 4000
 
 
 class AgentRuntimeSettings(BaseModel):

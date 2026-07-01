@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
-from typing import AsyncGenerator, Optional, List
+from typing import AsyncGenerator, Optional, List, List
 
 from app.domain.models.event import (
     StepEventStatus,
@@ -15,13 +15,32 @@ from app.domain.models.event import (
 )
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
-from app.domain.models.plan import Plan, Step, ExecutionStatus
+from app.domain.models.plan import Plan, Step, ExecutionStatus, ExecutionStatus
 from app.domain.services.agents.structured_parse import StructuredParseError, parse_structured_output
 from app.domain.services.prompts.react import REACT_SYSTEM_PROMPT, EXECUTION_PROMPT, SUMMARIZE_PROMPT
 from app.domain.services.prompts.system import SYSTEM_PROMPT
 from .base import BaseAgent
 
 logger = logging.getLogger(__name__)
+
+_PLAN_SNAPSHOT_MAX_STEPS = 30
+
+
+def render_plan_snapshot(plan: Plan, current_step_id: str) -> str:
+    """Render a compact todo-style plan snapshot for context recitation."""
+    lines: List[str] = []
+    steps = plan.steps[:_PLAN_SNAPSHOT_MAX_STEPS]
+    for step in steps:
+        if step.status == ExecutionStatus.COMPLETED:
+            mark = "x"
+        elif step.id == current_step_id or step.status == ExecutionStatus.RUNNING:
+            mark = ">"
+        else:
+            mark = " "
+        lines.append(f"- [{mark}] {step.description}")
+    if len(plan.steps) > _PLAN_SNAPSHOT_MAX_STEPS:
+        lines.append(f"- ... (仅显示前 {_PLAN_SNAPSHOT_MAX_STEPS}/{len(plan.steps)} 步)")
+    return "\n".join(lines) if lines else "(无计划步骤)"
 
 
 class ReActAgent(BaseAgent):
@@ -47,6 +66,7 @@ class ReActAgent(BaseAgent):
             attachments="\n".join(message.attachments),
             language=plan.language,
             step=step.description,
+            plan_snapshot=render_plan_snapshot(plan, step.id),
         )
 
         # 2.更新步骤的执行状态为运行中并返回Step事件

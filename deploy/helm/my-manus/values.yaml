@@ -142,6 +142,8 @@ appConfig:
     max_iterations: 100
     max_retries: 3
     max_search_results: 10
+    subagent_max_iterations: 15
+    subagent_max_concurrency: 3
   memory:
     recall_limit: 20
     auto_extract_enabled: true
@@ -150,6 +152,10 @@ appConfig:
     compact_token_threshold: 32000
     compact_keep_recent: 12
     compact_tool_content_max_chars: 2000
+    compact_always_on_step_boundary: true
+    compact_rule_trigger_threshold: 16000
+    tool_output_offload_enabled: false
+    tool_output_offload_threshold_chars: 4000
     embedding:
       provider: openai
       model: text-embedding-3-small
@@ -241,6 +247,7 @@ appConfig:
     enable_marketplace_llm_apps: true
     enable_embeddings: true
     enable_image_generation: true
+    enable_parallel_step_execution: false
 
 migrate:
   enabled: true

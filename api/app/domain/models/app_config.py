@@ -32,6 +32,10 @@ class MemoryConfig(BaseModel):
     compact_token_threshold: int = 32000
     compact_keep_recent: int = 12
     compact_tool_content_max_chars: int = 2000
+    compact_always_on_step_boundary: bool = True
+    compact_rule_trigger_threshold: int = 16000
+    tool_output_offload_enabled: bool = False
+    tool_output_offload_threshold_chars: int = 4000
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
 
 
@@ -100,6 +104,8 @@ class AgentConfig(BaseModel):
     max_flow_steps: int = Field(default=50, gt=0, lt=500)  # Flow 级步骤/状态转换上限
     tool_result_max_chars: int = Field(default=8000, gt=0, lt=200_000)  # 单次工具结果回填上限
     max_run_seconds: int = Field(default=3600, gt=0, lt=86400)  # 单次 Agent 运行全局超时（秒）
+    subagent_max_iterations: int = Field(default=15, gt=0, lt=500)
+    subagent_max_concurrency: int = Field(default=3, gt=0, le=20)
 
 
 class MCPTransport(str, Enum):
@@ -187,6 +193,7 @@ class FeatureFlagsConfig(BaseModel):
     enable_marketplace_llm_apps: bool = True
     enable_embeddings: bool = True
     enable_image_generation: bool = True
+    enable_parallel_step_execution: bool = False
 
 
 class KBChunkConfig(BaseModel):

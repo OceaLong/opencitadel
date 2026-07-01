@@ -18,6 +18,7 @@ import type {
   SSEEventData,
   SSEEventType,
   StepEvent,
+  SubAgentEvent,
   ToolEvent,
 } from "@/lib/api/types";
 
@@ -135,6 +136,12 @@ export type TimelineItem =
     }
   | { kind: "tool"; id: string; data: ToolEvent; timeLabel?: string }
   | { kind: "step"; id: string; data: StepEvent; tools: ToolEvent[]; anchorEventId?: string }
+  | {
+      kind: "subagent";
+      id: string;
+      data: SubAgentEvent;
+      anchorEventId?: string;
+    }
   | { kind: "wait"; id: string; message: string; timestamp?: number }
   | { kind: "error"; id: string; error: string; timestamp?: number; contextLabel?: string };
 
@@ -445,6 +452,33 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
           lastStepId = step.id;
         }
 
+        break;
+      }
+      case "subagent": {
+        const sub = ev.data as SubAgentEvent;
+        const anchor = (sub as { event_id?: string }).event_id;
+        const existingIdx = list.findIndex(
+          (item) => item.kind === "subagent" && item.data.subagent_id === sub.subagent_id,
+        );
+        if (existingIdx >= 0) {
+          const existing = list[existingIdx];
+          if (existing.kind === "subagent") {
+            list[existingIdx] = {
+              kind: "subagent",
+              id: existing.id,
+              data: sub,
+              anchorEventId: existing.anchorEventId ?? anchor,
+            };
+          }
+        } else {
+          list.push({
+            kind: "subagent",
+            id: stableId("subagent", stepIndex++, sub.subagent_id),
+            data: sub,
+            anchorEventId: anchor,
+          });
+        }
+        lastContextLabel = `子任务：${sub.goal}`;
         break;
       }
       case "tool": {

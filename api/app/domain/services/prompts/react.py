@@ -11,10 +11,13 @@ REACT_SYSTEM_PROMPT = """
 5. **提交结果**：将最终结果发送给用户，结果必须详尽且具体。
 """
 
-# 执行子步骤提示词模板，包含message、attachments、language、step
+# 执行子步骤提示词模板，包含message、attachments、language、step、plan_snapshot
 EXECUTION_PROMPT = """
 你正在执行任务：
 {step}
+
+## 当前整体计划
+{plan_snapshot}
 
 注意事项：
 - **是你来执行这个任务，而不是用户。**不要告诉用户“如何做”，而是直接通过工具“去做”。

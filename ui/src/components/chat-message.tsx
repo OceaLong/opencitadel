@@ -165,6 +165,27 @@ function ChatMessageComponent({
     );
   }
 
+  if (item.kind === "subagent") {
+    const statusLabel =
+      item.data.status === "completed"
+        ? "已完成"
+        : item.data.status === "failed"
+          ? "失败"
+          : "执行中";
+    return (
+      <div className={cn("mt-3 flex w-full", className)}>
+        <div className="border-border/70 bg-muted/30 w-full rounded-lg border px-3 py-2 text-sm">
+          <div className="text-muted-foreground mb-1 text-xs">子 Agent · {statusLabel}</div>
+          <div className="font-medium">{item.data.goal}</div>
+          {item.data.result_preview ? (
+            <div className="text-muted-foreground mt-2 text-xs">{item.data.result_preview}</div>
+          ) : null}
+          {item.data.error ? <div className="mt-1 text-xs text-red-600">{item.data.error}</div> : null}
+        </div>
+      </div>
+    );
+  }
+
   if (item.kind === "step") {
     return (
       <StepBlock

@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 import logging
 from typing import AsyncGenerator, Optional, Callable, List
+import asyncio
 
+from app.application.services.config_provider import get_runtime_config
 from app.domain.external.browser import Browser
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.json_parser import JSONParser
@@ -22,7 +24,7 @@ from app.domain.models.event import (
 )
 from app.domain.models.event import ErrorEvent, DoneEvent, WaitEvent
 from app.domain.models.message import Message
-from app.domain.models.plan import Plan, ExecutionStatus
+from app.domain.models.plan import Plan, Step, ExecutionStatus
 from app.domain.models.session import SessionStatus
 from app.domain.services.agents.clarify import ClarifyAgent
 from app.domain.services.agents.planner import PlannerAgent
@@ -30,7 +32,9 @@ from app.domain.services.agents.react import ReActAgent
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.mcp import MCPTool
+from app.domain.services.tools.subagent import SubAgentTool
 from app.domain.services.tools.tool_registry import ToolRegistry
+from app.domain.models.event import StepEvent, StepEventStatus, MessageEvent
 from app.domain.external.observability import ObservabilityPort
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
 from .base import BaseFlow, FlowStatus
@@ -64,8 +68,10 @@ class PlannerReActFlow(BaseFlow):
             extra_tools: Optional[List[BaseTool]] = None,
             model_id: Optional[str] = None,
             file_storage: Optional[FileStorage] = None,
+            stateful_tool_lock: Optional[asyncio.Lock] = None,
     ) -> None:
         """构造函数，完成规划与执行流的初始化"""
+        self._stateful_tool_lock = stateful_tool_lock or asyncio.Lock()
         # 1.流初始化数据配置
         self._uow_factory = uow_factory
         self._session_id = session_id
@@ -89,6 +95,11 @@ class PlannerReActFlow(BaseFlow):
         )
 
         allowed_tool_names = skill.allowed_tools if (skill and skill.allowed_tools) else None
+        self._subagent_tool: Optional[SubAgentTool] = None
+        for tool in extra_tools or []:
+            if isinstance(tool, SubAgentTool):
+                self._subagent_tool = tool
+                break
 
         # 3.创建澄清Agent（agent_params 已在 AgentService 合并）
         self.clarify = ClarifyAgent(
@@ -105,6 +116,7 @@ class PlannerReActFlow(BaseFlow):
             file_storage=file_storage,
             observability_port=self._observability,
             runtime_settings=self._runtime_settings,
+            stateful_tool_lock=self._stateful_tool_lock,
         )
         logger.debug(f"创建澄清Agent成功, 会话id: {self._session_id}")
 
@@ -123,6 +135,7 @@ class PlannerReActFlow(BaseFlow):
             file_storage=file_storage,
             observability_port=self._observability,
             runtime_settings=self._runtime_settings,
+            stateful_tool_lock=self._stateful_tool_lock,
         )
         logger.debug(f"创建规划Agent成功, 会话id: {self._session_id}")
 
@@ -141,8 +154,68 @@ class PlannerReActFlow(BaseFlow):
             file_storage=file_storage,
             observability_port=self._observability,
             runtime_settings=self._runtime_settings,
+            stateful_tool_lock=self._stateful_tool_lock,
         )
         logger.debug(f"创建执行Agent成功, 会话id: {self._session_id}")
+
+    async def _execute_parallel_steps(
+            self,
+            steps: List,
+            message: Message,
+    ) -> AsyncGenerator[BaseEvent, None]:
+        """Execute a batch of parallelizable steps via isolated sub-agents."""
+        if not self._subagent_tool:
+            for step in steps:
+                async for event in self.react.execute_step(self.plan, step, message):
+                    yield event
+            return
+
+        async def _run_one(step):
+            step.status = ExecutionStatus.RUNNING
+            self.react.set_current_step(step.id)
+            events = [StepEvent(step=step, status=StepEventStatus.STARTED)]
+            result = await self._subagent_tool.run_step(step.description)
+            payload = result.data if isinstance(result.data, dict) else {}
+            subagent_id = payload.get("subagent_id") if isinstance(payload, dict) else None
+            for aux in self._subagent_tool.drain_events(subagent_id=subagent_id):
+                events.append(aux)
+            if result.success:
+                step.status = ExecutionStatus.COMPLETED
+                step.success = True
+                summary = str(payload.get("summary") or result.message or "")
+                step.result = summary[:4000]
+                events.append(StepEvent(step=step, status=StepEventStatus.COMPLETED))
+                if step.result:
+                    events.append(MessageEvent(role="assistant", message=step.result))
+            else:
+                step.status = ExecutionStatus.FAILED
+                step.error = result.message
+                events.append(StepEvent(step=step, status=StepEventStatus.FAILED))
+            return events
+
+        results = await asyncio.gather(*[_run_one(s) for s in steps])
+        for event_list in results:
+            for event in event_list:
+                yield event
+
+    @staticmethod
+    def _build_parallel_update_step(steps: List[Step]) -> Step:
+        """Build a synthetic completed step summarizing a parallel batch for re-planning."""
+        summaries: List[str] = []
+        success = True
+        for item in steps:
+            status = item.status.value if hasattr(item.status, "value") else str(item.status)
+            if item.status != ExecutionStatus.COMPLETED or not item.success:
+                success = False
+            detail = item.result or item.error or ""
+            summaries.append(f"- [{status}] {item.description}: {detail}".strip())
+        return Step(
+            id="parallel-batch",
+            description="并行批次执行结果汇总",
+            status=ExecutionStatus.COMPLETED if success else ExecutionStatus.FAILED,
+            success=success,
+            result="\n".join(summaries)[:4000],
+        )
 
     async def invoke(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         """传递消息，运行流，在六中调用planner&react智能体组合完成任务并返回对应事件"""
@@ -276,10 +349,22 @@ class PlannerReActFlow(BaseFlow):
                     self.status = FlowStatus.COMPLETED
                     break
             elif self.status == FlowStatus.EXECUTING:
-                # 17.流的状态为执行中，先将计划状态调整为运行中，同时调用执行Agent完成每个子步骤
                 self.plan.status = ExecutionStatus.RUNNING
 
-                # 18.获取当前计划的下一个需要执行的子步骤
+                parallel_enabled = get_runtime_config().feature_flags.enable_parallel_step_execution
+                batch = self.plan.get_next_parallel_batch() if parallel_enabled else []
+                if parallel_enabled and self._subagent_tool and len(batch) > 1 and all(s.parallelizable for s in batch):
+                    logger.info(
+                        "Planner&ReAct流并行执行 %s 个步骤 session=%s",
+                        len(batch),
+                        self._session_id,
+                    )
+                    async for event in self._execute_parallel_steps(batch, message):
+                        yield event
+                    step = self._build_parallel_update_step(batch)
+                    self.status = FlowStatus.UPDATING
+                    continue
+
                 step = self.plan.get_next_step()
 
                 # 19.如果不存在下一个需要执行的自己花，则更新流状态并执行后续步骤

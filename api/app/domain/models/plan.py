@@ -24,6 +24,7 @@ class Step(BaseModel):
     error: Optional[str] = None  # 错误信息
     success: bool = False  # 是否执行成功
     attachments: List[str] = Field(default_factory=list)  # 附件列表信息
+    parallelizable: bool = False  # 是否可与其他步骤并行执行
 
     @property
     def done(self) -> bool:
@@ -50,3 +51,19 @@ class Plan(BaseModel):
     def get_next_step(self) -> Optional[Step]:
         """获取需要执行的下一个步骤"""
         return next((step for step in self.steps if not step.done), None)
+
+    def get_next_parallel_batch(self) -> List[Step]:
+        """获取下一批可执行步骤；连续 parallelizable 的步骤可批量并行。"""
+        pending = [step for step in self.steps if not step.done]
+        if not pending:
+            return []
+        first = pending[0]
+        if not first.parallelizable:
+            return [first]
+        batch: List[Step] = []
+        for step in pending:
+            if step.parallelizable:
+                batch.append(step)
+            else:
+                break
+        return batch

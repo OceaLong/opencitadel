@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import json
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -11,6 +12,13 @@ _IMAGE_OMITTED_TEXT = "[image omitted in compact]"
 _TRUNCATED_TOOL_PREFIX = "[truncated] "
 _DEFAULT_TOOL_CONTENT_MAX = 2000
 
+_BROWSER_COMPACT_FUNCTIONS = frozenset({
+    "browser_view",
+    "browser_navigate",
+    "browser_screenshot",
+    "browser_restart",
+})
+
 _TRUNCATABLE_TOOL_NAMES = frozenset({
     "search_web",
     "read_file",
@@ -19,9 +27,97 @@ _TRUNCATABLE_TOOL_NAMES = frozenset({
     "search_in_file",
     "find_files",
     "shell",
+    "shell_execute",
     "exec_command",
     "analyze_image",
 })
+
+# Keys to include in truncation hints per tool name.
+_TRUNCATION_ARG_KEYS: Dict[str, tuple[str, ...]] = {
+    "read_file": ("path", "filepath"),
+    "write_file": ("path", "filepath"),
+    "replace_in_file": ("path", "filepath"),
+    "search_in_file": ("path", "filepath"),
+    "find_files": ("path", "pattern"),
+    "search_web": ("query",),
+    "shell_execute": ("command",),
+    "shell": ("command",),
+}
+
+
+def _extract_url_from_tool_content(content: Any) -> Optional[str]:
+    """Parse tool result JSON (or multimodal parts) and return page URL if present."""
+    if content is None:
+        return None
+    try:
+        if isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict) or part.get("type") != "text":
+                    continue
+                text = part.get("text") or ""
+                url = _extract_url_from_tool_content(text)
+                if url:
+                    return url
+            return None
+        if isinstance(content, dict):
+            payload = content
+        else:
+            text = str(content).strip()
+            if not text:
+                return None
+            payload = json.loads(text)
+        if not isinstance(payload, dict):
+            return None
+        data = payload.get("data")
+        if isinstance(data, dict):
+            url = data.get("url")
+            if isinstance(url, str) and url.strip():
+                return url.strip()
+        url = payload.get("url")
+        if isinstance(url, str) and url.strip():
+            return url.strip()
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return None
+
+
+def _browser_compact_placeholder(url: Optional[str]) -> str:
+    if url:
+        return (
+            f"(页面内容已从上下文移除以节省空间；最近访问 URL: {url}，"
+            "如需重新获取请调用 browser_navigate 或 browser_view)"
+        )
+    return "(removed)"
+
+
+def _parse_tool_call_arguments(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _format_truncation_call_hint(function_name: Optional[str], arguments: Dict[str, Any]) -> str:
+    if not function_name or not arguments:
+        return ""
+    keys = _TRUNCATION_ARG_KEYS.get(function_name, ())
+    parts: List[str] = []
+    for key in keys:
+        value = arguments.get(key)
+        if value is None or value == "":
+            continue
+        text = str(value)
+        if len(text) > 120:
+            text = text[:117] + "..."
+        parts.append(f'{key}="{text}"')
+    if not parts:
+        return ""
+    return f"原始调用: {function_name}({', '.join(parts)})。 "
 
 
 def _message_has_image_part(message: Dict[str, Any]) -> bool:
@@ -97,20 +193,44 @@ class Memory(BaseModel):
             tool_call_id = message.get("tool_call_id")
             for tool_call in tool_calls:
                 if tool_call.get("id") == tool_call_id:
-                    return tool_call.get("function", {}).get("name")
+                    fn = tool_call.get("function") or {}
+                    return fn.get("name")
             if tool_calls:
                 return tool_calls[0].get("function", {}).get("name")
         return None
 
-    def _truncate_tool_content(self, message: Dict[str, Any], function_name: Optional[str], max_chars: int) -> None:
+    def _resolve_tool_call_arguments(self, index: int, message: Dict[str, Any]) -> Dict[str, Any]:
+        for previous in reversed(self.messages[:index]):
+            if previous.get("role") != "assistant":
+                continue
+            tool_call_id = message.get("tool_call_id")
+            for tool_call in previous.get("tool_calls") or []:
+                if tool_call.get("id") == tool_call_id:
+                    fn = tool_call.get("function") or {}
+                    return _parse_tool_call_arguments(fn.get("arguments"))
+            break
+        return {}
+
+    def _truncate_tool_content(
+            self,
+            message: Dict[str, Any],
+            function_name: Optional[str],
+            max_chars: int,
+            call_arguments: Optional[Dict[str, Any]] = None,
+    ) -> None:
         if function_name not in _TRUNCATABLE_TOOL_NAMES:
             return
         content = message.get("content")
         if not isinstance(content, str) or len(content) <= max_chars:
             return
+        hint = _format_truncation_call_hint(function_name, call_arguments or {})
+        notice = (
+            f"\n\n{hint}[结果已截断: 原始长度 {len(content)} 字符，保留前 {max_chars} 字符。"
+            "如需完整内容请缩小查询范围或使用 read_file 等工具分页获取。]"
+        )
+        budget = max(0, max_chars - len(_TRUNCATED_TOOL_PREFIX) - len(notice))
         message["content"] = (
-            _TRUNCATED_TOOL_PREFIX + content[: max_chars - len(_TRUNCATED_TOOL_PREFIX)]
-            + f"... ({len(content)} chars total)"
+            _TRUNCATED_TOOL_PREFIX + content[:budget] + notice
         )
 
     def compact(self, tool_content_max_chars: int = _DEFAULT_TOOL_CONTENT_MAX) -> None:
@@ -128,16 +248,21 @@ class Memory(BaseModel):
                         if ref:
                             seen_image_refs[ref] = index
 
-        # 1.循环遍历所有的消息列表
         for index, message in enumerate(self.messages):
-            # 2.判断消息的角色是否为tool
             if self.get_message_role(message) == "tool":
                 function_name = self._resolve_tool_function_name(index, message)
-                if function_name in ["browser_view", "browser_navigate", "browser_screenshot"]:
-                    message["content"] = "(removed)"
-                    logger.debug(f"从记忆中移除对应工具的结果: {function_name}")
+                call_args = self._resolve_tool_call_arguments(index, message)
+                if function_name in _BROWSER_COMPACT_FUNCTIONS:
+                    url = _extract_url_from_tool_content(message.get("content"))
+                    message["content"] = _browser_compact_placeholder(url)
+                    logger.debug("Compacted browser tool result: %s url=%s", function_name, url)
                 else:
-                    self._truncate_tool_content(message, function_name, tool_content_max_chars)
+                    self._truncate_tool_content(
+                        message,
+                        function_name,
+                        tool_content_max_chars,
+                        call_arguments=call_args,
+                    )
 
             if _message_has_image_part(message):
                 content = message.get("content")
@@ -146,22 +271,19 @@ class Memory(BaseModel):
                         p.get("ref") for p in content
                         if isinstance(p, dict) and p.get("type") == "image_ref" and p.get("ref")
                     ]
-                    # 保留最后一条含图消息；相同 ref 仅保留最新出现
                     if index != last_image_index or any(
                         seen_image_refs.get(r, index) != index for r in refs_in_msg
                     ):
                         _strip_image_parts_from_message(message)
                         logger.debug("从记忆中压缩历史多模态图片 part: index=%s", index)
 
-            # 3.仅移除非 assistant 消息中的 reasoning_content；thinking 模式要求
-            #    assistant 历史必须回传 reasoning_content，否则后续 LLM 调用会 400
             if (
                 "reasoning_content" in message
                 and message.get("role") != "assistant"
             ):
                 logger.debug(
-                    f"从记忆中移除非 assistant 思考结果: "
-                    f"{str(message['reasoning_content'])[:50]}..."
+                    "从记忆中移除非 assistant 思考结果: %s...",
+                    str(message["reasoning_content"])[:50],
                 )
                 del message["reasoning_content"]
 

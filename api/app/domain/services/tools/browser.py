@@ -81,6 +81,10 @@ class BrowserTool(BaseTool):
             "coordinate_y": {
                 "type": "number",
                 "description": "(可选)点击位置的y坐标"
+            },
+            "description": {
+                "type": "string",
+                "description": "(可选)当无法使用索引时，用自然语言描述要点击的元素，系统将尝试视觉定位"
             }
         },
         required=[],
@@ -90,9 +94,10 @@ class BrowserTool(BaseTool):
             index: Optional[int] = None,
             coordinate_x: Optional[float] = None,
             coordinate_y: Optional[float] = None,
+            description: Optional[str] = None,
     ) -> ToolResult:
-        """传递页面元素索引或者页面xy坐标点击对应元素"""
-        return await self.browser.click(index, coordinate_x, coordinate_y)
+        """传递页面元素索引、坐标或视觉描述点击对应元素"""
+        return await self.browser.click(index, coordinate_x, coordinate_y, description)
 
     @tool(
         name="browser_input",

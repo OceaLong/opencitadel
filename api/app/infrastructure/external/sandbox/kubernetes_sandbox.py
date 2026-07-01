@@ -13,6 +13,7 @@ from typing import BinaryIO, Optional, Self
 import httpx
 
 from app.domain.external.browser import Browser
+from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
 from app.infrastructure.external.browser.playwright_browser import PlaywrightBrowser
@@ -280,8 +281,16 @@ class KubernetesSandbox(Sandbox):
             removed += 1
         return removed
 
-    async def get_browser(self, supports_multimodal: bool = False) -> Browser:
-        return PlaywrightBrowser(self.cdp_url, supports_multimodal=supports_multimodal)
+    async def get_browser(
+            self,
+            supports_multimodal: bool = False,
+            llm: Optional[LLM] = None,
+    ) -> Browser:
+        return PlaywrightBrowser(
+            self.cdp_url,
+            supports_multimodal=supports_multimodal,
+            vision_llm=llm,
+        )
 
     async def ensure_sandbox(self, max_retries: Optional[int] = None) -> None:
         settings = self._settings()

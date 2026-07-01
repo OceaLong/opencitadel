@@ -2,8 +2,11 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import base64
+import json
 import logging
-from typing import Optional, List, Any
+import re
+import time
+from typing import Optional, List, Any, Tuple
 
 from markdownify import markdownify
 from playwright.async_api import async_playwright, Playwright, Browser, Page
@@ -11,6 +14,7 @@ from playwright.async_api import async_playwright, Playwright, Browser, Page
 from app.domain.external.browser import Browser as BrowserProtocol
 from app.domain.external.llm import LLM
 from app.domain.models.tool_result import ToolResult
+from app.infrastructure.observability.browser_metrics import record_vision_fallback
 from .playwright_browser_fun import (
     GET_VISIBLE_CONTENT_FUNC,
     GET_INTERACTIVE_ELEMENTS_FUNC,
@@ -28,10 +32,12 @@ class PlaywrightBrowser(BrowserProtocol):
             cdp_url: str,  # CDP的连接地址
             llm: Optional[LLM] = None,  # 可选参数，传递LLM，如果传递了则会使用LLM对页面内容进行整理变成markdown格式
             supports_multimodal: bool = False,
+            vision_llm: Optional[LLM] = None,
     ) -> None:
         """构造函数，完成Playwright浏览器的初始化"""
         # LLM相关
         self.llm: Optional[LLM] = llm
+        self.vision_llm: Optional[LLM] = vision_llm or llm
         self.supports_multimodal: bool = supports_multimodal
 
         # 浏览器相关
@@ -134,56 +140,148 @@ class PlaywrightBrowser(BrowserProtocol):
         selector = f'[data-manus-id="manus-element-{index}"]'
         return await self.page.query_selector(selector)
 
+    def _current_page_url(self) -> str:
+        if self.page:
+            return self.page.url or ""
+        return ""
+
+    async def _interactive_element_count(self) -> int:
+        elements = await self._extract_interactive_elements()
+        return len(elements)
+
+    async def _build_action_verification_note(
+            self,
+            before_url: str,
+            before_element_count: int,
+            action: str,
+    ) -> str:
+        after_url = self._current_page_url()
+        after_count = await self._interactive_element_count()
+        parts: List[str] = [f"{action}已执行"]
+        if before_url != after_url:
+            parts.append(f"URL: {before_url} -> {after_url}")
+        else:
+            parts.append(f"URL 未变化 ({after_url})")
+        if before_element_count != after_count:
+            parts.append(f"可交互元素: {before_element_count} -> {after_count}")
+        else:
+            parts.append(f"可交互元素数量仍为 {after_count}")
+        return "; ".join(parts)
+
+    async def _locate_by_vision(self, description: str) -> Optional[Tuple[float, float]]:
+        vision_llm = self.vision_llm
+        if not vision_llm or not self.supports_multimodal or not description.strip():
+            return None
+        started = time.monotonic()
+        try:
+            await self._ensure_page()
+            screenshot_bytes = await self.screenshot()
+            viewport = self.page.viewport_size or {"width": 1280, "height": 720}
+            width = float(viewport.get("width") or 1280)
+            height = float(viewport.get("height") or 720)
+            b64 = base64.b64encode(screenshot_bytes).decode("ascii")
+            prompt = (
+                f"在截图中找到可点击的 UI 元素：{description.strip()}。"
+                f"返回 JSON 对象，包含像素坐标 click_x 与 click_y（原点在左上角，"
+                f"视口约 {int(width)}x{int(height)}）。只返回 JSON，无其它文字。"
+            )
+            response = await vision_llm.invoke([{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                ],
+            }])
+            content = (response.get("content") or "").strip()
+            if not content:
+                record_vision_fallback("empty_response", time.monotonic() - started)
+                return None
+            match = re.search(r"\{[^{}]*\}", content, re.DOTALL)
+            payload = json.loads(match.group(0) if match else content)
+            x = payload.get("click_x", payload.get("x", payload.get("coordinate_x")))
+            y = payload.get("click_y", payload.get("y", payload.get("coordinate_y")))
+            if x is None or y is None:
+                record_vision_fallback("parse_failed", time.monotonic() - started)
+                return None
+            fx, fy = float(x), float(y)
+            if 0 <= fx <= 1 and 0 <= fy <= 1:
+                fx, fy = fx * width, fy * height
+            record_vision_fallback("success", time.monotonic() - started)
+            return fx, fy
+        except Exception as exc:
+            logger.warning("视觉定位失败: %s", exc)
+            record_vision_fallback("failure", time.monotonic() - started)
+            return None
+
     async def click(
             self,
             index: Optional[int] = None,
             coordinate_x: Optional[float] = None,
             coordinate_y: Optional[float] = None,
+            description: Optional[str] = None,
     ) -> ToolResult:
-        """根据传递的索引位置+xy坐标实现点击"""
-        # 1.确保页面存在
+        """根据传递的索引位置+xy坐标+视觉描述实现点击"""
         await self._ensure_page()
+        before_url = self._current_page_url()
+        before_count = await self._interactive_element_count()
 
-        # 2.判断传递的是xy坐标还是index
         if coordinate_x is not None and coordinate_y is not None:
             await self.page.mouse.click(coordinate_x, coordinate_y)
         elif index is not None:
-            try:
-                # 3.根据index获取元素
-                element = await self._get_element_by_id(index)
-                if not element:
-                    return ToolResult(success=False, message=f"使用索引{index}查找该元素无效, 未找到")
-
-                # 4.检查元素是否是可见的
-                is_visible = await self.page.evaluate("""(element) => {
-                    if (!element) return false;
-                    const rect = element.getBoundingClientRect();
-                    const style = window.getComputedStyle(element);
-                    return !(
-                        rect.width === 0 ||
-                        rect.height === 0 ||
-                        style.display === 'none' ||
-                        style.visibility === 'hidden' ||
-                        style.opacity === '0'
-                    );
-                }""", element)
-
-                # 5.如果元素不可见则执行以下代码
-                if not is_visible:
-                    # 6.尝试将页面滚动到该元素的位置
-                    await self.page.evaluate("""(element) => {
-                        if (element) {
-                            element.scrollIntoView({behavior: 'smooth', block: 'center'})
-                        }
+            element = await self._get_element_by_id(index)
+            if not element and description:
+                coords = await self._locate_by_vision(description)
+                if coords:
+                    await self.page.mouse.click(coords[0], coords[1])
+                else:
+                    return ToolResult(success=False, message=f"使用索引{index}查找该元素无效, 视觉兜底亦未定位")
+            elif not element:
+                return ToolResult(success=False, message=f"使用索引{index}查找该元素无效, 未找到")
+            else:
+                try:
+                    is_visible = await self.page.evaluate("""(element) => {
+                        if (!element) return false;
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return !(
+                            rect.width === 0 ||
+                            rect.height === 0 ||
+                            style.display === 'none' ||
+                            style.visibility === 'hidden' ||
+                            style.opacity === '0'
+                        );
                     }""", element)
-                    await asyncio.sleep(1)
+                    if not is_visible:
+                        await self.page.evaluate("""(element) => {
+                            if (element) {
+                                element.scrollIntoView({behavior: 'smooth', block: 'center'})
+                            }
+                        }""", element)
+                        await asyncio.sleep(1)
+                    await element.click(timeout=5000)
+                except Exception as e:
+                    if description:
+                        coords = await self._locate_by_vision(description)
+                        if coords:
+                            await self.page.mouse.click(coords[0], coords[1])
+                        else:
+                            return ToolResult(success=False, message=f"点击元素出错: {str(e)}")
+                    else:
+                        return ToolResult(success=False, message=f"点击元素出错: {str(e)}")
+        elif description:
+            coords = await self._locate_by_vision(description)
+            if not coords:
+                return ToolResult(success=False, message="视觉定位未找到可点击元素")
+            await self.page.mouse.click(coords[0], coords[1])
+        else:
+            return ToolResult(success=False, message="请提供 index、coordinate 或 description 之一")
 
-                # 7.点击元素
-                await element.click(timeout=5000)
-            except Exception as e:
-                return ToolResult(success=False, message=f"点击元素出错: {str(e)}")
-
-        return ToolResult(success=True)
+        verification = await self._build_action_verification_note(before_url, before_count, "点击")
+        return ToolResult(
+            success=True,
+            data={"url": self._current_page_url(), "verification": verification},
+            message=verification,
+        )
 
     async def initialize(self) -> bool:
         """初始化并确保资源是可用的"""
@@ -307,7 +405,10 @@ class PlaywrightBrowser(BrowserProtocol):
             # 3.使用goto进行跳转
             await self.page.goto(url)
             interactive_elements = await self._extract_interactive_elements()
-            data: dict[str, Any] = {"interactive_elements": interactive_elements}
+            data: dict[str, Any] = {
+                "interactive_elements": interactive_elements,
+                "url": self._current_page_url(),
+            }
             return ToolResult(success=True, data=data)
         except Exception as e:
             # 返回错误的工具结果
@@ -327,6 +428,7 @@ class PlaywrightBrowser(BrowserProtocol):
         data: dict[str, Any] = {
             "interactive_elements": interactive_elements,
             "content": await self._extract_content(),
+            "url": self._current_page_url(),
         }
 
         # 4.返回工具结果
@@ -344,6 +446,7 @@ class PlaywrightBrowser(BrowserProtocol):
             data={
                 "screenshot_base64": base64.b64encode(screenshot_bytes).decode("ascii"),
                 "interactive_elements": await self._extract_interactive_elements(),
+                "url": self._current_page_url(),
             },
         )
 
@@ -356,10 +459,10 @@ class PlaywrightBrowser(BrowserProtocol):
             coordinate_y: Optional[float] = None,
     ) -> ToolResult:
         """根据传递的文本+换行标识+索引+xy位置实现输入框文本输入"""
-        # 1.确保页面存在
         await self._ensure_page()
+        before_url = self._current_page_url()
+        before_count = await self._interactive_element_count()
 
-        # 2.判断下是传递xy还是index
         if coordinate_x is not None and coordinate_y is not None:
             # 3.点击指定位置后输入文本
             await self.page.mouse.click(coordinate_x, coordinate_y)
@@ -386,7 +489,12 @@ class PlaywrightBrowser(BrowserProtocol):
         if press_enter:
             await self.page.keyboard.press("Enter")
 
-        return ToolResult(success=True)
+        verification = await self._build_action_verification_note(before_url, before_count, "输入")
+        return ToolResult(
+            success=True,
+            data={"url": self._current_page_url(), "verification": verification},
+            message=verification,
+        )
 
     async def move_mouse(self, coordinate_x: float, coordinate_y: float) -> ToolResult:
         """传递xy坐标移动鼠标"""

@@ -3,6 +3,7 @@
 from typing import Protocol, Optional, BinaryIO, Self
 
 from app.domain.external.browser import Browser
+from app.domain.external.llm import LLM
 from app.domain.models.tool_result import ToolResult
 
 
@@ -108,7 +109,11 @@ class Sandbox(Protocol):
         """销毁当前沙箱实例"""
         ...
 
-    async def get_browser(self, supports_multimodal: bool = False) -> Browser:
+    async def get_browser(
+            self,
+            supports_multimodal: bool = False,
+            llm: Optional[LLM] = None,
+    ) -> Browser:
         """获取沙箱中的浏览器实例"""
         ...
 

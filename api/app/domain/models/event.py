@@ -107,6 +107,22 @@ class StepEvent(BaseEvent):
     parent_span_id: Optional[str] = None
 
 
+class SubAgentEventStatus(str, Enum):
+    STARTED = "started"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class SubAgentEvent(BaseEvent):
+    """子 Agent 委派事件"""
+    type: Literal["subagent"] = "subagent"
+    subagent_id: str
+    goal: str
+    status: SubAgentEventStatus = SubAgentEventStatus.STARTED
+    result_preview: Optional[str] = None
+    error: Optional[str] = None
+
+
 class MessageEvent(BaseEvent):
     """消息事件，包含人类消息和AI消息"""
     type: Literal["message"] = "message"
@@ -266,6 +282,7 @@ Event = Annotated[
         PlanEvent,
         TitleEvent,
         StepEvent,
+        SubAgentEvent,
         MessageEvent,
         MessageDeltaEvent,
         ReasoningDeltaEvent,

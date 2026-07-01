@@ -25,6 +25,7 @@ class Browser(Protocol):
             index: Optional[int] = None,
             coordinate_x: Optional[float] = None,
             coordinate_y: Optional[float] = None,
+            description: Optional[str] = None,
     ) -> ToolResult:
         """传递对应的元素索引或者xy坐标实现点击功能"""
         ...

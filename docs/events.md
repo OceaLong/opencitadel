@@ -52,6 +52,7 @@ flowchart TD
 | `title` | 会话标题更新 | live + replay |
 | `plan` | 计划步骤快照 | live + replay |
 | `step` | 单个执行步骤状态 | live + replay |
+| `subagent` | 子 Agent 委派状态（goal / 摘要） | live + replay |
 | `tool` | 工具调用状态与结果 | live + replay |
 | `wait` | 等待用户输入 | live + replay |
 | `usage` | Token 用量增量/汇总 | live + replay |

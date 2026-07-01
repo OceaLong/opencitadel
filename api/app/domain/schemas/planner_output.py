@@ -12,6 +12,7 @@ class PlannerStepSchema(BaseModel):
     id: Optional[str] = None
     description: str = Field(min_length=1)
     status: ExecutionStatus = ExecutionStatus.PENDING
+    parallelizable: bool = False
 
 
 class PlannerPlanSchema(BaseModel):

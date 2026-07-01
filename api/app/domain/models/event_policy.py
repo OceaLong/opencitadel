@@ -23,6 +23,7 @@ TIMELINE_EVENT_TYPES = frozenset({
     "message",
     "assistant_notice",
     "step",
+    "subagent",
     "tool",
     "error",
 })

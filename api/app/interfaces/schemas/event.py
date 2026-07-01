@@ -164,6 +164,21 @@ class StepSSEEvent(BaseSSEEvent):
     data: StepEventData
 
 
+class SubAgentEventData(BaseEventData):
+    """子 Agent 委派事件数据"""
+    subagent_id: str
+    goal: str
+    status: Literal["started", "completed", "failed"] = "started"
+    result_preview: Optional[str] = None
+    error: Optional[str] = None
+
+
+class SubAgentSSEEvent(BaseSSEEvent):
+    """子 Agent 流式事件"""
+    event: Literal["subagent"] = "subagent"
+    data: SubAgentEventData
+
+
 class PlanEventData(BaseEventData):
     """计划事件数据"""
     steps: List[StepEventData]
@@ -318,6 +333,7 @@ AgentSSEEvent = Union[
     ToolArgsDeltaSSEEvent,
     TitleSSEEvent,
     StepSSEEvent,
+    SubAgentSSEEvent,
     PlanSSEEvent,
     ToolSSEEvent,
     DoneSSEEvent,

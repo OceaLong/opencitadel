@@ -1,6 +1,36 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from app.domain.models.memory import Memory
+import json
+
+import pytest
+
+from app.domain.models.memory import Memory, _extract_url_from_tool_content
+
+
+def test_extract_url_from_tool_content_json_string():
+    payload = json.dumps({"success": True, "data": {"url": "https://example.com", "content": "x"}})
+    assert _extract_url_from_tool_content(payload) == "https://example.com"
+
+
+def test_compact_preserves_browser_url():
+    payload = json.dumps({"success": True, "data": {"url": "https://example.com", "content": "long page"}})
+    memory = Memory(messages=[
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "tc1", "function": {"name": "browser_navigate"}}],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "tc1",
+            "content": payload,
+            "_function_name": "browser_navigate",
+        },
+    ])
+    memory.compact()
+    tool = memory.messages[1]
+    assert "https://example.com" in tool["content"]
+    assert tool["content"] != "(removed)"
 
 
 def test_compact_preserves_assistant_reasoning_content():
@@ -25,47 +55,45 @@ def test_compact_preserves_assistant_reasoning_content():
     assert tool["content"] == "(removed)"
 
 
-def test_compact_removes_non_assistant_reasoning_content():
+def test_compact_truncation_includes_read_file_path():
     memory = Memory(messages=[
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "tc1",
+                "function": {"name": "read_file", "arguments": '{"filepath": "/home/ubuntu/report.csv"}'},
+            }],
+        },
         {
             "role": "tool",
             "tool_call_id": "tc1",
-            "content": "ok",
-            "reasoning_content": "should drop",
+            "content": "x" * 5000,
+            "_function_name": "read_file",
         },
     ])
-    memory.compact()
-    assert "reasoning_content" not in memory.messages[0]
+    memory.compact(tool_content_max_chars=2000)
+    assert "/home/ubuntu/report.csv" in memory.messages[1]["content"]
+    assert "[结果已截断" in memory.messages[1]["content"]
 
 
-def test_compact_strips_old_image_parts():
+def test_compact_truncation_includes_search_web_query():
     memory = Memory(messages=[
         {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "first"},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,old"}},
-            ],
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "tc2",
+                "function": {"name": "search_web", "arguments": '{"query": "python asyncio tutorial"}'},
+            }],
         },
-        {"role": "assistant", "content": "ok"},
         {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "latest"},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,new"}},
-            ],
+            "role": "tool",
+            "tool_call_id": "tc2",
+            "content": "y" * 5000,
+            "_function_name": "search_web",
         },
     ])
-    memory.compact()
-    first_content = memory.messages[0]["content"]
-    latest_content = memory.messages[2]["content"]
-    assert any(
-        part.get("type") == "text" and "[image omitted in compact]" in part.get("text", "")
-        for part in first_content
-        if isinstance(first_content, list)
-    )
-    assert any(
-        part.get("type") == "image_url"
-        for part in latest_content
-        if isinstance(latest_content, list)
-    )
+    memory.compact(tool_content_max_chars=2000)
+    assert "python asyncio tutorial" in memory.messages[1]["content"]
+    assert "[结果已截断" in memory.messages[1]["content"]

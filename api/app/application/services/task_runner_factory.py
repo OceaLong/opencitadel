@@ -28,9 +28,12 @@ from app.domain.services.agent_task_runner import AgentTaskRunner
 from app.domain.services.agent.sandbox_provider import LazyBrowser, LazySandbox, SandboxProvider
 from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.services.tools.codebase_tools import CodebaseTool
+from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.image_generation import ImageGenerationTool
 from app.domain.services.tools.knowledge_base_tools import KnowledgeBaseTool
 from app.domain.services.tools.memory import MemoryTool
+from app.domain.services.tools.mcp import MCPTool
+from app.domain.services.subagent_factory import build_subagent_tool
 from app.domain.utils.app_config_filter import filter_a2a_config_by_refs, filter_mcp_config_by_refs
 from app.infrastructure.external.llm.factory import LLMFactory
 from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError, create_resilient_llm
@@ -172,7 +175,11 @@ class TaskRunnerFactory:
             uow_factory=self._uow_factory,
         )
         sandbox = LazySandbox(sandbox_provider)
-        browser = LazyBrowser(sandbox_provider, supports_multimodal=llm.supports_multimodal)
+        browser = LazyBrowser(
+            sandbox_provider,
+            supports_multimodal=llm.supports_multimodal,
+            llm=llm,
+        )
 
         async def save_memory_fn(title, content, tags, scope):
             entry = await self._memory_service.save_from_tool(
@@ -229,6 +236,48 @@ class TaskRunnerFactory:
                 )
             )
 
+        runtime = get_runtime_config()
+        runtime_settings = AgentMemoryRuntimeSettings(
+            compact_tool_content_max_chars=runtime.memory.compact_tool_content_max_chars,
+            compact_strategy=runtime.memory.compact_strategy,
+            compact_token_threshold=runtime.memory.compact_token_threshold,
+            compact_keep_recent=runtime.memory.compact_keep_recent,
+            compact_always_on_step_boundary=runtime.memory.compact_always_on_step_boundary,
+            compact_rule_trigger_threshold=runtime.memory.compact_rule_trigger_threshold,
+            tool_output_offload_enabled=runtime.memory.tool_output_offload_enabled,
+            tool_output_offload_threshold_chars=runtime.memory.tool_output_offload_threshold_chars,
+        )
+        agent_runtime_settings = AgentRuntimeSettings(
+            tool_timeout_seconds=runtime.worker.tool_timeout_seconds,
+            memory=runtime_settings,
+        )
+
+        import asyncio
+        stateful_tool_lock = asyncio.Lock()
+        allowed_for_subagent = skill.allowed_tools if (skill and skill.allowed_tools) else None
+        subagent_tool = build_subagent_tool(
+            uow_factory=self._uow_factory,
+            session_id=session.id,
+            llm=llm,
+            agent_config=agent_config,
+            json_parser=self._json_parser,
+            browser=browser,
+            sandbox=sandbox,
+            search_engine=self._search_engine,
+            mcp_tool=MCPTool(self._mcp_connection_pool),
+            a2a_tool=A2ATool(self._a2a_connection_pool),
+            observability_port=self._observability_port,
+            runtime_settings=agent_runtime_settings,
+            extra_tools=extra_tools,
+            skill_prompt=skill_prompt,
+            long_term_memory_block=ltm_block,
+            allowed_tool_names=allowed_for_subagent,
+            model_id=model_id,
+            file_storage=self._file_storage,
+            stateful_tool_lock=stateful_tool_lock,
+        )
+        extra_tools = list(extra_tools) + [subagent_tool]
+
         mcp_config = filter_mcp_config_by_refs(
             self._mcp_config,
             skill.mcp_server_refs if skill else None,
@@ -246,17 +295,6 @@ class TaskRunnerFactory:
                     json_parser=self._json_parser,
                 )
                 await extractor.extract_from_session(session_id)
-
-        runtime = get_runtime_config()
-        runtime_settings = AgentRuntimeSettings(
-            tool_timeout_seconds=runtime.worker.tool_timeout_seconds,
-            memory=AgentMemoryRuntimeSettings(
-                compact_tool_content_max_chars=runtime.memory.compact_tool_content_max_chars,
-                compact_strategy=runtime.memory.compact_strategy,
-                compact_token_threshold=runtime.memory.compact_token_threshold,
-                compact_keep_recent=runtime.memory.compact_keep_recent,
-            ),
-        )
 
         return AgentTaskRunner(
             uow_factory=self._uow_factory,
@@ -285,7 +323,8 @@ class TaskRunnerFactory:
             observability_port=self._observability_port,
             event_sequence_port=self._event_sequence_port,
             session_state_port=self._session_state_factory(),
-            runtime_settings=runtime_settings,
+            runtime_settings=agent_runtime_settings,
             mcp_connection_pool=self._mcp_connection_pool,
             a2a_connection_pool=self._a2a_connection_pool,
+            stateful_tool_lock=stateful_tool_lock,
         )

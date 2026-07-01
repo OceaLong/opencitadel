@@ -17,6 +17,7 @@ from docker.errors import NotFound, APIError
 from docker.models.resource import Model
 
 from app.domain.external.browser import Browser
+from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
 from app.infrastructure.external.browser.playwright_browser import PlaywrightBrowser
@@ -464,9 +465,17 @@ class DockerSandbox(Sandbox):
             logger.error(f"获取沙箱发生未知错误: {str(e)}")
             return None
 
-    async def get_browser(self, supports_multimodal: bool = False) -> Browser:
+    async def get_browser(
+            self,
+            supports_multimodal: bool = False,
+            llm: Optional[LLM] = None,
+    ) -> Browser:
         """获取沙箱中的浏览器实例"""
-        return PlaywrightBrowser(self.cdp_url, supports_multimodal=supports_multimodal)
+        return PlaywrightBrowser(
+            self.cdp_url,
+            supports_multimodal=supports_multimodal,
+            vision_llm=llm,
+        )
 
     async def ensure_sandbox(self, max_retries: Optional[int] = None) -> None:
         """确保沙箱一定存在/服务全部都开启了才执行后续步骤"""

@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import asyncio
+
 from app.domain.models.tool_result import ToolResult
 from app.domain.services.agents.base import BaseAgent
 from app.domain.services.tools.tool_names import normalize_allowed_tool_names
@@ -110,3 +112,42 @@ def test_truncate_tool_result():
     assert "结果已截断" in (truncated.message or "")
     assert truncated.data is not None
     assert len(large.model_dump_json()) > 50
+
+
+class _WriteFileTool:
+    def __init__(self):
+        self.written: list[tuple[str, str]] = []
+
+    def get_tools(self):
+        return [{"function": {"name": "write_file"}}]
+
+    def has_tool(self, tool_name: str) -> bool:
+        return tool_name == "write_file"
+
+    async def invoke(self, tool_name: str, **kwargs):
+        self.written.append((kwargs["filepath"], kwargs["content"]))
+        return ToolResult(success=True, message="ok")
+
+
+def test_offload_large_result_writes_cache_and_returns_digest():
+    write_tool = _WriteFileTool()
+    agent = _make_agent(
+        tools=[write_tool],
+        runtime_settings=agent_test_runtime_settings(
+            tool_output_offload_enabled=True,
+            tool_output_offload_threshold_chars=100,
+        ),
+    )
+    agent._ensure_tool_cache()
+    large = ToolResult(success=True, message="search done", data="z" * 500)
+
+    async def _run():
+        return await agent._offload_large_result("call-abc", "search_web", large)
+
+    offloaded = asyncio.run(_run())
+    assert ".manus_cache/call-abc.json" in (offloaded.message or "")
+    assert len(offloaded.data or "") <= 500
+    assert len(write_tool.written) == 1
+    path, content = write_tool.written[0]
+    assert path == "/home/ubuntu/.manus_cache/call-abc.json"
+    assert "z" * 500 in content

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import asyncio
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
@@ -80,6 +81,7 @@ class AgentTaskRunner(TaskRunner):
             mode: SessionMode = SessionMode.AGENT,
             codebase_id: Optional[str] = None,
             knowledge_base_id: Optional[str] = None,
+            stateful_tool_lock: Optional[asyncio.Lock] = None,
     ) -> None:
         """构造函数，完成Agent任务运行器的创建"""
         self._uow_factory = uow_factory
@@ -132,6 +134,7 @@ class AgentTaskRunner(TaskRunner):
         self._mode = mode
         self._codebase_id = codebase_id
         self._knowledge_base_id = knowledge_base_id
+        self._stateful_tool_lock = stateful_tool_lock or asyncio.Lock()
         if codebase_id and mode == SessionMode.ASK:
             self._flow = CodeAskFlow(
                 uow_factory=uow_factory,
@@ -186,6 +189,7 @@ class AgentTaskRunner(TaskRunner):
                 file_storage=file_storage,
                 observability_port=self._observability,
                 runtime_settings=self._runtime_settings,
+                stateful_tool_lock=self._stateful_tool_lock,
             )
 
     async def _put_and_add_event(self, task: Task, event: Event) -> None:

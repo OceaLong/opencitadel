@@ -6,6 +6,7 @@ import logging
 from typing import BinaryIO, Callable, Optional, Type
 
 from app.domain.external.browser import Browser
+from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
 from app.domain.repositories.uow import IUnitOfWork
@@ -179,8 +180,15 @@ class LazySandbox:
             return True
         return await materialized.destroy()
 
-    async def get_browser(self, supports_multimodal: bool = False) -> Browser:
-        return await (await self._resolve()).get_browser(supports_multimodal=supports_multimodal)
+    async def get_browser(
+            self,
+            supports_multimodal: bool = False,
+            llm: Optional[LLM] = None,
+    ) -> Browser:
+        return await (await self._resolve()).get_browser(
+            supports_multimodal=supports_multimodal,
+            llm=llm,
+        )
 
     async def create_workspace_snapshot(self, snapshot_id: str) -> bytes:
         return await (await self._resolve()).create_workspace_snapshot(snapshot_id)
@@ -192,9 +200,15 @@ class LazySandbox:
 class LazyBrowser:
     """Deferred Browser proxy; materializes when a browser tool is invoked."""
 
-    def __init__(self, provider: SandboxProvider, supports_multimodal: bool = False) -> None:
+    def __init__(
+            self,
+            provider: SandboxProvider,
+            supports_multimodal: bool = False,
+            llm: Optional[LLM] = None,
+    ) -> None:
         self._provider = provider
         self._supports_multimodal = supports_multimodal
+        self._llm = llm
         self._inner: Optional[Browser] = None
         self._lock = asyncio.Lock()
 
@@ -205,7 +219,10 @@ class LazyBrowser:
             if self._inner is not None:
                 return self._inner
             sandbox = await self._provider.get()
-            browser = await sandbox.get_browser(supports_multimodal=self._supports_multimodal)
+            browser = await sandbox.get_browser(
+                supports_multimodal=self._supports_multimodal,
+                llm=self._llm,
+            )
             if browser is None:
                 raise RuntimeError(f"获取沙箱[{sandbox.id}]中的浏览器实例失败")
             self._inner = browser
@@ -229,8 +246,9 @@ class LazyBrowser:
             index: Optional[int] = None,
             coordinate_x: Optional[float] = None,
             coordinate_y: Optional[float] = None,
+            description: Optional[str] = None,
     ) -> ToolResult:
-        return await (await self._resolve()).click(index, coordinate_x, coordinate_y)
+        return await (await self._resolve()).click(index, coordinate_x, coordinate_y, description)
 
     async def input(
             self,

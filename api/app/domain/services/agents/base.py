@@ -54,6 +54,15 @@ _MEMORY_SUMMARY_PROMPT = """请将以下 Agent 对话历史压缩为简洁摘要
 BROWSER_VISION_TOOLS = frozenset({"browser_screenshot"})
 STATEFUL_TOOL_NAMES = frozenset({"browser", "shell"})
 
+# Tools whose large results may be offloaded to sandbox filesystem cache.
+_OFFLOAD_ELIGIBLE_TOOLS = frozenset({
+    "search_web",
+    "shell_execute",
+    "shell_read_output",
+    "browser_console_view",
+    "browser_view",
+})
+
 
 def _format_agent_error(error: Exception) -> str:
     """提取可读错误信息，兼容自定义异常空 str(e) 问题。"""
@@ -87,6 +96,7 @@ class BaseAgent(ABC):
             allowed_tool_names: Optional[List[str]] = None,
             model_id: Optional[str] = None,
             file_storage: Optional[FileStorage] = None,
+            stateful_tool_lock: Optional[asyncio.Lock] = None,
     ) -> None:
         """构造函数，完成Agent的初始化"""
         self._uow_factory = uow_factory
@@ -101,7 +111,7 @@ class BaseAgent(ABC):
         self._long_term_memory_block = long_term_memory_block
         self._allowed_tool_names = normalize_allowed_tool_names(allowed_tool_names)
         self._file_storage = file_storage
-        self._stateful_tool_lock = asyncio.Lock()
+        self._stateful_tool_lock = stateful_tool_lock or asyncio.Lock()
         self._pending_usage_event: Optional[UsageEvent] = None
         self._last_llm_message: Optional[Dict[str, Any]] = None
         self._current_step: str = "default"
@@ -246,15 +256,23 @@ class BaseAgent(ABC):
         raise ValueError(f"未知工具: {function_name}")
 
     @staticmethod
-    def _truncate_tool_result(result: ToolResult, max_chars: int) -> ToolResult:
+    def _truncate_tool_result(
+            result: ToolResult,
+            max_chars: int,
+            *,
+            function_name: Optional[str] = None,
+            function_args: Optional[Dict[str, Any]] = None,
+    ) -> ToolResult:
         """截断过大的工具结果，避免撑爆 LLM 上下文。"""
         if max_chars <= 0:
             return result
         serialized = result.model_dump_json()
         if len(serialized) <= max_chars:
             return result
+        from app.domain.models.memory import _format_truncation_call_hint
+        hint = _format_truncation_call_hint(function_name, function_args or {})
         notice = (
-            f"\n\n[结果已截断: 原始长度 {len(serialized)} 字符，保留前 {max_chars} 字符。"
+            f"\n\n{hint}[结果已截断: 原始长度 {len(serialized)} 字符，保留前 {max_chars} 字符。"
             "如需完整内容请缩小查询范围或使用 read_file 等工具分页获取。]"
         )
         budget = max(0, max_chars - len(notice))
@@ -263,6 +281,45 @@ class BaseAgent(ABC):
             success=result.success,
             message=(result.message or "") + notice if result.message else notice.strip(),
             data=truncated_payload,
+        )
+
+    async def _offload_large_result(
+            self,
+            tool_call_id: str,
+            function_name: str,
+            result: ToolResult,
+    ) -> ToolResult:
+        memory_cfg = self._runtime_settings.memory
+        if not memory_cfg.tool_output_offload_enabled:
+            return result
+        if function_name not in _OFFLOAD_ELIGIBLE_TOOLS:
+            return result
+        serialized = result.model_dump_json()
+        threshold = memory_cfg.tool_output_offload_threshold_chars
+        if len(serialized) <= threshold:
+            return result
+        file_tool = self._tool_index.get("write_file")
+        if file_tool is None:
+            self._ensure_tool_cache()
+            file_tool = self._tool_index.get("write_file")
+        if file_tool is None:
+            return result
+        cache_path = f"/home/ubuntu/.manus_cache/{tool_call_id}.json"
+        try:
+            write_res = await file_tool.invoke("write_file", filepath=cache_path, content=serialized)
+        except Exception as exc:
+            logger.warning("工具结果落盘失败，保留原始结果: %s", exc)
+            return result
+        if not write_res.success:
+            return result
+        digest = serialized[:500]
+        return ToolResult(
+            success=result.success,
+            message=(
+                f"完整结果已保存到 {cache_path}（{len(serialized)} 字符）。"
+                "摘要预览如下，如需完整内容请用 read_file 读取该路径。"
+            ),
+            data=digest,
         )
 
     async def _ensure_memory(self) -> None:
@@ -300,6 +357,11 @@ class BaseAgent(ABC):
     def _estimate_memory_tokens(self) -> int:
         if self._last_prompt_tokens > 0:
             return self._last_prompt_tokens
+        if self._memory:
+            return estimate_messages_tokens(self._memory.get_messages())
+        return 0
+
+    def _estimate_current_memory_tokens(self) -> int:
         if self._memory:
             return estimate_messages_tokens(self._memory.get_messages())
         return 0
@@ -486,6 +548,8 @@ class BaseAgent(ABC):
                 return self._truncate_tool_result(
                     result,
                     self._agent_config.tool_result_max_chars,
+                    function_name=tool_name,
+                    function_args=arguments if isinstance(arguments, dict) else {},
                 )
             except asyncio.TimeoutError:
                 err = f"调用工具[{tool_name}]超时({timeout_seconds}s)"
@@ -534,10 +598,14 @@ class BaseAgent(ABC):
         """混合记忆压缩：规则裁剪 + 超阈值时 LLM 摘要。"""
         memory_cfg = self._runtime_settings.memory
         strategy = (memory_cfg.compact_strategy or "hybrid").lower()
+        if not memory_cfg.compact_always_on_step_boundary:
+            await self._ensure_memory()
+            if self._estimate_current_memory_tokens() < memory_cfg.compact_rule_trigger_threshold:
+                return
         await self.compact_memory()
         if strategy == "rule":
             return
-        if self._estimate_memory_tokens() < memory_cfg.compact_token_threshold:
+        if self._estimate_current_memory_tokens() < memory_cfg.compact_token_threshold:
             return
         if strategy not in {"llm", "hybrid"}:
             return
@@ -781,6 +849,7 @@ class BaseAgent(ABC):
                         status=ToolEventStatus.CALLING,
                     ))
                     result = await self._invoke_tool(tool, function_name, function_args)
+                    result = await self._offload_large_result(tool_call_id, function_name, result)
                     inner_events.append(ToolEvent(
                         tool_call_id=tool_call_id,
                         tool_name=tool.name,
@@ -820,6 +889,13 @@ class BaseAgent(ABC):
                 for event in events:
                     yield event
                 tool_messages.extend(msgs)
+
+            # Drain auxiliary events from tools (e.g. SubAgentEvent)
+            for tool in self._tools:
+                drain = getattr(tool, "drain_events", None)
+                if callable(drain):
+                    for aux_event in drain():
+                        yield aux_event
 
             async for event in self._invoke_llm(tool_messages, format=None, emit_deltas=emit_deltas):
                 yield event

@@ -28,9 +28,14 @@ class _FakeSandbox:
     async def read_file(self, filepath: str, **kwargs) -> ToolResult:
         return ToolResult(success=True, data={"content": "hello", "filepath": filepath})
 
-    async def get_browser(self, supports_multimodal: bool = False) -> Browser:
+    async def get_browser(self, supports_multimodal: bool = False, llm=None) -> Browser:
+        self.last_browser_kwargs = {
+            "supports_multimodal": supports_multimodal,
+            "llm": llm,
+        }
         browser = MagicMock(spec=Browser)
         browser.view_page = AsyncMock(return_value=ToolResult(success=True))
+        browser.click = AsyncMock(return_value=ToolResult(success=True))
         browser.cleanup = AsyncMock()
         return browser
 
@@ -139,6 +144,30 @@ def test_lazy_browser_creates_sandbox_on_first_use():
     async def _run():
         await browser.view_page()
         assert _FakeSandboxCls.create_calls == 1
+
+    asyncio.run(_run())
+
+
+def test_lazy_browser_click_forwards_description_and_llm():
+    _FakeSandboxCls.reset()
+    vision_llm = object()
+    provider = SandboxProvider(
+        session_id="sess-1",
+        sandbox_id=None,
+        sandbox_cls=_FakeSandboxCls,
+        uow_factory=_uow_factory(),
+    )
+    browser = LazyBrowser(provider, supports_multimodal=True, llm=vision_llm)
+
+    async def _run():
+        await browser.click(index=3, description="提交按钮")
+        sandbox = provider.materialized()
+        assert sandbox.last_browser_kwargs == {
+            "supports_multimodal": True,
+            "llm": vision_llm,
+        }
+        inner = await browser._resolve()
+        inner.click.assert_awaited_once_with(3, None, None, "提交按钮")
 
     asyncio.run(_run())
 
