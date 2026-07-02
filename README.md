@@ -34,7 +34,10 @@ OpenCitadel is an open-source, **self-hosted AI agent platform** (not a browser-
 | **Agent chat** | `/`, `/sessions/[id]` | Supervised autonomy: Planner → ReAct, per-tool approval, VNC, checkpoints (incl. browser state) |
 | **Codebase** | `/codebase` | ZIP / Git import, symbol search, architecture views, Ask / Agent coding |
 | **Knowledge base** | `/knowledge` | Document upload & connectors, RAG Q&A, GraphRAG, reindex |
-| **Integrations** | Settings | MCP (stdio / SSE / streamable HTTP) and A2A remote agents |
+| **Marketplace** | `/marketplace` | LLM mini-apps (nutrition, translation, tools, etc.) |
+| **Automation** | `/automation` | Scheduled jobs, webhooks, notifications |
+| **Integrations** | `/settings/integrations` | MCP (stdio / SSE / streamable HTTP) and A2A remote agents |
+| **Admin** | `/admin/*` | Users, quotas, audit, usage |
 
 ## Quick start
 
@@ -78,7 +81,7 @@ Full design: [Architecture overview](docs/architecture/overview.md).
 | First run | [Self-host in 10 minutes](docs/tutorials/01-self-host-10-minutes.md) |
 | Ops / DevOps | [Deployment](docs/operations/deployment.md) · [HTTPS](docs/operations/https-domain-setup.md) · [Helm](deploy/helm/opencitadel/README.md) |
 | Enterprise use cases | [Internal knowledge base](docs/tutorials/02-internal-knowledge-base.md) · [MCP integrations](docs/tutorials/03-mcp-integrations.md) |
-| Platform engineers | [Docs index](docs/README.md) · [Security model](docs/architecture/security-model.md) · [Events](docs/architecture/events.md) |
+| Platform engineers | [Docs index](docs/README.md) · [Security model](docs/architecture/security-model.md) · [Checkpoints & HITL](docs/architecture/checkpoints-and-hitl.md) · [Events](docs/architecture/events.md) |
 | Contributors | [Contributing](.github/CONTRIBUTING.md) · [Security](.github/SECURITY.md) |
 
 ## Local development

@@ -71,7 +71,16 @@ OPENCITADEL_DOMAIN=your-domain.com
 HTTPS_ENABLED=true
 NGINX_PORT=8088
 NGINX_HTTPS_PORT=443
+
+# Required when ENV=production (API startup validation)
+ENV=production
+COOKIE_SECURE=true
+FRONTEND_BASE_URL=https://your-domain.com
+OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
+USE_DB_APP_CONFIG=true
 ```
+
+For **local HTTP quickstart** only (`make quickstart`), use `ENV=development` with `COOKIE_SECURE=false` and `FRONTEND_BASE_URL=http://localhost:8088` instead.
 
 ### 3. Restart Nginx
 

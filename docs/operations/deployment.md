@@ -111,7 +111,7 @@ docker compose up -d
 
 Built application images are named: `opencitadel-api`, `opencitadel-worker`, `opencitadel-migrate`, `opencitadel-ui`, `opencitadel-sandbox`.
 
-> **CI/CD note**: This repository does not ship an automatic CI workflow. Production release flow: `docker compose build` locally or in an external pipeline → (optional) push to a registry → `docker compose up` or Helm deploy for API/Worker.
+> **CI/CD note**: GitHub Actions runs API tests (pytest + Postgres/Redis), UI tests/build (Node 22), and Docker image builds on every PR and push to `main` (see [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)). Tagged releases (`v*`) publish multi-arch images to `ghcr.io/ocealong/opencitadel-*` via [`.github/workflows/release.yml`](../../.github/workflows/release.yml). Production release flow: use release images or `docker compose build` locally → push to your registry → `docker compose up` or Helm deploy.
 
 ---
 
@@ -135,6 +135,15 @@ STORAGE_PROVIDER=cos
 ENV=production
 LOG_LEVEL=INFO
 API_KEY_SECRET=<openssl rand -hex 32>
+JWT_SECRET=<openssl rand -hex 32>
+SESSION_SECRET=<openssl rand -hex 32>
+BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+BOOTSTRAP_ADMIN_PASSWORD=<STRONG_PASSWORD>
+COOKIE_DOMAIN=
+COOKIE_SECURE=true
+FRONTEND_BASE_URL=https://your-domain.com
+OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
+USE_DB_APP_CONFIG=true
 
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=<STRONG_PASSWORD>
@@ -167,6 +176,15 @@ STORAGE_PROVIDER=minio
 ENV=production
 LOG_LEVEL=INFO
 API_KEY_SECRET=<openssl rand -hex 32>
+JWT_SECRET=<openssl rand -hex 32>
+SESSION_SECRET=<openssl rand -hex 32>
+BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+BOOTSTRAP_ADMIN_PASSWORD=<STRONG_PASSWORD>
+COOKIE_DOMAIN=
+COOKIE_SECURE=true
+FRONTEND_BASE_URL=https://your-domain.com
+OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
+USE_DB_APP_CONFIG=true
 
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=<STRONG_PASSWORD>
@@ -315,21 +333,16 @@ See [Security model](../architecture/security-model.md) for trust boundaries and
 
 ### 2. Docker resource limits
 
-```bash
-# Add resource limits for key services in docker-compose.yml:
+OpenCitadel's Compose file uses top-level `mem_limit` and `cpus` on each service (compatible with `docker compose up`). Example from the shipped `docker-compose.yml`:
 
-# opencitadel-api example
+```yaml
 services:
   opencitadel-api:
-    deploy:
-      resources:
-        limits:
-          cpus: '4'
-          memory: 4G
-        reservations:
-          cpus: '1'
-          memory: 1G
+    mem_limit: 640m
+    cpus: 2
 ```
+
+Do **not** rely on `deploy.resources` unless you run Compose in Swarm mode. Adjust limits to match your host memory budget (see [Memory budget](#memory-budget-16-gb-host-right-sized) below).
 
 ### 3. Backup strategy
 
@@ -744,8 +757,9 @@ Details: [Helm chart README](../../deploy/helm/opencitadel/README.md).
 ## 🆘 Support
 
 - **Project docs**: [README.md](../../README.md) · [Documentation index](../README.md)
-- **API docs**: http://YOUR_SERVER_IP:8088/docs
-- **Logs**: `docker-compose logs`
+- **Health check**: `GET http://YOUR_SERVER_IP:8088/api/status` (via Nginx)
+- **OpenAPI (internal)**: FastAPI serves `/docs` on the API container port 8000 only; Nginx does not expose it on `:8088`. Use `docker compose exec opencitadel-api curl -s localhost:8000/docs` or port-forward for debugging.
+- **Logs**: `docker compose logs`
 - **Data volumes**: `/var/lib/docker/volumes`
 
 ---

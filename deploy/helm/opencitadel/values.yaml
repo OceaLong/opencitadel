@@ -126,6 +126,9 @@ env:
   REDIS_PORT: "6379"
   REDIS_DB: "0"
   USE_DB_APP_CONFIG: "true"
+  COOKIE_SECURE: "true"
+  FRONTEND_BASE_URL: https://opencitadel.local
+  OAUTH_REDIRECT_BASE: https://opencitadel.local/api/auth/oauth
   STORAGE_PROVIDER: cos
   COS_REGION: ""
   COS_SCHEME: https
@@ -138,6 +141,10 @@ env:
 # 敏感配置（渲染为 Secret，通过 envFrom 注入）
 secrets:
   apiKeySecret: replace-with-strong-random-secret
+  jwtSecret: replace-with-strong-random-secret
+  sessionSecret: replace-with-strong-random-secret
+  bootstrapAdminEmail: admin@example.com
+  bootstrapAdminPassword: replace-with-strong-password
   postgresPassword: postgres
   redisPassword: ""
   cosSecretId: ""

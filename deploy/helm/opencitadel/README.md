@@ -53,7 +53,15 @@ When `minio.enabled=true`, the chart deploys a MinIO StatefulSet and sets `MINIO
 | `secrets` | see values.yaml | Sensitive values rendered as Secret and injected via `envFrom` |
 | `appConfig` | see values.yaml | App behavior config rendered as ConfigMap mounted at `/app/config.yaml` |
 
-> **Note**: Before production, override sensitive values such as `secrets.apiKeySecret` and `secrets.postgresPassword` via `--set` or a dedicated values file. Confirm `env.POSTGRES_HOST` and `env.REDIS_HOST` point to actual in-cluster services. OpenTelemetry and similar toggles are managed via `appConfig.observability`. Sandbox execution (`sandbox.address` / docker.sock) on K8s must be externalized per the [architecture evolution guide](../../../docs/architecture/architecture-evolution.md).
+> **Note**: Before production, override all sensitive values via `--set` or a dedicated values file:
+> `secrets.apiKeySecret`, `secrets.jwtSecret`, `secrets.sessionSecret`, `secrets.bootstrapAdminPassword`, `secrets.postgresPassword`.
+> Set `env.FRONTEND_BASE_URL`, `env.OAUTH_REDIRECT_BASE`, and `env.COOKIE_SECURE=true` to match your Ingress host.
+> `env.USE_DB_APP_CONFIG` defaults to `"true"` for Helm deployments.
+> Confirm `env.POSTGRES_HOST` and `env.REDIS_HOST` point to actual in-cluster services.
+
+## Release images
+
+Tagged releases (`v*`) publish multi-arch images to `ghcr.io/ocealong/opencitadel-{api,worker,migrate,ui,sandbox}` via [`.github/workflows/release.yml`](../../../.github/workflows/release.yml). Override `image.*.repository` and `image.*.tag` to consume release builds.
 
 ## Architecture
 

@@ -38,7 +38,7 @@ All SSE data must carry unified metadata:
 | `channel` | `ui` / `runtime` / `debug` |
 | `persist` | Whether persistence is allowed |
 
-Current `EVENT_SCHEMA_VERSION=2`. Legacy payloads are upgraded via `event_upgrader.py` before deserialization.
+Current `EVENT_SCHEMA_VERSION=3`. Legacy payloads are upgraded via `event_upgrader.py` before deserialization.
 
 ## SSE Event Catalog
 

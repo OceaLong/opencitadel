@@ -28,11 +28,22 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [Architecture overview](architecture/overview.md) | System design, process roles, sandbox lifecycle, deployment modes |
 | [Security model](architecture/security-model.md) | Trust boundaries, sandbox isolation, auth |
 | [Events](architecture/events.md) | Domain events, SSE contract, persistence, replay |
+| [Checkpoints & HITL](architecture/checkpoints-and-hitl.md) | Gate contracts, rollback, Web Operator, browser profile snapshots |
+| [Automation & scheduler](architecture/automation-scheduler.md) | Cron/webhook jobs, leader election, notifications |
+| [Marketplace](architecture/marketplace.md) | LLM mini-app catalog and contracts |
 | [Config source governance](architecture/config-source-governance.md) | AppConfig, config.yaml, env var boundaries |
 | [Model resilience](architecture/model-resilience.md) | Circuit breaking, fallback, SLO runbooks |
 | [Contract compatibility](architecture/contract-compatibility.md) | API/SSE compatibility window |
 | [Codebase reindex](architecture/codebase-reindex.md) | Vector degradation and recovery |
 | [Architecture evolution](architecture/architecture-evolution.md) | Compose → K8s / external sandbox |
+
+### Module guides
+
+| Document | Scope |
+|----------|-------|
+| [API](../api/README.md) | Backend routes, SSE, local dev |
+| [UI](../ui/README.md) | Frontend stack and routes |
+| [Sandbox](../sandbox/README.md) | Isolated runtime |
 
 ### Open-source governance
 

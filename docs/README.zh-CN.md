@@ -28,11 +28,22 @@
 | [系统架构](architecture/overview.zh-CN.md) | 总体架构、进程职责、沙箱生命周期、部署形态 |
 | [安全模型](architecture/security-model.zh-CN.md) | 信任边界、沙箱隔离、认证与授权 |
 | [事件系统](architecture/events.zh-CN.md) | 领域事件、SSE 契约、持久化与 replay |
+| [检查点与 HITL](architecture/checkpoints-and-hitl.zh-CN.md) | 门控契约、回滚、Web Operator、浏览器 Profile 快照 |
+| [自动化与调度](architecture/automation-scheduler.zh-CN.md) | Cron/Webhook 任务、Leader 选举、通知 |
+| [应用市场](architecture/marketplace.zh-CN.md) | LLM 小应用目录与契约 |
 | [配置来源治理](architecture/config-source-governance.zh-CN.md) | AppConfig、config.yaml、环境变量边界 |
 | [模型韧性设计](architecture/model-resilience.zh-CN.md) | 熔断、fallback、SLO 与运行手册 |
 | [API/SSE 协议兼容策略](architecture/contract-compatibility.zh-CN.md) | 前后端契约兼容窗口 |
 | [Codebase 向量降级与重新索引](architecture/codebase-reindex.zh-CN.md) | embedding 不可用时的降级与恢复 |
 | [架构演进指南](architecture/architecture-evolution.zh-CN.md) | Compose → K8s / 外置沙箱演进 |
+
+### 模块说明
+
+| 文档 | 范围 |
+|------|------|
+| [API](../api/README.zh-CN.md) | 后端路由、SSE、本地开发 |
+| [UI](../ui/README.zh-CN.md) | 前端技术栈与路由 |
+| [Sandbox](../sandbox/README.zh-CN.md) | 隔离运行时 |
 
 ### 开源治理
 

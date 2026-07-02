@@ -13,7 +13,10 @@
 
 **请勿在公开的 GitHub Issue 中披露安全漏洞。**
 
-请通过邮件私下联系维护者（开源前请配置联系地址），或在仓库公开后通过 GitHub **Security Advisories** 提交报告。
+请通过以下方式私下报告：
+
+- **GitHub Security Advisories**：[github.com/OceaLong/opencitadel](https://github.com/OceaLong/opencitadel)（推荐）
+- 邮件联系仓库主页或 Release 标签中列出的维护者
 
 请包含：
 

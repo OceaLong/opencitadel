@@ -53,7 +53,14 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
 | `secrets` | 见 values.yaml | 敏感配置，渲染为 Secret 并通过 `envFrom` 注入 |
 | `appConfig` | 见 values.yaml | 应用行为配置，渲染为 ConfigMap 并挂载为 `/app/config.yaml` |
 
-> **注意**：生产部署前请通过 `--set` 或独立 values 文件覆盖 `secrets.apiKeySecret`、`secrets.postgresPassword` 等敏感项，并确认 `env.POSTGRES_HOST`、`env.REDIS_HOST` 指向集群内实际服务地址。OpenTelemetry 等行为开关通过 `appConfig.observability` 管理。沙箱执行（`sandbox.address` / docker.sock）在 K8s 中需按 [架构演进指南](../../../docs/architecture/architecture-evolution.zh-CN.md) 外置配置。
+> **注意**：生产部署前请通过 `--set` 或独立 values 文件覆盖全部敏感项：
+> `secrets.apiKeySecret`、`secrets.jwtSecret`、`secrets.sessionSecret`、`secrets.bootstrapAdminPassword`、`secrets.postgresPassword`。
+> 将 `env.FRONTEND_BASE_URL`、`env.OAUTH_REDIRECT_BASE` 与 `env.COOKIE_SECURE=true` 设置为与 Ingress 域名一致。
+> Helm 部署默认 `env.USE_DB_APP_CONFIG="true"`。确认 `env.POSTGRES_HOST`、`env.REDIS_HOST` 指向集群内实际服务。
+
+## Release 镜像
+
+打 tag（`v*`）后，[`.github/workflows/release.yml`](../../../.github/workflows/release.yml) 会发布多架构镜像到 `ghcr.io/ocealong/opencitadel-{api,worker,migrate,ui,sandbox}`。通过 `image.*.repository` 与 `image.*.tag` 引用 release 构建。
 
 ## 架构
 
@@ -85,4 +92,4 @@ kubectl scale deployment opencitadel-worker --replicas=4 -n opencitadel
 - 根目录 [README.md](../../../README.zh-CN.md) — 架构与配置说明
 - [生产部署指南](../../../docs/operations/deployment.zh-CN.md) — 生产部署指南
 - [架构演进指南](../../../docs/architecture/architecture-evolution.zh-CN.md) — 扩容与沙箱外置
-- [api/README.md](../../../api/README.md) — API / Worker 本地开发
+- [api/README.zh-CN.md](../../../api/README.zh-CN.md) — API / Worker 本地开发

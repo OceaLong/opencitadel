@@ -10,7 +10,7 @@
 
 - Docker 与 Docker Compose
 - Python 3.12+ 与 [uv](https://docs.astral.sh/uv/)
-- Node.js 20+ 与 npm（UI）
+- Node.js 22+ 与 npm（UI；与 CI 一致）
 
 ### API / Worker
 

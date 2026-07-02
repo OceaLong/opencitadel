@@ -13,9 +13,10 @@
 
 **Please do not open public GitHub issues for security vulnerabilities.**
 
-Report security issues privately by emailing the maintainers (configure your
-contact address before open-sourcing) or via GitHub **Security Advisories**
-on the repository once it is public.
+Report security issues privately via:
+
+- **GitHub Security Advisories** on [github.com/OceaLong/opencitadel](https://github.com/OceaLong/opencitadel) (preferred)
+- Email the maintainers listed on the repository profile or release tags
 
 Include:
 

@@ -38,7 +38,7 @@ flowchart TD
 | `channel` | `ui` / `runtime` / `debug` |
 | `persist` | 是否允许持久化 |
 
-当前 `EVENT_SCHEMA_VERSION=2`。旧 payload 会通过 `event_upgrader.py` 升级后再反序列化。
+当前 `EVENT_SCHEMA_VERSION=3`。旧 payload 会通过 `event_upgrader.py` 升级后再反序列化。
 
 ## SSE 事件目录
 

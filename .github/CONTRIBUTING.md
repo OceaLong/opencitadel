@@ -10,7 +10,7 @@ Thank you for your interest in contributing!
 
 - Docker & Docker Compose
 - Python 3.12+ with [uv](https://docs.astral.sh/uv/)
-- Node.js 20+ and npm (for UI)
+- Node.js 22+ and npm (for UI; matches CI)
 
 ### API / Worker
 

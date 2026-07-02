@@ -54,6 +54,10 @@ if [[ ! -f .env ]]; then
     sed -i.bak 's|^OAUTH_REDIRECT_BASE=.*|OAUTH_REDIRECT_BASE=http://localhost:8088/api/auth/oauth|' .env
     rm -f .env.bak
   fi
+  if grep -q '^ENV=' .env; then
+    sed -i.bak 's|^ENV=.*|ENV=development|' .env
+    rm -f .env.bak
+  fi
 
   warn "Edit .env and set BOOTSTRAP_ADMIN_PASSWORD before continuing."
   warn "After first login, add your LLM API key in Settings → Models."
@@ -85,7 +89,7 @@ info "Building and starting OpenCitadel (this may take several minutes on first 
 
 info "Waiting for API health ..."
 for i in $(seq 1 60); do
-  if curl -sf "http://localhost:${NGINX_PORT:-8088}/api/health" >/dev/null 2>&1; then
+  if curl -sf "http://localhost:${NGINX_PORT:-8088}/api/status" >/dev/null 2>&1; then
     break
   fi
   sleep 5

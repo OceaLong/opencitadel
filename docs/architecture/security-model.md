@@ -238,8 +238,11 @@ Team creators default to `OWNER`; regular members can access team resources but 
 
 - Private artifact routes require `WorkspaceContext` scope: list/get/content/share verify session ownership via `OwnerScope`.
 - Cross-scope artifact access returns **404** (no existence leak).
+- Lifecycle: `artifact_write` → object storage upload → `ArtifactEvent` to workbench → `artifact_finalize` → optional share token (`/share/artifact/{token}`).
 - HTML artifacts are sanitized server-side (strip `<script>` and inline event handlers) before preview.
 - UI renders HTML in iframe with `sandbox="allow-scripts"` only — **no** `allow-same-origin` (prevents same-origin script escalation).
+
+Details: [Checkpoints & HITL — Artifact delivery](checkpoints-and-hitl.md#artifact-delivery-related).
 
 ### Webhook automation
 

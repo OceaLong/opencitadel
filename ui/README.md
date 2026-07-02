@@ -20,7 +20,9 @@ ui/
 │   ├── app/               # Page routes
 │   │   ├── page.tsx       # Home
 │   │   ├── sessions/      # Session pages
-│   │   └── settings/      # Settings (models, Skills, memory)
+│   │   ├── marketplace/   # Marketplace mini-apps
+│   │   ├── automation/    # Scheduled jobs
+│   │   └── settings/      # Settings (models, Skills, memory, integrations)
 │   ├── components/        # Components
 │   │   ├── ui/            # Base UI components
 │   │   └── tool-use/      # Tool-use components
@@ -44,7 +46,9 @@ ui/
 - **Model management**: Settings → Models for multi-provider CRUD and default model.
 - **Skill templates**: Settings → Skills for system prompts, tools, recommended models, Agent params, and example questions.
 - **Long-term memory**: Settings → Memory for global or session memory; compact, clear, or delete Agent memory on session page.
-- **Settings modal**: general config, A2A Agents, MCP servers; provider config moved to Settings center.
+- **Settings modal**: general config; MCP and A2A management also available at **Settings → Integrations** (`/settings/integrations`).
+- **Marketplace**: `/marketplace` LLM mini-apps catalog.
+- **Automation**: `/automation` scheduled jobs and notifications.
 
 ## API Client
 

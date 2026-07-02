@@ -71,7 +71,16 @@ OPENCITADEL_DOMAIN=your-domain.com
 HTTPS_ENABLED=true
 NGINX_PORT=8088
 NGINX_HTTPS_PORT=443
+
+# ENV=production 时 API 启动校验必填
+ENV=production
+COOKIE_SECURE=true
+FRONTEND_BASE_URL=https://your-domain.com
+OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
+USE_DB_APP_CONFIG=true
 ```
+
+**本地 HTTP 快速体验**（`make quickstart`）请使用 `ENV=development`、`COOKIE_SECURE=false`、`FRONTEND_BASE_URL=http://localhost:8088`。
 
 ### 3. 重启 Nginx
 

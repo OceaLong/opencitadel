@@ -109,7 +109,7 @@ docker compose up -d
 
 Compose 构建后的应用镜像统一命名为：`opencitadel-api`、`opencitadel-worker`、`opencitadel-migrate`、`opencitadel-ui`、`opencitadel-sandbox`。
 
-> **CI/CD 说明**：本仓库无自动 CI workflow。生产发布流程为：本地或外部流水线 `docker compose build` →（可选）推送到镜像仓库 → `docker compose up` 或 Helm 部署 API/Worker。
+> **CI/CD 说明**：GitHub Actions 在每次 PR 与 `main` 推送时运行 API 测试（pytest + Postgres/Redis）、UI 测试/构建（Node 22）与 Docker 镜像构建（见 [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)）。打 tag（`v*`）后通过 [`.github/workflows/release.yml`](../../.github/workflows/release.yml) 发布多架构镜像到 `ghcr.io/ocealong/opencitadel-*`。生产发布流程：使用 release 镜像或本地 `docker compose build` → 推送到镜像仓库 → `docker compose up` 或 Helm 部署。
 
 ---
 
@@ -133,6 +133,15 @@ STORAGE_PROVIDER=cos
 ENV=production
 LOG_LEVEL=INFO
 API_KEY_SECRET=<openssl rand -hex 32>
+JWT_SECRET=<openssl rand -hex 32>
+SESSION_SECRET=<openssl rand -hex 32>
+BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+BOOTSTRAP_ADMIN_PASSWORD=<STRONG_PASSWORD>
+COOKIE_DOMAIN=
+COOKIE_SECURE=true
+FRONTEND_BASE_URL=https://your-domain.com
+OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
+USE_DB_APP_CONFIG=true
 
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=<STRONG_PASSWORD>
@@ -165,6 +174,15 @@ STORAGE_PROVIDER=minio
 ENV=production
 LOG_LEVEL=INFO
 API_KEY_SECRET=<openssl rand -hex 32>
+JWT_SECRET=<openssl rand -hex 32>
+SESSION_SECRET=<openssl rand -hex 32>
+BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+BOOTSTRAP_ADMIN_PASSWORD=<STRONG_PASSWORD>
+COOKIE_DOMAIN=
+COOKIE_SECURE=true
+FRONTEND_BASE_URL=https://your-domain.com
+OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
+USE_DB_APP_CONFIG=true
 
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=<STRONG_PASSWORD>
@@ -307,24 +325,18 @@ sudo ufw allow 8088/tcp
 sudo ufw status verbose
 ```
 
-### 2. Docker 安全优化
+### 2. Docker 资源限制
 
-```bash
-# 限制容器资源使用
-# 编辑 docker-compose.yml，为关键服务添加资源限制：
+仓库自带的 `docker-compose.yml` 使用顶层 `mem_limit` 与 `cpus`（适用于 `docker compose up`）。示例：
 
-# opencitadel-api 示例
+```yaml
 services:
   opencitadel-api:
-    deploy:
-      resources:
-        limits:
-          cpus: '4'
-          memory: 4G
-        reservations:
-          cpus: '1'
-          memory: 1G
+    mem_limit: 640m
+    cpus: 2
 ```
+
+除非使用 Swarm 模式，否则不要依赖 `deploy.resources`。请按宿主机内存预算调整（见下文「内存预算」）。
 
 ### 3. 数据备份策略
 
@@ -737,8 +749,9 @@ Chart 特性：
 ## 🆘 技术支持
 
 - **项目文档**: [README.zh-CN.md](../../README.zh-CN.md) · [文档中心](../README.zh-CN.md)
-- **API 文档**: http://YOUR_SERVER_IP:8088/docs
-- **日志位置**: `docker-compose logs`
+- **健康检查**: `GET http://YOUR_SERVER_IP:8088/api/status`（经 Nginx）
+- **OpenAPI（内网调试）**: FastAPI 的 `/docs` 仅在 API 容器 8000 端口提供，Nginx 未在 `:8088` 暴露。可用 `docker compose exec opencitadel-api curl -s localhost:8000/docs` 或 port-forward 调试。
+- **日志位置**: `docker compose logs`
 - **数据目录**: `/var/lib/docker/volumes`
 
 ---

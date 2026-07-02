@@ -234,6 +234,22 @@ flowchart TD
 
 团队创建者默认为 `OWNER`；普通成员可访问团队资源但无法管理邀请。
 
+### 交付物与可信分发
+
+- 私有交付物路由需 `WorkspaceContext` scope：list/get/content/share 均通过 `OwnerScope` 校验会话归属。
+- 跨 scope 访问返回 **404**（不泄露存在性）。
+- 生命周期：`artifact_write` → 对象存储上传 → `ArtifactEvent` 推送工作台 → `artifact_finalize` → 可选分享 token（`/share/artifact/{token}`）。
+- HTML 交付物在预览前经服务端消毒（移除 `<script>` 与内联事件处理器）。
+- UI 在 iframe 中使用 `sandbox="allow-scripts"`，**不含** `allow-same-origin`（防止同源脚本升级）。
+
+详见 [检查点与 HITL — 交付物](checkpoints-and-hitl.zh-CN.md#交付物相关)。
+
+### Webhook 自动化
+
+- `POST /api/webhooks/{token}` 需要 `X-Webhook-Signature: HMAC-SHA256(body, webhook_secret)`。
+- Webhook 密钥 Fernet 加密存储（`API_KEY_SECRET`）；创建/轮换时仅展示一次明文。
+- 幂等键按 job token 隔离：`webhook:idem:{token}:{sha256(body)}`。
+
 ### 限流与 CORS
 
 在 `api/config.yaml` 配置：
