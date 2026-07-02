@@ -4,9 +4,12 @@
 import logging
 from typing import Callable, Optional, Type
 
+from app.application.services.artifact_service import ArtifactService
 from app.application.services.config_provider import AppConfigProvider, get_runtime_config
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.memory_extractor_service import MemoryExtractorService
+from app.application.services.notification_service import NotificationService
+from app.application.services.scheduled_job_service import ScheduledJobService
 from app.application.services.memory_service import MemoryService
 from app.application.services.skill_service import SkillService
 from app.domain.external.connection_pool import A2AConnectionPoolPort, MCPConnectionPoolPort
@@ -31,6 +34,7 @@ from app.domain.services.tools.codebase_tools import CodebaseTool
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.image_generation import ImageGenerationTool
 from app.domain.services.tools.knowledge_base_tools import KnowledgeBaseTool
+from app.domain.services.tools.artifact import ArtifactTool
 from app.domain.services.tools.memory import MemoryTool
 from app.domain.services.tools.mcp import MCPTool
 from app.domain.services.subagent_factory import build_subagent_tool
@@ -80,6 +84,7 @@ class TaskRunnerFactory:
             session_state_factory: Callable[[], SessionStatePort],
             mcp_connection_pool: MCPConnectionPoolPort,
             a2a_connection_pool: A2AConnectionPoolPort,
+            artifact_service: Optional[ArtifactService] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm_model_service = llm_model_service
@@ -97,6 +102,7 @@ class TaskRunnerFactory:
         self._session_state_factory = session_state_factory
         self._mcp_connection_pool = mcp_connection_pool
         self._a2a_connection_pool = a2a_connection_pool
+        self._artifact_service = artifact_service
         self._agent_config = AgentConfig()
         self._mcp_config = MCPConfig()
         self._a2a_config = A2AConfig()
@@ -188,6 +194,32 @@ class TaskRunnerFactory:
             return {"id": entry.id}
 
         extra_tools = [MemoryTool(save_fn=save_memory_fn, session_id=session.id)]
+
+        runtime = get_runtime_config()
+        if runtime.feature_flags.enable_artifacts and self._artifact_service:
+            artifact_service = self._artifact_service
+
+            async def write_artifact(**kwargs):
+                artifact, event = await artifact_service.write_content(
+                    session_id=session.id,
+                    artifact_id=kwargs.get("artifact_id"),
+                    kind=kwargs["kind"],
+                    title=kwargs["title"],
+                    content=kwargs["content"],
+                )
+                return artifact.model_dump(mode="json"), event
+
+            async def finalize_artifact(artifact_id: str):
+                artifact, event = await artifact_service.finalize(session.id, artifact_id)
+                return artifact.model_dump(mode="json"), event
+
+            extra_tools.append(ArtifactTool(write_fn=write_artifact, finalize_fn=finalize_artifact))
+            skill_prompt = (
+                f"{skill_prompt}\n\n交付物规则：产出最终文档或网页时必须调用 artifact_write / artifact_finalize，"
+                f"不要仅用 write_file 写入交付物。"
+            ).strip() if skill_prompt else (
+                "交付物规则：产出最终文档或网页时必须调用 artifact_write / artifact_finalize。"
+            )
 
         codebase_prompt = ""
         if session.codebase_id:
@@ -298,6 +330,18 @@ class TaskRunnerFactory:
                 )
                 await extractor.extract_from_session(session_id)
 
+        async def on_session_terminal(session_id: str, status) -> None:
+            app_config = await self._config_provider.get()
+            job_service = ScheduledJobService(uow_factory=self._uow_factory)
+            notification_service = NotificationService(uow_factory=self._uow_factory)
+            await job_service.on_session_terminal(
+                session_id,
+                status.value if hasattr(status, "value") else str(status),
+                notification_service=notification_service,
+                mcp_pool=self._mcp_connection_pool,
+                app_config=app_config,
+            )
+
         return AgentTaskRunner(
             uow_factory=self._uow_factory,
             llm=llm,
@@ -316,6 +360,7 @@ class TaskRunnerFactory:
             long_term_memory_block=ltm_block,
             extra_tools=extra_tools,
             on_complete_callback=on_complete if self._auto_extract_memory else None,
+            on_session_terminal_callback=on_session_terminal,
             model_id=model_id,
             checkpoint_service=self._checkpoint_service,
             mode=session.mode,

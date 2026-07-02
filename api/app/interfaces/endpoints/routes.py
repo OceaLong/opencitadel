@@ -21,6 +21,8 @@ from . import (
     marketplace_routes,
     codebase_routes,
     knowledge_base_routes,
+    artifact_routes,
+    scheduling_routes,
 )
 
 
@@ -50,6 +52,11 @@ def create_api_routes() -> APIRouter:
     authenticated_router.include_router(memory_routes.memory_router)
     authenticated_router.include_router(codebase_routes.router)
     authenticated_router.include_router(knowledge_base_routes.router)
+    authenticated_router.include_router(artifact_routes.router)
+    authenticated_router.include_router(scheduling_routes.scheduled_router)
+    authenticated_router.include_router(scheduling_routes.notification_router)
+    api_router.include_router(scheduling_routes.webhook_router)
+    api_router.include_router(artifact_routes.share_router)
     api_router.include_router(authenticated_router)
 
     # 4.返回api路由实例

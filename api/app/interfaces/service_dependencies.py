@@ -200,3 +200,24 @@ async def get_a2a_server_service(
         service: A2AServerService = Depends(Provide[ApiContainer.a2a_server_service]),
 ) -> A2AServerService:
     return service
+
+
+@inject
+async def get_artifact_service(
+        service=Depends(Provide[ApiContainer.artifact_service]),
+):
+    return service
+
+
+@inject
+async def get_notification_service(
+        service=Depends(Provide[ApiContainer.notification_service]),
+):
+    return service
+
+
+@inject
+async def get_scheduled_job_service(
+        service=Depends(Provide[ApiContainer.scheduled_job_service]),
+):
+    return service

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 from typing import List, Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.invitation import Invitation, InvitationType
@@ -26,6 +26,13 @@ class DBInvitationRepository(InvitationRepository):
         stmt = stmt.offset(max(offset, 0)).limit(max(1, min(limit, 500)))
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
+
+    async def count(self, invitation_type: InvitationType | None = None) -> int:
+        stmt = select(func.count()).select_from(InvitationORM)
+        if invitation_type is not None:
+            stmt = stmt.where(InvitationORM.type == invitation_type.value)
+        result = await self.db_session.execute(stmt)
+        return int(result.scalar_one() or 0)
 
     async def save(self, invitation: Invitation) -> None:
         record = await self.db_session.get(InvitationORM, invitation.id)

@@ -915,7 +915,9 @@ export type SSEEventType =
   | "wait"
   | "usage"
   | "done"
-  | "error";
+  | "error"
+  | "artifact"
+  | "approval";
 
 /**
  * SSE 事件数据
@@ -959,7 +961,27 @@ export type SSEEventData =
       } & EventMeta;
     }
   | { type: "done"; data: Record<string, unknown> & EventMeta }
-  | { type: "error"; data: { error: string; code?: string | null } & EventMeta };
+  | { type: "error"; data: { error: string; code?: string | null } & EventMeta }
+  | {
+      type: "artifact";
+      data: {
+        artifact_id: string;
+        kind: "doc" | "web";
+        title: string;
+        status: "draft" | "updated" | "final";
+        storage_ref: string;
+        version: number;
+      } & EventMeta;
+    }
+  | {
+      type: "approval";
+      data: {
+        approval_id: string;
+        kind: "plan" | "tool" | "takeover";
+        payload: Record<string, unknown>;
+        options: string[];
+      } & EventMeta;
+    };
 
 /**
  * SSE 事件处理器
@@ -983,6 +1005,123 @@ export type SessionCheckpoint = {
   label: string;
   created_at: string;
 };
+
+// ==================== 交付物 ====================
+
+export type DeliveryArtifactKind = "doc" | "web";
+export type DeliveryArtifactStatus = "draft" | "updated" | "final";
+
+export type DeliveryArtifact = {
+  id: string;
+  session_id: string;
+  kind: DeliveryArtifactKind;
+  title: string;
+  storage_ref: string;
+  version_refs: string[];
+  status: DeliveryArtifactStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DeliveryArtifactsData = {
+  artifacts: DeliveryArtifact[];
+};
+
+export type DeliveryArtifactContent = {
+  content: string;
+  content_type: string;
+};
+
+export type DeliveryArtifactShare = {
+  share_token: string;
+  share_url: string;
+};
+
+export type ArtifactEventSummary = {
+  artifact_id: string;
+  kind: DeliveryArtifactKind;
+  title: string;
+  status: DeliveryArtifactStatus;
+  storage_ref: string;
+  version: number;
+};
+
+// ==================== 通知 ====================
+
+export type Notification = {
+  id: string;
+  user_id: string;
+  type: string;
+  session_id?: string | null;
+  artifact_id?: string | null;
+  job_id?: string | null;
+  message: string;
+  read: boolean;
+  created_at: string;
+};
+
+export type NotificationsData = {
+  notifications: Notification[];
+  unread_count: number;
+};
+
+export type PendingPlanUpdate = {
+  plan: PlanEvent;
+};
+
+// ==================== 自动化任务 ====================
+
+export type ScheduledJobTriggerType = "cron" | "interval" | "webhook";
+
+export type NotifyChannel = {
+  type: string;
+  server_name: string;
+  channel_arg: string;
+};
+
+export type ScheduledJob = {
+  id: string;
+  name: string;
+  owner_user_id: string;
+  trigger_type: ScheduledJobTriggerType | string;
+  trigger_spec: string;
+  prompt_template: string;
+  skill_id?: string | null;
+  model_id?: string | null;
+  codebase_id?: string | null;
+  knowledge_base_id?: string | null;
+  notify_channels: NotifyChannel[];
+  enabled: boolean;
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+  last_run_status?: string | null;
+  last_run_session_id?: string | null;
+  webhook_token?: string | null;
+};
+
+export type ScheduledJobsData = {
+  jobs: ScheduledJob[];
+};
+
+export type CreateScheduledJobParams = {
+  name: string;
+  trigger_type?: ScheduledJobTriggerType;
+  trigger_spec?: string;
+  prompt_template: string;
+  skill_id?: string | null;
+  model_id?: string | null;
+  codebase_id?: string | null;
+  knowledge_base_id?: string | null;
+  notify_channels?: NotifyChannel[];
+  enabled?: boolean;
+};
+
+export type CreateScheduledJobResult = {
+  job: ScheduledJob;
+  webhook_secret?: string | null;
+};
+
+export type ApprovalEventData = Extract<SSEEventData, { type: "approval" }>["data"];
 
 export type SessionCheckpointsData = {
   checkpoints: SessionCheckpoint[];

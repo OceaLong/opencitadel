@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 from typing import List, Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.user import User
@@ -38,6 +38,10 @@ class DBUserRepository(UserRepository):
         )
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
+
+    async def count(self) -> int:
+        result = await self.db_session.execute(select(func.count()).select_from(UserORM))
+        return int(result.scalar_one() or 0)
 
     async def save(self, user: User) -> None:
         user.email = user.email.lower()

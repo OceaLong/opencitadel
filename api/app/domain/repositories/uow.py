@@ -15,6 +15,9 @@ from .invitation_repository import InvitationRepository
 from .oauth_identity_repository import OAuthIdentityRepository
 from .quota_repository import QuotaRepository
 from .refresh_token_repository import RefreshTokenRepository
+from .artifact_repository import ArtifactRepository
+from .scheduled_job_repository import ScheduledJobRepository
+from .notification_repository import NotificationRepository
 from .session_repository import SessionRepository
 from .service_api_key_repository import ServiceApiKeyRepository
 from .skill_repository import SkillRepository
@@ -43,6 +46,9 @@ class IUnitOfWork(ABC):
     service_api_key: ServiceApiKeyRepository
     team: TeamRepository
     user: UserRepository
+    artifact: ArtifactRepository
+    scheduled_job: ScheduledJobRepository
+    notification: NotificationRepository
 
     @abstractmethod
     async def commit(self):

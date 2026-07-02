@@ -16,6 +16,10 @@ class InvitationRepository(ABC):
         ...
 
     @abstractmethod
+    async def count(self, invitation_type: InvitationType | None = None) -> int:
+        ...
+
+    @abstractmethod
     async def save(self, invitation: Invitation) -> None:
         ...
 

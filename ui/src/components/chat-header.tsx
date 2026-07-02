@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { BookOpen, Code2, LayoutGrid } from "lucide-react";
+import { BookOpen, Clock, Code2, LayoutGrid } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { CSSProperties } from "react";
 
 import { OpenCitadelIcon } from "@/components/open-citadel-icon";
+import { NotificationInbox } from "@/components/notification-inbox";
 import { Badge } from "@/components/ui/badge";
 
 import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
@@ -87,6 +88,12 @@ export function ChatHeader({ showSidebarTrigger = true }: { showSidebarTrigger?:
             <LayoutGrid className="size-4" />
           </Link>
         </Button>
+        <Button variant="outline" size="icon-sm" asChild aria-label="自动化任务" title="自动化任务">
+          <Link href="/automation">
+            <Clock className="size-4" />
+          </Link>
+        </Button>
+        <NotificationInbox />
         <ThemeToggle />
         <OpenCitadelSettings />
       </div>

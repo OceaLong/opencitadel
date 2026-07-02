@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { LogIn, LogOut, Settings } from "lucide-react";
+import { LayoutDashboard, LogIn, LogOut, Settings } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -68,6 +68,14 @@ export function AccountMenu() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" side="top" className="w-56">
+          {user.global_role === "admin" ? (
+            <DropdownMenuItem asChild>
+              <Link href="/admin">
+                <LayoutDashboard className="size-4" />
+                后台管理
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem asChild>
             <Link href="/settings">
               <Settings className="size-4" />

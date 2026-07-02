@@ -14,6 +14,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     ForeignKey,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -98,6 +99,10 @@ class SessionModel(Base):
         String(32),
         nullable=True,
     )  # 等待恢复的内部阶段
+    pending_metadata: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )  # 门控状态细节
     status: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
@@ -147,6 +152,7 @@ class SessionModel(Base):
             "team_id": self.team_id,
             "mode": self.mode,
             "pending_phase": self.pending_phase,
+            "pending_metadata": self.pending_metadata,
             "status": self.status,
             "updated_at": self.updated_at,
             "created_at": self.created_at,

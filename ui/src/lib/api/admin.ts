@@ -1,13 +1,15 @@
-import { get, post } from "./fetch";
 import type { AuthUser } from "./auth";
+import { del, get, patch, post, put } from "./fetch";
 
 export type AdminUser = AuthUser & { token_version: number };
+
 export type Quota = {
   monthly_token_limit?: number | null;
   daily_session_limit?: number | null;
   max_concurrent_tasks?: number | null;
   max_storage_bytes?: number | null;
 };
+
 export type AuditLog = {
   id: string;
   actor_user_id?: string | null;
@@ -19,9 +21,125 @@ export type AuditLog = {
   created_at: string;
 };
 
+export type UsageSummary = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cached_tokens: number;
+  call_count: number;
+};
+
+export type UsageTimeseriesPoint = {
+  date: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cached_tokens: number;
+  call_count: number;
+};
+
+export type UsageBreakdownItem = {
+  key: string;
+  total_tokens: number;
+  call_count: number;
+};
+
+export type UsageBreakdownDimension = "model" | "user" | "team" | "agent";
+
+export type AuditSummary = {
+  by_day: Array<{ date: string; count: number }>;
+  by_action: Array<{ action: string; count: number }>;
+};
+
+export type PlatformInvitation = {
+  id: string;
+  email?: string | null;
+  status: "pending" | "accepted" | "expired";
+  invited_by?: string | null;
+  expires_at: string;
+  accepted_at?: string | null;
+  accepted_user_id?: string | null;
+  created_at: string;
+};
+
+export type AdminOverview = {
+  total_users: number;
+  active_users: number;
+  disabled_users: number;
+  admin_users: number;
+  pending_invitations: number;
+  accepted_invitations: number;
+  expired_invitations: number;
+};
+
+export type AdminDateRangeParams = {
+  start_at?: string;
+  end_at?: string;
+  user_id?: string;
+  team_id?: string;
+};
+
+export type PatchUserPayload = {
+  global_role?: "admin" | "user";
+  status?: "active" | "disabled";
+  display_name?: string;
+};
+
+function buildParams(
+  params?: Record<string, string | number | undefined>,
+): Record<string, string | number | boolean> | undefined {
+  if (!params) return undefined;
+  const entries = Object.entries(params).filter(([, value]) => value !== undefined && value !== "");
+  if (!entries.length) return undefined;
+  return Object.fromEntries(entries) as Record<string, string | number | boolean>;
+}
+
 export const adminApi = {
-  users: () => get<{ users: AdminUser[] }>("/admin/users"),
+  overview: () => get<AdminOverview>("/admin/overview"),
+
+  users: (params?: { limit?: number; offset?: number }) =>
+    get<{ users: AdminUser[]; total: number }>("/admin/users", buildParams(params)),
+
+  patchUser: (userId: string, payload: PatchUserPayload) =>
+    patch<AdminUser>(`/admin/users/${userId}`, payload),
+
+  deleteUser: (userId: string, strategy: "cascade" | "transfer_to_team" | "anonymize" = "anonymize") =>
+    del<{ strategy: string }>(`/admin/users/${userId}?strategy=${strategy}`),
+
+  getQuota: (userId: string) => get<Quota>(`/admin/users/${userId}/quota`),
+
+  putQuota: (userId: string, payload: Quota) => put<Quota>(`/admin/users/${userId}/quota`, payload),
+
   invite: (email: string) => post<{ url: string }>("/admin/invitations", { email }),
-  usage: (params?: { user_id?: string; team_id?: string }) => get<Record<string, number>>("/admin/usage", params),
-  audit: () => get<{ logs: AuditLog[] }>("/admin/audit"),
+
+  invitations: (params?: { limit?: number; offset?: number }) =>
+    get<{ invitations: PlatformInvitation[]; total: number }>("/admin/invitations", buildParams(params)),
+
+  usageSummary: (params?: AdminDateRangeParams) =>
+    get<UsageSummary>("/admin/usage/summary", buildParams(params)),
+
+  usageTimeseries: (params?: AdminDateRangeParams) =>
+    get<{ points: UsageTimeseriesPoint[] }>("/admin/usage/timeseries", buildParams(params)),
+
+  usageBreakdown: (
+    dimension: UsageBreakdownDimension,
+    params?: AdminDateRangeParams & { limit?: number },
+  ) =>
+    get<{ dimension: UsageBreakdownDimension; items: UsageBreakdownItem[] }>(
+      "/admin/usage/breakdown",
+      buildParams({ ...params, dimension }),
+    ),
+
+  audit: (params?: {
+    limit?: number;
+    offset?: number;
+    action?: string;
+    start_at?: string;
+    end_at?: string;
+  }) => get<{ logs: AuditLog[]; total: number }>("/admin/audit", buildParams(params)),
+
+  auditSummary: (params?: AdminDateRangeParams) =>
+    get<AuditSummary>("/admin/audit/summary", buildParams(params)),
+
+  exportAuditCsvUrl: () => "/api/admin/audit/export",
 };

@@ -24,6 +24,10 @@ class UserRepository(ABC):
         ...
 
     @abstractmethod
+    async def count(self) -> int:
+        ...
+
+    @abstractmethod
     async def save(self, user: User) -> None:
         ...
 

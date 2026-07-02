@@ -12,12 +12,15 @@ import { useSessionDetail } from "@/hooks/use-session-detail";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { sessionApi } from "@/lib/api/session";
 import type {
+  ApprovalEventData,
+  ArtifactEventSummary,
   ClarifyAnswer,
   FileInfo,
   SessionCheckpoint,
   SessionMode,
   Skill,
   ToolEvent,
+  SSEEventData,
 } from "@/lib/api/types";
 import type { AttachmentFile, TimelineItem } from "@/lib/session-events";
 import { getLatestPlanFromEvents, getTaskObservationSummary } from "@/lib/session-events";
@@ -43,6 +46,38 @@ function findLatestTool(timeline: TimelineItem[]): ToolEvent | null {
         }
       }
     }
+  }
+  return null;
+}
+
+function getSessionArtifactsFromEvents(events: SSEEventData[]): ArtifactEventSummary[] {
+  const map = new Map<string, ArtifactEventSummary>();
+  for (const ev of events) {
+    if (ev.type !== "artifact") continue;
+    const data = ev.data;
+    const existing = map.get(data.artifact_id);
+    if (!existing || data.version >= existing.version) {
+      map.set(data.artifact_id, {
+        artifact_id: data.artifact_id,
+        kind: data.kind,
+        title: data.title,
+        status: data.status,
+        storage_ref: data.storage_ref,
+        version: data.version,
+      });
+    }
+  }
+  return Array.from(map.values());
+}
+
+function getLatestApprovalFromEvents(
+  events: SSEEventData[],
+  waiting: boolean,
+): ApprovalEventData | null {
+  if (!waiting) return null;
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const ev = events[i];
+    if (ev.type === "approval") return ev.data;
   }
   return null;
 }
@@ -82,6 +117,7 @@ export function useSessionDetailView({
   const [fileListOpen, setFileListOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<AttachmentFile | null>(null);
   const [previewTool, setPreviewTool] = useState<ToolEvent | null>(null);
+  const [artifactsPreviewDismissed, setArtifactsPreviewDismissed] = useState(false);
   const [vncOpen, setVncOpen] = useState(false);
   const [restoringCheckpoint, setRestoringCheckpoint] = useState(false);
   const [checkpointDialogOpen, setCheckpointDialogOpen] = useState(false);
@@ -101,11 +137,27 @@ export function useSessionDetailView({
     return map;
   }, [checkpoints]);
   const planSteps = useMemo(() => getLatestPlanFromEvents(events), [events]);
+  const sessionArtifacts = useMemo(() => getSessionArtifactsFromEvents(events), [events]);
+  const sessionArtifactsKey = useMemo(
+    () => sessionArtifacts.map((item) => `${item.artifact_id}:${item.version}`).join("|"),
+    [sessionArtifacts],
+  );
+  const latestApproval = useMemo(
+    () => getLatestApprovalFromEvents(events, session?.status === "waiting"),
+    [events, session?.status],
+  );
   const observationSummary = useMemo(
     () => getTaskObservationSummary(events, session?.status),
     [events, session?.status],
   );
-  const hasPreview = previewFile !== null || previewTool !== null;
+  const hasPreview =
+    previewFile !== null ||
+    previewTool !== null ||
+    (sessionArtifacts.length > 0 && !artifactsPreviewDismissed);
+
+  useEffect(() => {
+    setArtifactsPreviewDismissed(false);
+  }, [sessionArtifactsKey]);
 
   const resolvedPreviewTool = useMemo(() => {
     if (!previewTool) return null;
@@ -210,6 +262,19 @@ export function useSessionDetailView({
     [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth],
   );
 
+  const handleGateSend = useCallback(
+    async (message: string) => {
+      if (!requireAuth("登录后即可发送消息")) return;
+      await sendMessage(message, [], {
+        model_id: sessionModelId,
+        skill_id: sessionSkillId,
+        thinking_enabled: sessionThinkingEnabled,
+        mode,
+      });
+    },
+    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth],
+  );
+
   const handleThinkingChange = useCallback(
     async (enabled: boolean) => {
       await updateSessionConfig({ thinking_enabled: enabled });
@@ -252,6 +317,7 @@ export function useSessionDetailView({
   const handleClosePreview = useCallback(() => {
     setPreviewFile(null);
     setPreviewTool(null);
+    setArtifactsPreviewDismissed(true);
   }, []);
 
   const handleJumpToLatest = useCallback(() => {
@@ -354,6 +420,8 @@ export function useSessionDetailView({
     configEditable,
     timeline,
     planSteps,
+    sessionArtifacts,
+    latestApproval,
     observationSummary,
     fileListOpen,
     setFileListOpen,
@@ -364,6 +432,7 @@ export function useSessionDetailView({
     chatInputRef,
     scrollContainerRef,
     handleSend,
+    handleGateSend,
     handleClarifyAnswer,
     handleThinkingChange,
     handleModelChange,

@@ -16,6 +16,7 @@ from app.domain.models.app_config import AgentConfig
 from app.domain.models.event import (
     ToolEvent, ToolEventStatus, ErrorEvent, MessageEvent, BaseEvent,
     MessageDeltaEvent, ReasoningDeltaEvent, ToolArgsDeltaEvent, UsageEvent,
+    ApprovalEvent, WaitEvent,
 )
 from app.domain.models.memory import Memory
 from app.domain.models.message import Message, VisionAttachment
@@ -35,6 +36,11 @@ from app.domain.models.error_codes import MODEL_UNAVAILABLE, TASK_INFRA_FAILED
 from app.domain.utils.llm_retry import is_retriable_llm_error
 from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError
 from app.application.services.config_provider import get_runtime_config
+from app.domain.utils.hitl import (
+    TOOL_APPROVAL_PHASE,
+    merge_pending_metadata,
+    tool_matches_risk_list,
+)
 from app.infrastructure.external.llm.structured_output import schema_payload
 from pydantic import BaseModel
 
@@ -769,6 +775,73 @@ class BaseAgent(ABC):
             yield self._pending_usage_event
             self._pending_usage_event = None
 
+        async for event in self._run_tool_iteration_loop(
+                message,
+                format,
+                emit_deltas=emit_deltas,
+                response_schema=response_schema,
+        ):
+            yield event
+
+    async def continue_tool_iteration_loop(
+            self,
+            *,
+            inject_tool_messages: Optional[List[Dict[str, Any]]] = None,
+            format: Optional[str] = None,
+            emit_deltas: bool = True,
+            response_schema: Optional[Type[BaseModel]] = None,
+    ) -> AsyncGenerator[BaseEvent, None]:
+        """Resume ReAct loop after tool gate / takeover injects tool results."""
+        await self._ensure_memory()
+        fmt = format if format is not None else self._format
+
+        if inject_tool_messages:
+            self._memory.add_messages(inject_tool_messages)
+            llm_input = inject_tool_messages
+        else:
+            last = self._memory.get_last_message()
+            if last and last.get("role") == "tool":
+                llm_input = [last]
+            else:
+                message = self._last_llm_message or last
+                async for event in self._run_tool_iteration_loop(
+                        message,
+                        fmt,
+                        emit_deltas=emit_deltas,
+                        response_schema=response_schema,
+                ):
+                    yield event
+                return
+
+        async for event in self._invoke_llm(
+                llm_input,
+                format=None,
+                emit_deltas=emit_deltas,
+                response_schema=response_schema,
+        ):
+            yield event
+        message = self._last_llm_message
+        if self._pending_usage_event:
+            yield self._pending_usage_event
+            self._pending_usage_event = None
+        async for event in self._run_tool_iteration_loop(
+                message,
+                fmt,
+                emit_deltas=emit_deltas,
+                response_schema=response_schema,
+        ):
+            yield event
+
+    async def _run_tool_iteration_loop(
+            self,
+            message: Optional[Dict[str, Any]],
+            format: Optional[str],
+            *,
+            emit_deltas: bool,
+            response_schema: Optional[Type[BaseModel]],
+    ) -> AsyncGenerator[BaseEvent, None]:
+        format = format if format else self._format
+
         # 3.循环遍历直到最大迭代次数
         for _ in range(self._agent_config.max_iterations):
             # 4.如果LLM响应为空或无工具调用则表示LLM生成了文本回答，这时候就是最终答案
@@ -778,11 +851,11 @@ class BaseAgent(ABC):
             tool_calls = message.get("tool_calls") or []
             tool_messages: List[Dict[str, Any]] = []
 
-            async def _run_tool_call(tool_call: Dict[str, Any]) -> tuple[List[BaseEvent], List[Dict[str, Any]]]:
+            async def _run_tool_call(tool_call: Dict[str, Any]) -> tuple[List[BaseEvent], List[Dict[str, Any]], bool]:
                 events: List[BaseEvent] = []
                 msgs: List[Dict[str, Any]] = []
                 if not tool_call.get("function"):
-                    return events, msgs
+                    return events, msgs, False
 
                 tool_call_id = tool_call["id"] or str(uuid.uuid4())
                 function_name = normalize_tool_name(tool_call["function"]["name"])
@@ -810,7 +883,7 @@ class BaseAgent(ABC):
                         "_function_name": function_name,
                         "content": result.model_dump_json(),
                     })
-                    return events, msgs
+                    return events, msgs, False
 
                 try:
                     tool = self._resolve_tool(function_name)
@@ -836,9 +909,9 @@ class BaseAgent(ABC):
                         "_function_name": function_name,
                         "content": result.model_dump_json(),
                     })
-                    return events, msgs
+                    return events, msgs, False
 
-                async def _execute() -> tuple[List[BaseEvent], List[Dict[str, Any]]]:
+                async def _execute() -> tuple[List[BaseEvent], List[Dict[str, Any]], bool]:
                     inner_events: List[BaseEvent] = []
                     inner_msgs: List[Dict[str, Any]] = []
                     inner_events.append(ToolEvent(
@@ -848,6 +921,13 @@ class BaseAgent(ABC):
                         function_args=function_args,
                         status=ToolEventStatus.CALLING,
                     ))
+                    if await self._require_tool_approval_gate(
+                            function_name,
+                            function_args if isinstance(function_args, dict) else {},
+                            tool_call_id,
+                            inner_events,
+                    ):
+                        return inner_events, [], True
                     result = await self._invoke_tool(tool, function_name, function_args)
                     result = await self._offload_large_result(tool_call_id, function_name, result)
                     inner_events.append(ToolEvent(
@@ -877,7 +957,7 @@ class BaseAgent(ABC):
                         "content": tool_content,
                     })
                     inner_msgs.extend(extra_messages)
-                    return inner_events, inner_msgs
+                    return inner_events, inner_msgs, False
 
                 if tool.name in STATEFUL_TOOL_NAMES:
                     async with self._stateful_tool_lock:
@@ -885,7 +965,13 @@ class BaseAgent(ABC):
                 return await _execute()
 
             results = await asyncio.gather(*[_run_tool_call(tc) for tc in tool_calls])
-            for events, msgs in results:
+            if any(wait_flag for _, _, wait_flag in results):
+                for event_list, _, _ in results:
+                    for event in event_list:
+                        yield event
+                yield WaitEvent()
+                return
+            for events, msgs, _ in results:
                 for event in events:
                     yield event
                 tool_messages.extend(msgs)
@@ -918,3 +1004,46 @@ class BaseAgent(ABC):
             )
         else:
             yield ErrorEvent(error="Agent未能生成有效回复内容", code=MODEL_UNAVAILABLE)
+
+    async def _require_tool_approval_gate(
+            self,
+            function_name: str,
+            function_args: Dict[str, Any],
+            tool_call_id: str,
+            events: List[BaseEvent],
+    ) -> bool:
+        runtime = get_runtime_config()
+        if not runtime.feature_flags.enable_hitl_gates or not runtime.hitl.tool_gate_call_level_enabled:
+            return False
+        if not tool_matches_risk_list(function_name, runtime.hitl.tool_gate_risk_list):
+            return False
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(self._session_id)
+            if not session:
+                return False
+            meta = session.pending_metadata or {}
+            approved = meta.get("approved_tools") or []
+            if any(tool_matches_risk_list(function_name, [item]) for item in approved):
+                return False
+            await uow.session.set_pending_metadata(
+                self._session_id,
+                merge_pending_metadata(meta, {
+                    "pending_tool_call": {
+                        "tool_call_id": tool_call_id,
+                        "tool_name": function_name,
+                        "args": function_args,
+                    },
+                }),
+            )
+            await uow.session.set_pending_phase(self._session_id, TOOL_APPROVAL_PHASE)
+        events.append(ApprovalEvent(
+            approval_id=str(uuid.uuid4()),
+            kind="tool",
+            payload={
+                "tool_call_id": tool_call_id,
+                "tool_name": function_name,
+                "args": function_args,
+            },
+            options=["approve", "approve_same", "reject"],
+        ))
+        return True

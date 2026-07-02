@@ -157,3 +157,26 @@ feature_flags:
   enable_embeddings: true
   enable_image_generation: true
   enable_parallel_step_execution: false
+  enable_artifacts: true
+  enable_hitl_gates: true
+  enable_scheduled_jobs: true
+
+hitl:
+  plan_gate_enabled: true
+  tool_gate_task_level_enabled: true
+  tool_gate_call_level_enabled: false
+  tool_gate_risk_list:
+    - write_file
+    - replace_in_file
+    - shell_execute
+    - mcp_*
+    - a2a
+  takeover_timeout_minutes: 30
+
+scheduler:
+  enabled: true
+  poll_interval_seconds: 10.0
+  max_concurrent_jobs: 5
+  max_concurrent_jobs_per_job: 1
+  leader_lease_seconds: 30
+  webhook_idempotency_ttl_seconds: 600

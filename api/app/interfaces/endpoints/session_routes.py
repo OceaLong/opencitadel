@@ -873,3 +873,20 @@ async def vnc_websocket(
         # 其他错误记录日志并关闭websocket
         logger.error(f"WebSocket异常: {str(e)}")
         await websocket.close(code=1011, reason=f"WebSocket异常: {str(e)}")
+
+
+@router.patch("/{session_id}/pending-plan", response_model=Response[dict])
+async def update_pending_plan(
+        session_id: str,
+        body: dict = Body(...),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+):
+    async with get_uow() as uow:
+        session = await uow.session.get_by_id(session_id, scope=ctx.scope)
+        if not session:
+            raise NotFoundError("会话不存在")
+        meta = session.pending_metadata or {}
+        meta["edited_plan"] = body.get("plan", body)
+        await uow.session.set_pending_metadata(session_id, meta)
+        await uow.commit()
+    return Response.success({"updated": True})

@@ -13,6 +13,7 @@ class FlowStatus(str, Enum):
     IDLE = "idle"  # 空闲中
     CLARIFYING = "clarifying"  # 澄清中
     PLANNING = "planning"  # 规划中
+    AWAITING_PLAN_APPROVAL = "awaiting_plan_approval"  # 等待计划审批
     EXECUTING = "executing"  # 执行中
     UPDATING = "updating"  # 更新中
     SUMMARIZING = "summarizing"  # 汇总中

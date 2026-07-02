@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.domain.models.event import BaseEvent
 
-EVENT_SCHEMA_VERSION = 2
+EVENT_SCHEMA_VERSION = 3
 
 TRANSIENT_EVENT_TYPES = frozenset({
     "message_delta",
@@ -35,6 +35,8 @@ NON_TIMELINE_UI_EVENT_TYPES = frozenset({
     "done",
     "usage",
     "session_status",
+    "artifact",
+    "approval",
 })
 
 

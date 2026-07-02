@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 from pydantic import BaseModel, Field
 
@@ -46,6 +46,7 @@ class Session(BaseModel):
     team_id: Optional[str] = None  # 所属团队工作区
     mode: SessionMode = SessionMode.AGENT  # ask=快速问答, agent=规划改码
     pending_phase: Optional[str] = None  # 等待恢复的内部阶段
+    pending_metadata: Optional[Dict[str, Any]] = None  # 门控状态细节（Plan、tool call 等）
     status: SessionStatus = SessionStatus.PENDING  # 状态
     updated_at: datetime = Field(default_factory=datetime.now)  # 更新时间
     created_at: datetime = Field(default_factory=datetime.now)  # 创建时间

@@ -284,6 +284,36 @@ class DebugItemSSEEvent(BaseSSEEvent):
     data: DebugItemEventData
 
 
+class ArtifactEventData(BaseEventData):
+    """交付物事件数据"""
+    artifact_id: str
+    kind: Literal["doc", "web"] = "doc"
+    title: str = ""
+    status: Literal["draft", "updated", "final"] = "draft"
+    storage_ref: str = ""
+    version: int = 1
+
+
+class ArtifactSSEEvent(BaseSSEEvent):
+    """交付物流式事件"""
+    event: Literal["artifact"] = "artifact"
+    data: ArtifactEventData
+
+
+class ApprovalEventData(BaseEventData):
+    """审批门控事件数据"""
+    approval_id: str
+    kind: Literal["plan", "tool", "takeover"] = "plan"
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    options: List[str] = Field(default_factory=list)
+
+
+class ApprovalSSEEvent(BaseSSEEvent):
+    """审批门控流式事件"""
+    event: Literal["approval"] = "approval"
+    data: ApprovalEventData
+
+
 class MessageDeltaEventData(BaseEventData):
     """消息增量事件数据"""
     stream_id: str
@@ -343,6 +373,8 @@ AgentSSEEvent = Union[
     AssistantNoticeSSEEvent,
     SessionStatusSSEEvent,
     DebugItemSSEEvent,
+    ArtifactSSEEvent,
+    ApprovalSSEEvent,
 ]
 
 

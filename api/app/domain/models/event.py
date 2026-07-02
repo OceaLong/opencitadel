@@ -275,6 +275,26 @@ class UsageEvent(BaseEvent):
     delta_completion_tokens: int = 0
 
 
+class ArtifactEvent(BaseEvent):
+    """交付物事件"""
+    type: Literal["artifact"] = "artifact"
+    artifact_id: str
+    kind: Literal["doc", "web"] = "doc"
+    title: str = ""
+    status: Literal["draft", "updated", "final"] = "draft"
+    storage_ref: str = ""
+    version: int = 1
+
+
+class ApprovalEvent(BaseEvent):
+    """人类审批门控事件"""
+    type: Literal["approval"] = "approval"
+    approval_id: str
+    kind: Literal["plan", "tool", "takeover"] = "plan"
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    options: List[str] = Field(default_factory=list)
+
+
 # 定义应用事件类型声明
 Event = Annotated[
     Union[
@@ -294,6 +314,8 @@ Event = Annotated[
         WaitEvent,
         ErrorEvent,
         UsageEvent,
+        ArtifactEvent,
+        ApprovalEvent,
         DoneEvent,
     ],
     Field(discriminator="type"),

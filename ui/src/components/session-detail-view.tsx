@@ -5,6 +5,8 @@ import { Loader2 } from "lucide-react";
 import { ChatInput } from "@/components/chat-input";
 import { CheckpointRestoreDialog } from "@/components/checkpoint-restore-dialog";
 import { FilePreviewPanel } from "@/components/file-preview-panel";
+import { GateActionsBar } from "@/components/gate-actions-bar";
+import { PlanApprovalBar } from "@/components/plan-approval-bar";
 import { PlanPanel } from "@/components/plan-panel";
 import { SessionHeader } from "@/components/session-header";
 import { SessionModelPicker } from "@/components/session-model-picker";
@@ -53,6 +55,8 @@ export function SessionDetailView({
     configEditable,
     timeline,
     planSteps,
+    sessionArtifacts,
+    latestApproval,
     observationSummary,
     fileListOpen,
     setFileListOpen,
@@ -63,6 +67,7 @@ export function SessionDetailView({
     chatInputRef,
     scrollContainerRef,
     handleSend,
+    handleGateSend,
     handleThinkingChange,
     handleModelChange,
     handleSkillChange,
@@ -96,14 +101,16 @@ export function SessionDetailView({
       {previewFile && (
         <FilePreviewPanel file={previewFile} onClose={handleClosePreview} />
       )}
-      {resolvedPreviewTool && (
+      {resolvedPreviewTool || sessionArtifacts.length > 0 ? (
         <ToolPreviewPanel
+          sessionId={sessionId}
           tool={resolvedPreviewTool}
+          artifacts={sessionArtifacts}
           onClose={handleClosePreview}
           onJumpToLatest={handleJumpToLatest}
-          onOpenVNC={getToolKind(resolvedPreviewTool) === "browser" ? handleOpenVNC : undefined}
+          onOpenVNC={resolvedPreviewTool && getToolKind(resolvedPreviewTool) === "browser" ? handleOpenVNC : undefined}
         />
-      )}
+      ) : null}
     </>
   );
 
@@ -256,6 +263,23 @@ export function SessionDetailView({
                 </div>
               )}
               <PlanPanel className="mb-2" steps={planSteps} />
+              {latestApproval?.kind === "plan" && (
+                <PlanApprovalBar
+                  className="mb-2"
+                  sessionId={sessionId}
+                  approval={latestApproval}
+                  onSend={handleGateSend}
+                  disabled={streaming}
+                />
+              )}
+              {latestApproval && (latestApproval.kind === "tool" || latestApproval.kind === "takeover") && (
+                <GateActionsBar
+                  className="mb-2"
+                  approval={latestApproval}
+                  onSend={handleGateSend}
+                  disabled={streaming}
+                />
+              )}
               <ChatInput
                 ref={chatInputRef}
                 onSend={handleSend}

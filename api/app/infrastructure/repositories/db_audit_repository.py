@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.audit_log import AuditLog
@@ -44,3 +44,23 @@ class DBAuditRepository(AuditRepository):
         )
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
+
+    async def count(
+        self,
+        *,
+        actor_user_id: Optional[str] = None,
+        action: Optional[str] = None,
+        start_at: Optional[datetime] = None,
+        end_at: Optional[datetime] = None,
+    ) -> int:
+        stmt = select(func.count()).select_from(AuditLogORM)
+        if actor_user_id:
+            stmt = stmt.where(AuditLogORM.actor_user_id == actor_user_id)
+        if action:
+            stmt = stmt.where(AuditLogORM.action == action)
+        if start_at:
+            stmt = stmt.where(AuditLogORM.created_at >= start_at)
+        if end_at:
+            stmt = stmt.where(AuditLogORM.created_at <= end_at)
+        result = await self.db_session.execute(stmt)
+        return int(result.scalar_one() or 0)

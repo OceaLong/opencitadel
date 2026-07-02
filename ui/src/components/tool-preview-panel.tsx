@@ -1,14 +1,17 @@
 "use client";
 
-import { Bot, FileSearch, Globe, Maximize2, Monitor, Search, Terminal, Wrench } from "lucide-react";
+import { Bot, FileSearch, Globe, Maximize2, Monitor, Package, Search, Terminal, Wrench } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 
+import { ArtifactWorkbench } from "@/components/artifact-workbench";
 import { JumpToLatestButton, ToolPreviewContent } from "@/components/tool-preview-renderers";
 import type { ToolKind } from "@/components/tool-use/utils";
 import { getFriendlyToolLabel, getToolKind } from "@/components/tool-use/utils";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import type { ToolEvent } from "@/lib/api/types";
+import type { ArtifactEventSummary, ToolEvent } from "@/lib/api/types";
 import { formatDuration } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +20,10 @@ import { cn } from "@/lib/utils";
 /* ------------------------------------------------------------------ */
 
 export type ToolPreviewPanelProps = {
-  tool: ToolEvent;
+  sessionId: string;
+  tool?: ToolEvent | null;
+  artifacts?: ArtifactEventSummary[];
+  focusedArtifactId?: string | null;
   onClose: () => void;
   onJumpToLatest?: () => void;
   onOpenVNC?: () => void;
@@ -63,16 +69,13 @@ function formatArgs(args: Record<string, unknown>): string {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/*  Main Component                                                     */
-/* ------------------------------------------------------------------ */
-
-export function ToolPreviewPanel({
+function ToolPreviewHeader({
   tool,
   onClose,
-  onJumpToLatest,
-  onOpenVNC,
-}: ToolPreviewPanelProps) {
+}: {
+  tool: ToolEvent;
+  onClose: () => void;
+}) {
   const t = useTranslations("toolPreview");
   const kind = getToolKind(tool);
   const label = getFriendlyToolLabel(tool);
@@ -82,82 +85,199 @@ export function ToolPreviewPanel({
   const endedAt = formatToolTime(tool.ended_at);
 
   return (
-    <div className="bg-card flex h-full flex-col overflow-hidden rounded-2xl shadow-[var(--shadow-panel)]">
-      {/* Header */}
-      <div className="border-border/70 bg-muted/30 flex flex-shrink-0 flex-col gap-2 border-b px-4 py-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-foreground text-base font-semibold">{t("computerTitle")}</h2>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={onClose}
-            aria-label="关闭预览"
-            className="cursor-pointer"
+    <div className="border-border/70 bg-muted/30 flex flex-shrink-0 flex-col gap-2 border-b px-4 py-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-foreground text-base font-semibold">{t("computerTitle")}</h2>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onClose}
+          aria-label="关闭预览"
+          className="cursor-pointer"
+        >
+          <Maximize2 size={16} />
+        </Button>
+      </div>
+      <div className="text-muted-foreground flex items-center gap-2 text-sm">
+        <Monitor size={14} className="text-muted-foreground flex-shrink-0" />
+        <span>{t("usingTool")}</span>
+        <span className="text-foreground font-medium">{toolDesc}</span>
+      </div>
+      <div className="border-border/70 bg-muted/60 text-foreground inline-flex w-fit max-w-full items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs">
+        <ToolIcon size={14} className="text-muted-foreground flex-shrink-0" />
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        {tool.status && (
+          <span
+            className={cn(
+              "rounded-full border px-2 py-0.5 uppercase tracking-wide",
+              tool.status === "calling" &&
+                "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+              tool.status === "called" &&
+                "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+              tool.status === "error" &&
+                "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
+            )}
           >
-            <Maximize2 size={16} />
-          </Button>
+            {tool.status === "calling" ? "running" : tool.status}
+          </span>
+        )}
+        {tool.duration_ms != null && (
+          <span className="text-muted-foreground">耗时 {formatDuration(tool.duration_ms)}</span>
+        )}
+        {startedAt && (
+          <span className="text-muted-foreground">
+            {startedAt}
+            {endedAt ? ` - ${endedAt}` : ""}
+          </span>
+        )}
+      </div>
+      {tool.error && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-700 dark:text-red-300">
+          {tool.error}
         </div>
-        <div className="text-muted-foreground flex items-center gap-2 text-sm">
-          <Monitor size={14} className="text-muted-foreground flex-shrink-0" />
-          <span>{t("usingTool")}</span>
-          <span className="text-foreground font-medium">{toolDesc}</span>
-        </div>
-        <div className="border-border/70 bg-muted/60 text-foreground inline-flex w-fit max-w-full items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs">
-          <ToolIcon size={14} className="text-muted-foreground flex-shrink-0" />
-          <span className="truncate">{label}</span>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          {tool.status && (
-            <span
-              className={cn(
-                "rounded-full border px-2 py-0.5 uppercase tracking-wide",
-                tool.status === "calling" &&
-                  "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-                tool.status === "called" &&
-                  "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-                tool.status === "error" &&
-                  "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
-              )}
+      )}
+      {tool.args && Object.keys(tool.args).length > 0 && (
+        <details className="border-border/70 bg-background/60 rounded-lg border px-2.5 py-1.5 text-xs">
+          <summary className="text-muted-foreground cursor-pointer select-none">查看参数</summary>
+          <pre className="text-muted-foreground mt-2 max-h-40 overflow-auto font-mono whitespace-pre-wrap">
+            {formatArgs(tool.args)}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main Component                                                     */
+/* ------------------------------------------------------------------ */
+
+export function ToolPreviewPanel({
+  sessionId,
+  tool,
+  artifacts = [],
+  focusedArtifactId,
+  onClose,
+  onJumpToLatest,
+  onOpenVNC,
+}: ToolPreviewPanelProps) {
+  const hasArtifacts = artifacts.length > 0;
+  const hasTool = !!tool;
+  const defaultTab = hasArtifacts && !hasTool ? "artifacts" : hasTool ? "tool" : "artifacts";
+
+  const [activeTab, setActiveTab] = useState<"artifacts" | "tool">(defaultTab);
+
+  useEffect(() => {
+    if (focusedArtifactId) {
+      setActiveTab("artifacts");
+    }
+  }, [focusedArtifactId]);
+
+  useEffect(() => {
+    if (!hasTool && hasArtifacts) {
+      setActiveTab("artifacts");
+    } else if (hasTool && !hasArtifacts) {
+      setActiveTab("tool");
+    }
+  }, [hasArtifacts, hasTool]);
+
+  const showTabs = hasArtifacts && hasTool;
+
+  const toolKind = useMemo(() => (tool ? getToolKind(tool) : null), [tool]);
+
+  if (!hasArtifacts && !hasTool) {
+    return null;
+  }
+
+  return (
+    <div className="bg-card flex h-full flex-col overflow-hidden rounded-2xl shadow-[var(--shadow-panel)]">
+      {showTabs ? (
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as "artifacts" | "tool")}
+          className="flex h-full flex-col gap-0"
+        >
+          <div className="border-border/70 flex flex-shrink-0 items-center justify-between border-b px-4 py-2">
+            <TabsList variant="line">
+              <TabsTrigger value="artifacts" className="gap-1.5">
+                <Package className="size-3.5" />
+                交付物
+              </TabsTrigger>
+              <TabsTrigger value="tool" className="gap-1.5">
+                <Monitor className="size-3.5" />
+                工具预览
+              </TabsTrigger>
+            </TabsList>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onClose}
+              aria-label="关闭预览"
+              className="cursor-pointer"
             >
-              {tool.status === "calling" ? "running" : tool.status}
-            </span>
-          )}
-          {tool.duration_ms != null && (
-            <span className="text-muted-foreground">耗时 {formatDuration(tool.duration_ms)}</span>
-          )}
-          {startedAt && (
-            <span className="text-muted-foreground">
-              {startedAt}
-              {endedAt ? ` - ${endedAt}` : ""}
-            </span>
-          )}
-        </div>
-        {tool.error && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-700 dark:text-red-300">
-            {tool.error}
+              <Maximize2 size={16} />
+            </Button>
           </div>
-        )}
-        {tool.args && Object.keys(tool.args).length > 0 && (
-          <details className="border-border/70 bg-background/60 rounded-lg border px-2.5 py-1.5 text-xs">
-            <summary className="text-muted-foreground cursor-pointer select-none">查看参数</summary>
-            <pre className="text-muted-foreground mt-2 max-h-40 overflow-auto font-mono whitespace-pre-wrap">
-              {formatArgs(tool.args)}
-            </pre>
-          </details>
-        )}
-      </div>
-
-      {/* Content with overlaid jump button */}
-      <div className="relative flex-1 overflow-hidden">
-        <ToolPreviewContent kind={kind} tool={tool} onOpenVNC={onOpenVNC} />
-
-        {/* "跳转实时" overlaid at bottom-center */}
-        {onJumpToLatest && (
-          <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
-            <JumpToLatestButton onClick={onJumpToLatest} />
+          <TabsContent value="artifacts" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden">
+            <ArtifactWorkbench
+              sessionId={sessionId}
+              artifacts={artifacts}
+              focusedArtifactId={focusedArtifactId}
+              className="flex-1"
+            />
+          </TabsContent>
+          <TabsContent value="tool" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden">
+            {tool && toolKind && (
+              <>
+                <ToolPreviewHeader tool={tool} onClose={onClose} />
+                <div className="relative flex-1 overflow-hidden">
+                  <ToolPreviewContent kind={toolKind} tool={tool} onOpenVNC={onOpenVNC} />
+                  {onJumpToLatest && (
+                    <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
+                      <JumpToLatestButton onClick={onJumpToLatest} />
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </TabsContent>
+        </Tabs>
+      ) : hasArtifacts ? (
+        <>
+          <div className="border-border/70 flex flex-shrink-0 items-center justify-between border-b px-4 py-3">
+            <h2 className="text-foreground flex items-center gap-2 text-base font-semibold">
+              <Package className="size-4" />
+              交付物
+            </h2>
+            <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="关闭预览">
+              <Maximize2 size={16} />
+            </Button>
           </div>
-        )}
-      </div>
+          <ArtifactWorkbench
+            sessionId={sessionId}
+            artifacts={artifacts}
+            focusedArtifactId={focusedArtifactId}
+            className="flex-1"
+          />
+        </>
+      ) : (
+        tool &&
+        toolKind && (
+          <>
+            <ToolPreviewHeader tool={tool} onClose={onClose} />
+            <div className="relative flex-1 overflow-hidden">
+              <ToolPreviewContent kind={toolKind} tool={tool} onOpenVNC={onOpenVNC} />
+              {onJumpToLatest && (
+                <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
+                  <JumpToLatestButton onClick={onJumpToLatest} />
+                </div>
+              )}
+            </div>
+          </>
+        )
+      )}
     </div>
   );
 }

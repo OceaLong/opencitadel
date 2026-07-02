@@ -508,6 +508,26 @@ class DBSessionRepository(SessionRepository):
         if result.rowcount == 0:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 
+    async def set_pending_metadata(self, session_id: str, metadata: Optional[Dict[str, Any]]) -> None:
+        """更新会话门控状态元数据"""
+        stmt = (
+            update(SessionModel)
+            .where(SessionModel.id == session_id)
+            .values(pending_metadata=metadata)
+        )
+        result = await self.db_session.execute(stmt)
+        if result.rowcount == 0:
+            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
+
+    async def get_pending_metadata(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """读取会话门控状态元数据"""
+        stmt = select(SessionModel.pending_metadata).where(SessionModel.id == session_id)
+        result = await self.db_session.execute(stmt)
+        row = result.scalar_one_or_none()
+        if row is None:
+            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
+        return row
+
     async def update_unread_message_count(self, session_id: str, count: int) -> None:
         """更新会话的未读消息数"""
         # 1.构建更新语句并执行

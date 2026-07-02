@@ -24,3 +24,14 @@ class AuditRepository(ABC):
         offset: int = 0,
     ) -> List[AuditLog]:
         ...
+
+    @abstractmethod
+    async def count(
+        self,
+        *,
+        actor_user_id: Optional[str] = None,
+        action: Optional[str] = None,
+        start_at: Optional[datetime] = None,
+        end_at: Optional[datetime] = None,
+    ) -> int:
+        ...

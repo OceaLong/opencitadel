@@ -194,6 +194,30 @@ class FeatureFlagsConfig(BaseModel):
     enable_embeddings: bool = True
     enable_image_generation: bool = True
     enable_parallel_step_execution: bool = False
+    enable_artifacts: bool = True
+    enable_hitl_gates: bool = True
+    enable_scheduled_jobs: bool = True
+
+
+class HitlConfig(BaseModel):
+    """Human-in-the-loop gate configuration."""
+    plan_gate_enabled: bool = True
+    tool_gate_task_level_enabled: bool = True
+    tool_gate_call_level_enabled: bool = False
+    tool_gate_risk_list: List[str] = Field(default_factory=lambda: [
+        "write_file", "replace_in_file", "shell_execute", "mcp_*", "a2a",
+    ])
+    takeover_timeout_minutes: int = 30
+
+
+class SchedulerConfig(BaseModel):
+    """Scheduled job runner configuration."""
+    enabled: bool = True
+    poll_interval_seconds: float = 10.0
+    max_concurrent_jobs: int = 5
+    max_concurrent_jobs_per_job: int = 1
+    leader_lease_seconds: int = 30
+    webhook_idempotency_ttl_seconds: int = 600
 
 
 class KBChunkConfig(BaseModel):
@@ -265,6 +289,8 @@ class AppConfig(BaseModel):
     a2a_config: A2AConfig = Field(default_factory=A2AConfig)
     model_resilience: ModelResilienceConfig = Field(default_factory=ModelResilienceConfig)
     feature_flags: FeatureFlagsConfig = Field(default_factory=FeatureFlagsConfig)
+    hitl: HitlConfig = Field(default_factory=HitlConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     knowledge_base: KnowledgeBaseConfig = Field(default_factory=KnowledgeBaseConfig)
 
     model_config = ConfigDict(extra="allow")

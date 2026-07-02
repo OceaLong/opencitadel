@@ -76,6 +76,7 @@ class AgentTaskRunner(TaskRunner):
             long_term_memory_block: str = "",
             extra_tools: Optional[list] = None,
             on_complete_callback: Optional[Callable] = None,
+            on_session_terminal_callback: Optional[Callable] = None,
             model_id: Optional[str] = None,
             checkpoint_service: Optional[CheckpointService] = None,
             mode: SessionMode = SessionMode.AGENT,
@@ -97,6 +98,7 @@ class AgentTaskRunner(TaskRunner):
         self._file_storage = file_storage
         self._browser = browser
         self._on_complete_callback = on_complete_callback
+        self._on_session_terminal_callback = on_session_terminal_callback
         self._runtime_settings = runtime_settings
         self._session_state = session_state_port
         self._task_state_port = task_state_port
@@ -211,6 +213,11 @@ class AgentTaskRunner(TaskRunner):
         event = await self._session_state.transition(self._session_id, status, emit_event=True)
         if event:
             await self._put_and_add_event(task, event)
+        if status != SessionStatus.RUNNING and self._on_session_terminal_callback:
+            try:
+                await self._on_session_terminal_callback(self._session_id, status)
+            except Exception as exc:
+                logger.warning("会话终态回调失败 session=%s: %s", self._session_id, exc)
 
     async def _is_cancelled(self, task: Task) -> bool:
         return await self._task_state_port.is_cancelled(task.id)

@@ -25,6 +25,9 @@ from .db_session_repository import DBSessionRepository
 from .db_service_api_key_repository import DBServiceApiKeyRepository
 from .db_skill_repository import DBSkillRepository
 from .db_team_repository import DBTeamRepository
+from .db_artifact_repository import DBArtifactRepository
+from .db_scheduled_job_repository import DBScheduledJobRepository
+from .db_notification_repository import DBNotificationRepository
 from .db_user_repository import DBUserRepository
 
 logger = logging.getLogger(__name__)
@@ -75,6 +78,9 @@ class DBUnitOfWork(IUnitOfWork):
         self.team = DBTeamRepository(db_session=self.db_session)
         self.llm_token_usage = DBLLMTokenUsageRepository(db_session=self.db_session)
         self.user = DBUserRepository(db_session=self.db_session)
+        self.artifact = DBArtifactRepository(db_session=self.db_session)
+        self.scheduled_job = DBScheduledJobRepository(db_session=self.db_session)
+        self.notification = DBNotificationRepository(db_session=self.db_session)
 
         return self
 

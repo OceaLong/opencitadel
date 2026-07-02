@@ -3,6 +3,7 @@
 import logging
 from typing import AsyncGenerator, Optional, Callable, List
 import asyncio
+import uuid
 
 from app.application.services.config_provider import get_runtime_config
 from app.domain.external.browser import Browser
@@ -13,6 +14,7 @@ from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
 from app.domain.models.app_config import AgentConfig
 from app.domain.models.skill import Skill
+from app.application.services.config_provider import get_runtime_config
 from app.domain.models.event import (
     BaseEvent,
     ClarifyEvent,
@@ -21,6 +23,7 @@ from app.domain.models.event import (
     TitleEvent,
     AssistantNoticeEvent,
     DebugItemEvent,
+    ApprovalEvent,
 )
 from app.domain.models.event import ErrorEvent, DoneEvent, WaitEvent
 from app.domain.models.message import Message
@@ -39,6 +42,12 @@ from app.domain.external.observability import ObservabilityPort
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
 from .base import BaseFlow, FlowStatus
 from ...repositories.uow import IUnitOfWork
+from ...utils.hitl import (
+    PLAN_APPROVAL_PHASE,
+    derive_risk_tools_from_plan,
+    merge_pending_metadata,
+    parse_gate_action,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +246,8 @@ class PlannerReActFlow(BaseFlow):
         #    - Agent在等待人类输入，这时候人类输入了
         #   这时候均需要处理历史消息列表，避免AI(工具调用消息)后直接接上人类消息
         clarify_resume = session.pending_phase == CLARIFY_PENDING_PHASE
-        needs_event_history = session.status != SessionStatus.PENDING and not clarify_resume
+        plan_approval_resume = session.pending_phase == PLAN_APPROVAL_PHASE
+        needs_event_history = session.status != SessionStatus.PENDING and not clarify_resume and not plan_approval_resume
         if needs_event_history:
             async with self._uow_factory() as uow:
                 event_records = await uow.session.list_events(self._session_id, limit=200)
@@ -258,14 +268,37 @@ class PlannerReActFlow(BaseFlow):
             self.status = FlowStatus.CLARIFYING
 
         # 4.如果会话状态等于执行期等待人类输入，则恢复执行中
-        if session.status == SessionStatus.WAITING and not clarify_resume:
+        if session.status == SessionStatus.WAITING and not clarify_resume and not plan_approval_resume:
             logger.debug(f"会话[{self._session_id}]处于等待状态并传递了新消息")
             self.status = FlowStatus.EXECUTING
 
-        # 5.更新会话状态为运行中（由 AgentTaskRunner 统一管理，此处不再重复写入）
+        if plan_approval_resume:
+            action, feedback = parse_gate_action(message.message)
+            if action == "unknown":
+                yield WaitEvent()
+                return
+            metadata = session.pending_metadata or {}
+            if action in {"approve", "approve_with_edits"}:
+                plan_data = metadata.get("edited_plan") if action == "approve_with_edits" else metadata.get("plan")
+                if plan_data:
+                    self.plan = Plan.model_validate(plan_data)
+                await self._set_pending_phase(None)
+                await self._set_pending_metadata(None)
+                self.status = FlowStatus.EXECUTING
+            else:
+                await self._set_pending_phase(None)
+                await self._set_pending_metadata(None)
+                reject_msg = feedback or message.message
+                message = Message(
+                    message=reject_msg,
+                    attachments=message.attachments,
+                    vision_attachments=message.vision_attachments,
+                )
+                self.status = FlowStatus.CLARIFYING
 
-        # 6.获取当前会话中最新事件
-        self.plan = session.get_latest_plan()
+        # 6.获取当前会话中最新事件（计划审批恢复时保留已批准计划）
+        if not (plan_approval_resume and self.plan and self.status == FlowStatus.EXECUTING):
+            self.plan = session.get_latest_plan()
         logger.info(f"Planner&ReAct流接收消息: {message.message[:50]}...")
 
         # 7.定义当前正在执行的子步骤
@@ -340,6 +373,35 @@ class PlannerReActFlow(BaseFlow):
                 # 15.计划创建完成，更新流状态为执行中
                 logger.info(f"压缩{self.planner.name} Agent记忆/上下文")
                 await self.planner.summarize_and_compact()
+
+                runtime = get_runtime_config()
+                hitl = runtime.hitl
+                if (
+                    runtime.feature_flags.enable_hitl_gates
+                    and hitl.plan_gate_enabled
+                    and self.plan
+                    and len(self.plan.steps) > 0
+                ):
+                    risk_tools = derive_risk_tools_from_plan(self.plan.steps, hitl.tool_gate_risk_list)
+                    metadata = merge_pending_metadata(None, {
+                        "plan": self.plan.model_dump(mode="json"),
+                        "risk_tools": risk_tools,
+                        "approved_tools": risk_tools if hitl.tool_gate_task_level_enabled else [],
+                    })
+                    await self._set_pending_metadata(metadata)
+                    await self._set_pending_phase(PLAN_APPROVAL_PHASE)
+                    yield ApprovalEvent(
+                        approval_id=str(uuid.uuid4()),
+                        kind="plan",
+                        payload={
+                            "plan": self.plan.model_dump(mode="json"),
+                            "risk_tools": risk_tools,
+                        },
+                        options=["approve", "approve_with_edits", "reject"],
+                    )
+                    yield WaitEvent()
+                    return
+
                 logger.info(f"Planner&ReAct流状态从{FlowStatus.PLANNING}变成{FlowStatus.EXECUTING}")
                 self.status = FlowStatus.EXECUTING
 
@@ -435,3 +497,7 @@ class PlannerReActFlow(BaseFlow):
         """持久化等待恢复阶段，用于区分澄清等待和执行期等待。"""
         async with self._uow_factory() as uow:
             await uow.session.set_pending_phase(self._session_id, phase)
+
+    async def _set_pending_metadata(self, metadata: Optional[dict]) -> None:
+        async with self._uow_factory() as uow:
+            await uow.session.set_pending_metadata(self._session_id, metadata)

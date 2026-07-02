@@ -554,6 +554,23 @@ async def main() -> None:
     if dlq_count:
         logger.warning("Worker 启动检测到 DLQ 积压: count=%s", dlq_count)
     sandbox_cleanup_task = asyncio.create_task(_sandbox_cleanup_loop())
+    from app.infrastructure.external.scheduler.job_scheduler import run_scheduler_loop
+    from app.application.services.scheduled_job_service import ScheduledJobService
+    from app.application.services.notification_service import NotificationService
+
+    notification_service = NotificationService(uow_factory=get_uow)
+    app_config = await container.config_provider().get()
+    scheduler_stop = asyncio.Event()
+    scheduler_task = asyncio.create_task(
+        run_scheduler_loop(
+            get_uow,
+            ScheduledJobService(uow_factory=get_uow),
+            notification_service=notification_service,
+            mcp_pool=container.mcp_connection_pool(),
+            app_config=app_config,
+            stop_event=scheduler_stop,
+        )
+    )
     worker = AgentWorker(
         runner_factory=await container.task_runner_factory(),
         checkpoint_service=await container.checkpoint_service(),
@@ -573,6 +590,12 @@ async def main() -> None:
     try:
         await worker.start()
     finally:
+        scheduler_stop.set()
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
         sandbox_cleanup_task.cancel()
         try:
             await sandbox_cleanup_task

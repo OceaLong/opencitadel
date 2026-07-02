@@ -307,6 +307,7 @@ export function CodebaseWorkspace({ codebaseId }: CodebaseWorkspaceProps) {
       {previewFile && <FilePreviewPanel file={previewFile} onClose={handleClosePreview} />}
       {resolvedPreviewTool && (
         <ToolPreviewPanel
+          sessionId={sessionId ?? ""}
           tool={resolvedPreviewTool}
           onClose={handleClosePreview}
           onJumpToLatest={handleJumpToLatest}

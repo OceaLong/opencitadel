@@ -31,6 +31,9 @@ from app.application.services.service_api_key_service import ServiceApiKeyServic
 from app.application.services.skill_service import SkillService
 from app.application.services.team_service import TeamService
 from app.application.services.usage_stats_service import UsageStatsService
+from app.application.services.artifact_service import ArtifactService
+from app.application.services.notification_service import NotificationService
+from app.application.services.scheduled_job_service import ScheduledJobService
 from app.application.services.task_runner_factory import TaskRunnerFactory
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.checkpoint_service import CheckpointService
@@ -345,6 +348,9 @@ class BaseContainer(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         file_storage=file_storage,
     )
+    artifact_service = providers.Singleton(ArtifactService, uow_factory=uow_factory)
+    notification_service = providers.Singleton(NotificationService, uow_factory=uow_factory)
+    scheduled_job_service = providers.Singleton(ScheduledJobService, uow_factory=uow_factory)
 
     task_runner_factory = providers.Singleton(
         TaskRunnerFactory,
@@ -364,6 +370,7 @@ class BaseContainer(containers.DeclarativeContainer):
         session_state_factory=session_state_factory,
         mcp_connection_pool=mcp_connection_pool,
         a2a_connection_pool=a2a_connection_pool,
+        artifact_service=artifact_service,
     )
 
     agent_service = providers.Singleton(

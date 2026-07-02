@@ -234,6 +234,19 @@ flowchart TD
 
 Team creators default to `OWNER`; regular members can access team resources but cannot manage invitations.
 
+### Artifacts and trusted delivery
+
+- Private artifact routes require `WorkspaceContext` scope: list/get/content/share verify session ownership via `OwnerScope`.
+- Cross-scope artifact access returns **404** (no existence leak).
+- HTML artifacts are sanitized server-side (strip `<script>` and inline event handlers) before preview.
+- UI renders HTML in iframe with `sandbox="allow-scripts"` only — **no** `allow-same-origin` (prevents same-origin script escalation).
+
+### Webhook automation
+
+- `POST /api/webhooks/{token}` requires `X-Webhook-Signature: HMAC-SHA256(body, webhook_secret)`.
+- Webhook secrets are Fernet-encrypted at rest (`API_KEY_SECRET`); plaintext shown once on create/rotate.
+- Idempotency keys are scoped per job token: `webhook:idem:{token}:{sha256(body)}`.
+
 ### Rate Limiting and CORS
 
 Configured in `api/config.yaml`:

@@ -77,6 +77,14 @@ class SessionRepository(Protocol):
         """更新会话等待恢复的内部阶段"""
         ...
 
+    async def set_pending_metadata(self, session_id: str, metadata: Optional[Dict[str, Any]]) -> None:
+        """更新会话门控状态元数据"""
+        ...
+
+    async def get_pending_metadata(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """读取会话门控状态元数据"""
+        ...
+
     async def update_session_config(
             self,
             session_id: str,
