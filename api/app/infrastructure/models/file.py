@@ -44,7 +44,7 @@ class FileModel(Base):
         String(255),
         nullable=False,
         server_default=text("''::character varying"),
-    )  # 腾讯云cos对象存储中的文件路径
+    )  # 对象存储中的文件路径
     extension: Mapped[str] = mapped_column(
         String(255),
         nullable=False,

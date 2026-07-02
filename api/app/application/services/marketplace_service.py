@@ -13,6 +13,7 @@ from typing import Any, AsyncGenerator, Dict, Optional
 from fastapi import UploadFile
 
 from app.application.services.file_service import FileService
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.external.file_storage import FileUploadPayload
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.marketplace.catalog import (
@@ -334,6 +335,7 @@ class MarketplaceService:
             self,
             file_id: str,
             target_format: str,
+            scope: Optional[OwnerScope] = None,
     ) -> dict:
         file_bytes, file_info = await self._load_file_bytes(file_id)
         source_ext = self._resolve_extension(file_info.filename or "", file_info.mime_type or "")
@@ -344,7 +346,7 @@ class MarketplaceService:
             target_format,
             filename=file_info.filename or "",
         )
-        stored = await self._store_output_bytes(out_bytes, out_filename, out_mime)
+        stored = await self._store_output_bytes(out_bytes, out_filename, out_mime, scope=scope)
         return {
             "result_file_id": stored.id,
             "result_filename": stored.filename,
@@ -363,6 +365,7 @@ class MarketplaceService:
             opacity: float = 0.3,
             rotation: float = 45.0,
             tile: bool = True,
+            scope: Optional[OwnerScope] = None,
     ) -> dict:
         file_bytes, file_info = await self._load_file_bytes(file_id)
         mime_type = file_info.mime_type or "application/octet-stream"
@@ -414,7 +417,7 @@ class MarketplaceService:
         else:
             raise ValueError("仅支持图片或 PDF 文件加水印")
 
-        stored = await self._store_output_bytes(out_bytes, out_filename, out_mime)
+        stored = await self._store_output_bytes(out_bytes, out_filename, out_mime, scope=scope)
         return {
             "result_file_id": stored.id,
             "result_filename": stored.filename,
@@ -526,6 +529,7 @@ class MarketplaceService:
             watermark_text: Optional[str] = None,
             mode: str = "auto",
             model_id: Optional[str] = None,
+            scope: Optional[OwnerScope] = None,
     ) -> dict:
         file_bytes, file_info = await self._load_file_bytes(file_id)
         mime_type = file_info.mime_type or "application/octet-stream"
@@ -562,6 +566,8 @@ class MarketplaceService:
                     model,
                     self._file_service.file_storage,
                     mime_type=mime_type,
+                    owner_user_id=scope.user_id if scope else None,
+                    team_id=scope.team_id if scope and scope.type == OwnerScopeType.TEAM else None,
                 )
                 if edited:
                     out_bytes, _ = edited
@@ -591,7 +597,7 @@ class MarketplaceService:
         else:
             raise ValueError("仅支持图片或 PDF 文件去水印")
 
-        stored = await self._store_output_bytes(out_bytes, out_filename, out_mime)
+        stored = await self._store_output_bytes(out_bytes, out_filename, out_mime, scope=scope)
         return {
             "result_file_id": stored.id,
             "result_filename": stored.filename,
@@ -599,13 +605,23 @@ class MarketplaceService:
             "download_ready": True,
         }
 
-    async def _store_output_bytes(self, data: bytes, filename: str, mime_type: str):
+    async def _store_output_bytes(
+            self,
+            data: bytes,
+            filename: str,
+            mime_type: str,
+            scope: Optional[OwnerScope] = None,
+    ):
         stream = io.BytesIO(data)
+        owner_user_id = scope.user_id if scope else None
+        team_id = scope.team_id if scope and scope.type == OwnerScopeType.TEAM else None
         upload = FileUploadPayload(
             file=stream,
             filename=filename,
             size=len(data),
             content_type=mime_type,
+            owner_user_id=owner_user_id,
+            team_id=team_id,
         )
         return await self._file_service.file_storage.upload_file(upload)
 

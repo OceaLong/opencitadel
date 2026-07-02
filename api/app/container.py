@@ -6,6 +6,8 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
+from contextlib import asynccontextmanager
+
 from dependency_injector import containers, providers
 
 from app.application.services.a2a_server_service import A2AServerService
@@ -44,8 +46,9 @@ from app.infrastructure.adapters.domain_ports import (
     RedisSessionListNotifierAdapter,
     RedisTaskStateAdapter,
 )
-from app.infrastructure.adapters.object_storage import CosObjectStorageAdapter
+from app.infrastructure.adapters.object_storage import CosObjectStorageAdapter, MinioObjectStorageAdapter
 from app.infrastructure.external.file_storage.cos_file_storage import CosFileStorage
+from app.infrastructure.external.file_storage.minio_file_storage import MinioFileStorage
 from app.infrastructure.external.json_parser.repair_json_parser import RepairJSONParser
 from app.infrastructure.external.sandbox.sandbox_driver import get_sandbox_class
 from app.infrastructure.external.search.bing_search import BingSearchEngine
@@ -58,7 +61,7 @@ from app.infrastructure.security.jwt_service import JwtService
 from app.infrastructure.security.oauth_clients import OAuthClients
 from app.infrastructure.security.password_hasher import PasswordHasher
 from app.infrastructure.security.service_api_key import ServiceApiKeyHasher
-from app.infrastructure.storage.cos import Cos, get_cos
+from app.infrastructure.storage.factory import create_storage_client, set_active_storage_client
 from app.infrastructure.storage.postgres import Postgres, get_postgres
 from app.infrastructure.storage.redis import RedisClient, get_redis
 from core.config import Settings, get_settings
@@ -109,16 +112,18 @@ async def _shutdown_redis(redis: RedisClient) -> None:
     await redis.shutdown()
 
 
-async def _init_cos(cos: Cos) -> Cos:
-    await cos.init()
-    return cos
+@asynccontextmanager
+async def _storage_client_resource(settings: Settings):
+    client = await create_storage_client(settings)
+    set_active_storage_client(client)
+    try:
+        yield client
+    finally:
+        await client.shutdown()
+        set_active_storage_client(None)
 
 
-async def _shutdown_cos(cos: Cos) -> None:
-    await cos.shutdown()
-
-
-async def _sync_event_seq(_cos: Cos) -> None:
+async def _sync_event_seq(_storage_client) -> None:
     from app.infrastructure.external.event_seq_allocator import sync_global_event_seq
 
     await sync_global_event_seq()
@@ -173,6 +178,28 @@ async def _stop_config_listener(_: None) -> None:
     await stop_config_invalidate_listener()
 
 
+def _create_file_storage(storage_client, settings: Settings, uow_factory):
+    provider = (settings.storage_provider or "cos").strip().lower()
+    if provider == "minio":
+        return MinioFileStorage(
+            bucket=settings.minio_bucket,
+            minio=storage_client,
+            uow_factory=uow_factory,
+        )
+    return CosFileStorage(
+        bucket=settings.cos_bucket,
+        cos=storage_client,
+        uow_factory=uow_factory,
+    )
+
+
+def _create_object_storage(storage_client, settings: Settings):
+    provider = (settings.storage_provider or "cos").strip().lower()
+    if provider == "minio":
+        return MinioObjectStorageAdapter(minio=storage_client)
+    return CosObjectStorageAdapter(cos=storage_client)
+
+
 class BaseContainer(containers.DeclarativeContainer):
     """Shared infrastructure and application services for API and Worker."""
 
@@ -180,12 +207,11 @@ class BaseContainer(containers.DeclarativeContainer):
 
     postgres_client = providers.Singleton(get_postgres)
     redis_client = providers.Singleton(get_redis)
-    cos_client = providers.Singleton(get_cos)
 
     postgres = providers.Resource(_init_postgres, postgres=postgres_client)
     redis = providers.Resource(_init_redis, redis=redis_client)
-    cos = providers.Resource(_init_cos, cos=cos_client)
-    event_seq_sync = providers.Resource(_sync_event_seq, _cos=cos)
+    storage_client = providers.Resource(_storage_client_resource, settings=config)
+    event_seq_sync = providers.Resource(_sync_event_seq, _storage_client=storage_client)
 
     app_config_provider = providers.Singleton(create_app_config_provider)
     app_config_warmup = providers.Resource(
@@ -236,11 +262,15 @@ class BaseContainer(containers.DeclarativeContainer):
     json_parser = providers.Singleton(RepairJSONParser)
     search_engine = providers.Singleton(BingSearchEngine)
 
-    object_storage = providers.Factory(CosObjectStorageAdapter, cos=cos)
+    object_storage = providers.Singleton(
+        _create_object_storage,
+        storage_client=storage_client,
+        settings=config,
+    )
     file_storage = providers.Singleton(
-        CosFileStorage,
-        bucket=config.provided.cos_bucket,
-        cos=cos,
+        _create_file_storage,
+        storage_client=storage_client,
+        settings=config,
         uow_factory=uow_factory,
     )
 

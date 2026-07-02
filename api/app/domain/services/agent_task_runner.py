@@ -82,6 +82,8 @@ class AgentTaskRunner(TaskRunner):
             codebase_id: Optional[str] = None,
             knowledge_base_id: Optional[str] = None,
             stateful_tool_lock: Optional[asyncio.Lock] = None,
+            owner_user_id: Optional[str] = None,
+            team_id: Optional[str] = None,
     ) -> None:
         """构造函数，完成Agent任务运行器的创建"""
         self._uow_factory = uow_factory
@@ -110,6 +112,8 @@ class AgentTaskRunner(TaskRunner):
             uow_factory=uow_factory,
             sandbox=sandbox,
             file_storage=file_storage,
+            owner_user_id=owner_user_id,
+            team_id=team_id,
         )
         self._sandbox_lifecycle = SandboxLifecycleCoordinator(
             session_id=session_id,
@@ -130,6 +134,8 @@ class AgentTaskRunner(TaskRunner):
             file_storage=file_storage,
             sync_file_to_storage=self._attachment_sync.sync_file_to_storage,
             get_stream_size=AgentAttachmentSyncer.get_stream_size,
+            owner_user_id=owner_user_id,
+            team_id=team_id,
         )
         self._mode = mode
         self._codebase_id = codebase_id

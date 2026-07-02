@@ -21,7 +21,7 @@ router = APIRouter(prefix="/files", tags=["文件模块"])
     path="",
     response_model=Response[FileInfo],
     summary="对话文件上传接口",
-    description="在对话接口中，将文件上传到cos对象存储和沙箱中"
+    description="在对话接口中，将文件上传到对象存储和沙箱中"
 )
 async def upload_file(
         file: UploadFile = File(...),
@@ -73,11 +73,13 @@ async def download_file(
     encoded_filename = urllib.parse.quote(fileinfo.filename)
 
     # 3.返回文件流数据
+    headers = {
+        "Content-Disposition": f"attachment; filename*=utf-8''{encoded_filename}",
+    }
+    if fileinfo.size is not None:
+        headers["Content-Length"] = str(fileinfo.size)
     return StreamingResponse(
         content=file_data,
         media_type=fileinfo.mime_type,
-        headers={
-            "Content-Disposition": f"attachment; filename*=utf-8''{encoded_filename}",
-            "Content-Length": str(fileinfo.size)
-        }
+        headers=headers,
     )

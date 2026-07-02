@@ -33,7 +33,7 @@ export function CheckpointRestoreDialog({
           <DialogTitle>确认回退还原点</DialogTitle>
           <DialogDescription>
             确定要回退到「{checkpoint?.label || "此处"}」吗？将删除该点之后的所有对话、Agent
-            记忆、沙箱文件与 COS 文件记录。
+            记忆、沙箱文件与云端文件记录。
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

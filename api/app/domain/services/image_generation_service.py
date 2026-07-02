@@ -22,12 +22,20 @@ async def generate_image(
         *,
         size: str = "1024x1024",
         quality: str = "standard",
+        owner_user_id: Optional[str] = None,
+        team_id: Optional[str] = None,
 ) -> Optional[str]:
-    """生成图像并上传 COS，返回公开 URL。"""
+    """生成图像并上传对象存储，返回预签名 URL 或代理 URL。"""
     if model.provider in (LLMProvider.OPENAI, LLMProvider.AZURE):
-        return await _generate_openai_image(prompt, model, file_storage, size=size, quality=quality)
+        return await _generate_openai_image(
+            prompt, model, file_storage, size=size, quality=quality,
+            owner_user_id=owner_user_id, team_id=team_id,
+        )
     if model.provider == LLMProvider.GEMINI:
-        return await _generate_gemini_image(prompt, model, file_storage)
+        return await _generate_gemini_image(
+            prompt, model, file_storage,
+            owner_user_id=owner_user_id, team_id=team_id,
+        )
     logger.warning("Provider %s 不支持图像生成", model.provider)
     return None
 
@@ -39,6 +47,8 @@ async def _generate_openai_image(
         *,
         size: str,
         quality: str,
+        owner_user_id: Optional[str],
+        team_id: Optional[str],
 ) -> Optional[str]:
     base_url = str(model.base_url).rstrip("/")
     url = f"{base_url}/images/generations" if base_url.endswith("/v1") else f"{base_url}/v1/images/generations"
@@ -60,7 +70,12 @@ async def _generate_openai_image(
             if not b64:
                 return None
             image_bytes = base64.b64decode(b64)
-            return await upload_image_bytes_to_storage(file_storage, image_bytes, "image/png")
+            return await upload_image_bytes_to_storage(
+                file_storage, image_bytes, "image/png",
+                owner_user_id=owner_user_id,
+                team_id=team_id,
+                fallback_to_proxy=True,
+            )
     except Exception as exc:
         logger.error("OpenAI 图像生成失败: %s", exc)
         return None
@@ -70,6 +85,9 @@ async def _generate_gemini_image(
         prompt: str,
         model: LLMModel,
         file_storage: FileStorage,
+        *,
+        owner_user_id: Optional[str],
+        team_id: Optional[str],
 ) -> Optional[str]:
     base_url = str(model.base_url).rstrip("/")
     model_name = model.extra_params.get("image_model", "imagen-3.0-generate-002")
@@ -88,7 +106,12 @@ async def _generate_gemini_image(
             if not b64:
                 return None
             image_bytes = base64.b64decode(b64)
-            return await upload_image_bytes_to_storage(file_storage, image_bytes, "image/png")
+            return await upload_image_bytes_to_storage(
+                file_storage, image_bytes, "image/png",
+                owner_user_id=owner_user_id,
+                team_id=team_id,
+                fallback_to_proxy=True,
+            )
     except Exception as exc:
         logger.error("Gemini 图像生成失败: %s", exc)
         return None
@@ -102,11 +125,14 @@ async def edit_image(
         file_storage: FileStorage,
         *,
         mime_type: str = "image/png",
+        owner_user_id: Optional[str] = None,
+        team_id: Optional[str] = None,
 ) -> Optional[Tuple[bytes, str]]:
     """图像编辑/inpaint，返回 (image_bytes, mime_type)。"""
     if model.provider in (LLMProvider.OPENAI, LLMProvider.AZURE):
         return await _edit_openai_image(
             image_bytes, mask_bytes, prompt, model, file_storage, mime_type=mime_type,
+            owner_user_id=owner_user_id, team_id=team_id,
         )
     logger.warning("Provider %s 不支持图像编辑", model.provider)
     return None
@@ -120,6 +146,8 @@ async def _edit_openai_image(
         file_storage: FileStorage,
         *,
         mime_type: str,
+        owner_user_id: Optional[str],
+        team_id: Optional[str],
 ) -> Optional[Tuple[bytes, str]]:
     base_url = str(model.base_url).rstrip("/")
     url = f"{base_url}/images/edits" if base_url.endswith("/v1") else f"{base_url}/v1/images/edits"
@@ -147,7 +175,12 @@ async def _edit_openai_image(
             if not b64:
                 return None
             edited = base64.b64decode(b64)
-            await upload_image_bytes_to_storage(file_storage, edited, "image/png")
+            await upload_image_bytes_to_storage(
+                file_storage, edited, "image/png",
+                owner_user_id=owner_user_id,
+                team_id=team_id,
+                fallback_to_proxy=True,
+            )
             return edited, "image/png"
     except Exception as exc:
         logger.error("OpenAI 图像编辑失败: %s", exc)

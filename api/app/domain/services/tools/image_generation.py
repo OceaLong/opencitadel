@@ -22,11 +22,15 @@ class ImageGenerationTool(BaseTool):
             llm: LLM,
             llm_model: LLMModel,
             file_storage: FileStorage,
+            owner_user_id: Optional[str] = None,
+            team_id: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._llm = llm
         self._llm_model = llm_model
         self._file_storage = file_storage
+        self._owner_user_id = owner_user_id
+        self._team_id = team_id
 
     @tool(
         name="generate_image",
@@ -59,6 +63,8 @@ class ImageGenerationTool(BaseTool):
             self._llm_model,
             self._file_storage,
             size=size or "1024x1024",
+            owner_user_id=self._owner_user_id,
+            team_id=self._team_id,
         )
         if not url:
             return ToolResult(success=False, message="图像生成失败，请检查 provider 配置。")

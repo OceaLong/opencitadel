@@ -114,10 +114,14 @@ env:
   REDIS_PORT: "6379"
   REDIS_DB: "0"
   USE_DB_APP_CONFIG: "true"
+  STORAGE_PROVIDER: cos
   COS_REGION: ""
   COS_SCHEME: https
   COS_BUCKET: ""
   COS_DOMAIN: ""
+  MINIO_ENDPOINT: ""  # STORAGE_PROVIDER=minio 时必填，空串会覆盖代码默认值 manus-minio:9000
+  MINIO_BUCKET: manus
+  MINIO_SECURE: "false"
 
 # 敏感配置（渲染为 Secret，通过 envFrom 注入）
 secrets:
@@ -126,6 +130,8 @@ secrets:
   redisPassword: ""
   cosSecretId: ""
   cosSecretKey: ""
+  minioAccessKey: minioadmin
+  minioSecretKey: minioadmin
   embeddingApiKey: ""
   langfusePublicKey: ""
   langfuseSecretKey: ""

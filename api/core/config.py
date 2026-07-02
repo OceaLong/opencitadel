@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_password: str | None = None
 
+    # 对象存储：cos（默认）或 minio
+    storage_provider: str = "cos"
+
     # 腾讯云 COS 密钥与桶
     cos_secret_id: str = ""
     cos_secret_key: str = ""
@@ -57,6 +60,14 @@ class Settings(BaseSettings):
     cos_scheme: str = "https"
     cos_bucket: str = ""
     cos_domain: str = ""
+
+    # MinIO（STORAGE_PROVIDER=minio 时生效）
+    minio_endpoint: str = "manus-minio:9000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_bucket: str = "manus"
+    minio_secure: bool = False
+    minio_public_endpoint: str = ""
 
     # 嵌入 / 可观测性密钥
     embedding_api_key: str = ""

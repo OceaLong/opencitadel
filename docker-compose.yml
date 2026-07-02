@@ -68,6 +68,27 @@ services:
       timeout: 5s
       retries: 5
 
+  manus-minio:
+    image: minio/minio:latest
+    container_name: manus-minio
+    restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 256m
+    cpus: "0.50"
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    networks:
+      - manus-network
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # ==================== 沙箱服务 ====================
 
   manus-sandbox:
@@ -131,6 +152,8 @@ services:
         condition: service_healthy
       manus-postgres:
         condition: service_healthy
+      manus-minio:
+        condition: service_healthy
       manus-migrate:
         condition: service_completed_successfully
     networks:
@@ -166,6 +189,8 @@ services:
       manus-redis:
         condition: service_healthy
       manus-postgres:
+        condition: service_healthy
+      manus-minio:
         condition: service_healthy
       manus-migrate:
         condition: service_completed_successfully
@@ -243,6 +268,8 @@ volumes:
   redis_data:
     driver: local
   postgres_data:
+    driver: local
+  minio_data:
     driver: local
   nginx_conf:
     driver: local

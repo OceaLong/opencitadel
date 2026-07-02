@@ -233,6 +233,8 @@ class TaskRunnerFactory:
                     llm=llm,
                     llm_model=llm_model,
                     file_storage=self._file_storage,
+                    owner_user_id=session.owner_user_id,
+                    team_id=session.team_id,
                 )
             )
 
@@ -327,4 +329,6 @@ class TaskRunnerFactory:
             mcp_connection_pool=self._mcp_connection_pool,
             a2a_connection_pool=self._a2a_connection_pool,
             stateful_tool_lock=stateful_tool_lock,
+            owner_user_id=session.owner_user_id,
+            team_id=session.team_id,
         )

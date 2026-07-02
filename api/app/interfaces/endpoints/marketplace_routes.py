@@ -10,7 +10,8 @@ from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from app.application.errors.exceptions import BadRequestError
 from app.application.services.marketplace_service import MarketplaceService
-from app.interfaces.auth_dependencies import get_current_principal
+from app.interfaces.auth_dependencies import get_current_principal, get_workspace_context
+from app.domain.models.scope import WorkspaceContext
 from app.interfaces.schemas.base import Response
 from app.interfaces.schemas.marketplace import (
     ConsumptionAnalysisRequest,
@@ -215,13 +216,14 @@ async def translate(
 @router.post("/convert", response_model=Response[DocumentConvertResponse])
 async def convert_document(
         request: DocumentConvertRequest,
-        _principal=Depends(get_current_principal),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[DocumentConvertResponse]:
     try:
         data = await marketplace_service.convert_document(
             request.file_id,
             request.target_format,
+            scope=ctx.scope,
         )
         return Response.success(data=DocumentConvertResponse(**data))
     except ValueError as exc:
@@ -231,7 +233,7 @@ async def convert_document(
 @router.post("/watermark/add", response_model=Response[WatermarkResultResponse])
 async def add_watermark(
         request: WatermarkAddRequest,
-        _principal=Depends(get_current_principal),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[WatermarkResultResponse]:
     try:
@@ -243,6 +245,7 @@ async def add_watermark(
             opacity=request.opacity,
             rotation=request.rotation,
             tile=request.tile,
+            scope=ctx.scope,
         )
         return Response.success(data=WatermarkResultResponse(**data))
     except ValueError as exc:
@@ -310,7 +313,7 @@ async def get_fortune_share(
 @router.post("/watermark/remove", response_model=Response[WatermarkResultResponse])
 async def remove_watermark(
         request: WatermarkRemoveRequest,
-        _principal=Depends(get_current_principal),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[WatermarkResultResponse]:
     try:
@@ -319,6 +322,7 @@ async def remove_watermark(
             watermark_text=request.watermark_text,
             mode=request.mode,
             model_id=request.model_id,
+            scope=ctx.scope,
         )
         return Response.success(data=WatermarkResultResponse(**data))
     except ValueError as exc:

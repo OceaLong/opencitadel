@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentAttachmentSyncer:
-    """Syncs user/assistant attachments between COS and sandbox."""
+    """Syncs user/assistant attachments between object storage and sandbox."""
 
     def __init__(
             self,
@@ -23,11 +23,15 @@ class AgentAttachmentSyncer:
             uow_factory: Callable[[], IUnitOfWork],
             sandbox: Sandbox,
             file_storage: FileStorage,
+            owner_user_id: Optional[str] = None,
+            team_id: Optional[str] = None,
     ) -> None:
         self._session_id = session_id
         self._uow_factory = uow_factory
         self._sandbox = sandbox
         self._file_storage = file_storage
+        self._owner_user_id = owner_user_id
+        self._team_id = team_id
 
     @staticmethod
     def get_stream_size(f: BinaryIO) -> int:
@@ -106,6 +110,8 @@ class AgentAttachmentSyncer:
                 file=file_data,
                 filename=filename,
                 size=self.get_stream_size(file_data),
+                owner_user_id=self._owner_user_id,
+                team_id=self._team_id,
             )
             file = await self._file_storage.upload_file(upload_payload)
             file.filepath = filepath

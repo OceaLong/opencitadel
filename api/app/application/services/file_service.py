@@ -24,7 +24,7 @@ class FileService:
         self._uow_factory = uow_factory
 
     async def upload_file(self, upload_file: UploadFile, scope: OwnerScope | None = None) -> File:
-        """将传递的文件上传到腾讯云cos并记录上传数据"""
+        """将传递的文件上传到对象存储并记录上传数据"""
         return await self.file_storage.upload_file(
             FileUploadPayload(
                 file=upload_file.file,

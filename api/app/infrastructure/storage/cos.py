@@ -84,6 +84,17 @@ class Cos:
         body = response["Body"]
         return body.read() if hasattr(body, "read") else bytes(body)
 
+    async def presigned_get_url(self, key: str, expires_seconds: int = 604800) -> Optional[str]:
+        """Generate a presigned download URL for LLM-accessible image references."""
+        if self._settings.env == "test":
+            return f"https://example.com/{key}"
+        return await run_in_threadpool(
+            self.client.get_presigned_download_url,
+            Bucket=self.bucket,
+            Key=key,
+            Expired=expires_seconds,
+        )
+
 
 @lru_cache()
 def get_cos() -> Cos:

@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 _IMAGE_REF_TYPE = CONTENT_TYPE_IMAGE_REF
 _FALLBACK_IMAGE_NOTE = "原始消息包含图片附件，因模型服务连接异常已省略图片内容。"
+PRESIGNED_URL_DEFAULT_EXPIRES_SECONDS = 604800  # 7 days (S3 signature max)
 
 
 class _SupportsCapabilities(Protocol):
@@ -123,11 +124,26 @@ def crop_image_region(
     return _compress_image_bytes(buffer.getvalue(), mime_type, max_bytes)
 
 
-def build_file_public_url(file: File) -> str:
-    from core.config import get_settings
+def build_file_proxy_url(file: File) -> str:
+    """Return a same-origin API proxy URL for browser display."""
+    return f"/api/files/{file.id}/download"
 
-    settings = get_settings()
-    return f"https://{settings.cos_bucket}.cos.{settings.cos_region}.myqcloud.com/{file.key}"
+
+async def build_file_public_url(
+        file: File,
+        *,
+        expires_seconds: int = PRESIGNED_URL_DEFAULT_EXPIRES_SECONDS,
+) -> str:
+    """Return a presigned URL for LLM-accessible image references, or empty string."""
+    if not file.key:
+        return ""
+    from app.infrastructure.storage.factory import get_active_storage_client
+
+    client = get_active_storage_client()
+    if client is None:
+        return ""
+    url = await client.presigned_get_url(file.key, expires_seconds=expires_seconds)
+    return url or ""
 
 
 async def upload_image_bytes_to_storage(
@@ -135,8 +151,12 @@ async def upload_image_bytes_to_storage(
         image_bytes: bytes,
         mime_type: str = "image/png",
         filename: Optional[str] = None,
+        *,
+        owner_user_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        fallback_to_proxy: bool = False,
 ) -> str:
-    """上传图片到 COS，返回公开 URL。"""
+    """上传图片到对象存储，返回 LLM 可用的预签名 URL（不可用时返回空字符串或代理 URL）。"""
     name = filename or f"{uuid.uuid4()}.png"
     stream = io.BytesIO(image_bytes)
     upload = FileUploadPayload(
@@ -144,9 +164,16 @@ async def upload_image_bytes_to_storage(
         filename=name,
         size=len(image_bytes),
         content_type=mime_type,
+        owner_user_id=owner_user_id,
+        team_id=team_id,
     )
     stored = await file_storage.upload_file(upload)
-    return build_file_public_url(stored)
+    url = await build_file_public_url(stored)
+    if url:
+        return url
+    if fallback_to_proxy:
+        return build_file_proxy_url(stored)
+    return ""
 
 
 def _attachment_to_memory_part(
@@ -369,7 +396,7 @@ async def build_screenshot_messages(
     screenshot_ref = result_data.get("screenshot_ref")
     capabilities = resolve_capabilities(llm)
 
-    # 优先上传 COS 获得 screenshot_ref
+    # 优先上传对象存储获得 screenshot_ref（预签名 URL）
     if not screenshot_ref and screenshot_base64 and file_storage:
         try:
             screenshot_bytes = base64.b64decode(screenshot_base64, validate=False)
@@ -380,7 +407,7 @@ async def build_screenshot_messages(
                     "image/png",
                 )
         except Exception as exc:
-            logger.warning("截图上传 COS 失败，回退 base64: %s", exc)
+            logger.warning("截图上传对象存储失败，回退 base64: %s", exc)
 
     if screenshot_ref and capabilities.vision:
         extra_messages.append({
@@ -437,7 +464,7 @@ async def prepare_vision_attachments_from_files(
                     file.mime_type,
                     capabilities.max_image_bytes,
                 )
-            ref_url = build_file_public_url(stored_file) if stored_file.key else ""
+            ref_url = await build_file_public_url(stored_file) if stored_file.key else ""
             if ref_url:
                 attachments.append(VisionAttachment(
                     mime_type=file.mime_type,

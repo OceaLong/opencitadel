@@ -8,6 +8,7 @@ from typing import AsyncGenerator, Callable, List, Optional, Type
 
 from app.application.errors.exceptions import NotFoundError
 from app.domain.external.file_storage import FileStorage
+from app.domain.external.object_storage import ObjectStoragePort
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.codebase import (
     ArtifactKind,
@@ -234,8 +235,13 @@ class CodebaseService:
             raise NotFoundError(result.message or f"无法读取 {path}")
         return result.data or ""
 
-    async def package_download(self, codebase_id: str, cos, scope: Optional[OwnerScope] = None) -> str:
-        """Create tarball snapshot and store to COS. Returns snapshot key."""
+    async def package_download(
+            self,
+            codebase_id: str,
+            object_storage: ObjectStoragePort,
+            scope: Optional[OwnerScope] = None,
+    ) -> str:
+        """Create tarball snapshot and store to object storage. Returns snapshot key."""
         codebase = await self.get_codebase(codebase_id, scope=scope)
         if not codebase.sandbox_id:
             raise NotFoundError("代码库沙箱未就绪")
@@ -244,7 +250,7 @@ class CodebaseService:
             raise NotFoundError("沙箱不可用")
         snapshot_bytes = await sandbox.create_workspace_snapshot(codebase_id)
         key = f"codebases/{codebase_id}/download.tgz"
-        await cos.put_bytes(key, snapshot_bytes)
+        await object_storage.put_bytes(key, snapshot_bytes)
         codebase.snapshot_key = key
         codebase.updated_at = datetime.now()
         async with self._uow_factory() as uow:

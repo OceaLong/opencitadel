@@ -22,7 +22,7 @@ from app.domain.models.event import (
 )
 from app.domain.models.search import SearchResults
 from app.domain.models.tool_result import ToolResult
-from core.config import get_settings
+from app.domain.services.vision_service import build_file_proxy_url
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +39,16 @@ class ToolEventPresenter:
             file_storage: FileStorage,
             sync_file_to_storage: Callable,
             get_stream_size: Callable,
+            owner_user_id: Optional[str] = None,
+            team_id: Optional[str] = None,
     ) -> None:
         self._sandbox = sandbox
         self._browser = browser
         self._file_storage = file_storage
         self._sync_file_to_storage = sync_file_to_storage
         self._get_stream_size = get_stream_size
+        self._owner_user_id = owner_user_id
+        self._team_id = team_id
 
     async def enrich(self, event: ToolEvent) -> None:
         if event.status != ToolEventStatus.CALLED:
@@ -144,6 +148,7 @@ class ToolEventPresenter:
             file=stream,
             filename=f"{uuid.uuid4()}.png",
             size=self._get_stream_size(stream),
+            owner_user_id=self._owner_user_id,
+            team_id=self._team_id,
         ))
-        settings = get_settings()
-        return f"https://{settings.cos_bucket}.cos.{settings.cos_region}.myqcloud.com/{file.key}"
+        return build_file_proxy_url(file)

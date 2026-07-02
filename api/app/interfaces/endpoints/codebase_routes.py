@@ -27,9 +27,9 @@ from app.interfaces.schemas.codebase import (
     SymbolResponse,
 )
 from app.interfaces.schemas.event import EventMapper
+from app.domain.external.object_storage import ObjectStoragePort
 from app.interfaces.auth_dependencies import get_workspace_context
-from app.interfaces.service_dependencies import get_codebase_service
-from app.infrastructure.storage.cos import get_cos
+from app.interfaces.service_dependencies import get_codebase_service, get_object_storage
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/codebases", tags=["代码知识库"])
@@ -175,9 +175,9 @@ async def download_codebase(
         codebase_id: str,
         ctx: WorkspaceContext = Depends(get_workspace_context),
         service: CodebaseService = Depends(get_codebase_service),
+        object_storage: ObjectStoragePort = Depends(get_object_storage),
 ) -> Response[DownloadCodebaseResponse]:
-    cos = get_cos()
-    key = await service.package_download(codebase_id, cos, scope=ctx.scope)
+    key = await service.package_download(codebase_id, object_storage, scope=ctx.scope)
     return Response.success(data=DownloadCodebaseResponse(snapshot_key=key))
 
 

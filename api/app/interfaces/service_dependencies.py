@@ -29,6 +29,7 @@ from app.application.services.team_service import TeamService
 from app.application.services.usage_stats_service import UsageStatsService
 from app.application.services.status_service import StatusService
 from app.container import ApiContainer
+from app.domain.external.object_storage import ObjectStoragePort
 from app.infrastructure.external.health_checker.postgres_health_checker import PostgresHealthChecker
 from app.infrastructure.external.health_checker.redis_health_checker import RedisHealthChecker
 from app.infrastructure.storage.postgres import get_db_session
@@ -145,6 +146,13 @@ async def get_llm_status_service(
         llm_model_service: LLMModelService = Depends(Provide[ApiContainer.llm_model_service]),
 ) -> LLMStatusService:
     return LLMStatusService(llm_model_service=llm_model_service)
+
+
+@inject
+async def get_object_storage(
+        storage: ObjectStoragePort = Depends(Provide[ApiContainer.object_storage]),
+) -> ObjectStoragePort:
+    return storage
 
 
 @inject

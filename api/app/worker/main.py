@@ -17,7 +17,7 @@ from app.domain.models.session import SessionStatus
 from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.services.codebase.ingestion_task_runner import CodebaseIngestionTaskRunner
 from app.domain.services.knowledge_base.ingestion_task_runner import KBIngestionTaskRunner
-from app.infrastructure.external.file_storage.cos_file_storage import CosFileStorage
+from app.domain.external.file_storage import FileStorage
 from app.infrastructure.external.runtime_settings import get_admission_runtime_settings
 from app.infrastructure.external.sandbox.admission import get_sandbox_quota
 from app.infrastructure.external.sandbox.sandbox_maintenance import run_sandbox_maintenance
@@ -77,7 +77,7 @@ class AgentWorker:
             self,
             runner_factory: TaskRunnerFactory,
             checkpoint_service: CheckpointService,
-            file_storage: CosFileStorage,
+            file_storage: FileStorage,
             sandbox_cls: type[Sandbox],
             task_cls: type[RedisStreamTask],
     ) -> None:
