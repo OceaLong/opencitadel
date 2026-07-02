@@ -61,7 +61,7 @@ def setup_observability(app=None) -> None:
     logger.info("OpenTelemetry initialized: service=%s", observability.otel_service_name)
 
 
-def get_tracer(name: str = "my-manus"):
+def get_tracer(name: str = "opencitadel"):
     try:
         from opentelemetry import trace
         return trace.get_tracer(name)
@@ -85,7 +85,7 @@ def record_agent_step(agent_name: str, step: str) -> None:
     try:
         from opentelemetry import metrics
         if _agent_step_counter is None:
-            meter = metrics.get_meter("my-manus.agent")
+            meter = metrics.get_meter("opencitadel.agent")
             _agent_step_counter = meter.create_counter("agent_steps_total")
         _agent_step_counter.add(1, {"agent": agent_name, "step": step})
     except Exception:
@@ -102,10 +102,10 @@ def record_llm_tokens(
     try:
         from opentelemetry import metrics
         if _llm_token_counter is None:
-            meter = metrics.get_meter("my-manus.llm")
+            meter = metrics.get_meter("opencitadel.llm")
             _llm_token_counter = meter.create_counter("llm_tokens_total")
         if _llm_cached_token_counter is None:
-            meter = metrics.get_meter("my-manus.llm")
+            meter = metrics.get_meter("opencitadel.llm")
             _llm_cached_token_counter = meter.create_counter("llm_cached_tokens_total")
         if prompt_tokens:
             _llm_token_counter.add(prompt_tokens, {"model": model, "type": "prompt"})
@@ -125,7 +125,7 @@ def record_agent_cancel(session_id: str = "") -> None:
     try:
         from opentelemetry import metrics
         if _agent_cancel_counter is None:
-            meter = metrics.get_meter("my-manus.agent")
+            meter = metrics.get_meter("opencitadel.agent")
             _agent_cancel_counter = meter.create_counter("agent_cancellations_total")
         _agent_cancel_counter.add(1, {"session_id": session_id or "unknown"})
     except Exception:

@@ -13,9 +13,9 @@ x-pip-build-args: &pip-build-args
 services:
   # ==================== 基础设施 ====================
 
-  manus-redis:
+  opencitadel-redis:
     image: redis:7-alpine
-    container_name: manus-redis
+    container_name: opencitadel-redis
     restart: unless-stopped
     mem_limit: 512m
     mem_reservation: 256m
@@ -28,16 +28,16 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - manus-network
+      - opencitadel-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  manus-postgres:
+  opencitadel-postgres:
     image: pgvector/pgvector:pg16
-    container_name: manus-postgres
+    container_name: opencitadel-postgres
     restart: unless-stopped
     mem_limit: 1024m
     mem_reservation: 512m
@@ -45,7 +45,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-manus}
+      POSTGRES_DB: ${POSTGRES_DB:-opencitadel}
     command:
       - postgres
       - -c
@@ -61,18 +61,18 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - manus-network
+      - opencitadel-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-manus}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-opencitadel}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  manus-minio:
+  opencitadel-minio:
     profiles:
       - local
     image: minio/minio:latest
-    container_name: manus-minio
+    container_name: opencitadel-minio
     restart: unless-stopped
     mem_limit: 512m
     mem_reservation: 256m
@@ -84,7 +84,7 @@ services:
     volumes:
       - minio_data:/data
     networks:
-      - manus-network
+      - opencitadel-network
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
@@ -93,7 +93,7 @@ services:
 
   # ==================== 沙箱服务 ====================
 
-  manus-sandbox:
+  opencitadel-sandbox:
     profiles:
       - fixed-sandbox
     build:
@@ -101,45 +101,45 @@ services:
       dockerfile: Dockerfile
       args:
         <<: *pip-build-args
-    image: manus-sandbox
-    container_name: manus-sandbox
+    image: opencitadel-sandbox
+    container_name: opencitadel-sandbox
     restart: "no"
     mem_limit: 1g
     networks:
-      - manus-network
+      - opencitadel-network
 
   # ==================== 数据库迁移 (一次性) ====================
 
-  manus-migrate:
+  opencitadel-migrate:
     build:
       context: ./api
       dockerfile: Dockerfile
       target: api
       args:
         <<: *pip-build-args
-    image: manus-migrate
+    image: opencitadel-migrate
     mem_limit: 512m
     env_file:
       - .env
     depends_on:
-      manus-postgres:
+      opencitadel-postgres:
         condition: service_healthy
     networks:
-      - manus-network
+      - opencitadel-network
     command: ["python", "-m", "app.migrate"]
     restart: "no"
 
   # ==================== 后端 API ====================
 
-  manus-api:
+  opencitadel-api:
     build:
       context: ./api
       dockerfile: Dockerfile
       target: api
       args:
         <<: *pip-build-args
-    image: manus-api
-    container_name: manus-api
+    image: opencitadel-api
+    container_name: opencitadel-api
     restart: unless-stopped
     mem_limit: 640m
     mem_reservation: 384m
@@ -150,14 +150,14 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./api/config.yaml:/app/config.yaml
     depends_on:
-      manus-redis:
+      opencitadel-redis:
         condition: service_healthy
-      manus-postgres:
+      opencitadel-postgres:
         condition: service_healthy
-      manus-migrate:
+      opencitadel-migrate:
         condition: service_completed_successfully
     networks:
-      - manus-network
+      - opencitadel-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/status"]
       interval: 15s
@@ -167,15 +167,15 @@ services:
 
   # ==================== Agent Worker ====================
 
-  manus-worker:
+  opencitadel-worker:
     build:
       context: ./api
       dockerfile: Dockerfile
       target: worker
       args:
         <<: *pip-build-args
-    image: manus-worker
-    container_name: manus-worker
+    image: opencitadel-worker
+    container_name: opencitadel-worker
     restart: unless-stopped
     mem_limit: 1024m
     mem_reservation: 512m
@@ -186,14 +186,14 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./api/config.yaml:/app/config.yaml
     depends_on:
-      manus-redis:
+      opencitadel-redis:
         condition: service_healthy
-      manus-postgres:
+      opencitadel-postgres:
         condition: service_healthy
-      manus-migrate:
+      opencitadel-migrate:
         condition: service_completed_successfully
     networks:
-      - manus-network
+      - opencitadel-network
     command: ["./worker.sh"]
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import os, redis; redis.Redis(host=os.getenv('REDIS_HOST','localhost'), port=int(os.getenv('REDIS_PORT','6379')), password=os.getenv('REDIS_PASSWORD') or None).ping()\""]
@@ -203,24 +203,24 @@ services:
 
   # ==================== 前端 UI ====================
 
-  manus-ui:
+  opencitadel-ui:
     build:
       context: ./ui
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_BASE_URL: /api
         NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
-    image: manus-ui
-    container_name: manus-ui
+    image: opencitadel-ui
+    container_name: opencitadel-ui
     restart: unless-stopped
     mem_limit: 384m
     mem_reservation: 192m
     cpus: "1.00"
     depends_on:
-      manus-api:
+      opencitadel-api:
         condition: service_healthy
     networks:
-      - manus-network
+      - opencitadel-network
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000"]
       interval: 15s
@@ -229,15 +229,15 @@ services:
 
   # ==================== Nginx 网关 ====================
 
-  manus-nginx:
+  opencitadel-nginx:
     image: nginx:alpine
-    container_name: manus-nginx
+    container_name: opencitadel-nginx
     restart: unless-stopped
     mem_limit: 128m
     mem_reservation: 64m
     cpus: "0.50"
     environment:
-      MANUS_DOMAIN: ${MANUS_DOMAIN:-}
+      OPENCITADEL_DOMAIN: ${OPENCITADEL_DOMAIN:-}
       HTTPS_ENABLED: ${HTTPS_ENABLED:-false}
     ports:
       - "${NGINX_PORT:-8088}:80"
@@ -249,12 +249,12 @@ services:
       - nginx_conf:/etc/nginx/conf.d
       - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
-      manus-ui:
+      opencitadel-ui:
         condition: service_healthy
-      manus-api:
+      opencitadel-api:
         condition: service_healthy
     networks:
-      - manus-network
+      - opencitadel-network
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
       interval: 30s
@@ -274,6 +274,6 @@ volumes:
 
 # ==================== 网络 ====================
 networks:
-  manus-network:
-    name: manus-network
+  opencitadel-network:
+    name: opencitadel-network
     driver: bridge

@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 from enum import Enum
 
-_ROLE_ENV = "MANUS_PROCESS_ROLE"
+_ROLE_ENV = "OPENCITADEL_PROCESS_ROLE"
 
 
 class ProcessRole(str, Enum):

@@ -60,7 +60,7 @@ class SandboxConfig(BaseModel):
     idle_timeout_minutes: int = 30
     warmup_retry_interval_seconds: float = 0.5
     k8s_namespace: str = "default"
-    k8s_pod_label: str = "app=manus-sandbox"
+    k8s_pod_label: str = "app=opencitadel-sandbox"
 
 
 class WorkerConfig(BaseModel):
@@ -91,7 +91,7 @@ class StreamsConfig(BaseModel):
 class ObservabilityConfig(BaseModel):
     """可观测性开关（密钥由环境变量提供）"""
     otel_enabled: bool = False
-    otel_service_name: str = "my-manus-api"
+    otel_service_name: str = "opencitadel-api"
     otel_exporter_endpoint: str = ""
     langfuse_enabled: bool = False  # debug-only placeholder; no Langfuse SDK integration
 

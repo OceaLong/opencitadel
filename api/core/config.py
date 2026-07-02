@@ -6,7 +6,7 @@ from urllib.parse import quote_plus
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_DEFAULT_LOCAL_URI = "postgresql+asyncpg://postgres:postgres@localhost:5432/manus"
+_DEFAULT_LOCAL_URI = "postgresql+asyncpg://postgres:postgres@localhost:5432/opencitadel"
 
 
 class Settings(BaseSettings):
@@ -17,9 +17,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: str = "text"  # text | json
     app_config_filepath: str = "config.yaml"
-    api_key_secret: str = "my-manus-api-key-secret-change-in-production"
-    jwt_secret: str = "my-manus-jwt-secret-change-in-production"
-    session_secret: str = "my-manus-session-secret-change-in-production"
+    api_key_secret: str = "opencitadel-api-key-secret-change-in-production"
+    jwt_secret: str = "opencitadel-jwt-secret-change-in-production"
+    session_secret: str = "opencitadel-session-secret-change-in-production"
     access_token_ttl_seconds: int = 900
     refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30
     cookie_domain: str = ""
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # 数据库连接（引导层，启动前必须可用）
     postgres_user: str = "postgres"
     postgres_password: str = "postgres"
-    postgres_db: str = "manus"
+    postgres_db: str = "opencitadel"
     postgres_host: str = "localhost"
     sqlalchemy_database_uri: str = ""
     sqlalchemy_echo: bool = False
@@ -62,10 +62,10 @@ class Settings(BaseSettings):
     cos_domain: str = ""
 
     # MinIO（STORAGE_PROVIDER=minio 时生效）
-    minio_endpoint: str = "manus-minio:9000"
+    minio_endpoint: str = "opencitadel-minio:9000"
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
-    minio_bucket: str = "manus"
+    minio_bucket: str = "opencitadel"
     minio_secure: bool = False
     minio_public_endpoint: str = ""
 
@@ -96,9 +96,9 @@ class Settings(BaseSettings):
             )
         if self.env.lower() == "production":
             insecure_values = {
-                "api_key_secret": "my-manus-api-key-secret-change-in-production",
-                "jwt_secret": "my-manus-jwt-secret-change-in-production",
-                "session_secret": "my-manus-session-secret-change-in-production",
+                "api_key_secret": "opencitadel-api-key-secret-change-in-production",
+                "jwt_secret": "opencitadel-jwt-secret-change-in-production",
+                "session_secret": "opencitadel-session-secret-change-in-production",
             }
             for field, default in insecure_values.items():
                 if getattr(self, field) == default:

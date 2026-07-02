@@ -1,0 +1,39 @@
+---
+name: Bug report
+about: Report something that isn't working
+title: "[Bug] "
+labels: bug
+assignees: ''
+---
+
+## Description
+
+<!-- What happened? -->
+
+## Steps to reproduce
+
+1.
+2.
+3.
+
+## Expected behavior
+
+## Actual behavior
+
+## Environment
+
+- OpenCitadel version / git commit:
+- Deployment: Docker Compose / Helm / other
+- OS:
+- LLM provider:
+
+## Logs / screenshots
+
+<details>
+<summary>Relevant logs</summary>
+
+```
+Paste logs here
+```
+
+</details>

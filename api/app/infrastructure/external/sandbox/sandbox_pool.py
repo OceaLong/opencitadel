@@ -108,7 +108,7 @@ class SandboxPool:
 
     @staticmethod
     async def touch_activity(container_name: str) -> None:
-        if not container_name or container_name == "my-manus-sandbox":
+        if not container_name or container_name == "opencitadel-sandbox":
             return
         try:
             from app.infrastructure.storage.redis import get_redis

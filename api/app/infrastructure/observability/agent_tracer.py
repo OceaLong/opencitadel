@@ -23,7 +23,7 @@ class AgentTracer:
         if self._enabled:
             try:
                 from app.infrastructure.observability.otel import get_tracer
-                self._tracer = get_tracer("my-manus.agent")
+                self._tracer = get_tracer("opencitadel.agent")
             except Exception:
                 self._enabled = False
 

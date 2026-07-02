@@ -17,7 +17,7 @@ class JwtService:
             secret: str,
             access_ttl_seconds: int = 900,
             refresh_ttl_seconds: int = 60 * 60 * 24 * 30,
-            issuer: str = "my-manus",
+            issuer: str = "opencitadel",
     ) -> None:
         self.secret = secret
         self.access_ttl_seconds = access_ttl_seconds

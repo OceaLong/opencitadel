@@ -113,7 +113,7 @@ async def lifespan(app: FastAPI):
     configure_structured_logging()
 
     # 1.日志打印代码已经开始执行了
-    logger.info("MyManus正在初始化")
+    logger.info("OpenCitadel正在初始化")
 
     # 2.校验数据库迁移版本（迁移由独立 migrate job 执行）
     _verify_db_migrations()
@@ -126,7 +126,7 @@ async def lifespan(app: FastAPI):
         skill_service=skill_service,
     )
     pool_cleanup_task = asyncio.create_task(_connection_pool_cleanup_loop())
-    logger.info("MyManus初始化完成")
+    logger.info("OpenCitadel初始化完成")
 
     try:
         yield
@@ -137,7 +137,7 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
         try:
-            logger.info("MyManus正在关闭")
+            logger.info("OpenCitadel正在关闭")
             agent_service = await get_agent_service()
             await asyncio.wait_for(agent_service.shutdown(), timeout=30.0)
             logger.info("AgentService成功关闭")
@@ -147,13 +147,13 @@ async def lifespan(app: FastAPI):
             logger.error(f"AgentService关闭期间出现错误: {str(e)}")
 
         await shutdown_api_container(container)
-        logger.info("Manus应用关闭成功")
+        logger.info("OpenCitadel应用关闭成功")
 
 
-# 4.创建MyManus应用实例
+# 4.创建OpenCitadel应用实例
 app = FastAPI(
-    title="MyManus通用智能体",
-    description="MyManus是一个通用的AI Agent系统，可以完全私有部署，使用A2A+MCP连接Agent/Tool，同时支持在沙箱中运行各种内置工具和操作",
+    title="OpenCitadel通用智能体",
+    description="OpenCitadel是一个通用的AI Agent系统，可以完全私有部署，使用A2A+MCP连接Agent/Tool，同时支持在沙箱中运行各种内置工具和操作",
     lifespan=lifespan,
     openapi_tags=openapi_tags,
     version="1.0.0",

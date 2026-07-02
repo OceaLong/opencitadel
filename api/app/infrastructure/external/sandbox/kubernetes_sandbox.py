@@ -22,7 +22,7 @@ from app.infrastructure.external.runtime_settings import get_sandbox_runtime_set
 logger = logging.getLogger(__name__)
 
 _POD_LABEL_KEY = "app"
-_POD_LABEL_VALUE = "manus-sandbox"
+_POD_LABEL_VALUE = "opencitadel-sandbox"
 
 
 def _parse_memory_limit(limit: str) -> str:
@@ -45,7 +45,7 @@ class KubernetesSandbox(Sandbox):
 
     @property
     def id(self) -> str:
-        return self._pod_name or "my-manus-sandbox"
+        return self._pod_name or "opencitadel-sandbox"
 
     @property
     def vnc_url(self) -> str:
@@ -128,7 +128,7 @@ class KubernetesSandbox(Sandbox):
                 name=pod_name,
                 labels={
                     _POD_LABEL_KEY: _POD_LABEL_VALUE,
-                    "manus.io/sandbox": "true",
+                    "opencitadel.io/sandbox": "true",
                 },
             ),
             spec=client.V1PodSpec(
@@ -136,7 +136,7 @@ class KubernetesSandbox(Sandbox):
                 containers=[
                     client.V1Container(
                         name="sandbox",
-                        image=settings.image or "manus-sandbox",
+                        image=settings.image or "opencitadel-sandbox",
                         ports=[
                             client.V1ContainerPort(container_port=8080),
                             client.V1ContainerPort(container_port=5901),

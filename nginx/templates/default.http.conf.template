@@ -1,16 +1,16 @@
 server {
     listen 80;
-    server_name ${MANUS_DOMAIN};
+    server_name ${OPENCITADEL_DOMAIN};
 
     # Docker 内置 DNS，运行时动态解析上游容器 IP，
-    # 避免上游容器（manus-ui / manus-api）重建后 IP 变化导致 502。
+    # 避免上游容器（opencitadel-ui / opencitadel-api）重建后 IP 变化导致 502。
     resolver 127.0.0.11 valid=10s ipv6=off;
 
     # ----------------------------------------------------------
     # API 接口代理（含 WebSocket / SSE 支持）
     # ----------------------------------------------------------
     location /api/ {
-        set $api_upstream manus-api;
+        set $api_upstream opencitadel-api;
         proxy_pass http://$api_upstream:8000$request_uri;
         proxy_http_version 1.1;
 
@@ -36,7 +36,7 @@ server {
     # 前端 UI 代理
     # ----------------------------------------------------------
     location / {
-        set $ui_upstream manus-ui;
+        set $ui_upstream opencitadel-ui;
         proxy_pass http://$ui_upstream:3000$request_uri;
         proxy_http_version 1.1;
 

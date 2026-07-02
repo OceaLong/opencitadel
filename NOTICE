@@ -1,0 +1,7 @@
+OpenCitadel
+Copyright 2026 OpenCitadel Contributors
+
+This product includes software developed as part of the OpenCitadel project.
+
+Third-party components and their licenses are documented in individual
+package manifests (e.g. `api/pyproject.toml`, `ui/package.json`).

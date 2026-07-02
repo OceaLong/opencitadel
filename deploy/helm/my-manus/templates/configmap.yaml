@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "my-manus.fullname" . }}-config
-  labels:
-    app.kubernetes.io/name: {{ include "my-manus.fullname" . }}
-data:
-  config.yaml: |
-{{ .Values.appConfig | toYaml | nindent 4 }}

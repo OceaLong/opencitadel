@@ -1,32 +1,50 @@
-# MyManus 文档索引
+# OpenCitadel Documentation
 
-本文档是 `docs/` 目录的导航入口，说明各设计文档的权威范围与推荐阅读顺序。
+[简体中文](README.zh-CN.md)
 
-## 推荐阅读顺序
+Navigation hub for all OpenCitadel documentation. Each topic is maintained as a **paired document**: `*.md` (English) and `*.zh-CN.md` (Chinese).
 
-1. [系统架构](architecture.md)：先理解 API、Worker、Redis Streams、Postgres、沙箱和部署边界。
-2. [事件系统](events.md)：再理解领域事件、SSE 投影、持久化与 replay。
-3. [配置来源治理](config-source-governance.md)：确认行为配置、密钥连接和部署种子的来源边界。
-4. [模型韧性设计](model-resilience.md)：理解模型不可用时的熔断、fallback、SLO 和运行手册。
-5. [API/SSE 协议兼容策略](contract-compatibility.md)：查看前后端契约兼容窗口。
-6. [Codebase 向量降级与重新索引](codebase-reindex.md)：查看 embedding 不可用时的降级与恢复路径。
-7. [架构演进指南](architecture-evolution.md)：查看从单机 Compose 到 K8s / 外置沙箱的演进路径。
+## Recommended paths
 
-## 文档清单
+### Getting started
 
-| 文档 | 权威范围 |
-|------|----------|
-| [系统架构](architecture.md) | 系统总体架构、进程职责、任务执行状态、沙箱生命周期、依赖注入与部署形态 |
-| [事件系统](events.md) | 领域事件、SSE 线上契约、事件投影、持久化与分页重放 |
-| [配置来源治理](config-source-governance.md) | `AppConfig`、`config.yaml` / Helm `appConfig`、`Settings` 环境变量的边界 |
-| [模型韧性设计](model-resilience.md) | 模型隔离、Redis 熔断、fallback 策略、SLO、灰度、Kill-switch、DLQ 手册 |
-| [API/SSE 协议兼容策略](contract-compatibility.md) | `ErrorEvent.code`、Marketplace `model_dependency`、`/api/llm/status` 的兼容约束 |
-| [Codebase 向量降级与重新索引](codebase-reindex.md) | Codebase ingest 在 embedding 不可用时的降级、UI 提示与重新索引 |
-| [架构演进指南](architecture-evolution.md) | 单机稳定化、DB / Redis 外置、K8s HPA、沙箱外置与全托管演进 |
+1. [Self-host in 10 minutes](tutorials/01-self-host-10-minutes.md)
+2. [Internal knowledge base](tutorials/02-internal-knowledge-base.md)
+3. [MCP integrations](tutorials/03-mcp-integrations.md)
 
-## 维护规则
+### Operations & deployment
 
-- 每份文档只维护一个主题的权威说明，避免在多个文件重复描述同一策略。
-- 行为配置变化需同步 [配置来源治理](config-source-governance.md) 中的清单。
-- API / SSE 契约变化需同步 [API/SSE 协议兼容策略](contract-compatibility.md)。
-- 新增功能设计应在对应主题文档中补充 Mermaid 架构图、状态图或流程图。
+| Document | Scope |
+|----------|-------|
+| [README.md](../README.md) | Project overview and doc map |
+| [Production deployment](operations/deployment.md) | Docker Compose production deployment, cloud/local modes, backup, tuning |
+| [HTTPS & domain setup](operations/https-domain-setup.md) | Domain binding and HTTPS |
+| [Helm Chart](../deploy/helm/opencitadel/README.md) | Kubernetes / Helm install and values |
+
+### Architecture & design
+
+| Document | Scope |
+|----------|-------|
+| [Architecture overview](architecture/overview.md) | System design, process roles, sandbox lifecycle, deployment modes |
+| [Security model](architecture/security-model.md) | Trust boundaries, sandbox isolation, auth |
+| [Events](architecture/events.md) | Domain events, SSE contract, persistence, replay |
+| [Config source governance](architecture/config-source-governance.md) | AppConfig, config.yaml, env var boundaries |
+| [Model resilience](architecture/model-resilience.md) | Circuit breaking, fallback, SLO runbooks |
+| [Contract compatibility](architecture/contract-compatibility.md) | API/SSE compatibility window |
+| [Codebase reindex](architecture/codebase-reindex.md) | Vector degradation and recovery |
+| [Architecture evolution](architecture/architecture-evolution.md) | Compose → K8s / external sandbox |
+
+### Open-source governance
+
+| Document | Scope |
+|----------|-------|
+| [CONTRIBUTING.md](../.github/CONTRIBUTING.md) | Contribution guide |
+| [SECURITY.md](../.github/SECURITY.md) | Vulnerability reporting |
+| [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.md) | Community standards |
+
+## Maintenance rules
+
+- **One topic, one authoritative doc** — avoid duplicating policy across README and topic docs.
+- **Config source of truth** — `.env.example` for env vars; `api/config.yaml` for behavior config.
+- **Bilingual pairs** — update both language files when changing a topic.
+- **Link convention** — English docs link to `*.md`; Chinese docs link to `*.zh-CN.md`.

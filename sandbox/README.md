@@ -1,88 +1,88 @@
-# MyManus 沙箱服务
+[English](README.md) · [简体中文](README.zh-CN.md)
 
-基于 Ubuntu 22.04 构建的沙箱环境，提供隔离的代码执行、浏览器自动化和远程桌面访问能力。
+# OpenCitadel Sandbox Service
 
-## 技术栈
+Ubuntu 22.04-based isolated environment for code execution, browser automation, and remote desktop access.
+
+## Tech Stack
 
 - Ubuntu 22.04
-- Python 3.10 + FastAPI（依赖管理：uv）
+- Python 3.10 + FastAPI (uv for dependency management)
 - Node.js 24 (LTS)
-- Chromium (浏览器自动化)
-- Xvfb + x11vnc + websockify (虚拟显示 + VNC)
-- Supervisor (进程管理)
+- Chromium (browser automation)
+- Xvfb + x11vnc + websockify (virtual display + VNC)
+- Supervisor (process management)
 
-## 架构
+## Architecture
 
-沙箱通过 Supervisor 管理多个进程：
+Supervisor manages multiple processes:
 
-| 进程 | 端口 | 说明 |
-|------|------|------|
-| FastAPI | 8080 | REST API（文件操作、Shell 执行） |
-| Chrome | 8222 (内部) | 浏览器实例 |
-| socat | 9222 | Chrome DevTools Protocol 代理 |
-| Xvfb | - | 虚拟显示器 (:1) |
-| x11vnc | 5900 | VNC 服务 |
-| websockify | 5901 | WebSocket VNC 代理 |
+| Process | Port | Description |
+|---------|------|-------------|
+| FastAPI | 8080 | REST API (files, Shell execution) |
+| Chrome | 8222 (internal) | Browser instance |
+| socat | 9222 | Chrome DevTools Protocol proxy |
+| Xvfb | — | Virtual display (:1) |
+| x11vnc | 5900 | VNC server |
+| websockify | 5901 | WebSocket VNC proxy |
 
-## API 接口
+## API Endpoints
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/file/read-file` | 读取文件 |
-| POST | `/api/file/write-file` | 写入文件 |
-| POST | `/api/file/upload-file` | 上传文件 |
-| GET | `/api/file/download-file` | 下载文件 |
-| POST | `/api/shell/exec-command` | 执行命令 |
-| POST | `/api/shell/read-shell-output` | 读取 Shell 输出 |
-| GET | `/api/supervisor/status` | 获取进程状态 |
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/file/read-file` | Read file |
+| POST | `/api/file/write-file` | Write file |
+| POST | `/api/file/upload-file` | Upload file |
+| GET | `/api/file/download-file` | Download file |
+| POST | `/api/shell/exec-command` | Execute command |
+| POST | `/api/shell/read-shell-output` | Read Shell output |
+| GET | `/api/supervisor/status` | Process status |
 
-## 本地开发
+## Local Development
 
-### 环境准备
+### Prerequisites
 
 ```bash
 pip install uv
 uv sync --frozen
 ```
 
-### 启动服务
+### Start Service
 
-在容器内或本地：
+Inside a container or locally:
 
 ```bash
-# 启动 API 服务
 uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
-## Docker 部署
+## Docker Deployment
 
-沙箱服务通过根目录的 `docker-compose.yml` 统一部署。Dockerfile 在 `UV_INDEX_URL` 生效后执行 `uv sync --frozen`，依赖安装到 `/venv`，运行时通过 `PATH=/venv/bin` 解析 `uvicorn`。
+Sandbox deploys via root `docker-compose.yml`. After `UV_INDEX_URL` is set, Dockerfile runs `uv sync --frozen`; dependencies install to `/venv` with `PATH=/venv/bin` for `uvicorn`.
 
-`pip install uv` 与 `uv sync` 使用可覆盖的 build args（默认阿里云 PyPI、`UV_VERSION=0.11.19`、`UV_HTTP_TIMEOUT=300`），避免从 `files.pythonhosted.org` 拉取大 wheel 超时。npm 默认 `registry.npmmirror.com`。
-
-```bash
-# 仅重建沙箱镜像
-docker compose build manus-sandbox
-```
-
-默认生产路径为动态沙箱：`api/config.yaml` 中 `sandbox.address: null` 时，Worker 通过 Docker/Kubernetes driver 按任务创建 `manus-sandbox-*` 实例。固定容器仅用于 `docker compose --profile fixed-sandbox` 或外部沙箱集群，此时再通过 `sandbox.address` 连接。
-
-### 超时配置
-
-沙箱闲置自动销毁时间通过环境变量配置（单位：分钟）：
+`pip install uv` and `uv sync` use overridable build args (default Aliyun PyPI, `UV_VERSION=0.11.19`, `UV_HTTP_TIMEOUT=300`). npm defaults to `registry.npmmirror.com`.
 
 ```bash
-SERVER_TIMEOUT_MINUTES=60   # 推荐（pydantic-settings 标准名）
-# 兼容旧名: SERVICE_TIMEOUT_MINUTES=60
+docker compose build opencitadel-sandbox
 ```
 
-API/Worker 侧通过 `SANDBOX_TTL_MINUTES` 创建动态沙箱时注入 `SERVER_TIMEOUT_MINUTES`。
+Default production path is dynamic sandboxes: when `sandbox.address: null` in `api/config.yaml`, Worker creates `opencitadel-sandbox-*` instances via Docker/Kubernetes driver. Fixed containers are for `docker compose --profile fixed-sandbox` or external sandbox clusters, connected via `sandbox.address`.
 
-### 端口说明
+### Timeout Configuration
 
-在 Docker Compose 部署中，沙箱端口仅在容器网络内部可访问，不对外暴露：
+Sandbox idle destroy timeout (minutes):
 
-- `8080` - FastAPI REST API
-- `9222` - Chrome DevTools Protocol
-- `5900` - VNC RFB
-- `5901` - WebSocket VNC（API 服务通过此端口代理 VNC 到前端）
+```bash
+SERVER_TIMEOUT_MINUTES=60   # Recommended (pydantic-settings standard)
+# Legacy alias: SERVICE_TIMEOUT_MINUTES=60
+```
+
+API/Worker inject `SERVER_TIMEOUT_MINUTES` via `SANDBOX_TTL_MINUTES` when creating dynamic sandboxes.
+
+### Ports
+
+In Docker Compose, sandbox ports are internal only:
+
+- `8080` — FastAPI REST API
+- `9222` — Chrome DevTools Protocol
+- `5900` — VNC RFB
+- `5901` — WebSocket VNC (API proxies VNC to frontend)

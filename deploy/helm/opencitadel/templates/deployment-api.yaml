@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-api
+  labels:
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.replicaCount.api }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: api
+    spec:
+      {{- $secretName := printf "%s-secret" (include "opencitadel.fullname" .) }}
+      {{- $configName := printf "%s-config" (include "opencitadel.fullname" .) }}
+      initContainers:
+        {{- if .Values.migrate.enabled }}
+        - name: migrate
+          image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}"
+          command: ["python", "-m", "app.migrate"]
+          envFrom:
+            - secretRef:
+                name: {{ $secretName }}
+          env:
+            {{- range $key, $value := .Values.env }}
+            {{- if and (ne $key "POSTGRES_HOST") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+            - name: POSTGRES_HOST
+              value: {{ include "opencitadel.postgresHost" . | quote }}
+            - name: REDIS_HOST
+              value: {{ include "opencitadel.redisHost" . | quote }}
+            - name: MINIO_ENDPOINT
+              value: {{ include "opencitadel.minioEndpoint" . | quote }}
+        {{- end }}
+      containers:
+        - name: api
+          image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}"
+          imagePullPolicy: {{ .Values.image.api.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/status
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources.api | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: {{ $secretName }}
+          env:
+            {{- range $key, $value := .Values.env }}
+            {{- if and (ne $key "POSTGRES_HOST") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+            - name: POSTGRES_HOST
+              value: {{ include "opencitadel.postgresHost" . | quote }}
+            - name: REDIS_HOST
+              value: {{ include "opencitadel.redisHost" . | quote }}
+            - name: MINIO_ENDPOINT
+              value: {{ include "opencitadel.minioEndpoint" . | quote }}
+          volumeMounts:
+            - name: app-config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+      volumes:
+        - name: app-config
+          configMap:
+            name: {{ $configName }}

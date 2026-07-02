@@ -7,11 +7,11 @@ def test_settings_derives_database_uri_from_postgres_fields():
     settings = Settings(
         postgres_user="app",
         postgres_password="s3cret!",
-        postgres_db="manus",
-        postgres_host="manus-postgres",
+        postgres_db="opencitadel",
+        postgres_host="opencitadel-postgres",
     )
     assert settings.sqlalchemy_database_uri == (
-        "postgresql+asyncpg://app:s3cret%21@manus-postgres:5432/manus"
+        "postgresql+asyncpg://app:s3cret%21@opencitadel-postgres:5432/opencitadel"
     )
 
 
@@ -25,9 +25,9 @@ def test_sqlalchemy_sync_database_uri_uses_postgres_fields():
     settings = Settings(
         postgres_user="app",
         postgres_password="s3cret!",
-        postgres_db="manus",
-        postgres_host="manus-postgres",
+        postgres_db="opencitadel",
+        postgres_host="opencitadel-postgres",
     )
     assert sqlalchemy_sync_database_uri(settings) == (
-        "postgresql+psycopg2://app:s3cret%21@manus-postgres:5432/manus"
+        "postgresql+psycopg2://app:s3cret%21@opencitadel-postgres:5432/opencitadel"
     )

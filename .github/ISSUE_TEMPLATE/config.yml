@@ -1,0 +1,10 @@
+---
+name: config.yml
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability / 安全漏洞
+    url: https://github.com/OceaLong/opencitadel/security/advisories/new
+    about: Report security issues privately (do not open public issues) / 私下报告安全问题（请勿公开 Issue）
+  - name: Discussions / 讨论区
+    url: https://github.com/OceaLong/opencitadel/discussions
+    about: Ask questions and share ideas / 提问与交流想法

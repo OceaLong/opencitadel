@@ -30,14 +30,14 @@ memory:
 sandbox:
   driver: auto
   address: null
-  image: manus-sandbox
-  name_prefix: manus-sandbox
+  image: opencitadel-sandbox
+  name_prefix: opencitadel-sandbox
   ttl_minutes: 20
-  network: manus-network
+  network: opencitadel-network
   chrome_args: ''
   https_proxy: null
   http_proxy: null
-  no_proxy: localhost,127.0.0.1,manus-api,manus-ui,manus-redis,manus-postgres
+  no_proxy: localhost,127.0.0.1,opencitadel-api,opencitadel-ui,opencitadel-redis,opencitadel-postgres
   cleanup_interval_seconds: 60
   memory_limit: 1g
   cpu_limit: 2
@@ -47,7 +47,7 @@ sandbox:
   idle_timeout_minutes: 10
   warmup_retry_interval_seconds: 0.5
   k8s_namespace: default
-  k8s_pod_label: app=manus-sandbox
+  k8s_pod_label: app=opencitadel-sandbox
 
 worker:
   max_concurrent_tasks: 4
@@ -72,7 +72,7 @@ streams:
 
 observability:
   otel_enabled: false
-  otel_service_name: my-manus-api
+  otel_service_name: opencitadel-api
   otel_exporter_endpoint: ''
   langfuse_enabled: false
 

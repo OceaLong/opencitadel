@@ -79,7 +79,7 @@ class SandboxRuntimeSettings:
     warmup_max_retries: int = 30
     fast_warmup_max_retries: int = 5
     k8s_namespace: str = "default"
-    k8s_pod_label: str = "app=manus-sandbox"
+    k8s_pod_label: str = "app=opencitadel-sandbox"
 
     @classmethod
     def from_config(cls, config: SandboxConfig) -> "SandboxRuntimeSettings":

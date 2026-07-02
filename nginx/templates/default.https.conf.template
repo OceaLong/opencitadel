@@ -1,22 +1,22 @@
 # HTTP -> HTTPS 重定向（容器内 80 映射到宿主机 NGINX_PORT，默认 8088）
 server {
     listen 80;
-    server_name ${MANUS_DOMAIN};
+    server_name ${OPENCITADEL_DOMAIN};
     return 301 https://$server_name$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name ${MANUS_DOMAIN};
+    server_name ${OPENCITADEL_DOMAIN};
 
-    ssl_certificate     /etc/letsencrypt/live/${MANUS_DOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${MANUS_DOMAIN}/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/${OPENCITADEL_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${OPENCITADEL_DOMAIN}/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
     resolver 127.0.0.11 valid=10s ipv6=off;
 
     location /api/ {
-        set $api_upstream manus-api;
+        set $api_upstream opencitadel-api;
         proxy_pass http://$api_upstream:8000$request_uri;
         proxy_http_version 1.1;
 
@@ -39,7 +39,7 @@ server {
     }
 
     location / {
-        set $ui_upstream manus-ui;
+        set $ui_upstream opencitadel-ui;
         proxy_pass http://$ui_upstream:3000$request_uri;
         proxy_http_version 1.1;
 
