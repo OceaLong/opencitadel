@@ -41,7 +41,7 @@ spec:
                 name: {{ $secretName }}
           env:
             {{- range $key, $value := .Values.env }}
-            {{- if and (ne $key "POSTGRES_HOST") (ne $key "REDIS_HOST") }}
+            {{- if and (ne $key "POSTGRES_HOST") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
@@ -50,6 +50,8 @@ spec:
               value: {{ include "my-manus.postgresHost" . | quote }}
             - name: REDIS_HOST
               value: {{ include "my-manus.redisHost" . | quote }}
+            - name: MINIO_ENDPOINT
+              value: {{ include "my-manus.minioEndpoint" . | quote }}
             - name: MANUS_NODE_NAME
               valueFrom:
                 fieldRef:

@@ -69,6 +69,8 @@ services:
       retries: 5
 
   manus-minio:
+    profiles:
+      - local
     image: minio/minio:latest
     container_name: manus-minio
     restart: unless-stopped
@@ -152,8 +154,6 @@ services:
         condition: service_healthy
       manus-postgres:
         condition: service_healthy
-      manus-minio:
-        condition: service_healthy
       manus-migrate:
         condition: service_completed_successfully
     networks:
@@ -189,8 +189,6 @@ services:
       manus-redis:
         condition: service_healthy
       manus-postgres:
-        condition: service_healthy
-      manus-minio:
         condition: service_healthy
       manus-migrate:
         condition: service_completed_successfully

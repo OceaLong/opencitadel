@@ -52,6 +52,18 @@ redis:
       cpu: 500m
       memory: 512Mi
 
+minio:
+  enabled: false
+  image: minio/minio:latest
+  storage: 20Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 resourceQuota:
   enabled: true
   maxSandboxPods: "20"

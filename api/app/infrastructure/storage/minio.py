@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import asyncio
 import io
 import logging
 from datetime import timedelta
@@ -17,6 +18,14 @@ logger = logging.getLogger(__name__)
 _BUCKET_EXISTS_CODES = frozenset({
     "BucketAlreadyOwnedByYou",
     "BucketAlreadyExists",
+})
+
+_INIT_MAX_ATTEMPTS = 15
+_INIT_RETRY_DELAY_SECONDS = 2.0
+_AUTH_ERROR_CODES = frozenset({
+    "AccessDenied",
+    "InvalidAccessKeyId",
+    "SignatureDoesNotMatch",
 })
 
 
@@ -38,26 +47,46 @@ class Minio:
             self._client = object()  # type: ignore[assignment]
             return
 
-        try:
-            self._client = MinioClient(
-                self._settings.minio_endpoint,
-                access_key=self._settings.minio_access_key,
-                secret_key=self._settings.minio_secret_key,
-                secure=self._settings.minio_secure,
-            )
-            bucket = self.bucket
-            exists = await run_in_threadpool(self._client.bucket_exists, bucket)
-            if not exists:
-                try:
-                    await run_in_threadpool(self._client.make_bucket, bucket)
-                except S3Error as exc:
-                    if exc.code not in _BUCKET_EXISTS_CODES:
-                        raise
-            self._presign_client = self._build_presign_client()
-            logger.info("MinIO 对象存储初始化成功")
-        except Exception as exc:
-            logger.error("MinIO 对象存储初始化失败: %s", exc)
-            raise
+        last_exc: Exception | None = None
+        for attempt in range(1, _INIT_MAX_ATTEMPTS + 1):
+            try:
+                client = MinioClient(
+                    self._settings.minio_endpoint,
+                    access_key=self._settings.minio_access_key,
+                    secret_key=self._settings.minio_secret_key,
+                    secure=self._settings.minio_secure,
+                )
+                bucket = self.bucket
+                exists = await run_in_threadpool(client.bucket_exists, bucket)
+                if not exists:
+                    try:
+                        await run_in_threadpool(client.make_bucket, bucket)
+                    except S3Error as exc:
+                        if exc.code not in _BUCKET_EXISTS_CODES:
+                            raise
+                self._client = client
+                self._presign_client = self._build_presign_client()
+                logger.info("MinIO 对象存储初始化成功")
+                return
+            except S3Error as exc:
+                if exc.code in _AUTH_ERROR_CODES:
+                    logger.error("MinIO 对象存储认证失败: %s", exc)
+                    raise
+                last_exc = exc
+            except Exception as exc:
+                last_exc = exc
+
+            if attempt < _INIT_MAX_ATTEMPTS:
+                logger.warning(
+                    "MinIO 对象存储初始化失败 (attempt %s/%s): %s",
+                    attempt,
+                    _INIT_MAX_ATTEMPTS,
+                    last_exc,
+                )
+                await asyncio.sleep(_INIT_RETRY_DELAY_SECONDS)
+
+        logger.error("MinIO 对象存储初始化失败: %s", last_exc)
+        raise last_exc  # type: ignore[misc]
 
     def _build_presign_client(self) -> Optional[MinioClient]:
         public_endpoint = (self._settings.minio_public_endpoint or "").strip()

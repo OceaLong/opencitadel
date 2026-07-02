@@ -17,3 +17,11 @@
 {{- .Values.env.REDIS_HOST -}}
 {{- end -}}
 {{- end -}}
+
+{{- define "my-manus.minioEndpoint" -}}
+{{- if .Values.minio.enabled -}}
+{{- printf "%s-minio:9000" (include "my-manus.fullname" .) -}}
+{{- else -}}
+{{- .Values.env.MINIO_ENDPOINT -}}
+{{- end -}}
+{{- end -}}

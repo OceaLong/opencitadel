@@ -22,6 +22,19 @@ helm upgrade --install my-manus ./deploy/helm/my-manus \
   --set replicaCount.worker=2
 ```
 
+### local 模式（集群内 MinIO）
+
+```bash
+helm upgrade --install my-manus ./deploy/helm/my-manus \
+  --namespace manus --create-namespace \
+  --set minio.enabled=true \
+  --set env.STORAGE_PROVIDER=minio \
+  --set secrets.minioAccessKey=minioadmin \
+  --set secrets.minioSecretKey=minioadmin
+```
+
+`minio.enabled=true` 时 Chart 自动部署 MinIO StatefulSet 并将 `MINIO_ENDPOINT` 指向集群内 Service。
+
 ## 主要 Values
 
 | 参数 | 默认值 | 说明 |
@@ -31,6 +44,9 @@ helm upgrade --install my-manus ./deploy/helm/my-manus \
 | `autoscaling.api.enabled` | true | API HPA |
 | `autoscaling.worker.enabled` | true | Worker HPA |
 | `migrate.enabled` | true | API initContainer 执行迁移 |
+| `minio.enabled` | false | 集群内 MinIO（local 模式设为 true） |
+| `minio.storage` | 20Gi | MinIO PVC 大小 |
+| `env.STORAGE_PROVIDER` | cos | 对象存储后端：`cos` 或 `minio` |
 | `env` | 见 values.yaml | 非敏感环境变量（DB/Redis 主机、日志级别等） |
 | `secrets` | 见 values.yaml | 敏感配置，渲染为 Secret 并通过 `envFrom` 注入 |
 | `appConfig` | 见 values.yaml | 应用行为配置，渲染为 ConfigMap 并挂载为 `/app/config.yaml` |
