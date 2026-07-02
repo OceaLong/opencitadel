@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import pytest
+
 from app.application.services.a2a_server_service import (
     A2AServerService,
     build_a2a_text_response,
@@ -51,13 +53,14 @@ class _FakeSkillService:
 
 class _FakeModelService:
     async def get_default_model(self):
-        return object()
+        return type("Model", (), {"id": "model-1"})()
 
 
 async def _closed_circuit(_model_id: str) -> bool:
     return False
 
 
+@pytest.mark.asyncio
 async def test_a2a_message_send_creates_owned_session():
     session_service = _FakeSessionService()
     service = A2AServerService(

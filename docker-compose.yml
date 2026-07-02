@@ -222,10 +222,11 @@ services:
     networks:
       - opencitadel-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/healthz"]
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
   # ==================== Nginx 网关 ====================
 

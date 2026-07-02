@@ -24,7 +24,7 @@ def test_migrate_main_runs_alembic_before_llm_key_migration(monkeypatch):
 
     main()
 
-    assert calls == ["alembic", "llm_keys"]
+    assert calls == ["alembic", "llm_keys", "llm_keys"]
 
 
 def test_migrate_legacy_plaintext_skips_cipher_when_no_candidates(monkeypatch):

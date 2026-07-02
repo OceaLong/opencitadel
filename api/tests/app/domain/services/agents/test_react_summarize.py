@@ -4,6 +4,8 @@ import asyncio
 import json
 from typing import AsyncGenerator, Optional, List
 
+import pytest
+
 from app.domain.models.event import MessageEvent
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.services.agents.react import ReActAgent
@@ -12,6 +14,21 @@ from tests.app.domain.services.agents.conftest import (
     agent_test_observability_port,
     agent_test_runtime_settings,
 )
+
+
+class _FakeSessionRepo:
+    async def get_by_id(self, _session_id):
+        return None
+
+
+class _FakeUow:
+    session = _FakeSessionRepo()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
 
 
 class _FakeJsonParser:
@@ -51,7 +68,7 @@ class _StepAgent(ReActAgent):
 
 def _agent_kwargs(**overrides):
     defaults = {
-        "uow_factory": lambda: None,
+        "uow_factory": lambda: _FakeUow(),
         "session_id": "session-1",
         "agent_config": type("Cfg", (), {"max_retries": 1, "max_iterations": 1})(),
         "llm": _DummyLLM(),
