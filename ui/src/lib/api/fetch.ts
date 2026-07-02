@@ -1,5 +1,7 @@
 import type { ApiResponse } from "./types";
 import { dispatchAuthRequired } from "../auth-events";
+import { ACTIVE_WORKSPACE_KEY, LEGACY_ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
+import { readLocalStorageKey } from "@/lib/storage-migration";
 
 /**
  * API 配置
@@ -43,7 +45,7 @@ function readCookie(name: string): string {
 
 function activeWorkspaceId(): string {
   if (typeof window === "undefined") return "";
-  return window.localStorage.getItem("my-manus-active-workspace") || "";
+  return readLocalStorageKey(LEGACY_ACTIVE_WORKSPACE_KEY, ACTIVE_WORKSPACE_KEY);
 }
 
 let refreshPromise: Promise<unknown> | null = null;

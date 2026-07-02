@@ -14,7 +14,7 @@ export type SettingTab =
   | "a2a-setting"
   | "mcp-setting";
 
-export function useManusSettings(open: boolean, activeSetting: SettingTab) {
+export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab) {
   const [agentConfig, setAgentConfig] = useState<AgentConfig>({});
   const [mcpServers, setMcpServers] = useState<ListMCPServerItem[]>([]);
   const [a2aServers, setA2aServers] = useState<ListA2AServerItem[]>([]);

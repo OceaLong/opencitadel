@@ -137,7 +137,7 @@ class PlaywrightBrowser(BrowserProtocol):
             return None
 
         # 2.构建选择器
-        selector = f'[data-manus-id="manus-element-{index}"]'
+        selector = f'[data-opencitadel-id="opencitadel-element-{index}"]'
         return await self.page.query_selector(selector)
 
     def _current_page_url(self) -> str:

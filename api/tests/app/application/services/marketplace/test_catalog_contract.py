@@ -19,8 +19,6 @@ FRONTEND_REGISTRY_IDS = {
     "secret-generator",
     "document-converter",
     "watermark-tool",
-    "party-room",
-    "questionnaire",
     "personality-tests",
     "fortune-teller",
 }

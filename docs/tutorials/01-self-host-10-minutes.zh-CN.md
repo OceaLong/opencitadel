@@ -68,7 +68,7 @@ FRONTEND_BASE_URL=http://localhost:8088
 
 | 问题 | 解决方法 |
 |------|----------|
-| 登录 502 | 等待 `opencitadel-migrate` 完成；查看 `docker compose logs migrate` |
+| 登录 502 | 等待 `opencitadel-migrate` 完成；查看 `docker compose logs opencitadel-migrate` |
 | Agent 无响应 | 确认已设置带有效 API Key 的默认模型 |
 | OOM / 运行缓慢 | 参见 [部署指南](../operations/deployment.zh-CN.md) 内存调优；在小 VM 上启用 swap |
 

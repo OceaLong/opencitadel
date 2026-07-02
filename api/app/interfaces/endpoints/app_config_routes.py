@@ -119,7 +119,7 @@ async def set_mcp_server_enabled(
     path="/a2a-servers",
     response_model=Response[ListA2AServerResponse],
     summary="获取a2a服务器列表",
-    description="获取MyManus项目中的所有已配置的a2a服务列表",
+    description="获取 OpenCitadel 项目中的所有已配置的 a2a 服务列表",
 )
 async def get_a2a_servers(
         app_config_service: AppConfigService = Depends(get_app_config_service),
@@ -136,7 +136,7 @@ async def get_a2a_servers(
     path="/a2a-servers",
     response_model=Response[Optional[Dict]],
     summary="新增a2a服务器",
-    description="为MyManus项目新增a2a服务器",
+    description="为 OpenCitadel 项目新增 a2a 服务器",
 )
 async def create_a2a_server(
         base_url: str = Body(..., embed=True),

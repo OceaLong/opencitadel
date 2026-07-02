@@ -112,30 +112,6 @@ MARKETPLACE_APPS: list[dict[str, Any]] = [
         "examples": ["生成 16 位强密码", "批量生成 5 个 UUID"],
     },
     {
-        "id": "party-room",
-        "name": "派对房间",
-        "description": "房间码加入，摇骰子、真心话大冒险，支持多人实时",
-        "icon": "🎲",
-        "category": "娱乐",
-        "tags": ["骰子", "真心话大冒险", "多人", "房间"],
-        "featured": True,
-        "accent": "rose",
-        "needs_vision": False,
-        "examples": ["创建派对房间", "加入房间码 123456", "摇骰子真心话大冒险"],
-    },
-    {
-        "id": "questionnaire",
-        "name": "自定义问卷",
-        "description": "创建问卷、发布分享链接、收集回复并查看统计",
-        "icon": "📋",
-        "category": "社交",
-        "tags": ["问卷", "调查", "统计", "分享"],
-        "featured": True,
-        "accent": "sky",
-        "needs_vision": False,
-        "examples": ["创建一份满意度问卷", "发布活动报名表", "查看问卷统计"],
-    },
-    {
         "id": "personality-tests",
         "name": "趣味人格测试",
         "description": "MBTI、九型人格、DISC、爱之语言、EQ、动物人格等 6 套测试",
@@ -150,7 +126,7 @@ MARKETPLACE_APPS: list[dict[str, Any]] = [
     {
         "id": "fortune-teller",
         "name": "AI 运势预测",
-        "description": "运势预测、抽签、算命、星盘推演，生成可分享的精美结果",
+        "description": "运势预测、抽签、算命、星盘推演，生成精美结果",
         "icon": "🔮",
         "category": "娱乐",
         "tags": ["运势", "抽签", "算命", "星盘", "分享"],
@@ -198,8 +174,6 @@ _APP_MODEL_DEPENDENCY: dict[str, str] = {
     "qr-generator": "none",
     "dev-toolbox": "none",
     "secret-generator": "none",
-    "party-room": "none",
-    "questionnaire": "none",
     "personality-tests": "none",
     "fortune-teller": "optional",
     "document-converter": "none",
@@ -257,5 +231,4 @@ def build_route_prompt() -> str:
 - document-converter: params.target_format 可为 pdf/docx/md/txt。
 - watermark-tool: params.mode 可为 add/remove；params.text = 水印文字。
 - personality-tests: params.test_id 可为 mbti/enneagram/disc/love/eq/fun-animal。
-- fortune-teller: params.mode 可为 fortune/lottery/divination/astrology；params.question = 用户想预测的问题。
-- party-room: params.code = 6 位房间码（加入已有房间）。"""
+- fortune-teller: params.mode 可为 fortune/lottery/divination/astrology；params.question = 用户想预测的问题。"""

@@ -145,9 +145,9 @@ def test_offload_large_result_writes_cache_and_returns_digest():
         return await agent._offload_large_result("call-abc", "search_web", large)
 
     offloaded = asyncio.run(_run())
-    assert ".manus_cache/call-abc.json" in (offloaded.message or "")
+    assert ".opencitadel_cache/call-abc.json" in (offloaded.message or "")
     assert len(offloaded.data or "") <= 500
     assert len(write_tool.written) == 1
     path, content = write_tool.written[0]
-    assert path == "/home/ubuntu/.manus_cache/call-abc.json"
+    assert path == "/home/ubuntu/.opencitadel_cache/call-abc.json"
     assert "z" * 500 in content

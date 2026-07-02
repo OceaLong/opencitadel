@@ -175,11 +175,11 @@ GET_INTERACTIVE_ELEMENTS_FUNC = """() => {
             text = text.substring(0, 97) + '...';
         }
 
-        // 24.为当前元素添加data-manus-id的属性，值为manus-element-idx，这样可以通过索引找到对应的元素
-        element.setAttribute('data-manus-id', `manus-element-${validElementIndex}`);
+        // 24.为当前元素添加 data-opencitadel-id 的属性，值为 opencitadel-element-idx，这样可以通过索引找到对应的元素
+        element.setAttribute('data-opencitadel-id', `opencitadel-element-${validElementIndex}`);
 
         // 25.构建css选择器
-        const selector = `[data-manus-id="manus-element-${validElementIndex}"]`;
+        const selector = `[data-opencitadel-id="opencitadel-element-${validElementIndex}"]`;
 
         // 26.将索引、标签名、文本、选择器添加到激活元素列表中
         interactiveElements.push({

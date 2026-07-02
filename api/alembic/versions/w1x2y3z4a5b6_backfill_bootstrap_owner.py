@@ -34,7 +34,7 @@ def _bootstrap_admin_email() -> str:
 
 
 def _bootstrap_admin_id(email: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"my-manus-bootstrap-admin:{email}"))
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"opencitadel-bootstrap-admin:{email}"))
 
 
 def upgrade() -> None:

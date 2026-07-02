@@ -39,8 +39,6 @@ _OWNED_RESOURCE_TABLES = (
     "codebases",
     "files",
     "llm_token_usages",
-    "questionnaires",
-    "marketplace_fortune_predictions",
 )
 
 

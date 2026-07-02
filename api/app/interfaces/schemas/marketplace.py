@@ -246,12 +246,3 @@ class FortunePredictionResponse(BaseModel):
     input_profile: Dict[str, Any] = Field(default_factory=dict)
     result: FortunePredictionResult
     created_at: str
-
-
-class FortunePredictionShareResponse(BaseModel):
-    share_id: str
-    mode: str
-    question: str
-    input_profile: Dict[str, Any] = Field(default_factory=dict)
-    result: FortunePredictionResult
-    created_at: str

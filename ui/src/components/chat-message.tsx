@@ -13,7 +13,7 @@ import {
 
 import { AttachmentsMessage } from "@/components/attachments-message";
 import { ClarifyQuestions } from "@/components/clarify-questions";
-import { ManusIcon } from "@/components/manus-icon";
+import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { MarkdownContent } from "@/components/markdown-content";
 import { ToolUse } from "@/components/tool-use";
 
@@ -125,7 +125,7 @@ function ChatMessageComponent({
         <div className="group flex h-7 items-center justify-between">
           <div className="text-foreground flex items-center justify-center gap-1">
             <Languages size={18} />
-            <ManusIcon />
+            <OpenCitadelIcon />
           </div>
         </div>
         <div className="text-foreground m-0 max-w-none p-0">
@@ -141,7 +141,7 @@ function ChatMessageComponent({
         <div className="group flex h-7 items-center justify-between">
           <div className="text-foreground flex items-center justify-center gap-1">
             <Languages size={18} />
-            <ManusIcon />
+            <OpenCitadelIcon />
           </div>
         </div>
         <ClarifyQuestions
@@ -230,7 +230,7 @@ function ChatMessageComponent({
         <div className="group flex h-7 items-center justify-between">
           <div className="flex items-center justify-center gap-1 text-red-600">
             <Languages size={18} />
-            <ManusIcon />
+            <OpenCitadelIcon />
           </div>
         </div>
         <div className="m-0 max-w-none p-0 text-red-600">

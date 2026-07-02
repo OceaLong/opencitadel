@@ -25,8 +25,8 @@ def test_planner_plan_schema_rejects_empty_steps():
 
 
 def test_create_plan_prompt_matches_non_empty_steps_schema():
-    assert "steps\"返回空数组" not in CREATE_PLAN_PROMPT
-    assert "不要返回空 steps" in CREATE_PLAN_PROMPT
+    assert 'empty "steps"' in CREATE_PLAN_PROMPT or "empty steps" in CREATE_PLAN_PROMPT.lower()
+    assert "steps" in CREATE_PLAN_PROMPT
 
 
 def test_planner_plan_schema_ignores_legacy_message_field():

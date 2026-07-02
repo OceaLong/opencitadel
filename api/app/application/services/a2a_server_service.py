@@ -62,7 +62,7 @@ def build_a2a_error_response(request_id: Any, message: str, code: int = -32000) 
 
 
 class A2AServerService:
-    """将 MyManus 会话能力适配为 A2A JSON-RPC 接口。"""
+    """将 OpenCitadel 会话能力适配为 A2A JSON-RPC 接口。"""
 
     def __init__(
             self,
@@ -81,7 +81,7 @@ class A2AServerService:
         base = base_url.rstrip("/")
         skills = await self._skill_service.list_skills(enabled_only=True)
         return {
-            "name": "MyManus",
+            "name": "OpenCitadel",
             "description": "通用 AI Agent 系统，支持规划、工具调用、MCP 与沙箱执行",
             "url": f"{base}/api/a2a",
             "version": "1.0.0",

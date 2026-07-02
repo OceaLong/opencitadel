@@ -13,6 +13,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 import { MemorySettings } from "@/components/settings/memory-settings";
 import { ModelsSettings } from "@/components/settings/models-settings";
@@ -43,7 +44,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
-import { type SettingTab, useManusSettings } from "@/hooks/use-manus-settings";
+import { type SettingTab, useOpenCitadelSettings } from "@/hooks/use-open-citadel-settings";
 import type { AgentConfig, ListA2AServerItem, ListMCPServerItem } from "@/lib/api";
 
 // ==================== 通用配置 ====================
@@ -126,6 +127,7 @@ type A2ASettingProps = {
 };
 
 function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: A2ASettingProps) {
+  const t = useTranslations("settings");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addUrl, setAddUrl] = useState("");
   const [adding, setAdding] = useState(false);
@@ -163,9 +165,7 @@ function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: A2AS
                 <DialogHeader>
                   <DialogTitle className="text-foreground">添加远程Agent</DialogTitle>
                   <DialogDescription className="text-muted-foreground">
-                    MyManus 使用标准的 A2A 协议来连接远程 Agent。
-                    <br />
-                    请将您的配置粘贴到下方，然后点击&ldquo;添加&rdquo;即可添加 Agent。
+                    {t("a2aAddDescription")}
                   </DialogDescription>
                 </DialogHeader>
                 <form
@@ -181,7 +181,7 @@ function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: A2AS
                         <Input
                           id="a2a_base_url"
                           type="url"
-                          placeholder="Example: https://my-manus.com/weather-agent"
+                          placeholder="Example: https://opencitadel.example/weather-agent"
                           value={addUrl}
                           onChange={(e) => setAddUrl(e.target.value)}
                           disabled={adding}
@@ -204,10 +204,7 @@ function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: A2AS
               </DialogContent>
             </Dialog>
           </FieldLegend>
-          <FieldDescription className="text-sm">
-            模型上下文协议 (MCP) 通过集成外部工具来增强 MyManus
-            的性能，例如私有域搜索、网页浏览、订餐、PPT 生成等任务。
-          </FieldDescription>
+          <FieldDescription className="text-sm">{t("a2aDescription")}</FieldDescription>
 
           {/* 加载态 */}
           {loading && (
@@ -312,6 +309,7 @@ type MCPSettingProps = {
 };
 
 function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: MCPSettingProps) {
+  const t = useTranslations("settings");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addConfig, setAddConfig] = useState("");
   const [adding, setAdding] = useState(false);
@@ -364,8 +362,7 @@ function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: MCPS
                 <DialogHeader>
                   <DialogTitle className="text-foreground">添加新的 MCP 服务器</DialogTitle>
                   <DialogDescription className="text-muted-foreground">
-                    MyManus 使用标准的 JSON MCP 配置来创建新服务器。
-                    请将您的配置粘贴到下方，然后点击&ldquo;添加&rdquo;即可添加新服务器。
+                    {t("mcpAddDescription")}
                   </DialogDescription>
                 </DialogHeader>
                 <form
@@ -404,10 +401,7 @@ function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: MCPS
               </DialogContent>
             </Dialog>
           </FieldLegend>
-          <FieldDescription className="text-sm">
-            模型上下文协议 (MCP) 通过集成外部工具来增强 MyManus
-            的性能，例如私有域搜索、网页浏览、订餐、PPT 生成等任务。
-          </FieldDescription>
+          <FieldDescription className="text-sm">{t("a2aDescription")}</FieldDescription>
 
           {/* 加载态 */}
           {loading && (
@@ -489,7 +483,8 @@ const SETTING_MENUS: Array<{
   { key: "mcp-setting", icon: Wrench, title: "MCP 服务器" },
 ];
 
-export function ManusSettings() {
+export function OpenCitadelSettings() {
+  const t = useTranslations("settings");
   // ---- 防止 SSR hydration 不匹配（Radix Dialog 在服务端/客户端生成不同的 aria-controls ID）----
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -518,7 +513,7 @@ export function ManusSettings() {
     handleA2AToggle,
     handleA2ADelete,
     handleA2AAdd,
-  } = useManusSettings(open, activeSetting);
+  } = useOpenCitadelSettings(open, activeSetting);
 
   // 客户端挂载前，仅渲染普通按钮占位，避免 Radix Dialog SSR hydration 不匹配
   if (!mounted) {
@@ -537,8 +532,8 @@ export function ManusSettings() {
           variant="outline"
           size="icon-sm"
           className="cursor-pointer"
-          aria-label="打开 MyManus 设置"
-          title="设置"
+          aria-label={t("openLabel")}
+          title={t("settingsTitle")}
         >
           <Settings />
         </Button>
@@ -548,9 +543,9 @@ export function ManusSettings() {
       <DialogContent className="!max-w-[920px] shadow-[var(--shadow-panel)]">
         {/* 头部 */}
         <DialogHeader className="border-border/70 border-b pb-4">
-          <DialogTitle className="text-foreground">MyManus 设置</DialogTitle>
+          <DialogTitle className="text-foreground">{t("title")}</DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            在此管理您的 MyManus 设置。
+            {t("description")}
           </DialogDescription>
         </DialogHeader>
 

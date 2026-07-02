@@ -68,7 +68,7 @@ Install [Ollama](https://ollama.com) on the host, pull a capable model (e.g. `qw
 
 | Issue | Fix |
 |-------|-----|
-| 502 on login | Wait for `opencitadel-migrate` to finish; check `docker compose logs migrate` |
+| 502 on login | Wait for `opencitadel-migrate` to finish; check `docker compose logs opencitadel-migrate` |
 | Agent does nothing | Confirm a default model is set with valid API key |
 | OOM / slow | See [deployment guide](../operations/deployment.md) memory tuning; enable swap on small VMs |
 

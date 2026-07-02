@@ -18,7 +18,7 @@ type SidebarLayoutStyle = React.CSSProperties & {
 };
 
 const AUTH_PREFIXES = ["/login", "/register"];
-const SHELLLESS_PREFIXES = ["/q/", "/room/", "/share/"];
+const SHELLLESS_PREFIXES = ["/share/test"];
 const AUTH_REQUIRED_PREFIXES = ["/settings", "/admin"];
 
 function isAuthRoute(pathname: string): boolean {

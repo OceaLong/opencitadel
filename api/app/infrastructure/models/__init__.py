@@ -34,9 +34,6 @@ from .knowledge_base import (
     KnowledgeEntityModel,
     KnowledgeRelationModel,
 )
-from .questionnaire import QuestionnaireModel, QuestionnaireResponseModel
-from .fortune_prediction import FortunePredictionModel
-from .room import RoomModel, RoomParticipantModel, RoomEventModel, RoomTodPromptModel
 from .app_config import AppConfigModel
 
 __all__ = [
@@ -71,12 +68,5 @@ __all__ = [
     "KnowledgeChunkModel",
     "KnowledgeEntityModel",
     "KnowledgeRelationModel",
-    "QuestionnaireModel",
-    "QuestionnaireResponseModel",
-    "FortunePredictionModel",
-    "RoomModel",
-    "RoomParticipantModel",
-    "RoomEventModel",
-    "RoomTodPromptModel",
     "AppConfigModel",
 ]

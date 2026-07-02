@@ -447,8 +447,6 @@ class MarketplaceService:
             result=result,
             owner_user_id=owner_user_id,
         )
-        async with self._uow_factory() as uow:
-            await uow.fortune_prediction.save(prediction)
         return self._format_fortune_prediction(prediction)
 
     async def stream_fortune_prediction(
@@ -483,8 +481,6 @@ class MarketplaceService:
                     result=result,
                     owner_user_id=owner_user_id,
                 )
-                async with self._uow_factory() as uow:
-                    await uow.fortune_prediction.save(prediction)
                 yield {
                     "event": "done",
                     "data": json.dumps(
@@ -492,16 +488,6 @@ class MarketplaceService:
                         ensure_ascii=False,
                     ),
                 }
-
-    async def get_fortune_prediction_share(self, share_id: str) -> dict:
-        share_id = (share_id or "").strip()
-        if not share_id:
-            raise ValueError("分享 ID 无效")
-        async with self._uow_factory() as uow:
-            prediction = await uow.fortune_prediction.get_by_share_id(share_id)
-        if not prediction:
-            raise ValueError("未找到该预测结果")
-        return self._format_fortune_prediction(prediction)
 
     @staticmethod
     def _format_fortune_prediction(prediction: FortunePrediction) -> dict:

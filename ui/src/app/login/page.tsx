@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +13,7 @@ import { useAuth } from "@/providers/auth-provider";
 export default function LoginPage() {
   const router = useRouter();
   const { refresh } = useAuth();
+  const t = useTranslations("auth");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -26,7 +28,7 @@ export default function LoginPage() {
       await refresh();
       router.replace("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "登录失败");
+      setError(err instanceof Error ? err.message : t("loginFailed"));
     } finally {
       setLoading(false);
     }
@@ -36,16 +38,31 @@ export default function LoginPage() {
     <main className="bg-background flex min-h-screen items-center justify-center p-6">
       <form onSubmit={onSubmit} className="border-border bg-card w-full max-w-sm space-y-4 rounded-xl border p-6 shadow-sm">
         <div>
-          <h1 className="text-xl font-semibold">登录 MyManus</h1>
-          <p className="text-muted-foreground mt-1 text-sm">使用本地账号或 SSO 进入工作区。</p>
+          <h1 className="text-xl font-semibold">{t("loginTitle")}</h1>
+          <p className="text-muted-foreground mt-1 text-sm">{t("loginPageDescription")}</p>
         </div>
-        <Input value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="邮箱或用户名" />
-        <Input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="密码" type="password" />
+        <Input
+          value={identifier}
+          onChange={(e) => setIdentifier(e.target.value)}
+          placeholder={t("identifierPlaceholder")}
+        />
+        <Input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={t("passwordPlaceholder")}
+          type="password"
+        />
         {error && <p className="text-destructive text-sm">{error}</p>}
-        <Button className="w-full" disabled={loading}>{loading ? "登录中..." : "登录"}</Button>
+        <Button className="w-full" disabled={loading}>
+          {loading ? t("loggingIn") : t("login")}
+        </Button>
         <div className="grid grid-cols-2 gap-2">
-          <Button type="button" variant="outline" onClick={() => (window.location.href = "/api/auth/oauth/google/login")}>Google</Button>
-          <Button type="button" variant="outline" onClick={() => (window.location.href = "/api/auth/oauth/github/login")}>GitHub</Button>
+          <Button type="button" variant="outline" onClick={() => (window.location.href = "/api/auth/oauth/google/login")}>
+            Google
+          </Button>
+          <Button type="button" variant="outline" onClick={() => (window.location.href = "/api/auth/oauth/github/login")}>
+            GitHub
+          </Button>
         </div>
       </form>
     </main>

@@ -22,7 +22,7 @@ class WebDocument:
 
 async def fetch_web_document(url: str, *, timeout_seconds: float = 20.0) -> WebDocument:
     current = validate_public_url(url)
-    headers = {"User-Agent": "MyManus-KnowledgeBase/1.0"}
+    headers = {"User-Agent": "OpenCitadel-KnowledgeBase/1.0"}
     async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as client:
         response = None
         for _ in range(8):

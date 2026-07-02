@@ -1,6 +1,6 @@
 "use client";
 
-export function ManusIcon() {
+export function OpenCitadelIcon() {
   return (
     <svg height="10" width="59" viewBox="0 0 59 10" xmlns="http://www.w3.org/2000/svg">
       <path

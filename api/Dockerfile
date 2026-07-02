@@ -57,7 +57,7 @@ ENV PYTHONUNBUFFERED=1
 # ==================== API 镜像 ====================
 FROM base AS api
 
-ENV MANUS_PROCESS_ROLE=api
+ENV OPENCITADEL_PROCESS_ROLE=api
 
 # 10.暴露端口号
 EXPOSE 8000
@@ -68,6 +68,6 @@ CMD ["./run.sh"]
 # ==================== Worker 镜像 ====================
 FROM base AS worker
 
-ENV MANUS_PROCESS_ROLE=worker
+ENV OPENCITADEL_PROCESS_ROLE=worker
 
 CMD ["./worker.sh"]

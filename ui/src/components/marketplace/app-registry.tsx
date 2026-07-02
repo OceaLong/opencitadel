@@ -16,8 +16,6 @@ const MODEL_DEPENDENCY: Record<string, ModelDependency> = {
   "qr-generator": "none",
   "dev-toolbox": "none",
   "secret-generator": "none",
-  "party-room": "none",
-  questionnaire: "none",
   "personality-tests": "none",
   "fortune-teller": "optional",
   "document-converter": "none",
@@ -66,12 +64,6 @@ const DevToolboxApp = lazy(() =>
 );
 const SecretGeneratorApp = lazy(() =>
   import("@/components/marketplace/secret-generator-app").then((m) => m.SecretGeneratorApp),
-);
-const QuestionnaireApp = lazy(() =>
-  import("@/components/marketplace/questionnaire-app").then((m) => m.QuestionnaireApp),
-);
-const RoomApp = lazy(() =>
-  import("@/components/marketplace/room-app").then((m) => m.RoomApp),
 );
 const FortuneTellerApp = lazy(() =>
   import("@/components/marketplace/fortune-teller-app").then((m) => m.FortuneTellerApp),
@@ -315,41 +307,9 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
   },
   {
     meta: {
-      id: "party-room",
-      name: "派对房间",
-      description: "房间码加入，摇骰子、真心话大冒险，支持多人实时",
-      icon: "🎲",
-      category: "娱乐",
-      tags: ["骰子", "真心话大冒险", "多人", "房间"],
-      featured: true,
-      accent: "rose",
-      needs_vision: false,
-      examples: ["创建派对房间", "加入房间码 123456", "摇骰子真心话大冒险"],
-    },
-    render: (params) => (
-      <RoomApp initialCode={typeof params.code === "string" ? params.code : undefined} />
-    ),
-  },
-  {
-    meta: {
-      id: "questionnaire",
-      name: "自定义问卷",
-      description: "创建问卷、发布分享链接、收集回复并查看统计",
-      icon: "📋",
-      category: "社交",
-      tags: ["问卷", "调查", "统计", "分享"],
-      featured: true,
-      accent: "sky",
-      needs_vision: false,
-      examples: ["创建一份满意度问卷", "发布活动报名表", "查看问卷统计"],
-    },
-    render: () => <QuestionnaireApp />,
-  },
-  {
-    meta: {
       id: "fortune-teller",
       name: "AI 运势预测",
-      description: "运势预测、抽签、算命、星盘推演，生成可分享的精美结果",
+      description: "运势预测、抽签、算命、星盘推演，生成精美结果",
       icon: "🔮",
       category: "娱乐",
       tags: ["运势", "抽签", "算命", "星盘", "分享"],

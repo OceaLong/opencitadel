@@ -19,8 +19,6 @@ from . import (
     memory_routes,
     metrics_routes,
     marketplace_routes,
-    questionnaire_routes,
-    room_routes,
     codebase_routes,
     knowledge_base_routes,
 )
@@ -32,14 +30,12 @@ def create_api_routes() -> APIRouter:
     api_router = APIRouter()
     authenticated_router = APIRouter(dependencies=[Depends(get_current_principal)])
 
-    # 2.公开模块：认证引导、健康检查、公开分享/房间/问卷等
+    # 2.公开模块：认证引导、健康检查、公开分享等
     api_router.include_router(auth_routes.router)
     api_router.include_router(status_routes.router)
     api_router.include_router(llm_status_routes.router)
     api_router.include_router(metrics_routes.router)
     api_router.include_router(marketplace_routes.router)
-    api_router.include_router(questionnaire_routes.router)
-    api_router.include_router(room_routes.router)
 
     # 3.默认鉴权模块：新增业务接口若无明确公开需求，应放在这里。
     authenticated_router.include_router(admin_routes.router)

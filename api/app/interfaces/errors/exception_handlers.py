@@ -19,11 +19,11 @@ def _request_context(req: Request) -> str:
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    """处理MyManus项目中所有的异常并进行统一处理，涵盖：自定义业务状态异常、HTTP异常、通用异常"""
+    """处理 OpenCitadel 项目中所有的异常并进行统一处理，涵盖：自定义业务状态异常、HTTP异常、通用异常"""
 
     @app.exception_handler(AppException)
     async def app_exception_handler(req: Request, e: AppException) -> JSONResponse:
-        """处理MyManus业务异常，将所有状态统一响应结构"""
+        """处理 OpenCitadel 业务异常，将所有状态统一响应结构"""
         logger.error("AppException: %s (%s)", e.msg, _request_context(req))
         return JSONResponse(
             status_code=e.status_code,
@@ -49,7 +49,7 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def exception_handler(req: Request, e: Exception) -> JSONResponse:
-        """处理MyManus中抛出的未定义的任意一场，将状态码统一设置为500"""
+        """处理 OpenCitadel 中抛出的未定义的任意异常，将状态码统一设置为500"""
         logger.exception("未捕获异常: %s (%s)", e, _request_context(req))
         return JSONResponse(
             status_code=500,

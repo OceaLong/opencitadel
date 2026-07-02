@@ -39,9 +39,15 @@ export const MODE_LABELS: Record<FortuneMode, string> = {
   astrology: "星盘推演",
 };
 
-export function buildFortuneShareUrl(shareId: string): string {
-  if (typeof window === "undefined") return "";
-  return `${window.location.origin}/share/fortune/${shareId}`;
+export function buildFortuneSummaryText(data: FortunePredictionData): string {
+  const lines = [
+    `${data.result.title}`,
+    data.result.summary,
+    ...data.result.sections.map((section) => `${section.heading}: ${section.content}`),
+    `幸运色 ${data.result.lucky_items.color} · 数字 ${data.result.lucky_items.number} · 关键词 ${data.result.lucky_items.keyword}`,
+    data.result.disclaimer,
+  ];
+  return lines.filter(Boolean).join("\n\n");
 }
 
 export function modeAccent(mode: FortuneMode): string {
@@ -137,7 +143,7 @@ export async function downloadFortunePoster(data: FortunePredictionData): Promis
 
   const link = document.createElement("a");
   link.href = canvas.toDataURL("image/png");
-  link.download = `fortune-${data.share_id.slice(0, 8)}.png`;
+  link.download = `fortune-${data.share_id.slice(0, 8) || "result"}.png`;
   link.click();
 }
 

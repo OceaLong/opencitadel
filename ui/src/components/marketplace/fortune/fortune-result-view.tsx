@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Download, Share2 } from "lucide-react";
+import { Copy, Download } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +13,7 @@ import type { FortunePredictionData } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 import {
-  buildFortuneShareUrl,
+  buildFortuneSummaryText,
   downloadFortunePoster,
   FORTUNE_MODES,
   MODE_LABELS,
@@ -29,12 +29,11 @@ type FortuneResultViewProps = {
 export function FortuneResultView({ data, onReset, showReset = true }: FortuneResultViewProps) {
   const reduced = usePrefersReducedMotion();
   const modeMeta = FORTUNE_MODES.find((m) => m.id === data.result.mode);
-  const shareUrl = buildFortuneShareUrl(data.share_id);
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(shareUrl);
-      toast.success("分享链接已复制");
+      await navigator.clipboard.writeText(buildFortuneSummaryText(data));
+      toast.success("结果摘要已复制");
     } catch {
       toast.error("复制失败");
     }
@@ -106,11 +105,7 @@ export function FortuneResultView({ data, onReset, showReset = true }: FortuneRe
       <motion.div variants={reducedVariants(fadeInUp, reduced)} className="flex flex-wrap gap-2">
         <Button variant="outline" onClick={handleCopy}>
           <Copy className="mr-1 size-4" />
-          复制分享链接
-        </Button>
-        <Button variant="outline" onClick={() => window.open(shareUrl, "_blank")}>
-          <Share2 className="mr-1 size-4" />
-          打开分享页
+          复制结果摘要
         </Button>
         <Button variant="outline" onClick={() => void handleDownload()}>
           <Download className="mr-1 size-4" />

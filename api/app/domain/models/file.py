@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class File(BaseModel):
-    """文件信息Domain模型，用于记录Manus/Human上传or生成的文件"""
+    """文件信息 Domain 模型，用于记录 OpenCitadel/Human 上传或生成的文件"""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # 文件id
     filename: str = ""  # 文件名字
     filepath: str = ""  # 文件路径

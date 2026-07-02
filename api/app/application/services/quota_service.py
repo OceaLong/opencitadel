@@ -5,7 +5,7 @@ from typing import Callable
 
 from sqlalchemy import func, select
 
-from app.application.errors.exceptions import TooManusRequestsError
+from app.application.errors.exceptions import TooManyRequestsError
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.models.file import FileModel
 from app.infrastructure.models.llm_token_usage import LLMTokenUsageORM
@@ -30,7 +30,7 @@ class QuotaService:
                     )
                 )
                 if int(result.scalar() or 0) >= quota.daily_session_limit:
-                    raise TooManusRequestsError("已达到每日会话上限")
+                    raise TooManyRequestsError("已达到每日会话上限")
             if quota.monthly_token_limit is not None:
                 since = datetime.now() - timedelta(days=30)
                 result = await uow.db_session.execute(  # type: ignore[attr-defined]
@@ -40,7 +40,7 @@ class QuotaService:
                     )
                 )
                 if int(result.scalar() or 0) >= quota.monthly_token_limit:
-                    raise TooManusRequestsError("已达到月度 Token 上限")
+                    raise TooManyRequestsError("已达到月度 Token 上限")
 
     async def check_storage_quota(self, user_id: str, incoming_bytes: int = 0) -> None:
         async with self._uow_factory() as uow:
@@ -51,4 +51,4 @@ class QuotaService:
                 select(func.coalesce(func.sum(FileModel.size), 0)).where(FileModel.owner_user_id == user_id)
             )
             if int(result.scalar() or 0) + incoming_bytes > quota.max_storage_bytes:
-                raise TooManusRequestsError("已达到存储容量上限")
+                raise TooManyRequestsError("已达到存储容量上限")

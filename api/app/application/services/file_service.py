@@ -12,7 +12,7 @@ from app.domain.repositories.uow import IUnitOfWork
 
 
 class FileService:
-    """MyManus文件系统服务"""
+    """OpenCitadel 文件系统服务"""
 
     def __init__(
             self,

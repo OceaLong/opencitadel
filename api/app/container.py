@@ -24,9 +24,7 @@ from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.marketplace_service import MarketplaceService
 from app.application.services.memory_service import MemoryService
-from app.application.services.questionnaire_service import QuestionnaireService
 from app.application.services.quota_service import QuotaService
-from app.application.services.room_service import RoomService
 from app.application.services.session_service import SessionService
 from app.application.services.session_state_service import SessionStateService
 from app.application.services.service_api_key_service import ServiceApiKeyService
@@ -329,15 +327,6 @@ class BaseContainer(containers.DeclarativeContainer):
         sandbox_cls=sandbox_cls,
         session_list_notifier=session_list_notifier,
         task_state_port=task_state_port,
-    )
-    questionnaire_service = providers.Singleton(
-        QuestionnaireService,
-        uow_factory=uow_factory,
-    )
-    room_service = providers.Factory(
-        RoomService,
-        uow_factory=uow_factory,
-        redis_client=redis,
     )
     marketplace_service = providers.Factory(
         MarketplaceService,

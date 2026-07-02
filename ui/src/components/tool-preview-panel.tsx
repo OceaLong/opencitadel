@@ -1,6 +1,7 @@
 "use client";
 
 import { Bot, FileSearch, Globe, Maximize2, Monitor, Search, Terminal, Wrench } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { JumpToLatestButton, ToolPreviewContent } from "@/components/tool-preview-renderers";
 import type { ToolKind } from "@/components/tool-use/utils";
@@ -72,6 +73,7 @@ export function ToolPreviewPanel({
   onJumpToLatest,
   onOpenVNC,
 }: ToolPreviewPanelProps) {
+  const t = useTranslations("toolPreview");
   const kind = getToolKind(tool);
   const label = getFriendlyToolLabel(tool);
   const ToolIcon = TOOL_ICONS[kind];
@@ -84,7 +86,7 @@ export function ToolPreviewPanel({
       {/* Header */}
       <div className="border-border/70 bg-muted/30 flex flex-shrink-0 flex-col gap-2 border-b px-4 py-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-foreground text-base font-semibold">MyManus 的电脑</h2>
+          <h2 className="text-foreground text-base font-semibold">{t("computerTitle")}</h2>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -97,7 +99,7 @@ export function ToolPreviewPanel({
         </div>
         <div className="text-muted-foreground flex items-center gap-2 text-sm">
           <Monitor size={14} className="text-muted-foreground flex-shrink-0" />
-          <span>MyManus 正在使用</span>
+          <span>{t("usingTool")}</span>
           <span className="text-foreground font-medium">{toolDesc}</span>
         </div>
         <div className="border-border/70 bg-muted/60 text-foreground inline-flex w-fit max-w-full items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs">

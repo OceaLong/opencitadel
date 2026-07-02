@@ -22,7 +22,11 @@ import type { LLMStatusData, MarketplaceApp } from "@/lib/api/types";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { cn } from "@/lib/utils";
 
-const RECENT_KEY = "my-manus-marketplace-recent";
+import {
+  LEGACY_MARKETPLACE_RECENT_KEY,
+  MARKETPLACE_RECENT_KEY,
+} from "@/lib/storage-keys";
+import { migrateLocalStorageKey, writeLocalStorageKey } from "@/lib/storage-migration";
 
 function AppListSkeleton() {
   return (
@@ -82,7 +86,7 @@ export function MarketplaceShell() {
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(RECENT_KEY);
+      const raw = migrateLocalStorageKey(LEGACY_MARKETPLACE_RECENT_KEY, MARKETPLACE_RECENT_KEY);
       if (raw) setRecentIds(JSON.parse(raw));
     } catch {
       setRecentIds([]);
@@ -121,7 +125,11 @@ export function MarketplaceShell() {
   const remember = useCallback((appId: string) => {
     setRecentIds((prev) => {
       const next = [appId, ...prev.filter((id) => id !== appId)].slice(0, 6);
-      localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+      writeLocalStorageKey(
+        LEGACY_MARKETPLACE_RECENT_KEY,
+        MARKETPLACE_RECENT_KEY,
+        JSON.stringify(next),
+      );
       return next;
     });
   }, []);

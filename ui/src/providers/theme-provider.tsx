@@ -10,6 +10,9 @@ import {
   type ReactNode,
 } from "react";
 
+import { LEGACY_THEME_KEY, THEME_KEY } from "@/lib/storage-keys";
+import { migrateLocalStorageKey, writeLocalStorageKey } from "@/lib/storage-migration";
+
 type Theme = "light" | "dark";
 
 type ThemeContextValue = {
@@ -19,7 +22,6 @@ type ThemeContextValue = {
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
-const STORAGE_KEY = "my-manus-theme";
 
 function applyTheme(theme: Theme) {
   document.documentElement.classList.toggle("dark", theme === "dark");
@@ -29,7 +31,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>("light");
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
+    const stored = migrateLocalStorageKey(LEGACY_THEME_KEY, THEME_KEY);
     const initial: Theme = stored === "dark" ? "dark" : "light";
     setThemeState(initial);
     applyTheme(initial);
@@ -37,14 +39,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setTheme = useCallback((next: Theme) => {
     setThemeState(next);
-    window.localStorage.setItem(STORAGE_KEY, next);
+    writeLocalStorageKey(LEGACY_THEME_KEY, THEME_KEY, next);
     applyTheme(next);
   }, []);
 
   const toggleTheme = useCallback(() => {
     setThemeState((prev) => {
       const next: Theme = prev === "dark" ? "light" : "dark";
-      window.localStorage.setItem(STORAGE_KEY, next);
+      writeLocalStorageKey(LEGACY_THEME_KEY, THEME_KEY, next);
       applyTheme(next);
       return next;
     });

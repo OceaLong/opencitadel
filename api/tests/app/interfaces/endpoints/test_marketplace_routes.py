@@ -51,11 +51,6 @@ def test_predict_fortune_requires_question(client):
     assert response.status_code == 422
 
 
-def test_get_fortune_share_not_found(client):
-    response = client.get("/api/marketplace/fortune/share/nonexistent-id")
-    assert response.status_code == 400
-
-
 def test_route_marketplace_request_contract(client):
     class FakeMarketplaceService:
         async def route_request(self, query, *, model_id=None):

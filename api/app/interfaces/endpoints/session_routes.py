@@ -303,7 +303,7 @@ async def stream_sessions(
     path="",
     response_model=Response[ListSessionResponse],
     summary="获取会话列表基础信息",
-    description="获取MyManus项目中所有任务会话基础信息列表",
+    description="获取 OpenCitadel 项目中所有任务会话基础信息列表",
 )
 async def get_all_sessions(
         limit: int = Query(default=100, ge=1, le=500),
@@ -311,7 +311,7 @@ async def get_all_sessions(
         ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
 ) -> Response[ListSessionResponse]:
-    """获取MyManus项目中所有任务会话基础信息列表"""
+    """获取 OpenCitadel 项目中所有任务会话基础信息列表"""
     sessions = await session_service.get_all_sessions(limit=limit, offset=offset, scope=ctx.scope)
     session_items = [
         ListSessionItem(

@@ -7,7 +7,7 @@ from core.config import get_settings
 
 
 def setup_logging() -> None:
-    """配置MyManus项目的日志系统，涵盖日志等级、输出格式、输出渠道等"""
+    """配置 OpenCitadel 项目的日志系统，涵盖日志等级、输出格式、输出渠道等"""
     # 1.获取项目配置
     settings = get_settings()
 

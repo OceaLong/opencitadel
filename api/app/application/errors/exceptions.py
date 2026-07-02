@@ -66,7 +66,7 @@ class ValidationError(AppException):
         super().__init__(status_code=422, code=422, msg=msg)
 
 
-class TooManusRequestsError(AppException):
+class TooManyRequestsError(AppException):
     """请求过多错误（触发限流）"""
 
     def __init__(self, msg: str = "请求过多，触发限流，请稍后重试"):

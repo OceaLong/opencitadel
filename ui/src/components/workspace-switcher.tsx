@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 
 import { teamApi, type Team } from "@/lib/api/team";
+import { ACTIVE_WORKSPACE_KEY, LEGACY_ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
+import { readLocalStorageKey, writeLocalStorageKey } from "@/lib/storage-migration";
 import { useAuth } from "@/providers/auth-provider";
 
 export function WorkspaceSwitcher() {
@@ -12,7 +14,7 @@ export function WorkspaceSwitcher() {
 
   useEffect(() => {
     if (!user) return;
-    setActive(window.localStorage.getItem("my-manus-active-workspace") || "");
+    setActive(readLocalStorageKey(LEGACY_ACTIVE_WORKSPACE_KEY, ACTIVE_WORKSPACE_KEY));
     void teamApi.list().then((data) => setTeams(data.teams)).catch(() => setTeams([]));
   }, [user]);
 
@@ -22,7 +24,7 @@ export function WorkspaceSwitcher() {
 
   function change(value: string) {
     setActive(value);
-    window.localStorage.setItem("my-manus-active-workspace", value);
+    writeLocalStorageKey(LEGACY_ACTIVE_WORKSPACE_KEY, ACTIVE_WORKSPACE_KEY, value);
     window.location.reload();
   }
 

@@ -4,16 +4,17 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { BookOpen, Code2, LayoutGrid } from "lucide-react";
+import { useTranslations } from "next-intl";
 import type { CSSProperties } from "react";
 
-import { ManusIcon } from "@/components/manus-icon";
+import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { Badge } from "@/components/ui/badge";
 
 import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
 import type { LLMStatusData } from "@/lib/api/types";
 
-const ManusSettings = dynamic(
-  () => import("@/components/manus-settings").then((mod) => mod.ManusSettings),
+const OpenCitadelSettings = dynamic(
+  () => import("@/components/open-citadel-settings").then((mod) => mod.OpenCitadelSettings),
   { ssr: false },
 );
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -29,6 +30,7 @@ function ChatHeaderSidebarTrigger() {
 }
 
 export function ChatHeader({ showSidebarTrigger = true }: { showSidebarTrigger?: boolean }) {
+  const t = useTranslations("metadata");
   const [llmStatus, setLlmStatus] = useState<LLMStatusData["status"]>("unknown");
 
   useEffect(() => {
@@ -59,8 +61,8 @@ export function ChatHeader({ showSidebarTrigger = true }: { showSidebarTrigger?:
           style={{ "--logo-color": "currentColor" } as CSSProperties}
           aria-label="返回首页"
         >
-          <ManusIcon />
-          <span className="sr-only">MyManus</span>
+          <OpenCitadelIcon />
+          <span className="sr-only">{t("title")}</span>
         </Link>
       </div>
       <div className="flex items-center gap-1">
@@ -86,7 +88,7 @@ export function ChatHeader({ showSidebarTrigger = true }: { showSidebarTrigger?:
           </Link>
         </Button>
         <ThemeToggle />
-        <ManusSettings />
+        <OpenCitadelSettings />
       </div>
     </header>
   );

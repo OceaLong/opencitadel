@@ -123,7 +123,4 @@ export const marketplaceApi = {
       }
     }
   },
-
-  getFortuneShare: (shareId: string): Promise<FortunePredictionData> =>
-    get<FortunePredictionData>(`/marketplace/fortune/share/${shareId}`),
 };

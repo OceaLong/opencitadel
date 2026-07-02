@@ -5,13 +5,13 @@ set -euo pipefail
 
 PHASE="${1:-snapshot}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-OUT_DIR="${OUT_DIR:-/tmp/my-manus-health}"
+OUT_DIR="${OUT_DIR:-/tmp/opencitadel-health}"
 OUT_FILE="${OUT_DIR}/health-${PHASE}-${STAMP}.txt"
 
 mkdir -p "${OUT_DIR}"
 
 {
-  echo "=== MyManus host health (${PHASE}) @ ${STAMP} UTC ==="
+  echo "=== OpenCitadel host health (${PHASE}) @ ${STAMP} UTC ==="
   echo
   echo "--- free -h ---"
   free -h
@@ -29,9 +29,9 @@ mkdir -p "${OUT_DIR}"
     echo "docker not installed"
   fi
   echo
-  echo "--- sandbox containers (manus-sandbox-*) ---"
+  echo "--- sandbox containers (opencitadel-sandbox-*) ---"
   if command -v docker >/dev/null 2>&1; then
-    docker ps -a --filter "name=manus-sandbox-" --format "table {{.Names}}\t{{.Status}}\t{{.Size}}" 2>/dev/null || true
+    docker ps -a --filter "name=opencitadel-sandbox-" --format "table {{.Names}}\t{{.Status}}\t{{.Size}}" 2>/dev/null || true
   fi
   echo
   echo "--- sysctl vm.swappiness ---"

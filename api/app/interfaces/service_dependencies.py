@@ -19,9 +19,7 @@ from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.marketplace_service import MarketplaceService
 from app.application.services.memory_service import MemoryService
-from app.application.services.questionnaire_service import QuestionnaireService
 from app.application.services.quota_service import QuotaService
-from app.application.services.room_service import RoomService
 from app.application.services.session_service import SessionService
 from app.application.services.service_api_key_service import ServiceApiKeyService
 from app.application.services.skill_service import SkillService
@@ -166,20 +164,6 @@ async def get_file_service(
 async def get_session_service(
         service: SessionService = Depends(Provide[ApiContainer.session_service]),
 ) -> SessionService:
-    return service
-
-
-@inject
-async def get_questionnaire_service(
-        service: QuestionnaireService = Depends(Provide[ApiContainer.questionnaire_service]),
-) -> QuestionnaireService:
-    return service
-
-
-@inject
-async def get_room_service(
-        service: RoomService = Depends(Provide[ApiContainer.room_service]),
-) -> RoomService:
     return service
 
 

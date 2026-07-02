@@ -11,7 +11,7 @@ def test_all_catalog_apps_have_model_dependency():
 
 
 def test_offline_apps_marked_none():
-    offline_ids = {"qr-generator", "dev-toolbox", "party-room", "questionnaire"}
+    offline_ids = {"qr-generator", "dev-toolbox"}
     by_id = {a["id"]: a for a in list_marketplace_apps()}
     for app_id in offline_ids:
         assert by_id[app_id]["model_dependency"] == "none"

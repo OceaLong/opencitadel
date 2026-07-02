@@ -39,7 +39,6 @@ from app.interfaces.schemas.marketplace import (
     VideoSearchResponse,
     FortunePredictionRequest,
     FortunePredictionResponse,
-    FortunePredictionShareResponse,
 )
 from app.interfaces.service_dependencies import get_marketplace_service
 
@@ -296,18 +295,6 @@ async def predict_fortune_stream(
             )
 
     return EventSourceResponse(event_generator())
-
-
-@router.get("/fortune/share/{share_id}", response_model=Response[FortunePredictionShareResponse])
-async def get_fortune_share(
-        share_id: str,
-        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
-) -> Response[FortunePredictionShareResponse]:
-    try:
-        data = await marketplace_service.get_fortune_prediction_share(share_id)
-        return Response.success(data=FortunePredictionShareResponse(**data))
-    except ValueError as exc:
-        raise BadRequestError(str(exc)) from exc
 
 
 @router.post("/watermark/remove", response_model=Response[WatermarkResultResponse])

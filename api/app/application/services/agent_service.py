@@ -39,7 +39,7 @@ _STREAM_STALE_IDLE_SECONDS = 120.0
 
 
 class AgentService:
-    """Manus智能体服务"""
+    """OpenCitadel 智能体服务"""
 
     def __init__(
             self,

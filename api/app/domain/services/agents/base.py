@@ -304,7 +304,7 @@ class BaseAgent(ABC):
             file_tool = self._tool_index.get("write_file")
         if file_tool is None:
             return result
-        cache_path = f"/home/ubuntu/.manus_cache/{tool_call_id}.json"
+        cache_path = f"/home/ubuntu/.opencitadel_cache/{tool_call_id}.json"
         try:
             write_res = await file_tool.invoke("write_file", filepath=cache_path, content=serialized)
         except Exception as exc:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Host tuning for MyManus single-node production (16GB RAM).
+# Host tuning for OpenCitadel single-node production (16GB RAM).
 # Run on the Ubuntu server as root: sudo bash deploy/scripts/host-tune.sh
 set -euo pipefail
 
