@@ -126,7 +126,7 @@ type A2ASettingProps = {
   onAdd: (baseUrl: string) => Promise<boolean>;
 };
 
-function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: A2ASettingProps) {
+export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: A2ASettingProps) {
   const t = useTranslations("settings");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addUrl, setAddUrl] = useState("");
@@ -308,7 +308,7 @@ type MCPSettingProps = {
   onAdd: (config: string) => Promise<boolean>;
 };
 
-function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: MCPSettingProps) {
+export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: MCPSettingProps) {
   const t = useTranslations("settings");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addConfig, setAddConfig] = useState("");
@@ -479,8 +479,6 @@ const SETTING_MENUS: Array<{
   { key: "models-setting", icon: Cpu, title: "模型管理" },
   { key: "skills-setting", icon: Sparkles, title: "Skill 模板" },
   { key: "memory-setting", icon: Brain, title: "长期记忆" },
-  { key: "a2a-setting", icon: LayoutGrid, title: "A2A Agent 配置" },
-  { key: "mcp-setting", icon: Wrench, title: "MCP 服务器" },
 ];
 
 export function OpenCitadelSettings() {
@@ -588,22 +586,20 @@ export function OpenCitadelSettings() {
             {activeSetting === "skills-setting" && <SkillsSettings embedded />}
             {activeSetting === "memory-setting" && <MemorySettings embedded />}
             {activeSetting === "a2a-setting" && (
-              <A2ASetting
-                servers={a2aServers}
-                loading={loadingA2A}
-                onToggleEnabled={handleA2AToggle}
-                onDelete={handleA2ADelete}
-                onAdd={handleA2AAdd}
-              />
+              <p className="text-muted-foreground text-sm">
+                A2A 配置已迁移至{" "}
+                <a href="/settings/integrations" className="text-primary underline">
+                  设置 → 协议集成
+                </a>
+              </p>
             )}
             {activeSetting === "mcp-setting" && (
-              <MCPSetting
-                servers={mcpServers}
-                loading={loadingMCP}
-                onToggleEnabled={handleMCPToggle}
-                onDelete={handleMCPDelete}
-                onAdd={handleMCPAdd}
-              />
+              <p className="text-muted-foreground text-sm">
+                MCP 配置已迁移至{" "}
+                <a href="/settings/integrations" className="text-primary underline">
+                  设置 → 协议集成
+                </a>
+              </p>
             )}
           </div>
         </div>

@@ -174,6 +174,17 @@ export function SessionDetailView({
 
             <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
               <div className="flex w-full flex-col gap-3 pt-3">
+                {(session.operator_scope || activeSkill?.slug === "web-operator") && (
+                  <div className="border-primary/20 bg-primary/5 text-muted-foreground rounded-lg border px-3 py-2 text-xs">
+                    监工台模式 ·{" "}
+                    {session.operator_scope === "third_party_saas"
+                      ? "第三方 SaaS（已声明并审计）"
+                      : session.operator_scope === "owned"
+                        ? "企业自有/自建系统"
+                        : "Web Operator"}
+                    {session.status === "waiting" && " · 等待审批或接管"}
+                  </div>
+                )}
                 {session.status === "failed" && (
                   <div className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-3 py-2 text-sm">
                     任务执行失败，可修改配置后重新发送消息继续。
@@ -278,6 +289,9 @@ export function SessionDetailView({
                   approval={latestApproval}
                   onSend={handleGateSend}
                   disabled={streaming}
+                  operatorScope={
+                    typeof session?.operator_scope === "string" ? session.operator_scope : null
+                  }
                 />
               )}
               <ChatInput

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, Brain, Cpu, Sparkles } from "lucide-react";
+import { ArrowLeft, Brain, Cpu, Plug, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -12,6 +12,7 @@ const NAV = [
   { href: "/settings/models", label: "模型管理", icon: Cpu },
   { href: "/settings/skills", label: "Skill 模板", icon: Sparkles },
   { href: "/settings/memory", label: "长期记忆", icon: Brain },
+  { href: "/settings/integrations", label: "协议集成", icon: Plug },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {

@@ -262,3 +262,32 @@ class SupervisorService:
             shutdown_time=self.shutdown_time.isoformat() if self.shutdown_time else None,
             remaining_seconds=remaining_seconds
         )
+
+    async def stop_process(self, name: str) -> SupervisorActionResult:
+        """Stop a single supervisor-managed process."""
+        try:
+            result = await self._call_rpc(self.server.supervisor.stopProcess, name)
+            return SupervisorActionResult(status="stopped", result=result, process=name)
+        except Exception as e:
+            logger.error("停止进程[%s]失败: %s", name, e)
+            raise AppException(f"停止进程[{name}]失败: {str(e)}")
+
+    async def start_process(self, name: str) -> SupervisorActionResult:
+        """Start a single supervisor-managed process."""
+        try:
+            result = await self._call_rpc(self.server.supervisor.startProcess, name)
+            return SupervisorActionResult(status="started", result=result, process=name)
+        except Exception as e:
+            logger.error("启动进程[%s]失败: %s", name, e)
+            raise AppException(f"启动进程[{name}]失败: {str(e)}")
+
+    async def restart_chrome(self) -> SupervisorActionResult:
+        """Restart only the Chrome browser process."""
+        stop_result = await self.stop_process("chrome")
+        start_result = await self.start_process("chrome")
+        return SupervisorActionResult(
+            status="restarted",
+            stop_result=stop_result.result,
+            start_result=start_result.result,
+            process="chrome",
+        )

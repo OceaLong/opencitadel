@@ -25,6 +25,7 @@ class DBAuditRepository(AuditRepository):
         action: Optional[str] = None,
         start_at: Optional[datetime] = None,
         end_at: Optional[datetime] = None,
+        resource_id: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> List[AuditLog]:
@@ -33,6 +34,8 @@ class DBAuditRepository(AuditRepository):
             stmt = stmt.where(AuditLogORM.actor_user_id == actor_user_id)
         if action:
             stmt = stmt.where(AuditLogORM.action == action)
+        if resource_id:
+            stmt = stmt.where(AuditLogORM.resource_id == resource_id)
         if start_at:
             stmt = stmt.where(AuditLogORM.created_at >= start_at)
         if end_at:

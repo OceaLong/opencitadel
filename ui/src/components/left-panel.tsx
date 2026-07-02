@@ -18,7 +18,7 @@ export function LeftPanel() {
   const { user } = useAuth();
   const { promptLogin } = useLoginPrompt();
 
-  if (pathname.startsWith("/marketplace") || pathname.startsWith("/share/test")) {
+  if (pathname.startsWith("/marketplace")) {
     return null;
   }
 

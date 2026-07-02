@@ -438,33 +438,6 @@ export type AddTodPromptParams = {
   text: string;
 };
 
-export type VideoSearchParams = {
-  query: string;
-};
-
-export type VideoSearchResult = {
-  title: string;
-  platform: string;
-  icon: string;
-  url: string;
-  quality: string;
-  condition: string;
-  trust_score: number;
-  source_type?: string;
-  recommendation_reason?: string | null;
-};
-
-export type VideoSearchData = {
-  query: string;
-  copyright_notice: string;
-  results: VideoSearchResult[];
-  stats: {
-    crawled_candidates: number;
-    filtered_risk_sources: number;
-    legal_results: number;
-  };
-};
-
 export type NutritionAnalysisParams = {
   file_id: string;
   model_id?: string;
@@ -553,17 +526,6 @@ export type ConsumptionAnalysisData = {
   message: string;
 };
 
-export type DocumentQaParams = {
-  file_id: string;
-  question: string;
-  model_id?: string;
-};
-
-export type DocumentQaData = {
-  answer: string;
-  source_summary: string;
-};
-
 export type TranslationParams = {
   text?: string;
   file_id?: string;
@@ -614,52 +576,6 @@ export type WatermarkResultData = {
   result_filename: string;
   download_ready: boolean;
   method?: string;
-};
-
-export type FortuneMode = "fortune" | "lottery" | "divination" | "astrology";
-
-export type FortuneInputProfile = {
-  nickname?: string;
-  birth_date?: string;
-  birth_time?: string;
-  birth_place?: string;
-};
-
-export type FortunePredictionParams = {
-  mode: FortuneMode;
-  question: string;
-  input_profile?: FortuneInputProfile;
-  model_id?: string;
-};
-
-export type FortuneSection = {
-  heading: string;
-  content: string;
-};
-
-export type FortuneLuckyItems = {
-  color: string;
-  number: string;
-  keyword: string;
-  element?: string;
-};
-
-export type FortunePredictionResult = {
-  mode: FortuneMode;
-  title: string;
-  summary: string;
-  sections: FortuneSection[];
-  lucky_items: FortuneLuckyItems;
-  disclaimer: string;
-};
-
-export type FortunePredictionData = {
-  share_id: string;
-  mode: FortuneMode;
-  question: string;
-  input_profile: FortuneInputProfile;
-  result: FortunePredictionResult;
-  created_at: string;
 };
 
 // ==================== 文件模块类型 ====================
@@ -721,6 +637,7 @@ export type CreateSessionParams = {
   codebase_id?: string;
   knowledge_base_id?: string;
   mode?: SessionMode;
+  operator_scope?: "owned" | "third_party_saas";
   [key: string]: unknown;
 };
 

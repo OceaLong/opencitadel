@@ -559,7 +559,7 @@ async def main() -> None:
     from app.application.services.notification_service import NotificationService
 
     notification_service = NotificationService(uow_factory=get_uow)
-    app_config = await container.config_provider().get()
+    app_config = await container.app_config_provider().get()
     scheduler_stop = asyncio.Event()
     scheduler_task = asyncio.create_task(
         run_scheduler_loop(

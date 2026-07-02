@@ -78,11 +78,38 @@ class SandboxPool:
 
         try:
             sandbox = self._queue.get_nowait()
+            await self._wipe_browser_profile(sandbox)
             await self.touch_activity(sandbox.id)
             return sandbox
         except asyncio.QueueEmpty:
             self.refill_background()
             return await sandbox_cls._create_and_fast_warm()
+
+    @staticmethod
+    async def _wipe_browser_profile(sandbox: "Sandbox") -> None:
+        """Clear browser login state when reassigning a warm pooled container."""
+        exec_command = getattr(sandbox, "exec_command", None)
+        if not callable(exec_command):
+            return
+        try:
+            await sandbox.ensure_sandbox()
+            result = await exec_command(
+                "pool-reset",
+                "/home/ubuntu",
+                "rm -rf /home/ubuntu/.browser-profile",
+            )
+            if not result.success:
+                logger.warning(
+                    "Sandbox pool browser profile wipe failed for %s: %s",
+                    getattr(sandbox, "id", sandbox),
+                    result.message or result.data,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Sandbox pool browser profile wipe failed for %s: %s",
+                getattr(sandbox, "id", sandbox),
+                exc,
+            )
 
     def refill_background(self) -> None:
         if self._started and (self._warmup_task is None or self._warmup_task.done()):

@@ -1,12 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import logging
-import time
-import json
-from typing import AsyncGenerator
-
-from fastapi import APIRouter, Depends, Request
-from sse_starlette import EventSourceResponse, ServerSentEvent
+from fastapi import APIRouter, Depends
 
 from app.application.errors.exceptions import BadRequestError
 from app.application.services.marketplace_service import MarketplaceService
@@ -18,8 +12,6 @@ from app.interfaces.schemas.marketplace import (
     ConsumptionAnalysisResponse,
     ConsumptionCorrectionRequest,
     ConsumptionManualRequest,
-    DocumentQaRequest,
-    DocumentQaResponse,
     MarketplaceAppsResponse,
     MarketplaceAppResponse,
     MarketplaceRouteRequest,
@@ -35,14 +27,9 @@ from app.interfaces.schemas.marketplace import (
     WatermarkAddRequest,
     WatermarkRemoveRequest,
     WatermarkResultResponse,
-    VideoSearchRequest,
-    VideoSearchResponse,
-    FortunePredictionRequest,
-    FortunePredictionResponse,
 )
 from app.interfaces.service_dependencies import get_marketplace_service
 
-logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/marketplace", tags=["应用市场"])
 
 
@@ -52,31 +39,6 @@ async def list_apps(
 ) -> Response[MarketplaceAppsResponse]:
     apps = [MarketplaceAppResponse(**app) for app in marketplace_service.list_apps()]
     return Response.success(data=MarketplaceAppsResponse(apps=apps))
-
-
-@router.post("/video/search", response_model=Response[VideoSearchResponse])
-async def search_videos(
-        request: VideoSearchRequest,
-        http_request: Request,
-        _principal=Depends(get_current_principal),
-        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
-) -> Response[VideoSearchResponse]:
-    request_id = http_request.headers.get("x-request-id") or "-"
-    started_at = time.perf_counter()
-    logger.info("影视搜索开始 request_id=%s query=%s", request_id, request.query)
-    try:
-        data = await marketplace_service.search_videos(request.query)
-        total_ms = int((time.perf_counter() - started_at) * 1000)
-        logger.info(
-            "影视搜索响应 request_id=%s query=%s total_ms=%s result_count=%s",
-            request_id,
-            request.query,
-            total_ms,
-            len(data.get("results", [])),
-        )
-        return Response.success(data=VideoSearchResponse(**data))
-    except ValueError as exc:
-        raise BadRequestError(str(exc)) from exc
 
 
 @router.post("/assistant/route", response_model=Response[MarketplaceRouteResponse])
@@ -176,23 +138,6 @@ async def correct_consumption(
         raise BadRequestError(str(exc)) from exc
 
 
-@router.post("/document-qa/ask", response_model=Response[DocumentQaResponse])
-async def ask_document_question(
-        request: DocumentQaRequest,
-        _principal=Depends(get_current_principal),
-        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
-) -> Response[DocumentQaResponse]:
-    try:
-        data = await marketplace_service.answer_document_question(
-            request.file_id,
-            request.question,
-            model_id=request.model_id,
-        )
-        return Response.success(data=DocumentQaResponse(**data))
-    except ValueError as exc:
-        raise BadRequestError(str(exc)) from exc
-
-
 @router.post("/translation/translate", response_model=Response[TranslationResponse])
 async def translate(
         request: TranslationRequest,
@@ -249,52 +194,6 @@ async def add_watermark(
         return Response.success(data=WatermarkResultResponse(**data))
     except ValueError as exc:
         raise BadRequestError(str(exc)) from exc
-
-
-@router.post("/fortune/predict", response_model=Response[FortunePredictionResponse])
-async def predict_fortune(
-        request: FortunePredictionRequest,
-        _principal=Depends(get_current_principal),
-        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
-) -> Response[FortunePredictionResponse]:
-    try:
-        profile = request.input_profile.model_dump(exclude_none=True)
-        data = await marketplace_service.generate_fortune_prediction(
-            mode=request.mode,
-            question=request.question,
-            input_profile=profile,
-            model_id=request.model_id,
-            owner_user_id=_principal.user_id,
-        )
-        return Response.success(data=FortunePredictionResponse(**data))
-    except ValueError as exc:
-        raise BadRequestError(str(exc)) from exc
-
-
-@router.post("/fortune/predict/stream")
-async def predict_fortune_stream(
-        request: FortunePredictionRequest,
-        _principal=Depends(get_current_principal),
-        marketplace_service: MarketplaceService = Depends(get_marketplace_service),
-) -> EventSourceResponse:
-    async def event_generator() -> AsyncGenerator[ServerSentEvent, None]:
-        try:
-            profile = request.input_profile.model_dump(exclude_none=True)
-            async for item in marketplace_service.stream_fortune_prediction(
-                    mode=request.mode,
-                    question=request.question,
-                    input_profile=profile,
-                    model_id=request.model_id,
-                    owner_user_id=_principal.user_id,
-            ):
-                yield ServerSentEvent(event=item["event"], data=item["data"])
-        except ValueError as exc:
-            yield ServerSentEvent(
-                event="error",
-                data=json.dumps({"message": str(exc)}, ensure_ascii=False),
-            )
-
-    return EventSourceResponse(event_generator())
 
 
 @router.post("/watermark/remove", response_model=Response[WatermarkResultResponse])

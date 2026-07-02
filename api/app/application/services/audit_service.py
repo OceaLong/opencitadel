@@ -25,6 +25,7 @@ class AuditService:
             *,
             actor_user_id: Optional[str] = None,
             action: Optional[str] = None,
+            resource_id: Optional[str] = None,
             start_at: Optional[datetime] = None,
             end_at: Optional[datetime] = None,
             limit: int = 100,
@@ -34,11 +35,25 @@ class AuditService:
             return await uow.audit.list(
                 actor_user_id=actor_user_id,
                 action=action,
+                resource_id=resource_id,
                 start_at=start_at,
                 end_at=end_at,
                 limit=limit,
                 offset=offset,
             )
+
+    async def build_session_audit_report(self, session_id: str) -> str:
+        logs = await self.list_logs(resource_id=session_id, limit=500)
+        lines = [f"# 会话审计报告\n\nSession: `{session_id}`\n\n"]
+        if not logs:
+            lines.append("_无 API 层审计记录_\n")
+            return "".join(lines)
+        for log in logs:
+            lines.append(
+                f"- **{log.created_at.isoformat()}** `{log.action}` "
+                f"actor={log.actor_user_id or 'system'} metadata={log.metadata}\n"
+            )
+        return "".join(lines)
 
     async def summarize(
             self,

@@ -4,6 +4,7 @@
 import logging
 from typing import Callable, Optional, Type
 
+from app.application.services.audit_service import AuditService
 from app.application.services.artifact_service import ArtifactService
 from app.application.services.config_provider import AppConfigProvider, get_runtime_config
 from app.application.services.llm_model_service import LLMModelService
@@ -24,7 +25,7 @@ from app.domain.external.task_state_port import TaskStatePort
 from app.domain.models.agent_runtime_settings import AgentMemoryRuntimeSettings, AgentRuntimeSettings
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
 from app.domain.models.codebase import SessionMode
-from app.domain.models.session import Session
+from app.domain.models.session import Session, SessionStatus
 from app.domain.models.skill import Skill
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agent_task_runner import AgentTaskRunner
@@ -85,6 +86,7 @@ class TaskRunnerFactory:
             mcp_connection_pool: MCPConnectionPoolPort,
             a2a_connection_pool: A2AConnectionPoolPort,
             artifact_service: Optional[ArtifactService] = None,
+            audit_service: Optional[AuditService] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm_model_service = llm_model_service
@@ -103,6 +105,7 @@ class TaskRunnerFactory:
         self._mcp_connection_pool = mcp_connection_pool
         self._a2a_connection_pool = a2a_connection_pool
         self._artifact_service = artifact_service
+        self._audit_service = audit_service
         self._agent_config = AgentConfig()
         self._mcp_config = MCPConfig()
         self._a2a_config = A2AConfig()
@@ -283,6 +286,11 @@ class TaskRunnerFactory:
         )
         agent_runtime_settings = AgentRuntimeSettings(
             tool_timeout_seconds=runtime.worker.tool_timeout_seconds,
+            tool_gate_call_level_enabled=(
+                skill.agent_params.tool_gate_call_level_enabled
+                if skill and skill.agent_params
+                else None
+            ),
             memory=runtime_settings,
         )
 
@@ -341,6 +349,25 @@ class TaskRunnerFactory:
                 mcp_pool=self._mcp_connection_pool,
                 app_config=app_config,
             )
+            if (
+                status == SessionStatus.COMPLETED
+                and self._audit_service
+                and self._artifact_service
+            ):
+                async with self._uow_factory() as uow:
+                    session_row = await uow.session.get_by_id(session_id)
+                if session_row and session_row.operator_scope:
+                    try:
+                        report = await self._audit_service.build_session_audit_report(session_id)
+                        await self._artifact_service.write_content(
+                            session_id=session_id,
+                            artifact_id=None,
+                            kind="doc",
+                            title="会话审计报告",
+                            content=report,
+                        )
+                    except Exception as exc:
+                        logger.warning("生成会话审计 artifact 失败 session=%s: %s", session_id, exc)
 
         return AgentTaskRunner(
             uow_factory=self._uow_factory,

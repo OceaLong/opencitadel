@@ -74,6 +74,51 @@ async def restart(
 
 
 @router.post(
+    path="/stop-chrome",
+    response_model=Response[SupervisorActionResult],
+)
+async def stop_chrome(
+        supervisor_service: SupervisorService = Depends(get_supervisor_service),
+) -> Response[SupervisorActionResult]:
+    """Stop only the Chrome browser process (preserves xvfb/vnc)."""
+    result = await supervisor_service.stop_process("chrome")
+    return Response.success(
+        msg="Chrome 浏览器已停止",
+        data=result,
+    )
+
+
+@router.post(
+    path="/start-chrome",
+    response_model=Response[SupervisorActionResult],
+)
+async def start_chrome(
+        supervisor_service: SupervisorService = Depends(get_supervisor_service),
+) -> Response[SupervisorActionResult]:
+    """Start only the Chrome browser process."""
+    result = await supervisor_service.start_process("chrome")
+    return Response.success(
+        msg="Chrome 浏览器已启动",
+        data=result,
+    )
+
+
+@router.post(
+    path="/restart-chrome",
+    response_model=Response[SupervisorActionResult],
+)
+async def restart_chrome(
+        supervisor_service: SupervisorService = Depends(get_supervisor_service),
+) -> Response[SupervisorActionResult]:
+    """Restart only the Chrome browser process (preserves xvfb/vnc)."""
+    result = await supervisor_service.restart_chrome()
+    return Response.success(
+        msg="Chrome 浏览器重启成功",
+        data=result,
+    )
+
+
+@router.post(
     path="/activate-timeout",
     response_model=Response[SupervisorTimeout],
 )

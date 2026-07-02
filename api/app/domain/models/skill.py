@@ -19,6 +19,7 @@ class SkillAgentParams(BaseModel):
     max_retries: Optional[int] = None
     max_search_results: Optional[int] = None
     temperature_override: Optional[float] = None
+    tool_gate_call_level_enabled: Optional[bool] = None
 
 
 class Skill(BaseModel):

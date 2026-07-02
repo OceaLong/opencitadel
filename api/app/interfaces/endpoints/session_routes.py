@@ -7,7 +7,7 @@ from typing import Optional, Dict, AsyncGenerator
 
 import jwt
 import websockets
-from fastapi import APIRouter, Depends, Body, Query
+from fastapi import APIRouter, Depends, Body, Query, Request
 from sse_starlette import EventSourceResponse, ServerSentEvent
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from websockets import ConnectionClosed
@@ -53,15 +53,24 @@ from app.interfaces.service_dependencies import (
     get_memory_service,
     get_llm_token_usage_service,
     get_quota_service,
+    get_audit_service,
 )
 from app.application.services.quota_service import QuotaService
+from app.application.services.audit_service import AuditService
+from app.domain.models.audit_log import AuditLog
+from app.domain.utils.hitl import (
+    PLAN_APPROVAL_PHASE,
+    TAKEOVER_PHASE,
+    TOOL_APPROVAL_PHASE,
+    parse_gate_action,
+)
 from app.interfaces.auth_dependencies import get_workspace_context
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.skill_service import SkillService
 from app.application.services.memory_service import MemoryService
 from app.domain.models.session import Session
-from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
+from app.domain.models.scope import OwnerScope, OwnerScopeType, Principal, WorkspaceContext
 from app.domain.models.user import UserStatus
 from app.domain.models.event import BaseEvent
 from app.domain.models.event_policy import should_project_event
@@ -72,6 +81,62 @@ from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sessions", tags=["会话模块"])
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else ""
+
+
+async def _record_gate_audit_if_needed(
+        *,
+        session: Session,
+        message: str,
+        ctx: WorkspaceContext,
+        audit_service: AuditService,
+        request: Request,
+) -> None:
+    if not session.pending_phase:
+        return
+    action, feedback = parse_gate_action(message or "")
+    if action == "unknown":
+        return
+    meta = session.pending_metadata or {}
+    pending = meta.get("pending_tool_call") or {}
+    audit_action = {
+        TOOL_APPROVAL_PHASE: {
+            "approve": "agent_tool_approve",
+            "approve_same": "agent_tool_approve",
+            "reject": "agent_tool_reject",
+        },
+        PLAN_APPROVAL_PHASE: {
+            "approve": "agent_plan_approve",
+            "approve_with_edits": "agent_plan_approve",
+            "reject": "agent_plan_reject",
+        },
+        TAKEOVER_PHASE: {
+            "takeover": "agent_takeover",
+            "skip": "agent_takeover_skip",
+        },
+    }.get(session.pending_phase, {}).get(action)
+    if not audit_action:
+        return
+    await audit_service.record(AuditLog(
+        actor_user_id=ctx.principal.user_id,
+        actor_ip=_client_ip(request),
+        action=audit_action,
+        resource_type="session",
+        resource_id=session.id,
+        team_id=ctx.scope.team_id if ctx.scope.type == OwnerScopeType.TEAM else None,
+        metadata={
+            "decision": action,
+            "feedback": feedback,
+            "pending_phase": session.pending_phase,
+            "tool": pending.get("tool_name"),
+            "args": pending.get("args"),
+            "first_visit_domain": pending.get("first_visit_domain"),
+            "operator_scope": session.operator_scope,
+        },
+    ))
 
 
 async def _workspace_context_from_websocket(websocket: WebSocket) -> WorkspaceContext | None:
@@ -206,6 +271,7 @@ async def build_get_session_response(
         model=model_resp,
         skill=skill_resp,
         token_usage=token_usage_resp,
+        operator_scope=session.operator_scope,
     )
 
 # 流式获取会话详情睡眠间隔（config.yaml server.sessions_stream_interval_seconds）
@@ -219,10 +285,12 @@ SESSION_SLEEP_INTERVAL = max(5, get_runtime_config().server.sessions_stream_inte
     description="创建一个空白的新任务会话",
 )
 async def create_session(
+        http_request: Request,
         request: CreateSessionRequest = Body(default_factory=CreateSessionRequest),
         ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
         quota_service: QuotaService = Depends(get_quota_service),
+        audit_service: AuditService = Depends(get_audit_service),
 ) -> Response[CreateSessionResponse]:
     """创建一个空白的新任务会话"""
     await quota_service.check_session_quota(ctx.principal.user_id)
@@ -234,8 +302,19 @@ async def create_session(
         codebase_id=request.codebase_id,
         knowledge_base_id=request.knowledge_base_id,
         mode=request.mode,
+        operator_scope=request.operator_scope,
         scope=ctx.scope,
     )
+    if request.operator_scope:
+        await audit_service.record(AuditLog(
+            actor_user_id=ctx.principal.user_id,
+            actor_ip=_client_ip(http_request) if http_request else "",
+            action="operator_scope_declared",
+            resource_type="session",
+            resource_id=session.id,
+            team_id=ctx.scope.team_id if ctx.scope.type == OwnerScopeType.TEAM else None,
+            metadata={"ownership": request.operator_scope},
+        ))
     return Response.success(
         msg="创建任务会话成功",
         data=CreateSessionResponse(session_id=session.id)
@@ -372,20 +451,29 @@ async def delete_session(
 async def chat(
         session_id: str,
         request: ChatRequest,
+        http_request: Request,
         include_debug: bool = Query(default=False),
         ctx: WorkspaceContext = Depends(get_workspace_context),
         agent_service: AgentService = Depends(get_agent_service),
         session_service: SessionService = Depends(get_session_service),
+        audit_service: AuditService = Depends(get_audit_service),
 ) -> EventSourceResponse:
     """根据传递的会话id+chat请求数据向指定会话发起聊天请求"""
     session = await session_service.get_session(session_id, scope=ctx.scope)
     if not session:
         raise NotFoundError("该会话不存在，请核实后重试")
 
+    message = _format_clarify_answers(request)
+    await _record_gate_audit_if_needed(
+        session=session,
+        message=message,
+        ctx=ctx,
+        audit_service=audit_service,
+        request=http_request,
+    )
+
     async def event_generator() -> AsyncGenerator[ServerSentEvent, None]:
         """定义事件生成器，用于配合EventSourceResponse生成流式响应数据"""
-        message = _format_clarify_answers(request)
-        # 1.调用Agent服务发起聊天
         async for event in agent_service.chat(
                 session_id=session_id,
                 message=message,
@@ -701,13 +789,25 @@ async def list_session_checkpoints(
 async def restore_session_checkpoint(
         session_id: str,
         checkpoint_id: str,
+        http_request: Request,
         ctx: WorkspaceContext = Depends(get_workspace_context),
         session_service: SessionService = Depends(get_session_service),
         agent_service: AgentService = Depends(get_agent_service),
+        audit_service: AuditService = Depends(get_audit_service),
 ) -> Response[RestoreCheckpointResponse]:
-    if not await session_service.get_session(session_id, scope=ctx.scope):
+    session = await session_service.get_session(session_id, scope=ctx.scope)
+    if not session:
         raise NotFoundError("该会话不存在，请核实后重试")
     await agent_service.restore_checkpoint(session_id, checkpoint_id)
+    await audit_service.record(AuditLog(
+        actor_user_id=ctx.principal.user_id,
+        actor_ip=_client_ip(http_request),
+        action="agent_rollback",
+        resource_type="session",
+        resource_id=session_id,
+        team_id=ctx.scope.team_id if ctx.scope.type == OwnerScopeType.TEAM else None,
+        metadata={"checkpoint_id": checkpoint_id, "operator_scope": session.operator_scope},
+    ))
     return Response.success(
         msg="回退成功",
         data=RestoreCheckpointResponse(),

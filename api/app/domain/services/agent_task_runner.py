@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import asyncio
-import asyncio
 import logging
 import time
 from datetime import datetime, timezone
@@ -198,6 +197,7 @@ class AgentTaskRunner(TaskRunner):
                 observability_port=self._observability,
                 runtime_settings=self._runtime_settings,
                 stateful_tool_lock=self._stateful_tool_lock,
+                sandbox_lifecycle=self._sandbox_lifecycle,
             )
 
     async def _put_and_add_event(self, task: Task, event: Event) -> None:

@@ -59,6 +59,7 @@ class SessionService:
             codebase_id: Optional[str] = None,
             knowledge_base_id: Optional[str] = None,
             mode: Optional[SessionMode] = None,
+            operator_scope: Optional[str] = None,
             scope: Optional[OwnerScope] = None,
     ) -> Session:
         """创建一个空白的新任务会话"""
@@ -70,6 +71,7 @@ class SessionService:
             thinking_enabled=thinking_enabled,
             codebase_id=codebase_id,
             knowledge_base_id=knowledge_base_id,
+            operator_scope=operator_scope,
             owner_user_id=scope.user_id if scope else None,
             team_id=scope.team_id if scope and scope.type == OwnerScopeType.TEAM else None,
             mode=mode or SessionMode.AGENT,

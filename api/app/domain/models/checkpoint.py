@@ -31,4 +31,5 @@ class Checkpoint(BaseModel):
     files_snapshot: List[Dict[str, Any]] = Field(default_factory=list)
     session_state: SessionStateSnapshot = Field(default_factory=SessionStateSnapshot)
     sandbox_snapshot_key: Optional[str] = None
+    browser_snapshot_key: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)

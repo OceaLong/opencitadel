@@ -6,6 +6,7 @@ import uuid
 from hashlib import sha256
 from abc import ABC
 from typing import Optional, List, AsyncGenerator, Dict, Any, Callable, Type
+from urllib.parse import urlparse
 
 from app.domain.external.observability import ObservabilityPort
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
@@ -41,6 +42,7 @@ from app.domain.utils.hitl import (
     merge_pending_metadata,
     tool_matches_risk_list,
 )
+from app.domain.services.agent.sandbox_lifecycle import SandboxLifecycleCoordinator
 from app.infrastructure.external.llm.structured_output import schema_payload
 from pydantic import BaseModel
 
@@ -103,6 +105,7 @@ class BaseAgent(ABC):
             model_id: Optional[str] = None,
             file_storage: Optional[FileStorage] = None,
             stateful_tool_lock: Optional[asyncio.Lock] = None,
+            sandbox_lifecycle: Optional[SandboxLifecycleCoordinator] = None,
     ) -> None:
         """构造函数，完成Agent的初始化"""
         self._uow_factory = uow_factory
@@ -118,6 +121,7 @@ class BaseAgent(ABC):
         self._allowed_tool_names = normalize_allowed_tool_names(allowed_tool_names)
         self._file_storage = file_storage
         self._stateful_tool_lock = stateful_tool_lock or asyncio.Lock()
+        self._sandbox_lifecycle = sandbox_lifecycle
         self._pending_usage_event: Optional[UsageEvent] = None
         self._last_llm_message: Optional[Dict[str, Any]] = None
         self._current_step: str = "default"
@@ -921,6 +925,13 @@ class BaseAgent(ABC):
                         function_args=function_args,
                         status=ToolEventStatus.CALLING,
                     ))
+                    if await self._require_first_visit_domain_gate(
+                            function_name,
+                            function_args if isinstance(function_args, dict) else {},
+                            tool_call_id,
+                            inner_events,
+                    ):
+                        return inner_events, [], True
                     if await self._require_tool_approval_gate(
                             function_name,
                             function_args if isinstance(function_args, dict) else {},
@@ -929,6 +940,8 @@ class BaseAgent(ABC):
                     ):
                         return inner_events, [], True
                     result = await self._invoke_tool(tool, function_name, function_args)
+                    if function_name == "browser_navigate" and result.success:
+                        await self._record_visited_domain(function_args)
                     result = await self._offload_large_result(tool_call_id, function_name, result)
                     inner_events.append(ToolEvent(
                         tool_call_id=tool_call_id,
@@ -1005,7 +1018,40 @@ class BaseAgent(ABC):
         else:
             yield ErrorEvent(error="Agent未能生成有效回复内容", code=MODEL_UNAVAILABLE)
 
-    async def _require_tool_approval_gate(
+    @staticmethod
+    def _normalize_domain(url: str) -> str:
+        parsed = urlparse(url if "://" in url else f"https://{url}")
+        return (parsed.hostname or "").lower()
+
+    def _tool_gate_call_level_enabled(self) -> bool:
+        runtime = get_runtime_config()
+        if not runtime.feature_flags.enable_hitl_gates:
+            return False
+        override = self._runtime_settings.tool_gate_call_level_enabled
+        if override is not None:
+            return bool(override)
+        return runtime.hitl.tool_gate_call_level_enabled
+
+    async def _record_visited_domain(self, function_args: Dict[str, Any]) -> None:
+        url = function_args.get("url") if isinstance(function_args, dict) else None
+        domain = self._normalize_domain(str(url or ""))
+        if not domain:
+            return
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(self._session_id)
+            if not session:
+                return
+            meta = session.pending_metadata or {}
+            visited = list(meta.get("visited_domains") or [])
+            if domain in visited:
+                return
+            visited.append(domain)
+            await uow.session.set_pending_metadata(
+                self._session_id,
+                merge_pending_metadata(meta, {"visited_domains": visited}),
+            )
+
+    async def _require_first_visit_domain_gate(
             self,
             function_name: str,
             function_args: Dict[str, Any],
@@ -1013,8 +1059,48 @@ class BaseAgent(ABC):
             events: List[BaseEvent],
     ) -> bool:
         runtime = get_runtime_config()
-        if not runtime.feature_flags.enable_hitl_gates or not runtime.hitl.tool_gate_call_level_enabled:
+        if not runtime.feature_flags.enable_hitl_gates:
             return False
+        if function_name != "browser_navigate":
+            return False
+        url = function_args.get("url")
+        if not url:
+            return False
+        domain = self._normalize_domain(str(url))
+        if not domain:
+            return False
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(self._session_id)
+            if not session:
+                return False
+            if not session.operator_scope:
+                return False
+            meta = session.pending_metadata or {}
+            visited = set(meta.get("visited_domains") or [])
+            approved = set(meta.get("approved_domains") or [])
+            if domain in visited or domain in approved:
+                return False
+        if self._sandbox_lifecycle:
+            await self._sandbox_lifecycle.create_tool_checkpoint(function_name, tool_call_id)
+        return await self._enter_tool_approval_gate(
+            function_name=function_name,
+            function_args=function_args,
+            tool_call_id=tool_call_id,
+            events=events,
+            extra_metadata={"first_visit_domain": domain},
+            approval_note=f"首次访问域名: {domain}",
+        )
+
+    async def _require_tool_approval_gate(
+            self,
+            function_name: str,
+            function_args: Dict[str, Any],
+            tool_call_id: str,
+            events: List[BaseEvent],
+    ) -> bool:
+        if not self._tool_gate_call_level_enabled():
+            return False
+        runtime = get_runtime_config()
         if not tool_matches_risk_list(function_name, runtime.hitl.tool_gate_risk_list):
             return False
         async with self._uow_factory() as uow:
@@ -1025,25 +1111,58 @@ class BaseAgent(ABC):
             approved = meta.get("approved_tools") or []
             if any(tool_matches_risk_list(function_name, [item]) for item in approved):
                 return False
-            await uow.session.set_pending_metadata(
-                self._session_id,
-                merge_pending_metadata(meta, {
-                    "pending_tool_call": {
-                        "tool_call_id": tool_call_id,
-                        "tool_name": function_name,
-                        "args": function_args,
-                    },
-                }),
-            )
-            await uow.session.set_pending_phase(self._session_id, TOOL_APPROVAL_PHASE)
-        events.append(ApprovalEvent(
-            approval_id=str(uuid.uuid4()),
-            kind="tool",
-            payload={
+            if not session.operator_scope:
+                return False
+        if self._sandbox_lifecycle:
+            await self._sandbox_lifecycle.create_tool_checkpoint(function_name, tool_call_id)
+        return await self._enter_tool_approval_gate(
+            function_name=function_name,
+            function_args=function_args,
+            tool_call_id=tool_call_id,
+            events=events,
+        )
+
+    async def _enter_tool_approval_gate(
+            self,
+            function_name: str,
+            function_args: Dict[str, Any],
+            tool_call_id: str,
+            events: List[BaseEvent],
+            extra_metadata: Optional[Dict[str, Any]] = None,
+            approval_note: Optional[str] = None,
+    ) -> bool:
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(self._session_id)
+            if not session:
+                return False
+            meta = session.pending_metadata or {}
+            pending_tool_call = {
                 "tool_call_id": tool_call_id,
                 "tool_name": function_name,
                 "args": function_args,
-            },
+            }
+            if extra_metadata:
+                pending_tool_call.update(extra_metadata)
+            await uow.session.set_pending_metadata(
+                self._session_id,
+                merge_pending_metadata(meta, {
+                    "pending_tool_call": pending_tool_call,
+                }),
+            )
+            await uow.session.set_pending_phase(self._session_id, TOOL_APPROVAL_PHASE)
+        payload = {
+            "tool_call_id": tool_call_id,
+            "tool_name": function_name,
+            "args": function_args,
+        }
+        if extra_metadata:
+            payload.update(extra_metadata)
+        if approval_note:
+            payload["note"] = approval_note
+        events.append(ApprovalEvent(
+            approval_id=str(uuid.uuid4()),
+            kind="tool",
+            payload=payload,
             options=["approve", "approve_same", "reject"],
         ))
         return True

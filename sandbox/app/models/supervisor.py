@@ -30,6 +30,7 @@ class SupervisorActionResult(BaseModel):
     stop_result: Optional[Any] = Field(default=None, description="停止结果")
     start_result: Optional[Any] = Field(default=None, description="开始结果")
     shutdown_result: Optional[Any] = Field(default=None, description="关闭结果")
+    process: Optional[str] = Field(default=None, description="进程名称")
 
 
 class SupervisorTimeout(BaseModel):

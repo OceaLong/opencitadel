@@ -137,6 +137,18 @@ class Sandbox(Protocol):
         """类方法，用于快速创建一个沙箱"""
         ...
 
+    async def create_browser_profile_snapshot(self, snapshot_id: str) -> bytes:
+        """Create a tar.gz snapshot of the browser profile directory."""
+        ...
+
+    async def restore_browser_profile_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
+        """Restore the browser profile directory from a tar.gz snapshot."""
+        ...
+
+    async def restart_browser(self) -> None:
+        """Restart the sandbox Chrome process after profile restore."""
+        ...
+
     @classmethod
     async def get(cls, id: str) -> Optional[Self]:
         """类方法，根据传递的id获取沙箱实例"""

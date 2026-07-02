@@ -15,11 +15,14 @@ export type GateActionsBarProps = {
   onSend: (message: string) => Promise<void> | void;
   disabled?: boolean;
   className?: string;
+  operatorScope?: string | null;
 };
 
 type ToolPayload = {
   tool_name?: string;
   args?: Record<string, unknown>;
+  first_visit_domain?: string;
+  note?: string;
 };
 
 export function GateActionsBar({
@@ -27,6 +30,7 @@ export function GateActionsBar({
   onSend,
   disabled = false,
   className,
+  operatorScope,
 }: GateActionsBarProps) {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
@@ -84,6 +88,15 @@ export function GateActionsBar({
   const payload = approval.payload as ToolPayload;
   const toolName = payload.tool_name ?? "未知工具";
   const argsPreview = payload.args ? JSON.stringify(payload.args, null, 2) : "";
+  const domainNote = payload.first_visit_domain
+    ? `首次访问域名: ${payload.first_visit_domain}`
+    : payload.note;
+  const scopeLabel =
+    operatorScope === "third_party_saas"
+      ? "第三方 SaaS（已声明）"
+      : operatorScope === "owned"
+        ? "企业自有/自建"
+        : null;
 
   const handleReject = async () => {
     const text = feedback.trim();
@@ -110,6 +123,12 @@ export function GateActionsBar({
             工具操作待确认
           </p>
           <p className="text-muted-foreground text-xs">{toolName}</p>
+          {domainNote && (
+            <p className="text-amber-700 mt-1 text-xs">{domainNote}</p>
+          )}
+          {scopeLabel && (
+            <p className="text-muted-foreground mt-1 text-xs">目标系统: {scopeLabel}</p>
+          )}
         </div>
         {!rejectOpen && (
           <div className="flex flex-wrap gap-2">

@@ -11,7 +11,7 @@ def test_list_marketplace_apps(client):
     assert payload["code"] == 200
     apps = payload["data"]["apps"]
     assert len(apps) >= 5
-    assert apps[0]["id"] in {"video-search", "nutrition-analysis", "consumption-calculator"}
+    assert apps[0]["id"] in {"nutrition-analysis", "consumption-calculator", "smart-translation"}
     assert {"tags", "featured", "accent", "needs_vision", "examples"}.issubset(apps[0])
 
 
@@ -43,14 +43,6 @@ def test_correct_consumption_from_natural_language(client):
     assert data["full_servings"] == 20
 
 
-def test_predict_fortune_requires_question(client):
-    response = client.post(
-        "/api/marketplace/fortune/predict",
-        json={"mode": "fortune", "question": ""},
-    )
-    assert response.status_code == 422
-
-
 def test_route_marketplace_request_contract(client):
     class FakeMarketplaceService:
         async def route_request(self, query, *, model_id=None):
@@ -78,53 +70,3 @@ def test_route_marketplace_request_contract(client):
     data = payload["data"]
     assert data["app_id"] == "smart-translation"
     assert data["params"]["target_language"] == "中文"
-
-
-def test_search_videos_contract(client):
-    class FakeMarketplaceService:
-        async def search_videos(self, query, *, analyze_content=False, model_id=None):
-            assert query == "三体"
-            return {
-                "query": query,
-                "copyright_notice": "推荐正版资源，请支持版权",
-                "results": [
-                    {
-                        "title": "三体 - 哔哩哔哩站内搜索",
-                        "platform": "哔哩哔哩",
-                        "icon": "📺",
-                        "url": "https://search.bilibili.com/all?keyword=三体",
-                        "quality": "以平台页面为准",
-                        "condition": "免费/会员",
-                        "trust_score": 0.95,
-                        "source_type": "platform_search",
-                        "recommendation_reason": "正版来源优先推荐",
-                    }
-                ],
-                "stats": {
-                    "crawled_candidates": 0,
-                    "filtered_risk_sources": 0,
-                    "legal_results": 1,
-                },
-            }
-
-    app.dependency_overrides[get_marketplace_service] = lambda: FakeMarketplaceService()
-    try:
-        response = client.post(
-            "/api/marketplace/video/search",
-            json={"query": "三体"},
-        )
-    finally:
-        app.dependency_overrides.pop(get_marketplace_service, None)
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["code"] == 200
-    data = payload["data"]
-    assert data["query"] == "三体"
-    assert len(data["results"]) == 1
-    assert data["results"][0]["platform"] == "哔哩哔哩"
-
-
-def test_search_videos_requires_query(client):
-    response = client.post("/api/marketplace/video/search", json={"query": ""})
-    assert response.status_code == 422

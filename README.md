@@ -16,13 +16,22 @@
 
 ---
 
-OpenCitadel is an open-source, **self-hosted AI agent platform** for teams that need agents, knowledge bases, and codebase intelligence **without sending data to a SaaS vendor**. Connect internal systems via **MCP** and **A2A**, and run browser, shell, and file tools inside isolated sandboxes.
+OpenCitadel is an open-source, **self-hosted AI agent platform** (not a browser-only SDK). Keep data, model calls, and file storage on your network. Connect internal systems via **MCP** and **A2A**, and run browser, shell, and file tools inside isolated sandboxes.
+
+**Differentiation**: platform-level governance—plan approval, per-tool gates, VNC takeover, checkpoint rollback **including browser profile state**, and API-layer audit—across browser, shell, MCP, and A2A tools.
+
+| | Skyvern | OpenHands | Onyx | OpenCitadel |
+|---|---------|-----------|------|-------------|
+| Focus | Browser automation SDK (AGPL) | Code agent | Search/RAG | Private agent platform + governance breadth |
+| HITL | Browser tasks | Limited | — | Plan + per-tool + takeover + rollback + audit |
+
+> Web Operator targets **enterprise-owned/self-hosted systems**; third-party SaaS requires an ownership declaration and audit trail—not a waiver of legal risk.
 
 ## Core modules
 
 | Module | Route | Description |
 |--------|-------|-------------|
-| **Agent chat** | `/`, `/sessions/[id]` | Planner → ReAct tasks, tool calls, VNC, memory, checkpoints |
+| **Agent chat** | `/`, `/sessions/[id]` | Supervised autonomy: Planner → ReAct, per-tool approval, VNC, checkpoints (incl. browser state) |
 | **Codebase** | `/codebase` | ZIP / Git import, symbol search, architecture views, Ask / Agent coding |
 | **Knowledge base** | `/knowledge` | Document upload & connectors, RAG Q&A, GraphRAG, reindex |
 | **Integrations** | Settings | MCP (stdio / SSE / streamable HTTP) and A2A remote agents |

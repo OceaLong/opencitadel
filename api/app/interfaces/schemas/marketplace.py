@@ -23,35 +23,6 @@ class MarketplaceAppsResponse(BaseModel):
     apps: List[MarketplaceAppResponse]
 
 
-class VideoSearchRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=200)
-
-
-class VideoSearchResultItem(BaseModel):
-    title: str
-    platform: str
-    icon: str
-    url: str
-    quality: str
-    condition: str
-    trust_score: float
-    source_type: Optional[str] = None
-    recommendation_reason: Optional[str] = None
-
-
-class VideoSearchStats(BaseModel):
-    crawled_candidates: int
-    filtered_risk_sources: int
-    legal_results: int
-
-
-class VideoSearchResponse(BaseModel):
-    query: str
-    copyright_notice: str
-    results: List[VideoSearchResultItem]
-    stats: VideoSearchStats
-
-
 class MarketplaceRouteRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=500)
     model_id: Optional[str] = None
@@ -141,17 +112,6 @@ class ConsumptionCorrectionRequest(BaseModel):
     serving_grams: float = Field(..., gt=0, le=10000)
 
 
-class DocumentQaRequest(BaseModel):
-    file_id: str
-    question: str = Field(..., min_length=1, max_length=1000)
-    model_id: Optional[str] = None
-
-
-class DocumentQaResponse(BaseModel):
-    answer: str
-    source_summary: str
-
-
 class TranslationRequest(BaseModel):
     text: Optional[str] = Field(default=None, max_length=10000)
     file_id: Optional[str] = None
@@ -202,47 +162,3 @@ class WatermarkResultResponse(BaseModel):
     result_filename: str
     download_ready: bool = True
     method: Optional[str] = None
-
-
-class FortuneInputProfile(BaseModel):
-    nickname: Optional[str] = Field(default=None, max_length=50)
-    birth_date: Optional[str] = Field(default=None, max_length=20)
-    birth_time: Optional[str] = Field(default=None, max_length=20)
-    birth_place: Optional[str] = Field(default=None, max_length=100)
-
-
-class FortunePredictionRequest(BaseModel):
-    mode: Literal["fortune", "lottery", "divination", "astrology"] = "fortune"
-    question: str = Field(..., min_length=1, max_length=500)
-    input_profile: FortuneInputProfile = Field(default_factory=FortuneInputProfile)
-    model_id: Optional[str] = None
-
-
-class FortuneSection(BaseModel):
-    heading: str
-    content: str
-
-
-class FortuneLuckyItems(BaseModel):
-    color: str = ""
-    number: str = ""
-    keyword: str = ""
-    element: str = ""
-
-
-class FortunePredictionResult(BaseModel):
-    mode: str
-    title: str
-    summary: str
-    sections: List[FortuneSection] = Field(default_factory=list)
-    lucky_items: FortuneLuckyItems = Field(default_factory=FortuneLuckyItems)
-    disclaimer: str = "本结果仅供娱乐参考，请理性看待。"
-
-
-class FortunePredictionResponse(BaseModel):
-    share_id: str
-    mode: str
-    question: str
-    input_profile: Dict[str, Any] = Field(default_factory=dict)
-    result: FortunePredictionResult
-    created_at: str

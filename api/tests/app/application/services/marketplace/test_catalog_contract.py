@@ -8,10 +8,8 @@ from app.application.services.marketplace.catalog_contract import (
 
 # Keep in sync with ui/src/components/marketplace/app-registry.tsx meta ids.
 FRONTEND_REGISTRY_IDS = {
-    "video-search",
     "nutrition-analysis",
     "consumption-calculator",
-    "document-qa",
     "smart-translation",
     "prompt-lab",
     "qr-generator",
@@ -19,8 +17,6 @@ FRONTEND_REGISTRY_IDS = {
     "secret-generator",
     "document-converter",
     "watermark-tool",
-    "personality-tests",
-    "fortune-teller",
 }
 
 

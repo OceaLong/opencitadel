@@ -53,6 +53,7 @@ class CheckpointService:
             seq_before = await uow.session.get_max_event_seq(session_id)
             checkpoint_id = str(uuid.uuid4())
             snapshot_key: Optional[str] = None
+            browser_snapshot_key: Optional[str] = None
 
             active_sandbox = sandbox
             if active_sandbox is None and session.sandbox_id:
@@ -70,6 +71,18 @@ class CheckpointService:
                         session_id,
                         exc,
                     )
+                try:
+                    if session.operator_scope and active_sandbox is not None:
+                        browser_bytes = await active_sandbox.create_browser_profile_snapshot(checkpoint_id)
+                        browser_snapshot_key = f"checkpoints/{session_id}/{checkpoint_id}_browser.tgz"
+                        await self._object_storage.put_bytes(browser_snapshot_key, browser_bytes)
+                except Exception as exc:
+                    logger.warning(
+                        "会话[%s]创建浏览器快照失败，将仅保存工作区快照: %s",
+                        session_id,
+                        exc,
+                    )
+                    browser_snapshot_key = None
 
             checkpoint = Checkpoint(
                 id=checkpoint_id,
@@ -92,6 +105,7 @@ class CheckpointService:
                     pending_phase=session.pending_phase,
                 ),
                 sandbox_snapshot_key=snapshot_key,
+                browser_snapshot_key=browser_snapshot_key,
             )
             await uow.checkpoint.save(checkpoint)
             return checkpoint
@@ -150,6 +164,16 @@ class CheckpointService:
                 await sandbox.restore_workspace_snapshot(
                     checkpoint_id,
                     io.BytesIO(snapshot_bytes),
+                )
+
+        if checkpoint.browser_snapshot_key and sandbox_id:
+            sandbox = await self._sandbox_cls.get(sandbox_id)
+            if sandbox is not None:
+                await sandbox.ensure_sandbox()
+                browser_bytes = await self._object_storage.get_bytes(checkpoint.browser_snapshot_key)
+                await sandbox.restore_browser_profile_snapshot(
+                    checkpoint_id,
+                    io.BytesIO(browser_bytes),
                 )
 
         if session.status == SessionStatus.RUNNING:
@@ -224,6 +248,16 @@ class CheckpointService:
                     await sandbox.restore_workspace_snapshot(
                         checkpoint.id,
                         io.BytesIO(snapshot_bytes),
+                    )
+
+            if checkpoint.browser_snapshot_key and sandbox_id:
+                sandbox = await self._sandbox_cls.get(sandbox_id)
+                if sandbox is not None:
+                    await sandbox.ensure_sandbox()
+                    browser_bytes = await self._object_storage.get_bytes(checkpoint.browser_snapshot_key)
+                    await sandbox.restore_browser_profile_snapshot(
+                        checkpoint.id,
+                        io.BytesIO(browser_bytes),
                     )
 
             logger.info(

@@ -17,6 +17,7 @@ WORKSPACE_SNAPSHOT_EXCLUDE_DIRS = (
     ".vscode",
     "coverage",
     ".snapshots",
+    ".browser-profile",
 )
 
 WORKSPACE_SNAPSHOT_EXCLUDE_GLOBS = (

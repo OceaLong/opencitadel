@@ -6,11 +6,8 @@ import base64
 import io
 import json
 import re
-import time
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, Optional
-
-from fastapi import UploadFile
+from typing import Any, Dict, Optional
 
 from app.application.services.file_service import FileService
 from app.domain.models.scope import OwnerScope, OwnerScopeType
@@ -20,47 +17,28 @@ from app.application.services.marketplace.catalog import (
     APP_IDS,
     MARKETPLACE_APPS,
     build_route_prompt,
-    enrich_marketplace_app,
     examples_for,
     list_marketplace_apps,
 )
 from app.application.services.marketplace.consumption_service import ConsumptionService
 from app.application.services.marketplace.conversion_service import ConversionService
-from app.application.services.marketplace.fortune_service import FortuneService
 from app.application.services.marketplace.nutrition_service import NutritionService
-from app.application.services.marketplace.video_search_service import VideoSearchService
 from app.application.services.marketplace.watermark_service import WatermarkService
 from app.application.services.marketplace.utils import analyze_image_with_llm, analyze_images_with_llm
-from app.domain.models.fortune_prediction import FortunePrediction
 from app.domain.services.document_service import document_to_vision_attachments
 from app.domain.services.image_generation_service import edit_image
 from app.domain.utils.vision import build_image_content_part, is_image_mime
-from app.infrastructure.external.llm.factory import LLMFactory
 from app.infrastructure.external.llm.resilient_llm import create_resilient_llm
 from app.infrastructure.external.json_parser.repair_json_parser import RepairJSONParser
 logger = logging.getLogger(__name__)
 
-VIDEO_SEARCH_LLM_RANK_TIMEOUT_SECONDS = 15.0
-
 ROUTE_PROMPT = build_route_prompt()
-
-VIDEO_RANK_PROMPT = """请为正版影视搜索结果排序并补充推荐理由。仅返回 JSON：
-{{"items": [{{"url": "原 url", "recommendation_reason": "不超过 24 字"}}]}}
-偏好：官方来源、可页内播放、trust_score 高、标题和查询更相关。
-查询：{query}
-结果：{results}"""
 
 NUTRITION_FOLLOWUP_PROMPT = """你是营养教练。基于已结构化的餐食分析回答用户追问，简洁、可执行，不要编造图片外信息。
 餐食分析 JSON：
 {analysis}
 
 用户问题：{question}"""
-
-DOC_QA_PROMPT = """你是资料问答助手。请基于用户提供的内容回答问题；如果资料不足，明确说明缺失信息。
-问题：{question}
-
-资料：
-{content}"""
 
 TRANSLATION_PROMPT = """你是专业翻译助手。请自动识别输入语言，并按目标语言和风格翻译。仅返回 JSON：
 {{"detected_language": "识别到的语言", "translated_text": "译文", "notes": ["简短说明"]}}
@@ -84,75 +62,14 @@ class MarketplaceService:
         self._llm_model_service = llm_model_service
         self._file_service = file_service
         self._uow_factory = uow_factory
-        self._video = VideoSearchService()
         self._nutrition = NutritionService()
         self._consumption = ConsumptionService()
         self._conversion = ConversionService()
         self._watermark = WatermarkService()
-        self._fortune = FortuneService()
         self._json_parser = RepairJSONParser()
 
     def list_apps(self) -> list[dict]:
         return list_marketplace_apps()
-
-    async def search_videos(self, query: str, *, analyze_content: bool = False, model_id: Optional[str] = None) -> dict:
-        started_at = time.perf_counter()
-        bing_ms = 0
-        llm_ms = 0
-        rank_status = "skipped"
-
-        bing_started = time.perf_counter()
-        data = await self._video.search(query)
-        bing_ms = int((time.perf_counter() - bing_started) * 1000)
-
-        if analyze_content:
-            try:
-                vision_llm = await self._resolve_vision_llm(model_id)
-                content = await self._invoke_text(
-                    vision_llm,
-                    f"基于查询「{query}」为以下正版影视结果生成一句内容理解摘要（50字内）："
-                    f"{json.dumps(data.get('results', [])[:5], ensure_ascii=False)}",
-                )
-                data["content_summary"] = content.strip()
-            except Exception as exc:
-                logger.info("视频内容理解跳过: %s", exc)
-        try:
-            llm = await self._resolve_text_llm(None)
-            llm_started = time.perf_counter()
-            data = await asyncio.wait_for(
-                self._rank_video_results(llm, data),
-                timeout=VIDEO_SEARCH_LLM_RANK_TIMEOUT_SECONDS,
-            )
-            llm_ms = int((time.perf_counter() - llm_started) * 1000)
-            rank_status = "ranked"
-        except asyncio.TimeoutError:
-            llm_ms = int((time.perf_counter() - llm_started) * 1000) if "llm_started" in locals() else 0
-            rank_status = "timeout"
-            logger.warning(
-                "影视结果智能排序超时 query=%s llm_ms=%s budget_s=%s",
-                query,
-                llm_ms,
-                VIDEO_SEARCH_LLM_RANK_TIMEOUT_SECONDS,
-            )
-            for result in data.get("results", []):
-                result.setdefault("recommendation_reason", "正版来源优先推荐")
-        except Exception as exc:
-            rank_status = "error"
-            logger.info("影视结果智能排序跳过: %s", exc)
-            for result in data.get("results", []):
-                result.setdefault("recommendation_reason", "正版来源优先推荐")
-
-        total_ms = int((time.perf_counter() - started_at) * 1000)
-        logger.info(
-            "影视搜索完成 query=%s bing_ms=%s llm_ms=%s total_ms=%s rank_status=%s result_count=%s",
-            query,
-            bing_ms,
-            llm_ms,
-            total_ms,
-            rank_status,
-            len(data.get("results", [])),
-        )
-        return data
 
     async def route_request(self, query: str, *, model_id: Optional[str] = None) -> dict:
         query = (query or "").strip()
@@ -228,52 +145,6 @@ class MarketplaceService:
         if total_grams is None:
             raise ValueError("未识别到总量，请输入如 1.2kg、500g")
         return self._consumption.calculate_manual(total_grams, serving_grams)
-
-    async def answer_document_question(
-            self,
-            file_id: str,
-            question: str,
-            *,
-            model_id: Optional[str] = None,
-    ) -> dict:
-        file_bytes, file_info = await self._load_file_bytes(file_id)
-        mime_type = file_info.mime_type or "application/octet-stream"
-        llm = await self._resolve_vision_llm(model_id) if is_image_mime(mime_type) else await self._resolve_text_llm(model_id)
-
-        if is_image_mime(mime_type):
-            parsed = await analyze_image_with_llm(
-                llm, file_bytes, mime_type,
-                f"请阅读这张图片并回答问题：{question}",
-            )
-            if isinstance(parsed, dict) and parsed.get("answer"):
-                return {"answer": str(parsed["answer"]).strip(), "source_summary": "基于上传图片回答"}
-            answer = parsed if isinstance(parsed, str) else str(parsed)
-            return {"answer": answer.strip(), "source_summary": "基于上传图片回答"}
-
-        if mime_type == "application/pdf" or (file_info.filename or "").lower().endswith(".pdf"):
-            text, page_images = await document_to_vision_attachments(
-                file_bytes, mime_type, file_info.filename or "",
-            )
-            if page_images:
-                vision_llm = await self._resolve_vision_llm(model_id)
-                images = [
-                    (base64.b64decode(p["data_base64"]), p["mime_type"])
-                    for p in page_images[:5]
-                ]
-                answer_data = await analyze_images_with_llm(
-                    vision_llm,
-                    images,
-                    f"基于文档页面图像回答问题：{question}\n\n已抽取文本：\n{text[:4000]}",
-                )
-                answer = answer_data.get("answer") if isinstance(answer_data, dict) else str(answer_data)
-                return {"answer": str(answer).strip(), "source_summary": f"PDF {len(page_images)} 页"}
-
-        text = self._decode_text(file_bytes)
-        if not text:
-            raise ValueError("当前仅支持图片或可读取文本文件问答")
-        prompt = DOC_QA_PROMPT.format(question=question.strip(), content=text[:12000])
-        answer = await self._invoke_text(llm, prompt)
-        return {"answer": answer.strip(), "source_summary": f"已读取约 {min(len(text), 12000)} 个字符"}
 
     async def translate(
             self,
@@ -422,90 +293,6 @@ class MarketplaceService:
             "result_file_id": stored.id,
             "result_filename": stored.filename,
             "download_ready": True,
-        }
-
-    async def generate_fortune_prediction(
-            self,
-            *,
-            mode: str,
-            question: str,
-            input_profile: Optional[Dict[str, Any]] = None,
-            model_id: Optional[str] = None,
-            owner_user_id: Optional[str] = None,
-    ) -> dict:
-        llm = await self._resolve_text_llm(model_id)
-        result = await self._fortune.generate(
-            llm,
-            mode=mode,
-            question=question,
-            input_profile=input_profile,
-        )
-        prediction = FortunePrediction(
-            mode=mode,
-            question=question.strip(),
-            input_profile=input_profile or {},
-            result=result,
-            owner_user_id=owner_user_id,
-        )
-        return self._format_fortune_prediction(prediction)
-
-    async def stream_fortune_prediction(
-            self,
-            *,
-            mode: str,
-            question: str,
-            input_profile: Optional[Dict[str, Any]] = None,
-            model_id: Optional[str] = None,
-            owner_user_id: Optional[str] = None,
-    ) -> AsyncGenerator[Dict[str, str], None]:
-        llm = await self._resolve_text_llm(model_id)
-        async for event in self._fortune.generate_stream(
-                llm,
-                mode=mode,
-                question=question,
-                input_profile=input_profile,
-        ):
-            if event.get("type") == "delta":
-                yield {
-                    "event": "delta",
-                    "data": json.dumps({"text": event.get("text", "")}, ensure_ascii=False),
-                }
-                continue
-
-            if event.get("type") == "done":
-                result = event.get("result") or {}
-                prediction = FortunePrediction(
-                    mode=mode,
-                    question=question.strip(),
-                    input_profile=input_profile or {},
-                    result=result,
-                    owner_user_id=owner_user_id,
-                )
-                yield {
-                    "event": "done",
-                    "data": json.dumps(
-                        self._format_fortune_prediction(prediction),
-                        ensure_ascii=False,
-                    ),
-                }
-
-    @staticmethod
-    def _format_fortune_prediction(prediction: FortunePrediction) -> dict:
-        result = prediction.result or {}
-        return {
-            "share_id": prediction.share_id,
-            "mode": prediction.mode,
-            "question": prediction.question,
-            "input_profile": prediction.input_profile,
-            "result": {
-                "mode": result.get("mode", prediction.mode),
-                "title": result.get("title", ""),
-                "summary": result.get("summary", ""),
-                "sections": result.get("sections", []),
-                "lucky_items": result.get("lucky_items", {}),
-                "disclaimer": result.get("disclaimer", "本结果仅供娱乐参考，请理性看待。"),
-            },
-            "created_at": prediction.created_at.isoformat(),
         }
 
     async def remove_watermark(
@@ -662,50 +449,11 @@ class MarketplaceService:
             raise ValueError("模型未返回有效内容")
         return str(content)
 
-    async def _rank_video_results(self, llm, data: dict) -> dict:
-        compact_results = [
-            {
-                "title": item.get("title"),
-                "url": item.get("url"),
-                "platform": item.get("platform"),
-                "trust_score": item.get("trust_score"),
-                "source_type": item.get("source_type"),
-            }
-            for item in data.get("results", [])[:12]
-        ]
-        if not compact_results:
-            return data
-        content = await self._invoke_text(
-            llm,
-            VIDEO_RANK_PROMPT.format(
-                query=data.get("query", ""),
-                results=json.dumps(compact_results, ensure_ascii=False),
-            ),
-        )
-        parsed = await self._json_parser.invoke(content, default_value={})
-        ranked = parsed.get("items") if isinstance(parsed, dict) else []
-        reasons = {
-            item.get("url"): item.get("recommendation_reason")
-            for item in ranked
-            if isinstance(item, dict) and item.get("url")
-        }
-        order = {item.get("url"): idx for idx, item in enumerate(ranked) if isinstance(item, dict)}
-        for item in data.get("results", []):
-            item["recommendation_reason"] = reasons.get(item.get("url")) or "正版来源优先推荐"
-        data["results"] = sorted(
-            data.get("results", []),
-            key=lambda item: (order.get(item.get("url"), 999), -float(item.get("trust_score") or 0)),
-        )
-        return data
-
     def _route_by_rules(self, query: str) -> dict:
         lowered = query.lower()
         app_id = "prompt-lab"
         params: Dict[str, Any] = {}
-        if any(word in lowered for word in ["电影", "电视剧", "影视", "剧名", "播放", "观看", "video", "movie"]):
-            app_id = "video-search"
-            params["query"] = self._strip_intent_words(query)
-        elif any(word in query for word in ["营养", "热量", "蛋白", "减脂", "增肌", "餐食"]):
+        if any(word in query for word in ["营养", "热量", "蛋白", "减脂", "增肌", "餐食"]):
             app_id = "nutrition-analysis"
             if "减脂" in query:
                 params["goal"] = "cut"
@@ -719,9 +467,6 @@ class MarketplaceService:
         elif any(word in query for word in ["翻译", "译成", "英文", "中文", "日文"]):
             app_id = "smart-translation"
             params["text"] = re.sub(r"^(请|帮我)?(翻译|把)", "", query).strip()
-        elif any(word in query for word in ["文档", "总结", "问答", "截图", "资料"]):
-            app_id = "document-qa"
-            params["question"] = query
         elif any(word in query for word in ["二维码", "qr", "QR"]):
             app_id = "qr-generator"
             params["text"] = query
@@ -751,17 +496,6 @@ class MarketplaceService:
                 params["mode"] = "add"
             if text_match := re.search(r"[「\"'](.+?)[」\"']", query):
                 params["text"] = text_match.group(1)
-        elif any(word in query for word in ["运势", "抽签", "算命", "星盘", "塔罗", "占卜", "预测", "星座"]):
-            app_id = "fortune-teller"
-            if any(word in query for word in ["抽签", "签文", "灵签"]):
-                params["mode"] = "lottery"
-            elif any(word in query for word in ["算命", "八字", "卦", "占卜"]):
-                params["mode"] = "divination"
-            elif any(word in query for word in ["星盘", "星座", "占星"]):
-                params["mode"] = "astrology"
-            else:
-                params["mode"] = "fortune"
-            params["question"] = query
         return {
             "app_id": app_id,
             "confidence": 0.72,
@@ -793,13 +527,6 @@ class MarketplaceService:
 
     def _app_examples(self, app_id: str) -> list[str]:
         return examples_for(app_id)
-
-    @staticmethod
-    def _strip_intent_words(query: str) -> str:
-        cleaned = query
-        for word in ["搜索", "查找", "帮我找", "免费观看入口", "正版播放", "播放", "观看"]:
-            cleaned = cleaned.replace(word, "")
-        return cleaned.strip(" ，。") or query
 
     @staticmethod
     def _extract_grams(text: str) -> Optional[float]:

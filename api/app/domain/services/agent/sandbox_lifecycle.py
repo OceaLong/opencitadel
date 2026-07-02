@@ -59,3 +59,18 @@ class SandboxLifecycleCoordinator:
             )
         except Exception as exc:
             logger.warning("创建步骤还原点失败: %s", exc)
+
+    async def create_tool_checkpoint(self, tool_name: str, tool_call_id: str) -> None:
+        if not self._checkpoint_service:
+            return
+        sandbox = self._sandbox_provider.materialized()
+        try:
+            await self._checkpoint_service.create_checkpoint(
+                session_id=self._session_id,
+                anchor_type=CheckpointAnchorType.STEP,
+                anchor_event_id=tool_call_id,
+                label=f"before {tool_name}"[:200],
+                sandbox=sandbox,
+            )
+        except Exception as exc:
+            logger.warning("创建工具前还原点失败: %s", exc)

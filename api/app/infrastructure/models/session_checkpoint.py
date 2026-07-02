@@ -50,6 +50,7 @@ class SessionCheckpointModel(Base):
         server_default=text("'{}'::jsonb"),
     )
     sandbox_snapshot_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    browser_snapshot_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
@@ -68,6 +69,7 @@ class SessionCheckpointModel(Base):
             files_snapshot=self.files_snapshot or [],
             session_state=SessionStateSnapshot.model_validate(self.session_state or {}),
             sandbox_snapshot_key=self.sandbox_snapshot_key,
+            browser_snapshot_key=self.browser_snapshot_key,
             created_at=self.created_at,
         )
 
@@ -84,5 +86,6 @@ class SessionCheckpointModel(Base):
             files_snapshot=checkpoint.files_snapshot,
             session_state=checkpoint.session_state.model_dump(mode="json"),
             sandbox_snapshot_key=checkpoint.sandbox_snapshot_key,
+            browser_snapshot_key=checkpoint.browser_snapshot_key,
             created_at=checkpoint.created_at,
         )

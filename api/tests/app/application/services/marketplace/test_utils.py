@@ -5,23 +5,8 @@ import pytest
 from app.application.services.marketplace.nutrition_service import NutritionService
 from app.application.services.marketplace.utils import (
     calculate_servings,
-    is_legal_video_url,
     parse_net_content,
 )
-
-
-class TestVideoWhitelist:
-    def test_allows_youtube(self):
-        assert is_legal_video_url("https://www.youtube.com/watch?v=abc")
-
-    def test_allows_bilibili(self):
-        assert is_legal_video_url("https://www.bilibili.com/video/BV1xx")
-
-    def test_blocks_pan_links(self):
-        assert not is_legal_video_url("https://pan.baidu.com/s/abc123")
-
-    def test_blocks_unknown_domain(self):
-        assert not is_legal_video_url("https://example-pirate.com/watch/123")
 
 
 class TestNetContentParsing:

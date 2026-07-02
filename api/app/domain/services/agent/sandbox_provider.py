@@ -196,6 +196,15 @@ class LazySandbox:
     async def restore_workspace_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
         await (await self._resolve()).restore_workspace_snapshot(snapshot_id, snapshot_data)
 
+    async def create_browser_profile_snapshot(self, snapshot_id: str) -> bytes:
+        return await (await self._resolve()).create_browser_profile_snapshot(snapshot_id)
+
+    async def restore_browser_profile_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
+        await (await self._resolve()).restore_browser_profile_snapshot(snapshot_id, snapshot_data)
+
+    async def restart_browser(self) -> None:
+        await (await self._resolve()).restart_browser()
+
 
 class LazyBrowser:
     """Deferred Browser proxy; materializes when a browser tool is invoked."""
@@ -288,3 +297,9 @@ class LazyBrowser:
 
     async def console_view(self, max_lines: Optional[int] = None) -> ToolResult:
         return await (await self._resolve()).console_view(max_lines)
+
+    async def invalidate(self) -> None:
+        """Drop cached browser connection after sandbox profile restore."""
+        if self._inner is not None:
+            await self._inner.cleanup()
+        self._inner = None

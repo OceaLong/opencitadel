@@ -16,13 +16,22 @@
 
 ---
 
-OpenCitadel 是面向**企业私有化部署**的开源 AI Agent 平台。数据、模型调用与文件存储均可留在自有网络内，通过 **MCP** 与 **A2A** 连接内部系统，在隔离沙箱中执行浏览器、Shell 与文件操作。
+OpenCitadel 是面向**企业私有化部署**的开源 AI Agent **平台**（非单一浏览器 SDK）。数据、模型调用与文件存储均可留在自有网络内，通过 **MCP** 与 **A2A** 连接内部系统，在隔离沙箱中执行浏览器、Shell 与文件操作。
+
+**差异化**：平台级治理层——Plan 审批、逐工具门控、VNC 接管、含浏览器 Profile 的检查点回滚、API 层审计——覆盖浏览器/Shell/MCP/A2A 全工具链。
+
+| 对比 | Skyvern | OpenHands | Onyx | OpenCitadel |
+|------|---------|-----------|------|-------------|
+| 定位 | 浏览器自动化 SDK (AGPL) | 代码 Agent | 检索/RAG | 私有化 Agent 平台 + 全链路治理 |
+| HITL | 浏览器任务 | 有限 | — | Plan + 逐工具 + 接管 + 回滚 + 审计 |
+
+> Web Operator 场景限定于**企业自有/自建系统**；第三方 SaaS 需声明归属并留痕，不构成法律风险消除。
 
 ## 核心模块
 
 | 模块 | 入口 | 说明 |
 |------|------|------|
-| **Agent 对话** | `/`、`/sessions/[id]` | Planner → ReAct 多轮任务、工具调用、VNC、记忆与检查点 |
+| **Agent 对话** | `/`、`/sessions/[id]` | 监管级自主执行：Planner → ReAct、逐工具审批、VNC、检查点（含浏览器状态） |
 | **代码知识库** | `/codebase` | ZIP / Git 导入、符号检索、架构图、Ask / Agent 改码 |
 | **文档知识库** | `/knowledge` | 企业文档上传与连接器导入、检索问答、GraphRAG 与 reindex |
 | **协议集成** | 设置中心 | MCP（stdio / SSE / streamable HTTP）与 A2A 远程 Agent |

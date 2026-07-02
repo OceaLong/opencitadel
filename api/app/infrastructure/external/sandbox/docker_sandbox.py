@@ -776,7 +776,7 @@ class DockerSandbox(Sandbox):
 
         restore_cmd = (
             f"find /home/ubuntu -mindepth 1 -maxdepth 1 "
-            f"! -name '.snapshots' -exec rm -rf {{}} + && "
+            f"! -name '.snapshots' ! -name '.browser-profile' -exec rm -rf {{}} + && "
             f"tar xzf {archive_path} -C /home/ubuntu && rm -f {archive_path}"
         )
         result = await self.exec_command(
@@ -786,3 +786,75 @@ class DockerSandbox(Sandbox):
         )
         if not result.success:
             raise RuntimeError(f"恢复沙箱快照失败: {result.message or result.data}")
+
+    _BROWSER_PROFILE_DIR = "/home/ubuntu/.browser-profile"
+
+    async def stop_chrome(self) -> None:
+        response = await self.client.post(f"{self._base_url}/api/supervisor/stop-chrome")
+        response.raise_for_status()
+        payload = response.json()
+        tool_result = ToolResult.from_sandbox(**payload)
+        if not tool_result.success:
+            raise RuntimeError(f"停止浏览器失败: {tool_result.message or tool_result.data}")
+
+    async def start_chrome(self) -> None:
+        response = await self.client.post(f"{self._base_url}/api/supervisor/start-chrome")
+        response.raise_for_status()
+        payload = response.json()
+        tool_result = ToolResult.from_sandbox(**payload)
+        if not tool_result.success:
+            raise RuntimeError(f"启动浏览器失败: {tool_result.message or tool_result.data}")
+
+    async def restart_browser(self) -> None:
+        response = await self.client.post(f"{self._base_url}/api/supervisor/restart-chrome")
+        response.raise_for_status()
+        payload = response.json()
+        tool_result = ToolResult.from_sandbox(**payload)
+        if not tool_result.success:
+            raise RuntimeError(f"重启浏览器失败: {tool_result.message or tool_result.data}")
+
+    async def create_browser_profile_snapshot(self, snapshot_id: str) -> bytes:
+        """Live tar of .browser-profile without stopping Chrome (non-disruptive)."""
+        archive_path = f"/tmp/bp_{snapshot_id}.tgz"
+        create_cmd = f"tar czf {archive_path} -C /home/ubuntu .browser-profile"
+        try:
+            result = await self.exec_command(
+                self._CHECKPOINT_SHELL_SESSION,
+                "/home/ubuntu",
+                create_cmd,
+            )
+            if not result.success:
+                raise RuntimeError(f"创建浏览器快照失败: {result.message or result.data}")
+            stream = await self.download_file(archive_path)
+            return stream.read()
+        finally:
+            await self.exec_command(
+                self._CHECKPOINT_SHELL_SESSION,
+                "/home/ubuntu",
+                f"rm -f {archive_path}",
+            )
+
+    async def restore_browser_profile_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
+        archive_path = f"/tmp/bp_restore_{snapshot_id}.tgz"
+        await self.stop_chrome()
+        upload_result = await self.upload_file(
+            file_data=snapshot_data,
+            filepath=archive_path,
+            filename=f"bp_restore_{snapshot_id}.tgz",
+        )
+        if not upload_result.success:
+            raise RuntimeError(f"上传浏览器快照失败: {upload_result.message or upload_result.data}")
+
+        restore_cmd = (
+            f"rm -rf {self._BROWSER_PROFILE_DIR} && "
+            f"tar xzf {archive_path} -C /home/ubuntu && rm -f {archive_path}"
+        )
+        result = await self.exec_command(
+            self._CHECKPOINT_SHELL_SESSION,
+            "/home/ubuntu",
+            restore_cmd,
+        )
+        if not result.success:
+            raise RuntimeError(f"恢复浏览器快照失败: {result.message or result.data}")
+        await self.start_chrome()
+

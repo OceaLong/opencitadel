@@ -355,3 +355,19 @@ class KubernetesSandbox(Sandbox):
             data={"filepath": filepath},
         )
         return ToolResult.from_sandbox(**response.json())
+
+    async def create_workspace_snapshot(self, snapshot_id: str) -> bytes:
+        raise NotImplementedError("K8s 沙箱暂不支持工作区快照，浏览器回滚需先补工作区快照")
+
+    async def restore_workspace_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
+        raise NotImplementedError("K8s 沙箱暂不支持工作区快照")
+
+    async def create_browser_profile_snapshot(self, snapshot_id: str) -> bytes:
+        raise NotImplementedError("K8s 沙箱暂不支持浏览器 profile 回滚（前置：先补工作区快照）")
+
+    async def restore_browser_profile_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
+        raise NotImplementedError("K8s 沙箱暂不支持浏览器 profile 回滚（前置：先补工作区快照）")
+
+    async def restart_browser(self) -> None:
+        raise NotImplementedError("K8s 沙箱暂不支持浏览器 profile 回滚")
+

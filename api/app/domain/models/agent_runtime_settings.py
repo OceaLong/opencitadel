@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -16,4 +18,5 @@ class AgentMemoryRuntimeSettings(BaseModel):
 
 class AgentRuntimeSettings(BaseModel):
     tool_timeout_seconds: int = 120
+    tool_gate_call_level_enabled: Optional[bool] = None
     memory: AgentMemoryRuntimeSettings = Field(default_factory=AgentMemoryRuntimeSettings)

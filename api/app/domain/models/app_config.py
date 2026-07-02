@@ -206,6 +206,8 @@ class HitlConfig(BaseModel):
     tool_gate_call_level_enabled: bool = False
     tool_gate_risk_list: List[str] = Field(default_factory=lambda: [
         "write_file", "replace_in_file", "shell_execute", "mcp_*", "a2a",
+        "browser_click", "browser_input", "browser_select_option",
+        "browser_press_key", "browser_console_exec",
     ])
     takeover_timeout_minutes: int = 30
 

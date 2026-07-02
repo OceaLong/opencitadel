@@ -15,8 +15,6 @@ class UnusedFileService:
 
 
 class FakeUow:
-    fortune_prediction = None
-
     async def __aenter__(self):
         return self
 
@@ -46,7 +44,7 @@ def test_list_apps_exposes_rich_registry(service):
     apps = service.list_apps()
     assert len(apps) >= 5
     assert {"tags", "featured", "accent", "needs_vision", "examples"}.issubset(apps[0])
-    assert {app["id"] for app in apps} >= {"document-qa", "smart-translation"}
+    assert {app["id"] for app in apps} >= {"smart-translation", "nutrition-analysis"}
 
 
 @pytest.mark.anyio
@@ -62,11 +60,3 @@ def test_correct_consumption_extracts_natural_language_total(service):
     assert result["recognized"] is True
     assert result["total_grams"] == 1200
     assert result["full_servings"] == 20
-
-
-@pytest.mark.anyio
-async def test_route_request_matches_fortune_keywords(service):
-    route = await service.route_request("帮我测一下近期运势")
-    assert route["app_id"] == "fortune-teller"
-    assert route["params"]["mode"] == "fortune"
-    assert route["params"]["question"]

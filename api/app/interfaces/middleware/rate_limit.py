@@ -54,7 +54,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         prefixes = (
             "/api/auth/",
             "/api/marketplace/",
-            "/api/rooms/",
             "/api/files",
         )
         return any(path.startswith(prefix) for prefix in prefixes)

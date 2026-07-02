@@ -20,6 +20,7 @@ class AuditRepository(ABC):
         action: Optional[str] = None,
         start_at: Optional[datetime] = None,
         end_at: Optional[datetime] = None,
+        resource_id: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> List[AuditLog]:

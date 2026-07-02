@@ -36,7 +36,7 @@ from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.mcp import MCPTool
 from app.domain.services.tools.subagent import SubAgentTool
-from app.domain.services.tools.tool_registry import ToolRegistry
+from app.domain.services.agent.sandbox_lifecycle import SandboxLifecycleCoordinator
 from app.domain.models.event import StepEvent, StepEventStatus, MessageEvent
 from app.domain.external.observability import ObservabilityPort
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
@@ -78,6 +78,7 @@ class PlannerReActFlow(BaseFlow):
             model_id: Optional[str] = None,
             file_storage: Optional[FileStorage] = None,
             stateful_tool_lock: Optional[asyncio.Lock] = None,
+            sandbox_lifecycle: Optional["SandboxLifecycleCoordinator"] = None,
     ) -> None:
         """构造函数，完成规划与执行流的初始化"""
         self._stateful_tool_lock = stateful_tool_lock or asyncio.Lock()
@@ -164,6 +165,7 @@ class PlannerReActFlow(BaseFlow):
             observability_port=self._observability,
             runtime_settings=self._runtime_settings,
             stateful_tool_lock=self._stateful_tool_lock,
+            sandbox_lifecycle=sandbox_lifecycle,
         )
         logger.debug(f"创建执行Agent成功, 会话id: {self._session_id}")
 

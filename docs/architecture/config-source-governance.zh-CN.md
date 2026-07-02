@@ -41,7 +41,7 @@ flowchart TD
 
 | 变更类型 | 必须同步 |
 |----------|----------|
-| 新增 `AppConfig` 字段 | `api/app/domain/models/app_config.py`、`api/config.yaml`、Helm `appConfig`、相关文档 |
+| 新增 `AppConfig` 字段 | `api/app/domain/models/app_config.py`、`api/config.yaml`、Helm `appConfig`、相关文档（如 `hitl.tool_gate_risk_list` 含 browser 写工具） |
 | 新增环境变量 | `Settings` schema、`.env.example`、部署文档 / Helm env |
 | 新增用户可见契约 | API schema、前端类型、兼容策略文档 |
 

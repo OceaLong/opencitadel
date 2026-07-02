@@ -171,6 +171,11 @@ hitl:
     - shell_execute
     - mcp_*
     - a2a
+    - browser_click
+    - browser_input
+    - browser_select_option
+    - browser_press_key
+    - browser_console_exec
   takeover_timeout_minutes: 30
 
 scheduler:

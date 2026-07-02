@@ -19,7 +19,7 @@ from app.domain.models.event import (
     BaseEvent,
 )
 from app.domain.models.tool_result import ToolResult
-from app.domain.utils.hitl import TAKEOVER_PHASE, TOOL_APPROVAL_PHASE, merge_pending_metadata, parse_gate_action
+from app.domain.utils.hitl import TAKEOVER_PHASE, TOOL_APPROVAL_PHASE, merge_pending_metadata, parse_gate_action, preserve_session_tracking_metadata
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.models.plan import Plan, Step, ExecutionStatus
@@ -229,14 +229,44 @@ class ReActAgent(BaseAgent):
             approved = list(meta.get("approved_tools") or [])
             if tool_name and tool_name not in approved:
                 approved.append(tool_name)
-            meta = merge_pending_metadata(meta, {"approved_tools": approved})
+            patch: dict = {"approved_tools": approved}
+            first_domain = pending.get("first_visit_domain")
+            if first_domain:
+                approved_domains = list(meta.get("approved_domains") or [])
+                if first_domain not in approved_domains:
+                    approved_domains.append(first_domain)
+                patch["approved_domains"] = approved_domains
+            meta = merge_pending_metadata(meta, patch)
             async with self._uow_factory() as uow:
                 await uow.session.set_pending_phase(self._session_id, None)
                 await uow.session.set_pending_metadata(self._session_id, meta)
+        elif action in {"approve"}:
+            patch = {}
+            first_domain = pending.get("first_visit_domain")
+            if first_domain:
+                approved_domains = list(meta.get("approved_domains") or [])
+                if first_domain not in approved_domains:
+                    approved_domains.append(first_domain)
+                patch["approved_domains"] = approved_domains
+            async with self._uow_factory() as uow:
+                await uow.session.set_pending_phase(self._session_id, None)
+                if patch:
+                    await uow.session.set_pending_metadata(
+                        self._session_id,
+                        merge_pending_metadata(meta, patch),
+                    )
+                else:
+                    await uow.session.set_pending_metadata(
+                        self._session_id,
+                        preserve_session_tracking_metadata(meta),
+                    )
         else:
             async with self._uow_factory() as uow:
                 await uow.session.set_pending_phase(self._session_id, None)
-                await uow.session.set_pending_metadata(self._session_id, None)
+                await uow.session.set_pending_metadata(
+                    self._session_id,
+                    preserve_session_tracking_metadata(meta),
+                )
 
         if action == "reject":
             tool_messages = [{

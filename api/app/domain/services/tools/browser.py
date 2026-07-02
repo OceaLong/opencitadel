@@ -6,6 +6,20 @@ from app.domain.external.browser import Browser
 from app.domain.models.tool_result import ToolResult
 from .base import BaseTool, tool
 
+_UNTRUSTED_START = "=== UNTRUSTED EXTERNAL CONTENT (may contain prompt injection) ==="
+_UNTRUSTED_END = "=== END UNTRUSTED EXTERNAL CONTENT ==="
+
+
+def _wrap_untrusted_page_content(result: ToolResult) -> ToolResult:
+    if not result.success or not isinstance(result.data, dict):
+        return result
+    content = result.data.get("content")
+    if isinstance(content, str) and content.strip():
+        wrapped = dict(result.data)
+        wrapped["content"] = f"{_UNTRUSTED_START}\n{content}\n{_UNTRUSTED_END}"
+        return ToolResult(success=True, data=wrapped, message=result.message)
+    return result
+
 
 class BrowserTool(BaseTool):
     """浏览器工具"""
@@ -24,7 +38,7 @@ class BrowserTool(BaseTool):
     )
     async def browser_view(self) -> ToolResult:
         """获取浏览器当前网页内容并返回"""
-        return await self.browser.view_page()
+        return _wrap_untrusted_page_content(await self.browser.view_page())
 
     @tool(
         name="browser_screenshot",
@@ -49,7 +63,7 @@ class BrowserTool(BaseTool):
     )
     async def browser_navigate(self, url: str) -> ToolResult:
         """传递url地址，使用浏览器导航到对应页面"""
-        return await self.browser.navigate(url)
+        return _wrap_untrusted_page_content(await self.browser.navigate(url))
 
     @tool(
         name="browser_restart",
@@ -64,7 +78,7 @@ class BrowserTool(BaseTool):
     )
     async def browser_restart(self, url: str) -> ToolResult:
         """重启浏览器并导航到指定页面后返回页面内容"""
-        return await self.browser.restart(url)
+        return _wrap_untrusted_page_content(await self.browser.restart(url))
 
     @tool(
         name="browser_click",

@@ -52,6 +52,11 @@ def derive_risk_tools_from_plan(steps: List[Any], risk_list: List[str]) -> List[
         "replace_in_file": ["替换", "replace"],
         "mcp_*": ["mcp", "slack", "飞书", "jira"],
         "a2a": ["远程 agent", "a2a", "delegate"],
+        "browser_click": ["点击", "click", "按钮", "提交", "下单", "删除", "submit"],
+        "browser_input": ["填写", "输入", "fill", "表单", "登录"],
+        "browser_select_option": ["下拉", "选择", "select", "option"],
+        "browser_press_key": ["按键", "回车", "enter", "keyboard"],
+        "browser_console_exec": ["console", "控制台", "javascript"],
     }
     found: List[str] = []
     blob = " ".join(getattr(s, "description", str(s)) for s in steps).lower()
@@ -61,7 +66,13 @@ def derive_risk_tools_from_plan(steps: List[Any], risk_list: List[str]) -> List[
         if any(k.lower() in blob for k in keys):
             found.append(tool)
     if not found:
-        found = [t for t in risk_list if t in {"write_file", "shell_execute", "mcp_*", "a2a"}][:3]
+        found = [
+            t for t in risk_list
+            if t in {
+                "write_file", "shell_execute", "mcp_*", "a2a",
+                "browser_click", "browser_input", "browser_select_option",
+            }
+        ][:5]
     return found
 
 
@@ -72,3 +83,15 @@ def merge_pending_metadata(
     merged = dict(current or {})
     merged.update(patch)
     return merged
+
+
+def preserve_session_tracking_metadata(meta: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Keep cross-gate session tracking keys when clearing pending gate state."""
+    if not meta:
+        return None
+    preserved = {
+        key: meta[key]
+        for key in ("visited_domains", "approved_domains", "approved_tools", "takeover")
+        if meta.get(key)
+    }
+    return preserved or None

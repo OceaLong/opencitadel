@@ -22,6 +22,10 @@ class CreateSessionRequest(BaseModel):
     codebase_id: Optional[str] = None
     knowledge_base_id: Optional[str] = None
     mode: Optional[SessionMode] = None
+    operator_scope: Optional[str] = Field(
+        default=None,
+        description="Web Operator 目标系统归属: owned | third_party_saas",
+    )
 
 
 class CreateSessionResponse(BaseModel):
@@ -115,6 +119,7 @@ class GetSessionResponse(BaseModel):
     model: Optional[LLMModelResponse] = None
     skill: Optional[SkillSummaryResponse] = None
     token_usage: Optional[TokenUsageSummaryResponse] = None
+    operator_scope: Optional[str] = None
 
 
 class GetSessionEventsResponse(BaseModel):

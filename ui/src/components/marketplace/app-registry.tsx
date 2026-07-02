@@ -7,17 +7,13 @@ import type { ComponentType, ReactNode } from "react";
 import type { MarketplaceApp, ModelDependency } from "@/lib/api/types";
 
 const MODEL_DEPENDENCY: Record<string, ModelDependency> = {
-  "video-search": "optional",
   "nutrition-analysis": "required",
   "consumption-calculator": "required",
-  "document-qa": "required",
   "smart-translation": "required",
   "prompt-lab": "required",
   "qr-generator": "none",
   "dev-toolbox": "none",
   "secret-generator": "none",
-  "personality-tests": "none",
-  "fortune-teller": "optional",
   "document-converter": "none",
   "watermark-tool": "optional",
 };
@@ -32,17 +28,11 @@ function withModelDependency(meta: MarketplaceApp): MarketplaceApp {
 const lazy = <P extends object>(loader: () => Promise<ComponentType<P>>) =>
   dynamic<P>(loader, { ssr: false });
 
-const VideoSearchApp = lazy(() =>
-  import("@/components/marketplace/video-search-app").then((m) => m.VideoSearchApp),
-);
 const NutritionAnalysisApp = lazy(() =>
   import("@/components/marketplace/nutrition-analysis-app").then((m) => m.NutritionAnalysisApp),
 );
 const ConsumptionCalculatorApp = lazy(() =>
   import("@/components/marketplace/consumption-calculator-app").then((m) => m.ConsumptionCalculatorApp),
-);
-const DocumentQaApp = lazy(() =>
-  import("@/components/marketplace/document-qa-app").then((m) => m.DocumentQaApp),
 );
 const SmartTranslationApp = lazy(() =>
   import("@/components/marketplace/smart-translation-app").then((m) => m.SmartTranslationApp),
@@ -65,12 +55,6 @@ const DevToolboxApp = lazy(() =>
 const SecretGeneratorApp = lazy(() =>
   import("@/components/marketplace/secret-generator-app").then((m) => m.SecretGeneratorApp),
 );
-const FortuneTellerApp = lazy(() =>
-  import("@/components/marketplace/fortune-teller-app").then((m) => m.FortuneTellerApp),
-);
-const PersonalityTestsApp = lazy(() =>
-  import("@/components/marketplace/personality-tests-app").then((m) => m.PersonalityTestsApp),
-);
 
 export type LaunchParams = Record<string, unknown>;
 
@@ -80,26 +64,6 @@ export type MarketplaceAppEntry = {
 };
 
 export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
-  {
-    meta: {
-      id: "video-search",
-      name: "影视资源聚合",
-      description: "聚合正版免费观看入口，支持中文/英文剧名搜索",
-      icon: "🎬",
-      category: "娱乐",
-      tags: ["影视", "搜索", "正版资源", "在线播放"],
-      featured: true,
-      accent: "violet",
-      needs_vision: false,
-      examples: ["搜索三体免费观看入口", "帮我找 Breaking Bad 正版播放"],
-    },
-    render: (params) => (
-      <VideoSearchApp
-        initialQuery={typeof params.query === "string" ? params.query : undefined}
-        autoRun={Boolean(params.query)}
-      />
-    ),
-  },
   {
     meta: {
       id: "nutrition-analysis",
@@ -143,23 +107,6 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
           typeof params.serving_grams === "number" ? params.serving_grams : undefined
         }
       />
-    ),
-  },
-  {
-    meta: {
-      id: "document-qa",
-      name: "文档/图片问答",
-      description: "上传资料或截图，AI 提炼重点并回答问题",
-      icon: "📄",
-      category: "办公",
-      tags: ["文档", "图片理解", "问答", "总结"],
-      featured: true,
-      accent: "sky",
-      needs_vision: false,
-      examples: ["总结这个文档的重点", "看这张截图告诉我哪里异常"],
-    },
-    render: (params) => (
-      <DocumentQaApp initialQuestion={typeof params.question === "string" ? params.question : ""} />
     ),
   },
   {
@@ -302,52 +249,6 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
       <WatermarkToolApp
         initialMode={params.mode === "remove" ? "remove" : "add"}
         initialText={typeof params.text === "string" ? params.text : ""}
-      />
-    ),
-  },
-  {
-    meta: {
-      id: "fortune-teller",
-      name: "AI 运势预测",
-      description: "运势预测、抽签、算命、星盘推演，生成精美结果",
-      icon: "🔮",
-      category: "娱乐",
-      tags: ["运势", "抽签", "算命", "星盘", "分享"],
-      featured: true,
-      accent: "rose",
-      needs_vision: false,
-      examples: ["帮我测一下近期运势", "抽一支签看看事业", "根据生日做星盘推演"],
-    },
-    render: (params) => (
-      <FortuneTellerApp
-        initialMode={
-          params.mode === "fortune" ||
-          params.mode === "lottery" ||
-          params.mode === "divination" ||
-          params.mode === "astrology"
-            ? params.mode
-            : undefined
-        }
-        initialQuestion={typeof params.question === "string" ? params.question : ""}
-      />
-    ),
-  },
-  {
-    meta: {
-      id: "personality-tests",
-      name: "趣味人格测试",
-      description: "MBTI、九型人格、DISC、爱之语言、EQ、动物人格等 6 套测试",
-      icon: "🎯",
-      category: "娱乐",
-      tags: ["MBTI", "人格", "测试", "分享"],
-      featured: true,
-      accent: "violet",
-      needs_vision: false,
-      examples: ["测一下我的 MBTI", "九型人格测试", "我是哪种动物"],
-    },
-    render: (params) => (
-      <PersonalityTestsApp
-        initialTestId={typeof params.test_id === "string" ? params.test_id : undefined}
       />
     ),
   },

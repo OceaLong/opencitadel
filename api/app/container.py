@@ -371,6 +371,7 @@ class BaseContainer(containers.DeclarativeContainer):
         mcp_connection_pool=mcp_connection_pool,
         a2a_connection_pool=a2a_connection_pool,
         artifact_service=artifact_service,
+        audit_service=audit_service,
     )
 
     agent_service = providers.Singleton(
