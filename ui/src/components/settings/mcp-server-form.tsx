@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { AlertTriangle, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -35,7 +35,10 @@ export type McpServerFormState = {
 export type McpServerFormHandle = {
   getConfig: () => MCPServerConfig | null;
   validate: () => boolean;
+  getValidationError: () => string | null;
 };
+
+const HTTP_URL_SCHEME = /^https?:\/\//i;
 
 type McpServerFormProps = {
   server: ListMCPServerItem;
@@ -51,8 +54,7 @@ function newRow(key = "", value = ""): KeyValueRow {
 
 function looksEncrypted(url: string | null | undefined): boolean {
   if (!url) return false;
-  if (url.startsWith("gAAAA")) return true;
-  return !url.includes("://");
+  return url.startsWith("gAAAA");
 }
 
 function dictToRows(dict: Record<string, unknown> | null | undefined): KeyValueRow[] {
@@ -162,24 +164,53 @@ export const McpServerForm = forwardRef<McpServerFormHandle, McpServerFormProps>
 ) {
   const t = useTranslations("settings");
   const [form, setForm] = useState<McpServerFormState>(() => mcpConfigToForm(server));
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const validationErrorRef = useRef<string | null>(null);
 
   useEffect(() => {
     setForm(mcpConfigToForm(server));
+    setValidationError(null);
+    validationErrorRef.current = null;
   }, [server]);
 
-  useImperativeHandle(ref, () => ({
-    validate: () => {
-      if (HTTP_TRANSPORTS.includes(form.transport)) {
-        if (!form.serviceUrl.trim()) {
-          return false;
-        }
-      } else if (form.transport === "stdio") {
-        if (!form.command.trim()) {
+  const runValidation = (): boolean => {
+    if (HTTP_TRANSPORTS.includes(form.transport)) {
+      const serviceUrl = form.serviceUrl.trim();
+      if (!serviceUrl) {
+        validationErrorRef.current = "mcpUrlRequired";
+        setValidationError("mcpUrlRequired");
+        return false;
+      }
+      if (!HTTP_URL_SCHEME.test(serviceUrl)) {
+        validationErrorRef.current = "mcpUrlInvalidScheme";
+        setValidationError("mcpUrlInvalidScheme");
+        return false;
+      }
+      if (form.urlUndecryptable) {
+        const missingKeyValue = form.urlParams.some(
+          (row) => row.key.trim() && !row.value.trim(),
+        );
+        if (missingKeyValue) {
+          validationErrorRef.current = "mcpParamValueRequiredWhenUndecryptable";
+          setValidationError("mcpParamValueRequiredWhenUndecryptable");
           return false;
         }
       }
-      return true;
-    },
+    } else if (form.transport === "stdio") {
+      if (!form.command.trim()) {
+        validationErrorRef.current = "mcpCommandRequired";
+        setValidationError("mcpCommandRequired");
+        return false;
+      }
+    }
+    validationErrorRef.current = null;
+    setValidationError(null);
+    return true;
+  };
+
+  useImperativeHandle(ref, () => ({
+    validate: () => runValidation(),
+    getValidationError: () => validationErrorRef.current,
     getConfig: () => formToMcpConfig(form, server.enabled),
   }));
 
@@ -209,6 +240,7 @@ export const McpServerForm = forwardRef<McpServerFormHandle, McpServerFormProps>
     keyLabel: string,
     valueLabel: string,
     addLabel: string,
+    valuePlaceholder?: string,
   ) => (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -246,7 +278,14 @@ export const McpServerForm = forwardRef<McpServerFormHandle, McpServerFormProps>
                   value={row.value}
                   disabled={disabled}
                   onChange={(e) => updateRow(field, row.id, { value: e.target.value })}
-                  placeholder={t("mcpParamValueLeaveBlank")}
+                  placeholder={
+                    valuePlaceholder ??
+                    (field === "urlParams"
+                      ? t("mcpParamValueLeaveBlank")
+                      : field === "headerRows"
+                        ? t("mcpHeaderValueLeaveBlank")
+                        : t("mcpEnvValueLeaveBlank"))
+                  }
                 />
               </div>
               <Button
@@ -311,15 +350,24 @@ export const McpServerForm = forwardRef<McpServerFormHandle, McpServerFormProps>
             <Input
               value={form.serviceUrl}
               disabled={disabled}
-              onChange={(e) => setForm((prev) => ({ ...prev, serviceUrl: e.target.value }))}
+              onChange={(e) => {
+                validationErrorRef.current = null;
+                setValidationError(null);
+                setForm((prev) => ({ ...prev, serviceUrl: e.target.value }));
+              }}
               placeholder="https://mcp.example.com/mcp"
+              aria-invalid={validationError === "mcpUrlRequired" || validationError === "mcpUrlInvalidScheme"}
             />
+            {validationError === "mcpUrlRequired" || validationError === "mcpUrlInvalidScheme" ? (
+              <p className="text-destructive text-xs">{t(validationError)}</p>
+            ) : null}
           </div>
           {renderKeyValueRows(
             "urlParams",
             t("mcpParamKey"),
             t("mcpParamValueLeaveBlank"),
             t("addParam"),
+            form.urlUndecryptable ? t("mcpParamValueRequiredWhenUndecryptable") : undefined,
           )}
           {renderKeyValueRows(
             "headerRows",

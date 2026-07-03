@@ -19,6 +19,7 @@ from app.domain.external.connection_pool import MCPConnectionPoolPort
 from app.domain.models.app_config import MCPConfig, MCPServerConfig, MCPTransport
 from app.domain.models.tool_result import ToolResult
 from app.domain.utils.app_config_filter import filter_enabled_mcp_config
+from app.domain.utils.mcp_url import validate_mcp_http_url
 from .base import BaseTool
 
 """
@@ -76,13 +77,17 @@ class MCPClientManager:
 
     def __init__(self, mcp_config: Optional[MCPConfig] = None) -> None:
         """构造函数，完成MCP客户端管理器的初步初始化"""
-        self._mcp_config: MCPConfig = mcp_config  # mcp配置信息
-        self._exit_stack: AsyncExitStack = AsyncExitStack()  # 异步上下文管理器
-        self._clients: Dict[str, ClientSession] = {}  # 缓存的客户端会话
-        self._tools: Dict[str, List[Tool]] = {}  # 缓存的MCP工具参数声明
-        self._canonical_to_source: Dict[str, Tuple[str, str]] = {}  # 规范名 -> (server, 原始工具名)
-        self._connection_errors: Dict[str, str] = {}  # 连接失败的服务 -> 错误信息
-        self._initialized: bool = False  # 是否初始化标识
+        self._mcp_config: MCPConfig = mcp_config or MCPConfig()
+        self._exit_stack: Optional[AsyncExitStack] = None
+        self._clients: Dict[str, ClientSession] = {}
+        self._tools: Dict[str, List[Tool]] = {}
+        self._canonical_to_source: Dict[str, Tuple[str, str]] = {}
+        self._connection_errors: Dict[str, str] = {}
+        self._initialized: bool = False
+        self._owner_task: Optional[asyncio.Task] = None
+        self._ready_event: Optional[asyncio.Event] = None
+        self._shutdown_event: Optional[asyncio.Event] = None
+        self._closed_event: Optional[asyncio.Event] = None
 
     @property
     def tools(self) -> Dict[str, List[Tool]]:
@@ -103,21 +108,53 @@ class MCPClientManager:
         return timedelta(seconds=get_runtime_config().worker.tool_timeout_seconds)
 
     async def initialize(self) -> None:
-        """初始化函数，用于连接所有配置的MCP服务器"""
-        # 1.检查下是否已经初始化成功
-        if self._initialized:
+        """初始化函数，用于连接所有配置的MCP服务器（软失败，不向外抛异常）"""
+        if self._initialized and self._owner_task and not self._owner_task.done():
+            return
+        if self._owner_task and not self._owner_task.done():
+            await self._ready_event.wait()
             return
 
+        self._ready_event = asyncio.Event()
+        self._shutdown_event = asyncio.Event()
+        self._closed_event = asyncio.Event()
+        self._owner_task = asyncio.create_task(self._owner_lifecycle())
+        await self._ready_event.wait()
+
+    async def _owner_lifecycle(self) -> None:
+        """在专用 owner task 中进入/退出 MCP 客户端上下文，避免跨任务 cancel scope 错误。"""
+        self._exit_stack = AsyncExitStack()
         try:
-            # 2.记录日志并连接MCP服务器
-            logger.info(f"从config.yaml中加载了{len(self._mcp_config.mcpServers)}个MCP服务器")
+            enabled_count = len([
+                name for name, cfg in self._mcp_config.mcpServers.items() if cfg.enabled
+            ])
+            logger.info("从运行时配置加载了 %s 个 MCP 服务器", enabled_count)
             await self._connect_mcp_servers()
             self._initialized = True
-            logger.info(f"MCP客户端管理器加载成功")
-        except Exception as e:
-            # 3.记录错误信息并直接抛出
-            logger.error(f"MCP客户端管理器加载失败: {str(e)}")
-            raise
+            logger.info("MCP客户端管理器加载成功")
+        except Exception as exc:
+            logger.error("MCP客户端管理器加载失败: %s", exc)
+            self._connection_errors["__init__"] = str(exc)
+            self._initialized = True
+        finally:
+            self._ready_event.set()
+
+        await self._shutdown_event.wait()
+
+        try:
+            if self._exit_stack is not None:
+                await self._exit_stack.aclose()
+            logger.info("清除MCP客户端管理器成功")
+        except Exception as exc:
+            logger.error("清理MCP客户端管理器失败: %s", exc)
+        finally:
+            self._clients.clear()
+            self._tools.clear()
+            self._canonical_to_source.clear()
+            self._connection_errors.clear()
+            self._exit_stack = None
+            self._initialized = False
+            self._closed_event.set()
 
     async def _connect_mcp_servers(self) -> None:
         """根据配置连接所有已启用的 MCP 服务"""
@@ -210,13 +247,12 @@ class MCPClientManager:
 
     async def _connect_sse_server(self, server_name: str, server_config: MCPServerConfig) -> None:
         """根据服务名字+配置连接sse服务"""
-        # 1.提取sse服务器的连接url并判断是否存在
         url = server_config.url
         if not url:
             raise ValueError("连接sse-mcp服务器需要配置url")
+        validate_mcp_http_url(url, context=f"MCP 服务[{server_name}] URL")
 
         try:
-            # 2.建立sse连接
             sse_transport = await self._exit_stack.enter_async_context(
                 sse_client(url=url, headers=server_config.headers),
             )
@@ -247,13 +283,12 @@ class MCPClientManager:
 
     async def _connect_streamable_http_server(self, server_name: str, server_config: MCPServerConfig) -> None:
         """根据服务名字+配置连接streamable-http服务"""
-        # 1.提取streamable-http服务器的连接url并判断是否存在
         url = server_config.url
         if not url:
-            raise ValueError("连接sse-mcp服务器需要配置url")
+            raise ValueError("连接streamable-http-mcp服务器需要配置url")
+        validate_mcp_http_url(url, context=f"MCP 服务[{server_name}] URL")
 
         try:
-            # 2.连接streamable-http服务
             streamable_http_transport = await self._exit_stack.enter_async_context(
                 streamablehttp_client(url=url, headers=server_config.headers),
             )
@@ -387,34 +422,23 @@ class MCPClientManager:
             )
 
     async def cleanup(self) -> None:
-        """当退出MCP服务时，清除对应资源
-
-        该方法是幂等的，多次调用不会产生副作用。
-        注意：必须在初始化MCP的同一个asyncio Task中调用此方法，
-        否则anyio会因cancel scope上下文不匹配而抛出RuntimeError。
-        """
-        # 幂等检查：如果未初始化则跳过清理
-        if not self._initialized:
+        """关闭 MCP 连接；在 owner task 内完成 AsyncExitStack 退出。"""
+        if self._owner_task is None or self._closed_event is None:
+            return
+        if self._closed_event.is_set():
             return
 
-        try:
-            await self._exit_stack.aclose()
-            logger.info(f"清除MCP客户端管理器成功")
-        except RuntimeError as e:
-            # 防御性处理：anyio.create_task_group() 在不同任务中退出的已知问题
-            if "Attempted to exit cancel scope in a different task" in str(e):
-                logger.warning(f"清理MCP客户端管理器时遇到任务上下文切换警告（可忽略）: {str(e)}")
-            else:
-                logger.error(f"清理MCP客户端管理器失败: {str(e)}")
-        except Exception as e:
-            logger.error(f"清理MCP客户端管理器失败: {str(e)}")
-        finally:
-            # 无论aclose()是否成功，都必须清除缓存并重置状态
-            self._clients.clear()
-            self._tools.clear()
-            self._canonical_to_source.clear()
-            self._connection_errors.clear()
-            self._initialized = False
+        self._shutdown_event.set()
+        await self._closed_event.wait()
+        if not self._owner_task.done():
+            try:
+                await self._owner_task
+            except Exception as exc:
+                logger.warning("等待 MCP owner task 结束失败: %s", exc)
+        self._owner_task = None
+        self._ready_event = None
+        self._shutdown_event = None
+        self._closed_event = None
 
 
 class MCPTool(BaseTool):
@@ -426,18 +450,26 @@ class MCPTool(BaseTool):
         super().__init__()
         self._connection_pool = connection_pool
         self._initialized: bool = False
-        self._tools = []
-        self._manager: MCPClientManager = None
+        self._tools: List[Dict[str, Any]] = []
+        self._manager: Optional[MCPClientManager] = None
         self._uses_pool: bool = False
+        self._init_errors: Dict[str, str] = {}
 
     async def initialize(self, mcp_config: Optional[MCPConfig] = None) -> None:
-        """初始化MCP工具包"""
+        """初始化MCP工具包（软失败，不向外抛异常）"""
         if self._initialized:
             return
         filtered = filter_enabled_mcp_config(mcp_config) if mcp_config else MCPConfig()
-        self._manager = await self._connection_pool.acquire(filtered)
-        self._uses_pool = True
-        self._tools = await self._manager.get_all_tools()
+        try:
+            self._manager = await self._connection_pool.acquire(filtered)
+            self._uses_pool = True
+            self._tools = await self._manager.get_all_tools()
+        except Exception as exc:
+            logger.warning("MCP 工具包初始化失败: %s", exc)
+            self._init_errors["__init__"] = str(exc)
+            self._manager = None
+            self._tools = []
+            self._uses_pool = False
         self._initialized = True
 
     def get_tools(self) -> List[Dict[str, Any]]:
@@ -447,9 +479,10 @@ class MCPTool(BaseTool):
     @property
     def connection_errors(self) -> Dict[str, str]:
         """返回连接失败的 MCP 服务及错误信息"""
-        if self._manager is None:
-            return {}
-        return self._manager.connection_errors
+        errors = dict(self._init_errors)
+        if self._manager is not None:
+            errors.update(self._manager.connection_errors)
+        return errors
 
     def has_tool(self, tool_name: str) -> bool:
         """传递工具名字判断工具是否存在"""
@@ -463,6 +496,8 @@ class MCPTool(BaseTool):
 
     async def invoke(self, tool_name: str, **kwargs) -> ToolResult:
         """传递工具名字+参数调用MCP工具并获取结果"""
+        if self._manager is None:
+            return ToolResult(success=False, message="MCP工具未初始化")
         return await self._manager.invoke(tool_name, kwargs)
 
     async def cleanup(self) -> None:

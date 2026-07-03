@@ -27,6 +27,11 @@ STRUCTURED_REPAIR_HINT = (
     "上次输出不符合结构化 schema，请修正后只返回 JSON。\n校验错误:\n{errors}"
 )
 
+LENGTH_TRUNCATION_REPAIR_HINT = (
+    "上次输出因长度限制被截断。请勿在 JSON 的 message/result 字段中粘贴长文正文。"
+    "请先用 write_file 将完整内容写入沙箱文件，再仅返回摘要与 attachments 中的文件路径。"
+)
+
 SUBAGENT_SYSTEM_PROMPT = """
 你是一个专注的子任务执行 Agent。你会收到一个自包含的子目标，请独立完成它并返回简洁的结果摘要。
 

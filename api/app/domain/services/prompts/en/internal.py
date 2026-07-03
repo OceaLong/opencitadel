@@ -29,6 +29,13 @@ STRUCTURED_REPAIR_HINT = (
     "Fix and return JSON only.\nValidation errors:\n{errors}"
 )
 
+LENGTH_TRUNCATION_REPAIR_HINT = (
+    "Previous output was truncated due to length limits. "
+    "Do not paste long-form body text into JSON message/result fields. "
+    "Write the full content to sandbox files via write_file first, "
+    "then return only a summary with file paths in attachments."
+)
+
 SUBAGENT_SYSTEM_PROMPT = """
 You are a focused sub-task execution agent. You receive a self-contained sub-goal; complete it independently and return a concise summary.
 

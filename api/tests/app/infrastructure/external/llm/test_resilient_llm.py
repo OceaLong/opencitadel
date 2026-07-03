@@ -63,13 +63,13 @@ def _model(model_id: str) -> LLMModel:
     )
 
 
-def _runtime_config(*, fallback_enabled: bool = True):
+def _runtime_config(*, fallback_enabled: bool = True, max_attempts_per_call: int = 1):
     return SimpleNamespace(
         model_resilience=SimpleNamespace(
             enabled=True,
             fallback_enabled=fallback_enabled,
             allow_cross_provider_fallback=False,
-            max_attempts_per_call=1,
+            max_attempts_per_call=max_attempts_per_call,
             max_call_budget_seconds=120.0,
             fast_fail_on_open_circuit=True,
         )
@@ -239,8 +239,145 @@ async def _test_response_schema_and_retry_budget_are_forwarded():
         )
 
     assert result == {"content": "{}"}
-    assert budget.calls == ["resilient_invoke"]
+    assert budget.calls == []
 
 
 def test_response_schema_and_retry_budget_are_forwarded():
     asyncio.run(_test_response_schema_and_retry_budget_are_forwarded())
+
+
+class _RetryThenSucceedLLM:
+    def __init__(self, *, fail_times: int = 1) -> None:
+        self.fail_times = fail_times
+        self.invoke_count = 0
+
+    model_name = "fake"
+    temperature = 0.7
+    max_tokens = 1024
+    supports_multimodal = False
+
+    @property
+    def capabilities(self):
+        return ModelCapabilities()
+
+    async def invoke(
+            self,
+            messages,
+            tools=None,
+            response_format=None,
+            tool_choice=None,
+            response_schema=None,
+            retry_budget=None,
+    ):
+        self.invoke_count += 1
+        if self.invoke_count <= self.fail_times:
+            raise RuntimeError("503 service unavailable")
+        return {"content": "ok"}
+
+
+class _SuccessStreamLLM:
+    model_name = "fake"
+    temperature = 0.7
+    max_tokens = 1024
+    supports_multimodal = False
+
+    @property
+    def capabilities(self):
+        return ModelCapabilities()
+
+    async def stream_invoke(
+            self,
+            messages,
+            tools=None,
+            response_format=None,
+            tool_choice=None,
+            response_schema=None,
+            retry_budget=None,
+    ):
+        yield {"content": "hello"}
+
+
+async def _test_retriable_invoke_failure_consumes_budget_once():
+    primary = _model("m1")
+    llm = _RetryThenSucceedLLM(fail_times=1)
+    client = ResilientLLMClient(llm, primary)
+    budget = _Budget()
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False, max_attempts_per_call=3),
+    ):
+        result = await client.invoke(
+            [{"role": "user", "content": "hi"}],
+            retry_budget=budget,
+        )
+
+    assert result == {"content": "ok"}
+    assert budget.calls == ["resilient_invoke_retry"]
+
+
+def test_retriable_invoke_failure_consumes_budget_once():
+    asyncio.run(_test_retriable_invoke_failure_consumes_budget_once())
+
+
+async def _test_successful_stream_calls_do_not_consume_budget():
+    from app.domain.services.agents.retry_budget import LLMRetryBudget
+
+    primary = _model("m1")
+    client = ResilientLLMClient(_SuccessStreamLLM(), primary)
+    budget = LLMRetryBudget.create(max_calls=3, max_seconds=120.0)
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False),
+    ):
+        for _ in range(15):
+            chunks = []
+            async for chunk in client.stream_invoke(
+                [{"role": "user", "content": "hi"}],
+                retry_budget=budget,
+            ):
+                chunks.append(chunk)
+            assert chunks == [{"content": "hello"}]
+
+    assert budget.used_calls == 0
+
+
+def test_successful_stream_calls_do_not_consume_budget():
+    asyncio.run(_test_successful_stream_calls_do_not_consume_budget())
+
+
+async def _test_invoke_fallback_consumes_budget():
+    primary = _model("m1")
+    fallback = _model("m2")
+    primary_llm = _RetryThenSucceedLLM(fail_times=99)
+    fallback_llm = _FakeLLM(response={"content": "fallback"})
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary, fallback])
+    breaker = MagicMock()
+    breaker.allow_request = AsyncMock(return_value="allow")
+    breaker.record_success = AsyncMock()
+    breaker.record_failure = AsyncMock()
+
+    client = ResilientLLMClient(primary_llm, primary, llm_model_service=llm_model_service)
+    client._breaker = breaker
+    budget = _Budget()
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(max_attempts_per_call=2),
+    ), patch(
+        "app.infrastructure.external.llm.resilient_llm.LLMFactory.create",
+        return_value=fallback_llm,
+    ):
+        result = await client.invoke(
+            [{"role": "user", "content": "hi"}],
+            retry_budget=budget,
+        )
+
+    assert result == {"content": "fallback"}
+    assert budget.calls == ["resilient_invoke_retry", "resilient_invoke_fallback"]
+
+
+def test_invoke_fallback_consumes_budget():
+    asyncio.run(_test_invoke_fallback_consumes_budget())

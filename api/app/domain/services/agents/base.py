@@ -400,6 +400,13 @@ class BaseAgent(ABC):
         return 0
 
     @staticmethod
+    def _is_output_length_limited(finish_reason: Optional[str]) -> bool:
+        if not finish_reason:
+            return False
+        normalized = finish_reason.lower().replace("-", "_")
+        return normalized in {"length", "max_tokens", "max_output_tokens"}
+
+    @staticmethod
     def _align_keep_boundary(messages: List[Dict[str, Any]], split_idx: int) -> int:
         idx = max(1, split_idx)
         while idx < len(messages) and messages[idx].get("role") == "tool":
@@ -453,7 +460,8 @@ class BaseAgent(ABC):
 
         error = "调用语言模型发生错误"
         stripped_images_for_retry = False
-        for _ in range(self._agent_config.max_retries):
+        length_truncation_retried = False
+        for attempt in range(self._agent_config.max_retries):
             self._last_llm_message = None
             try:
                 stream_id = stream_id or str(uuid.uuid4())
@@ -466,6 +474,7 @@ class BaseAgent(ABC):
                 tool_call_acc: Dict[int, Dict[str, Any]] = {}
 
                 call_usage: Dict[str, int] = {}
+                finish_reason: Optional[str] = None
                 async for delta in self._llm.stream_invoke(
                         messages=self._messages_for_llm(
                             self._memory.get_messages(),
@@ -480,6 +489,9 @@ class BaseAgent(ABC):
                 ):
                     if usage_delta := delta.get("usage"):
                         call_usage = usage_delta
+                        continue
+                    if reason := delta.get("finish_reason"):
+                        finish_reason = reason
                         continue
                     if content := delta.get("content"):
                         aggregated["content"] += content
@@ -525,6 +537,8 @@ class BaseAgent(ABC):
                         {"role": "assistant", "content": ""},
                         {"role": "user", "content": "AI无响应内容，请继续。"}
                     ])
+                    if attempt + 1 < self._agent_config.max_retries:
+                        self._retry_budget.consume("agent_empty_response_retry")
                     await asyncio.sleep(self._retry_interval)
                     continue
                 if not content and not tool_calls and reasoning_content:
@@ -532,6 +546,26 @@ class BaseAgent(ABC):
                         "LLM仅返回reasoning_content，未返回content/tool_calls，"
                         "请检查思考模式参数或模型兼容性"
                     )
+
+                if (
+                        response_schema_payload is not None
+                        and self._is_output_length_limited(finish_reason)
+                        and not length_truncation_retried
+                ):
+                    length_truncation_retried = True
+                    logger.warning(
+                        "LLM structured output truncated (finish_reason=%s), retrying with file-delivery hint",
+                        finish_reason,
+                    )
+                    internal = self._internal_prompts()
+                    await self._add_to_memory([
+                        {"role": "assistant", "content": content or None},
+                        {"role": "user", "content": internal.LENGTH_TRUNCATION_REPAIR_HINT},
+                    ], persist=False)
+                    if attempt + 1 < self._agent_config.max_retries:
+                        self._retry_budget.consume("agent_length_truncation_retry")
+                    await asyncio.sleep(self._retry_interval)
+                    continue
 
                 filtered_message = {"role": "assistant", "content": content or None}
                 if reasoning_content:
@@ -552,6 +586,8 @@ class BaseAgent(ABC):
                     if not stripped_images_for_retry and await self._strip_images_from_memory():
                         stripped_images_for_retry = True
                         logger.warning("多模态请求失败，已从记忆中剥离图片并重试")
+                        if attempt + 1 < self._agent_config.max_retries:
+                            self._retry_budget.consume("agent_multimodal_strip_retry")
                         await asyncio.sleep(self._retry_interval)
                         continue
                     raise
@@ -563,6 +599,8 @@ class BaseAgent(ABC):
                     exc_info=not hasattr(e, "msg"),
                 )
                 error = error_msg
+                if attempt + 1 < self._agent_config.max_retries:
+                    self._retry_budget.consume("agent_invoke_retry")
                 await asyncio.sleep(self._retry_interval)
                 continue
 

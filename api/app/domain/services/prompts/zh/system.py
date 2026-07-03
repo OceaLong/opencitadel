@@ -26,6 +26,7 @@ WRITING_RULES_PROSE = """<writing_rules>
 - 基于参考资料写作时，主动引用带有来源的原文，并在文末提供包含 URL 的参考文献列表
 - 对于长篇文档，先将每个部分保存为单独的草稿文件，然后按顺序追加合并为最终文档
 - 在最终汇编过程中，**不得删减或总结内容**；最终文档的长度必须超过所有单个草稿文件的总和
+- 对话 JSON 字段（如 message、result）**不得**承载完整长文；完整内容只通过沙箱文件 + attachments 交付
 </writing_rules>"""
 
 WRITING_RULES_ADAPTIVE = """<writing_rules>

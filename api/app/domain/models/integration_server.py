@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -29,8 +30,12 @@ class MCPServerRecord(BaseModel):
 
     @model_validator(mode="after")
     def validate_transport_fields(self) -> "MCPServerRecord":
-        if self.transport in (MCPTransport.SSE, MCPTransport.STREAMABLE_HTTP) and not self.url:
-            raise ValueError("sse/streamable_http 模式必须提供 url")
+        if self.transport in (MCPTransport.SSE, MCPTransport.STREAMABLE_HTTP):
+            if not self.url:
+                raise ValueError("sse/streamable_http 模式必须提供 url")
+            parsed = urlparse(self.url.strip())
+            if parsed.scheme not in ("http", "https"):
+                raise ValueError("MCP URL 必须以 http:// 或 https:// 开头")
         if self.transport == MCPTransport.STDIO and not self.command:
             raise ValueError("stdio 模式必须提供 command")
         return self

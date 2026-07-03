@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 _IMAGE_OMITTED_TEXT = "[image omitted in compact]"
 _TRUNCATED_TOOL_PREFIX = "[truncated] "
-_DEFAULT_TOOL_CONTENT_MAX = 2000
+_DEFAULT_TOOL_CONTENT_MAX = 8000
 
 _BROWSER_COMPACT_FUNCTIONS = frozenset({
     "browser_view",
@@ -22,7 +22,6 @@ _BROWSER_COMPACT_FUNCTIONS = frozenset({
 _TRUNCATABLE_TOOL_NAMES = frozenset({
     "search_web",
     "read_file",
-    "write_file",
     "replace_in_file",
     "search_in_file",
     "find_files",
@@ -35,7 +34,6 @@ _TRUNCATABLE_TOOL_NAMES = frozenset({
 # Keys to include in truncation hints per tool name.
 _TRUNCATION_ARG_KEYS: Dict[str, tuple[str, ...]] = {
     "read_file": ("path", "filepath"),
-    "write_file": ("path", "filepath"),
     "replace_in_file": ("path", "filepath"),
     "search_in_file": ("path", "filepath"),
     "find_files": ("path", "pattern"),

@@ -6,7 +6,8 @@ from typing import AsyncGenerator, Optional, List
 
 import pytest
 
-from app.domain.models.event import MessageEvent
+from app.domain.models.event import MessageEvent, StepEvent
+from app.domain.models.memory import Memory
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.services.agents.react import ReActAgent
 from tests.app.domain.services.agents.conftest import (
@@ -64,6 +65,36 @@ class _StepAgent(ReActAgent):
         assert emit_deltas is False
         self.received_vision_counts.append(len(vision_attachments or []))
         yield MessageEvent(role="assistant", message='{"success":true,"result":"ok","attachments":[]}')
+
+
+class _RepairStepAgent(ReActAgent):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.repair_hints: List[str] = []
+
+    async def invoke(
+            self,
+            query: str,
+            format: Optional[str] = None,
+            vision_attachments: Optional[List[VisionAttachment]] = None,
+            emit_deltas: bool = True,
+    ) -> AsyncGenerator[MessageEvent, None]:
+        yield MessageEvent(role="assistant", message='{"result":"incomplete"}')
+
+    async def continue_tool_iteration_loop(
+            self,
+            *,
+            inject_tool_messages: Optional[List[dict]] = None,
+            format: Optional[str] = None,
+            emit_deltas: bool = True,
+            response_schema=None,
+    ) -> AsyncGenerator[MessageEvent, None]:
+        if inject_tool_messages:
+            self.repair_hints.append(inject_tool_messages[0]["content"])
+        yield MessageEvent(
+            role="assistant",
+            message='{"success":true,"result":"fixed","attachments":[]}',
+        )
 
 
 def _agent_kwargs(**overrides):
@@ -126,3 +157,30 @@ async def _test_execute_step_respects_optional_vision_attachments():
 
 def test_execute_step_respects_optional_vision_attachments():
     asyncio.run(_test_execute_step_respects_optional_vision_attachments())
+
+
+async def _test_execute_step_uses_locale_aware_structured_repair_hint(language: str, expected_snippet: str):
+    from app.domain.models.plan import Plan, Step
+
+    agent = _RepairStepAgent(**_agent_kwargs())
+    agent._memory = Memory(messages=[{"role": "system", "content": "test"}])
+    message = Message(message="do task")
+    plan = Plan(title="t", message="m", language=language, steps=[Step(description="s1")])
+    step = plan.steps[0]
+
+    events = [event async for event in agent.execute_step(plan, step, message)]
+    assert len(agent.repair_hints) == 1
+    assert expected_snippet in agent.repair_hints[0]
+    assert any(isinstance(event, StepEvent) for event in events)
+    assert step.result == "fixed"
+
+
+@pytest.mark.parametrize(
+    "language,expected_snippet",
+    [
+        ("zh", "上次输出不符合结构化 schema"),
+        ("en", "Previous output did not match the required structured schema"),
+    ],
+)
+def test_execute_step_uses_locale_aware_structured_repair_hint(language, expected_snippet):
+    asyncio.run(_test_execute_step_uses_locale_aware_structured_repair_hint(language, expected_snippet))

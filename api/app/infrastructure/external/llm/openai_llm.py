@@ -377,6 +377,7 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
                 self._raise_llm_error(error, request_model)
 
         stream_usage: Dict[str, int] = {}
+        finish_reason: Optional[str] = None
         async for chunk in stream:
             usage = getattr(chunk, "usage", None)
             if usage is not None:
@@ -384,7 +385,10 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
                 stream_usage = normalize_usage(raw)
             if not chunk.choices:
                 continue
-            delta = chunk.choices[0].delta
+            choice = chunk.choices[0]
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+            delta = choice.delta
             if delta is None:
                 continue
             payload: Dict[str, Any] = {}
@@ -406,6 +410,8 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
                     })
             if payload:
                 yield payload
+        if finish_reason:
+            yield {"finish_reason": finish_reason}
         if stream_usage.get("total_tokens"):
             yield {"usage": stream_usage}
 

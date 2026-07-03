@@ -61,7 +61,7 @@ def test_webhook_signature_and_idempotency_key():
     assert expected_key.startswith("webhook:idem:abc123:")
 
 
-def test_artifact_write_uploads_to_cos():
+def test_artifact_write_uploads_to_object_storage():
     uow = AsyncMock()
     uow.__aenter__ = AsyncMock(return_value=uow)
     uow.__aexit__ = AsyncMock(return_value=None)
@@ -69,26 +69,31 @@ def test_artifact_write_uploads_to_cos():
     uow.artifact.save = AsyncMock()
     uow.commit = AsyncMock()
 
+    object_storage = AsyncMock()
+    object_storage.put_bytes = AsyncMock()
+
     def factory():
         return uow
 
-    service = ArtifactService(factory)
+    service = ArtifactService(factory, object_storage=object_storage)
 
     async def _run():
-        with patch("app.application.services.artifact_service.get_cos") as mock_cos:
-            mock_cos.return_value.put_bytes = AsyncMock()
-            artifact, event = await service.write_content(
-                session_id="s1",
-                artifact_id=None,
-                kind="doc",
-                title="Report",
-                content="# Hello",
-            )
+        artifact, event = await service.write_content(
+            session_id="s1",
+            artifact_id=None,
+            kind="doc",
+            title="Report",
+            content="# Hello",
+        )
         assert artifact.session_id == "s1"
         assert event.kind == "doc"
-        mock_cos.return_value.put_bytes.assert_awaited_once()
+        object_storage.put_bytes.assert_awaited_once()
 
     asyncio.run(_run())
+
+
+def _artifact_service_without_storage(uow):
+    return ArtifactService(lambda: uow, object_storage=AsyncMock())
 
 
 def test_artifact_scope_denied_without_session_access():
@@ -98,7 +103,7 @@ def test_artifact_scope_denied_without_session_access():
     uow.session.get_metadata = AsyncMock(return_value=None)
     uow.artifact.list_by_session = AsyncMock(return_value=[])
 
-    service = ArtifactService(lambda: uow)
+    service = _artifact_service_without_storage(uow)
     scope = OwnerScope.personal("user-a")
 
     async def _run():
@@ -116,7 +121,7 @@ def test_artifact_get_by_id_requires_scope():
     uow.artifact.get_by_id = AsyncMock(return_value=artifact)
     uow.session.get_metadata = AsyncMock(return_value=None)
 
-    service = ArtifactService(lambda: uow)
+    service = _artifact_service_without_storage(uow)
 
     async def _run():
         result = await service.get_by_id("a1", scope=OwnerScope.personal("other"))

@@ -219,12 +219,17 @@ class A2ATool(BaseTool):
         self._uses_pool: bool = False
 
     async def initialize(self, a2a_config: Optional[A2AConfig] = None) -> None:
-        """初始化A2A工具包"""
+        """初始化A2A工具包（软失败，不向外抛异常）"""
         if self._initialized:
             return
         filtered = filter_enabled_a2a_config(a2a_config) if a2a_config else A2AConfig()
-        self.manager = await self._connection_pool.acquire(filtered)
-        self._uses_pool = True
+        try:
+            self.manager = await self._connection_pool.acquire(filtered)
+            self._uses_pool = True
+        except Exception as exc:
+            logger.warning("A2A 工具包初始化失败: %s", exc)
+            self.manager = None
+            self._uses_pool = False
         self._initialized = True
 
     @tool(

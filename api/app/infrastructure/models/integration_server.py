@@ -62,7 +62,7 @@ class MCPServerORM(Base):
             description=self.description,
             command=self.command,
             args=self.args,
-            url=self.url,
+            url=url,
             headers=headers,
             env=env,
             extra=self.extra or {},

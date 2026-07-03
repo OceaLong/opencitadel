@@ -125,6 +125,14 @@ export function useSessionStreams({
           ) {
             setStreaming(false);
           }
+          if (status === "cancelled") {
+            setStreamError(new Error(t("taskCancelledNotice")));
+            setStreamStatus("error");
+          }
+          if (status === "failed") {
+            setStreamError(new Error(t("taskFailedNotice")));
+            setStreamStatus("error");
+          }
         }
       }
 

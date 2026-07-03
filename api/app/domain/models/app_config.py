@@ -3,6 +3,7 @@
 import uuid
 from enum import Enum
 from typing import Dict, Optional, List, Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
@@ -31,7 +32,7 @@ class MemoryConfig(BaseModel):
     compact_strategy: str = "hybrid"  # rule | llm | hybrid
     compact_token_threshold: int = 32000
     compact_keep_recent: int = 12
-    compact_tool_content_max_chars: int = 2000
+    compact_tool_content_max_chars: int = 8000
     compact_always_on_step_boundary: bool = True
     compact_rule_trigger_threshold: int = 16000
     tool_output_offload_enabled: bool = False
@@ -103,7 +104,7 @@ class AgentConfig(BaseModel):
     max_retries: int = Field(default=3, gt=1, lt=10)  # 最大重试次数
     max_search_results: int = Field(default=10, gt=1, lt=30)  # 最大搜索结果条数
     max_flow_steps: int = Field(default=50, gt=0, lt=500)  # Flow 级步骤/状态转换上限
-    tool_result_max_chars: int = Field(default=8000, gt=0, lt=200_000)  # 单次工具结果回填上限
+    tool_result_max_chars: int = Field(default=32000, gt=0, lt=200_000)  # 单次工具结果回填上限
     max_run_seconds: int = Field(default=3600, gt=0, lt=86400)  # 单次 Agent 运行全局超时（秒）
     subagent_max_iterations: int = Field(default=15, gt=0, lt=500)
     subagent_max_concurrency: int = Field(default=3, gt=0, le=20)
@@ -142,6 +143,9 @@ class MCPServerConfig(BaseModel):
             # 2.这两种模式需要传递url
             if not self.url:
                 raise ValueError("在sse或streamable_http模式下必须传递url")
+            parsed = urlparse(self.url.strip())
+            if parsed.scheme not in ("http", "https"):
+                raise ValueError("MCP URL 必须以 http:// 或 https:// 开头")
 
         # 3.判断transport是否为stdio类型
         if self.transport == MCPTransport.STDIO:

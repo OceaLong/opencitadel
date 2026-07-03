@@ -234,7 +234,7 @@ export function ToolPreviewPanel({
             {tool && toolKind && (
               <>
                 <ToolPreviewHeader tool={tool} onClose={onClose} />
-                <div className="relative flex-1 overflow-hidden">
+                <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
                   <ToolPreviewContent kind={toolKind} tool={tool} onOpenVNC={onOpenVNC} />
                   {onJumpToLatest && (
                     <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
@@ -269,7 +269,7 @@ export function ToolPreviewPanel({
         toolKind && (
           <>
             <ToolPreviewHeader tool={tool} onClose={onClose} />
-            <div className="relative flex-1 overflow-hidden">
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
               <ToolPreviewContent kind={toolKind} tool={tool} onOpenVNC={onOpenVNC} />
               {onJumpToLatest && (
                 <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">

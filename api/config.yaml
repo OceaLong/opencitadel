@@ -10,6 +10,7 @@ agent_config:
   max_iterations: 100
   max_retries: 3
   max_search_results: 10
+  tool_result_max_chars: 32000
 
 memory:
   recall_limit: 20
@@ -18,7 +19,7 @@ memory:
   compact_strategy: hybrid
   compact_token_threshold: 32000
   compact_keep_recent: 12
-  compact_tool_content_max_chars: 2000
+  compact_tool_content_max_chars: 8000
   compact_always_on_step_boundary: true
   compact_rule_trigger_threshold: 16000
   tool_output_offload_enabled: false

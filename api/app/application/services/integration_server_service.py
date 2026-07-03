@@ -5,6 +5,8 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from pydantic import ValidationError
+
 from app.application.errors.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from app.application.services.audit_service import AuditService
 from app.domain.models.app_config import A2AConfig, MCPConfig, MCPTransport
@@ -23,6 +25,14 @@ logger = logging.getLogger(__name__)
 def _ensure_stdio_allowed(record: MCPServerRecord, *, is_admin: bool) -> None:
     if not is_admin and record.transport == MCPTransport.STDIO:
         raise ForbiddenError("仅管理员可配置 stdio 类型的 MCP 服务")
+
+
+def _ensure_valid_mcp_record(record: MCPServerRecord) -> None:
+    try:
+        MCPServerRecord.model_validate(record.model_dump())
+    except ValidationError as exc:
+        message = exc.errors()[0].get("msg", str(exc)) if exc.errors() else str(exc)
+        raise BadRequestError(message) from exc
 
 
 def _should_keep(new_val: Any) -> bool:
@@ -97,6 +107,7 @@ class MCPServerService:
         is_admin: bool = False,
     ) -> MCPServerRecord:
         _ensure_stdio_allowed(record, is_admin=is_admin)
+        _ensure_valid_mcp_record(record)
         if scope is not None and record.visibility != ResourceVisibility.GLOBAL:
             record.owner_user_id = scope.user_id
         enc_headers, headers_enc = encrypt_secret_dict(record.headers, self._cipher)
@@ -138,6 +149,7 @@ class MCPServerService:
                 updates.headers = _apply_masked_secret_updates(updates.headers, existing.headers or {})
             if updates.env is not None:
                 updates.env = _apply_masked_secret_updates(updates.env, existing.env or {})
+            _ensure_valid_mcp_record(updates)
             enc_headers, headers_enc = encrypt_secret_dict(updates.headers, self._cipher)
             enc_env, env_enc = encrypt_secret_dict(updates.env, self._cipher)
             enc_url, url_enc = encrypt_url(updates.url, self._cipher)

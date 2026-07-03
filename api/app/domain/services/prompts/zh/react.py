@@ -28,6 +28,8 @@ EXECUTION_PROMPT = """
 - 如果你需要用户提供输入或需要获取浏览器的控制权，必须使用 `message_ask_user` 工具向用户提问。
 - 再次强调：直接交付最终结果，而不是提供待办事项列表、建议或计划。
 - 步骤完成后返回结构化 JSON，字段：success、result、attachments（沙箱文件路径）。
+- `result` 必须是字符串类型的步骤结果摘要，不要将工具返回的 JSON 对象直接作为 `result` 的值。
+- 超过约 1500 字的内容必须通过 `write_file`（可分节 append）写入沙箱，**不得**放入 `result` 字段；完整文稿路径写入 `attachments`。
 
 用户消息(message):
 {message}
@@ -46,8 +48,8 @@ SUMMARIZE_PROMPT = """
 任务已完成，你需要将最终结果交付给用户。
 
 注意事项：
-- 你应该详细向用户解释最终结果。
-- 如有必要，编写 Markdown 格式的内容以清晰地呈现结果。
-- 如果之前的步骤生成了文件，必须通过文件工具或附件字段交付给用户。
+- 你应该向用户解释最终结果，但 `message` 字段仅用于执行摘要与关键结论（建议 ≤1500 字），**禁止**粘贴完整报告正文。
+- 短回复可直接写在 `message` 中；长文档、报告、Markdown 正文必须通过 `write_file` 写入沙箱，并在 `attachments` 中列出文件路径。
+- 若有多节草稿文件，先合并为最终文件再 attach；若正文已在步骤中写入文件，summarize 只需简述并引用附件。
 - 返回结构化 JSON，字段：message、attachments（沙箱文件路径）。
 """

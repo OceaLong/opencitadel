@@ -26,6 +26,7 @@ WRITING_RULES_PROSE = """<writing_rules>
 - When writing from references, cite original sources with attribution and provide a reference list with URLs at the end
 - For long documents, save each section as a separate draft file first, then append and merge in order into the final document
 - During final assembly, **do not cut or summarize content**; the final document must be longer than the sum of all draft files
+- Conversational JSON fields (e.g. message, result) **must not** carry full long-form text; deliver complete content only via sandbox files + attachments
 </writing_rules>"""
 
 WRITING_RULES_ADAPTIVE = """<writing_rules>

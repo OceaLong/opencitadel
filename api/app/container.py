@@ -356,7 +356,11 @@ class BaseContainer(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         file_storage=file_storage,
     )
-    artifact_service = providers.Singleton(ArtifactService, uow_factory=uow_factory)
+    artifact_service = providers.Singleton(
+        ArtifactService,
+        uow_factory=uow_factory,
+        object_storage=object_storage,
+    )
     evidence_service = providers.Singleton(
         EvidenceService,
         uow_factory=uow_factory,

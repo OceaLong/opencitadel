@@ -7,7 +7,6 @@ import { toast } from "sonner";
 
 import { MarkdownContent } from "@/components/markdown-content";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { fileApi } from "@/lib/api";
 import type { AttachmentFile } from "@/lib/session-events";
@@ -185,7 +184,7 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
   }
 
   return (
-    <div className="bg-card border-border/70 flex h-full flex-col border-l">
+    <div className="bg-card border-border/70 flex h-full flex-col overflow-hidden border-l">
       {/* 头部：文件名 + 操作按钮 - 添加背景色区分 */}
       <div className="border-border/70 bg-muted/30 flex flex-shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -222,7 +221,7 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
       </div>
 
       {/* 内容区域 */}
-      <div className="flex-1 overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-hidden">
         {loading && (
           <div className="flex h-full items-center justify-center">
             <p className="text-muted-foreground text-sm">{tCommon("loading")}</p>
@@ -252,19 +251,17 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
         )}
 
         {!loading && !error && fileType.type === "image" && imageUrl && (
-          <ScrollArea className="h-full">
-            <div className="p-4">
-              <img
-                src={imageUrl}
-                alt={file.filename}
-                className="h-auto max-w-full rounded-lg border"
-              />
-            </div>
-          </ScrollArea>
+          <div className="h-full overflow-y-auto p-4">
+            <img
+              src={imageUrl}
+              alt={file.filename}
+              className="h-auto max-w-full rounded-lg border"
+            />
+          </div>
         )}
 
         {!loading && !error && fileType.type === "text" && content !== null && (
-          <ScrollArea className="h-full">
+          <div className="h-full overflow-y-auto">
             {isMarkdown ? (
               <div className="p-4">
                 <MarkdownContent content={content} />
@@ -274,7 +271,7 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
                 {content}
               </pre>
             )}
-          </ScrollArea>
+          </div>
         )}
       </div>
     </div>

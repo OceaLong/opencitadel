@@ -203,12 +203,35 @@ class ReActAgent(BaseAgent):
             return
         if isinstance(event, MessageEvent):
             step.status = ExecutionStatus.COMPLETED
-            parsed = await parse_structured_output(
-                event.message,
-                ReactStepSchema,
-                self._json_parser,
-                retry_budget=getattr(self, "_retry_budget", None),
-            )
+            internal = self._internal_prompts()
+            max_repair_attempts = 2
+            current_message = event.message
+            parsed = None
+            for attempt in range(max_repair_attempts + 1):
+                try:
+                    parsed = await parse_structured_output(
+                        current_message,
+                        ReactStepSchema,
+                        self._json_parser,
+                        retry_budget=getattr(self, "_retry_budget", None),
+                    )
+                    break
+                except StructuredParseError as exc:
+                    if attempt >= max_repair_attempts:
+                        raise
+                    repair_hint = internal.STRUCTURED_REPAIR_HINT.format(errors=exc)
+                    got_message = False
+                    async for repair_event in self.continue_tool_iteration_loop(
+                            inject_tool_messages=[{"role": "user", "content": repair_hint}],
+                            emit_deltas=self._should_emit_deltas(),
+                    ):
+                        if isinstance(repair_event, MessageEvent):
+                            current_message = repair_event.message
+                            got_message = True
+                            break
+                        yield repair_event
+                    if not got_message:
+                        raise
             step.success = parsed.success
             step.result = parsed.result
             step.attachments = parsed.attachments

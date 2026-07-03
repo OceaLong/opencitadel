@@ -104,7 +104,7 @@ class ResilientLLMClient:
         if not candidates:
             raise ModelUnavailableError("未配置可用模型", error_code=MODEL_NOT_CONFIGURED)
 
-        for candidate in candidates:
+        for candidate_idx, candidate in enumerate(candidates):
             if not await self._candidate_allowed(candidate):
                 last_error = ModelUnavailableError(
                     f"模型「{candidate.display_name}」熔断开路，请稍后重试",
@@ -116,8 +116,6 @@ class ResilientLLMClient:
                 attempts += 1
                 client = self._client_for(candidate)
                 try:
-                    if retry_budget is not None:
-                        retry_budget.consume("resilient_invoke")
                     result = await client.invoke(
                         messages,
                         tools,
@@ -138,10 +136,14 @@ class ResilientLLMClient:
                         raise ModelUnavailableError(str(exc), error_code=classify_llm_error_code(exc)) from exc
                     if attempts >= cfg.max_attempts_per_call:
                         break
+                    if retry_budget is not None:
+                        retry_budget.consume("resilient_invoke_retry")
                     delay = min(2 ** (attempts - 1), 8)
                     await asyncio.sleep(delay)
             if not cfg.fallback_enabled:
                 break
+            if candidate_idx + 1 < len(candidates) and retry_budget is not None:
+                retry_budget.consume("resilient_invoke_fallback")
 
         code = classify_llm_error_code(last_error) if last_error else MODEL_UNAVAILABLE
         raise ModelUnavailableError(str(last_error) if last_error else "模型调用失败", error_code=code)
@@ -163,7 +165,7 @@ class ResilientLLMClient:
         if not candidates:
             raise ModelUnavailableError("未配置可用模型", error_code=MODEL_NOT_CONFIGURED)
 
-        for candidate in candidates:
+        for candidate_idx, candidate in enumerate(candidates):
             if self._streaming_started:
                 break
             if not await self._candidate_allowed(candidate):
@@ -179,8 +181,6 @@ class ResilientLLMClient:
                 attempts += 1
                 client = self._client_for(candidate)
                 try:
-                    if retry_budget is not None:
-                        retry_budget.consume("resilient_stream_invoke")
                     async for chunk in client.stream_invoke(
                         request_messages,
                         tools,
@@ -213,10 +213,14 @@ class ResilientLLMClient:
                         raise ModelUnavailableError(str(exc), error_code=classify_llm_error_code(exc)) from exc
                     if attempts >= cfg.max_attempts_per_call:
                         break
+                    if retry_budget is not None:
+                        retry_budget.consume("resilient_stream_invoke_retry")
                     delay = min(2 ** (attempts - 1), 8)
                     await asyncio.sleep(delay)
             if not cfg.fallback_enabled or self._streaming_started:
                 break
+            if candidate_idx + 1 < len(candidates) and retry_budget is not None:
+                retry_budget.consume("resilient_stream_invoke_fallback")
 
         code = classify_llm_error_code(last_error) if last_error else MODEL_UNAVAILABLE
         raise ModelUnavailableError(str(last_error) if last_error else "模型流式调用失败", error_code=code)

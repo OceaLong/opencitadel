@@ -427,11 +427,12 @@ export function MCPSetting({
     }
     const form = editFormRef.current;
     if (!form?.validate()) {
-      const transport = editServer.config?.transport ?? editServer.transport;
-      if (transport === "stdio") {
-        toast.error(t("mcpCommandRequired"));
+      const errorKey = form?.getValidationError();
+      if (errorKey) {
+        toast.error(t(errorKey));
       } else {
-        toast.error(t("mcpUrlRequired"));
+        const transport = editServer.config?.transport ?? editServer.transport;
+        toast.error(t(transport === "stdio" ? "mcpCommandRequired" : "mcpUrlRequired"));
       }
       return;
     }

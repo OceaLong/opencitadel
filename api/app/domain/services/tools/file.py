@@ -18,7 +18,7 @@ class FileTool(BaseTool):
 
     @tool(
         name="read_file",
-        description="读取文件内容。用于检查文件内容、分析日志或读取配置文件。",
+        description="读取文件内容。用于检查文件内容、分析日志或读取配置文件。长文档可用 start_line/end_line 分页，或增大 max_length。",
         parameters={
             "filepath": {
                 "type": "string",
@@ -38,7 +38,7 @@ class FileTool(BaseTool):
             },
             "max_length": {
                 "type": "integer",
-                "description": "(可选)读取文件内容的最大长度, 默认为10000"
+                "description": "(可选)读取文件内容的最大长度, 默认为50000"
             }
         },
         required=["filepath"],
@@ -49,7 +49,7 @@ class FileTool(BaseTool):
             start_line: Optional[int] = None,
             end_line: Optional[int] = None,
             sudo: Optional[bool] = False,
-            max_length: int = 10000,
+            max_length: int = 50000,
     ) -> ToolResult:
         """传递文件路径读取沙箱中的文件内容"""
         return await self.sandbox.read_file(

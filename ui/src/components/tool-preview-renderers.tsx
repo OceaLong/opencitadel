@@ -326,11 +326,14 @@ export function ToolPreviewContent({
   tool: ToolEvent;
   onOpenVNC?: () => void;
 }) {
-  if (kind === "bash") return <ShellPreview tool={tool} />;
-  if (kind === "browser") return <BrowserPreview tool={tool} onOpenVNC={onOpenVNC} />;
-  if (kind === "search") return <SearchPreview tool={tool} />;
-  if (kind === "file") return <FileToolPreview tool={tool} />;
-  if (kind === "mcp") return <MCPPreview tool={tool} />;
-  if (kind === "a2a") return <A2APreview tool={tool} />;
-  return <DefaultPreview tool={tool} />;
+  let preview: React.ReactNode;
+  if (kind === "bash") preview = <ShellPreview tool={tool} />;
+  else if (kind === "browser") preview = <BrowserPreview tool={tool} onOpenVNC={onOpenVNC} />;
+  else if (kind === "search") preview = <SearchPreview tool={tool} />;
+  else if (kind === "file") preview = <FileToolPreview tool={tool} />;
+  else if (kind === "mcp") preview = <MCPPreview tool={tool} />;
+  else if (kind === "a2a") preview = <A2APreview tool={tool} />;
+  else preview = <DefaultPreview tool={tool} />;
+
+  return <div className="h-full min-h-0">{preview}</div>;
 }

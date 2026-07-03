@@ -77,6 +77,28 @@ def test_compact_truncation_includes_read_file_path():
     assert "[结果已截断" in memory.messages[1]["content"]
 
 
+def test_compact_does_not_truncate_write_file_results():
+    memory = Memory(messages=[
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "tc1",
+                "function": {"name": "write_file", "arguments": '{"filepath": "/home/ubuntu/report.md"}'},
+            }],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "tc1",
+            "content": '{"success": true, "data": {"filepath": "/home/ubuntu/report.md", "bytes_written": 99999}}',
+            "_function_name": "write_file",
+        },
+    ])
+    memory.compact(tool_content_max_chars=2000)
+    assert "[truncated]" not in memory.messages[1]["content"]
+    assert "[结果已截断" not in memory.messages[1]["content"]
+
+
 def test_compact_truncation_includes_search_web_query():
     memory = Memory(messages=[
         {

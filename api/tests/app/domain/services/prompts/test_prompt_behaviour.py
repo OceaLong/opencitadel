@@ -38,6 +38,21 @@ def test_adaptive_style_allows_lists_in_zh():
     assert "严禁使用列表格式" not in composed
 
 
+def test_prose_writing_rules_require_file_delivery_for_long_form():
+    for locale in ("en", "zh"):
+        prompts = load_prompts(locale)
+        composed = _compose(prompts)
+        assert "attachments" in composed
+
+
+def test_react_prompts_require_file_delivery_for_long_form():
+    for locale in ("en", "zh"):
+        prompts = load_prompts(locale)
+        assert "1500" in prompts.react.EXECUTION_PROMPT
+        assert "attachments" in prompts.react.SUMMARIZE_PROMPT
+        assert "write_file" in prompts.react.SUMMARIZE_PROMPT
+
+
 def test_subagent_skill_prompt_injected_once():
     skill_prompt = "Follow the skill playbook exactly."
     prompts = load_prompts("en")
@@ -57,6 +72,22 @@ def test_react_schemas_parse_minimal_payload():
 def test_react_step_schema_requires_success():
     with pytest.raises(ValidationError):
         ReactStepSchema.model_validate({"result": "x"})
+
+
+def test_react_step_schema_coerces_dict_result():
+    step = ReactStepSchema.model_validate({
+        "success": True,
+        "result": {"current_time": "2026年7月5日 星期日"},
+    })
+    assert step.result == "current_time: 2026年7月5日 星期日"
+
+
+def test_react_step_schema_coerces_list_result():
+    step = ReactStepSchema.model_validate({
+        "success": True,
+        "result": ["line one", "line two"],
+    })
+    assert step.result == '["line one", "line two"]'
 
 
 def test_skill_md_import():

@@ -207,7 +207,7 @@ export function ArtifactWorkbench({
         </div>
       </div>
 
-      <div className="relative flex-1 overflow-hidden">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         {loading && (
           <div className="bg-background/60 absolute inset-0 z-10 flex items-center justify-center">
             <Loader2 className="text-muted-foreground size-5 animate-spin" />

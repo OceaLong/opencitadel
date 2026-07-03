@@ -28,6 +28,8 @@ Notes:
 - If you need user input or browser control, you must ask via the `message_ask_user` tool.
 - Again: deliver final results directly, not todo lists, suggestions, or plans.
 - When the step is complete, return structured JSON with fields: success, result, attachments (sandbox file paths).
+- `result` must be a plain-text string summary of the step outcome; do not nest JSON objects from tool output as the `result` value.
+- Content longer than ~1500 characters must be written to the sandbox via `write_file` (section append is allowed); **never** put it in `result`. Put full document paths in `attachments`.
 
 User message (message):
 {message}
@@ -46,8 +48,8 @@ SUMMARIZE_PROMPT = """
 The task is complete. Deliver the final result to the user.
 
 Notes:
-- Explain the final result to the user in detail.
-- Write Markdown when needed for clear presentation.
-- If previous steps generated files, deliver them via file tools or the attachments field.
+- Explain the final result to the user, but the `message` field is for an executive summary and key conclusions only (aim for ≤1500 characters); **never** paste the full report body.
+- Short replies may go directly in `message`; long documents, reports, and Markdown bodies must be written via `write_file` and listed in `attachments`.
+- If multiple draft files exist, merge them into one final file before attaching; if the body was already written in a step, summarize briefly and reference attachments.
 - Return structured JSON with fields: message, attachments (sandbox file paths).
 """

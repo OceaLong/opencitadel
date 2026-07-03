@@ -7,11 +7,11 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Callable, List, Optional
 
+from app.domain.external.object_storage import ObjectStoragePort
 from app.domain.models.artifact import Artifact, ArtifactStatus
 from app.domain.models.event import ArtifactEvent
 from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
-from app.infrastructure.storage.cos import get_cos
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,13 @@ def sanitize_html_for_preview(html: str) -> str:
 
 
 class ArtifactService:
-    def __init__(self, uow_factory: Callable[[], IUnitOfWork]) -> None:
+    def __init__(
+            self,
+            uow_factory: Callable[[], IUnitOfWork],
+            object_storage: ObjectStoragePort,
+    ) -> None:
         self._uow_factory = uow_factory
+        self._object_storage = object_storage
 
     def _storage_key(self, session_id: str, artifact_id: str, version: int, kind: str) -> str:
         ext = "md" if kind == "doc" else "html"
@@ -41,7 +46,6 @@ class ArtifactService:
             title: str,
             content: str,
     ) -> tuple[Artifact, ArtifactEvent]:
-        cos = get_cos()
         async with self._uow_factory() as uow:
             if artifact_id:
                 artifact = await uow.artifact.get_by_id(artifact_id)
@@ -61,7 +65,7 @@ class ArtifactService:
                 status = "draft"
 
             key = self._storage_key(session_id, artifact_id, version, kind)
-            await cos.put_bytes(key, content.encode("utf-8"))
+            await self._object_storage.put_bytes(key, content.encode("utf-8"))
 
             artifact.title = title or artifact.title
             artifact.storage_ref = key
@@ -130,8 +134,7 @@ class ArtifactService:
             else:
                 key = artifact.storage_ref
             kind = artifact.kind
-        cos = get_cos()
-        data = await cos.get_bytes(key)
+        data = await self._object_storage.get_bytes(key)
         if sanitize_html and kind == "web":
             return sanitize_html_for_preview(data.decode("utf-8")).encode("utf-8")
         return data

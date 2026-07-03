@@ -372,6 +372,9 @@ class AnthropicLLM(LLM):
                 elif event_type == "message_delta":
                     usage = event.get("usage") or {}
                     completion_tokens = int(usage.get("output_tokens") or completion_tokens)
+                    stop_reason = (event.get("delta") or {}).get("stop_reason")
+                    if stop_reason:
+                        yield {"finish_reason": stop_reason}
 
         usage = normalize_usage({
             "input_tokens": prompt_tokens,
@@ -431,6 +434,9 @@ class AnthropicLLM(LLM):
             elif event_type == "message_delta":
                 usage = event.get("usage") or {}
                 completion_tokens = int(usage.get("output_tokens") or completion_tokens)
+                stop_reason = (event.get("delta") or {}).get("stop_reason")
+                if stop_reason:
+                    yield {"finish_reason": stop_reason}
         usage = normalize_usage({"input_tokens": prompt_tokens, "output_tokens": completion_tokens})
         if usage.get("total_tokens"):
             yield {"usage": usage}

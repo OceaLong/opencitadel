@@ -224,6 +224,9 @@ class GeminiLLM(LLM):
                 cached_tokens = int(usage_meta.get("cachedContentTokenCount") or cached_tokens)
 
                 for candidate in chunk.get("candidates") or []:
+                    finish_reason = candidate.get("finishReason")
+                    if finish_reason:
+                        yield {"finish_reason": finish_reason}
                     parts = candidate.get("content", {}).get("parts") or []
                     for part in parts:
                         text = part.get("text")

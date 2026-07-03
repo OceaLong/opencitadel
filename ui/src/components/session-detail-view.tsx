@@ -403,7 +403,7 @@ export function SessionDetailView({
         </div>
 
         {hasPreview && !isMobile && (
-          <div className="animate-in slide-in-from-right h-full w-full max-w-[600px] flex-shrink-0 duration-300">
+          <div className="animate-in slide-in-from-right h-full min-h-0 w-full max-w-[600px] flex-shrink-0 overflow-hidden duration-300">
             {previewPanel}
           </div>
         )}
@@ -422,7 +422,7 @@ export function SessionDetailView({
 
       {isMobile && (
         <Sheet open={hasPreview} onOpenChange={(open) => !open && handleClosePreview()}>
-          <SheetContent side="right" className="w-full max-w-full p-2 sm:max-w-[600px]">
+          <SheetContent side="right" className="w-full max-w-full overflow-hidden p-2 sm:max-w-[600px]">
             {previewPanel}
           </SheetContent>
         </Sheet>

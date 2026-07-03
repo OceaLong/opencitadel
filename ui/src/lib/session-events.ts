@@ -341,8 +341,30 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
         break;
       }
       case "debug_item":
-      case "session_status":
         break;
+      case "session_status": {
+        const status = (ev.data as { status?: string }).status;
+        if (status === "cancelled") {
+          list.push({
+            kind: "assistant",
+            id: stableId("system", messageIndex++, `cancelled-${list.length}`),
+            data: {
+              role: "assistant",
+              message: translate("sessionDetail.taskCancelledNotice"),
+            },
+          });
+        } else if (status === "failed") {
+          list.push({
+            kind: "assistant",
+            id: stableId("system", messageIndex++, `failed-${list.length}`),
+            data: {
+              role: "assistant",
+              message: translate("sessionDetail.taskFailedNotice"),
+            },
+          });
+        }
+        break;
+      }
       case "clarify": {
         const data = ev.data as {
           title?: string | null;

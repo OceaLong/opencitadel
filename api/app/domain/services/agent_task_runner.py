@@ -43,8 +43,11 @@ from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
 from app.domain.external.observability import ObservabilityPort
 from app.domain.external.session_state import SessionStatePort
 from app.domain.external.task_state_port import TaskStatePort
+from app.application.services.config_provider import get_runtime_config
 
 logger = logging.getLogger(__name__)
+
+_INTEGRATION_INIT_FAILURE = "__init__"
 
 
 class AgentTaskRunner(TaskRunner):
@@ -412,27 +415,85 @@ class AgentTaskRunner(TaskRunner):
         except Exception as e:
             logger.warning(f"清理Browser资源时出错: {e}")
 
+    async def _emit_integration_notice(
+            self,
+            task: Task,
+            label: str,
+            errors: Dict[str, str],
+    ) -> None:
+        if not errors:
+            return
+        parts = []
+        for name, err in errors.items():
+            if name == _INTEGRATION_INIT_FAILURE:
+                parts.append(err)
+            else:
+                parts.append(f"{name}（{err}）")
+        await self._put_and_add_event(
+            task,
+            AssistantNoticeEvent(
+                message=f"{label}：" + "；".join(parts),
+            ),
+        )
+
+    async def _initialize_integration_tool(
+            self,
+            task: Task,
+            *,
+            label: str,
+            initialize_coro,
+            connection_errors: Callable[[], Dict[str, str]],
+            failure_prefix: str,
+    ) -> None:
+        timeout = get_runtime_config().worker.mcp_connect_timeout_seconds
+        try:
+            await asyncio.wait_for(initialize_coro(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning("%s 初始化超时（%ss）", label, timeout)
+            await self._emit_integration_notice(
+                task,
+                f"{failure_prefix}初始化超时，本次任务将不使用相关工具",
+                {_INTEGRATION_INIT_FAILURE: f"超过 {timeout} 秒未就绪"},
+            )
+            return
+        except Exception as exc:
+            logger.warning("%s 初始化失败: %s", label, exc)
+            await self._emit_integration_notice(
+                task,
+                f"{failure_prefix}初始化失败，本次任务将不使用相关工具",
+                {_INTEGRATION_INIT_FAILURE: str(exc)},
+            )
+            return
+
+        errors = connection_errors()
+        if errors:
+            await self._emit_integration_notice(
+                task,
+                f"以下 {failure_prefix} 服务连接失败，本次任务将不可用",
+                errors,
+            )
+
     async def invoke(self, task: Task) -> None:
         """根据传递的任务处理agent消息队列并运行agent流"""
         cancelled = False
         try:
             logger.info(f"AgentTaskRunner任务处理开始")
             await self._sandbox_lifecycle.ensure_ready()
-            await self._mcp_tool.initialize(self._mcp_config)
-            await self._a2a_tool.initialize(self._a2a_config)
             await self._emit_session_status(task, SessionStatus.RUNNING)
-            mcp_errors = self._mcp_tool.connection_errors
-            if mcp_errors:
-                parts = [f"{name}（{err}）" for name, err in mcp_errors.items()]
-                await self._put_and_add_event(
-                    task,
-                    AssistantNoticeEvent(
-                        message=(
-                            "以下 MCP 服务连接失败，本次任务将不可用："
-                            + "；".join(parts)
-                        ),
-                    ),
-                )
+            await self._initialize_integration_tool(
+                task,
+                label="MCP",
+                initialize_coro=lambda: self._mcp_tool.initialize(self._mcp_config),
+                connection_errors=lambda: self._mcp_tool.connection_errors,
+                failure_prefix="MCP",
+            )
+            await self._initialize_integration_tool(
+                task,
+                label="A2A",
+                initialize_coro=lambda: self._a2a_tool.initialize(self._a2a_config),
+                connection_errors=lambda: {},
+                failure_prefix="A2A",
+            )
             self._run_started_at = time.monotonic()
 
             processed_input = False

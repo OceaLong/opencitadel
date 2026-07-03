@@ -412,11 +412,14 @@ class AgentWorker:
                 pass
 
     async def _execute_job(self, task_id: str, session_id: str) -> None:
+        meta = await self._task_state.get_task_meta(task_id) or {}
+        if meta.get("status") == TaskStatus.PENDING.value:
+            await self._task_state.clear_cancel(task_id)
+
         if await self._task_state.is_cancelled(task_id):
             await self._task_state.set_status(task_id, TaskStatus.CANCELLED)
             return
 
-        meta = await self._task_state.get_task_meta(task_id) or {}
         if meta.get("task_type") == "codebase_ingest":
             await self._execute_ingest_job(task_id, meta.get("resource_id", ""))
             return
