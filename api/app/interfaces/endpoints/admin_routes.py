@@ -15,7 +15,7 @@ from app.domain.models.audit_log import AuditLog
 from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.user import UserStatus
 from app.domain.models.user_quota import UserQuota
-from app.interfaces.auth_dependencies import get_current_principal, require_admin
+from app.interfaces.auth_dependencies import get_current_principal, require_admin, require_auditor_or_admin
 from app.interfaces.schemas import Response
 from app.interfaces.schemas.admin import (
     AdminOverviewResponse,
@@ -279,7 +279,7 @@ async def put_quota(
     return Response.success(data=request_body, msg="配额已更新")
 
 
-@router.get("/audit", response_model=Response[ListAuditLogsResponse], dependencies=[Depends(require_admin)])
+@router.get("/audit", response_model=Response[ListAuditLogsResponse], dependencies=[Depends(require_auditor_or_admin)])
 async def list_audit_logs(
         limit: int = Query(100, ge=1, le=1000),
         offset: int = Query(0, ge=0),
@@ -305,7 +305,7 @@ async def list_audit_logs(
     )
 
 
-@router.get("/audit/summary", response_model=Response[AuditSummaryResponse], dependencies=[Depends(require_admin)])
+@router.get("/audit/summary", response_model=Response[AuditSummaryResponse], dependencies=[Depends(require_auditor_or_admin)])
 async def audit_summary(
         start_at: Optional[datetime] = Query(None),
         end_at: Optional[datetime] = Query(None),
@@ -315,7 +315,7 @@ async def audit_summary(
     return Response.success(data=AuditSummaryResponse(**summary))
 
 
-@router.get("/audit/export", dependencies=[Depends(require_admin)])
+@router.get("/audit/export", dependencies=[Depends(require_auditor_or_admin)])
 async def export_audit_logs(service: AuditService = Depends(get_audit_service)) -> StreamingResponse:
     return StreamingResponse(
         service.export_csv(),
@@ -324,7 +324,7 @@ async def export_audit_logs(service: AuditService = Depends(get_audit_service)) 
     )
 
 
-@router.get("/usage", response_model=Response[UsageSummaryResponse], dependencies=[Depends(require_admin)])
+@router.get("/usage", response_model=Response[UsageSummaryResponse], dependencies=[Depends(require_auditor_or_admin)])
 async def usage_summary(
         user_id: Optional[str] = Query(None),
         team_id: Optional[str] = Query(None),
@@ -341,7 +341,7 @@ async def usage_summary(
     return Response.success(data=UsageSummaryResponse(**data))
 
 
-@router.get("/usage/summary", response_model=Response[UsageSummaryResponse], dependencies=[Depends(require_admin)])
+@router.get("/usage/summary", response_model=Response[UsageSummaryResponse], dependencies=[Depends(require_auditor_or_admin)])
 async def usage_summary_alias(
         user_id: Optional[str] = Query(None),
         team_id: Optional[str] = Query(None),
@@ -352,7 +352,7 @@ async def usage_summary_alias(
     return await usage_summary(user_id=user_id, team_id=team_id, start_at=start_at, end_at=end_at, service=service)
 
 
-@router.get("/usage/timeseries", response_model=Response[UsageTimeseriesResponse], dependencies=[Depends(require_admin)])
+@router.get("/usage/timeseries", response_model=Response[UsageTimeseriesResponse], dependencies=[Depends(require_auditor_or_admin)])
 async def usage_timeseries(
         user_id: Optional[str] = Query(None),
         team_id: Optional[str] = Query(None),
@@ -369,7 +369,7 @@ async def usage_timeseries(
     return Response.success(data=UsageTimeseriesResponse(points=points))
 
 
-@router.get("/usage/breakdown", response_model=Response[UsageBreakdownResponse], dependencies=[Depends(require_admin)])
+@router.get("/usage/breakdown", response_model=Response[UsageBreakdownResponse], dependencies=[Depends(require_auditor_or_admin)])
 async def usage_breakdown(
         dimension: UsageBreakdownDimension = Query("model"),
         user_id: Optional[str] = Query(None),
@@ -390,7 +390,7 @@ async def usage_breakdown(
     return Response.success(data=UsageBreakdownResponse(dimension=dimension, items=items))
 
 
-@router.get("/overview", response_model=Response[AdminOverviewResponse], dependencies=[Depends(require_admin)])
+@router.get("/overview", response_model=Response[AdminOverviewResponse], dependencies=[Depends(require_auditor_or_admin)])
 async def overview() -> Response[AdminOverviewResponse]:
     now = datetime.now()
     async with get_uow() as uow:

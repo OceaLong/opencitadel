@@ -169,7 +169,7 @@ export default function AdminUsersPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium">{user.display_name || user.username}</span>
-                      <Badge variant={user.global_role === "admin" ? "default" : "secondary"}>
+                      <Badge variant={user.global_role === "admin" ? "default" : user.global_role === "auditor" ? "outline" : "secondary"}>
                         {user.global_role}
                       </Badge>
                       <Badge variant={user.status === "active" ? "outline" : "destructive"}>{user.status}</Badge>
@@ -238,7 +238,7 @@ export default function AdminUsersPage() {
                 <Label>{t("role")}</Label>
                 <Select
                   value={editing.global_role}
-                  onValueChange={(value: "admin" | "user") => setEditing({ ...editing, global_role: value })}
+                  onValueChange={(value: "admin" | "user" | "auditor") => setEditing({ ...editing, global_role: value })}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -246,6 +246,7 @@ export default function AdminUsersPage() {
                   <SelectContent>
                     <SelectItem value="admin">admin</SelectItem>
                     <SelectItem value="user">user</SelectItem>
+                    <SelectItem value="auditor">auditor</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -11,7 +11,7 @@ from app.application.services.notification_service import NotificationService
 from app.application.services.scheduled_job_service import ScheduledJobService
 from app.domain.models.scheduled_job import NotifyChannel
 from app.domain.models.scope import WorkspaceContext
-from app.interfaces.auth_dependencies import get_workspace_context
+from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
 from app.interfaces.schemas import Response as ApiResponse
 from app.interfaces.schemas.notification import NotificationListResponse, NotificationResponse
 from app.interfaces.schemas.scheduled_job import (
@@ -55,6 +55,7 @@ async def list_jobs(
 async def create_job(
         body: CreateScheduledJobRequest,
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
         service: ScheduledJobService = Depends(get_scheduled_job_service),
 ):
     channels = [NotifyChannel.model_validate(c.model_dump()) for c in body.notify_channels]

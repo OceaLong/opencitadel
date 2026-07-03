@@ -139,9 +139,9 @@ export function ChatHeader() {
           variant="outline"
           size="icon-sm"
           className="cursor-pointer"
-          aria-label={tSettings("openLabel")}
-          title={tSettings("settingsTitle")}
-          onClick={() => openSettings()}
+          aria-label={tSettings("openModelsLabel")}
+          title={tSettings("models")}
+          onClick={() => openSettings("models-setting")}
         >
           <Settings className="size-4" />
         </Button>

@@ -64,7 +64,7 @@ from app.domain.utils.hitl import (
     TOOL_APPROVAL_PHASE,
     parse_gate_action,
 )
-from app.interfaces.auth_dependencies import get_workspace_context
+from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.skill_service import SkillService
@@ -308,6 +308,7 @@ async def create_session(
         http_request: Request,
         request: CreateSessionRequest = Body(default_factory=CreateSessionRequest),
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard: Principal = Depends(require_non_auditor),
         session_service: SessionService = Depends(get_session_service),
         quota_service: QuotaService = Depends(get_quota_service),
         audit_service: AuditService = Depends(get_audit_service),
@@ -466,6 +467,7 @@ async def chat(
         http_request: Request,
         include_debug: bool = Query(default=False),
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard: Principal = Depends(require_non_auditor),
         agent_service: AgentService = Depends(get_agent_service),
         session_service: SessionService = Depends(get_session_service),
         audit_service: AuditService = Depends(get_audit_service),
@@ -654,6 +656,7 @@ async def patch_session(
         include_debug: bool = Query(default=False),
         events_limit: int = Query(default=100, ge=1, le=500),
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard: Principal = Depends(require_non_auditor),
         session_service: SessionService = Depends(get_session_service),
         llm_model_service: LLMModelService = Depends(get_llm_model_service),
         skill_service: SkillService = Depends(get_skill_service),
@@ -835,6 +838,7 @@ async def restore_session_checkpoint(
 async def stop_session(
         session_id: str,
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard: Principal = Depends(require_non_auditor),
         session_service: SessionService = Depends(get_session_service),
         agent_service: AgentService = Depends(get_agent_service),
 ) -> Response[Optional[Dict]]:

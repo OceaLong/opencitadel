@@ -10,7 +10,9 @@ from sqlalchemy import desc, func, select
 
 from app.domain.models.audit_log import AuditLog
 from app.domain.repositories.uow import IUnitOfWork
+from app.domain.services.audit_chain import GENESIS, compute_entry_hash, entry_fields
 from app.infrastructure.models.audit_log import AuditLogORM
+from core.config import get_settings
 
 
 class AuditService:
@@ -111,6 +113,74 @@ class AuditService:
             ensure_ascii=False,
             indent=2,
         )
+
+    async def verify_chain(self, *, limit: Optional[int] = None) -> dict:
+        secret = get_settings().api_key_secret
+        async with self._uow_factory() as uow:
+            logs = await uow.audit.list_chained(limit=limit)
+        return self._verify_logs(logs, secret)
+
+    async def verify_session_chain(self, session_id: str) -> dict:
+        global_result = await self.verify_chain()
+        async with self._uow_factory() as uow:
+            session_logs = await uow.audit.list_chained(resource_id=session_id)
+        if not session_logs:
+            return {
+                **global_result,
+                "session_id": session_id,
+                "session_entries": 0,
+                "session_ok": global_result.get("ok", False),
+            }
+        secret = get_settings().api_key_secret
+        session_verify = self._verify_logs(session_logs, secret)
+        return {
+            **global_result,
+            "session_id": session_id,
+            "session_entries": len(session_logs),
+            "session_ok": session_verify.get("ok", False),
+            "session_first_broken_seq": session_verify.get("first_broken_seq"),
+        }
+
+    @staticmethod
+    def _verify_logs(logs: list[AuditLog], secret: str) -> dict:
+        from datetime import datetime, timezone
+
+        prev_hash = GENESIS
+        first_broken: Optional[int] = None
+        for log in logs:
+            if log.chain_seq is None or not log.entry_hash:
+                first_broken = log.chain_seq
+                break
+            if log.prev_hash != prev_hash:
+                first_broken = log.chain_seq
+                break
+            fields = entry_fields(
+                chain_seq=log.chain_seq,
+                id=log.id,
+                actor_user_id=log.actor_user_id,
+                actor_ip=log.actor_ip,
+                action=log.action,
+                resource_type=log.resource_type,
+                resource_id=log.resource_id,
+                team_id=log.team_id,
+                request_id=log.request_id,
+                metadata=log.metadata,
+                created_at=log.created_at,
+            )
+            expected = compute_entry_hash(secret, fields, prev_hash)
+            if expected != log.entry_hash:
+                first_broken = log.chain_seq
+                break
+            prev_hash = log.entry_hash
+        return {
+            "ok": first_broken is None,
+            "total": len(logs),
+            "first_broken_seq": first_broken,
+            "checked_at": datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
 
     async def summarize(
             self,

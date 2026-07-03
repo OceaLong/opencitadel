@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from app.application.services.memory_service import MemoryService
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope
 from app.domain.models.scope import WorkspaceContext
-from app.interfaces.auth_dependencies import get_workspace_context
+from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
 from app.interfaces.schemas.base import Response
 from app.interfaces.schemas.memory import (
     MemoryEntryCreateRequest,
@@ -58,6 +58,7 @@ async def list_memories(
 async def create_memory(
         request: MemoryEntryCreateRequest,
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
         memory_service: MemoryService = Depends(get_memory_service),
 ) -> Response[MemoryEntryResponse]:
     entry = MemoryEntry(**request.model_dump())

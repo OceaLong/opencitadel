@@ -28,7 +28,7 @@ from app.interfaces.schemas.codebase import (
 )
 from app.interfaces.schemas.event import EventMapper
 from app.domain.external.object_storage import ObjectStoragePort
-from app.interfaces.auth_dependencies import get_workspace_context
+from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
 from app.interfaces.service_dependencies import get_codebase_service, get_object_storage
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ def _to_codebase_response(cb) -> CodebaseResponse:
 async def create_codebase(
         request: CreateCodebaseRequest,
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[CodebaseResponse]:
     codebase = await service.create_codebase(

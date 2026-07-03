@@ -10,6 +10,8 @@ Governed browser automation for enterprise-owned systems without APIs.
 | Planner→ReAct | Plan approval, selective tool gates |
 | Sandbox | Chrome + VNC, checkpoint snapshots |
 | Audit | Per-tool redacted logs + MD/JSON report artifacts |
+| Evidence chain | HMAC hash chain on `audit_logs` (`chain_seq`, `prev_hash`, `entry_hash`) |
+| Compliance | 等保2.0 + ISO27001 control mapping, evidence ZIP+PDF |
 | Automation | Scheduled/webhook jobs with operator template fields |
 
 ## Gate profiles
@@ -32,15 +34,20 @@ Runtime `agent_tool_invoke` entries (success **and** failure/timeout) include:
 - `result_summary`, `success`, `duration_ms`
 - `gate_profile` (session gate preset)
 - `gated` (whether the call matched per-call gate rules: risk list / critical action)
+- `chain_seq`, `prev_hash`, `entry_hash` (immutable evidence chain)
 
 Session end produces `audit-report.md` + `audit-report.json` artifacts aggregating governance actions and tool invocations.
 
+Admin **Evidence center** (`/admin/compliance`) can download a full evidence package (ZIP + PDF summary) per session.
+
 ## Demo target
 
-`demo/ops-console` — form-only ticket backend (`docker compose --profile demo`).
+`demo/ops-console` — ticket + settlement ledger backend with read-only REST API and form-only writes (`docker compose --profile demo`).
+
+Use the **退款对账稽核** (`refund-reconciliation`) skill for governed cross-system reconciliation against ops-console.
 
 ## K8s note
 
 `kubernetes_sandbox.py` implements workspace/browser profile snapshots aligned with Docker tar flow (Pod exec + file API).
 
-See [Governed Web Operator tutorial](../tutorials/04-governed-web-operator.md).
+See [Governed Web Operator tutorial](../tutorials/04-governed-web-operator.md) and [Refund reconciliation & compliance](../tutorials/05-refund-reconciliation-compliance.md).

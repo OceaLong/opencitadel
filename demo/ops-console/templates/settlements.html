@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>结算账本 — OpsConsole</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1 id="page-title">OpsConsole</h1>
+      <span class="badge">Settlement Ledger (SoR)</span>
+    </div>
+    <nav class="nav-links">
+      <a href="/tickets" id="nav-tickets">工单</a>
+      <a href="/settlements" id="nav-settlements" class="active">结算账本</a>
+    </nav>
+    <div class="user-bar">
+      <span id="current-user">{{ user }}</span>
+      <a href="/logout" id="btn-logout">退出</a>
+    </div>
+  </header>
+  <main class="container">
+    <section class="filters">
+      <h2>财务结算流水（只读）</h2>
+      <p class="hint">System of Record — 对账基准账本。写操作仅通过工单页面表单执行。</p>
+    </section>
+    <table class="data-table" id="settlement-table">
+      <thead>
+        <tr>
+          <th>结算单号</th>
+          <th>订单号</th>
+          <th>金额</th>
+          <th>渠道</th>
+          <th>方向</th>
+          <th>结算时间</th>
+          <th>状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in settlements %}
+        <tr data-settlement-no="{{ s.settlement_no }}">
+          <td>{{ s.settlement_no }}</td>
+          <td id="order-{{ s.order_no }}">{{ s.order_no }}</td>
+          <td>${{ '%.2f'|format(s.amount) }}</td>
+          <td>{{ s.channel }}</td>
+          <td>{{ s.direction }}</td>
+          <td>{{ s.settled_at }}</td>
+          <td><span class="status status-{{ s.status }}">{{ s.status }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>

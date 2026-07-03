@@ -9,7 +9,7 @@ from starlette.responses import StreamingResponse
 from app.application.services.file_service import FileService
 from app.domain.models.file import File as FileInfo
 from app.domain.models.scope import WorkspaceContext
-from app.interfaces.auth_dependencies import get_workspace_context
+from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
 from app.interfaces.schemas import Response
 from app.interfaces.service_dependencies import get_file_service
 
@@ -26,6 +26,7 @@ router = APIRouter(prefix="/files", tags=["文件模块"])
 async def upload_file(
         file: UploadFile = File(...),
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
         file_service: FileService = Depends(get_file_service),
 ) -> Response[FileInfo]:
     """文件上传接口，传递文件返回文件的File信息"""

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 class GlobalRole(str, Enum):
     ADMIN = "admin"
     USER = "user"
+    AUDITOR = "auditor"
 
 
 class UserStatus(str, Enum):
@@ -35,6 +36,10 @@ class User(BaseModel):
     @property
     def is_admin(self) -> bool:
         return self.global_role == GlobalRole.ADMIN
+
+    @property
+    def is_auditor(self) -> bool:
+        return self.global_role == GlobalRole.AUDITOR
 
     @property
     def is_active(self) -> bool:

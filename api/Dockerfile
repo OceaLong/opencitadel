@@ -17,6 +17,15 @@ ENV UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT}
 # 2.配置容器工作空间
 WORKDIR /app
 
+# 2.1 weasyprint PDF 依赖（合规证据 PDF）
+RUN apt-get update && apt-get install -y \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libcairo2 \
+    fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
 # 3.安装curl, 便于后续使用curl安装nodejs(Playwrigh需要安装nodejs作为中转连接)
 RUN apt-get update && apt-get install -y curl
 

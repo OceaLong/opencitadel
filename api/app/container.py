@@ -17,7 +17,9 @@ from app.application.services.app_config_service import AppConfigService
 from app.application.services.auth_service import AuthService
 from app.application.services.audit_service import AuditService
 from app.application.services.codebase_service import CodebaseService
+from app.application.services.compliance_service import ComplianceService
 from app.application.services.config_provider import AppConfigProvider, create_app_config_provider
+from app.application.services.evidence_service import EvidenceService
 from app.application.services.file_service import FileService
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.application.services.llm_model_service import LLMModelService
@@ -300,6 +302,11 @@ class BaseContainer(containers.DeclarativeContainer):
         jwt_service=jwt_service,
     )
     audit_service = providers.Singleton(AuditService, uow_factory=uow_factory)
+    compliance_service = providers.Singleton(
+        ComplianceService,
+        uow_factory=uow_factory,
+        audit_service=audit_service,
+    )
     usage_stats_service = providers.Singleton(UsageStatsService, uow_factory=uow_factory)
     quota_service = providers.Singleton(QuotaService, uow_factory=uow_factory)
     llm_model_service = providers.Singleton(
@@ -349,6 +356,12 @@ class BaseContainer(containers.DeclarativeContainer):
         file_storage=file_storage,
     )
     artifact_service = providers.Singleton(ArtifactService, uow_factory=uow_factory)
+    evidence_service = providers.Singleton(
+        EvidenceService,
+        uow_factory=uow_factory,
+        audit_service=audit_service,
+        artifact_service=artifact_service,
+    )
     notification_service = providers.Singleton(NotificationService, uow_factory=uow_factory)
     scheduled_job_service = providers.Singleton(ScheduledJobService, uow_factory=uow_factory)
 

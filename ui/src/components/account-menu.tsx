@@ -83,7 +83,7 @@ export function AccountMenu() {
           ) : null}
           <DropdownMenuItem
             className="cursor-pointer"
-            onClick={() => openSettings()}
+            onClick={() => openSettings("common-setting")}
           >
             <Settings className="size-4" />
             {tAccount("settings")}

@@ -8,7 +8,7 @@ from sse_starlette import EventSourceResponse, ServerSentEvent
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.domain.models.event_policy import should_project_event
 from app.domain.models.scope import WorkspaceContext
-from app.interfaces.auth_dependencies import get_workspace_context
+from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
 from app.interfaces.schemas import Response
 from app.interfaces.schemas.event import EventMapper
 from app.interfaces.schemas.knowledge_base import (
@@ -39,6 +39,7 @@ def _to_doc_response(doc) -> KnowledgeDocumentResponse:
 async def create_knowledge_base(
         request: CreateKnowledgeBaseRequest,
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[KnowledgeBaseResponse]:
     kb = await service.create_kb(name=request.name, settings=request.settings, scope=ctx.scope)

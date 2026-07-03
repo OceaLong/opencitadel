@@ -36,3 +36,11 @@ class AuditRepository(ABC):
         end_at: Optional[datetime] = None,
     ) -> int:
         ...
+
+    async def list_chained(
+        self,
+        *,
+        limit: Optional[int] = None,
+        resource_id: Optional[str] = None,
+    ) -> List[AuditLog]:
+        raise NotImplementedError

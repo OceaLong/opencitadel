@@ -29,6 +29,9 @@ class AuditLogORM(Base):
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )
+    chain_seq: Mapped[Optional[int]] = mapped_column(nullable=True)
+    prev_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    entry_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)"))
 
     @classmethod
@@ -43,6 +46,9 @@ class AuditLogORM(Base):
             team_id=log.team_id,
             request_id=log.request_id,
             metadata_json=log.metadata,
+            chain_seq=log.chain_seq,
+            prev_hash=log.prev_hash or None,
+            entry_hash=log.entry_hash or None,
             created_at=log.created_at,
         )
 
@@ -58,4 +64,7 @@ class AuditLogORM(Base):
             request_id=self.request_id,
             metadata=self.metadata_json or {},
             created_at=self.created_at,
+            chain_seq=self.chain_seq,
+            prev_hash=self.prev_hash or "",
+            entry_hash=self.entry_hash or "",
         )

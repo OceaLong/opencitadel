@@ -39,32 +39,13 @@
     "new": "New",
     "create": "Create",
     "name": "Name",
-    "thinking": "Thinking...",
-    "edit": "Edit",
-    "saveFailed": "Save failed",
-    "deleteFailed": "Delete failed",
-    "deleted": "Deleted",
-    "none": "None",
-    "previousPage": "Previous",
-    "nextPage": "Next",
-    "pageOf": "Page {current} / {total}",
-    "global": "Global",
-    "session": "Session"
+    "thinking": "Thinking..."
   },
   "language": {
     "title": "Language",
     "description": "Choose your preferred interface language.",
     "localeEn": "English",
     "localeZh": "中文"
-  },
-  "errors": {
-    "pageLoadError": "Page failed to load",
-    "unknownError": "An unknown error occurred. Please retry or return to the home page."
-  },
-  "shareArtifact": {
-    "title": "Shared artifact",
-    "home": "Home",
-    "artifactTitle": "Artifact"
   },
   "auth": {
     "loginTitle": "Sign in to OpenCitadel",
@@ -94,19 +75,11 @@
     "selectModelAfterLogin": "Select model after sign in",
     "loginToMarketplace": "Sign in to use AI smart launch",
     "loginToDocQa": "Sign in to use AI document Q&A",
-    "loginToTranslate": "Sign in to use AI translation",
-    "loginToNutrition": "Sign in to use AI nutrition analysis",
-    "loginToConsumption": "Sign in to use AI consumption calculator"
+    "loginToTranslate": "Sign in to use AI translation"
   },
   "home": {
     "greeting": "Hello there",
-    "title": "Regulatory-grade autonomous Agent",
-    "subtitle": "Planning · Approval · VNC takeover · Checkpoint rollback · Full tool audit",
-    "noModel": "Please add a model in Settings first",
-    "createFailed": "Failed to create session",
-    "loginRequired": "Sign in to start AI chat",
-    "manageCodebase": "Manage codebases",
-    "manageKnowledge": "Manage knowledge bases",
+    "subtitle": "What can I do for you?",
     "addModelFirst": "Please add a model in Settings first",
     "createSessionFailed": "Failed to create session",
     "codebaseTitle": "Code knowledge base",
@@ -115,27 +88,22 @@
   "chatHeader": {
     "backHome": "Back to home",
     "model": "Model",
-    "modelStatus": "Model {status, select, unknown {status unknown} unavailable {unavailable} ok {healthy} other {status unknown}}",
-    "workspaceMenu": "Workspace & resources",
     "statusUnknown": "status unknown",
     "unavailable": "unavailable",
     "normal": "normal",
     "codebase": "Code knowledge base",
     "knowledge": "Document knowledge base",
-    "marketplace": "App marketplace",
-    "automation": "Automation"
+    "marketplace": "App marketplace"
   },
   "leftPanel": {
-    "newTask": "New task",
-    "loginRequired": "Sign in to create a new task"
+    "newTask": "New task"
   },
   "workspace": {
     "label": "Workspace",
     "personal": "Personal workspace"
   },
   "account": {
-    "settings": "System settings",
-    "adminPanel": "Admin panel"
+    "settings": "System settings"
   },
   "theme": {
     "switchToLight": "Switch to light mode",
@@ -167,50 +135,7 @@
   "sessionList": {
     "deleteSuccess": "Deleted task \"{title}\"",
     "deleteFailed": "Failed to delete task \"{title}\", please retry",
-    "noTasks": "No tasks yet",
-    "empty": "No tasks yet",
-    "loadError": "Failed to load",
-    "retry": "Retry",
-    "filterEmpty": "No tasks match this filter",
-    "filter": {
-      "all": "All",
-      "general": "General",
-      "codebase": "Code",
-      "knowledge": "Docs",
-      "hybrid": "Hybrid"
-    }
-  },
-  "workspaceContext": {
-    "codebaseTab": "Codebase",
-    "knowledgeTab": "Documents",
-    "codebasePanelTitle": "Codebase context",
-    "knowledgePanelTitle": "Knowledge base context",
-    "tabOriginalText": "Original text",
-    "sourceHintKb": "Click a document or citation in an answer to view the source"
-  },
-  "redirect": {
-    "startTaskFailed": "Failed to create task",
-    "openingCodebaseTask": "Opening codebase task...",
-    "openingKnowledgeTask": "Opening knowledge base task..."
-  },
-  "contextSelector": {
-    "title": "Task context",
-    "codebase": "Codebase",
-    "knowledge": "Knowledge base",
-    "none": "No context",
-    "codebaseSection": "Codebases",
-    "knowledgeSection": "Knowledge bases",
-    "noCodebase": "No ready codebases",
-    "noKnowledge": "No ready knowledge bases",
-    "clear": "Clear context"
-  },
-  "settingsNav": {
-    "back": "Back",
-    "title": "Settings",
-    "models": "Models",
-    "skills": "Skills",
-    "memory": "Memory",
-    "integrations": "Integrations"
+    "noTasks": "No tasks yet"
   },
   "sessions": {
     "fetchFailed": "Failed to fetch session list",
@@ -240,15 +165,7 @@
     "streamReconnecting": "Reconnecting session stream...",
     "resync": "Resync",
     "loadEarlier": "Load earlier messages",
-    "emptyTimeline": "No conversation yet. Enter a task or question below.",
-    "operator": {
-      "modeLabel": "Supervisor mode",
-      "thirdPartySaas": "Third-party SaaS (declared and audited)",
-      "owned": "Enterprise-owned/self-hosted system",
-      "webOperator": "Web Operator",
-      "waitingApproval": "Awaiting approval or takeover",
-      "awaitingHuman": "Awaiting human (takeover timeout)"
-    }
+    "emptyTimeline": "No conversation yet. Enter a task or question below."
   },
   "sessionMemory": {
     "roles": {
@@ -271,9 +188,7 @@
     "sheetTitle": "Session memory",
     "messageCount": "{count} messages",
     "sheetDescription": "View and edit Agent short-term context (Tier 1)",
-    "agentCounts": "Planner {planner} · ReAct {react}",
-    "deleteTitle": "Delete",
-    "emptyMessage": "(empty)"
+    "agentCounts": "Planner {planner} · ReAct {react}"
   },
   "sessionDebug": {
     "title": "Debug events",
@@ -284,39 +199,6 @@
   "planPanel": {
     "noSteps": "No steps yet",
     "taskProgress": "Task progress"
-  },
-  "planApproval": {
-    "sendFailed": "Send failed",
-    "submitEditsFailed": "Failed to submit edits",
-    "rejectReasonRequired": "Please provide a rejection reason",
-    "title": "Plan pending approval",
-    "subtitle": "The following steps will run after you confirm",
-    "approve": "Approve",
-    "editSteps": "Edit steps",
-    "reject": "Reject",
-    "riskTools": "Involves risky tools: {tools}",
-    "saveAndApprove": "Save and approve",
-    "rejectPlaceholder": "Explain why you are rejecting or suggest changes…",
-    "confirmReject": "Confirm rejection"
-  },
-  "gateActions": {
-    "sendFailed": "Send failed",
-    "rejectReasonRequired": "Please provide a rejection reason",
-    "takeoverTitle": "Manual takeover required",
-    "takeoverDescription": "Browser actions may require you to complete them manually. Click \"Taken over\" when done to continue.",
-    "takeoverDone": "Taken over",
-    "skip": "Skip",
-    "unknownTool": "Unknown tool",
-    "firstVisitDomain": "First visit to domain: {domain}",
-    "scopeThirdParty": "Third-party SaaS (declared)",
-    "scopeOwned": "Enterprise-owned/self-hosted",
-    "toolConfirmTitle": "Tool action pending confirmation",
-    "targetSystem": "Target system: {scope}",
-    "approve": "Approve",
-    "approveSame": "Approve similar",
-    "reject": "Reject",
-    "rejectPlaceholder": "Explain why you are rejecting…",
-    "confirmReject": "Confirm rejection"
   },
   "filePreview": {
     "loadContentFailed": "Failed to load file content",
@@ -370,6 +252,7 @@
     "title": "OpenCitadel Settings",
     "description": "Manage your OpenCitadel settings here.",
     "openLabel": "Open OpenCitadel settings",
+    "openModelsLabel": "Open model settings",
     "settingsTitle": "Settings",
     "center": "Settings",
     "common": "General",
@@ -398,13 +281,7 @@
     "mcpAddDescription": "OpenCitadel uses standard JSON MCP configuration. Paste your config below and click Add.",
     "a2aAddDescription": "OpenCitadel uses the standard A2A protocol to connect remote agents. Paste your config below and click Add.",
     "enterMcpConfig": "Please enter MCP server configuration",
-    "noMcpServers": "No MCP servers yet. Click above to add one.",
-    "a2aMovedTo": "A2A configuration has moved to",
-    "mcpMovedTo": "MCP configuration has moved to",
-    "integrationsLink": "Settings → Integrations"
-  },
-  "settingsIntegrations": {
-    "description": "Configure MCP servers and A2A remote agents for Skills and session tasks."
+    "noMcpServers": "No MCP servers yet. Click above to add one."
   },
   "settingsModels": {
     "description": "Add models from multiple providers globally; sessions can choose which to use",
@@ -449,10 +326,7 @@
     "triggerExamples": "Trigger examples (one per line)",
     "globallyEnabled": "Globally enabled",
     "skillUpdated": "Skill updated",
-    "skillCreated": "Skill created",
-    "maxIterations": "Max iterations",
-    "maxRetries": "Max retries",
-    "maxSearchResults": "Max search results"
+    "skillCreated": "Skill created"
   },
   "settingsMemory": {
     "description": "Cross-session memory management; recalled and injected into the agent when tasks start",
@@ -499,26 +373,7 @@
     "waitingResult": "Waiting for result...",
     "agentCallInfo": "Agent call info",
     "toolLabel": "Tool:",
-    "instructionLabel": "Instruction:",
-    "artifacts": "Artifacts",
-    "toolPreviewTab": "Tool preview"
-  },
-  "artifactWorkbench": {
-    "statusDraft": "Draft",
-    "statusUpdated": "Updated",
-    "statusFinal": "Final",
-    "loadFailed": "Failed to load artifact",
-    "exportSuccess": "Artifact exported",
-    "shareLinkCopied": "Share link copied",
-    "shareLinkFailed": "Failed to create share link",
-    "empty": "No artifacts yet",
-    "selectArtifact": "Select artifact",
-    "version": "Version",
-    "export": "Export",
-    "generating": "Generating...",
-    "share": "Share",
-    "emptyContent": "(empty content)",
-    "sessionLabel": "Session {id}…"
+    "instructionLabel": "Instruction:"
   },
   "vnc": {
     "connectionFailed": "Connection failed",
@@ -538,130 +393,56 @@
     "generateInviteLink": "Generate invite link",
     "users": "Users",
     "auditLog": "Audit log",
+    "auditSubtitle": "Platform audit events and activity",
     "exportCsv": "Export CSV",
-    "overviewTitle": "Overview",
-    "overviewSubtitle": "Platform users, usage, and operational status",
-    "statTotalUsers": "Total users",
-    "statActiveHint": "Active {count}",
-    "statTotalTokens": "Total Tokens",
-    "statPromptHint": "Prompt {count}",
-    "statLlmCalls": "LLM calls",
-    "statCachedHint": "Cached {count}",
-    "statPendingInvites": "Pending invites",
-    "statAcceptedHint": "Accepted {count}",
-    "modelUsageTitle": "Model usage breakdown",
-    "modelUsageDesc": "Top 8 by model",
-    "userUsageTitle": "User usage breakdown",
-    "userUsageDesc": "Top 8 by user",
-    "platformOverviewTitle": "Platform overview",
-    "platformOverviewDesc": "Users and invitation status",
-    "metricAdminUsers": "Admins",
-    "metricDisabledUsers": "Disabled users",
-    "metricAcceptedInvitations": "Accepted invites",
-    "metricExpiredInvitations": "Expired invites",
-    "recentAuditTitle": "Recent audit",
-    "recentAuditDesc": "Last 8 admin actions",
-    "noAuditRecords": "No audit records yet",
-    "recentInvitesTitle": "Recent invitations",
-    "recentInvitesDesc": "Last 6 platform invitations",
-    "noInvitationRecords": "No invitation records yet",
-    "noEmailSpecified": "No email specified",
-    "inviteAccepted": "Accepted",
-    "invitePending": "Pending",
-    "inviteExpired": "Expired",
-    "usersTitle": "User management",
-    "usersSubtitle": "View user status, roles, and quotas",
-    "searchUsersPlaceholder": "Search email / username",
-    "userListTitle": "User list",
-    "userTotalCount": "{count} users total",
-    "lastLogin": "Last login {time}",
-    "editUser": "Edit user",
-    "userQuota": "User quota",
-    "quota": "Quota",
-    "disableUser": "Disable",
-    "userUpdated": "User updated",
-    "updateFailed": "Update failed",
-    "userDisabled": "User disabled",
-    "operationFailed": "Operation failed",
-    "quotaUpdated": "Quota updated",
-    "displayName": "Display name",
-    "role": "Role",
-    "status": "Status",
-    "quotaMonthlyTokenLimit": "Monthly Token Limit",
-    "quotaDailySessionLimit": "Daily Session Limit",
-    "quotaMaxConcurrentTasks": "Max Concurrent Tasks",
-    "quotaMaxStorageBytes": "Max Storage Bytes",
-    "invitationsSubtitle": "Create invite links and track registration conversion",
-    "summaryPending": "Pending",
-    "summaryAccepted": "Accepted",
-    "summaryExpired": "Expired",
-    "generateInviteTitle": "Generate invitation",
-    "inviteValidDays": "Invite links are valid for 7 days",
-    "enterEmail": "Please enter an email",
-    "inviteLinkGenerated": "Invite link generated",
-    "generateFailed": "Generation failed",
-    "inviteLinkCopied": "Invite link copied",
-    "invitationRecordsTitle": "Invitation records",
-    "totalRecords": "{count} records total",
-    "createdAt": "Created {time}",
-    "expiresAt": "Expires {time}",
-    "auditSubtitle": "Track admin actions and platform events",
+    "chainIntact": "Audit chain intact",
+    "chainBroken": "Audit chain broken",
     "actionDistributionTitle": "Action distribution",
-    "actionDistributionDesc": "Aggregated by action",
-    "noAuditData": "No audit data yet",
-    "logListTitle": "Log list",
-    "system": "system",
-    "tokenTrendTitle": "Token usage trend",
-    "tokenTrendDesc": "Prompt / Completion / Total by day",
-    "noUsageData": "No usage data yet",
-    "callsTrendTitle": "Call count trend",
-    "callsTrendDesc": "LLM calls by day",
-    "noCallsData": "No call data yet",
-    "noBreakdownData": "No breakdown data yet",
-    "auditActivityTitle": "Audit activity",
-    "auditActivityDesc": "Admin actions recorded per day",
-    "chartPrompt": "Prompt",
-    "chartCompletion": "Completion",
-    "chartTotal": "Total",
-    "chartCalls": "Calls",
-    "chartEvents": "Events",
-    "timeRange7d": "Last 7 days",
-    "timeRange30d": "Last 30 days",
-    "timeRange90d": "Last 90 days",
-    "timeRangeAll": "All time"
+    "actionDistributionDesc": "Top audit actions in range"
   },
-  "notifications": {
-    "title": "Notifications",
-    "refreshing": "Refreshing…",
-    "empty": "No notifications yet"
+  "adminNav": {
+    "title": "Administration",
+    "subtitle": "Users, audit, and platform settings",
+    "auditorSubtitle": "Read-only compliance and audit portal",
+    "back": "Back to app",
+    "forbidden": "Admin or auditor access required.",
+    "overview": "Overview",
+    "users": "Users",
+    "invitations": "Invitations",
+    "audit": "Audit log",
+    "evidence": "Evidence center",
+    "complianceReport": "Compliance report"
   },
-  "operatorScope": {
-    "title": "Target system ownership declaration",
-    "description": "Web Operator is only for enterprise-owned or self-hosted systems. Select the target system ownership for this task; the declaration will be recorded in the audit trail.",
-    "ownedTitle": "Enterprise-owned / self-hosted",
-    "ownedDescription": "Systems you are authorized to operate (internal admin panels, self-hosted demo environments, etc.).",
-    "thirdPartyTitle": "Third-party SaaS",
-    "thirdPartyDescription": "May violate terms of service or trigger unauthorized access risks; use only with explicit authorization. All actions will be fully audited.",
-    "confirmCreate": "Confirm and create task",
-    "ownershipLabel": "Ownership declaration",
-    "domainsLabel": "Domain allowlist",
-    "domainsPlaceholder": "ops-console, internal.example.com",
-    "domainsHint": "Comma or newline separated hostnames. First visit to hosts outside this list requires approval.",
-    "gateProfileLabel": "Gate profile",
-    "gateProfile": {
-      "loose": {
-        "title": "Loose",
-        "description": "Plan approval + first-visit domain gate only"
-      },
-      "standard": {
-        "title": "Standard (recommended)",
-        "description": "Plan approval + first-visit domain + critical actions (close/refund/delete)"
-      },
-      "strict": {
-        "title": "Strict",
-        "description": "All high-risk browser tools require per-call approval"
-      }
-    }
+  "compliance": {
+    "evidenceCenterTitle": "Compliance evidence center",
+    "evidenceCenterDesc": "Download immutable evidence packages for governed Web Operator sessions",
+    "chainIntact": "Chain intact",
+    "chainBroken": "Chain broken",
+    "chainOk": "OK",
+    "chainFail": "Fail",
+    "evidenceSessionsTitle": "Evidence sessions",
+    "evidenceSessionsDesc": "Sessions with operator scope or gate profile",
+    "noEvidenceSessions": "No evidence sessions yet",
+    "colTitle": "Title",
+    "colScope": "Scope",
+    "colGate": "Gate",
+    "colChain": "Chain",
+    "colActions": "Actions",
+    "downloadPackage": "Download ZIP",
+    "reportTitle": "Compliance report",
+    "reportDesc": "等保2.0 + ISO27001 control mapping against platform capabilities",
+    "frameworkAll": "All frameworks",
+    "frameworkDjbh": "等保2.0",
+    "frameworkIso": "ISO27001",
+    "generateReport": "Generate report",
+    "exportMd": "Export Markdown",
+    "exportPdf": "Export PDF",
+    "reportSummary": "Report summary",
+    "generatedAt": "Generated at",
+    "passCount": "Pass",
+    "gapCount": "Gap",
+    "naCount": "N/A",
+    "reportHint": "Select a time range and generate a report"
   },
   "marketplace": {
     "selectApp": "Select an app to get started",
@@ -690,44 +471,13 @@
     "offlineOnly": "No model required",
     "noMatch": "No matching apps found",
     "noMatchHint": "Try a different keyword or use the AI command bar above",
-    "categoryAll": "All",
     "categoryOffice": "Office",
     "categoryProductivity": "Productivity",
-    "categoryHealth": "Health",
-    "categoryLife": "Life",
     "noModelDirect": "No model · ready to use",
     "aiEnhanced": "AI enhanced · degradable",
     "modelRequired": "Model required",
     "modelRequiredUnavailable": "Model required, currently unavailable",
     "apps": {
-      "nutritionAnalysis": {
-        "name": "AI nutrition analysis",
-        "description": "Photo meal recognition with cut/bulk traffic-light nutrition assessment",
-        "tags": [
-          "Vision",
-          "Nutrition",
-          "Fitness",
-          "Fat loss"
-        ],
-        "examples": [
-          "Is this meal good for cutting?",
-          "Is there enough protein in this meal?"
-        ]
-      },
-      "consumptionCalculator": {
-        "name": "Consumption calculator",
-        "description": "Recognize package net weight and calculate servings",
-        "tags": [
-          "OCR",
-          "Calculator",
-          "Packaging",
-          "Daily life"
-        ],
-        "examples": [
-          "1.2kg pack, 50g per serving — how many times?",
-          "Recognize net weight and calculate consumption"
-        ]
-      },
       "documentQa": {
         "name": "Document/Image Q&A",
         "description": "Upload materials or screenshots, AI extracts key points and answers questions",
@@ -849,8 +599,6 @@
     "shared": {
       "fileTooLarge8mb": "File must not exceed 8MB",
       "fileTooLarge20mb": "File must not exceed 20MB",
-      "imageTooLarge5mb": "Image must not exceed 5MB",
-      "jpgPngOnly": "Only JPG/PNG images are supported",
       "copiedToClipboard": "Copied to clipboard",
       "selectFile": "Select file",
       "selectedFile": "Selected: {name}",
@@ -1012,9 +760,6 @@
       "targetFormatLabel": "Target format",
       "selectTargetFormatPlaceholder": "Select target format",
       "formatTxt": "Plain text",
-      "formatPdf": "PDF",
-      "formatDocx": "Word (DOCX)",
-      "formatMd": "Markdown",
       "localPrintSuffix": " (local print)",
       "printAsPdf": "Print as PDF",
       "startConvert": "Convert",
@@ -1053,77 +798,9 @@
       "resultAlt": "Result",
       "processMethod": "Method: {method}",
       "downloadResult": "Download result"
-    },
-    "nutritionAnalysis": {
-      "title": "AI visual nutrition analysis",
-      "subtitle": "Photo meal recognition with cut/bulk traffic-light nutrition assessment",
-      "weightLabel": "Weight (kg, optional)",
-      "weightPlaceholder": "e.g. 70",
-      "goalLabel": "Fitness goal",
-      "goalCut": "Cut",
-      "goalBulk": "Bulk",
-      "goalMaintain": "Maintain",
-      "mealPreviewAlt": "Meal preview",
-      "uploadHint": "Upload a meal photo — click or drag, JPG/PNG max 5MB",
-      "analyzeFailed": "Analysis failed",
-      "followupRequired": "Please enter a follow-up question",
-      "followupFailed": "Follow-up failed",
-      "emptyTitle": "Upload a meal photo to start analysis",
-      "emptyHint": "Optionally add weight and fitness goal for more accurate traffic-light assessment",
-      "metricCalories": "Calories",
-      "metricProtein": "Protein",
-      "metricFat": "Fat",
-      "metricCarbs": "Carbs",
-      "assessmentTitle": "Nutrition assessment",
-      "caloriesAssessment": "Calorie assessment",
-      "proteinAssessment": "Protein assessment",
-      "overallGreen": "Good fit",
-      "overallYellow": "Caution",
-      "overallRed": "Over limit",
-      "overallLabel": "Overall: {status}",
-      "ingredientsTitle": "Ingredients",
-      "itemNutrition": "{calories} kcal · protein {protein}g",
-      "followupTitle": "Follow-up nutrition advice",
-      "followupPlaceholder": "e.g. How should I adjust this meal for cutting? Is protein enough?",
-      "generateAdvice": "Get advice"
-    },
-    "consumptionCalculator": {
-      "title": "Consumption calculator",
-      "subtitle": "Photo package net weight and calculate servings from per-use amount",
-      "servingLabel": "Serving size (g)",
-      "packagePreviewAlt": "Package preview",
-      "uploadHint": "Upload package net-weight photo — click or drag, JPG/PNG max 5MB",
-      "invalidServing": "Please enter a valid serving size",
-      "recognizeFailed": "Recognition failed",
-      "notRecognizedToast": "Could not auto-detect — enter total weight manually to calculate",
-      "invalidTotalAndServing": "Please enter valid total weight and serving size",
-      "calculateFailed": "Calculation failed",
-      "correctionRequired": "Please enter a correction and valid serving size",
-      "correctionFailed": "Correction failed",
-      "emptyTitle": "Upload a package photo to start recognition",
-      "emptyHint": "Enter serving size first — the system will detect net weight and calculate servings",
-      "manualTotalLabel": "Manual total weight (g)",
-      "manualTotalPlaceholder": "e.g. 1000",
-      "recalculate": "Recalculate",
-      "ocrTextLabel": "Recognized text: {text}",
-      "ocrLabel": "Recognized: {text}",
-      "servingsApprox": "~{count}",
-      "servingsUnit": "servings",
-      "servingsLabel": "Estimated servings",
-      "totalLabel": "Total",
-      "perServingLabel": "Per serving",
-      "consumableLabel": "Servings",
-      "nlCorrectionTitle": "Natural language correction",
-      "correctionPlaceholder": "e.g. net weight is actually 1.2kg"
     }
   },
   "knowledge": {
-    "title": "Document knowledge base",
-    "librarySubtitle": "Manage document assets and start Ask or Agent tasks from the library",
-    "create": "New knowledge base",
-    "startAsk": "Ask Q&A",
-    "startAgent": "Agent task",
-    "empty": "No knowledge bases yet",
     "loadListFailed": "Failed to load knowledge bases",
     "loadDetailFailed": "Failed to load details",
     "indexFailed": "Indexing failed",
@@ -1132,9 +809,6 @@
     "readFailed": "Read failed",
     "reindexStarted": "Re-indexing started",
     "reindexFailed": "Re-indexing failed",
-    "startTaskFailed": "Failed to create task",
-    "statusDocCount": "{status} · {count} documents",
-    "indexingShort": "Indexing",
     "sidebarTitle": "Document knowledge base",
     "selectKbHint": "Select a knowledge base to start Q&A",
     "kbLabel": "Knowledge bases",
@@ -1176,23 +850,11 @@
     }
   },
   "codebase": {
-    "title": "Code knowledge base",
-    "librarySubtitle": "Manage code assets and start Ask or Agent tasks from the library",
-    "create": "New codebase",
-    "startAsk": "Ask Q&A",
-    "startAgent": "Agent edit",
-    "reanalyze": "Re-analyze",
-    "download": "Download",
-    "empty": "No codebases yet",
-    "loadError": "Failed to load codebases",
     "loadListFailed": "Failed to load codebases",
     "loadDetailFailed": "Failed to load details",
     "readFailed": "Read failed",
     "downloadSuccess": "Packaged: {key}",
     "downloadFailed": "Download failed",
-    "startTaskFailed": "Failed to create task",
-    "statusFileCount": "{status} · {count} files",
-    "indexingShort": "Indexing",
     "sidebarTitle": "Codebase & directory",
     "selectHint": "Select a codebase to start analysis",
     "codebaseLabel": "Codebases",
@@ -1238,71 +900,6 @@
       "createFailed": "Failed to create codebase",
       "createAndAnalyze": "Create & analyze"
     }
-  },
-  "automation": {
-    "title": "Automation",
-    "subtitle": "Schedule or webhook-triggered Agent tasks",
-    "loadFailed": "Failed to load jobs",
-    "createFailed": "Failed to create job",
-    "nameRequired": "Please fill in job name and prompt template",
-    "newJob": "New job",
-    "creating": "Creating...",
-    "create": "Create",
-    "empty": "No automation jobs yet",
-    "contextLabel": "Task context",
-    "triggerInterval": "Interval (seconds)",
-    "triggerCron": "Cron expression",
-    "triggerWebhook": "Webhook",
-    "fields": {
-      "name": "Job name",
-      "prompt": "Prompt template",
-      "triggerType": "Trigger type",
-      "triggerSpec": "Trigger config",
-      "enabled": "Enabled",
-      "modelId": "Model ID",
-      "skillId": "Skill ID",
-      "notifyServer": "MCP notify server",
-      "notifyChannel": "Notify channel arg",
-      "operatorScope": "Web Operator scope",
-      "operatorDomains": "Operator domains",
-      "gateProfile": "Gate profile"
-    },
-    "editJob": "Edit",
-    "saveJob": "Save",
-    "jobUpdated": "Job updated",
-    "updateFailed": "Failed to update job",
-    "copiedWithLabel": "{label} copied",
-    "jobCreated": "Job created",
-    "jobCreateFailed": "Failed to create job",
-    "jobDeleted": "Job deleted",
-    "deleteFailed": "Failed to delete",
-    "rotateSecretFailed": "Failed to rotate secret",
-    "webhookCredentialsTitle": "Webhook credentials (shown once)",
-    "webhookCredentialsDescription": "Save the secret now. Requests must include the header",
-    "copyWebhookUrlAria": "Copy Webhook URL",
-    "copyTokenAria": "Copy Token",
-    "copySecretAria": "Copy Secret",
-    "credentialsSaved": "I've saved it",
-    "namePlaceholder": "e.g. Daily summary",
-    "triggerTypeInterval": "Interval",
-    "promptPlaceholder": "Instructions sent to the Agent when the job triggers…",
-    "statusEnabled": "Enabled",
-    "statusDisabled": "Disabled",
-    "nextRunAt": "Next {time}",
-    "lastRunAt": "Last run {time}",
-    "viewSession": "View session",
-    "rotateSecretAria": "Rotate Webhook secret",
-    "deleteJobAria": "Delete job"
-  },
-  "adminNav": {
-    "back": "Back",
-    "title": "Admin",
-    "subtitle": "Platform operations, users, and usage monitoring",
-    "forbidden": "Admin access is required.",
-    "overview": "Overview",
-    "users": "Users",
-    "invitations": "Invitations",
-    "audit": "Audit"
   },
   "mermaid": {
     "renderFailed": "Mermaid render failed"

@@ -17,11 +17,26 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
-const NAV = [
-  { href: "/admin", labelKey: "overview" as const, icon: IconAdmin, exact: true },
-  { href: "/admin/users", labelKey: "users" as const, icon: IconUsers },
-  { href: "/admin/invitations", labelKey: "invitations" as const, icon: IconInvitation },
-  { href: "/admin/audit", labelKey: "audit" as const, icon: IconAudit },
+type NavItem = {
+  href: string;
+  labelKey: string;
+  icon: typeof IconAdmin;
+  exact?: boolean;
+  adminOnly?: boolean;
+};
+
+const NAV: NavItem[] = [
+  { href: "/admin", labelKey: "overview", icon: IconAdmin, exact: true },
+  { href: "/admin/users", labelKey: "users", icon: IconUsers, adminOnly: true },
+  {
+    href: "/admin/invitations",
+    labelKey: "invitations",
+    icon: IconInvitation,
+    adminOnly: true,
+  },
+  { href: "/admin/audit", labelKey: "audit", icon: IconAudit },
+  { href: "/admin/compliance", labelKey: "evidence", icon: IconAudit },
+  { href: "/admin/compliance/report", labelKey: "complianceReport", icon: IconAudit },
 ];
 
 export function AdminLayoutShell({ children }: { children: ReactNode }) {
@@ -29,6 +44,10 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
   const t = useTranslations("adminNav");
   const tCommon = useTranslations("common");
   const { user, loading } = useAuth();
+
+  const isAdmin = user?.global_role === "admin";
+  const isAuditor = user?.global_role === "auditor";
+  const canAccess = isAdmin || isAuditor;
 
   if (loading) {
     return (
@@ -38,7 +57,7 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
     );
   }
 
-  if (user?.global_role !== "admin") {
+  if (!canAccess) {
     return (
       <div className="bg-background flex min-h-screen flex-col items-center justify-center gap-4 p-6">
         <p className="text-muted-foreground text-sm">{t("forbidden")}</p>
@@ -48,6 +67,8 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
       </div>
     );
   }
+
+  const visibleNav = NAV.filter((item) => !item.adminOnly || isAdmin);
 
   return (
     <div className="bg-background flex min-h-screen flex-col">
@@ -60,12 +81,14 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
         </Button>
         <div>
           <h1 className="text-lg font-semibold tracking-tight">{t("title")}</h1>
-          <p className="text-muted-foreground text-xs">{t("subtitle")}</p>
+          <p className="text-muted-foreground text-xs">
+            {isAuditor ? t("auditorSubtitle") : t("subtitle")}
+          </p>
         </div>
       </header>
       <div className="flex flex-1">
         <nav className="border-border/70 bg-card/40 w-56 shrink-0 space-y-1.5 border-r p-4">
-          {NAV.map(({ href, labelKey, icon: Icon, exact }) => {
+          {visibleNav.map(({ href, labelKey, icon: Icon, exact }) => {
             const active = exact ? pathname === href : pathname.startsWith(href);
             return (
               <Link

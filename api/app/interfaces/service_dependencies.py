@@ -11,7 +11,9 @@ from app.application.services.agent_service import AgentService
 from app.application.services.app_config_service import AppConfigService
 from app.application.services.auth_service import AuthService
 from app.application.services.audit_service import AuditService
+from app.application.services.compliance_service import ComplianceService
 from app.application.services.codebase_service import CodebaseService
+from app.application.services.evidence_service import EvidenceService
 from app.application.services.file_service import FileService
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.application.services.llm_status_service import LLMStatusService
@@ -220,4 +222,18 @@ async def get_notification_service(
 async def get_scheduled_job_service(
         service=Depends(Provide[ApiContainer.scheduled_job_service]),
 ):
+    return service
+
+
+@inject
+async def get_evidence_service(
+        service: EvidenceService = Depends(Provide[ApiContainer.evidence_service]),
+) -> EvidenceService:
+    return service
+
+
+@inject
+async def get_compliance_service(
+        service: ComplianceService = Depends(Provide[ApiContainer.compliance_service]),
+) -> ComplianceService:
     return service

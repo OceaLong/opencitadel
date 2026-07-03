@@ -38,6 +38,10 @@ class Principal(BaseModel):
     def is_admin(self) -> bool:
         return self.global_role == GlobalRole.ADMIN
 
+    @property
+    def is_auditor(self) -> bool:
+        return self.global_role == GlobalRole.AUDITOR
+
 
 class WorkspaceContext(BaseModel):
     principal: Principal

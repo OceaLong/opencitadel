@@ -18,3 +18,6 @@ class AuditLog(BaseModel):
     request_id: str = ""
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.now)
+    chain_seq: Optional[int] = None
+    prev_hash: str = ""
+    entry_hash: str = ""

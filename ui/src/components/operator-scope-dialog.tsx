@@ -41,7 +41,7 @@ export function OperatorScopeDialog({
   onConfirm,
 }: OperatorScopeDialogProps) {
   const [scope, setScope] = useState<OperatorScope>("owned");
-  const [domainsText, setDomainsText] = useState("ops-console");
+  const [domainsText, setDomainsText] = useState("ops-console,localhost");
   const [gateProfile, setGateProfile] = useState<GateProfile>("standard");
   const t = useTranslations("operatorScope");
   const tCommon = useTranslations("common");

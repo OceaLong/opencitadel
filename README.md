@@ -37,7 +37,7 @@ OpenCitadel is an open-source, **self-hosted AI agent platform** (not a browser-
 | **Marketplace** | `/marketplace` | LLM mini-apps (nutrition, translation, tools, etc.) |
 | **Automation** | `/automation` | Scheduled jobs, webhooks, notifications |
 | **Integrations** | `/settings/integrations` | MCP (stdio / SSE / streamable HTTP) and A2A remote agents |
-| **Admin** | `/admin/*` | Users, quotas, audit, usage |
+| **Admin** | `/admin/*` | Users, quotas, audit, usage, **compliance evidence** |
 
 ## Quick start
 

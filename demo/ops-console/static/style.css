@@ -24,6 +24,14 @@ body {
   font-size: 0.75rem;
 }
 .user-bar { display: flex; gap: 1rem; align-items: center; }
+.nav-links { display: flex; gap: 1rem; align-items: center; }
+.nav-links a { color: #a8d0ff; text-decoration: none; padding: 0.25rem 0.5rem; border-radius: 4px; }
+.nav-links a.active { background: rgba(255,255,255,0.2); color: #fff; }
+.status-refund-none { background: #e2e3e5; color: #383d41; }
+.status-refund-requested { background: #fff3cd; color: #856404; }
+.status-refund-refunded { background: #f8d7da; color: #721c24; }
+.status-settled { background: #d4edda; color: #155724; }
+.status-reversed { background: #e2e3e5; color: #383d41; }
 .container { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
 .login-card {
   max-width: 400px;

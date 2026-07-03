@@ -6,7 +6,7 @@ export type AuthUser = {
   username: string;
   display_name: string;
   avatar_url: string;
-  global_role: "admin" | "user";
+  global_role: "admin" | "user" | "auditor";
   status: "active" | "disabled";
   created_at: string;
   last_login_at?: string | null;

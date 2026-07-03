@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,6 +12,10 @@
       <h1 id="page-title">Ticket #{{ ticket.id }}</h1>
       <a href="/tickets" id="btn-back-list">&larr; Back to list</a>
     </div>
+    <nav class="nav-links">
+      <a href="/tickets" id="nav-tickets">工单</a>
+      <a href="/settlements" id="nav-settlements">结算账本</a>
+    </nav>
     <div class="user-bar">
       <span id="current-user">{{ user }}</span>
       <a href="/logout" id="btn-logout">Logout</a>
@@ -24,11 +28,14 @@
     <section class="detail-card" id="ticket-detail">
       <h2>{{ ticket.title }}</h2>
       <dl class="meta-grid">
+        <dt>Order No</dt><dd id="field-order-no">{{ ticket.order_no }}</dd>
         <dt>Customer</dt><dd id="field-customer">{{ ticket.customer }}</dd>
         <dt>Status</dt><dd id="field-status"><span class="status status-{{ ticket.status }}">{{ ticket.status }}</span></dd>
+        <dt>Refund status</dt><dd id="field-refund-status"><span class="status status-refund-{{ ticket.refund_status }}">{{ ticket.refund_status }}</span></dd>
         <dt>Assignee</dt><dd id="field-assignee">{{ ticket.assignee }}</dd>
         <dt>Priority</dt><dd id="field-priority">{{ ticket.priority }}</dd>
         <dt>Amount</dt><dd id="field-amount">${{ '%.2f'|format(ticket.amount) }}</dd>
+        <dt>Refund amount</dt><dd id="field-refund-amount">${{ '%.2f'|format(ticket.refund_amount or 0) }}</dd>
         <dt>Updated</dt><dd id="field-updated">{{ ticket.updated_at }}</dd>
       </dl>
       <div class="notes-block">
@@ -63,7 +70,7 @@
       <p>These actions require a separate confirmation page.</p>
       <div class="danger-actions">
         <a href="/tickets/{{ ticket.id }}/close" class="btn-danger" id="btn-close-ticket">Close ticket</a>
-        {% if ticket.amount > 0 %}
+        {% if ticket.amount > 0 and ticket.refund_status != 'refunded' %}
         <a href="/tickets/{{ ticket.id }}/refund" class="btn-danger" id="btn-refund-ticket">Process refund</a>
         {% endif %}
       </div>

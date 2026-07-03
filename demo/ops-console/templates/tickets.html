@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpsConsole — Tickets</title>
+  <title>工单列表 — OpsConsole</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -12,6 +12,10 @@
       <h1 id="page-title">OpsConsole</h1>
       <span class="badge">Ticket Operations</span>
     </div>
+    <nav class="nav-links">
+      <a href="/tickets" id="nav-tickets" class="active">工单</a>
+      <a href="/settlements" id="nav-settlements">结算账本</a>
+    </nav>
     <div class="user-bar">
       <span id="current-user">Signed in as {{ user }}</span>
       <a href="/logout" id="btn-logout">Logout</a>
@@ -19,7 +23,7 @@
   </header>
   <main class="container">
     <section class="filters">
-      <h2>Ticket list</h2>
+      <h2>工单列表</h2>
       <form method="get" action="/tickets" id="filter-form" class="filter-row">
         <label for="status">Status</label>
         <select id="status" name="status">
@@ -35,6 +39,13 @@
           <option value="{{ a }}" {% if assignee_filter == a %}selected{% endif %}>{{ a }}</option>
           {% endfor %}
         </select>
+        <label for="refund_status">Refund status</label>
+        <select id="refund_status" name="refund_status">
+          <option value="">All</option>
+          {% for rs in refund_statuses %}
+          <option value="{{ rs }}" {% if refund_status_filter == rs %}selected{% endif %}>{{ rs }}</option>
+          {% endfor %}
+        </select>
         <button type="submit" id="btn-filter">Apply filters</button>
       </form>
     </section>
@@ -42,24 +53,24 @@
       <thead>
         <tr>
           <th>ID</th>
+          <th>Order No</th>
           <th>Title</th>
           <th>Customer</th>
           <th>Status</th>
-          <th>Assignee</th>
-          <th>Priority</th>
+          <th>Refund</th>
           <th>Amount</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for t in tickets %}
-        <tr data-ticket-id="{{ t.id }}">
+        <tr data-ticket-id="{{ t.id }}" data-order-no="{{ t.order_no }}">
           <td>#{{ t.id }}</td>
+          <td id="order-no-{{ t.id }}">{{ t.order_no }}</td>
           <td>{{ t.title }}</td>
           <td>{{ t.customer }}</td>
           <td><span class="status status-{{ t.status }}">{{ t.status }}</span></td>
-          <td>{{ t.assignee }}</td>
-          <td>{{ t.priority }}</td>
+          <td><span class="status status-refund-{{ t.refund_status }}">{{ t.refund_status }}</span></td>
           <td>${{ '%.2f'|format(t.amount) }}</td>
           <td><a href="/tickets/{{ t.id }}" id="btn-view-{{ t.id }}">View</a></td>
         </tr>

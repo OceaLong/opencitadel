@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 import { type AdminTimeRange, formatDateTime, getAdminDateRange } from "@/lib/admin-utils";
 import { adminApi, type AuditLog } from "@/lib/api/admin";
+import { complianceApi } from "@/lib/api/compliance";
 
 const PAGE_SIZE = 20;
 
@@ -25,20 +26,23 @@ export default function AdminAuditPage() {
   const [loading, setLoading] = useState(true);
   const [byDay, setByDay] = useState<Array<{ date: string; count: number }>>([]);
   const [byAction, setByAction] = useState<Array<{ action: string; count: number }>>([]);
+  const [chainOk, setChainOk] = useState<boolean | null>(null);
 
   const loadAudit = useCallback(async (nextOffset: number) => {
     setLoading(true);
     const dateParams = getAdminDateRange(range);
     try {
-      const [auditData, summary] = await Promise.all([
+      const [auditData, summary, chain] = await Promise.all([
         adminApi.audit({ ...dateParams, limit: PAGE_SIZE, offset: nextOffset }),
         adminApi.auditSummary(dateParams),
+        complianceApi.verifyChain(),
       ]);
       setLogs(auditData.logs);
       setTotal(auditData.total);
       setOffset(nextOffset);
       setByDay(summary.by_day);
       setByAction(summary.by_action);
+      setChainOk(chain.ok);
     } finally {
       setLoading(false);
     }
@@ -60,6 +64,11 @@ export default function AdminAuditPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <AdminTimeRangePicker value={range} onChange={setRange} />
+          {chainOk != null && (
+            <Badge variant={chainOk ? "secondary" : "destructive"}>
+              {chainOk ? t("chainIntact") : t("chainBroken")}
+            </Badge>
+          )}
           <Button variant="outline" asChild>
             <a href={adminApi.exportAuditCsvUrl()}>
               <Download className="mr-1 size-4" />

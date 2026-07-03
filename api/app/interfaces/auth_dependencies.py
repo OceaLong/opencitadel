@@ -24,6 +24,20 @@ async def require_admin() -> Principal:
     return principal
 
 
+async def require_auditor_or_admin() -> Principal:
+    principal = await get_current_principal()
+    if not (principal.is_admin or principal.is_auditor):
+        raise ForbiddenError("需要管理员或审计员权限")
+    return principal
+
+
+async def require_non_auditor() -> Principal:
+    principal = await get_current_principal()
+    if principal.is_auditor:
+        raise ForbiddenError("审计员为只读角色，无法执行此操作")
+    return principal
+
+
 async def get_workspace_context(
         x_workspace_id: str | None = Header(default=None, alias="X-Workspace-Id"),
 ) -> WorkspaceContext:
