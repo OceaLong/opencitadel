@@ -25,6 +25,14 @@ def sanitize_html_for_preview(html: str) -> str:
     return _EVENT_HANDLER_RE.sub("", cleaned)
 
 
+def _decode_text_content(data: bytes) -> tuple[str, bool]:
+    try:
+        return data.decode("utf-8"), False
+    except UnicodeDecodeError:
+        logger.warning("交付物内容 UTF-8 不完整，已降级为 replacement 解码")
+        return data.decode("utf-8", errors="replace"), True
+
+
 class ArtifactService:
     def __init__(
             self,
@@ -136,8 +144,30 @@ class ArtifactService:
             kind = artifact.kind
         data = await self._object_storage.get_bytes(key)
         if sanitize_html and kind == "web":
-            return sanitize_html_for_preview(data.decode("utf-8")).encode("utf-8")
+            text, _ = _decode_text_content(data)
+            return sanitize_html_for_preview(text).encode("utf-8")
         return data
+
+    async def get_content_text(
+            self,
+            artifact_id: str,
+            version_index: Optional[int] = None,
+            *,
+            scope: Optional[OwnerScope] = None,
+            sanitize_html: bool = True,
+    ) -> tuple[str, bool]:
+        data = await self.get_content(
+            artifact_id,
+            version_index=version_index,
+            scope=scope,
+            sanitize_html=False,
+        )
+        text, incomplete = _decode_text_content(data)
+        if sanitize_html:
+            artifact = await self.get_by_id(artifact_id, scope=scope)
+            if artifact and artifact.kind == "web":
+                text = sanitize_html_for_preview(text)
+        return text, incomplete
 
     async def list_by_session(self, session_id: str, scope: Optional[OwnerScope] = None) -> List[Artifact]:
         if scope is not None:

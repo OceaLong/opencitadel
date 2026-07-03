@@ -68,11 +68,15 @@ async def get_artifact_content(
     if not artifact:
         raise _access_denied()
     try:
-        data = await service.get_content(artifact_id, version_index=version, scope=ctx.scope)
+        content, incomplete = await service.get_content_text(
+            artifact_id, version_index=version, scope=ctx.scope,
+        )
     except PermissionError:
         raise _access_denied()
     content_type = "text/markdown" if artifact.kind == "doc" else "text/html"
-    return ApiResponse.success(ArtifactContentResponse(content=data.decode("utf-8"), content_type=content_type))
+    return ApiResponse.success(ArtifactContentResponse(
+        content=content, content_type=content_type, incomplete=incomplete,
+    ))
 
 
 @router.post("/artifacts/{artifact_id}/share", response_model=ApiResponse[ArtifactShareResponse])
@@ -101,6 +105,8 @@ async def public_share_artifact(
     artifact = await service.get_by_share_token(token)
     if not artifact:
         raise HTTPException(status_code=404, detail="分享链接无效或已过期")
-    data = await service.get_content(artifact.id, sanitize_html=True)
+    content, incomplete = await service.get_content_text(artifact.id, sanitize_html=True)
     content_type = "text/markdown" if artifact.kind == "doc" else "text/html"
-    return ApiResponse.success(ArtifactContentResponse(content=data.decode("utf-8"), content_type=content_type))
+    return ApiResponse.success(ArtifactContentResponse(
+        content=content, content_type=content_type, incomplete=incomplete,
+    ))

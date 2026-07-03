@@ -121,6 +121,8 @@ model_resilience:
   enabled: true
   fallback_enabled: false
   allow_cross_provider_fallback: false
+  fallback_on_quota_exceeded: true
+  allow_cross_provider_fallback_on_quota: true
   max_attempts_per_call: 3
   max_call_budget_seconds: 120
   breaker_window_seconds: 60

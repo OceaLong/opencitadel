@@ -7,6 +7,7 @@ from openai import AsyncOpenAI
 
 from app.application.errors.exceptions import ServerRequestsError
 from app.domain.external.llm import LLM
+from app.domain.utils.llm_retry import is_quota_exhausted_error
 from app.domain.models.llm_model import LLMModel, ModelCapabilities, LLMProvider
 from app.infrastructure.external.llm.base_llm import (
     MultimodalFallbackMixin,
@@ -76,6 +77,8 @@ def _merge_thinking_request_kwargs(
 
 def _format_llm_error(error: Exception, model_name: str) -> str:
     message = str(error)
+    if is_quota_exhausted_error(error):
+        return f"调用LLM失败: 模型 {model_name} API 配额已耗尽"
     if "Not supported model" in message:
         return (
             f"调用LLM失败: 模型 {model_name} 不被当前 Base URL 支持，"

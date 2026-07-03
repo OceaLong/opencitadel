@@ -213,7 +213,8 @@ export function SessionDetailView({
                 sessionId={sessionId}
                 memoryEditable={configEditable}
                 tokenUsage={session.token_usage}
-                events={includeDebug ? events : []}
+                events={events}
+                includeDebug={includeDebug}
                 observationSummary={observationSummary}
                 onDebugOpen={handleDebugOpen}
               />

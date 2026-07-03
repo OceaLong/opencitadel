@@ -14,9 +14,10 @@ from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
 from app.domain.models.app_config import AgentConfig
-from app.domain.models.event import MessageEvent
+from app.domain.models.event import ErrorEvent, MessageEvent
 from app.application.services.config_provider import get_runtime_config
 from app.domain.repositories.uow import IUnitOfWork
+from app.domain.services.agents.base import BaseAgent
 from app.domain.services.agents.subagent import SubAgentAgent
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool
@@ -27,6 +28,31 @@ from app.domain.services.tools.tool_names import is_tool_allowed, normalize_allo
 from app.domain.services.tools.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def extract_last_assistant_text(agent: SubAgentAgent) -> str:
+    """Return the last non-empty assistant text message from agent memory."""
+    memory = getattr(agent, "_memory", None)
+    if memory is None:
+        return ""
+    for msg in reversed(memory.get_messages()):
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+    return ""
+
+
+async def finalize_subagent_summary(agent: SubAgentAgent, goal: str, prompt_locale: str) -> str:
+    """Force a tool-free summary LLM call after the ReAct loop ends without a MessageEvent."""
+    await agent._ensure_memory()
+    prompts = load_prompts(prompt_locale)
+    hint = prompts.internal.SUBAGENT_FINAL_SUMMARY_HINT.format(goal=goal)
+    messages = agent._memory.get_messages() + [{"role": "user", "content": hint}]
+    sanitized = BaseAgent._messages_for_llm(messages, agent._llm, strip_images=True)
+    response = await agent._llm.invoke(messages=sanitized, tools=[])
+    return (response.get("content") or "").strip()
 
 
 def build_subagent_tool(
@@ -116,10 +142,26 @@ def build_subagent_tool(
         agent.set_locale(prompt_locale)
         agent.name = agent_name
         summary = ""
+        last_error = ""
         async for event in agent.invoke(goal, format=None, emit_deltas=False):
             if isinstance(event, MessageEvent) and event.message:
                 summary = event.message
+            elif isinstance(event, ErrorEvent) and event.error:
+                if not last_error:
+                    last_error = event.error
+
         if not summary:
+            summary = extract_last_assistant_text(agent)
+
+        if not summary:
+            try:
+                summary = await finalize_subagent_summary(agent, goal, prompt_locale)
+            except Exception as exc:
+                logger.warning("子 Agent summary-only 收尾调用失败: %s", exc)
+
+        if not summary:
+            if last_error:
+                raise RuntimeError(f"子 Agent 执行失败: {last_error}")
             raise RuntimeError("子 Agent 未返回有效摘要")
         return summary
 

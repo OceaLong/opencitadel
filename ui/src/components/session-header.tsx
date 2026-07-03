@@ -57,6 +57,8 @@ export type SessionHeaderProps = {
   tokenUsage?: TokenUsageSummary | null;
   /** 会话事件列表，用于调试面板 */
   events?: SSEEventData[];
+  /** 是否已开启 debug 事件加载 */
+  includeDebug?: boolean;
   /** 打开调试面板时触发 debug 事件订阅 */
   onDebugOpen?: () => void;
   /** 单任务观测摘要 */
@@ -73,6 +75,7 @@ export const SessionHeader = memo(function SessionHeader({
   memoryEditable = true,
   tokenUsage,
   events = [],
+  includeDebug = false,
   onDebugOpen,
   observationSummary,
 }: SessionHeaderProps) {
@@ -173,12 +176,11 @@ export const SessionHeader = memo(function SessionHeader({
     <header className="bg-background/95 sticky top-0 z-10 flex flex-shrink-0 flex-row items-center justify-end gap-2 px-4 pt-2 pb-2">
       <div className="flex shrink-0 items-center gap-0.5">
         {observationSummary &&
-          (observationSummary.toolCount > 0 || observationSummary.errorCount > 0) && (
+          (observationSummary.toolCount > 0 || observationSummary.durationMs !== undefined) && (
             <div
               className="border-border/70 bg-card text-muted-foreground flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)]"
               title={t("observationTitle", {
                 tools: observationSummary.toolCount,
-                errors: observationSummary.errorCount,
                 waits: observationSummary.waitCount,
               })}
             >
@@ -188,9 +190,6 @@ export const SessionHeader = memo(function SessionHeader({
                 <span className="text-muted-foreground/70">
                   · {formatDuration(observationSummary.durationMs)}
                 </span>
-              )}
-              {observationSummary.errorCount > 0 && (
-                <span className="text-red-600">· {observationSummary.errorCount} err</span>
               )}
             </div>
           )}
@@ -217,7 +216,12 @@ export const SessionHeader = memo(function SessionHeader({
         {sessionId && (
           <SessionMemorySheet sessionId={sessionId} editable={memoryEditable} compact />
         )}
-        <SessionDebugSheet events={events} compact onOpen={onDebugOpen} />
+        <SessionDebugSheet
+          events={events}
+          includeDebug={includeDebug}
+          compact
+          onOpen={onDebugOpen}
+        />
         {mounted ? (
           <Dialog open={openState} onOpenChange={setOpenState}>
             <DialogTrigger asChild>

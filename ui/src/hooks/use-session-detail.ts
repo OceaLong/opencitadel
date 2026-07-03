@@ -43,6 +43,7 @@ export type UseSessionDetailResult = {
   streamStatus: SessionStreamStatus;
   streamError: Error | null;
   enableDebugStream: () => void;
+  refetchEventsWithDebug: () => Promise<void>;
 };
 
 /**
@@ -139,6 +140,11 @@ export function useSessionDetail(
     await loadEarlier(false);
   }, [loadEarlier]);
 
+  const refetchEventsWithDebug = useCallback(async () => {
+    streamIncludeDebugRef.current = true;
+    await loadEventsPage(true);
+  }, [loadEventsPage]);
+
   useEffect(() => {
     if (!sessionId) {
       resetMeta();
@@ -171,5 +177,6 @@ export function useSessionDetail(
     streamStatus: streams.streamStatus,
     streamError: streams.streamError,
     enableDebugStream: streams.enableDebugStream,
+    refetchEventsWithDebug,
   };
 }

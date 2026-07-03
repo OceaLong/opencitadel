@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime, timedelta
 
+from app.domain.models.error_codes import MODEL_QUOTA_EXCEEDED
 from app.domain.models.event import (
     AssistantNoticeEvent,
     ClarifyEvent,
@@ -93,6 +94,14 @@ def test_all_event_types_have_typed_sse_mapping_and_meta():
         assert sse.data.visibility in {"user", "internal", "debug"}
         assert sse.data.channel in {"ui", "runtime", "debug"}
         assert isinstance(sse.data.persist, bool)
+
+
+def test_error_sse_mapping_preserves_code():
+    event = ErrorEvent(error="quota exhausted", code=MODEL_QUOTA_EXCEEDED)
+    sse = EventMapper.event_to_sse_event(event)
+    assert sse.event == "error"
+    assert sse.data.error == "quota exhausted"
+    assert sse.data.code == MODEL_QUOTA_EXCEEDED
 
 
 def test_clarify_sse_mapping_projects_questions():

@@ -169,6 +169,8 @@ class AssistantNoticeEvent(BaseEvent):
     """面向用户的简短助手提示，非结构化规划输出"""
     type: Literal["assistant_notice"] = "assistant_notice"
     message: str = ""
+    i18n_key: Optional[str] = None
+    i18n_params: Optional[Dict[str, str]] = None
 
 
 class SessionStatusEvent(BaseEvent):

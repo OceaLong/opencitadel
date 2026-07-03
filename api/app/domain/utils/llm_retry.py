@@ -27,6 +27,23 @@ def is_retriable_llm_error(error: Exception) -> bool:
     return any(marker in text for marker in markers)
 
 
+def is_quota_exhausted_error(error: Exception) -> bool:
+    text = str(error).lower()
+    return any(
+        marker in text
+        for marker in (
+            "insufficient_quota",
+            "quota has been exhausted",
+            "free quota",
+            "exceeded your current quota",
+        )
+    )
+
+
+def is_quota_fallback_eligible(error: Exception) -> bool:
+    return is_quota_exhausted_error(error)
+
+
 def is_breaker_eligible_error(error: Exception) -> bool:
     """Only infra-level signals count toward circuit breaker windows."""
     text = str(error).lower()
@@ -54,6 +71,8 @@ def classify_llm_error_code(error: Exception) -> str:
     text = str(error).lower()
     if "not configured" in text or "未配置" in text:
         return EC.MODEL_NOT_CONFIGURED
+    if is_quota_exhausted_error(error):
+        return EC.MODEL_QUOTA_EXCEEDED
     if "429" in text or "rate limit" in text or "ratelimit" in text:
         return EC.MODEL_RATE_LIMITED
     if "timeout" in text or "timed out" in text:

@@ -114,6 +114,7 @@ export function useSessionDetailView({
     streamStatus,
     streamError,
     enableDebugStream,
+    refetchEventsWithDebug,
   } = detail;
 
   const [activeSkill, setActiveSkill] = useState<Skill | null>(null);
@@ -368,7 +369,8 @@ export function useSessionDetailView({
   const handleDebugOpen = useCallback(() => {
     setIncludeDebug(true);
     enableDebugStream();
-  }, [enableDebugStream]);
+    void refetchEventsWithDebug();
+  }, [enableDebugStream, refetchEventsWithDebug]);
 
   const handleRestoreCheckpoint = useCallback((checkpoint: SessionCheckpoint) => {
     if (!session) return;

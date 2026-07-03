@@ -30,3 +30,4 @@ class ArtifactShareResponse(BaseModel):
 class ArtifactContentResponse(BaseModel):
     content: str
     content_type: str
+    incomplete: bool = False

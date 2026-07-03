@@ -45,3 +45,10 @@ Requirements:
 - When done, summarize key conclusions, file paths, and errors (if any) in natural language.
 - Do not return JSON; output readable summary text only.
 """
+
+SUBAGENT_FINAL_SUMMARY_HINT = (
+    "Iterations for sub-goal \"{goal}\" are ending or tool calls have stopped. "
+    "Based on tool results already in the conversation history, output a final summary now: "
+    "key conclusions, data points, file paths, and any errors encountered. "
+    "Do not call any tools; output readable text only."
+)

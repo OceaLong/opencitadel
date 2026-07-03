@@ -980,6 +980,7 @@ export type DeliveryArtifactsData = {
 export type DeliveryArtifactContent = {
   content: string;
   content_type: string;
+  incomplete?: boolean;
 };
 
 export type DeliveryArtifactShare = {

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.domain.models.error_codes import MODEL_QUOTA_EXCEEDED
 from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities
 from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError, ResilientLLMClient
 
@@ -63,17 +64,32 @@ def _model(model_id: str) -> LLMModel:
     )
 
 
-def _runtime_config(*, fallback_enabled: bool = True, max_attempts_per_call: int = 1):
+def _runtime_config(
+        *,
+        fallback_enabled: bool = True,
+        fallback_on_quota_exceeded: bool = True,
+        allow_cross_provider_fallback: bool = False,
+        allow_cross_provider_fallback_on_quota: bool = True,
+        max_attempts_per_call: int = 1,
+):
     return SimpleNamespace(
         model_resilience=SimpleNamespace(
             enabled=True,
             fallback_enabled=fallback_enabled,
-            allow_cross_provider_fallback=False,
+            fallback_on_quota_exceeded=fallback_on_quota_exceeded,
+            allow_cross_provider_fallback=allow_cross_provider_fallback,
+            allow_cross_provider_fallback_on_quota=allow_cross_provider_fallback_on_quota,
             max_attempts_per_call=max_attempts_per_call,
             max_call_budget_seconds=120.0,
             fast_fail_on_open_circuit=True,
         )
     )
+
+
+QUOTA_ERROR = RuntimeError(
+    "Error code: 403 - {'error': {'code': 'insufficient_quota', "
+    "'message': 'The free quota has been exhausted.'}}"
+)
 
 
 async def _test_stream_invoke_no_midstream_fallback_after_delta():
@@ -381,3 +397,166 @@ async def _test_invoke_fallback_consumes_budget():
 
 def test_invoke_fallback_consumes_budget():
     asyncio.run(_test_invoke_fallback_consumes_budget())
+
+
+async def _test_quota_exhausted_falls_back_without_general_fallback():
+    primary = _model("m1")
+    fallback = _model("m2")
+    primary_llm = _FakeLLM(error=QUOTA_ERROR)
+    fallback_llm = _FakeLLM(response={"content": "fallback"})
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary, fallback])
+    breaker = MagicMock()
+    breaker.allow_request = AsyncMock(return_value="allow")
+    breaker.record_success = AsyncMock()
+    breaker.record_failure = AsyncMock()
+
+    client = ResilientLLMClient(primary_llm, primary, llm_model_service=llm_model_service)
+    client._breaker = breaker
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False, fallback_on_quota_exceeded=True),
+    ), patch(
+        "app.infrastructure.external.llm.resilient_llm.LLMFactory.create",
+        return_value=fallback_llm,
+    ):
+        result = await client.invoke([{"role": "user", "content": "hi"}])
+
+    assert result == {"content": "fallback"}
+    assert client.active_model.id == "m2"
+    assert fallback_llm.invoke_count == 1
+
+
+def test_quota_exhausted_falls_back_without_general_fallback():
+    asyncio.run(_test_quota_exhausted_falls_back_without_general_fallback())
+
+
+async def _test_quota_exhausted_without_candidates_raises_quota_code():
+    primary = _model("m1")
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary])
+    breaker = MagicMock()
+    breaker.allow_request = AsyncMock(return_value="allow")
+    breaker.record_success = AsyncMock()
+    breaker.record_failure = AsyncMock()
+
+    client = ResilientLLMClient(_FakeLLM(error=QUOTA_ERROR), primary, llm_model_service=llm_model_service)
+    client._breaker = breaker
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False, fallback_on_quota_exceeded=True),
+    ):
+        with pytest.raises(ModelUnavailableError) as exc_info:
+            await client.invoke([{"role": "user", "content": "hi"}])
+
+    assert exc_info.value.error_code == MODEL_QUOTA_EXCEEDED
+
+
+def test_quota_exhausted_without_candidates_raises_quota_code():
+    asyncio.run(_test_quota_exhausted_without_candidates_raises_quota_code())
+
+
+async def _test_quota_exhausted_cross_provider_fallback():
+    primary = _model("m1")
+    fallback = LLMModel(
+        id="m2",
+        display_name="m2",
+        model_name="llama-m2",
+        provider=LLMProvider.OLLAMA,
+        base_url="http://localhost",
+        api_key="",
+    )
+    primary_llm = _FakeLLM(error=QUOTA_ERROR)
+    fallback_llm = _FakeLLM(response={"content": "ollama"})
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary, fallback])
+    breaker = MagicMock()
+    breaker.allow_request = AsyncMock(return_value="allow")
+    breaker.record_success = AsyncMock()
+    breaker.record_failure = AsyncMock()
+
+    client = ResilientLLMClient(primary_llm, primary, llm_model_service=llm_model_service)
+    client._breaker = breaker
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(
+            fallback_enabled=False,
+            fallback_on_quota_exceeded=True,
+            allow_cross_provider_fallback_on_quota=True,
+        ),
+    ), patch(
+        "app.infrastructure.external.llm.resilient_llm.LLMFactory.create",
+        return_value=fallback_llm,
+    ):
+        result = await client.invoke([{"role": "user", "content": "hi"}])
+
+    assert result == {"content": "ollama"}
+    assert client.active_model.provider == LLMProvider.OLLAMA
+
+
+def test_quota_exhausted_cross_provider_fallback():
+    asyncio.run(_test_quota_exhausted_cross_provider_fallback())
+
+
+class _QuotaThenSuccessStreamLLM:
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.error = error
+
+    model_name = "fake"
+    temperature = 0.7
+    max_tokens = 1024
+    supports_multimodal = False
+
+    @property
+    def capabilities(self):
+        return ModelCapabilities()
+
+    async def stream_invoke(
+            self,
+            messages,
+            tools=None,
+            response_format=None,
+            tool_choice=None,
+            response_schema=None,
+            retry_budget=None,
+    ):
+        if self.error is not None:
+            raise self.error
+        yield {"content": "hello"}
+
+
+async def _test_stream_quota_fallback_before_first_token():
+    primary = _model("m1")
+    fallback = _model("m2")
+    primary_llm = _QuotaThenSuccessStreamLLM(error=QUOTA_ERROR)
+    fallback_llm = _QuotaThenSuccessStreamLLM()
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary, fallback])
+    breaker = MagicMock()
+    breaker.allow_request = AsyncMock(return_value="allow")
+    breaker.record_success = AsyncMock()
+    breaker.record_failure = AsyncMock()
+
+    client = ResilientLLMClient(primary_llm, primary, llm_model_service=llm_model_service)
+    client._breaker = breaker
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False, fallback_on_quota_exceeded=True),
+    ), patch(
+        "app.infrastructure.external.llm.resilient_llm.LLMFactory.create",
+        return_value=fallback_llm,
+    ):
+        chunks = []
+        async for chunk in client.stream_invoke([{"role": "user", "content": "hi"}]):
+            chunks.append(chunk)
+
+    assert chunks == [{"content": "hello"}]
+    assert client.active_model.id == "m2"
+
+
+def test_stream_quota_fallback_before_first_token():
+    asyncio.run(_test_stream_quota_fallback_before_first_token())

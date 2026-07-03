@@ -180,6 +180,8 @@ class ModelResilienceConfig(BaseModel):
     enabled: bool = True
     fallback_enabled: bool = False
     allow_cross_provider_fallback: bool = False
+    fallback_on_quota_exceeded: bool = True
+    allow_cross_provider_fallback_on_quota: bool = True
     max_attempts_per_call: int = Field(default=3, gt=0, le=10)
     max_call_budget_seconds: float = Field(default=120.0, gt=0, le=600)
     breaker_window_seconds: int = Field(default=60, gt=0, le=3600)

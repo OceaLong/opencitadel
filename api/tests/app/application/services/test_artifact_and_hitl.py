@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.application.services.artifact_service import ArtifactService, sanitize_html_for_preview
+from app.application.services.artifact_service import (
+    ArtifactService,
+    _decode_text_content,
+    sanitize_html_for_preview,
+)
 from app.application.services.scheduled_job_service import ScheduledJobService
 from app.domain.models.artifact import Artifact
 from app.domain.models.scheduled_job import ScheduledJob
@@ -38,6 +42,46 @@ def test_sanitize_html_for_preview():
     cleaned = sanitize_html_for_preview(raw)
     assert "<script" not in cleaned.lower()
     assert "onclick" not in cleaned.lower()
+
+
+def test_decode_text_content_valid_utf8():
+    text, incomplete = _decode_text_content("你好 world".encode("utf-8"))
+    assert text == "你好 world"
+    assert incomplete is False
+
+
+def test_decode_text_content_truncated_utf8():
+    truncated = "你好".encode("utf-8")[:-1]
+    text, incomplete = _decode_text_content(truncated)
+    assert incomplete is True
+    assert "\ufffd" in text
+
+
+def test_get_content_text_returns_incomplete_for_corrupt_storage():
+    artifact = Artifact(
+        id="a1",
+        session_id="s1",
+        kind="doc",
+        title="Report",
+        storage_ref="artifacts/s1/a1/v1.md",
+        version_refs=["artifacts/s1/a1/v1.md"],
+    )
+    uow = AsyncMock()
+    uow.__aenter__ = AsyncMock(return_value=uow)
+    uow.__aexit__ = AsyncMock(return_value=None)
+    uow.artifact.get_by_id = AsyncMock(return_value=artifact)
+
+    object_storage = AsyncMock()
+    object_storage.get_bytes = AsyncMock(return_value="partial 中文".encode("utf-8")[:-1])
+
+    service = ArtifactService(lambda: uow, object_storage=object_storage)
+
+    async def _run():
+        text, incomplete = await service.get_content_text("a1")
+        assert incomplete is True
+        assert "partial" in text
+
+    asyncio.run(_run())
 
 
 def test_compute_next_run_interval():

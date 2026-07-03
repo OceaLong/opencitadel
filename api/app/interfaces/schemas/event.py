@@ -225,6 +225,7 @@ class WaitSSEEvent(BaseSSEEvent):
 class ErrorEventData(BaseEventData):
     """错误事件数据"""
     error: str
+    code: Optional[str] = None
 
 
 class ErrorSSEEvent(BaseSSEEvent):
@@ -253,6 +254,8 @@ class UsageSSEEvent(BaseSSEEvent):
 class AssistantNoticeEventData(BaseEventData):
     """助手提示事件数据"""
     message: str = ""
+    i18n_key: Optional[str] = None
+    i18n_params: Optional[Dict[str, str]] = None
 
 
 class AssistantNoticeSSEEvent(BaseSSEEvent):

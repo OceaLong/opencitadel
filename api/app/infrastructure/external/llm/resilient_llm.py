@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 from app.application.errors.exceptions import ServerRequestsError
 from app.application.services.config_provider import get_runtime_config
@@ -16,6 +16,7 @@ from app.domain.models.error_codes import MODEL_NOT_CONFIGURED, MODEL_UNAVAILABL
 from app.domain.models.llm_model import LLMModel, LLMProvider
 from app.domain.utils.llm_retry import (
     classify_llm_error_code,
+    is_quota_fallback_eligible,
     is_retriable_llm_error,
 )
 from app.infrastructure.external.llm.circuit_breaker import get_llm_circuit_breaker
@@ -51,10 +52,11 @@ class ResilientLLMClient:
     ) -> None:
         self._inner = inner
         self._model = model
+        self._active_model = model
         self._llm_model_service = llm_model_service
         self._thinking_enabled = thinking_enabled
         self._streaming_started = False
-        self._candidate_cache: dict[bool, List[LLMModel]] = {}
+        self._candidate_cache: dict[Tuple[bool, bool, bool, bool, bool], List[LLMModel]] = {}
         self._breaker = get_llm_circuit_breaker()
 
     @property
@@ -80,6 +82,10 @@ class ResilientLLMClient:
     @property
     def model_id(self) -> str:
         return self._model.id
+
+    @property
+    def active_model(self) -> LLMModel:
+        return self._active_model
 
     @property
     def streaming_started(self) -> bool:
@@ -112,6 +118,7 @@ class ResilientLLMClient:
                 )
                 continue
             attempts = 0
+            candidate_error: Optional[Exception] = None
             while attempts < cfg.max_attempts_per_call and time.monotonic() < deadline:
                 attempts += 1
                 client = self._client_for(candidate)
@@ -125,24 +132,29 @@ class ResilientLLMClient:
                         retry_budget=retry_budget,
                     )
                     await self._breaker.record_success(candidate.id)
+                    self._active_model = candidate
                     if candidate.id != self._model.id:
                         record_llm_resilience_event("fallback_success", candidate.id, candidate.provider.value)
                     return result
                 except Exception as exc:
                     last_error = exc
+                    candidate_error = exc
                     await self._breaker.record_failure(candidate.id, exc)
                     record_llm_resilience_event("invoke_error", candidate.id, candidate.provider.value)
-                    if not is_retriable_llm_error(exc):
-                        raise ModelUnavailableError(str(exc), error_code=classify_llm_error_code(exc)) from exc
-                    if attempts >= cfg.max_attempts_per_call:
+                    if is_retriable_llm_error(exc):
+                        if attempts >= cfg.max_attempts_per_call:
+                            break
+                        if retry_budget is not None:
+                            retry_budget.consume("resilient_invoke_retry")
+                        delay = min(2 ** (attempts - 1), 8)
+                        await asyncio.sleep(delay)
+                        continue
+                    if cfg.fallback_on_quota_exceeded and is_quota_fallback_eligible(exc):
                         break
-                    if retry_budget is not None:
-                        retry_budget.consume("resilient_invoke_retry")
-                    delay = min(2 ** (attempts - 1), 8)
-                    await asyncio.sleep(delay)
-            if not cfg.fallback_enabled:
+                    raise ModelUnavailableError(str(exc), error_code=classify_llm_error_code(exc)) from exc
+            if not self._can_advance_to_next_candidate(cfg, candidate_error or last_error, candidate_idx, candidates):
                 break
-            if candidate_idx + 1 < len(candidates) and retry_budget is not None:
+            if retry_budget is not None:
                 retry_budget.consume("resilient_invoke_fallback")
 
         code = classify_llm_error_code(last_error) if last_error else MODEL_UNAVAILABLE
@@ -177,6 +189,7 @@ class ResilientLLMClient:
             attempts = 0
             stripped_for_multimodal = False
             request_messages = messages
+            candidate_error: Optional[Exception] = None
             while attempts < cfg.max_attempts_per_call and time.monotonic() < deadline:
                 attempts += 1
                 client = self._client_for(candidate)
@@ -190,11 +203,15 @@ class ResilientLLMClient:
                         retry_budget=retry_budget,
                     ):
                         self._streaming_started = True
+                        self._active_model = candidate
                         yield chunk
                     await self._breaker.record_success(candidate.id)
+                    if candidate.id != self._model.id:
+                        record_llm_resilience_event("fallback_success", candidate.id, candidate.provider.value)
                     return
                 except Exception as exc:
                     last_error = exc
+                    candidate_error = exc
                     if self._streaming_started:
                         code = classify_llm_error_code(exc)
                         raise ModelUnavailableError(str(exc), error_code=code) from exc
@@ -209,21 +226,41 @@ class ResilientLLMClient:
                         attempts -= 1
                         continue
                     await self._breaker.record_failure(candidate.id, exc)
-                    if not is_retriable_llm_error(exc):
-                        raise ModelUnavailableError(str(exc), error_code=classify_llm_error_code(exc)) from exc
-                    if attempts >= cfg.max_attempts_per_call:
+                    if is_retriable_llm_error(exc):
+                        if attempts >= cfg.max_attempts_per_call:
+                            break
+                        if retry_budget is not None:
+                            retry_budget.consume("resilient_stream_invoke_retry")
+                        delay = min(2 ** (attempts - 1), 8)
+                        await asyncio.sleep(delay)
+                        continue
+                    if cfg.fallback_on_quota_exceeded and is_quota_fallback_eligible(exc):
                         break
-                    if retry_budget is not None:
-                        retry_budget.consume("resilient_stream_invoke_retry")
-                    delay = min(2 ** (attempts - 1), 8)
-                    await asyncio.sleep(delay)
-            if not cfg.fallback_enabled or self._streaming_started:
+                    raise ModelUnavailableError(str(exc), error_code=classify_llm_error_code(exc)) from exc
+            if self._streaming_started:
                 break
-            if candidate_idx + 1 < len(candidates) and retry_budget is not None:
+            if not self._can_advance_to_next_candidate(cfg, candidate_error or last_error, candidate_idx, candidates):
+                break
+            if retry_budget is not None:
                 retry_budget.consume("resilient_stream_invoke_fallback")
 
         code = classify_llm_error_code(last_error) if last_error else MODEL_UNAVAILABLE
         raise ModelUnavailableError(str(last_error) if last_error else "模型流式调用失败", error_code=code)
+
+    def _can_advance_to_next_candidate(
+            self,
+            cfg,
+            error: Optional[Exception],
+            candidate_idx: int,
+            candidates: List[LLMModel],
+    ) -> bool:
+        if error is None or candidate_idx + 1 >= len(candidates):
+            return False
+        if is_retriable_llm_error(error) and cfg.fallback_enabled:
+            return True
+        if is_quota_fallback_eligible(error) and cfg.fallback_on_quota_exceeded:
+            return True
+        return False
 
     def _client_for(self, model: LLMModel) -> LLM:
         if model.id == self._model.id:
@@ -231,33 +268,65 @@ class ResilientLLMClient:
         return LLMFactory.create(model, thinking_enabled=self._thinking_enabled)
 
     async def _build_candidate_chain(self, *, require_vision: bool) -> List[LLMModel]:
-        if require_vision in self._candidate_cache:
-            return list(self._candidate_cache[require_vision])
+        cfg = self._config()
+        cache_key = (
+            require_vision,
+            cfg.fallback_enabled,
+            cfg.fallback_on_quota_exceeded,
+            cfg.allow_cross_provider_fallback,
+            cfg.allow_cross_provider_fallback_on_quota,
+        )
+        if cache_key in self._candidate_cache:
+            return list(self._candidate_cache[cache_key])
+
         chain: List[LLMModel] = [self._model]
-        if not self._config().fallback_enabled or not self._llm_model_service:
-            self._candidate_cache[require_vision] = chain
+        if not (cfg.fallback_enabled or cfg.fallback_on_quota_exceeded) or not self._llm_model_service:
+            self._candidate_cache[cache_key] = chain
             return chain
         try:
             all_models = await self._llm_model_service.list_models(mask=False)
         except Exception:
-            self._candidate_cache[require_vision] = chain
+            self._candidate_cache[cache_key] = chain
             return chain
+
+        allow_cross = (
+            (cfg.fallback_enabled and cfg.allow_cross_provider_fallback)
+            or (cfg.fallback_on_quota_exceeded and cfg.allow_cross_provider_fallback_on_quota)
+        )
+        seen = {self._model.id}
+
         for candidate in all_models:
-            if candidate.id == self._model.id:
+            if candidate.id in seen:
                 continue
             if candidate.provider != self._model.provider:
-                if self._config().allow_cross_provider_fallback:
-                    pass
-                else:
-                    continue
-            caps = candidate.capabilities
-            if require_vision and not (caps.vision or candidate.supports_multimodal):
                 continue
-            if candidate.provider != LLMProvider.OLLAMA and not candidate.api_key.strip():
+            if not self._is_valid_fallback_candidate(candidate, require_vision=require_vision):
                 continue
             chain.append(candidate)
-        self._candidate_cache[require_vision] = chain
+            seen.add(candidate.id)
+
+        if allow_cross:
+            for candidate in all_models:
+                if candidate.id in seen:
+                    continue
+                if candidate.provider == self._model.provider:
+                    continue
+                if not self._is_valid_fallback_candidate(candidate, require_vision=require_vision):
+                    continue
+                chain.append(candidate)
+                seen.add(candidate.id)
+
+        self._candidate_cache[cache_key] = chain
         return chain
+
+    @staticmethod
+    def _is_valid_fallback_candidate(candidate: LLMModel, *, require_vision: bool) -> bool:
+        caps = candidate.capabilities
+        if require_vision and not (caps.vision or candidate.supports_multimodal):
+            return False
+        if candidate.provider != LLMProvider.OLLAMA and not candidate.api_key.strip():
+            return False
+        return True
 
     async def _candidate_allowed(self, candidate: LLMModel) -> bool:
         cfg = self._config()

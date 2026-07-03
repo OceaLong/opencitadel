@@ -18,6 +18,7 @@ function ShareArtifactContent() {
   const tCommon = useTranslations("common");
   const [content, setContent] = useState("");
   const [contentType, setContentType] = useState("text/markdown");
+  const [contentIncomplete, setContentIncomplete] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,6 +32,7 @@ function ShareArtifactContent() {
         if (cancelled) return;
         setContent(data.content);
         setContentType(data.content_type);
+        setContentIncomplete(data.incomplete === true);
         setError(null);
       })
       .catch((err) => {
@@ -71,17 +73,26 @@ function ShareArtifactContent() {
               <Link href="/">{tCommon("backHome")}</Link>
             </Button>
           </div>
-        ) : isHtml ? (
-          <iframe
-            title={t("artifactTitle")}
-            srcDoc={content}
-            className="bg-background h-[calc(100vh-120px)] w-full rounded-xl border shadow-[var(--shadow-panel)]"
-            sandbox="allow-scripts"
-          />
         ) : (
-          <div className="bg-card border-border/70 rounded-xl border p-6 shadow-[var(--shadow-panel)]">
-            <MarkdownContent content={content} />
-          </div>
+          <>
+            {contentIncomplete && (
+              <div className="border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 mb-4 rounded-xl border px-4 py-2 text-sm">
+                {t("incompleteContentWarning")}
+              </div>
+            )}
+            {isHtml ? (
+              <iframe
+                title={t("artifactTitle")}
+                srcDoc={content}
+                className="bg-background h-[calc(100vh-120px)] w-full rounded-xl border shadow-[var(--shadow-panel)]"
+                sandbox="allow-scripts"
+              />
+            ) : (
+              <div className="bg-card border-border/70 rounded-xl border p-6 shadow-[var(--shadow-panel)]">
+                <MarkdownContent content={content} />
+              </div>
+            )}
+          </>
         )}
       </main>
     </div>

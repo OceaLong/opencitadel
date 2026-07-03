@@ -23,6 +23,16 @@ from .playwright_browser_fun import (
 
 logger = logging.getLogger(__name__)
 
+_NAVIGATION_ERROR_MARKERS = (
+    "execution context was destroyed",
+    "context was destroyed",
+)
+
+
+def _is_navigation_context_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _NAVIGATION_ERROR_MARKERS)
+
 
 class PlaywrightBrowser(BrowserProtocol):
     """基础Playwright管理的浏览器扩展"""
@@ -149,20 +159,59 @@ class PlaywrightBrowser(BrowserProtocol):
         elements = await self._extract_interactive_elements()
         return len(elements)
 
+    async def _wait_for_stable_page(
+            self,
+            before_url: Optional[str] = None,
+            timeout_ms: int = 15000,
+    ) -> None:
+        """Wait for navigation/load to settle after a click or form submit."""
+        await self._ensure_page()
+        try:
+            await self.page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+        except Exception as exc:
+            logger.debug("wait_for_load_state(domcontentloaded): %s", exc)
+        if before_url is not None and self._current_page_url() != before_url:
+            try:
+                await self.page.wait_for_load_state("load", timeout=min(timeout_ms, 10000))
+            except Exception as exc:
+                logger.debug("wait_for_load_state(load) after navigation: %s", exc)
+        await self.wait_for_page_load(timeout=max(1, timeout_ms // 1000))
+
+    async def _safe_interactive_element_count(self, retries: int = 3) -> Optional[int]:
+        for attempt in range(retries):
+            try:
+                return await self._interactive_element_count()
+            except Exception as exc:
+                if _is_navigation_context_error(exc) and attempt < retries - 1:
+                    logger.debug(
+                        "interactive element count retry after navigation (attempt %s): %s",
+                        attempt + 1,
+                        exc,
+                    )
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    await self._wait_for_stable_page()
+                    continue
+                logger.warning("interactive element count failed: %s", exc)
+                return None
+        return None
+
     async def _build_action_verification_note(
             self,
             before_url: str,
             before_element_count: int,
             action: str,
     ) -> str:
+        await self._wait_for_stable_page(before_url)
         after_url = self._current_page_url()
-        after_count = await self._interactive_element_count()
+        after_count = await self._safe_interactive_element_count()
         parts: List[str] = [f"{action}已执行"]
         if before_url != after_url:
             parts.append(f"URL: {before_url} -> {after_url}")
         else:
             parts.append(f"URL 未变化 ({after_url})")
-        if before_element_count != after_count:
+        if after_count is None:
+            parts.append("页面验证已跳过（导航后页面尚未稳定）")
+        elif before_element_count != after_count:
             parts.append(f"可交互元素: {before_element_count} -> {after_count}")
         else:
             parts.append(f"可交互元素数量仍为 {after_count}")

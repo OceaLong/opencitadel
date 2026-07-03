@@ -12,6 +12,9 @@ export function isModelUnavailableStatus(status: LLMStatusData["status"] | undef
 
 export function modelErrorMessage(code: string | null | undefined): string | null {
   if (!code) return null;
+  if (code === "MODEL_QUOTA_EXCEEDED") {
+    return translate("errors.modelQuotaExceeded");
+  }
   if (code.startsWith("MODEL_") || code.startsWith("EMBEDDING_")) {
     return translate("errors.modelUnavailable");
   }

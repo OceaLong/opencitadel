@@ -87,6 +87,10 @@ const messages = {
       en: "Model or embedding service is unavailable. Check model settings or try again later.",
       zh: "模型或向量服务暂不可用，请检查模型设置或稍后重试",
     },
+    modelQuotaExceeded: {
+      en: "This model's API quota is exhausted. Complete billing in the provider console or switch to another model.",
+      zh: "该模型 API 配额已耗尽，请在提供商控制台完成付费或切换到其他可用模型。",
+    },
     infraFailed: {
       en: "System infrastructure error. Try again later or contact an administrator.",
       zh: "系统基础设施异常，请稍后重试或联系管理员",
@@ -298,6 +302,10 @@ const messages = {
     refreshFilesFailed: { en: "Failed to refresh file list", zh: "刷新文件列表失败" },
     streamResponseError: { en: "Streaming response error", zh: "流式响应异常" },
     waitForInput: { en: "Waiting for your input or confirmation.", zh: "等待你的输入或确认。" },
+    modelFallbackNotice: {
+      en: "Primary model quota exhausted. Switched to {modelName} and continuing.",
+      zh: "当前模型配额已耗尽，已自动切换至 {modelName} 并继续执行。",
+    },
   },
   sessionMemory: {
     roles: {

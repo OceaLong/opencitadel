@@ -7,7 +7,21 @@ from app.application.services.memory_extractor_service import (
     EXTRACT_PROMPT,
     _extract_llm_text_content,
 )
+from app.domain.models.error_codes import MODEL_QUOTA_EXCEEDED
+from app.domain.utils.llm_retry import (
+    classify_llm_error_code,
+    is_quota_exhausted_error,
+    is_quota_fallback_eligible,
+    is_retriable_llm_error,
+)
 from app.infrastructure.external.llm.openai_llm import _format_llm_error
+
+QUOTA_ERROR_SAMPLE = (
+    "Error code: 403 - {'error': {'message': 'The free quota has been exhausted. "
+    "To continue accessing the model on a paid basis, please complete your payment "
+    "information (or disable the \"use free tier only\" mode in the management console "
+    "if already completed)', 'type': 'insufficient_quota', 'code': 'insufficient_quota'}}"
+)
 
 
 def test_server_requests_error_str():
@@ -29,6 +43,35 @@ def test_format_llm_error_unsupported_model():
     )
     assert "MiMo-V2.5-Pro" in msg
     assert "不被当前 Base URL 支持" in msg
+
+
+def test_is_quota_exhausted_error_detects_insufficient_quota():
+    assert is_quota_exhausted_error(Exception(QUOTA_ERROR_SAMPLE)) is True
+
+
+def test_classify_llm_error_code_quota_exceeded():
+    assert classify_llm_error_code(Exception(QUOTA_ERROR_SAMPLE)) == MODEL_QUOTA_EXCEEDED
+
+
+def test_is_retriable_llm_error_quota_exhausted():
+    assert is_retriable_llm_error(Exception(QUOTA_ERROR_SAMPLE)) is False
+
+
+def test_format_llm_error_quota_exhausted():
+    msg = _format_llm_error(Exception(QUOTA_ERROR_SAMPLE), "qwen-plus")
+    assert msg == "调用LLM失败: 模型 qwen-plus API 配额已耗尽"
+    assert "insufficient_quota" not in msg
+    assert "free quota" not in msg
+
+
+def test_is_quota_fallback_eligible_matches_exhausted():
+    assert is_quota_fallback_eligible(Exception(QUOTA_ERROR_SAMPLE)) is True
+
+
+def test_quota_fallback_eligible_is_not_retriable():
+    err = Exception(QUOTA_ERROR_SAMPLE)
+    assert is_quota_fallback_eligible(err) is True
+    assert is_retriable_llm_error(err) is False
 
 
 def test_extract_llm_text_content_prefers_content():

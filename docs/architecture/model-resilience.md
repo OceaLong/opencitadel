@@ -99,6 +99,22 @@ Implementation constraints:
 - OpenAI path no longer retains an independent retry helper; chat LLM retry authority is centralized in `ResilientLLMClient`.
 - `allow_cross_provider_fallback=false` is the default; cross-provider fallback is not a P0 capability.
 
+### Quota-exhausted fallback
+
+Unlike transient 429/5xx retries, `insufficient_quota` (`MODEL_QUOTA_EXCEEDED`) is **not retried on the same model**, but when configured the platform can automatically switch to other DB-configured models:
+
+| Setting | Default | Role |
+|---------|---------|------|
+| `fallback_on_quota_exceeded` | `true` | Walk alternate models on quota errors |
+| `allow_cross_provider_fallback_on_quota` | `true` | Allow cross-provider alternates for quota (e.g. Alibaba → Ollama) |
+
+Notes:
+
+- **Independent of** `fallback_enabled`: quota fallback works without enabling general transient fallback.
+- Candidates come from `llm_models` (same provider first, then cross-provider); no runtime probe—call directly and continue on failure.
+- On success, Agent emits `assistant_notice` (`sessionDetail.modelFallbackNotice`) and the task continues; if all candidates fail, behavior remains `MODEL_QUOTA_EXCEEDED` + session failed.
+- Requires at least two valid configured models.
+
 ## Health, SLO, and Alerting
 
 ### Platform Domain L0
@@ -148,6 +164,7 @@ Initial thresholds are in `AppConfig.model_resilience`; review and tune weekly.
 |--------|--------|
 | `model_resilience.enabled=false` | Disable circuit breaking and `ResilientLLMClient` fast fail |
 | `model_resilience.fallback_enabled=false` | Disable same-provider fallback |
+| `model_resilience.fallback_on_quota_exceeded=false` | Disable auto-switch on quota exhaustion |
 | `feature_flags.enable_agent_features=false` | Disable Agent / A2A entry points |
 
 ### DLQ Replay

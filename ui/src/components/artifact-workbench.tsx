@@ -54,6 +54,7 @@ export function ArtifactWorkbench({
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [content, setContent] = useState<string>("");
   const [contentType, setContentType] = useState<string>("text/markdown");
+  const [contentIncomplete, setContentIncomplete] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sharing, setSharing] = useState(false);
 
@@ -80,6 +81,7 @@ export function ArtifactWorkbench({
   useEffect(() => {
     if (!selectedId || selectedVersion == null) {
       setContent("");
+      setContentIncomplete(false);
       return;
     }
     let cancelled = false;
@@ -90,11 +92,13 @@ export function ArtifactWorkbench({
         if (cancelled) return;
         setContent(data.content);
         setContentType(data.content_type);
+        setContentIncomplete(data.incomplete === true);
       })
       .catch((error) => {
         if (cancelled) return;
         toast.error(error instanceof Error ? error.message : t("loadFailed"));
         setContent("");
+        setContentIncomplete(false);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -211,6 +215,11 @@ export function ArtifactWorkbench({
         {loading && (
           <div className="bg-background/60 absolute inset-0 z-10 flex items-center justify-center">
             <Loader2 className="text-muted-foreground size-5 animate-spin" />
+          </div>
+        )}
+        {contentIncomplete && !loading && (
+          <div className="border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 border-b px-4 py-2 text-sm">
+            {t("incompleteContentWarning")}
           </div>
         )}
         {active?.kind === "web" ? (

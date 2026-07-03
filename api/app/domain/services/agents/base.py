@@ -18,7 +18,7 @@ from app.domain.models.app_config import AgentConfig
 from app.domain.models.event import (
     ToolEvent, ToolEventStatus, ErrorEvent, MessageEvent, BaseEvent,
     MessageDeltaEvent, ReasoningDeltaEvent, ToolArgsDeltaEvent, UsageEvent,
-    ApprovalEvent, WaitEvent,
+    ApprovalEvent, WaitEvent, AssistantNoticeEvent,
 )
 from app.domain.models.memory import Memory
 from app.domain.models.message import Message, VisionAttachment
@@ -420,6 +420,24 @@ class BaseAgent(ABC):
                     idx -= 1
         return max(1, idx)
 
+    @staticmethod
+    def _fallback_notice_if_needed_for(llm: LLM) -> Optional[AssistantNoticeEvent]:
+        from app.infrastructure.external.llm.resilient_llm import ResilientLLMClient
+
+        if not isinstance(llm, ResilientLLMClient):
+            return None
+        active = llm.active_model
+        if active.id == llm.model_id:
+            return None
+        return AssistantNoticeEvent(
+            message="",
+            i18n_key="sessionDetail.modelFallbackNotice",
+            i18n_params={"modelName": active.display_name},
+        )
+
+    def _fallback_notice_if_needed(self) -> Optional[AssistantNoticeEvent]:
+        return self._fallback_notice_if_needed_for(self._llm)
+
     async def _record_token_usage(self, usage: Dict[str, int]) -> None:
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
         completion_tokens = int(usage.get("completion_tokens") or 0)
@@ -475,6 +493,7 @@ class BaseAgent(ABC):
 
                 call_usage: Dict[str, int] = {}
                 finish_reason: Optional[str] = None
+                fallback_notice_emitted = False
                 async for delta in self._llm.stream_invoke(
                         messages=self._messages_for_llm(
                             self._memory.get_messages(),
@@ -487,6 +506,11 @@ class BaseAgent(ABC):
                         response_schema=response_schema_payload,
                         retry_budget=self._retry_budget,
                 ):
+                    if not fallback_notice_emitted:
+                        notice = self._fallback_notice_if_needed()
+                        if notice is not None:
+                            yield notice
+                            fallback_notice_emitted = True
                     if usage_delta := delta.get("usage"):
                         call_usage = usage_delta
                         continue

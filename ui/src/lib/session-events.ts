@@ -22,6 +22,7 @@ import type {
   ToolEvent,
 } from "@/lib/api/types";
 import { translate } from "@/i18n/translate";
+import { modelErrorMessage } from "@/lib/api/llm-status";
 
 const TRANSIENT_EVENT_TYPES = new Set(["message_delta", "reasoning_delta", "tool_args_delta"]);
 
@@ -95,6 +96,63 @@ export function extractDebugItems(events: SSEEventData[]): DebugItemEvent[] {
     }
   }
   return items;
+}
+
+export type SessionErrorItem = {
+  id: string;
+  message: string;
+  source: "tool" | "system";
+  toolName?: string;
+  code?: string | null;
+  timestamp?: number;
+};
+
+/** 从事件列表提取去重后的错误项（tool.error 与 type: error） */
+export function extractSessionErrors(events: SSEEventData[]): SessionErrorItem[] {
+  const byKey = new Map<string, SessionErrorItem>();
+
+  for (const ev of events) {
+    if (ev.type === "error") {
+      const errorData = ev.data as {
+        error?: string;
+        code?: string | null;
+        created_at?: number;
+        event_id?: string;
+      };
+      const message = modelErrorMessage(errorData.code) ?? errorData.error;
+      if (!message) continue;
+      const key = errorData.event_id ? `error:${errorData.event_id}` : `error:${byKey.size}`;
+      byKey.set(key, {
+        id: key,
+        message,
+        source: "system",
+        code: errorData.code,
+        timestamp: toMillis(errorData.created_at),
+      });
+      continue;
+    }
+
+    if (ev.type === "tool") {
+      const tool = ev.data as ToolEvent & { event_id?: string; created_at?: number };
+      if (!tool.error) continue;
+      const key = tool.tool_call_id
+        ? `tool:${tool.tool_call_id}`
+        : tool.event_id
+          ? `tool:${tool.event_id}`
+          : `tool:${tool.name}:${tool.function}:${byKey.size}`;
+      byKey.set(key, {
+        id: key,
+        message: tool.error,
+        source: "tool",
+        toolName: tool.name,
+        timestamp: toMillis(tool.created_at ?? tool.ended_at ?? tool.started_at),
+      });
+    }
+  }
+
+  return Array.from(byKey.values()).sort(
+    (a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0),
+  );
 }
 
 /** 后端返回的原始事件（可能用 event 或 type 表示类型） */
@@ -331,12 +389,19 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
       case "tool_args_delta":
         break;
       case "assistant_notice": {
-        const notice = ev.data as { message?: string };
-        if (!notice.message) break;
+        const notice = ev.data as {
+          message?: string;
+          i18n_key?: string | null;
+          i18n_params?: Record<string, string> | null;
+        };
+        const displayMessage = notice.i18n_key
+          ? translate(notice.i18n_key, notice.i18n_params ?? undefined)
+          : notice.message;
+        if (!displayMessage) break;
         list.push({
           kind: "assistant",
           id: stableId("assistant", messageIndex++, String(list.length)),
-          data: { role: "assistant", message: notice.message },
+          data: { role: "assistant", message: displayMessage },
         });
         break;
       }
@@ -600,15 +665,17 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
         // 处理错误事件
         const errorData = ev.data as {
           error?: string;
+          code?: string | null;
           created_at?: number;
           event_id?: string;
           [key: string]: unknown;
         };
-        if (errorData.error) {
+        const displayError = modelErrorMessage(errorData.code) ?? errorData.error;
+        if (displayError) {
           list.push({
             kind: "error",
             id: stableId("error", errorIndex++, String(list.length)),
-            error: errorData.error,
+            error: displayError,
             timestamp: errorData.created_at,
             contextLabel: lastContextLabel,
           });

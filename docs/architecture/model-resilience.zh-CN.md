@@ -99,6 +99,22 @@ stateDiagram-v2
 - OpenAI 路径不再保留独立重试 helper，chat LLM 重试权威集中在 `ResilientLLMClient`。
 - `allow_cross_provider_fallback=false` 为默认值；跨 Provider fallback 不是 P0 能力。
 
+### 配额耗尽专用 Fallback
+
+与 429/5xx 瞬态重试不同，`insufficient_quota`（`MODEL_QUOTA_EXCEEDED`）**不会在同一个模型上重试**，但可在配置开启时自动切换至 DB 中其他已配置模型：
+
+| 配置项 | 默认 | 说明 |
+|--------|------|------|
+| `fallback_on_quota_exceeded` | `true` | 配额耗尽时遍历备用模型 |
+| `allow_cross_provider_fallback_on_quota` | `true` | quota 场景允许跨 Provider（如阿里云 → Ollama） |
+
+行为要点：
+
+- **独立于** `fallback_enabled`：无需开启通用 transient fallback 即可启用 quota fallback。
+- 候选来自 `llm_models` 表（同 Provider 优先，再跨 Provider）；不做实时 probe，直接调用，失败继续下一个。
+- 切换成功后 Agent 发出 `assistant_notice`（`sessionDetail.modelFallbackNotice`），任务继续；全部失败则仍为 `MODEL_QUOTA_EXCEEDED` + session failed。
+- 运行前提：至少配置 2 个有效模型（含 API Key）。
+
 ## 健康、SLO 与告警
 
 ### 平台域 L0
@@ -148,6 +164,7 @@ stateDiagram-v2
 |------|------|
 | `model_resilience.enabled=false` | 关闭熔断与 `ResilientLLMClient` 快速失败 |
 | `model_resilience.fallback_enabled=false` | 关闭同 Provider fallback |
+| `model_resilience.fallback_on_quota_exceeded=false` | 关闭配额耗尽自动切换备用模型 |
 | `feature_flags.enable_agent_features=false` | 关闭 Agent / A2A 入口 |
 
 ### DLQ 重放
