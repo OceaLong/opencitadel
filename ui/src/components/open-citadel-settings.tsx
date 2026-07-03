@@ -5,6 +5,7 @@ import {
   LayoutGrid,
   LayoutList,
   Loader2,
+  Pencil,
   Settings,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -202,7 +203,7 @@ export function A2ASetting({
                         <Input
                           id="a2a_base_url"
                           type="url"
-                          placeholder="Example: https://opencitadel.example/weather-agent"
+                          placeholder={t("a2aUrlPlaceholder")}
                           value={addUrl}
                           onChange={(e) => setAddUrl(e.target.value)}
                           disabled={adding}
@@ -330,9 +331,36 @@ type MCPSettingProps = {
   onToggleEnabled: (serverName: string, enabled: boolean) => void;
   onDelete: (serverName: string) => void;
   onAdd: (config: string) => Promise<boolean>;
+  onEdit: (serverName: string, config: string) => Promise<boolean>;
   readOnly?: boolean;
   isAdmin?: boolean;
 };
+
+function buildMcpEditConfig(server: ListMCPServerItem): string {
+  const payload = server.config ?? {
+    transport: server.transport,
+    enabled: server.enabled,
+  };
+  return JSON.stringify({ mcpServers: { [server.server_name]: payload } }, null, 2);
+}
+
+function mcpConnectionStatusLabel(
+  server: ListMCPServerItem,
+  t: ReturnType<typeof useTranslations<"settings">>,
+  disabledLabel: string,
+): { label: string; variant: "default" | "secondary" | "destructive" | "outline" } {
+  const status = server.connection_status ?? (server.enabled ? "pending" : "disabled");
+  switch (status) {
+    case "connected":
+      return { label: t("mcpStatusConnected"), variant: "default" };
+    case "error":
+      return { label: t("mcpStatusError"), variant: "destructive" };
+    case "pending":
+      return { label: t("mcpStatusPending"), variant: "secondary" };
+    default:
+      return { label: disabledLabel, variant: "outline" };
+  }
+}
 
 export function MCPSetting({
   servers,
@@ -340,6 +368,7 @@ export function MCPSetting({
   onToggleEnabled,
   onDelete,
   onAdd,
+  onEdit,
   readOnly = false,
   isAdmin = false,
 }: MCPSettingProps) {
@@ -348,6 +377,10 @@ export function MCPSetting({
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addConfig, setAddConfig] = useState("");
   const [adding, setAdding] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editServerName, setEditServerName] = useState<string | null>(null);
+  const [editConfig, setEditConfig] = useState("");
+  const [editing, setEditing] = useState(false);
 
   const mcpConfigPlaceholder = isAdmin
     ? `{
@@ -387,6 +420,30 @@ export function MCPSetting({
       }
     } finally {
       setAdding(false);
+    }
+  };
+
+  const openEditDialog = (server: ListMCPServerItem) => {
+    setEditServerName(server.server_name);
+    setEditConfig(buildMcpEditConfig(server));
+    setEditDialogOpen(true);
+  };
+
+  const handleEdit = async () => {
+    if (!editServerName || !editConfig.trim()) {
+      toast.error(t("enterMcpConfig"));
+      return;
+    }
+    setEditing(true);
+    try {
+      const success = await onEdit(editServerName, editConfig.trim());
+      if (success) {
+        setEditDialogOpen(false);
+        setEditServerName(null);
+        setEditConfig("");
+      }
+    } finally {
+      setEditing(false);
     }
   };
 
@@ -446,6 +503,35 @@ export function MCPSetting({
               </DialogContent>
             </Dialog>
             ) : null}
+            <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle className="text-foreground">{t("editMcpServer")}</DialogTitle>
+                  <DialogDescription className="text-muted-foreground">
+                    {editServerName
+                      ? `${t("editMcpServerDesc")} (${editServerName})`
+                      : t("editMcpServerDesc")}
+                  </DialogDescription>
+                </DialogHeader>
+                <Textarea
+                  value={editConfig}
+                  onChange={(e) => setEditConfig(e.target.value)}
+                  className="min-h-[200px] font-mono text-xs"
+                  disabled={editing}
+                />
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button variant="outline" className="cursor-pointer" disabled={editing}>
+                      {tCommon("cancel")}
+                    </Button>
+                  </DialogClose>
+                  <Button className="cursor-pointer" onClick={handleEdit} disabled={editing}>
+                    {editing && <Loader2 className="animate-spin" />}
+                    {tCommon("save")}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </FieldLegend>
           <FieldDescription className="text-sm">
             {isAdmin ? t("mcpAddDescription") : t("mcpAddDescriptionNonAdmin")}
@@ -466,18 +552,30 @@ export function MCPSetting({
           {/* 列表 */}
           {!loading && servers.length > 0 && (
             <ItemGroup className="gap-3">
-              {servers.map((server) => (
+              {servers.map((server) => {
+                const statusBadge = mcpConnectionStatusLabel(server, t, tCommon("disabled"));
+                return (
                 <Item key={server.server_name} variant="outline">
                   <ItemContent>
                     <ItemTitle className="text-md text-foreground flex w-full items-center justify-between font-semibold">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         {server.server_name}
                         <Badge>{server.transport}</Badge>
-                        {!server.enabled && <Badge>{tCommon("disabled")}</Badge>}
+                        <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
+                        {!server.enabled && <Badge variant="outline">{tCommon("disabled")}</Badge>}
                       </div>
                       <div className="flex items-center justify-center gap-2">
                         {!readOnly ? (
                           <>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          className="cursor-pointer"
+                          onClick={() => openEditDialog(server)}
+                        >
+                          <Pencil className="size-3.5" />
+                        </Button>
                         <Button
                           type="button"
                           variant="ghost"
@@ -497,6 +595,11 @@ export function MCPSetting({
                         ) : null}
                       </div>
                     </ItemTitle>
+                    {server.connection_error ? (
+                      <ItemDescription className="text-destructive text-xs">
+                        {server.connection_error}
+                      </ItemDescription>
+                    ) : null}
                     {server.tools.length > 0 && (
                       <ItemDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <IconTool size={12} />
@@ -509,7 +612,8 @@ export function MCPSetting({
                     )}
                   </ItemContent>
                 </Item>
-              ))}
+              );
+              })}
             </ItemGroup>
           )}
         </FieldSet>
@@ -571,6 +675,7 @@ export function SettingsDialog({
     handleMCPToggle,
     handleMCPDelete,
     handleMCPAdd,
+    handleMCPEdit,
     handleA2AToggle,
     handleA2ADelete,
     handleA2AAdd,
@@ -631,6 +736,7 @@ export function SettingsDialog({
                   onToggleEnabled={handleMCPToggle}
                   onDelete={handleMCPDelete}
                   onAdd={handleMCPAdd}
+                  onEdit={handleMCPEdit}
                   readOnly={false}
                   isAdmin={isAdmin}
                 />

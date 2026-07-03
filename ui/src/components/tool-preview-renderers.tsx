@@ -40,6 +40,7 @@ export function JumpToLatestButton({ onClick }: { onClick: () => void }) {
 
 function ShellPreview({ tool }: { tool: ToolEvent }) {
   const t = useTranslations("toolPreview");
+  const tToolUse = useTranslations("toolUse");
   const content = getToolContent(tool);
   const consoleData = content?.console;
   const sessionId = getArg(tool.args, "session_id");
@@ -53,7 +54,7 @@ function ShellPreview({ tool }: { tool: ToolEvent }) {
     <div className="flex h-full flex-col gap-3 p-4">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-gray-700 bg-[#1e1e1e]">
         <div className="flex-shrink-0 border-b border-gray-700 bg-[#2d2d2d] py-1.5 text-center text-xs text-gray-400">
-          {sessionId || "shell"}
+          {sessionId || tToolUse("shellFallback")}
         </div>
         <ScrollArea className="flex-1">
           <div className="p-4 font-mono text-sm leading-relaxed">

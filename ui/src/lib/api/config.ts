@@ -63,6 +63,9 @@ export const configApi = {
 
   addMCPServer: (config: MCPConfig): Promise<void> => post<void>("/app-config/mcp-servers", config),
 
+  updateMCPServer: (serverName: string, config: MCPConfig): Promise<void> =>
+    post<void>(`/app-config/mcp-servers/${encodeURIComponent(serverName)}/update`, config),
+
   deleteMCPServer: (serverName: string): Promise<void> =>
     post<void>(`/app-config/mcp-servers/${serverName}/delete`, {}),
 

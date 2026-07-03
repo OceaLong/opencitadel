@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from app.domain.external.browser import Browser
 from app.domain.models.tool_result import ToolResult
@@ -29,6 +29,15 @@ class BrowserTool(BaseTool):
         """构造函数，完成浏览器工具的初始化"""
         super().__init__()
         self.browser = browser
+
+    def get_tools(self) -> List[Dict[str, Any]]:
+        tools = super().get_tools()
+        if not getattr(self.browser, "supports_multimodal", False):
+            tools = [
+                schema for schema in tools
+                if schema.get("function", {}).get("name") != "browser_screenshot"
+            ]
+        return tools
 
     @tool(
         name="browser_view",

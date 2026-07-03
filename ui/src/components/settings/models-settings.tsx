@@ -178,7 +178,7 @@ export function ModelsSettings({ embedded = false, isAdmin = false, userId }: Pr
               />
             </div>
             <div className="space-y-2">
-              <Label>Provider</Label>
+              <Label>{t("provider")}</Label>
               <Select
                 value={form.provider}
                 onValueChange={(v) => setForm({ ...form, provider: v as LLMProvider })}
@@ -196,14 +196,14 @@ export function ModelsSettings({ embedded = false, isAdmin = false, userId }: Pr
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Base URL</Label>
+              <Label>{t("baseUrl")}</Label>
               <Input
                 value={form.base_url}
                 onChange={(e) => setForm({ ...form, base_url: e.target.value })}
               />
             </div>
             <div className="space-y-2">
-              <Label>{editing ? t("apiKeyLeaveBlank") : "API Key"}</Label>
+              <Label>{editing ? t("apiKeyLeaveBlank") : t("apiKey")}</Label>
               <Input
                 type="password"
                 value={form.api_key}
@@ -211,7 +211,7 @@ export function ModelsSettings({ embedded = false, isAdmin = false, userId }: Pr
               />
             </div>
             <div className="space-y-2">
-              <Label>Model Name</Label>
+              <Label>{t("modelName")}</Label>
               <Input
                 value={form.model_name}
                 onChange={(e) => setForm({ ...form, model_name: e.target.value })}
@@ -301,7 +301,7 @@ export function ModelsSettings({ embedded = false, isAdmin = false, userId }: Pr
             )}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Temperature</Label>
+                <Label>{t("temperature")}</Label>
                 <Input
                   type="number"
                   step="0.1"
@@ -310,7 +310,7 @@ export function ModelsSettings({ embedded = false, isAdmin = false, userId }: Pr
                 />
               </div>
               <div className="space-y-2">
-                <Label>Max Tokens</Label>
+                <Label>{t("maxTokens")}</Label>
                 <Input
                   type="number"
                   value={form.max_tokens}

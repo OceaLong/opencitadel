@@ -56,8 +56,8 @@ const DYNAMIC_EXPANSIONS = [
     { prefix: `marketplace.apps.${appKey}.`, values: ["name", "description", "tags", "examples"] },
   ]),
   {
-    prefix: "marketplace.",
-    values: ["categoryAll", "categoryHealth", "categoryLife", "categoryOffice", "categoryProductivity"],
+    prefix: "settingsRuntime.sections.",
+    values: ["feature_flags", "scheduler", "server"],
   },
 ];
 
@@ -148,6 +148,8 @@ const knownDynamicPatterns = new Set([
   "marketplace.apps :: ${appKey}.tags",
   "marketplace.apps :: ${appKey}.examples",
   "marketplace :: categoryAll",
+  "settingsRuntime :: sections.${activeSection}",
+  "settingsRuntime :: sections.${section}",
 ]);
 
 const unknownDynamic = [...unresolvedDynamic].filter((p) => !knownDynamicPatterns.has(p)).sort();
@@ -161,6 +163,49 @@ if (unknownDynamic.length) {
 
 if (failed) {
   process.exit(1);
+}
+
+/** Heuristic scan for likely hardcoded user-facing strings (warnings only). */
+const HARDCODED_PATTERNS = [
+  {
+    name: "toast literal",
+    re: /toast\.(?:success|error|info|warning)\(\s*["'`][^"'`]+["'`]/g,
+    allow: (line) => line.includes("t(") || line.includes("translate("),
+  },
+  {
+    name: "JSX Chinese text",
+    re: />[^<{]*[\u4e00-\u9fff][^<{]*</g,
+    allow: (line) => line.trim().startsWith("//") || line.includes("{/*"),
+  },
+];
+
+const hardcodedFindings = [];
+for (const file of walk(srcDir)) {
+  const rel = path.relative(root, file);
+  if (rel.includes("/components/ui/")) continue;
+  const lines = fs.readFileSync(file, "utf8").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    for (const { name, re, allow } of HARDCODED_PATTERNS) {
+      if (allow?.(line)) continue;
+      re.lastIndex = 0;
+      if (re.test(line)) {
+        hardcodedFindings.push(`${rel}:${i + 1} [${name}] ${line.trim().slice(0, 120)}`);
+      }
+    }
+  }
+}
+
+if (hardcodedFindings.length) {
+  console.warn(
+    `i18n heuristic: ${hardcodedFindings.length} possible hardcoded string(s) (review manually):`,
+  );
+  for (const finding of hardcodedFindings.slice(0, 20)) {
+    console.warn(" ", finding);
+  }
+  if (hardcodedFindings.length > 20) {
+    console.warn(`  ... and ${hardcodedFindings.length - 20} more`);
+  }
 }
 
 console.log(

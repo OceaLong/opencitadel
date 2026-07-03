@@ -1,5 +1,6 @@
 import { get } from "./fetch";
 import type { LLMStatusData } from "./types";
+import { translate } from "@/i18n/translate";
 
 export const llmStatusApi = {
   getStatus: (): Promise<LLMStatusData> => get<LLMStatusData>("/llm/status"),
@@ -12,10 +13,10 @@ export function isModelUnavailableStatus(status: LLMStatusData["status"] | undef
 export function modelErrorMessage(code: string | null | undefined): string | null {
   if (!code) return null;
   if (code.startsWith("MODEL_") || code.startsWith("EMBEDDING_")) {
-    return "模型或向量服务暂不可用，请检查模型设置或稍后重试";
+    return translate("errors.modelUnavailable");
   }
   if (code === "TASK_INFRA_FAILED") {
-    return "系统基础设施异常，请稍后重试或联系管理员";
+    return translate("errors.infraFailed");
   }
   return null;
 }

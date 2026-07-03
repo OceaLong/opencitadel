@@ -7,6 +7,7 @@ from app.domain.external.browser import Browser
 from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
+from app.domain.services import vision_service
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.browser import BrowserTool
@@ -39,11 +40,14 @@ class ToolRegistry:
             BrowserTool(browser=browser),
             SearchTool(search_engine=search_engine),
             MessageTool(),
-            VisionTool(sandbox=sandbox, llm=llm),
-            VisionGroundingTool(sandbox=sandbox, llm=llm),
             mcp_tool,
             a2a_tool,
         ]
+        if vision_service.vision_enabled(llm):
+            tools.extend([
+                VisionTool(sandbox=sandbox, llm=llm),
+                VisionGroundingTool(sandbox=sandbox, llm=llm),
+            ])
         if extra_tools:
             tools.extend(extra_tools)
         return tools

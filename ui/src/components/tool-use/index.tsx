@@ -1,6 +1,7 @@
 "use client";
 
 import type { ComponentType } from "react";
+import { useTranslations } from "next-intl";
 
 import type { ToolEvent } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -33,10 +34,19 @@ const TOOL_COMPONENTS: Record<ToolKind, ComponentType<{ label: string; onClick?:
 };
 
 export function ToolUse({ data, onClick }: ToolUseProps) {
+  const t = useTranslations("toolUse");
   const label = getFriendlyToolLabel(data);
   const kind = getToolKind(data);
   const Component = TOOL_COMPONENTS[kind];
   const status = data?.status;
+  const statusLabel =
+    status === "calling"
+      ? t("statusRunning")
+      : status === "called"
+        ? t("statusCalled")
+        : status === "error"
+          ? t("statusError")
+          : status;
   return (
     <div className="inline-flex max-w-full items-center gap-2">
       <Component label={label} onClick={onClick} />
@@ -51,7 +61,7 @@ export function ToolUse({ data, onClick }: ToolUseProps) {
             status === "error" && "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
           )}
         >
-          {status === "calling" ? "running" : status}
+          {statusLabel}
         </span>
       )}
     </div>

@@ -1,4 +1,5 @@
 import type { KnowledgeSourceType } from "@/lib/api/types";
+import { translate } from "@/i18n/translate";
 
 export function parseKbDocHref(value: string): { docId: string; page?: number; chunkId?: string } | null {
   if (!value.startsWith("kbdoc://")) return null;
@@ -42,5 +43,5 @@ export function formatIngestStreamError(data: unknown): string {
     const message = (data as { error?: string }).error;
     if (message) return message;
   }
-  return "知识库索引失败";
+  return translate("knowledge.indexFailed");
 }

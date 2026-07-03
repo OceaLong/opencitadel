@@ -227,8 +227,7 @@ export default function AutomationPage() {
     `${typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/${token}`;
 
   return (
-    <div className="flex h-full min-h-screen flex-col">
-      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-4 py-6">
+    <div className="mx-auto flex h-full max-w-4xl flex-col gap-6 overflow-auto p-6">
         <PageHeader
           bordered={false}
           size="md"
@@ -243,7 +242,7 @@ export default function AutomationPage() {
         />
 
         <Dialog open={webhookCredentials != null} onOpenChange={(open) => !open && setWebhookCredentials(null)}>
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{t("webhookCredentialsTitle")}</DialogTitle>
               <DialogDescription>
@@ -254,7 +253,7 @@ export default function AutomationPage() {
             {webhookCredentials && (
               <div className="space-y-3 text-sm">
                 <div className="space-y-1">
-                  <Label>Webhook URL</Label>
+                  <Label>{t("webhookUrlLabel")}</Label>
                   <div className="flex gap-2">
                     <Input readOnly value={webhookUrl(webhookCredentials.webhookToken)} />
                     <Button
@@ -262,14 +261,14 @@ export default function AutomationPage() {
                       variant="outline"
                       size="icon"
                       aria-label={t("copyWebhookUrlAria")}
-                      onClick={() => void copyText("Webhook URL", webhookUrl(webhookCredentials.webhookToken))}
+                      onClick={() => void copyText(t("webhookUrlLabel"), webhookUrl(webhookCredentials.webhookToken))}
                     >
                       <Copy className="size-4" />
                     </Button>
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <Label>Token</Label>
+                  <Label>{t("tokenLabel")}</Label>
                   <div className="flex gap-2">
                     <Input readOnly value={webhookCredentials.webhookToken} />
                     <Button
@@ -277,14 +276,14 @@ export default function AutomationPage() {
                       variant="outline"
                       size="icon"
                       aria-label={t("copyTokenAria")}
-                      onClick={() => void copyText("Token", webhookCredentials.webhookToken)}
+                      onClick={() => void copyText(t("tokenLabel"), webhookCredentials.webhookToken)}
                     >
                       <Copy className="size-4" />
                     </Button>
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <Label>Secret</Label>
+                  <Label>{t("secretLabel")}</Label>
                   <div className="flex gap-2">
                     <Input readOnly value={webhookCredentials.webhookSecret} />
                     <Button
@@ -292,7 +291,7 @@ export default function AutomationPage() {
                       variant="outline"
                       size="icon"
                       aria-label={t("copySecretAria")}
-                      onClick={() => void copyText("Secret", webhookCredentials.webhookSecret)}
+                      onClick={() => void copyText(t("secretLabel"), webhookCredentials.webhookSecret)}
                     >
                       <Copy className="size-4" />
                     </Button>
@@ -340,8 +339,8 @@ export default function AutomationPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="interval">{t("triggerTypeInterval")}</SelectItem>
-                      <SelectItem value="cron">Cron</SelectItem>
-                      <SelectItem value="webhook">Webhook</SelectItem>
+                      <SelectItem value="cron">{t("triggerTypeCronOption")}</SelectItem>
+                      <SelectItem value="webhook">{t("triggerTypeWebhookOption")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -652,7 +651,6 @@ export default function AutomationPage() {
             ))}
           </div>
         )}
-      </main>
     </div>
   );
 }

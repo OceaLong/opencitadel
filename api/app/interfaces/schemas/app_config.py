@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import List
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +14,9 @@ class ListMCPServerItem(BaseModel):
     enabled: bool = True
     transport: MCPTransport = MCPTransport.STREAMABLE_HTTP
     tools: List[str] = Field(default_factory=list)
+    connection_status: Literal["disabled", "connected", "error", "pending"] = "pending"
+    connection_error: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
 
 
 class ListMCPServerResponse(BaseModel):

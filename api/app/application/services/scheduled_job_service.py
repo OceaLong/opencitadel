@@ -250,7 +250,7 @@ class ScheduledJobService:
             app_config=None,
     ) -> Optional[str]:
         config = get_runtime_config()
-        if not config.feature_flags.enable_scheduled_jobs:
+        if not config.scheduler.enabled:
             return None
 
         sched_cfg = config.scheduler

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { useTranslations } from "next-intl";
 
 import { useSessionEventLog } from "@/hooks/use-session-event-log";
 import { useSessionMeta } from "@/hooks/use-session-meta";
@@ -51,6 +52,7 @@ export function useSessionDetail(
   sessionId: string | null,
   initialSkipEmptyStream?: boolean,
 ): UseSessionDetailResult {
+  const t = useTranslations("sessionDetail");
   const resetStreamsRef = useRef<(() => void) | null>(null);
   const markSessionMissingRef = useRef<(() => void) | null>(null);
   const setErrorRef = useRef<((err: Error | null) => void) | null>(null);
@@ -72,7 +74,7 @@ export function useSessionDetail(
     markSessionMissingRef.current?.();
     resetStreamsRef.current?.();
     resetMetaRef.current?.();
-    setErrorRef.current?.(err instanceof Error ? err : new Error("会话不存在"));
+    setErrorRef.current?.(err instanceof Error ? err : new Error(t("sessionNotFound")));
   });
 
   const {
@@ -112,7 +114,7 @@ export function useSessionDetail(
       markSessionMissingRef.current?.();
       resetStreamsRef.current?.();
       resetMetaRef.current?.();
-      setError(err instanceof Error ? err : new Error("会话不存在"));
+      setError(err instanceof Error ? err : new Error(t("sessionNotFound")));
     },
     applySessionPatch,
     setError,

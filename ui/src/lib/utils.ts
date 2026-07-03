@@ -1,33 +1,38 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
+import { translate } from "@/i18n/translate";
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const WEEK_DAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"] as const;
+const WEEKDAY_KEYS = [
+  "common.dates.weekdaySun",
+  "common.dates.weekdayMon",
+  "common.dates.weekdayTue",
+  "common.dates.weekdayWed",
+  "common.dates.weekdayThu",
+  "common.dates.weekdayFri",
+  "common.dates.weekdaySat",
+] as const;
 
 /**
  * 将日期字符串格式化为相对日期标签
- * - 今天 → "今天"
- * - 昨天 → "昨天"
- * - 本周内 → "周一"..."周六"
- * - 更早 → "MM/DD"
  */
 export function formatRelativeDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return "今天";
+  if (!dateStr) return translate("common.dates.today");
   const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return "今天";
+  if (isNaN(date.getTime())) return translate("common.dates.today");
   const now = new Date();
 
-  // 归一化到当天 0:00
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const diffDays = Math.floor((today.getTime() - target.getTime()) / (1000 * 60 * 60 * 24));
 
-  if (diffDays === 0) return "今天";
-  if (diffDays === 1) return "昨天";
-  if (diffDays < 7) return WEEK_DAYS[date.getDay()];
+  if (diffDays === 0) return translate("common.dates.today");
+  if (diffDays === 1) return translate("common.dates.yesterday");
+  if (diffDays < 7) return translate(WEEKDAY_KEYS[date.getDay()]);
 
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -41,10 +46,8 @@ export function formatRelativeDate(dateStr: string | null | undefined): string {
  */
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return "0 B";
-
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }

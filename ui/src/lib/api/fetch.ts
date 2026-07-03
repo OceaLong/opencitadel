@@ -2,6 +2,7 @@ import type { ApiResponse } from "./types";
 import { dispatchAuthRequired } from "../auth-events";
 import { ACTIVE_WORKSPACE_KEY, LEGACY_ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
 import { readLocalStorageKey } from "@/lib/storage-migration";
+import { translate } from "@/i18n/translate";
 
 /**
  * API 配置
@@ -136,7 +137,7 @@ async function handleErrorResponse(response: Response): Promise<never> {
   } catch {
     errorData = {
       code: response.status,
-      msg: response.statusText || "请求失败",
+      msg: response.statusText || translate("errors.requestFailed"),
       data: null,
     };
   }
@@ -145,7 +146,7 @@ async function handleErrorResponse(response: Response): Promise<never> {
 }
 
 function isRateLimitError(code: number, msg: string): boolean {
-  return code === 429 || msg.includes("请求过于频繁");
+  return code === 429 || msg.includes("请求过于频繁") || msg.includes("Too many requests");
 }
 
 /**
@@ -160,7 +161,7 @@ function fetchWithTimeout(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
-      reject(new ApiError(408, "请求超时"));
+      reject(new ApiError(408, translate("errors.requestTimeout")));
     }, timeout);
 
     fetch(url, {
@@ -174,7 +175,7 @@ function fetchWithTimeout(
       .catch((error) => {
         clearTimeout(timeoutId);
         if (error.name === "AbortError") {
-          reject(new ApiError(408, "请求超时"));
+          reject(new ApiError(408, translate("errors.requestTimeout")));
         } else {
           reject(error);
         }
@@ -264,17 +265,17 @@ export async function request<T = unknown>(
     if (error instanceof ApiError) {
       if (isRateLimitError(error.code, error.msg) && typeof window !== "undefined") {
         const { toast } = await import("sonner");
-        toast.error("请求过于频繁，请稍后再试");
+        toast.error(translate("errors.rateLimit"));
       }
       throw error;
     }
 
     // 处理网络错误
     if (error instanceof TypeError && error.message === "Failed to fetch") {
-      throw new ApiError(500, "网络连接失败，请检查网络设置");
+      throw new ApiError(500, translate("errors.networkFailed"));
     }
 
-    throw new ApiError(500, error instanceof Error ? error.message : "未知错误");
+    throw new ApiError(500, error instanceof Error ? error.message : translate("errors.unknown"));
   }
 }
 
@@ -464,7 +465,7 @@ export async function createSSEStream(
     }
 
     if (!response.body) {
-      throw new ApiError(500, "响应体为空");
+      throw new ApiError(500, translate("errors.emptyBody"));
     }
 
     return response.body;
@@ -477,7 +478,7 @@ export async function createSSEStream(
     if (error instanceof ApiError) {
       throw error;
     }
-    throw new ApiError(500, error instanceof Error ? error.message : "未知错误");
+    throw new ApiError(500, error instanceof Error ? error.message : translate("errors.unknown"));
   }
 }
 
@@ -528,7 +529,7 @@ export async function parseSSEStream(
       return;
     }
     if (onError) {
-      onError(error instanceof Error ? error : new Error("读取流失败"));
+      onError(error instanceof Error ? error : new Error(translate("errors.streamReadFailed")));
     }
   } finally {
     try {

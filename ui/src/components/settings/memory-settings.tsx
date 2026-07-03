@@ -301,7 +301,7 @@ export function MemorySettings({ embedded = false }: Props) {
             </div>
             {form.scope === "session" && (
               <div className="space-y-2">
-                <Label>Session ID</Label>
+                <Label>{t("sessionIdLabel")}</Label>
                 <Input
                   value={form.session_id}
                   onChange={(e) => setForm({ ...form, session_id: e.target.value })}

@@ -212,20 +212,106 @@ class AppConfigService:
     async def get_mcp_servers(self, scope: Optional[OwnerScope] = None) -> List[ListMCPServerItem]:
         if self._mcp_server_service is None:
             raise BadRequestError("MCP 服务未启用")
-        app_config = AppConfig(mcp_config=await self._mcp_server_service.resolve_mcp_config(scope))
-        mcp_client_manager = await MCPConnectionPool.acquire(app_config.mcp_config)
-        tools = mcp_client_manager.tools
         records = await self._mcp_server_service.list_servers(scope=scope)
-        return [
-            ListMCPServerItem(
-                server_name=record.name,
-                server_id=record.id,
-                enabled=record.enabled,
-                transport=record.transport,
-                tools=[tool.name for tool in tools.get(record.name, [])],
+        mcp_config = await self._mcp_server_service.resolve_mcp_config(scope)
+        manager = MCPConnectionPool.try_get_cached(mcp_config)
+        self._refresh_mcp_pool_background(mcp_config)
+
+        tools: Dict[str, List[Any]] = manager.tools if manager else {}
+        connection_errors = manager.connection_errors if manager else {}
+
+        items: List[ListMCPServerItem] = []
+        for record in records:
+            if not record.enabled:
+                status = "disabled"
+                error = None
+            elif record.name in connection_errors:
+                status = "error"
+                error = connection_errors[record.name]
+            elif record.name in tools:
+                status = "connected"
+                error = None
+            elif manager is None:
+                status = "pending"
+                error = None
+            else:
+                status = "error"
+                error = connection_errors.get(record.name, "连接失败")
+            items.append(
+                ListMCPServerItem(
+                    server_name=record.name,
+                    server_id=record.id,
+                    enabled=record.enabled,
+                    transport=record.transport,
+                    tools=[tool.name for tool in tools.get(record.name, [])],
+                    connection_status=status,
+                    connection_error=error,
+                    config={
+                        "transport": record.transport.value,
+                        "enabled": record.enabled,
+                        "description": record.description,
+                        "command": record.command,
+                        "args": record.args,
+                        "url": record.url,
+                        "headers": record.headers,
+                        "env": record.env,
+                    },
+                )
             )
-            for record in records
-        ]
+        return items
+
+    @staticmethod
+    def _refresh_mcp_pool_background(mcp_config: MCPConfig) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(MCPConnectionPool.refresh_in_background(mcp_config))
+
+    async def update_mcp_server(
+        self,
+        server_name: str,
+        mcp_config: MCPConfig,
+        *,
+        scope: Optional[OwnerScope] = None,
+        actor_user_id: Optional[str] = None,
+        is_admin: bool = False,
+    ) -> MCPConfig:
+        if self._mcp_server_service is None:
+            raise BadRequestError("MCP 服务未启用")
+        cfg = mcp_config.mcpServers.get(server_name)
+        if cfg is None:
+            raise BadRequestError(f"MCP 配置中缺少服务[{server_name}]")
+        if not is_admin and cfg.transport == MCPTransport.STDIO:
+            raise ForbiddenError("仅管理员可配置 stdio 类型的 MCP 服务")
+        records = await self._mcp_server_service.list_servers(mask=False, scope=scope)
+        target = next((record for record in records if record.name == server_name), None)
+        if target is None:
+            raise NotFoundError(f"该MCP服务[{server_name}]不存在，请核实后重试")
+        updated = MCPServerRecord(
+            id=target.id,
+            name=server_name,
+            transport=cfg.transport,
+            enabled=cfg.enabled,
+            description=cfg.description,
+            env=cfg.env,
+            command=cfg.command,
+            args=cfg.args,
+            url=cfg.url,
+            headers=cfg.headers,
+            owner_user_id=target.owner_user_id,
+            visibility=target.visibility,
+        )
+        await self._mcp_server_service.update_server(
+            target.id,
+            updated,
+            scope=scope,
+            actor_user_id=actor_user_id,
+            is_admin=is_admin,
+        )
+        self._invalidate_runtime_pools()
+        self._notify_config_invalidate()
+        return await self._mcp_server_service.resolve_mcp_config(scope)
 
     async def update_and_create_mcp_servers(
         self,

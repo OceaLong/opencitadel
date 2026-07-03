@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import type { ChatInputRef } from "@/components/chat-input";
@@ -90,6 +91,8 @@ export function useSessionDetailView({
   mode,
 }: UseSessionDetailViewOptions) {
   const router = useRouter();
+  const t = useTranslations("sessionDetail");
+  const tAuth = useTranslations("auth");
   const { requireAuth } = useRequireAuth();
   const [includeDebug, setIncludeDebug] = useState(false);
   const detail = useSessionDetail(sessionId, hasInitialMessage);
@@ -211,7 +214,7 @@ export function useSessionDetailView({
           }, 100);
         })
         .catch((e) => {
-          toast.error(e instanceof Error ? e.message : "发送消息失败");
+          toast.error(e instanceof Error ? e.message : t("sendMessageFailed"));
         });
     }
   }, [
@@ -231,7 +234,7 @@ export function useSessionDetailView({
 
   const handleSend = useCallback(
     async (message: string, uploadedFiles: FileInfo[]) => {
-      if (!requireAuth("登录后即可发送消息")) return;
+      if (!requireAuth(tAuth("loginToSendMessage"))) return;
       try {
         const attachmentIds = uploadedFiles.map((file) => file.id);
         await sendMessage(message, attachmentIds, {
@@ -241,16 +244,16 @@ export function useSessionDetailView({
           mode,
         });
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "发送失败，请重试");
+        toast.error(e instanceof Error ? e.message : t("sendFailedRetry"));
         throw e;
       }
     },
-    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth],
+    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth, t, tAuth],
   );
 
   const handleClarifyAnswer = useCallback(
     async (answer: string, clarifyAnswers?: ClarifyAnswer[]) => {
-      if (!requireAuth("登录后即可发送消息")) return;
+      if (!requireAuth(tAuth("loginToSendMessage"))) return;
       await sendMessage(answer, [], {
         model_id: sessionModelId,
         skill_id: sessionSkillId,
@@ -259,12 +262,12 @@ export function useSessionDetailView({
         mode,
       });
     },
-    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth],
+    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth, t, tAuth],
   );
 
   const handleGateSend = useCallback(
     async (message: string) => {
-      if (!requireAuth("登录后即可发送消息")) return;
+      if (!requireAuth(tAuth("loginToSendMessage"))) return;
       await sendMessage(message, [], {
         model_id: sessionModelId,
         skill_id: sessionSkillId,
@@ -272,7 +275,7 @@ export function useSessionDetailView({
         mode,
       });
     },
-    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth],
+    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth, t, tAuth],
   );
 
   const handleThinkingChange = useCallback(
@@ -355,12 +358,12 @@ export function useSessionDetailView({
     if (!session) return;
     try {
       await sessionApi.stopSession(sessionId);
-      toast.success("任务已停止");
+      toast.success(t("taskStopped"));
       refresh();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "停止任务失败");
+      toast.error(e instanceof Error ? e.message : t("stopTaskFailed"));
     }
-  }, [session, sessionId, refresh]);
+  }, [session, sessionId, refresh, t]);
 
   const handleDebugOpen = useCallback(() => {
     setIncludeDebug(true);
@@ -381,17 +384,17 @@ export function useSessionDetailView({
         await sessionApi.stopSession(sessionId);
       }
       await sessionApi.restoreCheckpoint(sessionId, pendingCheckpoint.id);
-      toast.success("已回退到指定还原点");
+      toast.success(t("checkpointRestored"));
       setCheckpointDialogOpen(false);
       setPendingCheckpoint(null);
       await refresh();
       await refreshFiles();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "回退失败");
+      toast.error(e instanceof Error ? e.message : t("restoreFailed"));
     } finally {
       setRestoringCheckpoint(false);
     }
-  }, [session, pendingCheckpoint, sessionId, refresh, refreshFiles]);
+  }, [session, pendingCheckpoint, sessionId, refresh, refreshFiles, t]);
 
   const resolveCheckpoint = useCallback(
     (anchorEventId?: string) => {

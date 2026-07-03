@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, Optional
 
 from app.domain.models.app_config import A2AConfig, MCPConfig
 from app.domain.utils.app_config_filter import filter_enabled_a2a_config, filter_enabled_mcp_config
@@ -38,6 +38,27 @@ class MCPConnectionPool:
 
     _entries: Dict[str, _PoolEntry] = {}
     _lock = asyncio.Lock()
+
+    @classmethod
+    def try_get_cached(cls, mcp_config: MCPConfig) -> Optional["MCPClientManager"]:
+        """Return a warm pool manager without connecting."""
+        from app.domain.services.tools.mcp import MCPClientManager
+
+        filtered = filter_enabled_mcp_config(mcp_config)
+        fingerprint = _config_fingerprint(filtered)
+        entry = cls._entries.get(fingerprint)
+        if entry and entry.fingerprint == fingerprint:
+            entry.last_used = time.monotonic()
+            return entry.manager
+        return None
+
+    @classmethod
+    async def refresh_in_background(cls, mcp_config: MCPConfig) -> None:
+        """Connect to MCP servers in the background to warm the tool cache."""
+        try:
+            await cls.acquire(mcp_config)
+        except Exception as exc:
+            logger.warning("Background MCP pool refresh failed: %s", exc)
 
     @classmethod
     async def acquire(cls, mcp_config: MCPConfig) -> "MCPClientManager":

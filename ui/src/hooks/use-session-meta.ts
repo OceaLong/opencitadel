@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { ApiError } from "@/lib/api";
 import { sessionApi } from "@/lib/api/session";
@@ -16,13 +17,20 @@ function isSessionMissingError(err: unknown): boolean {
     return true;
   }
   const msg = err instanceof Error ? err.message : String(err);
-  return msg.includes("会话不存在") || msg.includes("任务会话不存在");
+  return (
+    msg.includes("会话不存在") ||
+    msg.includes("任务会话不存在") ||
+    msg.includes("Session not found") ||
+    msg.includes("Task not found")
+  );
 }
 
 export function useSessionMeta(
   sessionId: string | null,
   onSessionMissing: (err: unknown) => void,
 ) {
+  const t = useTranslations("sessionDetail");
+  const tCommon = useTranslations("common");
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [files, setFiles] = useState<SessionFile[]>([]);
   const [checkpoints, setCheckpoints] = useState<SessionCheckpoint[]>([]);
@@ -73,12 +81,12 @@ export function useSessionMeta(
       if (isSessionMissingError(e)) {
         onSessionMissing(e);
       } else {
-        setError(e instanceof Error ? e : new Error("加载失败"));
+        setError(e instanceof Error ? e : new Error(tCommon("loadFailed")));
       }
     } finally {
       setLoading(false);
     }
-  }, [sessionId, normalizeFileList, onSessionMissing]);
+  }, [sessionId, normalizeFileList, onSessionMissing, tCommon]);
 
   const refreshFiles = useCallback(async () => {
     if (!sessionId) return;
@@ -86,9 +94,9 @@ export function useSessionMeta(
       const fileListRaw = await sessionApi.getSessionFiles(sessionId);
       setFiles(normalizeFileList(fileListRaw));
     } catch {
-      setError(new Error("刷新文件列表失败"));
+      setError(new Error(t("refreshFilesFailed")));
     }
-  }, [sessionId, normalizeFileList]);
+  }, [sessionId, normalizeFileList, t]);
 
   const updateSessionConfig = useCallback(
     async (params: UpdateSessionConfigParams) => {

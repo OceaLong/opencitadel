@@ -50,7 +50,7 @@ async def run_scheduler_loop(
     while not stop.is_set():
         config = get_runtime_config()
         sched_cfg = config.scheduler
-        if not config.feature_flags.enable_scheduled_jobs or not sched_cfg.enabled:
+        if not sched_cfg.enabled:
             await asyncio.sleep(sched_cfg.poll_interval_seconds)
             continue
 

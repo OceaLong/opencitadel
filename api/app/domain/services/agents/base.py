@@ -241,7 +241,7 @@ class BaseAgent(ABC):
                 cleaned = {k: v for k, v in message.items() if not k.startswith("_")}
                 sanitized.append(cleaned)
         inflated = vision_service.inflate_messages_for_llm(sanitized, llm)
-        if strip_images:
+        if strip_images or (llm is not None and not vision_service.vision_enabled(llm)):
             return vision_service.strip_images_for_tool_call(inflated)
         return inflated
 
@@ -435,6 +435,7 @@ class BaseAgent(ABC):
         )
 
         error = "调用语言模型发生错误"
+        stripped_images_for_retry = False
         for _ in range(self._agent_config.max_retries):
             self._last_llm_message = None
             try:
@@ -530,9 +531,14 @@ class BaseAgent(ABC):
             except Exception as e:
                 if isinstance(e, RetryBudgetExceeded):
                     raise RuntimeError(str(e)) from e
-                if is_retriable_llm_error(e):
-                    raise
                 if isinstance(e, ModelUnavailableError):
+                    if not stripped_images_for_retry and await self._strip_images_from_memory():
+                        stripped_images_for_retry = True
+                        logger.warning("多模态请求失败，已从记忆中剥离图片并重试")
+                        await asyncio.sleep(self._retry_interval)
+                        continue
+                    raise
+                if is_retriable_llm_error(e):
                     raise
                 error_msg = _format_agent_error(e)
                 logger.error(
@@ -596,6 +602,16 @@ class BaseAgent(ABC):
             started=started,
         )
         return failed
+
+    async def _strip_images_from_memory(self) -> bool:
+        """Remove image parts from persisted memory after multimodal rejection."""
+        await self._ensure_memory()
+        messages = self._memory.get_messages()
+        if not vision_service.messages_contain_images(messages):
+            return False
+        self._memory.messages = vision_service.strip_image_parts_from_messages(messages)
+        await self._persist_memory()
+        return True
 
     async def _add_to_memory(self, messages: List[Dict[str, Any]], persist: bool = True) -> None:
         """将对应的信息添加到记忆中"""

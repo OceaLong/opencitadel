@@ -244,9 +244,9 @@ export default function AdminUsersPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="admin">admin</SelectItem>
-                    <SelectItem value="user">user</SelectItem>
-                    <SelectItem value="auditor">auditor</SelectItem>
+                    <SelectItem value="admin">{t("roleAdminEnum")}</SelectItem>
+                    <SelectItem value="user">{t("roleUser")}</SelectItem>
+                    <SelectItem value="auditor">{t("roleAuditor")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -260,8 +260,8 @@ export default function AdminUsersPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="active">active</SelectItem>
-                    <SelectItem value="disabled">disabled</SelectItem>
+                    <SelectItem value="active">{t("statusActive")}</SelectItem>
+                    <SelectItem value="disabled">{t("statusDisabled")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

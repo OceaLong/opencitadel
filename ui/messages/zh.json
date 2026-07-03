@@ -40,6 +40,28 @@
     "create": "创建",
     "name": "名称",
     "thinking": "正在思考中...",
+    "dates": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "weekdaySun": "周日",
+      "weekdayMon": "周一",
+      "weekdayTue": "周二",
+      "weekdayWed": "周三",
+      "weekdayThu": "周四",
+      "weekdayFri": "周五",
+      "weekdaySat": "周六"
+    },
+    "relativeTime": {
+      "minutesAgo": "{count}分钟前",
+      "hoursAgo": "{count}小时前",
+      "daysAgo": "{count}天前",
+      "weeksAgo": "{count}周前"
+    },
+    "contextStep": "步骤：{description}",
+    "contextSubtask": "子任务：{goal}",
+    "contextTool": "工具：{name}",
+    "enabled": "启用",
+    "disabledState": "禁用",
     "deleteFailed": "删除失败",
     "deleted": "已删除",
     "edit": "编辑",
@@ -50,6 +72,27 @@
     "previousPage": "上一页",
     "saveFailed": "保存失败",
     "session": "会话"
+  },
+  "errors": {
+    "requestFailed": "请求失败",
+    "requestTimeout": "请求超时",
+    "rateLimit": "请求过于频繁，请稍后再试",
+    "networkFailed": "网络连接失败，请检查网络设置",
+    "unknown": "未知错误",
+    "emptyBody": "响应体为空",
+    "streamReadFailed": "读取流失败",
+    "modelUnavailable": "模型或向量服务暂不可用，请检查模型设置或稍后重试",
+    "infraFailed": "系统基础设施异常，请稍后重试或联系管理员",
+    "saveFailed": "保存失败",
+    "updateFailed": "更新失败",
+    "addFailed": "添加失败",
+    "deleteFailed": "删除失败",
+    "operationFailedRetry": "操作失败，请重试",
+    "deleteFailedRetry": "删除失败，请重试",
+    "jsonInvalid": "JSON 格式错误，请检查配置",
+    "probeFailed": "探测失败",
+    "pageLoadError": "页面加载失败",
+    "unknownError": "发生了未知错误，请重试或返回首页。"
   },
   "language": {
     "title": "语言",
@@ -88,6 +131,8 @@
     "loginToMarketplace": "登录后即可使用 AI 智能启动",
     "loginToDocQa": "登录后即可使用 AI 文档问答",
     "loginToTranslate": "登录后即可使用 AI 翻译",
+    "loginToUseAi": "登录后即可使用 AI 功能",
+    "loginToSendMessage": "登录后即可发送消息",
     "loginToConsumption": "登录后即可使用消耗量计算器",
     "loginToNutrition": "登录后即可使用营养分析"
   },
@@ -98,12 +143,22 @@
     "createSessionFailed": "创建会话失败",
     "codebaseTitle": "代码知识库",
     "codebaseDescription": "上传代码库，生成架构图与调用链，Ask 问答 / Agent 改码",
+    "suggestedQuestions": {
+      "q1": "帮我分析2026年AI Agent的最新发展趋势",
+      "q2": "用Python实现一个基于RAG的智能知识库系统",
+      "q3": "对比GPT-5、Claude 4和Gemini Ultra的技术特点",
+      "q4": "如何构建企业级多Agent协作平台？"
+    },
     "createFailed": "创建会话失败",
     "loginRequired": "登录后即可创建新任务",
     "manageCodebase": "管理代码知识库",
     "manageKnowledge": "管理文档知识库",
     "noModel": "请先配置模型",
     "title": "OpenCitadel"
+  },
+  "sessionMode": {
+    "ask": "Ask",
+    "agent": "Agent"
   },
   "chatHeader": {
     "backHome": "返回首页",
@@ -203,6 +258,16 @@
     "resync": "重新同步",
     "loadEarlier": "加载更早对话",
     "emptyTimeline": "暂无对话记录，在下方输入任务或提问",
+    "sendMessageFailed": "发送消息失败",
+    "sendFailedRetry": "发送失败，请重试",
+    "taskStopped": "任务已停止",
+    "stopTaskFailed": "停止任务失败",
+    "checkpointRestored": "已回退到指定还原点",
+    "restoreFailed": "回退失败",
+    "sessionNotFound": "会话不存在",
+    "refreshFilesFailed": "刷新文件列表失败",
+    "streamResponseError": "流式响应异常",
+    "waitForInput": "等待你的输入或确认。",
     "operator": {
       "awaitingHuman": "等待人工",
       "domainsLabel": "域名：{domains}",
@@ -245,7 +310,11 @@
     "title": "调试事件",
     "button": "调试",
     "description": "内部 planner 输出、reasoning 与 tool args，不会显示在普通聊天气泡中。",
-    "empty": "暂无调试事件。打开后会请求 debug 事件，新的 planner、reasoning 与 tool args 会显示在这里。"
+    "empty": "暂无调试事件。打开后会请求 debug 事件，新的 planner、reasoning 与 tool args 会显示在这里。",
+    "typePlanner": "Planner",
+    "typeReasoning": "Reasoning",
+    "typeToolArgs": "Tool Args",
+    "typeDebug": "Debug"
   },
   "planPanel": {
     "noSteps": "暂无步骤",
@@ -311,7 +380,6 @@
     "skills": "Skill 模板",
     "memory": "长期记忆",
     "integrations": "协议集成",
-    "runtime": "运行时配置",
     "a2a": "A2A Agent 配置",
     "mcp": "MCP 服务器",
     "language": "语言",
@@ -331,10 +399,83 @@
     "addServer": "添加服务器",
     "addMcpServer": "添加新的 MCP 服务器",
     "mcpAddDescription": "OpenCitadel 使用标准的 JSON MCP 配置来创建新服务器。请将您的配置粘贴到下方，然后点击「添加」即可添加新服务器。",
-    "mcpAddDescriptionNonAdmin": "请粘贴远程 MCP 配置（SSE 或 streamable_http）。stdio 类型服务器仅管理员可配置。",
+    "mcpAddDescriptionNonAdmin": "OpenCitadel 使用标准的 JSON MCP 配置来创建新服务器。请将您的配置粘贴到下方，然后点击「添加」即可添加新服务器。（可能需要管理员审批。）",
+    "a2aUrlPlaceholder": "示例：https://opencitadel.example/weather-agent",
+    "toastLoadAgentConfigFailed": "获取基础配置失败",
+    "toastLoadMcpFailed": "获取 MCP 服务器列表失败",
+    "toastLoadA2aFailed": "获取 A2A 服务器列表失败",
+    "toastAgentConfigSaved": "通用配置保存成功",
+    "toastServerToggled": "{name} 已{state}",
+    "toastMcpDeleted": "已删除 MCP 服务器「{name}」",
+    "toastMcpUpdated": "MCP 服务器更新成功",
+    "toastMcpAdded": "MCP 服务器添加成功",
+    "toastA2aDeleted": "已删除 A2A Agent「{name}」",
+    "toastA2aAdded": "远程 Agent 添加成功",
     "a2aAddDescription": "OpenCitadel 使用标准的 A2A 协议来连接远程 Agent。请将您的配置粘贴到下方，然后点击「添加」即可添加 Agent。",
     "enterMcpConfig": "请输入 MCP 服务器配置",
-    "noMcpServers": "暂无 MCP 服务器，请点击上方按钮添加"
+    "noMcpServers": "暂无 MCP 服务器，请点击上方按钮添加",
+    "editMcpServer": "编辑 MCP 服务器",
+    "editMcpServerDesc": "更新此 MCP 服务器的 JSON 配置。",
+    "mcpStatusConnected": "已连接",
+    "mcpStatusError": "不可达",
+    "mcpStatusPending": "检测中"
+  },
+  "settingsRuntime": {
+    "loadFailed": "加载配置失败",
+    "saveSuccess": "配置已保存并热生效",
+    "saveFailed": "保存失败",
+    "rollbackSuccess": "已回滚配置",
+    "rollbackFailed": "回滚失败",
+    "recentRevisions": "最近版本",
+    "rollback": "回滚",
+    "revisionUpdateDefault": "更新",
+    "corsOriginsReadonlyHint": "CORS 来源修改后需重启 API 进程才能生效，其余 server 字段可热更新。",
+    "sections": {
+      "feature_flags": "功能开关",
+      "scheduler": "定时任务",
+      "server": "服务"
+    },
+    "fields": {
+      "feature_flags": {
+        "enable_agent_features": "Agent 功能",
+        "enable_marketplace_llm_apps": "市场 LLM 应用",
+        "enable_embeddings": "嵌入/向量总开关",
+        "enable_parallel_step_execution": "并行步骤执行",
+        "enable_artifacts": "交付物",
+        "enable_hitl_gates": "人工审批总开关"
+      },
+      "scheduler": {
+        "enabled": "启用定时任务调度",
+        "poll_interval_seconds": "轮询间隔（秒）",
+        "max_concurrent_jobs": "最大并发任务数",
+        "max_concurrent_jobs_per_job": "单任务最大并发执行数",
+        "leader_lease_seconds": "Leader 租约（秒）",
+        "webhook_idempotency_ttl_seconds": "Webhook 幂等 TTL（秒）"
+      },
+      "server": {
+        "cors_origins": "CORS 来源",
+        "rate_limit_enabled": "启用速率限制",
+        "rate_limit_per_minute": "每分钟请求上限",
+        "sessions_stream_interval_seconds": "会话流推送间隔（秒）",
+        "marketplace_max_upload_bytes": "市场上传大小上限（字节）"
+      }
+    },
+    "descriptions": {
+      "feature_flags": {
+        "enable_agent_features": "控制 A2A 入站 API 及相关 Agent 集成。",
+        "enable_marketplace_llm_apps": "启用市场 LLM 应用的展示与使用。",
+        "enable_embeddings": "嵌入/向量能力的全局总开关；记忆与知识库的向量开关为子层配置。",
+        "enable_parallel_step_execution": "允许 Planner 并行执行互不依赖的步骤。",
+        "enable_artifacts": "启用 artifact_write / artifact_finalize 交付物工具。",
+        "enable_hitl_gates": "人工审批（HITL）的全局总开关；详细 gate 配置仍在 hitl 段。"
+      },
+      "scheduler": {
+        "enabled": "开启或关闭后台定时任务调度循环。"
+      },
+      "server": {
+        "cors_origins": "此处只读。如需修改请编辑 config.yaml/环境变量并重启 API。"
+      }
+    }
   },
   "settingsModels": {
     "description": "全局新增多 Provider 模型，会话级可选择使用",
@@ -348,6 +489,21 @@
     "testMultimodal": "测试多模态",
     "noModels": "暂无模型，请先新增",
     "displayName": "显示名称",
+    "provider": "Provider",
+    "baseUrl": "Base URL",
+    "apiKey": "API Key",
+    "modelName": "Model Name",
+    "temperature": "Temperature",
+    "maxTokens": "Max Tokens",
+    "fillRequiredFields": "请填写显示名称、模型名和 Base URL",
+    "apiKeyRequired": "新建模型时必须填写 API Key",
+    "modelUpdated": "模型已更新",
+    "modelCreated": "模型已创建",
+    "deleted": "已删除",
+    "setDefaultSuccess": "已设为默认",
+    "operationFailed": "操作失败",
+    "multimodalProbeSuccess": "多模态探测成功",
+    "multimodalProbeDone": "多模态探测完成",
     "apiKeyLeaveBlank": "API Key (留空不更新)",
     "supportsMultimodal": "支持多模态理解",
     "supportsMultimodalDesc": "开启后可将用户图片与浏览器截图直接传给模型",
@@ -361,6 +517,8 @@
     "editSkill": "编辑 Skill",
     "noSkills": "暂无 Skill",
     "name": "名称",
+    "slug": "Slug",
+    "systemPrompt": "System Prompt",
     "icon": "图标",
     "descriptionLabel": "描述",
     "toolWhitelist": "工具白名单（逗号分隔，空=不过滤）",
@@ -395,6 +553,7 @@
     "tags": "标签（逗号分隔）",
     "scope": "作用域",
     "sessionIdPlaceholder": "目标会话 UUID",
+    "sessionIdLabel": "Session ID",
     "sessionScopeRequired": "会话作用域必须填写 session_id",
     "memoryUpdated": "记忆已更新",
     "memoryCreated": "记忆已创建"
@@ -555,6 +714,11 @@
     "userUpdated": "用户已更新",
     "usersSubtitle": "管理平台用户、角色与配额",
     "usersTitle": "用户管理",
+    "roleAdminEnum": "admin",
+    "roleUser": "user",
+    "roleAuditor": "auditor",
+    "statusActive": "active",
+    "statusDisabled": "disabled",
     "timeRange7d": "近 7 天",
     "timeRange30d": "近 30 天",
     "timeRange90d": "近 90 天",
@@ -1223,6 +1387,8 @@
       "description": "上传 zip、Git 仓库或多文件，系统将自动分析并建立专属代码知识库",
       "namePlaceholder": "我的项目",
       "tabFiles": "文件",
+      "tabZip": "Zip",
+      "tabGit": "Git",
       "zipUploaded": "已上传，点击更换",
       "selectZip": "选择 zip 压缩包",
       "zipUploadSuccess": "压缩包上传成功",
@@ -1250,6 +1416,58 @@
   },
   "mermaid": {
     "renderFailed": "Mermaid 渲染失败"
+  },
+  "toolUse": {
+    "statusRunning": "running",
+    "statusCalled": "called",
+    "statusError": "error",
+    "shellFallback": "shell",
+    "readingFile": "正在读取文件",
+    "readingFileWithPath": "正在读取文件 {path}",
+    "writingFile": "正在写入文件",
+    "writingFileWithPath": "正在写入文件 {path}",
+    "replacingFile": "正在替换文件内容",
+    "replacingFileWithPath": "正在替换文件内容 {path}",
+    "searchingInFile": "正在在文件中搜索",
+    "searchingInFileWithPath": "正在在文件中搜索 {path}",
+    "findingFiles": "正在查找文件",
+    "findingFilesWithPath": "正在查找文件 {path}",
+    "listingDir": "正在列出目录",
+    "listingDirWithPath": "正在列出目录 {path}",
+    "accessingFile": "正在访问文件",
+    "accessingFileWithPath": "正在访问文件 {path}",
+    "accessingDirWithPath": "正在访问目录 {path}",
+    "browserView": "正在查看当前页面",
+    "browserNavigate": "正在打开页面",
+    "browserNavigateWithUrl": "正在打开页面 {url}",
+    "browserRestart": "正在重启浏览器",
+    "browserRestartWithUrl": "正在重启浏览器并打开 {url}",
+    "browserClick": "正在点击页面元素",
+    "browserInput": "正在输入内容",
+    "browserMoveMouse": "正在移动鼠标",
+    "browserPressKey": "正在按键",
+    "browserPressKeyWithKey": "正在按键 {key}",
+    "browserSelectOption": "正在选择下拉选项",
+    "browserScrollUp": "正在向上滚动页面",
+    "browserScrollDown": "正在向下滚动页面",
+    "browserConsoleExec": "正在执行控制台脚本",
+    "browserConsoleView": "正在查看控制台输出",
+    "browserDefault": "正在使用浏览器访问页面",
+    "browserDefaultWithUrl": "正在打开页面 {url}",
+    "searching": "正在搜索",
+    "searchingWithQuery": "正在搜索 {query}",
+    "runningCommand": "正在执行命令",
+    "runningCommandWithCmd": "正在执行命令 {cmd}",
+    "shellReadOutput": "正在查看命令输出",
+    "shellWait": "正在等待命令完成",
+    "shellWriteInput": "正在向命令输入内容",
+    "shellKillProcess": "正在终止进程",
+    "a2aListAgents": "正在获取远程 Agent 列表",
+    "a2aCallAgent": "正在调用远程 Agent",
+    "a2aCallAgentWithQuery": "正在调用远程 Agent：{query}",
+    "a2aDefault": "正在调用 Agent",
+    "mcpAction": "正在通过 MCP 服务执行操作",
+    "defaultAction": "正在执行操作"
   },
   "artifactWorkbench": {
     "empty": "暂无交付物",
@@ -1331,7 +1549,12 @@
     "promptHelp": "Webhook 可使用 {{payload.key}} 引用 JSON 字段",
     "cronHelp": "Cron：HH:MM 或 minute hour * * *（如 0 9 * * *）",
     "webhookCredentialsDescription": "请立即保存这些凭据，密钥仅显示一次。请使用以下方式签名请求：",
-    "webhookCredentialsTitle": "Webhook 凭据"
+    "webhookCredentialsTitle": "Webhook 凭据",
+    "webhookUrlLabel": "Webhook URL",
+    "tokenLabel": "Token",
+    "secretLabel": "Secret",
+    "triggerTypeCronOption": "Cron",
+    "triggerTypeWebhookOption": "Webhook"
   },
   "contextSelector": {
     "clear": "清除上下文",
@@ -1343,10 +1566,6 @@
     "noKnowledge": "暂无可用知识库",
     "none": "无上下文",
     "title": "会话上下文"
-  },
-  "errors": {
-    "pageLoadError": "页面加载失败",
-    "unknownError": "发生了未知错误，请重试或返回首页。"
   },
   "gateActions": {
     "approve": "批准",

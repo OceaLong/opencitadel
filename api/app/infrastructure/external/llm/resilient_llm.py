@@ -19,6 +19,11 @@ from app.domain.utils.llm_retry import (
     is_retriable_llm_error,
 )
 from app.infrastructure.external.llm.circuit_breaker import get_llm_circuit_breaker
+from app.infrastructure.external.llm.base_llm import (
+    _has_multimodal_image_content,
+    _strip_multimodal_to_text,
+    is_retriable_multimodal_error,
+)
 from app.infrastructure.external.llm.factory import LLMFactory
 from app.infrastructure.observability.llm_metrics import record_llm_resilience_event
 
@@ -168,6 +173,8 @@ class ResilientLLMClient:
                 )
                 continue
             attempts = 0
+            stripped_for_multimodal = False
+            request_messages = messages
             while attempts < cfg.max_attempts_per_call and time.monotonic() < deadline:
                 attempts += 1
                 client = self._client_for(candidate)
@@ -175,7 +182,7 @@ class ResilientLLMClient:
                     if retry_budget is not None:
                         retry_budget.consume("resilient_stream_invoke")
                     async for chunk in client.stream_invoke(
-                        messages,
+                        request_messages,
                         tools,
                         response_format,
                         tool_choice,
@@ -191,6 +198,16 @@ class ResilientLLMClient:
                     if self._streaming_started:
                         code = classify_llm_error_code(exc)
                         raise ModelUnavailableError(str(exc), error_code=code) from exc
+                    if (
+                            not stripped_for_multimodal
+                            and _has_multimodal_image_content(messages)
+                            and is_retriable_multimodal_error(exc)
+                    ):
+                        stripped_for_multimodal = True
+                        request_messages = _strip_multimodal_to_text(messages)
+                        logger.warning("多模态流式请求失败，降级为文本后重试: error=%s", exc)
+                        attempts -= 1
+                        continue
                     await self._breaker.record_failure(candidate.id, exc)
                     if not is_retriable_llm_error(exc):
                         raise ModelUnavailableError(str(exc), error_code=classify_llm_error_code(exc)) from exc

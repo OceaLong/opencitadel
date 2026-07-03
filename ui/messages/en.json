@@ -40,6 +40,28 @@
     "create": "Create",
     "name": "Name",
     "thinking": "Thinking...",
+    "dates": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "weekdaySun": "Sun",
+      "weekdayMon": "Mon",
+      "weekdayTue": "Tue",
+      "weekdayWed": "Wed",
+      "weekdayThu": "Thu",
+      "weekdayFri": "Fri",
+      "weekdaySat": "Sat"
+    },
+    "relativeTime": {
+      "minutesAgo": "{count} min ago",
+      "hoursAgo": "{count} hr ago",
+      "daysAgo": "{count} days ago",
+      "weeksAgo": "{count} wk ago"
+    },
+    "contextStep": "Step: {description}",
+    "contextSubtask": "Subtask: {goal}",
+    "contextTool": "Tool: {name}",
+    "enabled": "enabled",
+    "disabledState": "disabled",
     "deleteFailed": "Delete failed",
     "deleted": "Deleted",
     "edit": "Edit",
@@ -50,6 +72,27 @@
     "previousPage": "Previous",
     "saveFailed": "Save failed",
     "session": "Session"
+  },
+  "errors": {
+    "requestFailed": "Request failed",
+    "requestTimeout": "Request timed out",
+    "rateLimit": "Too many requests. Please try again later.",
+    "networkFailed": "Network error. Check your connection.",
+    "unknown": "Unknown error",
+    "emptyBody": "Empty response body",
+    "streamReadFailed": "Failed to read stream",
+    "modelUnavailable": "Model or embedding service is unavailable. Check model settings or try again later.",
+    "infraFailed": "System infrastructure error. Try again later or contact an administrator.",
+    "saveFailed": "Save failed",
+    "updateFailed": "Update failed",
+    "addFailed": "Add failed",
+    "deleteFailed": "Delete failed",
+    "operationFailedRetry": "Operation failed. Please try again.",
+    "deleteFailedRetry": "Delete failed. Please try again.",
+    "jsonInvalid": "Invalid JSON. Check your configuration.",
+    "probeFailed": "Probe failed",
+    "pageLoadError": "Page failed to load",
+    "unknownError": "An unknown error occurred. Please retry or return home."
   },
   "language": {
     "title": "Language",
@@ -88,6 +131,8 @@
     "loginToMarketplace": "Sign in to use AI smart launch",
     "loginToDocQa": "Sign in to use AI document Q&A",
     "loginToTranslate": "Sign in to use AI translation",
+    "loginToUseAi": "Sign in to use AI features",
+    "loginToSendMessage": "Sign in to send messages",
     "loginToConsumption": "Sign in to use consumption calculator",
     "loginToNutrition": "Sign in to use nutrition analysis"
   },
@@ -98,12 +143,22 @@
     "createSessionFailed": "Failed to create session",
     "codebaseTitle": "Code knowledge base",
     "codebaseDescription": "Upload a codebase, generate architecture diagrams and call chains, Ask Q&A / Agent code edits",
+    "suggestedQuestions": {
+      "q1": "Analyze the latest AI Agent trends in 2026",
+      "q2": "Build a RAG-based knowledge base system in Python",
+      "q3": "Compare GPT-5, Claude 4, and Gemini Ultra",
+      "q4": "How to build an enterprise multi-agent collaboration platform?"
+    },
     "createFailed": "Failed to create session",
     "loginRequired": "Sign in to create a new task",
     "manageCodebase": "Manage code knowledge base",
     "manageKnowledge": "Manage document knowledge base",
     "noModel": "Please configure a model first",
     "title": "OpenCitadel"
+  },
+  "sessionMode": {
+    "ask": "Ask",
+    "agent": "Agent"
   },
   "chatHeader": {
     "backHome": "Back to home",
@@ -203,6 +258,16 @@
     "resync": "Resync",
     "loadEarlier": "Load earlier messages",
     "emptyTimeline": "No conversation yet. Enter a task or question below.",
+    "sendMessageFailed": "Failed to send message",
+    "sendFailedRetry": "Send failed. Please try again.",
+    "taskStopped": "Task stopped",
+    "stopTaskFailed": "Failed to stop task",
+    "checkpointRestored": "Restored to checkpoint",
+    "restoreFailed": "Restore failed",
+    "sessionNotFound": "Session not found",
+    "refreshFilesFailed": "Failed to refresh file list",
+    "streamResponseError": "Streaming response error",
+    "waitForInput": "Waiting for your input or confirmation.",
     "operator": {
       "awaitingHuman": "Awaiting human",
       "domainsLabel": "Domains: {domains}",
@@ -245,7 +310,11 @@
     "title": "Debug events",
     "button": "Debug",
     "description": "Internal planner output, reasoning, and tool args — not shown in regular chat bubbles.",
-    "empty": "No debug events yet. Opening this panel requests debug events; new planner, reasoning, and tool args will appear here."
+    "empty": "No debug events yet. Opening this panel requests debug events; new planner, reasoning, and tool args will appear here.",
+    "typePlanner": "Planner",
+    "typeReasoning": "Reasoning",
+    "typeToolArgs": "Tool Args",
+    "typeDebug": "Debug"
   },
   "planPanel": {
     "noSteps": "No steps yet",
@@ -311,7 +380,6 @@
     "skills": "Skill templates",
     "memory": "Long-term memory",
     "integrations": "Integrations",
-    "runtime": "Runtime Config",
     "a2a": "A2A Agent",
     "mcp": "MCP servers",
     "language": "Language",
@@ -331,10 +399,83 @@
     "addServer": "Add server",
     "addMcpServer": "Add new MCP server",
     "mcpAddDescription": "OpenCitadel uses standard JSON MCP configuration. Paste your config below and click Add.",
-    "mcpAddDescriptionNonAdmin": "Paste a remote MCP config (SSE or streamable_http). stdio servers require an administrator.",
+    "mcpAddDescriptionNonAdmin": "OpenCitadel uses standard JSON MCP configuration. Paste your config below and click Add. (Admin approval may be required.)",
+    "a2aUrlPlaceholder": "Example: https://opencitadel.example/weather-agent",
+    "toastLoadAgentConfigFailed": "Failed to load agent settings",
+    "toastLoadMcpFailed": "Failed to load MCP servers",
+    "toastLoadA2aFailed": "Failed to load A2A agents",
+    "toastAgentConfigSaved": "General settings saved",
+    "toastServerToggled": "{name} {state}",
+    "toastMcpDeleted": "MCP server \"{name}\" deleted",
+    "toastMcpUpdated": "MCP server updated",
+    "toastMcpAdded": "MCP server added",
+    "toastA2aDeleted": "A2A agent \"{name}\" deleted",
+    "toastA2aAdded": "Remote agent added",
     "a2aAddDescription": "OpenCitadel uses the standard A2A protocol to connect remote agents. Paste your config below and click Add.",
     "enterMcpConfig": "Please enter MCP server configuration",
-    "noMcpServers": "No MCP servers yet. Click above to add one."
+    "noMcpServers": "No MCP servers yet. Click above to add one.",
+    "editMcpServer": "Edit MCP server",
+    "editMcpServerDesc": "Update the JSON configuration for this MCP server.",
+    "mcpStatusConnected": "Connected",
+    "mcpStatusError": "Unreachable",
+    "mcpStatusPending": "Checking"
+  },
+  "settingsRuntime": {
+    "loadFailed": "Failed to load configuration",
+    "saveSuccess": "Configuration saved and applied",
+    "saveFailed": "Failed to save configuration",
+    "rollbackSuccess": "Configuration rolled back",
+    "rollbackFailed": "Failed to roll back configuration",
+    "recentRevisions": "Recent revisions",
+    "rollback": "Rollback",
+    "revisionUpdateDefault": "update",
+    "corsOriginsReadonlyHint": "CORS origins require an API restart to take effect. Other server fields hot-reload.",
+    "sections": {
+      "feature_flags": "Feature flags",
+      "scheduler": "Scheduler",
+      "server": "Server"
+    },
+    "fields": {
+      "feature_flags": {
+        "enable_agent_features": "Agent features",
+        "enable_marketplace_llm_apps": "Marketplace LLM apps",
+        "enable_embeddings": "Embeddings master switch",
+        "enable_parallel_step_execution": "Parallel step execution",
+        "enable_artifacts": "Artifacts",
+        "enable_hitl_gates": "HITL gates master switch"
+      },
+      "scheduler": {
+        "enabled": "Scheduler enabled",
+        "poll_interval_seconds": "Poll interval (seconds)",
+        "max_concurrent_jobs": "Max concurrent jobs",
+        "max_concurrent_jobs_per_job": "Max concurrent runs per job",
+        "leader_lease_seconds": "Leader lease (seconds)",
+        "webhook_idempotency_ttl_seconds": "Webhook idempotency TTL (seconds)"
+      },
+      "server": {
+        "cors_origins": "CORS origins",
+        "rate_limit_enabled": "Rate limit enabled",
+        "rate_limit_per_minute": "Rate limit per minute",
+        "sessions_stream_interval_seconds": "Session stream interval (seconds)",
+        "marketplace_max_upload_bytes": "Marketplace max upload (bytes)"
+      }
+    },
+    "descriptions": {
+      "feature_flags": {
+        "enable_agent_features": "Controls A2A inbound APIs and related agent integrations.",
+        "enable_marketplace_llm_apps": "Show and use marketplace LLM applications.",
+        "enable_embeddings": "Global master switch for embedding/vector features. Memory and knowledge-base vector toggles are sub-layers.",
+        "enable_parallel_step_execution": "Allow planner to execute independent steps in parallel.",
+        "enable_artifacts": "Enable artifact_write / artifact_finalize delivery tools.",
+        "enable_hitl_gates": "Global kill switch for human-in-the-loop gates. Detailed gate profiles remain in hitl config."
+      },
+      "scheduler": {
+        "enabled": "Turn the background scheduler loop on or off."
+      },
+      "server": {
+        "cors_origins": "Read-only here. Edit config.yaml or env and restart API to change."
+      }
+    }
   },
   "settingsModels": {
     "description": "Add models from multiple providers globally; sessions can choose which to use",
@@ -348,6 +489,21 @@
     "testMultimodal": "Test multimodal",
     "noModels": "No models yet. Add one to get started.",
     "displayName": "Display name",
+    "provider": "Provider",
+    "baseUrl": "Base URL",
+    "apiKey": "API Key",
+    "modelName": "Model Name",
+    "temperature": "Temperature",
+    "maxTokens": "Max Tokens",
+    "fillRequiredFields": "Please fill in display name, model name, and Base URL",
+    "apiKeyRequired": "API Key is required when creating a model",
+    "modelUpdated": "Model updated",
+    "modelCreated": "Model created",
+    "deleted": "Deleted",
+    "setDefaultSuccess": "Set as default",
+    "operationFailed": "Operation failed",
+    "multimodalProbeSuccess": "Multimodal probe succeeded",
+    "multimodalProbeDone": "Multimodal probe completed",
     "apiKeyLeaveBlank": "API Key (leave blank to keep unchanged)",
     "supportsMultimodal": "Supports multimodal understanding",
     "supportsMultimodalDesc": "When enabled, user images and browser screenshots can be sent directly to the model",
@@ -361,6 +517,8 @@
     "editSkill": "Edit Skill",
     "noSkills": "No Skills yet",
     "name": "Name",
+    "slug": "Slug",
+    "systemPrompt": "System Prompt",
     "icon": "Icon",
     "descriptionLabel": "Description",
     "toolWhitelist": "Tool allowlist (comma-separated, empty = no filter)",
@@ -395,6 +553,7 @@
     "tags": "Tags (comma-separated)",
     "scope": "Scope",
     "sessionIdPlaceholder": "Target session UUID",
+    "sessionIdLabel": "Session ID",
     "sessionScopeRequired": "Session scope requires session_id",
     "memoryUpdated": "Memory updated",
     "memoryCreated": "Memory created"
@@ -555,6 +714,11 @@
     "userUpdated": "User updated",
     "usersSubtitle": "Manage platform users, roles, and quotas",
     "usersTitle": "User management",
+    "roleAdminEnum": "admin",
+    "roleUser": "user",
+    "roleAuditor": "auditor",
+    "statusActive": "active",
+    "statusDisabled": "disabled",
     "timeRange7d": "Last 7 days",
     "timeRange30d": "Last 30 days",
     "timeRange90d": "Last 90 days",
@@ -1223,6 +1387,8 @@
       "description": "Upload a zip, Git repository, or multiple files — the system will analyze and build a dedicated code knowledge base",
       "namePlaceholder": "My project",
       "tabFiles": "Files",
+      "tabZip": "Zip",
+      "tabGit": "Git",
       "zipUploaded": "Uploaded — click to replace",
       "selectZip": "Select zip archive",
       "zipUploadSuccess": "Archive uploaded successfully",
@@ -1250,6 +1416,58 @@
   },
   "mermaid": {
     "renderFailed": "Mermaid render failed"
+  },
+  "toolUse": {
+    "statusRunning": "running",
+    "statusCalled": "called",
+    "statusError": "error",
+    "shellFallback": "shell",
+    "readingFile": "Reading file",
+    "readingFileWithPath": "Reading file {path}",
+    "writingFile": "Writing file",
+    "writingFileWithPath": "Writing file {path}",
+    "replacingFile": "Replacing in file",
+    "replacingFileWithPath": "Replacing in file {path}",
+    "searchingInFile": "Searching in file",
+    "searchingInFileWithPath": "Searching in file {path}",
+    "findingFiles": "Finding files",
+    "findingFilesWithPath": "Finding files {path}",
+    "listingDir": "Listing directory",
+    "listingDirWithPath": "Listing directory {path}",
+    "accessingFile": "Accessing file",
+    "accessingFileWithPath": "Accessing file {path}",
+    "accessingDirWithPath": "Accessing directory {path}",
+    "browserView": "Viewing current page",
+    "browserNavigate": "Opening page",
+    "browserNavigateWithUrl": "Opening page {url}",
+    "browserRestart": "Restarting browser",
+    "browserRestartWithUrl": "Restarting browser at {url}",
+    "browserClick": "Clicking element",
+    "browserInput": "Entering text",
+    "browserMoveMouse": "Moving mouse",
+    "browserPressKey": "Pressing key",
+    "browserPressKeyWithKey": "Pressing key {key}",
+    "browserSelectOption": "Selecting option",
+    "browserScrollUp": "Scrolling up",
+    "browserScrollDown": "Scrolling down",
+    "browserConsoleExec": "Running console script",
+    "browserConsoleView": "Viewing console output",
+    "browserDefault": "Using browser",
+    "browserDefaultWithUrl": "Opening page {url}",
+    "searching": "Searching",
+    "searchingWithQuery": "Searching {query}",
+    "runningCommand": "Running command",
+    "runningCommandWithCmd": "Running command {cmd}",
+    "shellReadOutput": "Reading command output",
+    "shellWait": "Waiting for command",
+    "shellWriteInput": "Sending input to command",
+    "shellKillProcess": "Killing process",
+    "a2aListAgents": "Fetching remote agents",
+    "a2aCallAgent": "Calling remote agent",
+    "a2aCallAgentWithQuery": "Calling remote agent: {query}",
+    "a2aDefault": "Calling agent",
+    "mcpAction": "Running MCP action",
+    "defaultAction": "Running action"
   },
   "artifactWorkbench": {
     "empty": "No artifacts yet",
@@ -1331,7 +1549,12 @@
     "promptHelp": "Use {{payload.key}} for webhook JSON fields",
     "cronHelp": "Cron: HH:MM or minute hour * * * (e.g. 0 9 * * *)",
     "webhookCredentialsDescription": "Save these credentials now. The secret is shown only once. Sign requests with",
-    "webhookCredentialsTitle": "Webhook credentials"
+    "webhookCredentialsTitle": "Webhook credentials",
+    "webhookUrlLabel": "Webhook URL",
+    "tokenLabel": "Token",
+    "secretLabel": "Secret",
+    "triggerTypeCronOption": "Cron",
+    "triggerTypeWebhookOption": "Webhook"
   },
   "contextSelector": {
     "clear": "Clear context",
@@ -1343,10 +1566,6 @@
     "noKnowledge": "No ready knowledge bases",
     "none": "No context",
     "title": "Session context"
-  },
-  "errors": {
-    "pageLoadError": "Page failed to load",
-    "unknownError": "An unknown error occurred. Please retry or return home."
   },
   "gateActions": {
     "approve": "Approve",

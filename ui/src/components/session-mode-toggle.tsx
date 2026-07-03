@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { SegmentedControl } from "@/components/segmented-control";
 import type { SessionMode } from "@/lib/api/types";
 import { IconAgent, IconAsk } from "@/lib/icons";
@@ -12,14 +14,16 @@ type SessionModeToggleProps = {
 };
 
 export function SessionModeToggle({ mode, onChange, className }: SessionModeToggleProps) {
+  const t = useTranslations("sessionMode");
+
   return (
     <SegmentedControl
       className={cn(className)}
       value={mode}
       onChange={onChange}
       options={[
-        { value: "ask", label: "Ask", icon: <IconAsk className="size-3.5" /> },
-        { value: "agent", label: "Agent", icon: <IconAgent className="size-3.5" /> },
+        { value: "ask", label: t("ask"), icon: <IconAsk className="size-3.5" /> },
+        { value: "agent", label: t("agent"), icon: <IconAgent className="size-3.5" /> },
       ]}
     />
   );

@@ -157,11 +157,9 @@ feature_flags:
   enable_agent_features: true
   enable_marketplace_llm_apps: true
   enable_embeddings: true
-  enable_image_generation: true
   enable_parallel_step_execution: false
   enable_artifacts: true
   enable_hitl_gates: true
-  enable_scheduled_jobs: true
 
 hitl:
   plan_gate_enabled: true

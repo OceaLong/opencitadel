@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { modelsApi } from "@/lib/api/models";
@@ -39,6 +40,9 @@ const emptyForm: CreateLLMModelParams = {
 };
 
 export function useModelsSettings() {
+  const t = useTranslations("settingsModels");
+  const tCommon = useTranslations("common");
+  const tErrors = useTranslations("errors");
   const [models, setModels] = useState<LLMModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -54,11 +58,11 @@ export function useModelsSettings() {
       const data = await modelsApi.list();
       setModels(data.models);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "加载失败");
+      toast.error(e instanceof Error ? e.message : tCommon("loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tCommon]);
 
   useEffect(() => {
     load();
@@ -92,11 +96,11 @@ export function useModelsSettings() {
 
   const handleSave = async () => {
     if (!form.display_name.trim() || !form.model_name.trim() || !form.base_url.trim()) {
-      toast.error("请填写显示名称、模型名和 Base URL");
+      toast.error(t("fillRequiredFields"));
       return;
     }
     if (!editing && !form.api_key?.trim()) {
-      toast.error("新建模型时必须填写 API Key");
+      toast.error(t("apiKeyRequired"));
       return;
     }
 
@@ -114,16 +118,16 @@ export function useModelsSettings() {
     try {
       if (editing) {
         await modelsApi.update(editing.id, payload);
-        toast.success("模型已更新");
+        toast.success(t("modelUpdated"));
       } else {
         await modelsApi.create(payload);
-        toast.success("模型已创建");
+        toast.success(t("modelCreated"));
       }
       setDialogOpen(false);
       invalidateModelsCache();
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "保存失败");
+      toast.error(e instanceof Error ? e.message : tErrors("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -132,22 +136,22 @@ export function useModelsSettings() {
   const handleDelete = async (id: string) => {
     try {
       await modelsApi.delete(id);
-      toast.success("已删除");
+      toast.success(t("deleted"));
       invalidateModelsCache();
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "删除失败");
+      toast.error(e instanceof Error ? e.message : tErrors("deleteFailed"));
     }
   };
 
   const handleSetDefault = async (id: string) => {
     try {
       await modelsApi.setDefault(id);
-      toast.success("已设为默认");
+      toast.success(t("setDefaultSuccess"));
       invalidateModelsCache();
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "操作失败");
+      toast.error(e instanceof Error ? e.message : t("operationFailed"));
     }
   };
 
@@ -157,13 +161,13 @@ export function useModelsSettings() {
       const result = await modelsApi.probeMultimodal(id);
       setProbeStatus((prev) => ({ ...prev, [id]: result.status }));
       if (result.status === "ok") {
-        toast.success(result.message || "多模态探测成功");
+        toast.success(result.message || t("multimodalProbeSuccess"));
       } else {
-        toast.info(result.message || "多模态探测完成");
+        toast.info(result.message || t("multimodalProbeDone"));
       }
     } catch (e) {
       setProbeStatus((prev) => ({ ...prev, [id]: "error" }));
-      toast.error(e instanceof Error ? e.message : "探测失败");
+      toast.error(e instanceof Error ? e.message : tErrors("probeFailed"));
     } finally {
       setProbingId(null);
     }

@@ -16,23 +16,55 @@ type RuntimeSettingsProps = {
   isAdmin: boolean;
 };
 
-const GLOBAL_SECTIONS: AppConfigSection[] = [
-  "feature_flags",
-  "worker",
-  "sandbox",
-  "scheduler",
-  "server",
-  "streams",
-  "observability",
-];
+const RUNTIME_SECTIONS: AppConfigSection[] = ["feature_flags", "scheduler", "server"];
+
+const SERVER_VISIBLE_KEYS = new Set([
+  "cors_origins",
+  "rate_limit_enabled",
+  "rate_limit_per_minute",
+  "sessions_stream_interval_seconds",
+  "marketplace_max_upload_bytes",
+]);
+
+const SERVER_READONLY_KEYS = new Set(["cors_origins"]);
+
+function visibleEntries(
+  section: AppConfigSection,
+  payload: Record<string, unknown>,
+): Array<[string, unknown]> {
+  const entries = Object.entries(payload);
+  if (section !== "server") {
+    return entries;
+  }
+  return entries.filter(([key]) => SERVER_VISIBLE_KEYS.has(key));
+}
 
 export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
-  const t = useTranslations("settings");
+  const t = useTranslations("settingsRuntime");
+  const tCommon = useTranslations("common");
   const [activeSection, setActiveSection] = useState<AppConfigSection>("feature_flags");
   const [payload, setPayload] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [revisions, setRevisions] = useState<AppConfigRevision[]>([]);
+
+  const fieldLabel = (section: AppConfigSection, key: string) => {
+    const labelKey = `fields.${section}.${key}` as Parameters<typeof t>[0];
+    try {
+      return t(labelKey);
+    } catch {
+      return key;
+    }
+  };
+
+  const fieldDescription = (section: AppConfigSection, key: string) => {
+    const descKey = `descriptions.${section}.${key}` as Parameters<typeof t>[0];
+    try {
+      return t(descKey);
+    } catch {
+      return undefined;
+    }
+  };
 
   const loadSection = useCallback(async (section: AppConfigSection) => {
     setLoading(true);
@@ -44,11 +76,11 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
         setRevisions(revs ?? []);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载配置失败");
+      toast.error(err instanceof Error ? err.message : t("loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, t]);
 
   useEffect(() => {
     void loadSection(activeSection);
@@ -59,10 +91,10 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
     setSaving(true);
     try {
       await configApi.updateSection(activeSection, payload);
-      toast.success("配置已保存并热生效");
+      toast.success(t("saveSuccess"));
       await loadSection(activeSection);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "保存失败");
+      toast.error(err instanceof Error ? err.message : t("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -71,10 +103,10 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
   const handleRollback = async (revisionId: string) => {
     try {
       await configApi.rollbackRevision(revisionId);
-      toast.success("已回滚配置");
+      toast.success(t("rollbackSuccess"));
       await loadSection(activeSection);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "回滚失败");
+      toast.error(err instanceof Error ? err.message : t("rollbackFailed"));
     }
   };
 
@@ -85,7 +117,7 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
   return (
     <div className="space-y-4 px-1">
       <div className="flex flex-wrap gap-2">
-        {GLOBAL_SECTIONS.map((section) => (
+        {RUNTIME_SECTIONS.map((section) => (
           <Button
             key={section}
             type="button"
@@ -93,7 +125,7 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
             variant={activeSection === section ? "default" : "outline"}
             onClick={() => setActiveSection(section)}
           >
-            {section}
+            {t(`sections.${section}` as Parameters<typeof t>[0])}
           </Button>
         ))}
       </div>
@@ -105,21 +137,28 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
       ) : (
         <FieldGroup>
           <FieldSet>
-            <FieldLegend className="text-foreground text-lg font-semibold">{activeSection}</FieldLegend>
+            <FieldLegend className="text-foreground text-lg font-semibold">
+              {t(`sections.${activeSection}` as Parameters<typeof t>[0])}
+            </FieldLegend>
             {activeSection === "server" && (
               <FieldDescription className="text-xs text-amber-600">
-                cors_origins 修改后需重启 API 进程才能生效，其余 server 字段可热更新。
+                {t("corsOriginsReadonlyHint")}
               </FieldDescription>
             )}
-            {Object.entries(payload).map(([key, value]) => {
+            {visibleEntries(activeSection, payload).map(([key, value]) => {
+              const description = fieldDescription(activeSection, key);
+              const readOnlyField =
+                !isAdmin || (activeSection === "server" && SERVER_READONLY_KEYS.has(key));
+
               if (typeof value === "object" && value !== null) {
                 return (
                   <Field key={key}>
-                    <FieldLabel>{key}</FieldLabel>
+                    <FieldLabel>{fieldLabel(activeSection, key)}</FieldLabel>
+                    {description ? <FieldDescription>{description}</FieldDescription> : null}
                     <Input
                       value={JSON.stringify(value)}
-                      readOnly={!isAdmin}
-                      disabled={!isAdmin}
+                      readOnly={readOnlyField}
+                      disabled={readOnlyField}
                       onChange={(e) => {
                         try {
                           updateField(key, JSON.parse(e.target.value));
@@ -134,10 +173,13 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
               if (typeof value === "boolean") {
                 return (
                   <Field key={key} orientation="horizontal">
-                    <FieldLabel>{key}</FieldLabel>
+                    <div className="space-y-1">
+                      <FieldLabel>{fieldLabel(activeSection, key)}</FieldLabel>
+                      {description ? <FieldDescription>{description}</FieldDescription> : null}
+                    </div>
                     <Switch
                       checked={value}
-                      disabled={!isAdmin}
+                      disabled={readOnlyField}
                       onCheckedChange={(checked) => updateField(key, checked)}
                     />
                   </Field>
@@ -145,12 +187,13 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
               }
               return (
                 <Field key={key}>
-                  <FieldLabel>{key}</FieldLabel>
+                  <FieldLabel>{fieldLabel(activeSection, key)}</FieldLabel>
+                  {description ? <FieldDescription>{description}</FieldDescription> : null}
                   <Input
                     type={typeof value === "number" ? "number" : "text"}
                     value={value === null || value === undefined ? "" : String(value)}
-                    readOnly={!isAdmin}
-                    disabled={!isAdmin}
+                    readOnly={readOnlyField}
+                    disabled={readOnlyField}
                     onChange={(e) => {
                       const raw = e.target.value;
                       if (typeof value === "number") {
@@ -171,20 +214,20 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
         <div className="flex items-center gap-2">
           <Button type="button" onClick={handleSave} disabled={saving || loading}>
             {saving && <Loader2 className="animate-spin" />}
-            {t("save")}
+            {tCommon("save")}
           </Button>
         </div>
       )}
 
       {isAdmin && revisions.length > 0 && (
         <FieldSet>
-          <FieldLegend className="text-sm font-semibold">最近版本</FieldLegend>
+          <FieldLegend className="text-sm font-semibold">{t("recentRevisions")}</FieldLegend>
           <div className="space-y-2">
             {revisions.map((rev) => (
               <div key={rev.id} className="flex items-center justify-between rounded border px-3 py-2 text-xs">
-                <span>{rev.created_at} · {rev.note || rev.changed_by || "update"}</span>
+                <span>{rev.created_at} · {rev.note || rev.changed_by || t("revisionUpdateDefault")}</span>
                 <Button type="button" size="xs" variant="outline" onClick={() => handleRollback(rev.id)}>
-                  回滚
+                  {t("rollback")}
                 </Button>
               </div>
             ))}

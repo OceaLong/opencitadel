@@ -193,11 +193,9 @@ class FeatureFlagsConfig(BaseModel):
     enable_agent_features: bool = True
     enable_marketplace_llm_apps: bool = True
     enable_embeddings: bool = True
-    enable_image_generation: bool = True
     enable_parallel_step_execution: bool = False
     enable_artifacts: bool = True
     enable_hitl_gates: bool = True
-    enable_scheduled_jobs: bool = True
 
 
 class GateProfileSettings(BaseModel):

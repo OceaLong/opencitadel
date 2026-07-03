@@ -21,6 +21,7 @@ import type {
   SubAgentEvent,
   ToolEvent,
 } from "@/lib/api/types";
+import { translate } from "@/i18n/translate";
 
 const TRANSIENT_EVENT_TYPES = new Set(["message_delta", "reasoning_delta", "tool_args_delta"]);
 
@@ -238,13 +239,29 @@ function formatTimeLabel(ts: number | string | undefined): string | undefined {
 
   const now = Date.now();
   const diff = now - t;
-  if (diff < 0) return "刚刚";
-  if (diff < 60 * 1000) return "刚刚";
-  if (diff < 60 * 60 * 1000) return `${Math.floor(diff / (60 * 1000))}分钟前`;
-  if (diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / (60 * 60 * 1000))}小时前`;
-  if (diff < 2 * 24 * 60 * 60 * 1000) return "昨天";
-  if (diff < 7 * 24 * 60 * 60 * 1000) return `${Math.floor(diff / (24 * 60 * 60 * 1000))}天前`;
-  if (diff < 30 * 24 * 60 * 60 * 1000) return `${Math.floor(diff / (7 * 24 * 60 * 60 * 1000))}周前`;
+  if (diff < 0) return translate("common.justNow");
+  if (diff < 60 * 1000) return translate("common.justNow");
+  if (diff < 60 * 60 * 1000) {
+    return translate("common.relativeTime.minutesAgo", {
+      count: Math.floor(diff / (60 * 1000)),
+    });
+  }
+  if (diff < 24 * 60 * 60 * 1000) {
+    return translate("common.relativeTime.hoursAgo", {
+      count: Math.floor(diff / (60 * 60 * 1000)),
+    });
+  }
+  if (diff < 2 * 24 * 60 * 60 * 1000) return translate("common.dates.yesterday");
+  if (diff < 7 * 24 * 60 * 60 * 1000) {
+    return translate("common.relativeTime.daysAgo", {
+      count: Math.floor(diff / (24 * 60 * 60 * 1000)),
+    });
+  }
+  if (diff < 30 * 24 * 60 * 60 * 1000) {
+    return translate("common.relativeTime.weeksAgo", {
+      count: Math.floor(diff / (7 * 24 * 60 * 60 * 1000)),
+    });
+  }
   return undefined;
 }
 
@@ -404,7 +421,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
       case "step": {
         const step = ev.data as StepEvent;
         const stepAnchorEventId = (step as { event_id?: string }).event_id;
-        lastContextLabel = `步骤：${step.description}`;
+        lastContextLabel = translate("common.contextStep", { description: step.description });
 
         // 判断是更新现有 step 还是创建新 step
         // 关键：只有当 lastStepId === step.id 时才是同一个 step 的状态更新
@@ -478,13 +495,15 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
             anchorEventId: anchor,
           });
         }
-        lastContextLabel = `子任务：${sub.goal}`;
+        lastContextLabel = translate("common.contextSubtask", { goal: sub.goal });
         break;
       }
       case "tool": {
         const tool = ev.data as ToolEvent;
         const toolCallId = (tool as { tool_call_id?: string }).tool_call_id;
-        lastContextLabel = `工具：${tool.name || tool.function}`;
+        lastContextLabel = translate("common.contextTool", {
+          name: tool.name || tool.function || "",
+        });
 
         if (lastStepId !== null) {
           // 工具属于当前 step，添加到 step 的 tools 中
@@ -550,7 +569,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
         list.push({
           kind: "wait",
           id: stableId("wait", errorIndex++, String(list.length)),
-          message: data.message || data.prompt || data.reason || "等待你的输入或确认。",
+          message: data.message || data.prompt || data.reason || translate("sessionDetail.waitForInput"),
           timestamp: data.created_at,
         });
         break;

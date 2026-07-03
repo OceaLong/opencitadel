@@ -148,8 +148,8 @@ export function CreateCodebaseDialog({
           </div>
           <Tabs value={tab} onValueChange={(v) => setTab(v as CodebaseSourceType)}>
             <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="zip">Zip</TabsTrigger>
-              <TabsTrigger value="git">Git</TabsTrigger>
+              <TabsTrigger value="zip">{t("tabZip")}</TabsTrigger>
+              <TabsTrigger value="git">{t("tabGit")}</TabsTrigger>
               <TabsTrigger value="files">{t("tabFiles")}</TabsTrigger>
             </TabsList>
             <TabsContent value="zip" className="space-y-3 pt-2">

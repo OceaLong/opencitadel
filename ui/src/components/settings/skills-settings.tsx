@@ -343,7 +343,7 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Slug</Label>
+              <Label>{t("slug")}</Label>
               <Input
                 value={form.slug}
                 onChange={(e) => setForm({ ...form, slug: e.target.value })}
@@ -358,7 +358,7 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
               />
             </div>
             <div className="space-y-2">
-              <Label>System Prompt</Label>
+              <Label>{t("systemPrompt")}</Label>
               <Textarea
                 rows={5}
                 value={form.system_prompt}

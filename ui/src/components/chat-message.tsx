@@ -18,6 +18,7 @@ import { MarkdownContent } from "@/components/markdown-content";
 import { ToolUse } from "@/components/tool-use";
 
 import type { ClarifyAnswer, SessionCheckpoint, SessionStatus, ToolEvent } from "@/lib/api/types";
+import { formatGateActionMessage } from "@/lib/gate-action-label";
 import { type AttachmentFile, getToolTimeLabel, type TimelineItem } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 
@@ -103,7 +104,10 @@ function ChatMessageComponent({
   onSourceClick,
 }: ChatMessageProps) {
   const t = useTranslations("chatMessage");
+  const tGate = useTranslations("gateActions");
+  const tPlan = useTranslations("planApproval");
   if (item.kind === "user") {
+    const displayMessage = formatGateActionMessage(item.data.message, tGate, tPlan);
     return (
       <div className={cn("group mt-3 flex w-full flex-col items-end justify-end gap-1", className)}>
         <div className="relative flex max-w-[90%] flex-col items-end gap-2">
@@ -115,7 +119,7 @@ function ChatMessageComponent({
             />
           )}
           <div className="border-border/70 bg-card text-foreground relative flex items-center overflow-hidden rounded-2xl border px-3.5 py-2.5 text-sm leading-relaxed shadow-[var(--shadow-card)]">
-            {item.data.message ?? ""}
+            {displayMessage}
           </div>
         </div>
       </div>

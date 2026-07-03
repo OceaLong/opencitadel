@@ -1,4 +1,5 @@
 import type { ToolEvent } from "@/lib/api/types";
+import { translate } from "@/i18n/translate";
 
 export type ToolKind =
   | "message"
@@ -47,24 +48,25 @@ export function getToolKind(data: ToolEvent | null | undefined): ToolKind {
   if (name === "mcp" || name.startsWith("mcp_")) {
     return "mcp";
   }
-  // 剔除原先fn中关于search_web的包含匹配, 避免mcp工具中也存在搜索工具，识别错误
-  if (fn === "search_web" || name === "search") {
+  if (
+    name === "search" ||
+    fn === "search_web" ||
+    fn.includes("search_web") ||
+    fn.includes("search")
+  ) {
     return "search";
   }
-  if (name === "browser" || name.includes("browser") || fn.startsWith("browser_")) {
+  if (name === "browser" || fn.startsWith("browser_")) {
     return "browser";
   }
-  if (name === "a2a" || name.includes("a2a")) {
+  if (name === "a2a" || fn.startsWith("a2a_") || fn.includes("remote_agent")) {
     return "a2a";
   }
   return "default";
 }
 
-/**
- * 根据工具 name/function 和 args 生成事件列表中的人性化提示
- */
 export function getFriendlyToolLabel(data: ToolEvent | null | undefined): string {
-  if (!data) return "—";
+  if (!data) return translate("toolUse.defaultAction");
   const name = (data.name ?? "").toLowerCase();
   const fn = (data.function ?? "").toLowerCase();
   const args = data.args && typeof data.args === "object" ? data.args : {};
@@ -84,100 +86,132 @@ export function getFriendlyToolLabel(data: ToolEvent | null | undefined): string
   if (name === "file") {
     switch (fn) {
       case "read_file":
-        return filepath ? `正在读取文件 ${truncate(filepath, 60)}` : "正在读取文件";
+        return filepath
+          ? translate("toolUse.readingFileWithPath", { path: truncate(filepath, 60) })
+          : translate("toolUse.readingFile");
       case "write_file":
-        return filepath ? `正在写入文件 ${truncate(filepath, 60)}` : "正在写入文件";
+        return filepath
+          ? translate("toolUse.writingFileWithPath", { path: truncate(filepath, 60) })
+          : translate("toolUse.writingFile");
       case "replace_in_file":
-        return filepath ? `正在替换文件内容 ${truncate(filepath, 60)}` : "正在替换文件内容";
+        return filepath
+          ? translate("toolUse.replacingFileWithPath", { path: truncate(filepath, 60) })
+          : translate("toolUse.replacingFile");
       case "search_in_file":
-        return filepath ? `正在在文件中搜索 ${truncate(filepath, 60)}` : "正在在文件中搜索";
+        return filepath
+          ? translate("toolUse.searchingInFileWithPath", { path: truncate(filepath, 60) })
+          : translate("toolUse.searchingInFile");
       case "find_files":
-        return dirPath ? `正在查找文件 ${truncate(dirPath, 60)}` : "正在查找文件";
+        return dirPath
+          ? translate("toolUse.findingFilesWithPath", { path: truncate(dirPath, 60) })
+          : translate("toolUse.findingFiles");
       case "list_files":
-        return dirPath ? `正在列出目录 ${truncate(dirPath, 60)}` : "正在列出目录";
+        return dirPath
+          ? translate("toolUse.listingDirWithPath", { path: truncate(dirPath, 60) })
+          : translate("toolUse.listingDir");
       default:
         return filepath
-          ? `正在访问文件 ${truncate(filepath, 60)}`
+          ? translate("toolUse.accessingFileWithPath", { path: truncate(filepath, 60) })
           : dirPath
-            ? `正在访问目录 ${truncate(dirPath, 60)}`
-            : "正在访问文件";
+            ? translate("toolUse.accessingDirWithPath", { path: truncate(dirPath, 60) })
+            : translate("toolUse.accessingFile");
     }
   }
 
   if (name === "browser" || fn.startsWith("browser_")) {
     switch (fn) {
       case "browser_view":
-        return "正在查看当前页面";
+        return translate("toolUse.browserView");
       case "browser_navigate":
-        return url ? `正在打开页面 ${truncate(url, 80)}` : "正在打开页面";
+        return url
+          ? translate("toolUse.browserNavigateWithUrl", { url: truncate(url, 80) })
+          : translate("toolUse.browserNavigate");
       case "browser_restart":
-        return url ? `正在重启浏览器并打开 ${truncate(url, 80)}` : "正在重启浏览器";
+        return url
+          ? translate("toolUse.browserRestartWithUrl", { url: truncate(url, 80) })
+          : translate("toolUse.browserRestart");
       case "browser_click":
-        return "正在点击页面元素";
+        return translate("toolUse.browserClick");
       case "browser_input":
-        return "正在输入内容";
+        return translate("toolUse.browserInput");
       case "browser_move_mouse":
-        return "正在移动鼠标";
+        return translate("toolUse.browserMoveMouse");
       case "browser_press_key":
-        return key ? `正在按键 ${key}` : "正在按键";
+        return key
+          ? translate("toolUse.browserPressKeyWithKey", { key })
+          : translate("toolUse.browserPressKey");
       case "browser_select_option":
-        return "正在选择下拉选项";
+        return translate("toolUse.browserSelectOption");
       case "browser_scroll_up":
-        return "正在向上滚动页面";
+        return translate("toolUse.browserScrollUp");
       case "browser_scroll_down":
-        return "正在向下滚动页面";
+        return translate("toolUse.browserScrollDown");
       case "browser_console_exec":
-        return "正在执行控制台脚本";
+        return translate("toolUse.browserConsoleExec");
       case "browser_console_view":
-        return "正在查看控制台输出";
+        return translate("toolUse.browserConsoleView");
       default:
-        return url ? `正在打开页面 ${truncate(url, 80)}` : "正在使用浏览器访问页面";
+        return url
+          ? translate("toolUse.browserDefaultWithUrl", { url: truncate(url, 80) })
+          : translate("toolUse.browserDefault");
     }
   }
 
   if (name === "search" || fn === "search_web" || fn.includes("search_web")) {
-    return query ? `正在搜索 ${truncate(query, 60)}` : "正在搜索";
+    return query
+      ? translate("toolUse.searchingWithQuery", { query: truncate(query, 60) })
+      : translate("toolUse.searching");
   }
 
   if (name === "shell") {
     switch (fn) {
       case "shell_execute":
-        return command ? `正在执行命令 ${truncate(command, 60)}` : "正在执行命令";
+        return command
+          ? translate("toolUse.runningCommandWithCmd", { cmd: truncate(command, 60) })
+          : translate("toolUse.runningCommand");
       case "shell_read_output":
-        return "正在查看命令输出";
+        return translate("toolUse.shellReadOutput");
       case "shell_wait":
-        return "正在等待命令完成";
+        return translate("toolUse.shellWait");
       case "shell_write_input":
-        return "正在向命令输入内容";
+        return translate("toolUse.shellWriteInput");
       case "shell_kill_process":
-        return "正在终止进程";
+        return translate("toolUse.shellKillProcess");
       default:
-        return command ? `正在执行命令 ${truncate(command, 60)}` : "正在执行命令";
+        return command
+          ? translate("toolUse.runningCommandWithCmd", { cmd: truncate(command, 60) })
+          : translate("toolUse.runningCommand");
     }
   }
 
   if (name.includes("bash") || fn === "run" || fn === "execute" || fn === "run_command") {
     const cmd = command || (typeof args.input === "string" ? args.input : "");
-    return cmd ? `正在执行命令 ${truncate(cmd, 60)}` : "正在执行命令";
+    return cmd
+      ? translate("toolUse.runningCommandWithCmd", { cmd: truncate(cmd, 60) })
+      : translate("toolUse.runningCommand");
   }
 
   if (name === "a2a") {
     switch (fn) {
       case "get_remote_agent_cards":
-        return "正在获取远程 Agent 列表";
+        return translate("toolUse.a2aListAgents");
       case "call_remote_agent":
-        return query ? `正在调用远程 Agent：${truncate(query, 40)}` : "正在调用远程 Agent";
+        return query
+          ? translate("toolUse.a2aCallAgentWithQuery", { query: truncate(query, 40) })
+          : translate("toolUse.a2aCallAgent");
       default:
-        return "正在调用 Agent";
+        return translate("toolUse.a2aDefault");
     }
   }
 
   if (name === "mcp" || name.startsWith("mcp_")) {
     if (fn.includes("search_web") || fn.includes("search")) {
-      return query ? `正在搜索 ${truncate(query, 60)}` : "正在搜索";
+      return query
+        ? translate("toolUse.searchingWithQuery", { query: truncate(query, 60) })
+        : translate("toolUse.searching");
     }
-    return "正在通过 MCP 服务执行操作";
+    return translate("toolUse.mcpAction");
   }
 
-  return "正在执行操作";
+  return translate("toolUse.defaultAction");
 }

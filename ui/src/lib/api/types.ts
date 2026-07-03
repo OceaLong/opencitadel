@@ -206,6 +206,9 @@ export type ListMCPServerItem = {
   enabled: boolean;
   transport: MCPTransport;
   tools: string[];
+  connection_status?: "disabled" | "connected" | "error" | "pending";
+  connection_error?: string | null;
+  config?: MCPServerConfig | null;
 };
 
 /**

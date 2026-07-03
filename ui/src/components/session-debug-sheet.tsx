@@ -33,17 +33,17 @@ function formatPayload(payload: Record<string, unknown>): string {
   }
 }
 
-function getDebugDescription(type: string): string {
-  if (type.includes("planner")) return "Planner";
-  if (type.includes("reasoning")) return "Reasoning";
-  if (type.includes("tool")) return "Tool Args";
-  return "Debug";
-}
-
 export function SessionDebugSheet({ events, compact, onOpen }: Props) {
   const t = useTranslations("sessionDebug");
   const [open, setOpen] = useState(false);
   const debugItems = useMemo(() => extractDebugItems(events), [events]);
+
+  const getDebugDescription = (type: string): string => {
+    if (type.includes("planner")) return t("typePlanner");
+    if (type.includes("reasoning")) return t("typeReasoning");
+    if (type.includes("tool")) return t("typeToolArgs");
+    return t("typeDebug");
+  };
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);

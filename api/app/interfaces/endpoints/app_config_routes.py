@@ -208,6 +208,32 @@ async def create_mcp_servers(
 
 
 @router.post(
+    path="/mcp-servers/{server_name}/update",
+    response_model=Response[Optional[Dict]],
+    summary="更新MCP服务配置",
+)
+async def update_mcp_server(
+        server_name: str,
+        mcp_config: MCPConfig,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        app_config_service: AppConfigService = Depends(get_app_config_service),
+) -> Response[Optional[Dict]]:
+    if not ctx.principal.is_admin:
+        cfg = mcp_config.mcpServers.get(server_name)
+        if cfg and cfg.transport == MCPTransport.STDIO:
+            from app.application.errors.exceptions import ForbiddenError
+            raise ForbiddenError("仅管理员可配置 stdio 类型的 MCP 服务")
+    await app_config_service.update_mcp_server(
+        server_name,
+        mcp_config,
+        scope=ctx.scope,
+        actor_user_id=ctx.principal.user_id,
+        is_admin=ctx.principal.is_admin,
+    )
+    return Response.success(msg="更新MCP服务配置成功")
+
+
+@router.post(
     path="/mcp-servers/{server_name}/delete",
     response_model=Response[Optional[Dict]],
     summary="删除MCP服务配置",

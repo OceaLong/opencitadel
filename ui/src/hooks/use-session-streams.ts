@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useTranslations } from "next-intl";
 
 import { ApiError } from "@/lib/api";
 import { modelErrorMessage } from "@/lib/api/llm-status";
@@ -12,7 +13,12 @@ function isSessionMissingError(err: unknown): boolean {
     return true;
   }
   const msg = err instanceof Error ? err.message : String(err);
-  return msg.includes("会话不存在") || msg.includes("任务会话不存在");
+  return (
+    msg.includes("会话不存在") ||
+    msg.includes("任务会话不存在") ||
+    msg.includes("Session not found") ||
+    msg.includes("Task not found")
+  );
 }
 
 function getSessionMissingErrorFromEvent(ev: SSEEventData): boolean {
@@ -56,6 +62,7 @@ export function useSessionStreams({
   onReconnect,
   onDebugModeChange,
 }: StreamDeps) {
+  const t = useTranslations("sessionDetail");
   const [streaming, setStreaming] = useState(false);
   const [streamStatus, setStreamStatus] = useState<SessionStreamStatus>("idle");
   const [streamError, setStreamError] = useState<Error | null>(null);
@@ -162,7 +169,7 @@ export function useSessionStreams({
         emptyStreamRetryCountRef.current = 0;
         handleStreamEvent(ev);
         if (getSessionMissingErrorFromEvent(ev)) {
-          onSessionMissing(new Error("会话不存在"));
+          onSessionMissing(new Error(t("sessionNotFound")));
         }
       },
       (err) => {
@@ -194,7 +201,7 @@ export function useSessionStreams({
           }, delay);
           return;
         }
-        const nextError = err instanceof Error ? err : new Error("会话流连接异常");
+        const nextError = err instanceof Error ? err : new Error(t("streamError"));
         setStreamError(nextError);
         setStreamStatus("error");
         setError(nextError);
@@ -257,7 +264,7 @@ export function useSessionStreams({
             messageStreamCleanupRef.current();
             messageStreamCleanupRef.current = null;
           }
-          onSessionMissing(new Error("会话不存在"));
+          onSessionMissing(new Error(t("sessionNotFound")));
           return;
         }
         if (ev.type === "done") {
@@ -303,7 +310,7 @@ export function useSessionStreams({
             }
             return;
           }
-          const nextError = err instanceof Error ? err : new Error("流式响应异常");
+          const nextError = err instanceof Error ? err : new Error(t("streamResponseError"));
           setError(nextError);
           setStreaming(false);
           isSendMessageRef.current = false;

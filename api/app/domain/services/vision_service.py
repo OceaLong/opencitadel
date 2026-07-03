@@ -308,6 +308,23 @@ def inflate_messages_for_llm(
     return inflated
 
 
+def messages_contain_images(messages: List[Dict[str, Any]]) -> bool:
+    """Return True when any message still carries image parts."""
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if isinstance(part, dict) and part.get("type") in {_IMAGE_REF_TYPE, "image_url"}:
+                return True
+    return False
+
+
+def strip_image_parts_from_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Strip image parts from messages for persistent memory or degraded LLM calls."""
+    return strip_images_for_tool_call(messages)
+
+
 def strip_images_for_tool_call(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """vision_with_tools=False 时，带 tools 的请求临时剥离图片。"""
     stripped: List[Dict[str, Any]] = []
@@ -389,12 +406,12 @@ async def build_screenshot_messages(
         "success": True,
         "message": "",
         "interactive_elements": interactive_elements[:100],
-        "note": "Page screenshot attached in the following user message.",
     }
     extra_messages: List[Dict[str, Any]] = []
     screenshot_base64 = result_data.get("screenshot_base64")
     screenshot_ref = result_data.get("screenshot_ref")
     capabilities = resolve_capabilities(llm)
+    attached_image = False
 
     # 优先上传对象存储获得 screenshot_ref（预签名 URL）
     if not screenshot_ref and screenshot_base64 and file_storage:
@@ -410,6 +427,7 @@ async def build_screenshot_messages(
             logger.warning("截图上传对象存储失败，回退 base64: %s", exc)
 
     if screenshot_ref and capabilities.vision:
+        attached_image = True
         extra_messages.append({
             "role": "user",
             "content": [
@@ -428,6 +446,7 @@ async def build_screenshot_messages(
         if len(screenshot_bytes) > capabilities.max_image_bytes:
             summary["note"] = "Page screenshot omitted due to size limit."
         else:
+            attached_image = True
             extra_messages.append({
                 "role": "user",
                 "content": [
@@ -438,6 +457,12 @@ async def build_screenshot_messages(
                     build_image_content_part(screenshot_bytes, "image/png"),
                 ],
             })
+    if attached_image:
+        summary["note"] = "Page screenshot attached in the following user message."
+    elif not capabilities.vision:
+        summary["note"] = "Screenshot omitted because the current model does not support vision."
+    elif screenshot_base64 or screenshot_ref:
+        summary["note"] = "Page screenshot omitted due to size limit or upload failure."
     return json.dumps(summary, ensure_ascii=False), extra_messages
 
 
