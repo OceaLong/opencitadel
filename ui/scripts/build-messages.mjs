@@ -505,6 +505,7 @@ const messages = {
         enable_parallel_step_execution: { en: "Parallel step execution", zh: "并行步骤执行" },
         enable_artifacts: { en: "Artifacts", zh: "交付物" },
         enable_hitl_gates: { en: "HITL gates master switch", zh: "人工审批总开关" },
+        enable_skill_auto_recommend: { en: "Skill auto-recommend", zh: "Skill 自动推荐" },
       },
       scheduler: {
         enabled: { en: "Scheduler enabled", zh: "启用定时任务调度" },
@@ -548,17 +549,57 @@ const messages = {
           en: "Global kill switch for human-in-the-loop gates. Detailed gate profiles remain in hitl config.",
           zh: "人工审批（HITL）的全局总开关；详细 gate 配置仍在 hitl 段。",
         },
+        enable_skill_auto_recommend: {
+          en: "Automatically recommend and attach a skill based on the user's latest message when starting a task.",
+          zh: "任务启动时根据用户最新消息自动推荐并绑定 Skill。",
+        },
       },
       scheduler: {
         enabled: {
           en: "Turn the background scheduler loop on or off.",
           zh: "开启或关闭后台定时任务调度循环。",
         },
+        poll_interval_seconds: {
+          en: "How often the scheduler polls for due jobs.",
+          zh: "调度器轮询到期任务的间隔。",
+        },
+        max_concurrent_jobs: {
+          en: "Maximum number of jobs running concurrently across all job types.",
+          zh: "全局最大并发执行任务数。",
+        },
+        max_concurrent_jobs_per_job: {
+          en: "Maximum concurrent executions of the same scheduled job.",
+          zh: "同一 scheduled job 的最大并发执行数。",
+        },
+        leader_lease_seconds: {
+          en: "Leader election lease duration for multi-instance deployments.",
+          zh: "多实例部署下的 Leader 选举租约时长。",
+        },
+        webhook_idempotency_ttl_seconds: {
+          en: "Time-to-live for webhook idempotency keys.",
+          zh: "Webhook 幂等键的 TTL。",
+        },
       },
       server: {
         cors_origins: {
           en: "Read-only here. Edit config.yaml or env and restart API to change.",
           zh: "此处只读。如需修改请编辑 config.yaml/环境变量并重启 API。",
+        },
+        rate_limit_enabled: {
+          en: "Enable or disable HTTP rate limiting.",
+          zh: "是否启用 HTTP 速率限制。",
+        },
+        rate_limit_per_minute: {
+          en: "Maximum requests per minute per client.",
+          zh: "每客户端每分钟最大请求数。",
+        },
+        sessions_stream_interval_seconds: {
+          en: "Interval for pushing session stream updates to clients.",
+          zh: "会话流向客户端推送的间隔。",
+        },
+        marketplace_max_upload_bytes: {
+          en: "Maximum file upload size for marketplace assets (bytes).",
+          zh: "市场资源上传大小上限（字节）。",
         },
       },
     },

@@ -401,6 +401,7 @@
     "addMcpServer": "添加新的 MCP 服务器",
     "mcpAddDescription": "OpenCitadel 使用标准的 JSON MCP 配置来创建新服务器。请将您的配置粘贴到下方，然后点击「添加」即可添加新服务器。",
     "mcpAddDescriptionNonAdmin": "OpenCitadel 使用标准的 JSON MCP 配置来创建新服务器。请将您的配置粘贴到下方，然后点击「添加」即可添加新服务器。（可能需要管理员审批。）",
+    "mcpStatusRefreshHint": "连接状态在重新打开设置或保存变更后更新。",
     "a2aUrlPlaceholder": "示例：https://opencitadel.example/weather-agent",
     "toastLoadAgentConfigFailed": "获取基础配置失败",
     "toastLoadMcpFailed": "获取 MCP 服务器列表失败",
@@ -416,7 +417,28 @@
     "enterMcpConfig": "请输入 MCP 服务器配置",
     "noMcpServers": "暂无 MCP 服务器，请点击上方按钮添加",
     "editMcpServer": "编辑 MCP 服务器",
-    "editMcpServerDesc": "更新此 MCP 服务器的 JSON 配置。密钥已脱敏，保持 **** 不变即不修改。",
+    "editMcpServerDesc": "更新 MCP 服务器配置。密钥字段留空则不修改。",
+    "mcpTransport": "传输方式",
+    "mcpDescription": "描述",
+    "mcpDescriptionPlaceholder": "可选描述",
+    "mcpServiceUrl": "服务地址",
+    "mcpUrlParams": "URL 密钥参数",
+    "mcpParamKey": "参数名",
+    "mcpParamValueLeaveBlank": "留空则不修改",
+    "mcpHeaderKey": "请求头名称",
+    "mcpHeaderValueLeaveBlank": "留空则不修改",
+    "mcpEnvKey": "环境变量名",
+    "mcpEnvValueLeaveBlank": "留空则不修改",
+    "mcpCommand": "启动命令",
+    "mcpArgs": "命令参数",
+    "mcpArgsPlaceholder": "每行一个参数",
+    "addParam": "添加参数",
+    "addHeader": "添加请求头",
+    "addEnv": "添加环境变量",
+    "mcpNoParams": "暂无参数，可点击上方按钮添加",
+    "mcpUrlUndecryptable": "无法解密现有地址，请重新填写完整服务地址与密钥参数。",
+    "mcpUrlRequired": "请填写服务地址",
+    "mcpCommandRequired": "请填写启动命令",
     "mcpStatusConnected": "已连接",
     "mcpStatusError": "不可达",
     "mcpStatusPending": "检测中"
@@ -443,7 +465,8 @@
         "enable_embeddings": "嵌入/向量总开关",
         "enable_parallel_step_execution": "并行步骤执行",
         "enable_artifacts": "交付物",
-        "enable_hitl_gates": "人工审批总开关"
+        "enable_hitl_gates": "人工审批总开关",
+        "enable_skill_auto_recommend": "Skill 自动推荐"
       },
       "scheduler": {
         "enabled": "启用定时任务调度",
@@ -468,13 +491,23 @@
         "enable_embeddings": "嵌入/向量能力的全局总开关；记忆与知识库的向量开关为子层配置。",
         "enable_parallel_step_execution": "允许 Planner 并行执行互不依赖的步骤。",
         "enable_artifacts": "启用 artifact_write / artifact_finalize 交付物工具。",
-        "enable_hitl_gates": "人工审批（HITL）的全局总开关；详细 gate 配置仍在 hitl 段。"
+        "enable_hitl_gates": "人工审批（HITL）的全局总开关；详细 gate 配置仍在 hitl 段。",
+        "enable_skill_auto_recommend": "任务启动时根据用户最新消息自动推荐并绑定 Skill。"
       },
       "scheduler": {
-        "enabled": "开启或关闭后台定时任务调度循环。"
+        "enabled": "开启或关闭后台定时任务调度循环。",
+        "poll_interval_seconds": "调度器轮询到期任务的间隔。",
+        "max_concurrent_jobs": "全局最大并发执行任务数。",
+        "max_concurrent_jobs_per_job": "同一 scheduled job 的最大并发执行数。",
+        "leader_lease_seconds": "多实例部署下的 Leader 选举租约时长。",
+        "webhook_idempotency_ttl_seconds": "Webhook 幂等键的 TTL。"
       },
       "server": {
-        "cors_origins": "此处只读。如需修改请编辑 config.yaml/环境变量并重启 API。"
+        "cors_origins": "此处只读。如需修改请编辑 config.yaml/环境变量并重启 API。",
+        "rate_limit_enabled": "是否启用 HTTP 速率限制。",
+        "rate_limit_per_minute": "每客户端每分钟最大请求数。",
+        "sessions_stream_interval_seconds": "会话流向客户端推送的间隔。",
+        "marketplace_max_upload_bytes": "市场资源上传大小上限（字节）。"
       }
     }
   },

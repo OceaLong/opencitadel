@@ -7,6 +7,7 @@ import { Copy, Loader2, LogOut, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { ScrollablePageContent } from "@/components/scrollable-page-content";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -161,7 +162,7 @@ export default function TeamDetailPage() {
   }
 
   return (
-    <div className="mx-auto flex h-full max-w-4xl flex-col gap-6 overflow-auto p-6">
+    <ScrollablePageContent>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <Button variant="ghost" size="sm" asChild className="mb-2 px-0">
@@ -281,6 +282,6 @@ export default function TeamDetailPage() {
           ))}
         </CardContent>
       </Card>
-    </div>
+    </ScrollablePageContent>
   );
 }

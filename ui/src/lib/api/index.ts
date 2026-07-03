@@ -10,6 +10,7 @@ export type {
   AgentConfig,
   ListA2AServerItem,
   ListMCPServerItem,
+  MCPServerConfig,
   Session,
 } from "./types";
 

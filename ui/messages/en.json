@@ -401,6 +401,7 @@
     "addMcpServer": "Add new MCP server",
     "mcpAddDescription": "OpenCitadel uses standard JSON MCP configuration. Paste your config below and click Add.",
     "mcpAddDescriptionNonAdmin": "OpenCitadel uses standard JSON MCP configuration. Paste your config below and click Add. (Admin approval may be required.)",
+    "mcpStatusRefreshHint": "Connection status updates when you reopen settings or save changes.",
     "a2aUrlPlaceholder": "Example: https://opencitadel.example/weather-agent",
     "toastLoadAgentConfigFailed": "Failed to load agent settings",
     "toastLoadMcpFailed": "Failed to load MCP servers",
@@ -416,7 +417,28 @@
     "enterMcpConfig": "Please enter MCP server configuration",
     "noMcpServers": "No MCP servers yet. Click above to add one.",
     "editMcpServer": "Edit MCP server",
-    "editMcpServerDesc": "Update the JSON configuration for this MCP server. Secrets are masked; leave **** unchanged to keep existing values.",
+    "editMcpServerDesc": "Update MCP server settings. Leave secret fields blank to keep existing values.",
+    "mcpTransport": "Transport",
+    "mcpDescription": "Description",
+    "mcpDescriptionPlaceholder": "Optional description",
+    "mcpServiceUrl": "Service URL",
+    "mcpUrlParams": "URL secret parameters",
+    "mcpParamKey": "Parameter name",
+    "mcpParamValueLeaveBlank": "Leave blank to keep unchanged",
+    "mcpHeaderKey": "Header name",
+    "mcpHeaderValueLeaveBlank": "Leave blank to keep unchanged",
+    "mcpEnvKey": "Environment variable",
+    "mcpEnvValueLeaveBlank": "Leave blank to keep unchanged",
+    "mcpCommand": "Command",
+    "mcpArgs": "Arguments",
+    "mcpArgsPlaceholder": "One argument per line",
+    "addParam": "Add parameter",
+    "addHeader": "Add header",
+    "addEnv": "Add variable",
+    "mcpNoParams": "No parameters yet. Click above to add one.",
+    "mcpUrlUndecryptable": "Unable to decrypt the existing URL. Please re-enter the full service URL and secret parameters.",
+    "mcpUrlRequired": "Service URL is required",
+    "mcpCommandRequired": "Command is required",
     "mcpStatusConnected": "Connected",
     "mcpStatusError": "Unreachable",
     "mcpStatusPending": "Checking"
@@ -443,7 +465,8 @@
         "enable_embeddings": "Embeddings master switch",
         "enable_parallel_step_execution": "Parallel step execution",
         "enable_artifacts": "Artifacts",
-        "enable_hitl_gates": "HITL gates master switch"
+        "enable_hitl_gates": "HITL gates master switch",
+        "enable_skill_auto_recommend": "Skill auto-recommend"
       },
       "scheduler": {
         "enabled": "Scheduler enabled",
@@ -468,13 +491,23 @@
         "enable_embeddings": "Global master switch for embedding/vector features. Memory and knowledge-base vector toggles are sub-layers.",
         "enable_parallel_step_execution": "Allow planner to execute independent steps in parallel.",
         "enable_artifacts": "Enable artifact_write / artifact_finalize delivery tools.",
-        "enable_hitl_gates": "Global kill switch for human-in-the-loop gates. Detailed gate profiles remain in hitl config."
+        "enable_hitl_gates": "Global kill switch for human-in-the-loop gates. Detailed gate profiles remain in hitl config.",
+        "enable_skill_auto_recommend": "Automatically recommend and attach a skill based on the user's latest message when starting a task."
       },
       "scheduler": {
-        "enabled": "Turn the background scheduler loop on or off."
+        "enabled": "Turn the background scheduler loop on or off.",
+        "poll_interval_seconds": "How often the scheduler polls for due jobs.",
+        "max_concurrent_jobs": "Maximum number of jobs running concurrently across all job types.",
+        "max_concurrent_jobs_per_job": "Maximum concurrent executions of the same scheduled job.",
+        "leader_lease_seconds": "Leader election lease duration for multi-instance deployments.",
+        "webhook_idempotency_ttl_seconds": "Time-to-live for webhook idempotency keys."
       },
       "server": {
-        "cors_origins": "Read-only here. Edit config.yaml or env and restart API to change."
+        "cors_origins": "Read-only here. Edit config.yaml or env and restart API to change.",
+        "rate_limit_enabled": "Enable or disable HTTP rate limiting.",
+        "rate_limit_per_minute": "Maximum requests per minute per client.",
+        "sessions_stream_interval_seconds": "Interval for pushing session stream updates to clients.",
+        "marketplace_max_upload_bytes": "Maximum file upload size for marketplace assets (bytes)."
       }
     }
   },

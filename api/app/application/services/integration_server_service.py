@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 import logging
 import uuid
-from typing import Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from app.application.errors.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from app.application.services.audit_service import AuditService
@@ -24,20 +25,46 @@ def _ensure_stdio_allowed(record: MCPServerRecord, *, is_admin: bool) -> None:
         raise ForbiddenError("仅管理员可配置 stdio 类型的 MCP 服务")
 
 
+def _should_keep(new_val: Any) -> bool:
+    if not isinstance(new_val, str):
+        return False
+    if not new_val.strip():
+        return True
+    if "****" in new_val:
+        return True
+    return ApiKeyCipher.looks_like_fernet_token(new_val)
+
+
 def _apply_masked_secret_updates(
     updates: dict,
     existing: dict,
 ) -> dict:
-    return {
-        k: (existing.get(k, v) if isinstance(v, str) and "****" in v else v)
-        for k, v in updates.items()
-    }
+    merged: Dict[str, Any] = {}
+    for key, value in updates.items():
+        if _should_keep(value):
+            if key in existing:
+                merged[key] = existing[key]
+        else:
+            merged[key] = value
+    return merged
 
 
-def _apply_masked_url_update(updated_url: Optional[str], existing_url: Optional[str]) -> Optional[str]:
-    if isinstance(updated_url, str) and "****" in updated_url:
+def _merge_url_secrets(updated_url: Optional[str], existing_url: Optional[str]) -> Optional[str]:
+    if updated_url is None:
         return existing_url
-    return updated_url
+    if _should_keep(updated_url):
+        return existing_url
+    parsed = urlparse(updated_url)
+    if not parsed.query:
+        return updated_url
+    old_params = dict(parse_qsl(urlparse(existing_url or "").query, keep_blank_values=True))
+    merged_pairs = [
+        (key, old_params.get(key, value) if _should_keep(value) else value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+    ]
+    return urlunparse(
+        (parsed.scheme, parsed.netloc, parsed.path, parsed.params, urlencode(merged_pairs), parsed.fragment)
+    )
 
 
 class MCPServerService:
@@ -106,10 +133,10 @@ class MCPServerService:
             if not existing:
                 raise NotFoundError(f"MCP 服务[{server_id}]不存在")
             updates.id = server_id
-            updates.url = _apply_masked_url_update(updates.url, existing.url)
-            if updates.headers:
+            updates.url = _merge_url_secrets(updates.url, existing.url)
+            if updates.headers is not None:
                 updates.headers = _apply_masked_secret_updates(updates.headers, existing.headers or {})
-            if updates.env:
+            if updates.env is not None:
                 updates.env = _apply_masked_secret_updates(updates.env, existing.env or {})
             enc_headers, headers_enc = encrypt_secret_dict(updates.headers, self._cipher)
             enc_env, env_enc = encrypt_secret_dict(updates.env, self._cipher)

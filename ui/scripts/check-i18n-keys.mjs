@@ -45,6 +45,41 @@ const MARKETPLACE_APP_I18N_KEYS = [
   "watermarkTool",
 ];
 
+/** Keep aligned with api/app/domain/models/app_config.py and runtime-settings.tsx RUNTIME_SECTIONS. */
+const RUNTIME_CONFIG_FIELDS = {
+  feature_flags: [
+    "enable_agent_features",
+    "enable_marketplace_llm_apps",
+    "enable_embeddings",
+    "enable_parallel_step_execution",
+    "enable_artifacts",
+    "enable_hitl_gates",
+    "enable_skill_auto_recommend",
+  ],
+  scheduler: [
+    "enabled",
+    "poll_interval_seconds",
+    "max_concurrent_jobs",
+    "max_concurrent_jobs_per_job",
+    "leader_lease_seconds",
+    "webhook_idempotency_ttl_seconds",
+  ],
+  server: [
+    "cors_origins",
+    "rate_limit_enabled",
+    "rate_limit_per_minute",
+    "sessions_stream_interval_seconds",
+    "marketplace_max_upload_bytes",
+  ],
+};
+
+const RUNTIME_FIELD_EXPANSIONS = Object.entries(RUNTIME_CONFIG_FIELDS).flatMap(
+  ([section, fields]) => [
+    { prefix: `settingsRuntime.fields.${section}.`, values: fields },
+    { prefix: `settingsRuntime.descriptions.${section}.`, values: fields },
+  ],
+);
+
 const DYNAMIC_EXPANSIONS = [
   { prefix: "sessionList.filter.", values: ["all", "general", "codebase", "knowledge", "hybrid"] },
   { prefix: "operatorScope.gateProfile.", suffix: ".title", values: ["loose", "standard", "strict"] },
@@ -59,6 +94,7 @@ const DYNAMIC_EXPANSIONS = [
     prefix: "settingsRuntime.sections.",
     values: ["feature_flags", "scheduler", "server"],
   },
+  ...RUNTIME_FIELD_EXPANSIONS,
   {
     prefix: "settings.",
     values: ["common", "models", "skills", "memory", "integrations", "runtime"],
@@ -143,6 +179,23 @@ if (missingFromEn.length || missingFromZh.length) {
   }
 }
 
+const missingRuntimeFields = [];
+for (const [section, fields] of Object.entries(RUNTIME_CONFIG_FIELDS)) {
+  for (const field of fields) {
+    for (const kind of ["fields", "descriptions"]) {
+      const key = `settingsRuntime.${kind}.${section}.${field}`;
+      if (!enKeys.has(key)) missingRuntimeFields.push(`${key} (en)`);
+      if (!zhKeys.has(key)) missingRuntimeFields.push(`${key} (zh)`);
+    }
+  }
+}
+
+if (missingRuntimeFields.length) {
+  failed = true;
+  console.error("settingsRuntime config field i18n missing:");
+  console.error("   ", missingRuntimeFields.join(", "));
+}
+
 const knownDynamicPatterns = new Set([
   "sessionList :: filter.${option}",
   "sessionList :: filter.${contextKind}",
@@ -158,6 +211,8 @@ const knownDynamicPatterns = new Set([
   "marketplace :: categoryAll",
   "settingsRuntime :: sections.${activeSection}",
   "settingsRuntime :: sections.${section}",
+  "settingsRuntime :: fields.${section}.${key}",
+  "settingsRuntime :: descriptions.${section}.${key}",
 ]);
 
 const unknownDynamic = [...unresolvedDynamic].filter((p) => !knownDynamicPatterns.has(p)).sort();

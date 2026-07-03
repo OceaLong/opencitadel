@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/page-header";
+import { ScrollablePageContent } from "@/components/scrollable-page-content";
 import { ContextSelector } from "@/components/context-selector";
 import { SessionModelPicker } from "@/components/session-model-picker";
 import { SessionSkillPicker } from "@/components/session-skill-picker";
@@ -227,7 +228,7 @@ export default function AutomationPage() {
     `${typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/${token}`;
 
   return (
-    <div className="mx-auto flex h-full max-w-4xl flex-col gap-6 overflow-auto p-6">
+    <ScrollablePageContent>
         <PageHeader
           bordered={false}
           size="md"
@@ -651,6 +652,6 @@ export default function AutomationPage() {
             ))}
           </div>
         )}
-    </div>
+    </ScrollablePageContent>
   );
 }

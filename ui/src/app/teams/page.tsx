@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { PageHeader } from "@/components/page-header";
+import { ScrollablePageContent } from "@/components/scrollable-page-content";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -71,7 +72,7 @@ export default function TeamsPage() {
   }
 
   return (
-    <div className="mx-auto flex h-full max-w-4xl flex-col gap-6 overflow-auto p-6">
+    <ScrollablePageContent>
       <PageHeader
         bordered={false}
         title={t("title")}
@@ -158,6 +159,6 @@ export default function TeamsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </ScrollablePageContent>
   );
 }

@@ -3,18 +3,12 @@
 import Link from "next/link";
 import { LayoutDashboard, LogIn, LogOut, Settings } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { SidebarFooter } from "@/components/ui/sidebar";
 
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 import { useLoginPrompt } from "@/providers/login-prompt-provider";
 import { useSettingsDialog } from "@/providers/settings-dialog-provider";
@@ -32,6 +26,37 @@ function getInitials(name: string): string {
   return trimmed.slice(0, 1).toUpperCase();
 }
 
+function AccountMenuItem({
+  children,
+  className,
+  onClick,
+  href,
+}: {
+  children: ReactNode;
+  className?: string;
+  onClick?: () => void;
+  href?: string;
+}) {
+  const itemClassName = cn(
+    "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors hover:bg-accent [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground",
+    className,
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className={itemClassName} onClick={onClick}>
+        {children}
+      </Link>
+    );
+  }
+
+  return (
+    <button type="button" className={itemClassName} onClick={onClick}>
+      {children}
+    </button>
+  );
+}
+
 export function AccountMenu() {
   const { user, logout } = useAuth();
   const { promptLogin } = useLoginPrompt();
@@ -39,18 +64,35 @@ export function AccountMenu() {
   const tAccount = useTranslations("account");
   const tAuth = useTranslations("auth");
   const tCommon = useTranslations("common");
+  const [open, setOpen] = useState(false);
+  const footerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (footerRef.current && !footerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  const closeMenu = () => setOpen(false);
 
   if (!user) {
     return (
-      <SidebarFooter className="border-border/60 border-t p-2">
-        <Button
-          variant="ghost"
-          className="w-full justify-center gap-2"
+      <SidebarFooter className="p-2">
+        <button
+          type="button"
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-muted/50 px-2.5 py-2 text-sm transition-colors hover:bg-muted/80"
           onClick={() => promptLogin()}
         >
-          <LogIn className="size-4" />
+          <LogIn className="size-4 text-muted-foreground" />
           {tAuth("loginRegister")}
-        </Button>
+        </button>
       </SidebarFooter>
     );
   }
@@ -58,48 +100,47 @@ export function AccountMenu() {
   const displayName = getDisplayName(user, tCommon("user"));
 
   return (
-    <SidebarFooter className="border-border/60 border-t p-2">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="h-auto w-full justify-start gap-2 px-2 py-2">
-            <Avatar size="sm">
-              {user.avatar_url ? <AvatarImage src={user.avatar_url} alt={displayName} /> : null}
-              <AvatarFallback>{getInitials(displayName)}</AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1 text-left">
-              <div className="truncate text-sm font-medium">{displayName}</div>
-              <div className="text-muted-foreground truncate text-xs">{user.email}</div>
-            </div>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" side="top" className="w-56">
+    <SidebarFooter ref={footerRef} className="p-2">
+      {open ? (
+        <div className="bg-popover mb-1 animate-in fade-in-0 slide-in-from-bottom-2 rounded-xl border py-1 shadow-sm duration-200">
           {user.global_role === "admin" ? (
-            <DropdownMenuItem asChild>
-              <Link href="/admin">
-                <LayoutDashboard className="size-4" />
-                {tAccount("adminPanel")}
-              </Link>
-            </DropdownMenuItem>
+            <AccountMenuItem href="/admin" onClick={closeMenu}>
+              <LayoutDashboard />
+              {tAccount("adminPanel")}
+            </AccountMenuItem>
           ) : null}
-          <DropdownMenuItem
-            className="cursor-pointer"
-            onClick={() => openSettings("common-setting")}
-          >
-            <Settings className="size-4" />
-            {tAccount("settings")}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            variant="destructive"
+          <AccountMenuItem
             onClick={() => {
+              closeMenu();
+              openSettings("common-setting");
+            }}
+          >
+            <Settings />
+            {tAccount("settings")}
+          </AccountMenuItem>
+          <AccountMenuItem
+            onClick={() => {
+              closeMenu();
               void logout();
             }}
           >
-            <LogOut className="size-4" />
+            <LogOut />
             {tAuth("logout")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </AccountMenuItem>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        className="flex w-full items-center gap-2.5 rounded-xl bg-muted/50 px-2.5 py-2 transition-colors hover:bg-muted/80"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        <Avatar>
+          {user.avatar_url ? <AvatarImage src={user.avatar_url} alt={displayName} /> : null}
+          <AvatarFallback>{getInitials(displayName)}</AvatarFallback>
+        </Avatar>
+        <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">{displayName}</span>
+      </button>
     </SidebarFooter>
   );
 }

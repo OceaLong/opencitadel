@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LayoutGrid,
   LayoutList,
@@ -20,6 +20,7 @@ import {
   IconTool,
 } from "@/lib/icons";
 
+import { McpServerForm, type McpServerFormHandle } from "@/components/settings/mcp-server-form";
 import { MemorySettings } from "@/components/settings/memory-settings";
 import { ModelsSettings } from "@/components/settings/models-settings";
 import { RuntimeSettings } from "@/components/settings/runtime-settings";
@@ -51,7 +52,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 import { type SettingTab, useOpenCitadelSettings } from "@/hooks/use-open-citadel-settings";
-import type { AgentConfig, ListA2AServerItem, ListMCPServerItem } from "@/lib/api";
+import type { AgentConfig, ListA2AServerItem, ListMCPServerItem, MCPServerConfig } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -331,18 +332,10 @@ type MCPSettingProps = {
   onToggleEnabled: (serverName: string, enabled: boolean) => void;
   onDelete: (serverName: string) => void;
   onAdd: (config: string) => Promise<boolean>;
-  onEdit: (serverName: string, config: string) => Promise<boolean>;
+  onEdit: (serverName: string, config: MCPServerConfig) => Promise<boolean>;
   readOnly?: boolean;
   isAdmin?: boolean;
 };
-
-function buildMcpEditConfig(server: ListMCPServerItem): string {
-  const payload = server.config ?? {
-    transport: server.transport,
-    enabled: server.enabled,
-  };
-  return JSON.stringify({ mcpServers: { [server.server_name]: payload } }, null, 2);
-}
 
 function mcpConnectionStatusLabel(
   server: ListMCPServerItem,
@@ -378,8 +371,8 @@ export function MCPSetting({
   const [addConfig, setAddConfig] = useState("");
   const [adding, setAdding] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [editServerName, setEditServerName] = useState<string | null>(null);
-  const [editConfig, setEditConfig] = useState("");
+  const [editServer, setEditServer] = useState<ListMCPServerItem | null>(null);
+  const editFormRef = useRef<McpServerFormHandle>(null);
   const [editing, setEditing] = useState(false);
 
   const mcpConfigPlaceholder = isAdmin
@@ -424,23 +417,34 @@ export function MCPSetting({
   };
 
   const openEditDialog = (server: ListMCPServerItem) => {
-    setEditServerName(server.server_name);
-    setEditConfig(buildMcpEditConfig(server));
+    setEditServer(server);
     setEditDialogOpen(true);
   };
 
   const handleEdit = async () => {
-    if (!editServerName || !editConfig.trim()) {
-      toast.error(t("enterMcpConfig"));
+    if (!editServer) {
+      return;
+    }
+    const form = editFormRef.current;
+    if (!form?.validate()) {
+      const transport = editServer.config?.transport ?? editServer.transport;
+      if (transport === "stdio") {
+        toast.error(t("mcpCommandRequired"));
+      } else {
+        toast.error(t("mcpUrlRequired"));
+      }
+      return;
+    }
+    const config = form.getConfig();
+    if (!config) {
       return;
     }
     setEditing(true);
     try {
-      const success = await onEdit(editServerName, editConfig.trim());
+      const success = await onEdit(editServer.server_name, config);
       if (success) {
         setEditDialogOpen(false);
-        setEditServerName(null);
-        setEditConfig("");
+        setEditServer(null);
       }
     } finally {
       setEditing(false);
@@ -503,22 +507,32 @@ export function MCPSetting({
               </DialogContent>
             </Dialog>
             ) : null}
-            <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-              <DialogContent>
+            <Dialog
+              open={editDialogOpen}
+              onOpenChange={(open) => {
+                setEditDialogOpen(open);
+                if (!open) {
+                  setEditServer(null);
+                }
+              }}
+            >
+              <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle className="text-foreground">{t("editMcpServer")}</DialogTitle>
                   <DialogDescription className="text-muted-foreground">
-                    {editServerName
-                      ? `${t("editMcpServerDesc")} (${editServerName})`
+                    {editServer
+                      ? `${t("editMcpServerDesc")} (${editServer.server_name})`
                       : t("editMcpServerDesc")}
                   </DialogDescription>
                 </DialogHeader>
-                <Textarea
-                  value={editConfig}
-                  onChange={(e) => setEditConfig(e.target.value)}
-                  className="min-h-[200px] font-mono text-xs"
-                  disabled={editing}
-                />
+                {editServer ? (
+                  <McpServerForm
+                    ref={editFormRef}
+                    server={editServer}
+                    isAdmin={isAdmin}
+                    disabled={editing}
+                  />
+                ) : null}
                 <DialogFooter>
                   <DialogClose asChild>
                     <Button variant="outline" className="cursor-pointer" disabled={editing}>
@@ -535,6 +549,9 @@ export function MCPSetting({
           </FieldLegend>
           <FieldDescription className="text-sm">
             {isAdmin ? t("mcpAddDescription") : t("mcpAddDescriptionNonAdmin")}
+          </FieldDescription>
+          <FieldDescription className="text-muted-foreground text-xs">
+            {t("mcpStatusRefreshHint")}
           </FieldDescription>
 
           {/* 加载态 */}
@@ -562,7 +579,6 @@ export function MCPSetting({
                         {server.server_name}
                         <Badge>{server.transport}</Badge>
                         <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
-                        {!server.enabled && <Badge variant="outline">{tCommon("disabled")}</Badge>}
                       </div>
                       <div className="flex items-center justify-center gap-2">
                         {!readOnly ? (

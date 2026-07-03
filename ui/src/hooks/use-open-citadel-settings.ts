@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import type { AgentConfig, ListA2AServerItem, ListMCPServerItem } from "@/lib/api";
+import type { AgentConfig, ListA2AServerItem, ListMCPServerItem, MCPServerConfig } from "@/lib/api";
 import { configApi } from "@/lib/api";
 
 export type SettingTab =
@@ -14,13 +14,6 @@ export type SettingTab =
   | "memory-setting"
   | "integrations-setting"
   | "runtime-setting";
-
-const MCP_POLL_INTERVAL_MS = 2000;
-const MCP_POLL_TIMEOUT_MS = 45000;
-
-function hasPendingMcpServers(servers: ListMCPServerItem[]): boolean {
-  return servers.some((server) => server.enabled && server.connection_status === "pending");
-}
 
 export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab) {
   const t = useTranslations("settings");
@@ -34,26 +27,19 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
   const [loadingA2A, setLoadingA2A] = useState(false);
   const [saving, setSaving] = useState(false);
   const fetchingRef = useRef(false);
-  const mcpPollGenerationRef = useRef(0);
-  const mcpPollStartedAtRef = useRef<number | null>(null);
-  const mcpPollExhaustedRef = useRef(false);
 
   const refreshMcpServersSilently = useCallback(async () => {
-    mcpPollExhaustedRef.current = false;
-    mcpPollStartedAtRef.current = null;
     try {
       const data = await configApi.getMCPServers();
       setMcpServers(data?.mcp_servers ?? []);
     } catch {
-      // Best-effort silent refresh during polling or after MCP mutations.
+      // Best-effort silent refresh after MCP mutations.
     }
   }, []);
 
   const fetchAllConfigs = useCallback(() => {
     if (fetchingRef.current) return;
     fetchingRef.current = true;
-    mcpPollExhaustedRef.current = false;
-    mcpPollStartedAtRef.current = null;
 
     setLoadingConfig(true);
     configApi
@@ -100,66 +86,6 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
     }
     fetchingRef.current = false;
   }, [open, fetchAllConfigs]);
-
-  useEffect(() => {
-    if (!open || !hasPendingMcpServers(mcpServers)) {
-      mcpPollStartedAtRef.current = null;
-      return;
-    }
-    if (mcpPollExhaustedRef.current) {
-      return;
-    }
-    if (mcpPollStartedAtRef.current === null) {
-      mcpPollStartedAtRef.current = Date.now();
-    }
-
-    const generation = ++mcpPollGenerationRef.current;
-    let cancelled = false;
-
-    const pollPendingMcpServers = async () => {
-      let stillPending = true;
-      while (!cancelled && generation === mcpPollGenerationRef.current) {
-        const startedAt = mcpPollStartedAtRef.current;
-        if (startedAt === null || Date.now() - startedAt >= MCP_POLL_TIMEOUT_MS) {
-          break;
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, MCP_POLL_INTERVAL_MS));
-        if (cancelled || generation !== mcpPollGenerationRef.current) {
-          break;
-        }
-
-        try {
-          const data = await configApi.getMCPServers();
-          if (cancelled || generation !== mcpPollGenerationRef.current) {
-            break;
-          }
-          const servers = data?.mcp_servers ?? [];
-          setMcpServers(servers);
-          stillPending = hasPendingMcpServers(servers);
-          if (!stillPending) {
-            mcpPollStartedAtRef.current = null;
-            break;
-          }
-        } catch {
-          // Keep polling on transient failures.
-        }
-      }
-      if (
-        !cancelled &&
-        generation === mcpPollGenerationRef.current &&
-        stillPending
-      ) {
-        mcpPollExhaustedRef.current = true;
-      }
-    };
-
-    void pollPendingMcpServers();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, mcpServers]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -218,19 +144,14 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
   );
 
   const handleMCPEdit = useCallback(
-    async (serverName: string, configText: string): Promise<boolean> => {
+    async (serverName: string, config: MCPServerConfig): Promise<boolean> => {
       try {
-        const parsed = JSON.parse(configText);
-        await configApi.updateMCPServer(serverName, parsed);
+        await configApi.updateMCPServer(serverName, { mcpServers: { [serverName]: config } });
         toast.success(t("toastMcpUpdated"));
         await refreshMcpServersSilently();
         return true;
       } catch (err) {
-        if (err instanceof SyntaxError) {
-          toast.error(tErrors("jsonInvalid"));
-        } else {
-          toast.error(err instanceof Error ? err.message : tErrors("updateFailed"));
-        }
+        toast.error(err instanceof Error ? err.message : tErrors("updateFailed"));
         return false;
       }
     },

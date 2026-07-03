@@ -50,20 +50,12 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
 
   const fieldLabel = (section: AppConfigSection, key: string) => {
     const labelKey = `fields.${section}.${key}` as Parameters<typeof t>[0];
-    try {
-      return t(labelKey);
-    } catch {
-      return key;
-    }
+    return t.has(labelKey) ? t(labelKey) : key;
   };
 
   const fieldDescription = (section: AppConfigSection, key: string) => {
     const descKey = `descriptions.${section}.${key}` as Parameters<typeof t>[0];
-    try {
-      return t(descKey);
-    } catch {
-      return undefined;
-    }
+    return t.has(descKey) ? t(descKey) : undefined;
   };
 
   const loadSection = useCallback(async (section: AppConfigSection) => {
