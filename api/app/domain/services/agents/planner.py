@@ -4,12 +4,13 @@ import logging
 import json
 from typing import Optional, AsyncGenerator
 
+from app.application.services.config_provider import get_runtime_config
 from app.domain.models.event import BaseEvent, MessageEvent, PlanEvent, PlanEventStatus
 from app.domain.models.message import Message
 from app.domain.models.plan import Plan, Step
 from app.domain.schemas.planner_output import PlannerPlanSchema, PlannerUpdateSchema
 from app.domain.services.agents.structured_parse import StructuredParseError, parse_structured_output
-from app.domain.services.prompts.loader import compose_system_prompt, detect_locale_from_text, load_prompts
+from app.domain.services.prompts.loader import compose_system_prompt, detect_locale_from_text, load_prompts, resolve_writing_style
 from .base import BaseAgent
 
 """
@@ -45,8 +46,20 @@ class PlannerAgent(BaseAgent):
         """根据用户传递的消息创建计划/规划，迭代返回对应的事件"""
         self.set_current_step("create_plan")
         prompts = load_prompts(detect_locale_from_text(message.message))
+        self.set_locale(prompts.locale)
         saved_prompt = self._system_prompt
-        self._system_prompt = compose_system_prompt(prompts, prompts.planner.PLANNER_SYSTEM_PROMPT)
+        runtime = get_runtime_config()
+        style = resolve_writing_style(
+            self._writing_style_override,
+            self._override_base_rules,
+            runtime.prompt.writing_style,
+        )
+        self._system_prompt = compose_system_prompt(
+            prompts,
+            prompts.planner.PLANNER_SYSTEM_PROMPT,
+            sandbox_runtime=runtime.sandbox_runtime,
+            writing_style=style,
+        )
         # 1.根据用户传递的消息生成创建plan的提示词
         query = prompts.planner.CREATE_PLAN_PROMPT.format(
             message=message.message,
@@ -76,8 +89,8 @@ class PlannerAgent(BaseAgent):
                             if attempt >= max_repair_attempts:
                                 raise
                             current_query = (
-                                f"{query}\n\n上次输出不符合结构化 schema，请修正后只返回 JSON。\n"
-                                f"校验错误:\n{exc}"
+                                f"{query}\n\n"
+                                f"{prompts.internal.STRUCTURED_REPAIR_HINT.format(errors=exc)}"
                             )
                             break
                         plan = Plan.model_validate(validated.model_dump())
@@ -92,8 +105,20 @@ class PlannerAgent(BaseAgent):
         """根据传递的原始规划+子步骤更新事件"""
         self.set_current_step(f"update_plan:{step.id}")
         prompts = load_prompts(plan.language)
+        self.set_locale(prompts.locale)
         saved_prompt = self._system_prompt
-        self._system_prompt = compose_system_prompt(prompts, prompts.planner.PLANNER_SYSTEM_PROMPT)
+        runtime = get_runtime_config()
+        style = resolve_writing_style(
+            self._writing_style_override,
+            self._override_base_rules,
+            runtime.prompt.writing_style,
+        )
+        self._system_prompt = compose_system_prompt(
+            prompts,
+            prompts.planner.PLANNER_SYSTEM_PROMPT,
+            sandbox_runtime=runtime.sandbox_runtime,
+            writing_style=style,
+        )
         # 1.使用plan+step创建更新Plan提示词
         pending_plan_payload = plan.model_dump(mode="json")
         pending_plan_payload["steps"] = [
@@ -128,8 +153,8 @@ class PlannerAgent(BaseAgent):
                             if attempt >= max_repair_attempts:
                                 raise
                             current_query = (
-                                f"{query}\n\n上次输出不符合结构化 schema，请修正后只返回 JSON。\n"
-                                f"校验错误:\n{exc}"
+                                f"{query}\n\n"
+                                f"{prompts.internal.STRUCTURED_REPAIR_HINT.format(errors=exc)}"
                             )
                             break
 

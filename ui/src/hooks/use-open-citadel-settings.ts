@@ -15,6 +15,13 @@ export type SettingTab =
   | "integrations-setting"
   | "runtime-setting";
 
+const MCP_POLL_INTERVAL_MS = 2000;
+const MCP_POLL_TIMEOUT_MS = 45000;
+
+function hasPendingMcpServers(servers: ListMCPServerItem[]): boolean {
+  return servers.some((server) => server.enabled && server.connection_status === "pending");
+}
+
 export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab) {
   const t = useTranslations("settings");
   const tErrors = useTranslations("errors");
@@ -27,10 +34,26 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
   const [loadingA2A, setLoadingA2A] = useState(false);
   const [saving, setSaving] = useState(false);
   const fetchingRef = useRef(false);
+  const mcpPollGenerationRef = useRef(0);
+  const mcpPollStartedAtRef = useRef<number | null>(null);
+  const mcpPollExhaustedRef = useRef(false);
+
+  const refreshMcpServersSilently = useCallback(async () => {
+    mcpPollExhaustedRef.current = false;
+    mcpPollStartedAtRef.current = null;
+    try {
+      const data = await configApi.getMCPServers();
+      setMcpServers(data?.mcp_servers ?? []);
+    } catch {
+      // Best-effort silent refresh during polling or after MCP mutations.
+    }
+  }, []);
 
   const fetchAllConfigs = useCallback(() => {
     if (fetchingRef.current) return;
     fetchingRef.current = true;
+    mcpPollExhaustedRef.current = false;
+    mcpPollStartedAtRef.current = null;
 
     setLoadingConfig(true);
     configApi
@@ -78,6 +101,66 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
     fetchingRef.current = false;
   }, [open, fetchAllConfigs]);
 
+  useEffect(() => {
+    if (!open || !hasPendingMcpServers(mcpServers)) {
+      mcpPollStartedAtRef.current = null;
+      return;
+    }
+    if (mcpPollExhaustedRef.current) {
+      return;
+    }
+    if (mcpPollStartedAtRef.current === null) {
+      mcpPollStartedAtRef.current = Date.now();
+    }
+
+    const generation = ++mcpPollGenerationRef.current;
+    let cancelled = false;
+
+    const pollPendingMcpServers = async () => {
+      let stillPending = true;
+      while (!cancelled && generation === mcpPollGenerationRef.current) {
+        const startedAt = mcpPollStartedAtRef.current;
+        if (startedAt === null || Date.now() - startedAt >= MCP_POLL_TIMEOUT_MS) {
+          break;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, MCP_POLL_INTERVAL_MS));
+        if (cancelled || generation !== mcpPollGenerationRef.current) {
+          break;
+        }
+
+        try {
+          const data = await configApi.getMCPServers();
+          if (cancelled || generation !== mcpPollGenerationRef.current) {
+            break;
+          }
+          const servers = data?.mcp_servers ?? [];
+          setMcpServers(servers);
+          stillPending = hasPendingMcpServers(servers);
+          if (!stillPending) {
+            mcpPollStartedAtRef.current = null;
+            break;
+          }
+        } catch {
+          // Keep polling on transient failures.
+        }
+      }
+      if (
+        !cancelled &&
+        generation === mcpPollGenerationRef.current &&
+        stillPending
+      ) {
+        mcpPollExhaustedRef.current = true;
+      }
+    };
+
+    void pollPendingMcpServers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mcpServers]);
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -106,6 +189,7 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
             state: enabled ? tCommon("enabled") : tCommon("disabledState"),
           }),
         );
+        await refreshMcpServersSilently();
       } catch {
         setMcpServers((prev) =>
           prev.map((server) =>
@@ -115,7 +199,7 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
         toast.error(tErrors("operationFailedRetry"));
       }
     },
-    [t, tCommon, tErrors],
+    [t, tCommon, tErrors, refreshMcpServersSilently],
   );
 
   const handleMCPDelete = useCallback(
@@ -139,12 +223,7 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
         const parsed = JSON.parse(configText);
         await configApi.updateMCPServer(serverName, parsed);
         toast.success(t("toastMcpUpdated"));
-        try {
-          const data = await configApi.getMCPServers();
-          setMcpServers(data?.mcp_servers ?? []);
-        } catch {
-          // Best-effort refresh after update.
-        }
+        await refreshMcpServersSilently();
         return true;
       } catch (err) {
         if (err instanceof SyntaxError) {
@@ -155,7 +234,7 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
         return false;
       }
     },
-    [t, tErrors],
+    [t, tErrors, refreshMcpServersSilently],
   );
 
   const handleMCPAdd = useCallback(
@@ -164,13 +243,7 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
         const parsed = JSON.parse(configText);
         await configApi.addMCPServer(parsed);
         toast.success(t("toastMcpAdded"));
-
-        try {
-          const data = await configApi.getMCPServers();
-          setMcpServers(data?.mcp_servers ?? []);
-        } catch {
-          // Best-effort refresh; the add result has already been saved.
-        }
+        await refreshMcpServersSilently();
         return true;
       } catch (err) {
         if (err instanceof SyntaxError) {
@@ -181,7 +254,7 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
         return false;
       }
     },
-    [t, tErrors],
+    [t, tErrors, refreshMcpServersSilently],
   );
 
   const handleA2AToggle = useCallback(

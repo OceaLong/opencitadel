@@ -25,6 +25,9 @@ class MCPServerORM(Base):
     command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     args: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    url_encryption: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'legacy_plaintext'")
+    )
     headers: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     headers_encryption: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default=text("'legacy_plaintext'")
@@ -45,7 +48,12 @@ class MCPServerORM(Base):
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
 
-    def to_domain(self, headers: Optional[Dict[str, Any]], env: Optional[Dict[str, Any]]) -> MCPServerRecord:
+    def to_domain(
+        self,
+        url: Optional[str],
+        headers: Optional[Dict[str, Any]],
+        env: Optional[Dict[str, Any]],
+    ) -> MCPServerRecord:
         return MCPServerRecord(
             id=self.id,
             name=self.name,

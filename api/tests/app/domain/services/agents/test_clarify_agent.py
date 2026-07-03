@@ -17,6 +17,9 @@ def test_clarify_agent_yields_clarify_event_when_questions_needed():
     agent = ClarifyAgent.__new__(ClarifyAgent)
     agent._json_parser = DummyJsonParser()
     agent.last_brief = None
+    agent._writing_style_override = None
+    agent._override_base_rules = False
+    agent._system_prompt = ""
 
     async def fake_invoke(*args, **kwargs):
         yield MessageEvent(
@@ -51,6 +54,9 @@ def test_clarify_agent_records_brief_when_no_questions_needed():
     agent = ClarifyAgent.__new__(ClarifyAgent)
     agent._json_parser = DummyJsonParser()
     agent.last_brief = None
+    agent._writing_style_override = None
+    agent._override_base_rules = False
+    agent._system_prompt = ""
 
     async def fake_invoke(*args, **kwargs):
         yield MessageEvent(

@@ -3,6 +3,7 @@
 import logging
 from typing import AsyncGenerator, Dict, Any, List, Optional
 
+from app.application.services.config_provider import get_runtime_config
 from app.domain.models.event import (
     BaseEvent,
     ClarifyEvent,
@@ -12,7 +13,7 @@ from app.domain.models.event import (
 from app.domain.models.message import Message
 from app.domain.schemas.clarify_output import ClarifyOutputSchema
 from app.domain.services.agents.structured_parse import StructuredParseError, parse_structured_output
-from app.domain.services.prompts.loader import compose_system_prompt, detect_locale_from_text, load_prompts
+from app.domain.services.prompts.loader import compose_system_prompt, detect_locale_from_text, load_prompts, resolve_writing_style
 from .base import BaseAgent
 
 logger = logging.getLogger(__name__)
@@ -37,8 +38,20 @@ class ClarifyAgent(BaseAgent):
         self.set_current_step("analyze")
         self.last_brief = None
         prompts = load_prompts(detect_locale_from_text(message.message))
+        self.set_locale(prompts.locale)
         saved_prompt = self._system_prompt
-        self._system_prompt = compose_system_prompt(prompts, prompts.clarify.CLARIFY_SYSTEM_PROMPT)
+        runtime = get_runtime_config()
+        style = resolve_writing_style(
+            getattr(self, "_writing_style_override", None),
+            getattr(self, "_override_base_rules", False),
+            runtime.prompt.writing_style,
+        )
+        self._system_prompt = compose_system_prompt(
+            prompts,
+            prompts.clarify.CLARIFY_SYSTEM_PROMPT,
+            sandbox_runtime=runtime.sandbox_runtime,
+            writing_style=style,
+        )
         query = prompts.clarify.CLARIFY_PROMPT.format(
             message=message.message,
             attachments="\n".join(message.attachments),
@@ -67,8 +80,8 @@ class ClarifyAgent(BaseAgent):
                             if attempt >= max_repair_attempts:
                                 raise
                             current_query = (
-                                f"{query}\n\n上次输出不符合结构化 schema，请修正后只返回 JSON。\n"
-                                f"校验错误:\n{exc}"
+                                f"{query}\n\n"
+                                f"{prompts.internal.STRUCTURED_REPAIR_HINT.format(errors=exc)}"
                             )
                             break
 

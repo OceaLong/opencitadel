@@ -380,6 +380,7 @@
     "skills": "Skill templates",
     "memory": "Long-term memory",
     "integrations": "Integrations",
+    "runtime": "Runtime config",
     "a2a": "A2A Agent",
     "mcp": "MCP servers",
     "language": "Language",
@@ -415,7 +416,7 @@
     "enterMcpConfig": "Please enter MCP server configuration",
     "noMcpServers": "No MCP servers yet. Click above to add one.",
     "editMcpServer": "Edit MCP server",
-    "editMcpServerDesc": "Update the JSON configuration for this MCP server.",
+    "editMcpServerDesc": "Update the JSON configuration for this MCP server. Secrets are masked; leave **** unchanged to keep existing values.",
     "mcpStatusConnected": "Connected",
     "mcpStatusError": "Unreachable",
     "mcpStatusPending": "Checking"

@@ -43,6 +43,9 @@ from app.domain.services.tools.artifact import ArtifactTool
 from app.domain.services.tools.memory import MemoryTool
 from app.domain.services.tools.mcp import MCPTool
 from app.domain.services.subagent_factory import build_subagent_tool
+from app.domain.services.skills.skill_loader import render_active
+from app.application.services.skill_recommender_service import SkillRecommenderService
+from app.domain.services.prompts.loader import detect_locale_from_text
 from app.domain.utils.app_config_filter import filter_a2a_config_by_refs, filter_mcp_config_by_refs
 from app.infrastructure.external.llm.factory import LLMFactory
 from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError, create_resilient_llm
@@ -150,18 +153,21 @@ class TaskRunnerFactory:
             overrides["max_search_results"] = params.max_search_results
         return agent_config.model_copy(update=overrides) if overrides else agent_config
 
-    async def _resolve_llm_and_config(self, session: Session):
+    async def _resolve_llm_and_config(self, session: Session, latest_message: str = ""):
         model_id = session.model_id
         skill = None
         skill_prompt = ""
         agent_config = self._agent_config
         temperature_override: Optional[float] = None
 
+        if not session.skill_id:
+            await self._maybe_auto_recommend_skill(session, latest_message)
+
         if session.skill_id:
             try:
                 skill = await self._skill_service.get_skill(session.skill_id)
                 if skill.enabled:
-                    skill_prompt = skill.system_prompt
+                    skill_prompt = render_active(skill)
                     agent_config = self._apply_skill_agent_params(agent_config, skill)
                     if skill.agent_params and skill.agent_params.temperature_override is not None:
                         temperature_override = skill.agent_params.temperature_override
@@ -183,6 +189,40 @@ class TaskRunnerFactory:
         long_term_memory_block = await self._memory_recall(session.id)
         return llm, agent_config, skill, skill_prompt, long_term_memory_block, llm_model
 
+    async def _maybe_auto_recommend_skill(self, session: Session, latest_message: str = "") -> None:
+        runtime = get_runtime_config()
+        if not runtime.feature_flags.enable_skill_auto_recommend:
+            return
+        scope = OwnerScope.personal(session.owner_user_id) if session.owner_user_id else None
+        message = latest_message
+        if not message:
+            return
+        skills = await self._skill_service.list_skills(enabled_only=True, scope=scope)
+        llm_model = await self._llm_model_service.resolve_model(session.model_id)
+        llm = create_resilient_llm(llm_model, llm_model_service=self._llm_model_service)
+        recommender = SkillRecommenderService(llm, self._json_parser)
+        result = await recommender.recommend(message, skills)
+        if not result.skill_id:
+            return
+        async with self._uow_factory() as uow:
+            await uow.session.update_session_config(session.id, skill_id=result.skill_id)
+        session.skill_id = result.skill_id
+        logger.info(
+            "Auto-recommended skill session=%s skill_id=%s confidence=%s",
+            session.id,
+            result.skill_id,
+            result.confidence,
+        )
+
+    async def _latest_user_message(self, session_id: str) -> str:
+        async with self._uow_factory() as uow:
+            records = await uow.session.list_events(session_id, limit=50)
+        for _, event in reversed(records):
+            role = getattr(event, "role", None)
+            if role == "user" and getattr(event, "message", None):
+                return str(event.message)
+        return ""
+
     async def _memory_recall(self, session_id: str) -> str:
         try:
             return await self._memory_service.recall_for_session(session_id)
@@ -193,8 +233,13 @@ class TaskRunnerFactory:
     async def create_runner(self, session: Session) -> AgentTaskRunner:
         await self._refresh_runtime_config(session)
 
-        llm, agent_config, skill, skill_prompt, ltm_block, llm_model = await self._resolve_llm_and_config(session)
+        latest_message = await self._latest_user_message(session.id)
+        llm, agent_config, skill, skill_prompt, ltm_block, llm_model = await self._resolve_llm_and_config(
+            session,
+            latest_message,
+        )
         model_id = llm_model.id
+        prompt_locale = detect_locale_from_text(latest_message)
 
         on_ready = None
         if (
@@ -355,6 +400,13 @@ class TaskRunnerFactory:
         import asyncio
         stateful_tool_lock = asyncio.Lock()
         allowed_for_subagent = skill.allowed_tools if (skill and skill.allowed_tools) else None
+        subagent_overrides = {}
+        if skill:
+            params = skill.agent_params
+            subagent_overrides = {
+                "writing_style_override": params.writing_style_override if params else None,
+                "override_base_rules": skill.override_base_rules,
+            }
         subagent_tool = build_subagent_tool(
             uow_factory=self._uow_factory,
             session_id=session.id,
@@ -375,6 +427,8 @@ class TaskRunnerFactory:
             model_id=model_id,
             file_storage=self._file_storage,
             stateful_tool_lock=stateful_tool_lock,
+            prompt_locale=prompt_locale,
+            **subagent_overrides,
         )
         extra_tools = list(extra_tools) + [subagent_tool]
 

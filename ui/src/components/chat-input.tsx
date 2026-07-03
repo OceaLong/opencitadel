@@ -15,7 +15,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { fileApi } from "@/lib/api/file";
 import type { FileInfo } from "@/lib/api/types";
@@ -210,7 +210,6 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
                   </Item>
                 ))}
               </div>
-              <ScrollBar orientation="horizontal" />
             </ScrollArea>
           </div>
         )}

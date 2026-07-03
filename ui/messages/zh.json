@@ -380,6 +380,7 @@
     "skills": "Skill 模板",
     "memory": "长期记忆",
     "integrations": "协议集成",
+    "runtime": "运行时配置",
     "a2a": "A2A Agent 配置",
     "mcp": "MCP 服务器",
     "language": "语言",
@@ -415,7 +416,7 @@
     "enterMcpConfig": "请输入 MCP 服务器配置",
     "noMcpServers": "暂无 MCP 服务器，请点击上方按钮添加",
     "editMcpServer": "编辑 MCP 服务器",
-    "editMcpServerDesc": "更新此 MCP 服务器的 JSON 配置。",
+    "editMcpServerDesc": "更新此 MCP 服务器的 JSON 配置。密钥已脱敏，保持 **** 不变即不修改。",
     "mcpStatusConnected": "已连接",
     "mcpStatusError": "不可达",
     "mcpStatusPending": "检测中"

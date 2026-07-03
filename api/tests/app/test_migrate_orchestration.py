@@ -48,15 +48,20 @@ def test_run_data_migrations_runs_all_steps_in_one_event_loop(monkeypatch):
         calls.append("mcp_a2a")
         return {"mcp": 0, "a2a": 0}
 
+    async def _mcp_secrets():
+        calls.append("mcp_secrets")
+        return {"urls": 0, "headers": 0, "env": 0}
+
     monkeypatch.setattr("app.migrate.migrate_legacy_plaintext_api_keys", _llm_keys)
     monkeypatch.setattr("app.migrate.seed_app_config_from_yaml_if_empty", _seed)
     monkeypatch.setattr("app.migrate.migrate_mcp_a2a_from_blob", _mcp_a2a)
+    monkeypatch.setattr("app.migrate.migrate_mcp_url_and_secrets", _mcp_secrets)
 
     from app.migrate import run_data_migrations
 
     asyncio.run(run_data_migrations())
 
-    assert calls == ["llm_keys", "seed", "mcp_a2a"]
+    assert calls == ["llm_keys", "seed", "mcp_a2a", "mcp_secrets"]
 
 
 def test_seed_migration_shuts_down_postgres_on_early_return(monkeypatch):

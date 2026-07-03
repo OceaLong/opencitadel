@@ -4,6 +4,7 @@
 import logging
 from typing import AsyncGenerator, Callable, List, Optional
 
+from app.application.services.config_provider import get_runtime_config
 from app.domain.external.browser import Browser
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
@@ -16,7 +17,7 @@ from app.domain.models.event import BaseEvent, DoneEvent, ErrorEvent
 from app.domain.models.message import Message
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agents.base import BaseAgent
-from app.domain.services.prompts.system import SYSTEM_PROMPT
+from app.domain.services.prompts.loader import compose_system_prompt, detect_locale_from_text, load_prompts
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.mcp import MCPTool
@@ -25,21 +26,10 @@ from .base import BaseFlow, FlowStatus
 
 logger = logging.getLogger(__name__)
 
-HYBRID_ASK_PROMPT = """
-你是企业级混合知识问答助手（Ask 模式）。用户同时绑定了代码库与文档知识库。
-
-要求：
-1. 根据问题类型选择合适的工具：代码相关问题用 codebase 工具，文档/流程/政策类问题用 knowledge_base 工具，跨域问题可同时检索两者
-2. 代码引用格式为 `文件路径:行号`；文档引用优先复用工具返回的 `kbdoc://` Markdown 链接
-3. 涉及调用关系时，用 ```mermaid 代码块输出调用链/流程图
-4. 不要规划任务或修改代码/文件，仅做问答与分析
-5. 若某来源无可靠依据，明确说明，不要编造
-"""
-
 
 class HybridAskAgent(BaseAgent):
     name: str = "hybrid_ask"
-    _system_prompt: str = SYSTEM_PROMPT + HYBRID_ASK_PROMPT
+    _system_prompt: str = ""
     _format: str = "text"
 
     def _should_emit_deltas(self) -> bool:
@@ -92,6 +82,15 @@ class HybridAskFlow(BaseFlow):
 
     async def invoke(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         try:
+            prompts = load_prompts(detect_locale_from_text(message.message))
+            runtime = get_runtime_config()
+            self._agent.set_locale(prompts.locale)
+            self._agent._system_prompt = compose_system_prompt(
+                prompts,
+                prompts.flows.HYBRID_ASK_PROMPT,
+                sandbox_runtime=runtime.sandbox_runtime,
+                writing_style=runtime.prompt.writing_style,
+            )
             async for event in self._agent.invoke(message):
                 yield event
             self.status = FlowStatus.COMPLETED

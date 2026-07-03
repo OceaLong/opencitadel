@@ -28,6 +28,17 @@ memory:
     model: text-embedding-3-small
     base_url: https://api.openai.com/v1
 
+sandbox_runtime:
+  os: Ubuntu 22.04 (linux/amd64)
+  user: ubuntu
+  home: /home/ubuntu
+  python_version: "3.10"
+  node_version: "24.x"
+  extra_tools: bc
+
+prompt:
+  writing_style: prose
+
 sandbox:
   driver: auto
   address: null
@@ -79,6 +90,7 @@ observability:
   langfuse_enabled: false
 
 mcp_config:
+  # 以下 MCP 条目仅为种子模板（enabled: false）；生产环境勿在此填写真实密钥，请通过 UI/API 配置。
   mcpServers:
     amap-maps-streamableHTTP:
       transport: streamable_http
@@ -160,6 +172,7 @@ feature_flags:
   enable_parallel_step_execution: false
   enable_artifacts: true
   enable_hitl_gates: true
+  enable_skill_auto_recommend: false
 
 hitl:
   plan_gate_enabled: true

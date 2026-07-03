@@ -12,6 +12,7 @@ from app.infrastructure.logging import setup_logging
 from app.migrate_llm_api_keys import migrate_legacy_plaintext_api_keys
 from app.migrate_app_config_seed import seed_app_config_from_yaml_if_empty
 from app.migrate_mcp_a2a_from_blob import migrate_mcp_a2a_from_blob
+from app.migrate_mcp_url_and_secrets import migrate_mcp_url_and_secrets
 from app.runtime_role import ProcessRole, set_role
 
 set_role(ProcessRole.MIGRATE)
@@ -26,6 +27,9 @@ async def run_data_migrations() -> None:
 
     migrated_integrations = await migrate_mcp_a2a_from_blob()
     print(f"MCP/A2A blob migration complete: {migrated_integrations}")
+
+    migrated_mcp_secrets = await migrate_mcp_url_and_secrets()
+    print(f"MCP url/secret migration complete: {migrated_mcp_secrets}")
 
 
 def main() -> None:

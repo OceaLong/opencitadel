@@ -14,7 +14,7 @@ from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.utils.integration_config_builder import a2a_records_to_config, mcp_records_to_config
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
-from app.infrastructure.security.secret_dict_cipher import encrypt_secret_dict
+from app.infrastructure.security.secret_dict_cipher import encrypt_secret_dict, encrypt_url
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,12 @@ def _apply_masked_secret_updates(
         k: (existing.get(k, v) if isinstance(v, str) and "****" in v else v)
         for k, v in updates.items()
     }
+
+
+def _apply_masked_url_update(updated_url: Optional[str], existing_url: Optional[str]) -> Optional[str]:
+    if isinstance(updated_url, str) and "****" in updated_url:
+        return existing_url
+    return updated_url
 
 
 class MCPServerService:
@@ -68,6 +74,7 @@ class MCPServerService:
             record.owner_user_id = scope.user_id
         enc_headers, headers_enc = encrypt_secret_dict(record.headers, self._cipher)
         enc_env, env_enc = encrypt_secret_dict(record.env, self._cipher)
+        enc_url, url_enc = encrypt_url(record.url, self._cipher)
         async with self._uow_factory() as uow:
             if record.visibility != ResourceVisibility.GLOBAL:
                 if await uow.mcp_server.exists_global_name(record.name):
@@ -75,8 +82,13 @@ class MCPServerService:
             existing = await uow.mcp_server.get_by_name(record.name, scope=scope)
             if existing:
                 raise BadRequestError(f"MCP 服务[{record.name}]已存在")
-            await uow.mcp_server.save(record, enc_headers, headers_enc, enc_env, env_enc)
-        await self._audit(actor_user_id, "mcp_server.create", record.id, record.model_dump(mode="json"))
+            await uow.mcp_server.save(record, enc_url, url_enc, enc_headers, headers_enc, enc_env, env_enc)
+        await self._audit(
+            actor_user_id,
+            "mcp_server.create",
+            record.id,
+            record.mask_secrets().model_dump(mode="json"),
+        )
         return record.mask_secrets()
 
     async def update_server(
@@ -94,14 +106,21 @@ class MCPServerService:
             if not existing:
                 raise NotFoundError(f"MCP 服务[{server_id}]不存在")
             updates.id = server_id
+            updates.url = _apply_masked_url_update(updates.url, existing.url)
             if updates.headers:
-                updates.headers = _apply_masked_secret_updates(updates.headers, existing.headers)
+                updates.headers = _apply_masked_secret_updates(updates.headers, existing.headers or {})
             if updates.env:
-                updates.env = _apply_masked_secret_updates(updates.env, existing.env)
+                updates.env = _apply_masked_secret_updates(updates.env, existing.env or {})
             enc_headers, headers_enc = encrypt_secret_dict(updates.headers, self._cipher)
             enc_env, env_enc = encrypt_secret_dict(updates.env, self._cipher)
-            await uow.mcp_server.save(updates, enc_headers, headers_enc, enc_env, env_enc)
-        await self._audit(actor_user_id, "mcp_server.update", server_id, updates.model_dump(mode="json"))
+            enc_url, url_enc = encrypt_url(updates.url, self._cipher)
+            await uow.mcp_server.save(updates, enc_url, url_enc, enc_headers, headers_enc, enc_env, env_enc)
+        await self._audit(
+            actor_user_id,
+            "mcp_server.update",
+            server_id,
+            updates.mask_secrets().model_dump(mode="json"),
+        )
         return updates.mask_secrets()
 
     async def delete_server(
@@ -131,7 +150,8 @@ class MCPServerService:
             existing.enabled = enabled
             enc_headers, headers_enc = encrypt_secret_dict(existing.headers, self._cipher)
             enc_env, env_enc = encrypt_secret_dict(existing.env, self._cipher)
-            await uow.mcp_server.save(existing, enc_headers, headers_enc, enc_env, env_enc)
+            enc_url, url_enc = encrypt_url(existing.url, self._cipher)
+            await uow.mcp_server.save(existing, enc_url, url_enc, enc_headers, headers_enc, enc_env, env_enc)
         await self._audit(actor_user_id, "mcp_server.set_enabled", server_id, {"enabled": enabled})
         return existing.mask_secrets()
 

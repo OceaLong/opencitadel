@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.domain.models.app_config import MCPTransport
 from app.domain.models.llm_model import ResourceVisibility
+from app.domain.utils.secret_masking import mask_url
 
 
 class MCPServerRecord(BaseModel):
@@ -36,6 +37,8 @@ class MCPServerRecord(BaseModel):
 
     def mask_secrets(self) -> "MCPServerRecord":
         masked = self.model_copy(deep=True)
+        if masked.url:
+            masked.url = mask_url(masked.url)
         if masked.headers:
             masked.headers = {k: _mask_value(v) for k, v in masked.headers.items()}
         if masked.env:

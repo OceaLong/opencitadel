@@ -23,8 +23,9 @@ from app.domain.utils.hitl import TAKEOVER_PHASE, TOOL_APPROVAL_PHASE, merge_pen
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.models.plan import Plan, Step, ExecutionStatus
+from app.domain.schemas.react_output import ReactStepSchema, ReactSummarySchema
 from app.domain.services.agents.structured_parse import StructuredParseError, parse_structured_output
-from app.domain.services.prompts.loader import compose_system_prompt, detect_locale_from_text, load_prompts
+from app.domain.services.prompts.loader import compose_system_prompt, detect_locale_from_text, load_prompts, resolve_writing_style
 from .base import BaseAgent
 
 logger = logging.getLogger(__name__)
@@ -66,8 +67,20 @@ class ReActAgent(BaseAgent):
     ) -> AsyncGenerator[BaseEvent, None]:
         """根据传递的消息+规划+子步骤，执行相应的子步骤"""
         prompts = load_prompts(plan.language)
+        self.set_locale(prompts.locale)
         saved_prompt = self._system_prompt
-        self._system_prompt = compose_system_prompt(prompts, prompts.react.REACT_SYSTEM_PROMPT)
+        runtime = get_runtime_config()
+        style = resolve_writing_style(
+            self._writing_style_override,
+            self._override_base_rules,
+            runtime.prompt.writing_style,
+        )
+        self._system_prompt = compose_system_prompt(
+            prompts,
+            prompts.react.REACT_SYSTEM_PROMPT,
+            sandbox_runtime=runtime.sandbox_runtime,
+            writing_style=style,
+        )
         # 1.根据传递的内容生成执行消息
         query = prompts.react.EXECUTION_PROMPT.format(
             message=message.message,
@@ -190,15 +203,15 @@ class ReActAgent(BaseAgent):
             return
         if isinstance(event, MessageEvent):
             step.status = ExecutionStatus.COMPLETED
-            new_step = await parse_structured_output(
+            parsed = await parse_structured_output(
                 event.message,
-                Step,
+                ReactStepSchema,
                 self._json_parser,
                 retry_budget=getattr(self, "_retry_budget", None),
             )
-            step.success = new_step.success
-            step.result = new_step.result
-            step.attachments = new_step.attachments
+            step.success = parsed.success
+            step.result = parsed.result
+            step.attachments = parsed.attachments
             yield StepEvent(step=step, status=StepEventStatus.COMPLETED)
             if step.result:
                 yield MessageEvent(role="assistant", message=step.result)
@@ -322,8 +335,20 @@ class ReActAgent(BaseAgent):
         """调用Agent汇总历史的消息并生成最终回复+附件"""
         self.set_current_step("summarize")
         prompts = load_prompts(detect_locale_from_text(message.message))
+        self.set_locale(prompts.locale)
         saved_prompt = self._system_prompt
-        self._system_prompt = compose_system_prompt(prompts, prompts.react.REACT_SYSTEM_PROMPT)
+        runtime = get_runtime_config()
+        style = resolve_writing_style(
+            self._writing_style_override,
+            self._override_base_rules,
+            runtime.prompt.writing_style,
+        )
+        self._system_prompt = compose_system_prompt(
+            prompts,
+            prompts.react.REACT_SYSTEM_PROMPT,
+            sandbox_runtime=runtime.sandbox_runtime,
+            writing_style=style,
+        )
         # 1.构建请求query
         query = prompts.react.SUMMARIZE_PROMPT
 
@@ -341,16 +366,17 @@ class ReActAgent(BaseAgent):
                             # 5.将解析数据转换为Message对象
                             summary_message = await parse_structured_output(
                                 event.message,
-                                Message,
+                                ReactSummarySchema,
                                 self._json_parser,
                                 retry_budget=getattr(self, "_retry_budget", None),
                             )
                         except StructuredParseError as exc:
                             if attempt >= max_repair_attempts:
                                 raise
+                            internal = prompts.internal
                             current_query = (
-                                f"{query}\n\n上次输出不符合结构化 schema，请修正后只返回 JSON。\n"
-                                f"校验错误:\n{exc}"
+                                f"{query}\n\n"
+                                f"{internal.STRUCTURED_REPAIR_HINT.format(errors=exc)}"
                             )
                             break
 

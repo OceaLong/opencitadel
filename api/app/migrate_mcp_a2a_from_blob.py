@@ -13,7 +13,7 @@ from app.domain.models.llm_model import ResourceVisibility
 from app.infrastructure.models.app_config import AppConfigModel
 from app.infrastructure.models.integration_server import A2AServerORM, MCPServerORM
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
-from app.infrastructure.security.secret_dict_cipher import encrypt_secret_dict
+from app.infrastructure.security.secret_dict_cipher import encrypt_secret_dict, encrypt_url
 from app.infrastructure.storage.postgres import get_postgres
 from core.config import get_settings
 
@@ -41,6 +41,7 @@ async def migrate_mcp_a2a_from_blob() -> dict:
                 for name, cfg in app_config.mcp_config.mcpServers.items():
                     enc_headers, headers_enc = encrypt_secret_dict(cfg.headers, cipher)
                     enc_env, env_enc = encrypt_secret_dict(cfg.env, cipher)
+                    enc_url, url_enc = encrypt_url(cfg.url, cipher)
                     session.add(
                         MCPServerORM(
                             id=str(uuid.uuid4()),
@@ -50,7 +51,8 @@ async def migrate_mcp_a2a_from_blob() -> dict:
                             description=cfg.description,
                             command=cfg.command,
                             args=cfg.args,
-                            url=cfg.url,
+                            url=enc_url,
+                            url_encryption=url_enc,
                             headers=enc_headers,
                             headers_encryption=headers_enc,
                             env=enc_env,

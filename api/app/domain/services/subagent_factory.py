@@ -15,12 +15,14 @@ from app.domain.external.search import SearchEngine
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
 from app.domain.models.app_config import AgentConfig
 from app.domain.models.event import MessageEvent
+from app.application.services.config_provider import get_runtime_config
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agents.subagent import SubAgentAgent
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.mcp import MCPTool
 from app.domain.services.tools.subagent import SubAgentTool
+from app.domain.services.prompts.loader import compose_system_prompt, load_prompts, resolve_writing_style
 from app.domain.services.tools.tool_names import is_tool_allowed, normalize_allowed_tool_names
 from app.domain.services.tools.tool_registry import ToolRegistry
 
@@ -48,6 +50,9 @@ def build_subagent_tool(
         model_id: Optional[str] = None,
         file_storage: Optional[FileStorage] = None,
         stateful_tool_lock: Optional[asyncio.Lock] = None,
+        writing_style_override: Optional[str] = None,
+        override_base_rules: bool = False,
+        prompt_locale: str = "en",
 ) -> SubAgentTool:
     """Build SubAgentTool with a closure that spawns isolated SubAgentAgent instances."""
     base_extra = [t for t in (extra_tools or []) if not isinstance(t, SubAgentTool)]
@@ -74,6 +79,20 @@ def build_subagent_tool(
         )
         sub_iterations = min(agent_config.subagent_max_iterations, agent_config.max_iterations)
         sub_config = agent_config.model_copy(update={"max_iterations": sub_iterations})
+        prompts = load_prompts(prompt_locale)
+        runtime = get_runtime_config()
+        style = resolve_writing_style(
+            writing_style_override,
+            override_base_rules,
+            runtime.prompt.writing_style,
+        )
+        subagent_extra = prompts.internal.SUBAGENT_SYSTEM_PROMPT
+        system_prompt = compose_system_prompt(
+            prompts,
+            subagent_extra,
+            sandbox_runtime=runtime.sandbox_runtime,
+            writing_style=style,
+        )
         agent = SubAgentAgent(
             uow_factory=uow_factory,
             session_id=session_id,
@@ -89,7 +108,12 @@ def build_subagent_tool(
             observability_port=observability_port,
             runtime_settings=runtime_settings,
             stateful_tool_lock=lock,
+            writing_style_override=writing_style_override,
+            override_base_rules=override_base_rules,
+            prompt_locale=prompt_locale,
         )
+        agent._system_prompt = system_prompt
+        agent.set_locale(prompt_locale)
         agent.name = agent_name
         summary = ""
         async for event in agent.invoke(goal, format=None, emit_deltas=False):

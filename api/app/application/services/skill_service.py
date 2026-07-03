@@ -20,6 +20,7 @@ BUILTIN_SKILLS = [
         category="development",
         system_prompt="你是一位专业的编程助手。优先使用文件和Shell工具完成代码任务，注重代码质量与最佳实践。",
         allowed_tools=["read_file", "write_file", "replace_in_file", "shell_execute", "message_notify_user", "message_ask_user"],
+        agent_params=SkillAgentParams(writing_style_override="adaptive"),
         examples=["帮我写一个Python爬虫", "重构这段代码", "修复这个bug"],
         is_builtin=True,
     ),
@@ -42,6 +43,7 @@ BUILTIN_SKILLS = [
         category="analysis",
         system_prompt="你是一位数据分析专家。擅长处理结构化数据，生成清晰的分析结论和可视化建议。",
         allowed_tools=["read_file", "write_file", "shell_execute", "search_web", "message_notify_user"],
+        agent_params=SkillAgentParams(writing_style_override="adaptive"),
         examples=["分析这份CSV数据", "生成数据统计报告", "找出数据异常点"],
         is_builtin=True,
     ),
@@ -114,6 +116,7 @@ BUILTIN_SKILLS = [
             max_iterations=40,
             max_retries=3,
             tool_gate_call_level_enabled=True,
+            writing_style_override="adaptive",
         ),
         examples=["对账本月退款并出稽核报告", "核对 ops-console 与结算账本差异"],
         is_builtin=True,
@@ -182,6 +185,11 @@ class SkillService:
             if existing.is_builtin:
                 raise BadRequestError("内置Skill模板不可删除，可将其禁用")
             await uow.skill.delete_by_id(skill_id)
+
+    async def import_from_markdown(self, content: str, *, slug: str = "", scope: Optional[OwnerScope] = None) -> Skill:
+        from app.domain.services.skills.skill_import import import_skill_md
+        skill = import_skill_md(content, slug=slug or None)
+        return await self.create_skill(skill, scope=scope)
 
     async def seed_builtin_skills(self) -> None:
         async with self._uow_factory() as uow:

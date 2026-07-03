@@ -52,18 +52,9 @@ from app.domain.services.agent.sandbox_lifecycle import SandboxLifecycleCoordina
 from app.infrastructure.external.llm.structured_output import schema_payload
 from pydantic import BaseModel
 
+from app.domain.services.prompts.loader import get_internal_prompts
+
 logger = logging.getLogger(__name__)
-
-_MEMORY_SUMMARY_PROMPT = """请将以下 Agent 对话历史压缩为简洁摘要，保留：
-- 已完成的关键操作与结论
-- 重要文件路径、数据、错误信息
-- 用户目标与当前进度
-
-只输出摘要正文，不要 JSON。使用与历史相同的语言。
-
-历史消息:
-{history}
-"""
 
 BROWSER_VISION_TOOLS = frozenset({"browser_screenshot"})
 STATEFUL_TOOL_NAMES = frozenset({"browser", "shell"})
@@ -112,6 +103,9 @@ class BaseAgent(ABC):
             file_storage: Optional[FileStorage] = None,
             stateful_tool_lock: Optional[asyncio.Lock] = None,
             sandbox_lifecycle: Optional[SandboxLifecycleCoordinator] = None,
+            writing_style_override: Optional[str] = None,
+            override_base_rules: bool = False,
+            prompt_locale: str = "en",
     ) -> None:
         """构造函数，完成Agent的初始化"""
         self._uow_factory = uow_factory
@@ -124,6 +118,9 @@ class BaseAgent(ABC):
         self._tools = tools
         self._skill_prompt = skill_prompt
         self._long_term_memory_block = long_term_memory_block
+        self._writing_style_override = writing_style_override
+        self._override_base_rules = override_base_rules
+        self._prompt_locale = prompt_locale or "en"
         self._allowed_tool_names = normalize_allowed_tool_names(allowed_tool_names)
         self._file_storage = file_storage
         self._stateful_tool_lock = stateful_tool_lock or asyncio.Lock()
@@ -220,6 +217,23 @@ class BaseAgent(ABC):
         self._cached_available_tools = available_tools
         return available_tools
 
+    def set_locale(self, locale: str) -> None:
+        self._prompt_locale = locale or "en"
+
+    def set_prompt_overrides(
+            self,
+            *,
+            writing_style_override: Optional[str] = None,
+            override_base_rules: Optional[bool] = None,
+    ) -> None:
+        if writing_style_override is not None:
+            self._writing_style_override = writing_style_override
+        if override_base_rules is not None:
+            self._override_base_rules = override_base_rules
+
+    def _internal_prompts(self):
+        return get_internal_prompts(self._prompt_locale)
+
     @classmethod
     @staticmethod
     def _messages_for_llm(
@@ -271,8 +285,8 @@ class BaseAgent(ABC):
                 return candidate
         raise ValueError(f"未知工具: {function_name}")
 
-    @staticmethod
     def _truncate_tool_result(
+            self,
             result: ToolResult,
             max_chars: int,
             *,
@@ -287,9 +301,11 @@ class BaseAgent(ABC):
             return result
         from app.domain.models.memory import _format_truncation_call_hint
         hint = _format_truncation_call_hint(function_name, function_args or {})
-        notice = (
-            f"\n\n{hint}[结果已截断: 原始长度 {len(serialized)} 字符，保留前 {max_chars} 字符。"
-            "如需完整内容请缩小查询范围或使用 read_file 等工具分页获取。]"
+        internal = self._internal_prompts()
+        notice = internal.TRUNCATION_NOTICE.format(
+            hint=hint,
+            original_len=len(serialized),
+            max_chars=max_chars,
         )
         budget = max(0, max_chars - len(notice))
         truncated_payload = serialized[:budget] + notice
@@ -329,11 +345,12 @@ class BaseAgent(ABC):
         if not write_res.success:
             return result
         digest = serialized[:500]
+        internal = self._internal_prompts()
         return ToolResult(
             success=result.success,
-            message=(
-                f"完整结果已保存到 {cache_path}（{len(serialized)} 字符）。"
-                "摘要预览如下，如需完整内容请用 read_file 读取该路径。"
+            message=internal.OFFLOAD_NOTICE.format(
+                cache_path=cache_path,
+                original_len=len(serialized),
             ),
             data=digest,
         )
@@ -677,9 +694,10 @@ class BaseAgent(ABC):
             for m in middle
         )[:12000]
         try:
+            internal = self._internal_prompts()
             summary_response = await self._llm.invoke([{
                 "role": "user",
-                "content": _MEMORY_SUMMARY_PROMPT.format(history=history_text),
+                "content": internal.MEMORY_SUMMARY_PROMPT.format(history=history_text),
             }])
             summary_text = summary_response.get("content") or ""
             if not summary_text and summary_response.get("reasoning_content"):

@@ -27,42 +27,7 @@ Notes:
     - a concise description of the current action.
 - If you need user input or browser control, you must ask via the `message_ask_user` tool.
 - Again: deliver final results directly, not todo lists, suggestions, or plans.
-
-Return format:
-- Return JSON matching the TypeScript interface below.
-- Include all required fields.
-
-TypeScript interface:
-```typescript
-interface Response {{
-  /** Whether the task step executed successfully **/
-  success: boolean;
-  /** Paths of generated files in the sandbox to deliver to the user **/
-  attachments: string[];
-
-  /** Task result text; leave empty if there is nothing to deliver **/
-  result: string;
-}}
-```
-
-JSON example:
-{{
-    "success": true,
-    "result": "We completed data cleaning and generated a summary.",
-    "attachments": [
-        "/home/ubuntu/file1.md",
-        "/home/ubuntu/file2.md"
-    ]
-}}
-
-Inputs:
-- message: user message (use this language for all text output)
-- attachments: user-provided attachments
-- language: current working language
-- task: current task to execute
-
-Output:
-- Step execution result in JSON
+- When the step is complete, return structured JSON with fields: success, result, attachments (sandbox file paths).
 
 User message (message):
 {message}
@@ -84,27 +49,5 @@ Notes:
 - Explain the final result to the user in detail.
 - Write Markdown when needed for clear presentation.
 - If previous steps generated files, deliver them via file tools or the attachments field.
-
-Return format:
-- Return JSON matching the TypeScript interface below.
-- Include all required fields.
-
-TypeScript interface:
-```typescript
-interface Response {{
-  /** Reply to the user message and summary of the task; be as detailed as possible */
-  message: string;
-  /** Paths of generated files in the sandbox to deliver to the user */
-  attachments: string[];
-}}
-```
-
-JSON example:
-{{
-    "message": "Task completed. I processed all data. Key findings include growth rate and outliers. See the attached report for details.",
-    "attachments": [
-        "/home/ubuntu/report.md",
-        "/home/ubuntu/data.csv"
-    ]
-}}
+- Return structured JSON with fields: message, attachments (sandbox file paths).
 """

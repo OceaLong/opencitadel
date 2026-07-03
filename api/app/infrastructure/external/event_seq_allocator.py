@@ -13,10 +13,11 @@ from app.infrastructure.storage.redis import get_redis
 logger = logging.getLogger(__name__)
 
 GLOBAL_EVENT_SEQ_KEY = "session_events:global_seq"
-_BLOCK_SIZE = 64
+# Must remain 1. Block prefetch (e.g. 64) breaks global monotonic ordering when API and
+# Worker processes each cache a local block: user messages (API) and agent events
+# (Worker) can get seq values that invert causal order on session_events replay.
+_BLOCK_SIZE = 1
 
-_local_next: int | None = None
-_local_end: int | None = None
 _alloc_lock = asyncio.Lock()
 
 
@@ -44,10 +45,6 @@ async def sync_global_event_seq() -> None:
     if current is not None and int(current) > 0:
         sync_value = int(current)
         await _sync_postgres_seq_counter(sync_value)
-        global _local_next, _local_end
-        async with _alloc_lock:
-            _local_next = None
-            _local_end = None
         logger.info("Restored global event seq counter from Redis: %s", sync_value)
         return
 
@@ -55,20 +52,11 @@ async def sync_global_event_seq() -> None:
     sync_value = max_seq
     await redis.client.set(GLOBAL_EVENT_SEQ_KEY, sync_value)
     await _sync_postgres_seq_counter(sync_value)
-    async with _alloc_lock:
-        _local_next = None
-        _local_end = None
     logger.info("Seeded global event seq counter from database: %s", sync_value)
 
 
 async def allocate_event_seq() -> int:
-    global _local_next, _local_end
+    """Allocate the next global event seq via a single atomic Redis INCRBY."""
     async with _alloc_lock:
-        if _local_next is None or _local_next > _local_end:
-            redis = get_redis()
-            new_end = int(await redis.client.incrby(GLOBAL_EVENT_SEQ_KEY, _BLOCK_SIZE))
-            _local_end = new_end
-            _local_next = new_end - _BLOCK_SIZE + 1
-        seq = _local_next
-        _local_next += 1
-        return seq
+        redis = get_redis()
+        return int(await redis.client.incrby(GLOBAL_EVENT_SEQ_KEY, _BLOCK_SIZE))

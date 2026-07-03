@@ -55,6 +55,16 @@ logger = logging.getLogger(__name__)
 CLARIFY_PENDING_PHASE = "clarify"
 
 
+def _skill_agent_overrides(skill: Optional[Skill]) -> dict:
+    if not skill:
+        return {"writing_style_override": None, "override_base_rules": False}
+    params = skill.agent_params
+    return {
+        "writing_style_override": params.writing_style_override if params else None,
+        "override_base_rules": skill.override_base_rules,
+    }
+
+
 class PlannerReActFlow(BaseFlow):
     """规划与执行流"""
 
@@ -106,6 +116,7 @@ class PlannerReActFlow(BaseFlow):
         )
 
         allowed_tool_names = skill.allowed_tools if (skill and skill.allowed_tools) else None
+        skill_overrides = _skill_agent_overrides(skill)
         self._subagent_tool: Optional[SubAgentTool] = None
         for tool in extra_tools or []:
             if isinstance(tool, SubAgentTool):
@@ -128,6 +139,7 @@ class PlannerReActFlow(BaseFlow):
             observability_port=self._observability,
             runtime_settings=self._runtime_settings,
             stateful_tool_lock=self._stateful_tool_lock,
+            **skill_overrides,
         )
         logger.debug(f"创建澄清Agent成功, 会话id: {self._session_id}")
 
@@ -147,6 +159,7 @@ class PlannerReActFlow(BaseFlow):
             observability_port=self._observability,
             runtime_settings=self._runtime_settings,
             stateful_tool_lock=self._stateful_tool_lock,
+            **skill_overrides,
         )
         logger.debug(f"创建规划Agent成功, 会话id: {self._session_id}")
 
@@ -167,6 +180,7 @@ class PlannerReActFlow(BaseFlow):
             runtime_settings=self._runtime_settings,
             stateful_tool_lock=self._stateful_tool_lock,
             sandbox_lifecycle=sandbox_lifecycle,
+            **skill_overrides,
         )
         logger.debug(f"创建执行Agent成功, 会话id: {self._session_id}")
 

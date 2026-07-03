@@ -4,6 +4,7 @@
 import logging
 from typing import AsyncGenerator, Callable, List, Optional
 
+from app.application.services.config_provider import get_runtime_config
 from app.domain.external.browser import Browser
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
@@ -16,7 +17,7 @@ from app.domain.models.event import BaseEvent, DoneEvent, ErrorEvent
 from app.domain.models.message import Message
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agents.base import BaseAgent
-from app.domain.services.prompts.system import SYSTEM_PROMPT
+from app.domain.services.prompts.loader import compose_system_prompt, detect_locale_from_text, load_prompts
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.mcp import MCPTool
@@ -25,20 +26,10 @@ from .base import BaseFlow, FlowStatus
 
 logger = logging.getLogger(__name__)
 
-DOC_QA_PROMPT = """
-你是企业文档知识库问答助手（Ask 模式）。用户正在询问一个已索引的企业文档知识库。
-
-要求：
-1. 必须先使用 knowledge_base 工具检索相关文档，再回答问题
-2. 回答中的事实性结论必须带来源引用，优先复用工具返回的 `kbdoc://` Markdown 链接
-3. 如果检索不到依据，明确说明“知识库中没有找到可靠依据”，不要编造
-4. 只做问答、总结、对比与解释，不规划改动、不执行文件或系统操作
-"""
-
 
 class DocQAAgent(BaseAgent):
     name: str = "doc_qa"
-    _system_prompt: str = SYSTEM_PROMPT + DOC_QA_PROMPT
+    _system_prompt: str = ""
     _format: str = "text"
 
     def _should_emit_deltas(self) -> bool:
@@ -91,6 +82,15 @@ class DocQAFlow(BaseFlow):
 
     async def invoke(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         try:
+            prompts = load_prompts(detect_locale_from_text(message.message))
+            runtime = get_runtime_config()
+            self._agent.set_locale(prompts.locale)
+            self._agent._system_prompt = compose_system_prompt(
+                prompts,
+                prompts.flows.DOC_QA_PROMPT,
+                sandbox_runtime=runtime.sandbox_runtime,
+                writing_style=runtime.prompt.writing_style,
+            )
             async for event in self._agent.invoke(message):
                 yield event
             self.status = FlowStatus.COMPLETED

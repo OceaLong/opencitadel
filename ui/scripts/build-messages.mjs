@@ -414,6 +414,7 @@ const messages = {
     skills: { en: "Skill templates", zh: "Skill 模板" },
     memory: { en: "Long-term memory", zh: "长期记忆" },
     integrations: { en: "Integrations", zh: "协议集成" },
+    runtime: { en: "Runtime config", zh: "运行时配置" },
     a2a: { en: "A2A Agent", zh: "A2A Agent 配置" },
     mcp: { en: "MCP servers", zh: "MCP 服务器" },
     language: { en: "Language", zh: "语言" },
@@ -471,8 +472,8 @@ const messages = {
     noMcpServers: { en: "No MCP servers yet. Click above to add one.", zh: "暂无 MCP 服务器，请点击上方按钮添加" },
     editMcpServer: { en: "Edit MCP server", zh: "编辑 MCP 服务器" },
     editMcpServerDesc: {
-      en: "Update the JSON configuration for this MCP server.",
-      zh: "更新此 MCP 服务器的 JSON 配置。",
+      en: "Update the JSON configuration for this MCP server. Secrets are masked; leave **** unchanged to keep existing values.",
+      zh: "更新此 MCP 服务器的 JSON 配置。密钥已脱敏，保持 **** 不变即不修改。",
     },
     mcpStatusConnected: { en: "Connected", zh: "已连接" },
     mcpStatusError: { en: "Unreachable", zh: "不可达" },

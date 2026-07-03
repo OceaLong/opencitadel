@@ -21,6 +21,8 @@ class MCPServerRepository(Protocol):
     async def save(
         self,
         record: MCPServerRecord,
+        encrypted_url: Optional[str],
+        url_encryption: str,
         encrypted_headers: Optional[dict],
         headers_encryption: str,
         encrypted_env: Optional[dict],

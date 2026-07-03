@@ -95,7 +95,7 @@ class _FakeMCPRepo:
     async def get_by_name(self, name: str, scope=None):
         return object() if self.scoped_exists else None
 
-    async def save(self, record, enc_headers, headers_enc, enc_env, env_enc):
+    async def save(self, record, enc_url, url_enc, enc_headers, headers_enc, enc_env, env_enc):
         self.saved = record
 
 

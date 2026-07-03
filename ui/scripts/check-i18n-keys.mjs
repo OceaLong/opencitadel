@@ -59,6 +59,14 @@ const DYNAMIC_EXPANSIONS = [
     prefix: "settingsRuntime.sections.",
     values: ["feature_flags", "scheduler", "server"],
   },
+  {
+    prefix: "settings.",
+    values: ["common", "models", "skills", "memory", "integrations", "runtime"],
+  },
+  {
+    prefix: "adminNav.",
+    values: ["overview", "users", "teams", "invitations", "audit", "evidence", "complianceReport"],
+  },
 ];
 
 function collectUsedKeys() {

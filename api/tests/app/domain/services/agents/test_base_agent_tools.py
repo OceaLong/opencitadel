@@ -64,6 +64,7 @@ def _make_agent(**kwargs):
         "agent_config": _agent_config(),
         "llm": _DummyLLM(),
         "json_parser": object(),
+        "tools": [],
         "observability_port": agent_test_observability_port(),
         "runtime_settings": agent_test_runtime_settings(),
     }
@@ -108,7 +109,9 @@ def test_resolve_tool_uses_index():
 
 def test_truncate_tool_result():
     large = ToolResult(success=True, data="x" * 100)
-    truncated = BaseAgent._truncate_tool_result(large, max_chars=50)
+    agent = _make_agent()
+    agent.set_locale("zh")
+    truncated = agent._truncate_tool_result(large, max_chars=50)
     assert "结果已截断" in (truncated.message or "")
     assert truncated.data is not None
     assert len(large.model_dump_json()) > 50

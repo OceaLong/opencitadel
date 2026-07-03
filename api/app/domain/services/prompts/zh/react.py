@@ -27,42 +27,7 @@ EXECUTION_PROMPT = """
     - 简明扼要地告知当前动作。
 - 如果你需要用户提供输入或需要获取浏览器的控制权，必须使用 `message_ask_user` 工具向用户提问。
 - 再次强调：直接交付最终结果，而不是提供待办事项列表、建议或计划。
-
-返回格式要求：
-- 必须返回符合以下 TypeScript 接口定义的 JSON 格式。
-- 必须包含所有指定的必填字段。
-
-TypeScript 接口定义：
-```typescript
-interface Response {{
-  /** 任务步骤是否成功执行 **/
-  success: boolean;
-  /** 沙箱中需要交付给用户的生成文件的路径数组 **/
-  attachments: string[];
-
-  /** 任务结果文本，如果没有结果需要交付则留空 **/
-  result: string;
-}}
-```
-
-JSON 输出示例：
-{{
-    "success": true,
-    "result": "我们已经完成了数据清洗任务，并生成了摘要。",
-    "attachments": [
-        "/home/ubuntu/file1.md",
-        "/home/ubuntu/file2.md"
-    ]
-}}
-
-输入信息：
-- message: 用户消息（请在所有文本输出中使用此语言）
-- attachments: 用户提供的附件
-- language: 当前的工作语言
-- task: 当前需要执行的任务
-
-输出：
-- JSON 格式的步骤执行结果
+- 步骤完成后返回结构化 JSON，字段：success、result、attachments（沙箱文件路径）。
 
 用户消息(message):
 {message}
@@ -84,27 +49,5 @@ SUMMARIZE_PROMPT = """
 - 你应该详细向用户解释最终结果。
 - 如有必要，编写 Markdown 格式的内容以清晰地呈现结果。
 - 如果之前的步骤生成了文件，必须通过文件工具或附件字段交付给用户。
-
-返回格式要求：
-- 必须返回符合以下 TypeScript 接口定义的 JSON 格式。
-- 必须包含所有指定的必填字段。
-
-TypeScript 接口定义：
-```typescript
-interface Response {{
-  /** 对用户消息的回复以及关于任务的总结思考，越详细越好 */
-  message: string;
-  /** 沙箱中生成的、需要交付给用户的文件路径数组 */
-  attachments: string[];
-}}
-```
-
-JSON 输出示例：
-{{
-    "message": "任务已完成。我已经为您处理了所有数据，主要发现如下：\n1. 增长率...\n2. 异常值...\n详细报告请查看附件。",
-    "attachments": [
-        "/home/ubuntu/report.md",
-        "/home/ubuntu/data.csv"
-    ]
-}}
+- 返回结构化 JSON，字段：message、attachments（沙箱文件路径）。
 """

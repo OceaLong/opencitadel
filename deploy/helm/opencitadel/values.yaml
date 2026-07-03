@@ -231,6 +231,7 @@ appConfig:
     otel_exporter_endpoint: ''
     langfuse_enabled: false
   mcp_config:
+    # Seed template only (enabled: false). Do not put real secrets here in production; configure via UI/API.
     mcpServers:
       amap-maps-streamableHTTP:
         transport: streamable_http

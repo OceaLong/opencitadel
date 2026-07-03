@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import uuid
 from enum import Enum
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, Literal
 
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
@@ -188,6 +188,21 @@ class ModelResilienceConfig(BaseModel):
     dlq_replay_interval_seconds: int = Field(default=5, gt=0, le=60)
 
 
+class SandboxRuntimeConfig(BaseModel):
+    """Sandbox environment facts injected into agent system prompts."""
+    os: str = "Ubuntu 22.04 (linux/amd64)"
+    user: str = "ubuntu"
+    home: str = "/home/ubuntu"
+    python_version: str = "3.10"
+    node_version: str = "24.x"
+    extra_tools: str = "bc"
+
+
+class PromptConfig(BaseModel):
+    """Global prompt behavior toggles."""
+    writing_style: Literal["prose", "adaptive"] = "prose"
+
+
 class FeatureFlagsConfig(BaseModel):
     """Static feature gates — route visibility, not runtime health."""
     enable_agent_features: bool = True
@@ -196,6 +211,7 @@ class FeatureFlagsConfig(BaseModel):
     enable_parallel_step_execution: bool = False
     enable_artifacts: bool = True
     enable_hitl_gates: bool = True
+    enable_skill_auto_recommend: bool = False
 
 
 class GateProfileSettings(BaseModel):
@@ -311,6 +327,8 @@ class AppConfig(BaseModel):
     agent_config: AgentConfig = Field(default_factory=AgentConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
+    sandbox_runtime: SandboxRuntimeConfig = Field(default_factory=SandboxRuntimeConfig)
+    prompt: PromptConfig = Field(default_factory=PromptConfig)
     worker: WorkerConfig = Field(default_factory=WorkerConfig)
     streams: StreamsConfig = Field(default_factory=StreamsConfig)
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)

@@ -11,7 +11,7 @@ from app.domain.models.scope import OwnerScope
 from app.domain.repositories.integration_server_repository import A2AServerRepository, MCPServerRepository
 from app.infrastructure.models.integration_server import A2AServerORM, MCPServerORM
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
-from app.infrastructure.security.secret_dict_cipher import decrypt_secret_dict
+from app.infrastructure.security.secret_dict_cipher import decrypt_secret_dict, decrypt_url
 
 
 class DBMCPServerRepository(MCPServerRepository):
@@ -27,9 +27,10 @@ class DBMCPServerRepository(MCPServerRepository):
         return stmt.where(or_(MCPServerORM.visibility == "global", owner_filter))
 
     def _to_domain(self, record: MCPServerORM) -> MCPServerRecord:
+        url = decrypt_url(record.url, record.url_encryption, self.cipher)
         headers = decrypt_secret_dict(record.headers, record.headers_encryption, self.cipher)
         env = decrypt_secret_dict(record.env, record.env_encryption, self.cipher)
-        return record.to_domain(headers, env)
+        return record.to_domain(url, headers, env)
 
     async def list_all(self, scope: Optional[OwnerScope] = None) -> List[MCPServerRecord]:
         stmt = self._apply_scope(select(MCPServerORM), scope).order_by(MCPServerORM.created_at)
@@ -59,6 +60,8 @@ class DBMCPServerRepository(MCPServerRepository):
     async def save(
         self,
         record: MCPServerRecord,
+        encrypted_url: Optional[str],
+        url_encryption: str,
         encrypted_headers: Optional[dict],
         headers_encryption: str,
         encrypted_env: Optional[dict],
@@ -74,7 +77,8 @@ class DBMCPServerRepository(MCPServerRepository):
             existing.description = record.description
             existing.command = record.command
             existing.args = record.args
-            existing.url = record.url
+            existing.url = encrypted_url if encrypted_url is not None else record.url
+            existing.url_encryption = url_encryption
             if encrypted_headers is not None:
                 existing.headers = encrypted_headers
                 existing.headers_encryption = headers_encryption
@@ -95,7 +99,8 @@ class DBMCPServerRepository(MCPServerRepository):
                     description=record.description,
                     command=record.command,
                     args=record.args,
-                    url=record.url,
+                    url=encrypted_url if encrypted_url is not None else record.url,
+                    url_encryption=url_encryption,
                     headers=encrypted_headers,
                     headers_encryption=headers_encryption,
                     env=encrypted_env,
