@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, ChevronDown, ChevronUp, Clock } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 
@@ -15,6 +16,7 @@ export type PlanPanelProps = {
 };
 
 export function PlanPanel({ className, steps: stepsProp = [] }: PlanPanelProps) {
+  const t = useTranslations("planPanel");
   const [isExpanded, setIsExpanded] = useState(false);
   const togglePanel = () => setIsExpanded(!isExpanded);
   const steps = stepsProp;
@@ -43,7 +45,7 @@ export function PlanPanel({ className, steps: stepsProp = [] }: PlanPanelProps) 
               <div className="text-muted-foreground flex w-full items-center justify-center gap-2.5 truncate px-4 py-2">
                 <Clock size={16} />
                 <div className="flex w-full flex-col gap-0.5 truncate">
-                  <div className="truncate text-sm">{steps[0]?.description ?? "暂无步骤"}</div>
+                  <div className="truncate text-sm">{steps[0]?.description ?? t("noSteps")}</div>
                 </div>
               </div>
             </div>
@@ -77,7 +79,7 @@ export function PlanPanel({ className, steps: stepsProp = [] }: PlanPanelProps) 
           <div className="px-4">
             <div className="bg-muted/40 rounded-xl px-2 py-3">
               <div className="flex w-full justify-between px-4">
-                <span className="text-foreground font-semibold">任务进度</span>
+                <span className="text-foreground font-semibold">{t("taskProgress")}</span>
                 <div className="flex items-center gap-3">
                   <span className="text-muted-foreground text-xs">
                     {completedCount} / {totalCount}

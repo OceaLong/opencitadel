@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 
 import { SessionDetailView } from "@/components/session-detail-view";
 
@@ -18,6 +19,7 @@ type PageProps = {
  */
 export default function SessionDetailPage({ params }: PageProps) {
   const searchParams = useSearchParams();
+  const tCommon = useTranslations("common");
   const [sessionData, setSessionData] = useState<{
     id: string;
     initialMessage?: string;
@@ -60,7 +62,7 @@ export default function SessionDetailPage({ params }: PageProps) {
   }, [params, searchParams]);
 
   if (!sessionData) {
-    return <div className="flex h-full items-center justify-center">加载中...</div>;
+    return <div className="flex h-full items-center justify-center">{tCommon("loading")}</div>;
   }
 
   return (

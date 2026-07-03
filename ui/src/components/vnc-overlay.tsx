@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { Loader2, WifiOff, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import type { VNCStatus } from "@/components/vnc-viewer";
@@ -42,16 +43,20 @@ function buildVNCUrl(sessionId: string): string {
 }
 
 export function VNCOverlay({ sessionId, onClose }: VNCOverlayProps) {
+  const t = useTranslations("vnc");
   const vncUrl = useMemo(() => buildVNCUrl(sessionId), [sessionId]);
   const [status, setStatus] = useState<VNCStatus>("connecting");
   const [errorDetail, setErrorDetail] = useState("");
 
-  const handleStatusChange = useCallback((s: VNCStatus, detail?: string) => {
-    setStatus(s);
-    if (s === "error" || s === "disconnected") {
-      setErrorDetail(detail || "连接失败");
-    }
-  }, []);
+  const handleStatusChange = useCallback(
+    (s: VNCStatus, detail?: string) => {
+      setStatus(s);
+      if (s === "error" || s === "disconnected") {
+        setErrorDetail(detail || t("connectionFailed"));
+      }
+    },
+    [t],
+  );
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -72,22 +77,20 @@ export function VNCOverlay({ sessionId, onClose }: VNCOverlayProps) {
       <div className="relative flex-1">
         <VNCViewer url={vncUrl} viewOnly={false} onStatusChange={handleStatusChange} />
 
-        {/* 连接中 */}
         {status === "connecting" && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/80">
             <Loader2 className="size-8 animate-spin text-white" />
-            <span className="text-sm text-gray-300">正在连接沙箱环境...</span>
+            <span className="text-sm text-gray-300">{t("connectingSandbox")}</span>
           </div>
         )}
 
-        {/* 连接失败 / 沙箱离线 */}
         {hasError && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/80">
             <div className="flex flex-col items-center gap-3 rounded-2xl border border-gray-700 bg-gray-900/90 px-10 py-8">
               <WifiOff className="size-10 text-gray-400" />
-              <div className="text-base font-medium text-white">无法连接到沙箱</div>
+              <div className="text-base font-medium text-white">{t("cannotConnectSandbox")}</div>
               <p className="max-w-[280px] text-center text-sm leading-relaxed text-gray-400">
-                {errorDetail || "沙箱环境可能已关闭，请确认任务仍在运行中"}
+                {errorDetail || t("sandboxClosedHint")}
               </p>
               <Button
                 variant="secondary"
@@ -95,14 +98,13 @@ export function VNCOverlay({ sessionId, onClose }: VNCOverlayProps) {
                 className="mt-2 cursor-pointer gap-2 rounded-full border border-gray-600 bg-white/10 px-6 text-white hover:bg-white/20"
               >
                 <X size={14} />
-                退出远程桌面
+                {t("exitRemoteDesktop")}
               </Button>
             </div>
           </div>
         )}
       </div>
 
-      {/* 底部退出按钮（仅连接成功时显示） */}
       {status === "connected" && (
         <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
           <button
@@ -111,7 +113,7 @@ export function VNCOverlay({ sessionId, onClose }: VNCOverlayProps) {
             className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-white/10 bg-black/60 px-5 py-2 text-sm text-white/90 shadow-xl backdrop-blur transition-colors hover:bg-black/80"
           >
             <X size={14} />
-            退出远程桌面
+            {t("exitRemoteDesktop")}
           </button>
         </div>
       )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { InlineOptionPicker } from "@/components/inline-option-picker";
 
@@ -32,6 +33,8 @@ type Props = {
 };
 
 export function SessionSkillPicker({ value, onChange, disabled, onSkillLoaded, className }: Props) {
+  const t = useTranslations("skillPicker");
+  const tCommon = useTranslations("common");
   const { user } = useAuth();
   const [skills, setSkills] = useState<Skill[]>([]);
 
@@ -71,7 +74,7 @@ export function SessionSkillPicker({ value, onChange, disabled, onSkillLoaded, c
         title: s.name,
         description: s.description || s.category,
         icon: <span className="text-base leading-none">{s.icon}</span>,
-        badge: s.is_builtin ? "内置" : undefined,
+        badge: s.is_builtin ? tCommon("builtin") : undefined,
       })),
     [skills],
   );
@@ -91,7 +94,7 @@ export function SessionSkillPicker({ value, onChange, disabled, onSkillLoaded, c
     <InlineOptionPicker
       value={value || undefined}
       options={options}
-      placeholder="不启用 Skill"
+      placeholder={t("none")}
       onChange={handleChange}
       disabled={disabled}
       allowClear

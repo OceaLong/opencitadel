@@ -13,6 +13,7 @@ import {
   Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -44,7 +45,6 @@ type Props = {
 type MemoryRole = "system" | "user" | "assistant" | "tool" | "unknown";
 
 type RoleStyle = {
-  label: string;
   icon: LucideIcon;
   cardClass: string;
   headerClass: string;
@@ -55,7 +55,6 @@ type RoleStyle = {
 
 const ROLE_STYLES: Record<MemoryRole, RoleStyle> = {
   system: {
-    label: "系统",
     icon: Settings2,
     cardClass: "border-slate-300/70 dark:border-slate-600/50",
     headerClass: "bg-slate-100/80 dark:bg-slate-800/40",
@@ -65,7 +64,6 @@ const ROLE_STYLES: Record<MemoryRole, RoleStyle> = {
     contentClass: "bg-slate-50/50 dark:bg-slate-900/20",
   },
   user: {
-    label: "用户",
     icon: UserRound,
     cardClass: "border-blue-200/70 dark:border-blue-700/40",
     headerClass: "bg-blue-50/80 dark:bg-blue-950/30",
@@ -75,7 +73,6 @@ const ROLE_STYLES: Record<MemoryRole, RoleStyle> = {
     contentClass: "bg-blue-50/30 dark:bg-blue-950/15",
   },
   assistant: {
-    label: "助手",
     icon: Bot,
     cardClass: "border-violet-200/70 dark:border-violet-700/40",
     headerClass: "bg-violet-50/80 dark:bg-violet-950/30",
@@ -85,7 +82,6 @@ const ROLE_STYLES: Record<MemoryRole, RoleStyle> = {
     contentClass: "bg-violet-50/30 dark:bg-violet-950/15",
   },
   tool: {
-    label: "工具",
     icon: Wrench,
     cardClass: "border-amber-200/70 dark:border-amber-700/40",
     headerClass: "bg-amber-50/80 dark:bg-amber-950/30",
@@ -95,7 +91,6 @@ const ROLE_STYLES: Record<MemoryRole, RoleStyle> = {
     contentClass: "bg-amber-50/30 dark:bg-amber-950/15",
   },
   unknown: {
-    label: "未知",
     icon: HelpCircle,
     cardClass: "border-border/70",
     headerClass: "bg-muted/50",
@@ -185,8 +180,11 @@ function MemoryMessageCard({
   editable: boolean;
   onDelete: () => void;
 }) {
+  const t = useTranslations("sessionMemory");
+  const tCommon = useTranslations("common");
   const content = formatMessageContent(msg);
   const displayContent = content.slice(0, 2000) + (content.length > 2000 ? "\n…" : "");
+  const role = normalizeRole(msg.role);
   const roleStyle = getRoleStyle(msg.role);
   const RoleIcon = roleStyle.icon;
   const meta = getMessageMeta(msg);
@@ -194,9 +192,9 @@ function MemoryMessageCard({
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(content);
-      toast.success("已复制");
+      toast.success(t("copied"));
     } catch {
-      toast.error("复制失败");
+      toast.error(t("copyFailed"));
     }
   };
 
@@ -229,7 +227,7 @@ function MemoryMessageCard({
                 variant="outline"
                 className={cn("px-1.5 py-0 text-[10px] font-medium", roleStyle.badgeClass)}
               >
-                {roleStyle.label}
+                {t(`roles.${role}`)}
               </Badge>
               <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px] opacity-70">
                 #{index + 1}
@@ -241,7 +239,7 @@ function MemoryMessageCard({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-0.5 opacity-80 transition-opacity group-hover:opacity-100">
-          <Button size="icon" variant="ghost" className="size-7" onClick={handleCopy} title="复制">
+          <Button size="icon" variant="ghost" className="size-7" onClick={handleCopy} title={tCommon("copy")}>
             <Copy className="size-3.5" />
           </Button>
           {editable && (
@@ -250,7 +248,7 @@ function MemoryMessageCard({
               variant="ghost"
               className="text-destructive hover:text-destructive size-7"
               onClick={onDelete}
-              title="删除"
+              title={t("deleteTitle")}
             >
               <Trash2 className="size-3.5" />
             </Button>
@@ -263,7 +261,7 @@ function MemoryMessageCard({
           roleStyle.contentClass,
         )}
       >
-        {displayContent || "(empty)"}
+        {displayContent || t("emptyMessage")}
       </pre>
     </div>
   );
@@ -275,6 +273,8 @@ export function SessionMemorySheet({
   trigger,
   compact = false,
 }: Props) {
+  const t = useTranslations("sessionMemory");
+  const tCommon = useTranslations("common");
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<SessionMemoryData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -290,7 +290,7 @@ export function SessionMemorySheet({
       const mem = await memoryApi.getSessionMemory(sessionId);
       setData(mem);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "加载失败");
+      toast.error(e instanceof Error ? e.message : tCommon("loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -308,20 +308,20 @@ export function SessionMemorySheet({
   const handleCompact = async (agent: string) => {
     try {
       await memoryApi.compactSessionMemory(sessionId, agent);
-      toast.success("已压缩");
+      toast.success(t("compacted"));
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "操作失败");
+      toast.error(e instanceof Error ? e.message : t("operationFailed"));
     }
   };
 
   const handleClear = async (agent: string) => {
     try {
       await memoryApi.clearSessionMemory(sessionId, agent);
-      toast.success("已清空");
+      toast.success(t("cleared"));
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "操作失败");
+      toast.error(e instanceof Error ? e.message : t("operationFailed"));
     }
   };
 
@@ -330,7 +330,7 @@ export function SessionMemorySheet({
       await memoryApi.deleteSessionMemoryMessage(sessionId, agent, index);
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "删除失败");
+      toast.error(e instanceof Error ? e.message : t("deleteFailed"));
     }
   };
 
@@ -344,7 +344,7 @@ export function SessionMemorySheet({
             className="h-7 text-xs"
             onClick={() => handleCompact(agent)}
           >
-            压缩
+            {t("compact")}
           </Button>
           <Button
             size="sm"
@@ -352,7 +352,7 @@ export function SessionMemorySheet({
             className="h-7 text-xs"
             onClick={() => handleClear(agent)}
           >
-            清空
+            {t("clear")}
           </Button>
         </div>
       )}
@@ -366,7 +366,7 @@ export function SessionMemorySheet({
         />
       ))}
       {messages.length === 0 && (
-        <p className="text-muted-foreground py-6 text-center text-sm">暂无消息</p>
+        <p className="text-muted-foreground py-6 text-center text-sm">{tCommon("noMessages")}</p>
       )}
     </div>
   );
@@ -376,14 +376,14 @@ export function SessionMemorySheet({
       variant="ghost"
       size="icon-sm"
       className="flex-shrink-0 cursor-pointer"
-      title="会话记忆"
+      title={t("memoryTitle")}
     >
       <Brain />
     </Button>
   ) : (
     <Button variant="ghost" size="sm" className="h-8 gap-1">
       <Brain className="size-4" />
-      记忆
+      {t("memoryButton")}
     </Button>
   );
 
@@ -397,18 +397,18 @@ export function SessionMemorySheet({
       <SheetContent className="w-full sm:max-w-lg">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
-            会话内存
+            {t("sheetTitle")}
             {!loading && (
               <Badge variant="secondary" className="text-xs font-normal">
-                共 {messageCount} 条
+                {t("messageCount", { count: messageCount })}
               </Badge>
             )}
           </SheetTitle>
           <SheetDescription>
-            查看与编辑 Agent 短期上下文（Tier 1）
+            {t("sheetDescription")}
             {!loading && messageCount > 0 && (
               <span className="mt-1 block text-xs">
-                Planner {plannerCount} 条 · ReAct {reactCount} 条
+                {t("agentCounts", { planner: plannerCount, react: reactCount })}
               </span>
             )}
           </SheetDescription>

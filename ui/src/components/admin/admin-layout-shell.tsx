@@ -2,29 +2,38 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, ClipboardList, LayoutDashboard, MailPlus, Users } from "lucide-react";
+import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 
+import {
+  IconAdmin,
+  IconAudit,
+  IconBack,
+  IconInvitation,
+  IconUsers,
+} from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
 const NAV = [
-  { href: "/admin", label: "概览", icon: LayoutDashboard, exact: true },
-  { href: "/admin/users", label: "用户", icon: Users },
-  { href: "/admin/invitations", label: "邀请", icon: MailPlus },
-  { href: "/admin/audit", label: "审计", icon: ClipboardList },
+  { href: "/admin", labelKey: "overview" as const, icon: IconAdmin, exact: true },
+  { href: "/admin/users", labelKey: "users" as const, icon: IconUsers },
+  { href: "/admin/invitations", labelKey: "invitations" as const, icon: IconInvitation },
+  { href: "/admin/audit", labelKey: "audit" as const, icon: IconAudit },
 ];
 
 export function AdminLayoutShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const t = useTranslations("adminNav");
+  const tCommon = useTranslations("common");
   const { user, loading } = useAuth();
 
   if (loading) {
     return (
       <div className="bg-background flex min-h-screen items-center justify-center text-sm text-muted-foreground">
-        加载中...
+        {tCommon("loading")}
       </div>
     );
   }
@@ -32,9 +41,9 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
   if (user?.global_role !== "admin") {
     return (
       <div className="bg-background flex min-h-screen flex-col items-center justify-center gap-4 p-6">
-        <p className="text-muted-foreground text-sm">需要管理员权限才能访问后台。</p>
+        <p className="text-muted-foreground text-sm">{t("forbidden")}</p>
         <Button variant="outline" asChild>
-          <Link href="/">返回首页</Link>
+          <Link href="/">{tCommon("backHome")}</Link>
         </Button>
       </div>
     );
@@ -45,18 +54,18 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
       <header className="border-border/70 bg-card/80 flex items-center gap-4 border-b px-6 py-4">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/">
-            <ArrowLeft className="mr-1 size-4" />
-            返回
+            <IconBack className="mr-1 size-4" />
+            {t("back")}
           </Link>
         </Button>
         <div>
-          <h1 className="text-lg font-semibold tracking-tight">后台管理</h1>
-          <p className="text-muted-foreground text-xs">平台运营、用户与用量监控</p>
+          <h1 className="text-lg font-semibold tracking-tight">{t("title")}</h1>
+          <p className="text-muted-foreground text-xs">{t("subtitle")}</p>
         </div>
       </header>
       <div className="flex flex-1">
         <nav className="border-border/70 bg-card/40 w-56 shrink-0 space-y-1.5 border-r p-4">
-          {NAV.map(({ href, label, icon: Icon, exact }) => {
+          {NAV.map(({ href, labelKey, icon: Icon, exact }) => {
             const active = exact ? pathname === href : pathname.startsWith(href);
             return (
               <Link
@@ -70,7 +79,7 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
                 )}
               >
                 <Icon className="size-4" />
-                {label}
+                {t(labelKey)}
               </Link>
             );
           })}

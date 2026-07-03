@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Languages, Loader2, Upload } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -28,17 +29,23 @@ type TranslationStyle = TranslationParams["style"];
 
 export function SmartTranslationApp({
   initialText = "",
-  initialTargetLanguage = "中文",
+  initialTargetLanguage,
   initialStyle = "plain",
 }: {
   initialText?: string;
   initialTargetLanguage?: string;
   initialStyle?: TranslationStyle;
 }) {
+  const t = useTranslations("marketplaceApps.smartTranslation");
+  const tShared = useTranslations("marketplaceApps.shared");
+  const tAuth = useTranslations("auth");
+  const tCommon = useTranslations("common");
   const { requireAuth } = useRequireAuth();
   const fileRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState(initialText);
-  const [targetLanguage, setTargetLanguage] = useState(initialTargetLanguage);
+  const [targetLanguage, setTargetLanguage] = useState(
+    initialTargetLanguage ?? t("defaultTargetLanguage"),
+  );
   const [style, setStyle] = useState<TranslationStyle>(initialStyle);
   const [fileId, setFileId] = useState("");
   const [fileName, setFileName] = useState("");
@@ -47,9 +54,9 @@ export function SmartTranslationApp({
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
-    if (!requireAuth("登录后即可使用 AI 翻译")) return;
+    if (!requireAuth(tAuth("loginToTranslate"))) return;
     if (file.size > MAX_SIZE) {
-      toast.error("文件不能超过 8MB");
+      toast.error(tShared("fileTooLarge8mb"));
       return;
     }
     setLoading(true);
@@ -57,9 +64,9 @@ export function SmartTranslationApp({
       const uploaded = await fileApi.uploadFile({ file });
       setFileId(uploaded.id);
       setFileName(file.name);
-      toast.message("文件已上传，可结合文本一起翻译");
+      toast.message(t("fileUploadedToast"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "上传失败");
+      toast.error(e instanceof Error ? e.message : tCommon("uploadFailed"));
     } finally {
       setLoading(false);
     }
@@ -67,10 +74,10 @@ export function SmartTranslationApp({
 
   const translate = async () => {
     if (!text.trim() && !fileId) {
-      toast.error("请输入文本或上传图片/文本文件");
+      toast.error(t("textOrFileRequired"));
       return;
     }
-    if (!requireAuth("登录后即可使用 AI 翻译")) return;
+    if (!requireAuth(tAuth("loginToTranslate"))) return;
     setLoading(true);
     setResult(null);
     try {
@@ -82,7 +89,7 @@ export function SmartTranslationApp({
       });
       setResult(data);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "翻译失败");
+      toast.error(e instanceof Error ? e.message : t("translateFailed"));
     } finally {
       setLoading(false);
     }
@@ -91,47 +98,45 @@ export function SmartTranslationApp({
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-foreground text-lg font-semibold tracking-tight">智能翻译</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          自动识别语种，并按场景风格输出更自然的译文
-        </p>
+        <h2 className="text-foreground text-lg font-semibold tracking-tight">{t("title")}</h2>
+        <p className="text-muted-foreground mt-1 text-sm">{t("subtitle")}</p>
       </div>
 
       <Card>
         <CardContent className="space-y-4 py-5">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="target-language">目标语言</Label>
+              <Label htmlFor="target-language">{t("targetLanguageLabel")}</Label>
               <Input
                 id="target-language"
                 value={targetLanguage}
                 onChange={(e) => setTargetLanguage(e.target.value)}
-                placeholder="中文 / English / 日本語"
+                placeholder={t("targetLanguagePlaceholder")}
               />
             </div>
             <div className="space-y-2">
-              <Label>翻译风格</Label>
+              <Label>{t("styleLabel")}</Label>
               <Select value={style} onValueChange={(value) => setStyle(value as TranslationStyle)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="plain">自然准确</SelectItem>
-                  <SelectItem value="formal">正式商务</SelectItem>
-                  <SelectItem value="casual">口语轻松</SelectItem>
-                  <SelectItem value="technical">技术文档</SelectItem>
+                  <SelectItem value="plain">{t("stylePlain")}</SelectItem>
+                  <SelectItem value="formal">{t("styleFormal")}</SelectItem>
+                  <SelectItem value="casual">{t("styleCasual")}</SelectItem>
+                  <SelectItem value="technical">{t("styleTechnical")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="source-text">原文</Label>
+            <Label htmlFor="source-text">{t("sourceTextLabel")}</Label>
             <Textarea
               id="source-text"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="粘贴需要翻译的文本，也可以上传截图或文本文件"
+              placeholder={t("sourceTextPlaceholder")}
               className="min-h-36"
             />
           </div>
@@ -146,11 +151,11 @@ export function SmartTranslationApp({
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={loading}>
               <Upload className="size-4" />
-              {fileName || "上传图片/文本"}
+              {fileName || t("uploadButton")}
             </Button>
             <Button onClick={translate} disabled={loading}>
               {loading ? <Loader2 className="size-4 animate-spin" /> : <Languages className="size-4" />}
-              开始翻译
+              {t("startTranslate")}
             </Button>
           </div>
         </CardContent>
@@ -161,13 +166,13 @@ export function SmartTranslationApp({
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base">
               <Languages className="size-4" />
-              翻译结果
+              {t("resultTitle")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="text-muted-foreground flex flex-wrap gap-2 text-xs">
-              <span>识别语言：{result.detected_language}</span>
-              <span>目标语言：{result.target_language}</span>
+              <span>{t("detectedLanguage", { lang: result.detected_language })}</span>
+              <span>{t("targetLanguageResult", { lang: result.target_language })}</span>
             </div>
             <div className="border-border/70 bg-background/80 text-foreground rounded-xl border p-4 text-sm leading-relaxed whitespace-pre-wrap">
               {result.translated_text}

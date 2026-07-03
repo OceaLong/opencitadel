@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { CheckCircle2, ChevronLeft, ChevronRight, Circle, HelpCircle } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,6 +38,7 @@ export function ClarifyQuestions({
   onSubmit,
   className,
 }: ClarifyQuestionsProps) {
+  const t = useTranslations("clarify");
   const [step, setStep] = useState(0);
   const [selections, setSelections] = useState<Record<string, string[]>>({});
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
@@ -70,7 +72,7 @@ export function ClarifyQuestions({
   };
 
   const buildAnswer = () => {
-    const lines = ["【澄清回复】"];
+    const lines = [t("header")];
     for (const question of questions) {
       const selectedIds = selections[question.id] ?? [];
       const selectedLabels = question.options
@@ -78,7 +80,7 @@ export function ClarifyQuestions({
         .map((option) => option.label);
       const custom = (customAnswers[question.id] ?? "").trim();
       const parts = [...selectedLabels];
-      if (custom) parts.push(`自定义: ${custom}`);
+      if (custom) parts.push(`${t("customPrefix")}: ${custom}`);
       lines.push(`- ${question.prompt}: ${parts.join("；")}`);
     }
     return lines.join("\n");
@@ -129,13 +131,13 @@ export function ClarifyQuestions({
       <CardHeader className="gap-2 px-4">
         <CardTitle className="flex items-center gap-2 text-sm">
           <HelpCircle className="text-primary size-4" />
-          <span>{title || "需要确认几个关键点"}</span>
+          <span>{title || t("defaultTitle")}</span>
         </CardTitle>
         {interactive && questions.length > 1 && (
           <div className="space-y-2">
             <div className="text-muted-foreground flex items-center justify-between text-xs">
               <span>
-                问题 {step + 1} / {questions.length}
+                {t("questionProgress", { current: step + 1, total: questions.length })}
               </span>
             </div>
             <Progress value={progress} className="h-1.5" />
@@ -181,7 +183,7 @@ export function ClarifyQuestions({
               <Textarea
                 value={customAnswers[currentQuestion.id] ?? ""}
                 disabled={!interactive || submitting}
-                placeholder="其它 / 自定义回答..."
+                placeholder={t("customPlaceholder")}
                 className="min-h-16 text-sm"
                 onChange={(event) =>
                   setCustomAnswers((prev) => ({
@@ -204,7 +206,7 @@ export function ClarifyQuestions({
               onClick={() => setStep((prev) => Math.max(0, prev - 1))}
             >
               <ChevronLeft className="size-4" />
-              上一题
+              {t("prev")}
             </Button>
             <Button
               type="button"
@@ -214,18 +216,18 @@ export function ClarifyQuestions({
             >
               {step < questions.length - 1 ? (
                 <>
-                  下一题
+                  {t("next")}
                   <ChevronRight className="size-4" />
                 </>
               ) : submitting ? (
-                "提交中..."
+                t("submitting")
               ) : (
-                "提交回答"
+                t("submit")
               )}
             </Button>
           </div>
         ) : (
-          <div className="text-muted-foreground text-xs">已提交回答，继续处理中。</div>
+          <div className="text-muted-foreground text-xs">{t("submitted")}</div>
         )}
       </CardContent>
     </Card>

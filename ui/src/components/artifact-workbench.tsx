@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, FileText, Globe, Link2, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { MarkdownContent } from "@/components/markdown-content";
@@ -26,21 +27,25 @@ export type ArtifactWorkbenchProps = {
   className?: string;
 };
 
-const STATUS_LABEL: Record<ArtifactEventSummary["status"], string> = {
-  draft: "草稿",
-  updated: "已更新",
-  final: "定稿",
-};
-
 export function ArtifactWorkbench({
   sessionId,
   artifacts,
   focusedArtifactId,
   className,
 }: ArtifactWorkbenchProps) {
+  const t = useTranslations("artifactWorkbench");
   const sortedArtifacts = useMemo(
     () => [...artifacts].sort((a, b) => a.title.localeCompare(b.title, "zh-CN")),
     [artifacts],
+  );
+
+  const statusLabel = useCallback(
+    (status: ArtifactEventSummary["status"]) => {
+      if (status === "draft") return t("statusDraft");
+      if (status === "updated") return t("statusUpdated");
+      return t("statusFinal");
+    },
+    [t],
   );
 
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -88,7 +93,7 @@ export function ArtifactWorkbench({
       })
       .catch((error) => {
         if (cancelled) return;
-        toast.error(error instanceof Error ? error.message : "加载交付物失败");
+        toast.error(error instanceof Error ? error.message : t("loadFailed"));
         setContent("");
       })
       .finally(() => {
@@ -97,7 +102,7 @@ export function ArtifactWorkbench({
     return () => {
       cancelled = true;
     };
-  }, [selectedId, selectedVersion]);
+  }, [selectedId, selectedVersion, t]);
 
   const versionOptions = useMemo(() => {
     if (!active) return [];
@@ -114,8 +119,8 @@ export function ArtifactWorkbench({
     anchor.download = `${active.title || "artifact"}.${ext}`;
     anchor.click();
     URL.revokeObjectURL(url);
-    toast.success("已导出交付物");
-  }, [active, content, contentType]);
+    toast.success(t("exportSuccess"));
+  }, [active, content, contentType, t]);
 
   const handleShare = useCallback(async () => {
     if (!selectedId) return;
@@ -126,18 +131,18 @@ export function ArtifactWorkbench({
         ? result.share_url
         : `${window.location.origin}${result.share_url}`;
       await navigator.clipboard.writeText(url);
-      toast.success("分享链接已复制");
+      toast.success(t("shareLinkCopied"));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "创建分享链接失败");
+      toast.error(error instanceof Error ? error.message : t("shareLinkFailed"));
     } finally {
       setSharing(false);
     }
-  }, [selectedId]);
+  }, [selectedId, t]);
 
   if (sortedArtifacts.length === 0) {
     return (
       <div className={cn("text-muted-foreground flex h-full items-center justify-center text-sm", className)}>
-        暂无交付物
+        {t("empty")}
       </div>
     );
   }
@@ -154,7 +159,7 @@ export function ArtifactWorkbench({
           }}
         >
           <SelectTrigger size="sm" className="max-w-[220px]">
-            <SelectValue placeholder="选择交付物" />
+            <SelectValue placeholder={t("selectArtifact")} />
           </SelectTrigger>
           <SelectContent>
             {sortedArtifacts.map((item) => (
@@ -171,7 +176,7 @@ export function ArtifactWorkbench({
             onValueChange={(value) => setSelectedVersion(Number(value))}
           >
             <SelectTrigger size="sm" className="w-[100px]">
-              <SelectValue placeholder="版本" />
+              <SelectValue placeholder={t("version")} />
             </SelectTrigger>
             <SelectContent>
               {versionOptions.map((version) => (
@@ -186,18 +191,18 @@ export function ArtifactWorkbench({
         {active && (
           <Badge variant="secondary" className="gap-1">
             {active.kind === "doc" ? <FileText className="size-3" /> : <Globe className="size-3" />}
-            {STATUS_LABEL[active.status]}
+            {statusLabel(active.status)}
           </Badge>
         )}
 
         <div className="ml-auto flex items-center gap-1">
           <Button variant="outline" size="sm" onClick={handleExport} disabled={!content || loading}>
             <Download className="size-3.5" />
-            导出
+            {t("export")}
           </Button>
           <Button variant="outline" size="sm" onClick={() => void handleShare()} disabled={sharing}>
             <Link2 className="size-3.5" />
-            {sharing ? "生成中..." : "分享"}
+            {sharing ? t("generating") : t("share")}
           </Button>
         </div>
       </div>
@@ -217,12 +222,12 @@ export function ArtifactWorkbench({
           />
         ) : (
           <div className="h-full overflow-y-auto px-4 py-4">
-            <MarkdownContent content={content || "（空内容）"} />
+            <MarkdownContent content={content || t("emptyContent")} />
           </div>
         )}
       </div>
       <p className="text-muted-foreground border-border/70 border-t px-4 py-2 text-xs">
-        会话 {sessionId.slice(0, 8)}…
+        {t("sessionLabel", { id: sessionId.slice(0, 8) })}
       </p>
     </div>
   );

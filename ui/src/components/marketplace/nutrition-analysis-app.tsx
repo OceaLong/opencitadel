@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { MessageCircle, Salad, Send } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { ImageUploadZone } from "@/components/marketplace/image-upload-zone";
@@ -45,6 +46,9 @@ export function NutritionAnalysisApp({
 }: {
   initialGoal?: "cut" | "bulk" | "maintain";
 }) {
+  const t = useTranslations("marketplaceApps.nutritionAnalysis");
+  const tShared = useTranslations("marketplaceApps.shared");
+  const tAuth = useTranslations("auth");
   const { requireAuth } = useRequireAuth();
   const [preview, setPreview] = useState<string | null>(null);
   const [weightKg, setWeightKg] = useState("");
@@ -55,14 +59,20 @@ export function NutritionAnalysisApp({
   const [followupAnswer, setFollowupAnswer] = useState("");
   const [followupLoading, setFollowupLoading] = useState(false);
 
+  const overallStatusLabel = (status: "green" | "yellow" | "red") => {
+    if (status === "green") return t("overallGreen");
+    if (status === "yellow") return t("overallYellow");
+    return t("overallRed");
+  };
+
   const handleFile = async (file: File) => {
-    if (!requireAuth("登录后即可使用 AI 营养分析")) return;
+    if (!requireAuth(tAuth("loginToNutrition"))) return;
     if (!ALLOWED_TYPES.includes(file.type)) {
-      toast.error("仅支持 JPG/PNG 图片");
+      toast.error(tShared("jpgPngOnly"));
       return;
     }
     if (file.size > MAX_SIZE) {
-      toast.error("图片不能超过 5MB");
+      toast.error(tShared("imageTooLarge5mb"));
       return;
     }
 
@@ -79,7 +89,7 @@ export function NutritionAnalysisApp({
       });
       setResult(data);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "分析失败");
+      toast.error(e instanceof Error ? e.message : t("analyzeFailed"));
     } finally {
       setLoading(false);
     }
@@ -87,10 +97,10 @@ export function NutritionAnalysisApp({
 
   const handleFollowup = async () => {
     if (!result || !followupQuestion.trim()) {
-      toast.error("请输入想追问的问题");
+      toast.error(t("followupRequired"));
       return;
     }
-    if (!requireAuth("登录后即可使用 AI 营养分析")) return;
+    if (!requireAuth(tAuth("loginToNutrition"))) return;
     setFollowupLoading(true);
     setFollowupAnswer("");
     try {
@@ -100,7 +110,7 @@ export function NutritionAnalysisApp({
       });
       setFollowupAnswer(data.answer);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "追问失败");
+      toast.error(e instanceof Error ? e.message : t("followupFailed"));
     } finally {
       setFollowupLoading(false);
     }
@@ -109,33 +119,31 @@ export function NutritionAnalysisApp({
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-foreground text-lg font-semibold tracking-tight">AI视觉营养分析</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          拍照识别餐食营养，提供减脂/增肌红绿灯评估
-        </p>
+        <h2 className="text-foreground text-lg font-semibold tracking-tight">{t("title")}</h2>
+        <p className="text-muted-foreground mt-1 text-sm">{t("subtitle")}</p>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label htmlFor="weight">体重 (kg，可选)</Label>
+          <Label htmlFor="weight">{t("weightLabel")}</Label>
           <Input
             id="weight"
             type="number"
-            placeholder="如 70"
+            placeholder={t("weightPlaceholder")}
             value={weightKg}
             onChange={(e) => setWeightKg(e.target.value)}
           />
         </div>
         <div className="space-y-2">
-          <Label>健身目标</Label>
+          <Label>{t("goalLabel")}</Label>
           <Select value={goal} onValueChange={setGoal}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="cut">减脂</SelectItem>
-              <SelectItem value="bulk">增肌</SelectItem>
-              <SelectItem value="maintain">维持</SelectItem>
+              <SelectItem value="cut">{t("goalCut")}</SelectItem>
+              <SelectItem value="bulk">{t("goalBulk")}</SelectItem>
+              <SelectItem value="maintain">{t("goalMaintain")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -144,8 +152,8 @@ export function NutritionAnalysisApp({
       <ImageUploadZone
         loading={loading}
         preview={preview}
-        previewAlt="餐食预览"
-        hint="上传餐食照片，支持点击或拖拽，JPG/PNG 最大 5MB"
+        previewAlt={t("mealPreviewAlt")}
+        hint={t("uploadHint")}
         onFile={handleFile}
       />
 
@@ -163,10 +171,8 @@ export function NutritionAnalysisApp({
       {!loading && !result && !preview && (
         <div className="bg-muted/20 flex flex-col items-center justify-center rounded-xl border border-dashed px-4 py-10 text-center">
           <Salad className="text-muted-foreground/50 mb-3 size-10" />
-          <p className="text-foreground text-sm font-medium">上传餐食照片开始分析</p>
-          <p className="text-muted-foreground mt-1 max-w-sm text-xs">
-            可选填体重与健身目标，获得更精准的红绿灯营养评估
-          </p>
+          <p className="text-foreground text-sm font-medium">{t("emptyTitle")}</p>
+          <p className="text-muted-foreground mt-1 max-w-sm text-xs">{t("emptyHint")}</p>
         </div>
       )}
 
@@ -178,28 +184,24 @@ export function NutritionAnalysisApp({
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <MetricCard label="热量" value={result.totals.calories} unit="kcal" />
-                <MetricCard label="蛋白质" value={result.totals.protein} unit="g" />
-                <MetricCard label="脂肪" value={result.totals.fat} unit="g" />
-                <MetricCard label="碳水" value={result.totals.carbs} unit="g" />
+                <MetricCard label={t("metricCalories")} value={result.totals.calories} unit="kcal" />
+                <MetricCard label={t("metricProtein")} value={result.totals.protein} unit="g" />
+                <MetricCard label={t("metricFat")} value={result.totals.fat} unit="g" />
+                <MetricCard label={t("metricCarbs")} value={result.totals.carbs} unit="g" />
               </div>
 
               <div className="border-border/70 bg-muted/10 space-y-2 rounded-xl border p-3">
                 <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                  营养评估
+                  {t("assessmentTitle")}
                 </p>
                 <div className="flex flex-wrap gap-x-6 gap-y-2">
-                  <TrafficLight status={result.assessment.lights.calories} label="热量评估" />
-                  <TrafficLight status={result.assessment.lights.protein} label="蛋白质评估" />
+                  <TrafficLight status={result.assessment.lights.calories} label={t("caloriesAssessment")} />
+                  <TrafficLight status={result.assessment.lights.protein} label={t("proteinAssessment")} />
                   <TrafficLight
                     status={result.assessment.overall}
-                    label={`综合: ${
-                      result.assessment.overall === "green"
-                        ? "适合"
-                        : result.assessment.overall === "yellow"
-                          ? "注意"
-                          : "超标"
-                    }`}
+                    label={t("overallLabel", {
+                      status: overallStatusLabel(result.assessment.overall),
+                    })}
                   />
                 </div>
               </div>
@@ -216,7 +218,7 @@ export function NutritionAnalysisApp({
 
           <div className="space-y-2">
             <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-              食材明细
+              {t("ingredientsTitle")}
             </p>
             <div className="grid gap-2">
               {result.items.map((item) => (
@@ -226,7 +228,10 @@ export function NutritionAnalysisApp({
                       {item.name} ({item.grams}g)
                     </span>
                     <span className="text-muted-foreground">
-                      {item.calories} kcal · 蛋白 {item.protein}g
+                      {t("itemNutrition", {
+                        calories: item.calories,
+                        protein: item.protein,
+                      })}
                     </span>
                   </CardContent>
                 </Card>
@@ -238,14 +243,14 @@ export function NutritionAnalysisApp({
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-base">
                 <MessageCircle className="size-4" />
-                追问营养建议
+                {t("followupTitle")}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <Textarea
                 value={followupQuestion}
                 onChange={(e) => setFollowupQuestion(e.target.value)}
-                placeholder="例如：这顿饭减脂期要怎么调整？蛋白质够吗？"
+                placeholder={t("followupPlaceholder")}
                 className="min-h-20 bg-background/70"
               />
               <Button onClick={handleFollowup} disabled={followupLoading}>
@@ -254,7 +259,7 @@ export function NutritionAnalysisApp({
                 ) : (
                   <Send className="size-4" />
                 )}
-                生成建议
+                {t("generateAdvice")}
               </Button>
               {followupAnswer && (
                 <div className="border-border/70 bg-background/80 text-foreground rounded-xl border p-3 text-sm leading-relaxed whitespace-pre-wrap">

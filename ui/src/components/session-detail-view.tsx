@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { ChatInput } from "@/components/chat-input";
 import { CheckpointRestoreDialog } from "@/components/checkpoint-restore-dialog";
@@ -9,6 +11,7 @@ import { GateActionsBar } from "@/components/gate-actions-bar";
 import { PlanApprovalBar } from "@/components/plan-approval-bar";
 import { PlanPanel } from "@/components/plan-panel";
 import { SessionHeader } from "@/components/session-header";
+import { SessionModeToggle } from "@/components/session-mode-toggle";
 import { SessionModelPicker } from "@/components/session-model-picker";
 import { SessionSkillPicker } from "@/components/session-skill-picker";
 import { ThinkingToggle } from "@/components/thinking-toggle";
@@ -16,11 +19,16 @@ import { ToolPreviewPanel } from "@/components/tool-preview-panel";
 import { getToolKind } from "@/components/tool-use/utils";
 import { VirtualizedTimeline } from "@/components/virtualized-timeline";
 import { VNCOverlay } from "@/components/vnc-overlay";
+import {
+  SessionContextPanel,
+  useSessionContextRefs,
+} from "@/components/workspace/session-context-panel";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSessionDetailView } from "@/hooks/use-session-detail-view";
+import type { SessionMode } from "@/lib/api/types";
 
 export type SessionDetailViewProps = {
   sessionId: string;
@@ -35,7 +43,11 @@ export function SessionDetailView({
   initialAttachments,
   hasInitialMessage,
 }: SessionDetailViewProps) {
+  const t = useTranslations("sessionDetail");
+  const tCommon = useTranslations("common");
   const isMobile = useIsMobile();
+  const [mode, setMode] = useState<SessionMode>("agent");
+  const { codeSourceRef, kbSourceRef, handleTimelineSourceClick } = useSessionContextRefs();
   const {
     session,
     files,
@@ -94,7 +106,16 @@ export function SessionDetailView({
     initialMessage,
     initialAttachments,
     hasInitialMessage,
+    mode,
   });
+
+  useEffect(() => {
+    if (session?.mode) {
+      setMode(session.mode);
+    }
+  }, [session?.mode]);
+
+  const hasContext = Boolean(session?.codebase_id || session?.knowledge_base_id);
 
   const previewPanel = (
     <>
@@ -120,10 +141,10 @@ export function SessionDetailView({
         {hasInitialMessage ? (
           <div className="text-muted-foreground flex items-center gap-2 text-sm">
             <Loader2 className="size-4 animate-spin" />
-            <span>正在思考中...</span>
+            <span>{t("thinking")}</span>
           </div>
         ) : (
-          <p className="text-muted-foreground text-sm">加载中...</p>
+          <p className="text-muted-foreground text-sm">{tCommon("loading")}</p>
         )}
       </div>
     );
@@ -134,7 +155,7 @@ export function SessionDetailView({
       <div className="relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-2 px-4">
         <p className="text-sm text-red-600">{error.message}</p>
         <button type="button" onClick={() => refresh()} className="text-primary text-sm underline">
-          重试
+          {tCommon("retry")}
         </button>
       </div>
     );
@@ -143,7 +164,7 @@ export function SessionDetailView({
   if (!session) {
     return (
       <div className="relative flex h-full min-w-0 flex-1 flex-col items-center justify-center px-4">
-        <p className="text-muted-foreground text-sm">未找到该任务</p>
+        <p className="text-muted-foreground text-sm">{t("taskNotFound")}</p>
       </div>
     );
   }
@@ -153,7 +174,7 @@ export function SessionDetailView({
       <div className="flex h-screen w-full flex-row overflow-hidden">
         <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
           <div
-            className={`mx-auto flex h-full w-full min-w-0 flex-col px-4 ${hasPreview && !isMobile ? "" : "max-w-[768px]"}`}
+            className={`mx-auto flex h-full w-full min-w-0 flex-col px-4 ${hasPreview && !isMobile ? "" : hasContext ? "" : "max-w-[768px]"}`}
           >
             <div className="flex-shrink-0">
               <SessionHeader
@@ -176,18 +197,18 @@ export function SessionDetailView({
               <div className="flex w-full flex-col gap-3 pt-3">
                 {(session.operator_scope || activeSkill?.slug === "web-operator") && (
                   <div className="border-primary/20 bg-primary/5 text-muted-foreground rounded-lg border px-3 py-2 text-xs">
-                    监工台模式 ·{" "}
+                    {t("operator.modeLabel")} ·{" "}
                     {session.operator_scope === "third_party_saas"
-                      ? "第三方 SaaS（已声明并审计）"
+                      ? t("operator.thirdPartySaas")
                       : session.operator_scope === "owned"
-                        ? "企业自有/自建系统"
-                        : "Web Operator"}
-                    {session.status === "waiting" && " · 等待审批或接管"}
+                        ? t("operator.owned")
+                        : t("operator.webOperator")}
+                    {session.status === "waiting" && ` · ${t("operator.waitingApproval")}`}
                   </div>
                 )}
                 {session.status === "failed" && (
                   <div className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-3 py-2 text-sm">
-                    任务执行失败，可修改配置后重新发送消息继续。
+                    {t("taskFailed")}
                   </div>
                 )}
                 {session.status === "running" &&
@@ -197,10 +218,10 @@ export function SessionDetailView({
                     <div className="border-border bg-muted/60 text-muted-foreground flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm">
                       <span>
                         {streamStatus === "stale"
-                          ? "后台任务正在恢复，事件流暂时中断。"
+                          ? t("streamStale")
                           : streamStatus === "error"
-                            ? streamError?.message || "会话流连接异常，正在尝试恢复。"
-                            : "会话流正在重新连接..."}
+                            ? streamError?.message || t("streamError")
+                            : t("streamReconnecting")}
                       </span>
                       <Button
                         type="button"
@@ -208,7 +229,7 @@ export function SessionDetailView({
                         variant="outline"
                         onClick={() => refresh()}
                       >
-                        重新同步
+                        {t("resync")}
                       </Button>
                     </div>
                   )}
@@ -221,14 +242,14 @@ export function SessionDetailView({
                       onClick={() => loadEarlierEvents()}
                       disabled={loadingEarlier}
                     >
-                      {loadingEarlier ? "加载中..." : "加载更早对话"}
+                      {loadingEarlier ? tCommon("loading") : t("loadEarlier")}
                     </Button>
                   </div>
                 )}
 
                 {timeline.length === 0 && !streaming && !hasInitialMessage && (
                   <div className="text-muted-foreground flex items-center justify-center py-8 text-sm">
-                    暂无对话记录，在下方输入任务或提问
+                    {t("emptyTimeline")}
                   </div>
                 )}
 
@@ -244,13 +265,14 @@ export function SessionDetailView({
                   onRestoreCheckpoint={handleRestoreCheckpoint}
                   restoringCheckpoint={restoringCheckpoint}
                   streaming={streaming}
+                  onSourceClick={hasContext ? handleTimelineSourceClick : undefined}
                 />
 
                 {(session?.status === "running" ||
                   (hasInitialMessage && timeline.length === 0)) && (
                   <div className="text-muted-foreground flex items-center gap-2 py-3 text-sm">
                     <Loader2 className="size-4 animate-spin" />
-                    <span>正在思考中...</span>
+                    <span>{t("thinking")}</span>
                   </div>
                 )}
 
@@ -302,6 +324,9 @@ export function SessionDetailView({
                 onStop={handleStop}
                 toolbarRight={
                   <>
+                    {hasContext && (
+                      <SessionModeToggle mode={mode} onChange={setMode} />
+                    )}
                     <ThinkingToggle
                       enabled={session?.thinking_enabled ?? false}
                       onChange={handleThinkingChange}
@@ -328,6 +353,17 @@ export function SessionDetailView({
         {hasPreview && !isMobile && (
           <div className="animate-in slide-in-from-right h-full w-full max-w-[600px] flex-shrink-0 duration-300">
             {previewPanel}
+          </div>
+        )}
+
+        {hasContext && !isMobile && (
+          <div className={hasPreview ? "hidden" : undefined}>
+            <SessionContextPanel
+              codebaseId={session.codebase_id}
+              knowledgeBaseId={session.knowledge_base_id}
+              codeSourceRef={codeSourceRef}
+              kbSourceRef={kbSourceRef}
+            />
           </div>
         )}
       </div>

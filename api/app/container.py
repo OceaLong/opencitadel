@@ -372,6 +372,8 @@ class BaseContainer(containers.DeclarativeContainer):
         a2a_connection_pool=a2a_connection_pool,
         artifact_service=artifact_service,
         audit_service=audit_service,
+        codebase_service=codebase_service,
+        object_storage=object_storage,
     )
 
     agent_service = providers.Singleton(

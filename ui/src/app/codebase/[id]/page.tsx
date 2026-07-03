@@ -3,7 +3,7 @@
 import { use } from "react";
 
 import { ChatHeader } from "@/components/chat-header";
-import { CodebaseWorkspace } from "@/components/codebase/codebase-workspace";
+import { CodebaseDetailRedirect } from "@/components/codebase/codebase-detail-redirect";
 
 export default function CodebaseDetailPage({
   params,
@@ -13,8 +13,8 @@ export default function CodebaseDetailPage({
   const { id } = use(params);
   return (
     <div className="flex h-full flex-col">
-      <ChatHeader showSidebarTrigger={false} />
-      <CodebaseWorkspace codebaseId={id} />
+      <ChatHeader />
+      <CodebaseDetailRedirect codebaseId={id} />
     </div>
   );
 }

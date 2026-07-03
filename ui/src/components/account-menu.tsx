@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { LayoutDashboard, LogIn, LogOut, Settings } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -17,12 +18,11 @@ import { SidebarFooter } from "@/components/ui/sidebar";
 import { useAuth } from "@/providers/auth-provider";
 import { useLoginPrompt } from "@/providers/login-prompt-provider";
 
-function getDisplayName(user: {
-  display_name?: string;
-  username?: string;
-  email?: string;
-}): string {
-  return user.display_name || user.username || user.email || "用户";
+function getDisplayName(
+  user: { display_name?: string; username?: string; email?: string },
+  fallback: string,
+): string {
+  return user.display_name || user.username || user.email || fallback;
 }
 
 function getInitials(name: string): string {
@@ -34,6 +34,9 @@ function getInitials(name: string): string {
 export function AccountMenu() {
   const { user, logout } = useAuth();
   const { promptLogin } = useLoginPrompt();
+  const tAccount = useTranslations("account");
+  const tAuth = useTranslations("auth");
+  const tCommon = useTranslations("common");
 
   if (!user) {
     return (
@@ -44,13 +47,13 @@ export function AccountMenu() {
           onClick={() => promptLogin()}
         >
           <LogIn className="size-4" />
-          登录 / 注册
+          {tAuth("loginRegister")}
         </Button>
       </SidebarFooter>
     );
   }
 
-  const displayName = getDisplayName(user);
+  const displayName = getDisplayName(user, tCommon("user"));
 
   return (
     <SidebarFooter className="border-border/60 border-t p-2">
@@ -72,14 +75,14 @@ export function AccountMenu() {
             <DropdownMenuItem asChild>
               <Link href="/admin">
                 <LayoutDashboard className="size-4" />
-                后台管理
+                {tAccount("adminPanel")}
               </Link>
             </DropdownMenuItem>
           ) : null}
           <DropdownMenuItem asChild>
             <Link href="/settings">
               <Settings className="size-4" />
-              系统设置
+              {tAccount("settings")}
             </Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
@@ -90,7 +93,7 @@ export function AccountMenu() {
             }}
           >
             <LogOut className="size-4" />
-            退出登录
+            {tAuth("logout")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

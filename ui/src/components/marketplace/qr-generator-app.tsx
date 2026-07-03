@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, QrCode } from "lucide-react";
+import { useTranslations } from "next-intl";
 import QRCode from "qrcode";
 import { toast } from "sonner";
 
@@ -20,34 +21,38 @@ import { Textarea } from "@/components/ui/textarea";
 type ErrorLevel = "L" | "M" | "Q" | "H";
 
 export function QrGeneratorApp({ initialText = "" }: { initialText?: string }) {
+  const t = useTranslations("marketplaceApps.qrGenerator");
   const [text, setText] = useState(initialText);
   const [errorLevel, setErrorLevel] = useState<ErrorLevel>("M");
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const generateQr = useCallback(async (value: string, level: ErrorLevel) => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      setDataUrl(null);
-      return;
-    }
+  const generateQr = useCallback(
+    async (value: string, level: ErrorLevel) => {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        setDataUrl(null);
+        return;
+      }
 
-    setGenerating(true);
-    try {
-      const url = await QRCode.toDataURL(trimmed, {
-        errorCorrectionLevel: level,
-        margin: 2,
-        width: 280,
-      });
-      setDataUrl(url);
-    } catch {
-      setDataUrl(null);
-      toast.error("二维码生成失败，请检查输入内容");
-    } finally {
-      setGenerating(false);
-    }
-  }, []);
+      setGenerating(true);
+      try {
+        const url = await QRCode.toDataURL(trimmed, {
+          errorCorrectionLevel: level,
+          margin: 2,
+          width: 280,
+        });
+        setDataUrl(url);
+      } catch {
+        setDataUrl(null);
+        toast.error(t("generateFailed"));
+      } finally {
+        setGenerating(false);
+      }
+    },
+    [t],
+  );
 
   const scheduleGenerate = useCallback(
     (value: string, level: ErrorLevel) => {
@@ -72,41 +77,39 @@ export function QrGeneratorApp({ initialText = "" }: { initialText?: string }) {
     link.href = dataUrl;
     link.download = "qrcode.png";
     link.click();
-    toast.message("二维码已下载");
+    toast.message(t("downloadedToast"));
   };
 
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-foreground text-lg font-semibold tracking-tight">二维码生成器</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          输入文本、链接或联系方式，实时生成可下载的二维码
-        </p>
+        <h2 className="text-foreground text-lg font-semibold tracking-tight">{t("title")}</h2>
+        <p className="text-muted-foreground mt-1 text-sm">{t("subtitle")}</p>
       </div>
 
       <Card>
         <CardContent className="space-y-4 py-5">
           <div className="space-y-2">
-            <Label htmlFor="qr-text">内容</Label>
+            <Label htmlFor="qr-text">{t("contentLabel")}</Label>
             <Textarea
               id="qr-text"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="例如：https://example.com 或 微信号 / 联系方式"
+              placeholder={t("contentPlaceholder")}
               className="min-h-28"
             />
           </div>
           <div className="space-y-2">
-            <Label>纠错级别</Label>
+            <Label>{t("errorLevelLabel")}</Label>
             <Select value={errorLevel} onValueChange={(value) => setErrorLevel(value as ErrorLevel)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="L">低 (7%)</SelectItem>
-                <SelectItem value="M">中 (15%)</SelectItem>
-                <SelectItem value="Q">较高 (25%)</SelectItem>
-                <SelectItem value="H">高 (30%)</SelectItem>
+                <SelectItem value="L">{t("errorLevelL")}</SelectItem>
+                <SelectItem value="M">{t("errorLevelM")}</SelectItem>
+                <SelectItem value="Q">{t("errorLevelQ")}</SelectItem>
+                <SelectItem value="H">{t("errorLevelH")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -117,16 +120,16 @@ export function QrGeneratorApp({ initialText = "" }: { initialText?: string }) {
         <CardContent className="flex flex-col items-center gap-4 py-8">
           {dataUrl ? (
             <>
-              <img src={dataUrl} alt="生成的二维码" className="size-56 rounded-xl bg-white p-3" />
+              <img src={dataUrl} alt={t("qrAlt")} className="size-56 rounded-xl bg-white p-3" />
               <Button variant="outline" onClick={download}>
                 <Download className="size-4" />
-                下载 PNG
+                {t("downloadPng")}
               </Button>
             </>
           ) : (
             <div className="text-muted-foreground flex flex-col items-center gap-2 py-8 text-center">
               <QrCode className="size-10 opacity-40" />
-              <p className="text-sm">{generating ? "生成中..." : "输入内容后自动生成二维码"}</p>
+              <p className="text-sm">{generating ? t("generating") : t("autoGenerateHint")}</p>
             </div>
           )}
         </CardContent>

@@ -15,6 +15,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useTranslations } from "next-intl";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -54,6 +55,7 @@ function ChartTooltip({
 }
 
 export function UsageTimeseriesChart({ points }: { points: UsageTimeseriesPoint[] }) {
+  const t = useTranslations("admin");
   const data = points.map((point) => ({
     ...point,
     label: formatShortDate(point.date),
@@ -62,13 +64,13 @@ export function UsageTimeseriesChart({ points }: { points: UsageTimeseriesPoint[
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Token 使用趋势</CardTitle>
-        <CardDescription>Prompt / Completion / Total 按日统计</CardDescription>
+        <CardTitle className="text-base">{t("tokenTrendTitle")}</CardTitle>
+        <CardDescription>{t("tokenTrendDesc")}</CardDescription>
       </CardHeader>
       <CardContent className="h-72">
         {data.length === 0 ? (
           <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-            暂无用量数据
+            {t("noUsageData")}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -78,9 +80,9 @@ export function UsageTimeseriesChart({ points }: { points: UsageTimeseriesPoint[
               <YAxis tickFormatter={formatCompactNumber} tick={{ fontSize: 12 }} width={48} />
               <Tooltip content={<ChartTooltip />} />
               <Legend />
-              <Line type="monotone" dataKey="prompt_tokens" name="Prompt" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="completion_tokens" name="Completion" stroke={CHART_COLORS[1]} strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="total_tokens" name="Total" stroke={CHART_COLORS[2]} strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="prompt_tokens" name={t("chartPrompt")} stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="completion_tokens" name={t("chartCompletion")} stroke={CHART_COLORS[1]} strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="total_tokens" name={t("chartTotal")} stroke={CHART_COLORS[2]} strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         )}
@@ -90,6 +92,7 @@ export function UsageTimeseriesChart({ points }: { points: UsageTimeseriesPoint[
 }
 
 export function UsageCallsChart({ points }: { points: UsageTimeseriesPoint[] }) {
+  const t = useTranslations("admin");
   const data = points.map((point) => ({
     ...point,
     label: formatShortDate(point.date),
@@ -98,13 +101,13 @@ export function UsageCallsChart({ points }: { points: UsageTimeseriesPoint[] }) 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">调用次数趋势</CardTitle>
-        <CardDescription>LLM 调用按日统计</CardDescription>
+        <CardTitle className="text-base">{t("callsTrendTitle")}</CardTitle>
+        <CardDescription>{t("callsTrendDesc")}</CardDescription>
       </CardHeader>
       <CardContent className="h-64">
         {data.length === 0 ? (
           <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-            暂无调用数据
+            {t("noCallsData")}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -113,7 +116,7 @@ export function UsageCallsChart({ points }: { points: UsageTimeseriesPoint[] }) 
               <XAxis dataKey="label" tick={{ fontSize: 12 }} />
               <YAxis tick={{ fontSize: 12 }} width={40} />
               <Tooltip content={<ChartTooltip />} />
-              <Bar dataKey="call_count" name="Calls" fill={CHART_COLORS[0]} radius={[6, 6, 0, 0]} />
+              <Bar dataKey="call_count" name={t("chartCalls")} fill={CHART_COLORS[0]} radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -131,6 +134,7 @@ export function UsageBreakdownChart({
   description: string;
   items: UsageBreakdownItem[];
 }) {
+  const t = useTranslations("admin");
   const data = items.slice(0, 8).map((item) => ({
     name: item.key.length > 18 ? `${item.key.slice(0, 18)}…` : item.key,
     value: item.total_tokens,
@@ -146,7 +150,7 @@ export function UsageBreakdownChart({
       <CardContent className="h-72">
         {data.length === 0 ? (
           <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-            暂无分布数据
+            {t("noBreakdownData")}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -185,6 +189,7 @@ export function AuditActivityChart({
 }: {
   byDay: Array<{ date: string; count: number }>;
 }) {
+  const t = useTranslations("admin");
   const data = byDay.map((item) => ({
     ...item,
     label: formatShortDate(item.date),
@@ -193,13 +198,13 @@ export function AuditActivityChart({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">审计活动</CardTitle>
-        <CardDescription>按日记录的管理操作数量</CardDescription>
+        <CardTitle className="text-base">{t("auditActivityTitle")}</CardTitle>
+        <CardDescription>{t("auditActivityDesc")}</CardDescription>
       </CardHeader>
       <CardContent className="h-64">
         {data.length === 0 ? (
           <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-            暂无审计数据
+            {t("noAuditData")}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -208,7 +213,7 @@ export function AuditActivityChart({
               <XAxis dataKey="label" tick={{ fontSize: 12 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 12 }} width={32} />
               <Tooltip content={<ChartTooltip />} />
-              <Bar dataKey="count" name="Events" fill={CHART_COLORS[3]} radius={[6, 6, 0, 0]} />
+              <Bar dataKey="count" name={t("chartEvents")} fill={CHART_COLORS[3]} radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         )}

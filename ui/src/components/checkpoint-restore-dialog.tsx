@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import {
   Dialog,
   DialogContent,
@@ -26,14 +28,16 @@ export function CheckpointRestoreDialog({
   onOpenChange,
   onConfirm,
 }: CheckpointRestoreDialogProps) {
+  const t = useTranslations("checkpoint");
+  const tCommon = useTranslations("common");
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>确认回退还原点</DialogTitle>
+          <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>
-            确定要回退到「{checkpoint?.label || "此处"}」吗？将删除该点之后的所有对话、Agent
-            记忆、沙箱文件与云端文件记录。
+            {t("description", { label: checkpoint?.label || tCommon("here") })}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -43,10 +47,10 @@ export function CheckpointRestoreDialog({
             onClick={() => onOpenChange(false)}
             disabled={restoring}
           >
-            取消
+            {tCommon("cancel")}
           </Button>
           <Button type="button" variant="destructive" onClick={onConfirm} disabled={restoring}>
-            {restoring ? "回退中..." : "确认回退"}
+            {restoring ? t("restoring") : t("confirm")}
           </Button>
         </DialogFooter>
       </DialogContent>

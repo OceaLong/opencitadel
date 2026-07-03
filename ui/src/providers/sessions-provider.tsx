@@ -9,6 +9,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { useTranslations } from "next-intl";
 
 import type { Session } from "@/lib/api";
 import { sessionApi } from "@/lib/api";
@@ -62,6 +63,7 @@ const SessionsContext = createContext<SessionsContextValue | null>(null);
  *  4. refresh() 可手动通过 REST 拉取
  */
 export function SessionsProvider({ children }: { children: React.ReactNode }) {
+  const t = useTranslations("sessions");
   const { user, loading: authLoading } = useAuth();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,11 +84,11 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
       const raw = await sessionApi.getSessions();
       setSessions(normalizeSessions(raw));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "获取会话列表失败");
+      setError(err instanceof Error ? err.message : t("fetchFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   // ---------- 初始 REST 请求（仅一次，登录后） ----------
   useEffect(() => {
@@ -112,10 +114,10 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         setError(null);
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : "获取会话列表失败");
+        setError(err instanceof Error ? err.message : t("fetchFailed"));
         setLoading(false);
       });
-  }, [authLoading, user]);
+  }, [authLoading, user, t]);
 
   // ---------- SSE 实时订阅 ----------
   useEffect(() => {
@@ -162,7 +164,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
           if (!mounted) return;
 
           if (retryCount >= RETRY_CONFIG.maxRetries) {
-            setError("会话列表实时连接已断开，请手动刷新");
+            setError(t("streamDisconnected"));
             return;
           }
 
@@ -191,7 +193,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         retryTimerRef.current = null;
       }
     };
-  }, [authLoading, user]);
+  }, [authLoading, user, t]);
 
   // ---------- 删除会话 ----------
   const deleteSession = useCallback(async (sessionId: string): Promise<boolean> => {
@@ -224,9 +226,10 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
  * 必须在 <SessionsProvider> 内使用
  */
 export function useSessions(): SessionsContextValue {
+  const t = useTranslations("sessions");
   const ctx = useContext(SessionsContext);
   if (!ctx) {
-    throw new Error("useSessions 必须在 SessionsProvider 内使用");
+    throw new Error(t("hookError"));
   }
   return ctx;
 }

@@ -3,7 +3,7 @@
 import { use } from "react";
 
 import { ChatHeader } from "@/components/chat-header";
-import { KnowledgeWorkspace } from "@/components/knowledge/knowledge-workspace";
+import { KnowledgeDetailRedirect } from "@/components/knowledge/knowledge-detail-redirect";
 
 export default function KnowledgeDetailPage({
   params,
@@ -13,8 +13,8 @@ export default function KnowledgeDetailPage({
   const { id } = use(params);
   return (
     <div className="flex h-full flex-col">
-      <ChatHeader showSidebarTrigger={false} />
-      <KnowledgeWorkspace knowledgeBaseId={id} />
+      <ChatHeader />
+      <KnowledgeDetailRedirect knowledgeBaseId={id} />
     </div>
   );
 }

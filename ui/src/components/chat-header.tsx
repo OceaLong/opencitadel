@@ -3,24 +3,38 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { BookOpen, Clock, Code2, LayoutGrid } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { CSSProperties } from "react";
 
 import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { NotificationInbox } from "@/components/notification-inbox";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
 import type { LLMStatusData } from "@/lib/api/types";
+import {
+  IconAutomation,
+  IconCodebase,
+  IconKnowledge,
+  IconMarketplace,
+  IconWorkspace,
+} from "@/lib/icons";
 
 const OpenCitadelSettings = dynamic(
   () => import("@/components/open-citadel-settings").then((mod) => mod.OpenCitadelSettings),
   { ssr: false },
 );
-import { ThemeToggle } from "@/components/theme-toggle";
-import { Button } from "@/components/ui/button";
-import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
 function ChatHeaderSidebarTrigger() {
   const { open, isMobile } = useSidebar();
@@ -30,9 +44,17 @@ function ChatHeaderSidebarTrigger() {
   return <SidebarTrigger className="cursor-pointer" />;
 }
 
-export function ChatHeader({ showSidebarTrigger = true }: { showSidebarTrigger?: boolean }) {
-  const t = useTranslations("metadata");
+export function ChatHeader() {
+  const t = useTranslations("chatHeader");
+  const tMeta = useTranslations("metadata");
   const [llmStatus, setLlmStatus] = useState<LLMStatusData["status"]>("unknown");
+
+  const modelStatusKey =
+    llmStatus === "unknown"
+      ? "unknown"
+      : isModelUnavailableStatus(llmStatus)
+        ? "unavailable"
+        : "ok";
 
   useEffect(() => {
     let mounted = true;
@@ -55,15 +77,15 @@ export function ChatHeader({ showSidebarTrigger = true }: { showSidebarTrigger?:
   return (
     <header className="z-50 flex w-full items-center justify-between px-4 py-2">
       <div className="flex items-center gap-2">
-        {showSidebarTrigger && <ChatHeaderSidebarTrigger />}
+        <ChatHeaderSidebarTrigger />
         <Link
           href="/"
           className="border-border/60 bg-card text-foreground hover:bg-muted/60 flex h-9 items-center gap-2 rounded-xl border px-3 shadow-[var(--shadow-card)] transition-colors"
           style={{ "--logo-color": "currentColor" } as CSSProperties}
-          aria-label="返回首页"
+          aria-label={t("backHome")}
         >
           <OpenCitadelIcon />
-          <span className="sr-only">{t("title")}</span>
+          <span className="sr-only">{tMeta("title")}</span>
         </Link>
       </div>
       <div className="flex items-center gap-1">
@@ -71,28 +93,48 @@ export function ChatHeader({ showSidebarTrigger = true }: { showSidebarTrigger?:
           variant={isModelUnavailableStatus(llmStatus) ? "destructive" : "secondary"}
           className="hidden text-[10px] sm:inline-flex"
         >
-          模型{llmStatus === "unknown" ? "状态未知" : isModelUnavailableStatus(llmStatus) ? "不可用" : "正常"}
+          {t("modelStatus", { status: modelStatusKey })}
         </Badge>
-        <Button variant="outline" size="icon-sm" asChild aria-label="代码知识库" title="代码知识库">
-          <Link href="/codebase">
-            <Code2 className="size-4" />
-          </Link>
-        </Button>
-        <Button variant="outline" size="icon-sm" asChild aria-label="文档知识库" title="文档知识库">
-          <Link href="/knowledge">
-            <BookOpen className="size-4" />
-          </Link>
-        </Button>
-        <Button variant="outline" size="icon-sm" asChild aria-label="应用市场" title="应用市场">
-          <Link href="/marketplace">
-            <LayoutGrid className="size-4" />
-          </Link>
-        </Button>
-        <Button variant="outline" size="icon-sm" asChild aria-label="自动化任务" title="自动化任务">
-          <Link href="/automation">
-            <Clock className="size-4" />
-          </Link>
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label={t("workspaceMenu")}
+              title={t("workspaceMenu")}
+            >
+              <IconWorkspace className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuLabel>{t("workspaceMenu")}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/codebase" className="cursor-pointer">
+                <IconCodebase className="size-4" />
+                {t("codebase")}
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/knowledge" className="cursor-pointer">
+                <IconKnowledge className="size-4" />
+                {t("knowledge")}
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/marketplace" className="cursor-pointer">
+                <IconMarketplace className="size-4" />
+                {t("marketplace")}
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/automation" className="cursor-pointer">
+                <IconAutomation className="size-4" />
+                {t("automation")}
+              </Link>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <NotificationInbox />
         <ThemeToggle />
         <OpenCitadelSettings />

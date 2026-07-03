@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +49,9 @@ type Props = {
 };
 
 export function MemorySettings({ embedded = false }: Props) {
+  const tNav = useTranslations("settingsNav");
+  const t = useTranslations("settingsMemory");
+  const tCommon = useTranslations("common");
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterScope, setFilterScope] = useState<MemoryScope | "all">("all");
@@ -62,7 +66,7 @@ export function MemorySettings({ embedded = false }: Props) {
       const data = await memoryApi.list(filterScope === "all" ? {} : { scope: filterScope });
       setEntries(data.entries);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "加载失败");
+      toast.error(e instanceof Error ? e.message : tCommon("loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -92,7 +96,7 @@ export function MemorySettings({ embedded = false }: Props) {
 
   const handleSave = async () => {
     if (form.scope === "session" && !form.session_id.trim()) {
-      toast.error("会话作用域必须填写 session_id");
+      toast.error(t("sessionScopeRequired"));
       return;
     }
     setSaving(true);
@@ -109,15 +113,15 @@ export function MemorySettings({ embedded = false }: Props) {
     try {
       if (editing) {
         await memoryApi.update(editing.id, payload);
-        toast.success("记忆已更新");
+        toast.success(t("memoryUpdated"));
       } else {
         await memoryApi.create(payload);
-        toast.success("记忆已创建");
+        toast.success(t("memoryCreated"));
       }
       setDialogOpen(false);
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "保存失败");
+      toast.error(e instanceof Error ? e.message : tCommon("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -126,10 +130,10 @@ export function MemorySettings({ embedded = false }: Props) {
   const handleDelete = async (id: string) => {
     try {
       await memoryApi.delete(id);
-      toast.success("已删除");
+      toast.success(tCommon("deleted"));
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "删除失败");
+      toast.error(e instanceof Error ? e.message : tCommon("deleteFailed"));
     }
   };
 
@@ -146,11 +150,9 @@ export function MemorySettings({ embedded = false }: Props) {
                 : "text-2xl font-semibold tracking-tight"
             }
           >
-            长期记忆
+            {tNav("memory")}
           </h2>
-          <p className="text-muted-foreground mt-1 text-sm">
-            跨会话记忆管理，任务开始时自动召回注入 Agent
-          </p>
+          <p className="text-muted-foreground mt-1 text-sm">{t("description")}</p>
         </div>
         <div className="flex gap-2">
           <Select
@@ -161,14 +163,14 @@ export function MemorySettings({ embedded = false }: Props) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部</SelectItem>
-              <SelectItem value="global">全局</SelectItem>
-              <SelectItem value="session">会话</SelectItem>
+              <SelectItem value="all">{tCommon("all")}</SelectItem>
+              <SelectItem value="global">{tCommon("global")}</SelectItem>
+              <SelectItem value="session">{tCommon("session")}</SelectItem>
             </SelectContent>
           </Select>
           <Button size={embedded ? "xs" : "default"} onClick={openCreate}>
             <Plus className="mr-1 size-4" />
-            新增
+            {tCommon("add")}
           </Button>
         </div>
       </div>
@@ -201,7 +203,7 @@ export function MemorySettings({ embedded = false }: Props) {
                     </Badge>
                     {e.use_count > 0 && (
                       <span className="text-muted-foreground text-[10px]">
-                        使用 {e.use_count} 次
+                        {t("usedCount", { count: e.use_count })}
                       </span>
                     )}
                   </div>
@@ -243,7 +245,7 @@ export function MemorySettings({ embedded = false }: Props) {
             </div>
           ))}
           {entries.length === 0 && (
-            <p className="text-muted-foreground py-8 text-center text-sm">暂无记忆条目</p>
+            <p className="text-muted-foreground py-8 text-center text-sm">{t("noEntries")}</p>
           )}
         </div>
       )}
@@ -251,18 +253,18 @@ export function MemorySettings({ embedded = false }: Props) {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="shadow-[var(--shadow-panel)]">
           <DialogHeader>
-            <DialogTitle>{editing ? "编辑记忆" : "新增记忆"}</DialogTitle>
+            <DialogTitle>{editing ? t("editMemory") : t("addMemory")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label>标题</Label>
+              <Label>{t("titleLabel")}</Label>
               <Input
                 value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
               />
             </div>
             <div className="space-y-2">
-              <Label>内容</Label>
+              <Label>{t("content")}</Label>
               <Textarea
                 rows={4}
                 value={form.content}
@@ -270,14 +272,14 @@ export function MemorySettings({ embedded = false }: Props) {
               />
             </div>
             <div className="space-y-2">
-              <Label>标签（逗号分隔）</Label>
+              <Label>{t("tags")}</Label>
               <Input
                 value={form.tags}
                 onChange={(e) => setForm({ ...form, tags: e.target.value })}
               />
             </div>
             <div className="space-y-2">
-              <Label>作用域</Label>
+              <Label>{t("scope")}</Label>
               <Select
                 value={form.scope}
                 onValueChange={(v) =>
@@ -292,8 +294,8 @@ export function MemorySettings({ embedded = false }: Props) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="global">全局</SelectItem>
-                  <SelectItem value="session">会话</SelectItem>
+                  <SelectItem value="global">{tCommon("global")}</SelectItem>
+                  <SelectItem value="session">{tCommon("session")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -303,18 +305,18 @@ export function MemorySettings({ embedded = false }: Props) {
                 <Input
                   value={form.session_id}
                   onChange={(e) => setForm({ ...form, session_id: e.target.value })}
-                  placeholder="目标会话 UUID"
+                  placeholder={t("sessionIdPlaceholder")}
                 />
               </div>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              取消
+              {tCommon("cancel")}
             </Button>
             <Button onClick={handleSave} disabled={saving}>
               {saving && <Loader2 className="mr-1 size-4 animate-spin" />}
-              保存
+              {tCommon("save")}
             </Button>
           </DialogFooter>
         </DialogContent>

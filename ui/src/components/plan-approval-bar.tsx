@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, Pencil, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,8 @@ export function PlanApprovalBar({
   disabled = false,
   className,
 }: PlanApprovalBarProps) {
+  const t = useTranslations("planApproval");
+  const tCommon = useTranslations("common");
   const [editing, setEditing] = useState(false);
   const [steps, setSteps] = useState<PlanStep[]>(() => extractSteps(approval));
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -53,7 +56,7 @@ export function PlanApprovalBar({
     try {
       await onSend("approve");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "发送失败");
+      toast.error(error instanceof Error ? error.message : t("sendFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -68,7 +71,7 @@ export function PlanApprovalBar({
       await onSend("approve_with_edits");
       setEditing(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "提交修改失败");
+      toast.error(error instanceof Error ? error.message : t("submitEditsFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -77,7 +80,7 @@ export function PlanApprovalBar({
   const handleReject = async () => {
     const text = feedback.trim();
     if (!text) {
-      toast.error("请填写拒绝原因");
+      toast.error(t("rejectReasonRequired"));
       return;
     }
     setSubmitting(true);
@@ -86,7 +89,7 @@ export function PlanApprovalBar({
       setRejectOpen(false);
       setFeedback("");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "发送失败");
+      toast.error(error instanceof Error ? error.message : t("sendFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -107,14 +110,14 @@ export function PlanApprovalBar({
     >
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-foreground text-sm font-medium">计划待审批</p>
-          <p className="text-muted-foreground text-xs">确认后将开始执行以下步骤</p>
+          <p className="text-foreground text-sm font-medium">{t("title")}</p>
+          <p className="text-muted-foreground text-xs">{t("subtitle")}</p>
         </div>
         {!editing && !rejectOpen && (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => void handleApprove()} disabled={disabled || submitting}>
               <Check className="size-3.5" />
-              批准
+              {t("approve")}
             </Button>
             <Button
               size="sm"
@@ -123,7 +126,7 @@ export function PlanApprovalBar({
               disabled={disabled || submitting}
             >
               <Pencil className="size-3.5" />
-              编辑步骤
+              {t("editSteps")}
             </Button>
             <Button
               size="sm"
@@ -132,7 +135,7 @@ export function PlanApprovalBar({
               disabled={disabled || submitting}
             >
               <X className="size-3.5" />
-              拒绝
+              {t("reject")}
             </Button>
           </div>
         )}
@@ -140,7 +143,9 @@ export function PlanApprovalBar({
 
       {riskTools.length > 0 && (
         <p className="text-muted-foreground mb-2 text-xs">
-          涉及风险工具：{riskTools.join("、")}
+          {t("riskTools", {
+            tools: new Intl.ListFormat(undefined, { style: "short", type: "unit" }).format(riskTools),
+          })}
         </p>
       )}
 
@@ -157,10 +162,10 @@ export function PlanApprovalBar({
           ))}
           <div className="flex gap-2">
             <Button size="sm" onClick={() => void handleApproveWithEdits()} disabled={submitting}>
-              保存并批准
+              {t("saveAndApprove")}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
-              取消
+              {tCommon("cancel")}
             </Button>
           </div>
         </div>
@@ -177,15 +182,15 @@ export function PlanApprovalBar({
           <Textarea
             value={feedback}
             onChange={(event) => setFeedback(event.target.value)}
-            placeholder="请说明拒绝原因或修改建议…"
+            placeholder={t("rejectPlaceholder")}
             rows={3}
           />
           <div className="flex gap-2">
             <Button size="sm" variant="destructive" onClick={() => void handleReject()} disabled={submitting}>
-              确认拒绝
+              {t("confirmReject")}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setRejectOpen(false)}>
-              取消
+              {tCommon("cancel")}
             </Button>
           </div>
         </div>

@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { Layers3 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import type { ComponentType, ReactNode } from "react";
 
 import type { MarketplaceApp, ModelDependency } from "@/lib/api/types";
@@ -17,6 +18,54 @@ const MODEL_DEPENDENCY: Record<string, ModelDependency> = {
   "document-converter": "none",
   "watermark-tool": "optional",
 };
+
+export const APP_I18N_KEYS: Record<string, string> = {
+  "nutrition-analysis": "nutritionAnalysis",
+  "consumption-calculator": "consumptionCalculator",
+  "smart-translation": "smartTranslation",
+  "prompt-lab": "promptLab",
+  "qr-generator": "qrGenerator",
+  "dev-toolbox": "devToolbox",
+  "secret-generator": "secretGenerator",
+  "document-converter": "documentConverter",
+  "watermark-tool": "watermarkTool",
+};
+
+export const CATEGORY_I18N_KEYS = new Set([
+  "categoryHealth",
+  "categoryLife",
+  "categoryOffice",
+  "categoryProductivity",
+]);
+
+export function getCategoryLabel(
+  category: string,
+  tMarketplace: (key: string) => string,
+): string {
+  if (category === "all") return tMarketplace("categoryAll");
+  if (CATEGORY_I18N_KEYS.has(category)) return tMarketplace(category);
+  return category;
+}
+
+type MarketplaceAppsTranslator = {
+  (key: string): string;
+  raw: (key: string) => unknown;
+};
+
+export function localizeMarketplaceApp(
+  app: MarketplaceApp,
+  tApps: MarketplaceAppsTranslator,
+): MarketplaceApp {
+  const appKey = APP_I18N_KEYS[app.id];
+  if (!appKey) return app;
+  return {
+    ...app,
+    name: tApps(`${appKey}.name`),
+    description: tApps(`${appKey}.description`),
+    tags: tApps.raw(`${appKey}.tags`) as string[],
+    examples: tApps.raw(`${appKey}.examples`) as string[],
+  };
+}
 
 function withModelDependency(meta: MarketplaceApp): MarketplaceApp {
   return {
@@ -67,15 +116,15 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
   {
     meta: {
       id: "nutrition-analysis",
-      name: "AI营养分析",
-      description: "拍照识别餐食营养，减脂/增肌红绿灯评估",
+      name: "nutrition-analysis",
+      description: "nutrition-analysis",
       icon: "🥗",
-      category: "健康",
-      tags: ["视觉识别", "营养", "健身", "减脂"],
+      category: "categoryHealth",
+      tags: [],
       featured: true,
       accent: "emerald",
       needs_vision: true,
-      examples: ["分析这顿饭适不适合减脂", "看看这张餐食蛋白够不够"],
+      examples: [],
     },
     render: (params) => (
       <NutritionAnalysisApp
@@ -90,15 +139,15 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
   {
     meta: {
       id: "consumption-calculator",
-      name: "消耗计算器",
-      description: "识别包装净含量，计算可食用次数",
+      name: "consumption-calculator",
+      description: "consumption-calculator",
       icon: "📦",
-      category: "生活",
-      tags: ["OCR", "计算", "包装识别", "生活效率"],
+      category: "categoryLife",
+      tags: [],
       featured: false,
       accent: "amber",
       needs_vision: true,
-      examples: ["这包 1.2kg 每次 50g 能吃几次", "识别包装净含量并计算消耗"],
+      examples: [],
     },
     render: (params) => (
       <ConsumptionCalculatorApp
@@ -112,15 +161,15 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
   {
     meta: {
       id: "smart-translation",
-      name: "智能翻译",
-      description: "自动识别语种，按正式/口语/技术风格翻译",
+      name: "smart-translation",
+      description: "smart-translation",
       icon: "🌐",
-      category: "办公",
-      tags: ["翻译", "润色", "多语言", "技术文档"],
+      category: "categoryOffice",
+      tags: [],
       featured: true,
       accent: "indigo",
       needs_vision: false,
-      examples: ["把这段英文翻译成正式中文", "翻译截图里的文字为英文"],
+      examples: [],
     },
     render: (params) => (
       <SmartTranslationApp
@@ -139,15 +188,15 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
   {
     meta: {
       id: "prompt-lab",
-      name: "提示词工坊",
-      description: "把粗略想法改写为可复用的高质量提示词",
+      name: "prompt-lab",
+      description: "prompt-lab",
       icon: "✨",
-      category: "效率",
-      tags: ["提示词", "工作流", "创作", "效率"],
+      category: "categoryProductivity",
+      tags: [],
       featured: false,
       accent: "rose",
       needs_vision: false,
-      examples: ["帮我写一个数据分析 Agent 提示词", "优化这段客服回复 prompt"],
+      examples: [],
     },
     render: (params) => (
       <PromptLabApp initialPrompt={typeof params.text === "string" ? params.text : ""} />
@@ -156,15 +205,15 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
   {
     meta: {
       id: "qr-generator",
-      name: "二维码生成器",
-      description: "将文本或链接快速生成可下载的二维码图片",
+      name: "qr-generator",
+      description: "qr-generator",
       icon: "📱",
-      category: "效率",
-      tags: ["二维码", "链接", "分享", "下载"],
+      category: "categoryProductivity",
+      tags: [],
       featured: false,
       accent: "sky",
       needs_vision: false,
-      examples: ["生成 https://example.com 的二维码", "把这段文字做成二维码"],
+      examples: [],
     },
     render: (params) => (
       <QrGeneratorApp initialText={typeof params.text === "string" ? params.text : ""} />
@@ -173,15 +222,15 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
   {
     meta: {
       id: "dev-toolbox",
-      name: "开发者工具箱",
-      description: "JSON 格式化、Base64 与 URL 编解码一站式处理",
+      name: "dev-toolbox",
+      description: "dev-toolbox",
       icon: "🛠️",
-      category: "效率",
-      tags: ["JSON", "Base64", "URL", "格式化"],
+      category: "categoryProductivity",
+      tags: [],
       featured: false,
       accent: "indigo",
       needs_vision: false,
-      examples: ["格式化这段 JSON", "把文本 Base64 编码", "URL 解码这段参数"],
+      examples: [],
     },
     render: (params) => (
       <DevToolboxApp initialText={typeof params.text === "string" ? params.text : ""} />
@@ -190,15 +239,15 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
   {
     meta: {
       id: "secret-generator",
-      name: "密码 & UUID 生成器",
-      description: "生成可配置强度的密码与批量 UUID",
+      name: "secret-generator",
+      description: "secret-generator",
       icon: "🔐",
-      category: "效率",
-      tags: ["密码", "UUID", "安全", "随机"],
+      category: "categoryProductivity",
+      tags: [],
       featured: false,
       accent: "rose",
       needs_vision: false,
-      examples: ["生成 16 位强密码", "批量生成 5 个 UUID"],
+      examples: [],
     },
     render: (params) => (
       <SecretGeneratorApp
@@ -209,15 +258,15 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
   {
     meta: {
       id: "document-converter",
-      name: "文档格式转换",
-      description: "md/txt 转 PDF、PDF 转 Word、常用文档格式互转",
+      name: "document-converter",
+      description: "document-converter",
       icon: "📑",
-      category: "办公",
-      tags: ["PDF", "Word", "Markdown", "格式转换"],
+      category: "categoryOffice",
+      tags: [],
       featured: true,
       accent: "sky",
       needs_vision: false,
-      examples: ["把这份 PDF 转成 Word", "md 转 pdf", "pdf 转 markdown"],
+      examples: [],
     },
     render: (params) => (
       <DocumentConverterApp
@@ -235,15 +284,15 @@ export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
   {
     meta: {
       id: "watermark-tool",
-      name: "水印工具",
-      description: "图片/PDF 加水印，图片 AI 去水印与 PDF 去水印",
+      name: "watermark-tool",
+      description: "watermark-tool",
       icon: "💧",
-      category: "办公",
-      tags: ["水印", "去水印", "PDF", "图片处理"],
+      category: "categoryOffice",
+      tags: [],
       featured: false,
       accent: "indigo",
       needs_vision: true,
-      examples: ["给 PDF 加上机密水印", "去掉图片右下角水印", "批量平铺文字水印"],
+      examples: [],
     },
     render: (params) => (
       <WatermarkToolApp
@@ -258,15 +307,20 @@ export const FALLBACK_APPS = MARKETPLACE_REGISTRY.map((entry) => withModelDepend
 
 const REGISTRY_BY_ID = new Map(MARKETPLACE_REGISTRY.map((entry) => [entry.meta.id, entry]));
 
+function SelectAppPlaceholder() {
+  const t = useTranslations("marketplace");
+  return (
+    <div className="text-muted-foreground flex flex-col items-center justify-center py-16 text-center">
+      <Layers3 className="mb-3 size-10 opacity-40" />
+      <p className="text-sm">{t("selectApp")}</p>
+    </div>
+  );
+}
+
 export function renderApp(appId: string, params: LaunchParams): ReactNode {
   const entry = REGISTRY_BY_ID.get(appId);
   if (entry) {
     return entry.render(params);
   }
-  return (
-    <div className="text-muted-foreground flex flex-col items-center justify-center py-16 text-center">
-      <Layers3 className="mb-3 size-10 opacity-40" />
-      <p className="text-sm">请选择一个应用开始使用</p>
-    </div>
-  );
+  return <SelectAppPlaceholder />;
 }

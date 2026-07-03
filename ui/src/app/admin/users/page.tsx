@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, MoreHorizontal } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +37,8 @@ import { adminApi, type AdminUser, type Quota } from "@/lib/api/admin";
 const PAGE_SIZE = 20;
 
 export default function AdminUsersPage() {
+  const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -83,11 +86,11 @@ export default function AdminUsersPage() {
         status: editing.status,
         display_name: editing.display_name,
       });
-      toast.success("用户信息已更新");
+      toast.success(t("userUpdated"));
       setEditing(null);
       await loadUsers(offset);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "更新失败");
+      toast.error(error instanceof Error ? error.message : t("updateFailed"));
     } finally {
       setSaving(false);
     }
@@ -97,10 +100,10 @@ export default function AdminUsersPage() {
     setSaving(true);
     try {
       await adminApi.patchUser(user.id, { status: "disabled" });
-      toast.success("用户已禁用");
+      toast.success(t("userDisabled"));
       await loadUsers(offset);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "操作失败");
+      toast.error(error instanceof Error ? error.message : t("operationFailed"));
     } finally {
       setSaving(false);
     }
@@ -122,10 +125,10 @@ export default function AdminUsersPage() {
     setSaving(true);
     try {
       await adminApi.putQuota(quotaUser.id, quota);
-      toast.success("配额已更新");
+      toast.success(t("quotaUpdated"));
       setQuotaOpen(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "保存失败");
+      toast.error(error instanceof Error ? error.message : tCommon("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -138,21 +141,21 @@ export default function AdminUsersPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">用户管理</h2>
-          <p className="text-muted-foreground mt-1 text-sm">查看用户状态、角色与配额</p>
+          <h2 className="text-2xl font-semibold tracking-tight">{t("usersTitle")}</h2>
+          <p className="text-muted-foreground mt-1 text-sm">{t("usersSubtitle")}</p>
         </div>
         <Input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="搜索邮箱 / 用户名"
+          placeholder={t("searchUsersPlaceholder")}
           className="max-w-xs"
         />
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">用户列表</CardTitle>
-          <CardDescription>共 {total} 位用户</CardDescription>
+          <CardTitle className="text-base">{t("userListTitle")}</CardTitle>
+          <CardDescription>{t("userTotalCount", { count: total })}</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -172,7 +175,7 @@ export default function AdminUsersPage() {
                       <Badge variant={user.status === "active" ? "outline" : "destructive"}>{user.status}</Badge>
                     </div>
                     <div className="text-muted-foreground mt-1 text-xs">
-                      {user.email} · 最近登录 {formatDateTime(user.last_login_at)}
+                      {user.email} · {t("lastLogin", { time: formatDateTime(user.last_login_at) })}
                     </div>
                   </div>
                   <DropdownMenu>
@@ -182,11 +185,11 @@ export default function AdminUsersPage() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => setEditing({ ...user })}>编辑</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => void openQuota(user)}>配额</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setEditing({ ...user })}>{tCommon("edit")}</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void openQuota(user)}>{t("quota")}</DropdownMenuItem>
                       {user.status === "active" ? (
                         <DropdownMenuItem variant="destructive" onClick={() => void disableUser(user)}>
-                          禁用
+                          {t("disableUser")}
                         </DropdownMenuItem>
                       ) : null}
                     </DropdownMenuContent>
@@ -198,11 +201,11 @@ export default function AdminUsersPage() {
 
           <div className="mt-4 flex items-center justify-between">
             <span className="text-muted-foreground text-sm">
-              第 {currentPage} / {totalPages} 页
+              {tCommon("pageOf", { current: currentPage, total: totalPages })}
             </span>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => void loadUsers(Math.max(0, offset - PAGE_SIZE))}>
-                上一页
+                {tCommon("previousPage")}
               </Button>
               <Button
                 variant="outline"
@@ -210,7 +213,7 @@ export default function AdminUsersPage() {
                 disabled={offset + PAGE_SIZE >= total}
                 onClick={() => void loadUsers(offset + PAGE_SIZE)}
               >
-                下一页
+                {tCommon("nextPage")}
               </Button>
             </div>
           </div>
@@ -220,19 +223,19 @@ export default function AdminUsersPage() {
       <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>编辑用户</DialogTitle>
+            <DialogTitle>{t("editUser")}</DialogTitle>
           </DialogHeader>
           {editing ? (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>显示名称</Label>
+                <Label>{t("displayName")}</Label>
                 <Input
                   value={editing.display_name}
                   onChange={(event) => setEditing({ ...editing, display_name: event.target.value })}
                 />
               </div>
               <div className="space-y-2">
-                <Label>角色</Label>
+                <Label>{t("role")}</Label>
                 <Select
                   value={editing.global_role}
                   onValueChange={(value: "admin" | "user") => setEditing({ ...editing, global_role: value })}
@@ -247,7 +250,7 @@ export default function AdminUsersPage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>状态</Label>
+                <Label>{t("status")}</Label>
                 <Select
                   value={editing.status}
                   onValueChange={(value: "active" | "disabled") => setEditing({ ...editing, status: value })}
@@ -265,10 +268,10 @@ export default function AdminUsersPage() {
           ) : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditing(null)}>
-              取消
+              {tCommon("cancel")}
             </Button>
             <Button disabled={saving} onClick={() => void saveUserChanges()}>
-              保存
+              {tCommon("save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -277,20 +280,20 @@ export default function AdminUsersPage() {
       <Dialog open={quotaOpen} onOpenChange={setQuotaOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>用户配额</DialogTitle>
+            <DialogTitle>{t("userQuota")}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-3">
-            <Field label="Monthly Token Limit" value={quota.monthly_token_limit} onChange={(value) => setQuota({ ...quota, monthly_token_limit: value })} />
-            <Field label="Daily Session Limit" value={quota.daily_session_limit} onChange={(value) => setQuota({ ...quota, daily_session_limit: value })} />
-            <Field label="Max Concurrent Tasks" value={quota.max_concurrent_tasks} onChange={(value) => setQuota({ ...quota, max_concurrent_tasks: value })} />
-            <Field label="Max Storage Bytes" value={quota.max_storage_bytes} onChange={(value) => setQuota({ ...quota, max_storage_bytes: value })} />
+            <Field label={t("quotaMonthlyTokenLimit")} value={quota.monthly_token_limit} onChange={(value) => setQuota({ ...quota, monthly_token_limit: value })} />
+            <Field label={t("quotaDailySessionLimit")} value={quota.daily_session_limit} onChange={(value) => setQuota({ ...quota, daily_session_limit: value })} />
+            <Field label={t("quotaMaxConcurrentTasks")} value={quota.max_concurrent_tasks} onChange={(value) => setQuota({ ...quota, max_concurrent_tasks: value })} />
+            <Field label={t("quotaMaxStorageBytes")} value={quota.max_storage_bytes} onChange={(value) => setQuota({ ...quota, max_storage_bytes: value })} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setQuotaOpen(false)}>
-              取消
+              {tCommon("cancel")}
             </Button>
             <Button disabled={saving} onClick={() => void saveQuota()}>
-              保存
+              {tCommon("save")}
             </Button>
           </DialogFooter>
         </DialogContent>

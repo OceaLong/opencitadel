@@ -2,18 +2,21 @@
 
 import { useEffect, useState } from "react";
 import {
-  Brain,
-  Cpu,
   LayoutGrid,
   LayoutList,
   Loader2,
   Settings,
-  Sparkles,
-  Trash,
-  Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+
+import {
+  IconDelete,
+  IconMemory,
+  IconModel,
+  IconSkill,
+  IconTool,
+} from "@/lib/icons";
 
 import { MemorySettings } from "@/components/settings/memory-settings";
 import { ModelsSettings } from "@/components/settings/models-settings";
@@ -55,6 +58,7 @@ type CommonSettingProps = {
 };
 
 function CommonSetting({ config, onChange }: CommonSettingProps) {
+  const t = useTranslations("settings");
   const handleChange = (field: keyof AgentConfig, value: string) => {
     const numValue = value === "" ? undefined : Number(value);
     onChange({ ...config, [field]: numValue });
@@ -64,50 +68,46 @@ function CommonSetting({ config, onChange }: CommonSettingProps) {
     <form className="w-full px-1" onSubmit={(e) => e.preventDefault()}>
       <FieldGroup>
         <FieldSet>
-          <FieldLegend className="text-foreground text-lg font-semibold">通用配置</FieldLegend>
+          <FieldLegend className="text-foreground text-lg font-semibold">{t("common")}</FieldLegend>
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="max_iterations">最大计划迭代次数</FieldLabel>
+              <FieldLabel htmlFor="max_iterations">{t("maxIterations")}</FieldLabel>
               <Input
                 id="max_iterations"
                 type="number"
-                placeholder="Agent最大迭代次数"
+                placeholder={t("maxIterationsPlaceholder")}
                 value={config.max_iterations ?? 100}
                 onChange={(e) => handleChange("max_iterations", e.target.value)}
                 min={0}
                 max={200}
               />
-              <FieldDescription className="text-xs">
-                执行Agent最大能迭代循环调用工具的次数，默认为100
-              </FieldDescription>
+              <FieldDescription className="text-xs">{t("maxIterationsDesc")}</FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="max_retries">最大重试次数</FieldLabel>
+              <FieldLabel htmlFor="max_retries">{t("maxRetries")}</FieldLabel>
               <Input
                 id="max_retries"
                 type="number"
-                placeholder="LLM/Tool最大重试次数"
+                placeholder={t("maxRetriesPlaceholder")}
                 value={config.max_retries ?? 3}
                 onChange={(e) => handleChange("max_retries", e.target.value)}
                 min={0}
                 max={10}
               />
-              <FieldDescription className="text-xs">默认情况下，最大重试次数为3</FieldDescription>
+              <FieldDescription className="text-xs">{t("maxRetriesDesc")}</FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="max_search_results">最大搜索结果</FieldLabel>
+              <FieldLabel htmlFor="max_search_results">{t("maxSearchResults")}</FieldLabel>
               <Input
                 id="max_search_results"
                 type="number"
-                placeholder="搜索工具返回的最大结果数"
+                placeholder={t("maxSearchResultsPlaceholder")}
                 value={config.max_search_results ?? 10}
                 onChange={(e) => handleChange("max_search_results", e.target.value)}
                 min={0}
                 max={30}
               />
-              <FieldDescription className="text-xs">
-                默认情况下，每个搜索步骤包含 10 个结果。
-              </FieldDescription>
+              <FieldDescription className="text-xs">{t("maxSearchResultsDesc")}</FieldDescription>
             </Field>
           </FieldGroup>
         </FieldSet>
@@ -128,13 +128,14 @@ type A2ASettingProps = {
 
 export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: A2ASettingProps) {
   const t = useTranslations("settings");
+  const tCommon = useTranslations("common");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addUrl, setAddUrl] = useState("");
   const [adding, setAdding] = useState(false);
 
   const handleAdd = async () => {
     if (!addUrl.trim()) {
-      toast.error("请输入远程 Agent 地址");
+      toast.error(t("enterAgentUrl"));
       return;
     }
     setAdding(true);
@@ -154,16 +155,16 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
       <FieldGroup>
         <FieldSet>
           <FieldLegend className="text-foreground flex w-full items-center justify-between text-lg font-semibold">
-            A2A Agent 配置
+            {t("a2a")}
             <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
               <DialogTrigger asChild>
                 <Button type="button" size="xs" className="cursor-pointer">
-                  添加远程Agent
+                  {t("addRemoteAgent")}
                 </Button>
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle className="text-foreground">添加远程Agent</DialogTitle>
+                  <DialogTitle className="text-foreground">{t("addRemoteAgent")}</DialogTitle>
                   <DialogDescription className="text-muted-foreground">
                     {t("a2aAddDescription")}
                   </DialogDescription>
@@ -193,12 +194,12 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                 <DialogFooter>
                   <DialogClose asChild>
                     <Button variant="outline" className="cursor-pointer" disabled={adding}>
-                      取消
+                      {tCommon("cancel")}
                     </Button>
                   </DialogClose>
                   <Button className="cursor-pointer" onClick={handleAdd} disabled={adding}>
                     {adding && <Loader2 className="animate-spin" />}
-                    添加
+                    {tCommon("add")}
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -215,9 +216,7 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
 
           {/* 空态 */}
           {!loading && servers.length === 0 && (
-            <div className="text-muted-foreground py-8 text-center text-sm">
-              暂无 A2A Agent，请点击上方按钮添加
-            </div>
+            <div className="text-muted-foreground py-8 text-center text-sm">{t("noA2aAgents")}</div>
           )}
 
           {/* 列表 */}
@@ -229,7 +228,7 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                     <ItemTitle className="text-md text-foreground flex w-full items-center justify-between font-semibold">
                       <div className="flex items-center gap-2">
                         {server.name}
-                        {!server.enabled && <Badge>禁用</Badge>}
+                        {!server.enabled && <Badge>{tCommon("disabled")}</Badge>}
                       </div>
                       <div className="flex items-center justify-center gap-2">
                         <Button
@@ -239,7 +238,7 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                           className="cursor-pointer"
                           onClick={() => onDelete(server.id)}
                         >
-                          <Trash />
+                          <IconDelete />
                         </Button>
                         <Switch
                           checked={server.enabled}
@@ -256,7 +255,7 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                           variant="secondary"
                           className="text-muted-foreground"
                         >
-                          输入: {mode}
+                          {tCommon("input")}: {mode}
                         </Badge>
                       ))}
                       {server.output_modes?.map((mode) => (
@@ -265,7 +264,7 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                           variant="secondary"
                           className="text-muted-foreground"
                         >
-                          输出: {mode}
+                          {tCommon("output")}: {mode}
                         </Badge>
                       ))}
                       <Badge
@@ -274,7 +273,7 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                           server.streaming ? "text-muted-foreground" : "text-muted-foreground/70"
                         }
                       >
-                        流式输出: {server.streaming ? "开启" : "关闭"}
+                        {tCommon("streaming")}: {server.streaming ? tCommon("on") : tCommon("off")}
                       </Badge>
                       <Badge
                         variant={server.push_notifications ? "secondary" : "outline"}
@@ -284,7 +283,7 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                             : "text-muted-foreground/70"
                         }
                       >
-                        推送通知: {server.push_notifications ? "开启" : "关闭"}
+                        {tCommon("pushNotifications")}: {server.push_notifications ? tCommon("on") : tCommon("off")}
                       </Badge>
                     </ItemDescription>
                   </ItemContent>
@@ -310,6 +309,7 @@ type MCPSettingProps = {
 
 export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: MCPSettingProps) {
   const t = useTranslations("settings");
+  const tCommon = useTranslations("common");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addConfig, setAddConfig] = useState("");
   const [adding, setAdding] = useState(false);
@@ -331,7 +331,7 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
 
   const handleAdd = async () => {
     if (!addConfig.trim()) {
-      toast.error("请输入 MCP 服务器配置");
+      toast.error(t("enterMcpConfig"));
       return;
     }
     setAdding(true);
@@ -351,16 +351,16 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
       <FieldGroup>
         <FieldSet>
           <FieldLegend className="text-foreground flex w-full items-center justify-between text-lg font-semibold">
-            MCP 服务器
+            {t("mcp")}
             <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
               <DialogTrigger asChild>
                 <Button type="button" size="xs" className="cursor-pointer">
-                  添加服务器
+                  {t("addServer")}
                 </Button>
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle className="text-foreground">添加新的 MCP 服务器</DialogTitle>
+                  <DialogTitle className="text-foreground">{t("addMcpServer")}</DialogTitle>
                   <DialogDescription className="text-muted-foreground">
                     {t("mcpAddDescription")}
                   </DialogDescription>
@@ -390,18 +390,18 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                 <DialogFooter>
                   <DialogClose asChild>
                     <Button variant="outline" className="cursor-pointer" disabled={adding}>
-                      取消
+                      {tCommon("cancel")}
                     </Button>
                   </DialogClose>
                   <Button className="cursor-pointer" onClick={handleAdd} disabled={adding}>
                     {adding && <Loader2 className="animate-spin" />}
-                    添加
+                    {tCommon("add")}
                   </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
           </FieldLegend>
-          <FieldDescription className="text-sm">{t("a2aDescription")}</FieldDescription>
+          <FieldDescription className="text-sm">{t("mcpAddDescription")}</FieldDescription>
 
           {/* 加载态 */}
           {loading && (
@@ -412,9 +412,7 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
 
           {/* 空态 */}
           {!loading && servers.length === 0 && (
-            <div className="text-muted-foreground py-8 text-center text-sm">
-              暂无 MCP 服务器，请点击上方按钮添加
-            </div>
+            <div className="text-muted-foreground py-8 text-center text-sm">{t("noMcpServers")}</div>
           )}
 
           {/* 列表 */}
@@ -427,7 +425,7 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                       <div className="flex items-center gap-2">
                         {server.server_name}
                         <Badge>{server.transport}</Badge>
-                        {!server.enabled && <Badge>禁用</Badge>}
+                        {!server.enabled && <Badge>{tCommon("disabled")}</Badge>}
                       </div>
                       <div className="flex items-center justify-center gap-2">
                         <Button
@@ -437,7 +435,7 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                           className="cursor-pointer"
                           onClick={() => onDelete(server.server_name)}
                         >
-                          <Trash />
+                          <IconDelete />
                         </Button>
                         <Switch
                           checked={server.enabled}
@@ -449,7 +447,7 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                     </ItemTitle>
                     {server.tools.length > 0 && (
                       <ItemDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <Wrench size={12} />
+                        <IconTool size={12} />
                         {server.tools.map((tool) => (
                           <Badge key={tool} variant="secondary" className="text-muted-foreground">
                             {tool}
@@ -473,16 +471,17 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
 const SETTING_MENUS: Array<{
   key: SettingTab;
   icon: typeof Settings;
-  title: string;
+  labelKey: "common" | "models" | "skills" | "memory";
 }> = [
-  { key: "common-setting", icon: Settings, title: "通用配置" },
-  { key: "models-setting", icon: Cpu, title: "模型管理" },
-  { key: "skills-setting", icon: Sparkles, title: "Skill 模板" },
-  { key: "memory-setting", icon: Brain, title: "长期记忆" },
+  { key: "common-setting", icon: Settings, labelKey: "common" },
+  { key: "models-setting", icon: IconModel, labelKey: "models" },
+  { key: "skills-setting", icon: IconSkill, labelKey: "skills" },
+  { key: "memory-setting", icon: IconMemory, labelKey: "memory" },
 ];
 
 export function OpenCitadelSettings() {
   const t = useTranslations("settings");
+  const tCommon = useTranslations("common");
   // ---- 防止 SSR hydration 不匹配（Radix Dialog 在服务端/客户端生成不同的 aria-controls ID）----
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -560,7 +559,7 @@ export function OpenCitadelSettings() {
                   onClick={() => setActiveSetting(menu.key)}
                 >
                   <menu.icon className="size-4" />
-                  <span className="truncate">{menu.title}</span>
+                  <span className="truncate">{t(menu.labelKey)}</span>
                 </Button>
               ))}
             </div>
@@ -587,17 +586,17 @@ export function OpenCitadelSettings() {
             {activeSetting === "memory-setting" && <MemorySettings embedded />}
             {activeSetting === "a2a-setting" && (
               <p className="text-muted-foreground text-sm">
-                A2A 配置已迁移至{" "}
+                {t("a2aMovedTo")}{" "}
                 <a href="/settings/integrations" className="text-primary underline">
-                  设置 → 协议集成
+                  {t("integrationsLink")}
                 </a>
               </p>
             )}
             {activeSetting === "mcp-setting" && (
               <p className="text-muted-foreground text-sm">
-                MCP 配置已迁移至{" "}
+                {t("mcpMovedTo")}{" "}
                 <a href="/settings/integrations" className="text-primary underline">
-                  设置 → 协议集成
+                  {t("integrationsLink")}
                 </a>
               </p>
             )}
@@ -608,12 +607,12 @@ export function OpenCitadelSettings() {
           <DialogFooter className="border-t pt-4">
             <DialogClose asChild>
               <Button variant="outline" className="cursor-pointer">
-                取消
+                {tCommon("cancel")}
               </Button>
             </DialogClose>
             <Button className="cursor-pointer" disabled={saving} onClick={handleSave}>
               {saving && <Loader2 className="animate-spin" />}
-              保存
+              {tCommon("save")}
             </Button>
           </DialogFooter>
         )}

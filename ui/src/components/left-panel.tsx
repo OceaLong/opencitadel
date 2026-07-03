@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { SessionList } from "@/components/session-list";
 import { AccountMenu } from "@/components/account-menu";
@@ -11,10 +11,12 @@ import { Sidebar, SidebarContent, SidebarHeader, SidebarTrigger } from "@/compon
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useLoginPrompt } from "@/providers/login-prompt-provider";
 import { useAuth } from "@/providers/auth-provider";
+import { IconAdd } from "@/lib/icons";
 
 export function LeftPanel() {
   const router = useRouter();
   const pathname = usePathname();
+  const t = useTranslations("leftPanel");
   const { user } = useAuth();
   const { promptLogin } = useLoginPrompt();
 
@@ -37,14 +39,14 @@ export function LeftPanel() {
           className="mb-3 cursor-pointer"
           onClick={() => {
             if (!user) {
-              promptLogin("登录后即可创建新任务");
+              promptLogin(t("loginRequired"));
               return;
             }
             router.push("/");
           }}
         >
-          <Plus />
-          新建任务
+          <IconAdd />
+          {t("newTask")}
           <KbdGroup>
             <Kbd>⌘</Kbd>
             <Kbd>K</Kbd>

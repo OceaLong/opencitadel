@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { FileUp, Globe2, Loader2 } from "lucide-react";
+import { FileUp, Globe, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { inferSourceType } from "@/components/knowledge/knowledge-utils";
@@ -35,6 +36,9 @@ type UploadedFile = {
 };
 
 export function AddDocumentDialog({ kbId, open, onOpenChange, onAdded }: AddDocumentDialogProps) {
+  const t = useTranslations("knowledge.addDialog");
+  const tCommon = useTranslations("common");
+  const tChatInput = useTranslations("chatInput");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<"files" | "web">("files");
   const [uploading, setUploading] = useState(false);
@@ -67,9 +71,9 @@ export function AddDocumentDialog({ kbId, open, onOpenChange, onAdded }: AddDocu
         next.push({ id: info.id, sourceType: inferSourceType(file.name) });
       }
       setUploadedFiles((prev) => [...prev, ...next]);
-      toast.success(`已上传 ${next.length} 个文件`);
+      toast.success(tChatInput("uploadSuccess", { count: next.length }));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "上传失败");
+      toast.error(err instanceof Error ? err.message : tCommon("uploadFailed"));
     } finally {
       setUploading(false);
     }
@@ -81,7 +85,7 @@ export function AddDocumentDialog({ kbId, open, onOpenChange, onAdded }: AddDocu
       let kb: KnowledgeBase;
       if (tab === "web") {
         if (!url.trim()) {
-          toast.error("请输入网页 URL");
+          toast.error(t("urlRequired"));
           return;
         }
         kb = await knowledgeApi.addDocuments(kbId, {
@@ -90,7 +94,7 @@ export function AddDocumentDialog({ kbId, open, onOpenChange, onAdded }: AddDocu
         });
       } else {
         if (!uploadedFiles.length) {
-          toast.error("请先上传文件");
+          toast.error(t("filesRequired"));
           return;
         }
         kb = await knowledgeApi.addDocuments(kbId, {
@@ -101,23 +105,23 @@ export function AddDocumentDialog({ kbId, open, onOpenChange, onAdded }: AddDocu
       onAdded(kb);
       handleOpenChange(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "添加失败");
+      toast.error(err instanceof Error ? err.message : t("addFailed"));
     } finally {
       setAdding(false);
     }
-  }, [handleOpenChange, kbId, onAdded, tab, uploadedFiles, url]);
+  }, [handleOpenChange, kbId, onAdded, tab, uploadedFiles, url, t]);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>添加知识文档</DialogTitle>
-          <DialogDescription>上传 PDF、Office、Markdown、文本文件，或添加网页链接</DialogDescription>
+          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
         <Tabs value={tab} onValueChange={(value) => setTab(value as "files" | "web")}>
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="files">文件</TabsTrigger>
-            <TabsTrigger value="web">网页</TabsTrigger>
+            <TabsTrigger value="files">{t("tabFiles")}</TabsTrigger>
+            <TabsTrigger value="web">{t("tabWeb")}</TabsTrigger>
           </TabsList>
           <TabsContent value="files" className="space-y-3 pt-3">
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFiles} />
@@ -128,14 +132,14 @@ export function AddDocumentDialog({ kbId, open, onOpenChange, onAdded }: AddDocu
               disabled={uploading}
             >
               {uploading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <FileUp className="mr-2 size-4" />}
-              选择文件 ({uploadedFiles.length} 已选)
+              {t("selectFiles", { count: uploadedFiles.length })}
             </Button>
           </TabsContent>
           <TabsContent value="web" className="space-y-3 pt-3">
             <div className="space-y-2">
-              <Label htmlFor="kb-url">网页 URL</Label>
+              <Label htmlFor="kb-url">{t("webUrlLabel")}</Label>
               <div className="flex items-center gap-2">
-                <Globe2 className="text-muted-foreground size-4" />
+                <Globe className="text-muted-foreground size-4" />
                 <Input id="kb-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." />
               </div>
             </div>
@@ -143,11 +147,11 @@ export function AddDocumentDialog({ kbId, open, onOpenChange, onAdded }: AddDocu
         </Tabs>
         <DialogFooter>
           <Button variant="outline" onClick={() => handleOpenChange(false)}>
-            取消
+            {tCommon("cancel")}
           </Button>
           <Button onClick={handleAdd} disabled={adding || uploading}>
             {adding && <Loader2 className="mr-2 size-4 animate-spin" />}
-            添加并索引
+            {t("addAndIndex")}
           </Button>
         </DialogFooter>
       </DialogContent>

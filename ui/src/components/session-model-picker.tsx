@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Cpu } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { InlineOptionPicker } from "@/components/inline-option-picker";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +39,9 @@ export function SessionModelPicker({
   disabled,
   className,
 }: Props) {
+  const t = useTranslations("modelPicker");
+  const tAuth = useTranslations("auth");
+  const tCommon = useTranslations("common");
   const { user } = useAuth();
   const { promptLogin } = useLoginPrompt();
   const [models, setModels] = useState<LLMModel[]>([]);
@@ -107,7 +111,7 @@ export function SessionModelPicker({
         title: m.display_name,
         description: `${m.provider} · ${m.model_name}`,
         icon: <Cpu className="text-muted-foreground size-4 shrink-0" />,
-        badge: m.is_default ? "默认" : undefined,
+        badge: m.is_default ? tCommon("default") : undefined,
       })),
     [supportedModels],
   );
@@ -122,10 +126,10 @@ export function SessionModelPicker({
         size="sm"
         className={className}
         disabled={disabled}
-        onClick={() => promptLogin("登录后即可选择模型")}
+        onClick={() => promptLogin(tAuth("loginToSelectModel"))}
       >
         <Cpu className="text-muted-foreground size-4" />
-        登录后选择模型
+        {tAuth("selectModelAfterLogin")}
       </Button>
     );
   }
@@ -135,17 +139,17 @@ export function SessionModelPicker({
       {options.length === 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <Badge variant="destructive" className="text-[10px]">
-            {llmUnavailable ? "模型暂不可用" : "未配置模型"}
+            {llmUnavailable ? t("unavailable") : t("notConfigured")}
           </Badge>
           <Link href="/settings" className="text-primary text-xs underline">
-            前往模型设置
+            {t("goSettings")}
           </Link>
         </div>
       )}
       <InlineOptionPicker
         value={pickerValue}
         options={options}
-        placeholder="暂无模型"
+        placeholder={t("noModels")}
         onChange={onChange}
         disabled={disabled || options.length === 0}
       />

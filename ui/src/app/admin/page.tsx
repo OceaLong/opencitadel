@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Cpu, MailPlus, PhoneCall, Users } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { AdminStatCard } from "@/components/admin/stat-card";
 import { AdminTimeRangePicker } from "@/components/admin/time-range-picker";
@@ -26,6 +27,7 @@ import {
 } from "@/lib/api/admin";
 
 export default function AdminOverviewPage() {
+  const t = useTranslations("admin");
   const [range, setRange] = useState<AdminTimeRange>("30d");
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<AdminOverview | null>(null);
@@ -102,17 +104,17 @@ export default function AdminOverviewPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">概览</h2>
-          <p className="text-muted-foreground mt-1 text-sm">平台用户、用量与运营状态总览</p>
+          <h2 className="text-2xl font-semibold tracking-tight">{t("overviewTitle")}</h2>
+          <p className="text-muted-foreground mt-1 text-sm">{t("overviewSubtitle")}</p>
         </div>
         <AdminTimeRangePicker value={range} onChange={setRange} />
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <AdminStatCard label="总用户" value={overview?.total_users ?? 0} hint={`活跃 ${overview?.active_users ?? 0}`} icon={Users} />
-        <AdminStatCard label="Total Tokens" value={usage?.total_tokens ?? 0} hint={`Prompt ${usage?.prompt_tokens ?? 0}`} icon={Cpu} />
-        <AdminStatCard label="LLM 调用" value={usage?.call_count ?? 0} hint={`缓存 ${usage?.cached_tokens ?? 0}`} icon={PhoneCall} />
-        <AdminStatCard label="待处理邀请" value={overview?.pending_invitations ?? 0} hint={`已接受 ${overview?.accepted_invitations ?? 0}`} icon={MailPlus} />
+        <AdminStatCard label={t("statTotalUsers")} value={overview?.total_users ?? 0} hint={t("statActiveHint", { count: overview?.active_users ?? 0 })} icon={Users} />
+        <AdminStatCard label={t("statTotalTokens")} value={usage?.total_tokens ?? 0} hint={t("statPromptHint", { count: usage?.prompt_tokens ?? 0 })} icon={Cpu} />
+        <AdminStatCard label={t("statLlmCalls")} value={usage?.call_count ?? 0} hint={t("statCachedHint", { count: usage?.cached_tokens ?? 0 })} icon={PhoneCall} />
+        <AdminStatCard label={t("statPendingInvites")} value={overview?.pending_invitations ?? 0} hint={t("statAcceptedHint", { count: overview?.accepted_invitations ?? 0 })} icon={MailPlus} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -121,22 +123,22 @@ export default function AdminOverviewPage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <UsageBreakdownChart title="模型用量分布" description="按 model 聚合 Top 8" items={modelBreakdown} />
-        <UsageBreakdownChart title="用户用量分布" description="按 user 聚合 Top 8" items={userBreakdown} />
+        <UsageBreakdownChart title={t("modelUsageTitle")} description={t("modelUsageDesc")} items={modelBreakdown} />
+        <UsageBreakdownChart title={t("userUsageTitle")} description={t("userUsageDesc")} items={userBreakdown} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <AuditActivityChart byDay={auditByDay} />
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">平台概况</CardTitle>
-            <CardDescription>用户与邀请状态</CardDescription>
+            <CardTitle className="text-base">{t("platformOverviewTitle")}</CardTitle>
+            <CardDescription>{t("platformOverviewDesc")}</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2">
-            <MetricRow label="管理员" value={overview?.admin_users ?? 0} />
-            <MetricRow label="禁用用户" value={overview?.disabled_users ?? 0} />
-            <MetricRow label="已接受邀请" value={overview?.accepted_invitations ?? 0} />
-            <MetricRow label="过期邀请" value={overview?.expired_invitations ?? 0} />
+            <MetricRow label={t("metricAdminUsers")} value={overview?.admin_users ?? 0} />
+            <MetricRow label={t("metricDisabledUsers")} value={overview?.disabled_users ?? 0} />
+            <MetricRow label={t("metricAcceptedInvitations")} value={overview?.accepted_invitations ?? 0} />
+            <MetricRow label={t("metricExpiredInvitations")} value={overview?.expired_invitations ?? 0} />
           </CardContent>
         </Card>
       </div>
@@ -144,12 +146,12 @@ export default function AdminOverviewPage() {
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">最近审计</CardTitle>
-            <CardDescription>最近 8 条管理操作</CardDescription>
+            <CardTitle className="text-base">{t("recentAuditTitle")}</CardTitle>
+            <CardDescription>{t("recentAuditDesc")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             {recentAudit.length === 0 ? (
-              <EmptyHint text="暂无审计记录" />
+              <EmptyHint text={t("noAuditRecords")} />
             ) : (
               recentAudit.map((item) => (
                 <div key={item.id} className="rounded-lg border px-3 py-2 text-sm">
@@ -168,17 +170,17 @@ export default function AdminOverviewPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">最近邀请</CardTitle>
-            <CardDescription>最近 6 条平台邀请</CardDescription>
+            <CardTitle className="text-base">{t("recentInvitesTitle")}</CardTitle>
+            <CardDescription>{t("recentInvitesDesc")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             {recentInvitations.length === 0 ? (
-              <EmptyHint text="暂无邀请记录" />
+              <EmptyHint text={t("noInvitationRecords")} />
             ) : (
               recentInvitations.map((item) => (
                 <div key={item.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
                   <div className="min-w-0">
-                    <div className="truncate font-medium">{item.email || "未指定邮箱"}</div>
+                    <div className="truncate font-medium">{item.email || t("noEmailSpecified")}</div>
                     <div className="text-muted-foreground text-xs">{formatDateTime(item.created_at)}</div>
                   </div>
                   <InvitationStatusBadge status={item.status} />
@@ -206,7 +208,9 @@ function EmptyHint({ text }: { text: string }) {
 }
 
 function InvitationStatusBadge({ status }: { status: PlatformInvitation["status"] }) {
+  const t = useTranslations("admin");
   const variant = status === "accepted" ? "secondary" : status === "pending" ? "outline" : "destructive";
-  const label = status === "accepted" ? "已接受" : status === "pending" ? "待注册" : "已过期";
+  const label =
+    status === "accepted" ? t("inviteAccepted") : status === "pending" ? t("invitePending") : t("inviteExpired");
   return <Badge variant={variant}>{label}</Badge>;
 }

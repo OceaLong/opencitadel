@@ -1,6 +1,7 @@
 "use client";
 
 import { Sparkles } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 
@@ -19,13 +20,15 @@ export function ThinkingToggle({
   disabled = false,
   className,
 }: ThinkingToggleProps) {
+  const t = useTranslations("thinking");
+
   return (
     <Button
       type="button"
       variant="ghost"
       size="sm"
       aria-pressed={enabled}
-      aria-label={enabled ? "关闭思考模式" : "开启思考模式"}
+      aria-label={enabled ? t("disable") : t("enable")}
       disabled={disabled}
       onClick={() => onChange(!enabled)}
       className={cn(
@@ -44,7 +47,7 @@ export function ThinkingToggle({
           </span>
         )}
       </span>
-      <span>思考</span>
+      <span>{t("label")}</span>
     </Button>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Download, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { AdminTimeRangePicker } from "@/components/admin/time-range-picker";
 import { AuditActivityChart } from "@/components/admin/usage-charts";
@@ -9,12 +10,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-import { type AdminTimeRange, formatDateTime,getAdminDateRange } from "@/lib/admin-utils";
+import { type AdminTimeRange, formatDateTime, getAdminDateRange } from "@/lib/admin-utils";
 import { adminApi, type AuditLog } from "@/lib/api/admin";
 
 const PAGE_SIZE = 20;
 
 export default function AdminAuditPage() {
+  const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const [range, setRange] = useState<AdminTimeRange>("30d");
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
@@ -52,15 +55,15 @@ export default function AdminAuditPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">审计日志</h2>
-          <p className="text-muted-foreground mt-1 text-sm">追踪管理员操作与平台事件</p>
+          <h2 className="text-2xl font-semibold tracking-tight">{t("auditLog")}</h2>
+          <p className="text-muted-foreground mt-1 text-sm">{t("auditSubtitle")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <AdminTimeRangePicker value={range} onChange={setRange} />
           <Button variant="outline" asChild>
             <a href={adminApi.exportAuditCsvUrl()}>
               <Download className="mr-1 size-4" />
-              导出 CSV
+              {t("exportCsv")}
             </a>
           </Button>
         </div>
@@ -70,12 +73,12 @@ export default function AdminAuditPage() {
         <AuditActivityChart byDay={byDay} />
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">动作分布</CardTitle>
-            <CardDescription>按 action 聚合</CardDescription>
+            <CardTitle className="text-base">{t("actionDistributionTitle")}</CardTitle>
+            <CardDescription>{t("actionDistributionDesc")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             {byAction.length === 0 ? (
-              <div className="text-muted-foreground py-10 text-center text-sm">暂无审计数据</div>
+              <div className="text-muted-foreground py-10 text-center text-sm">{t("noAuditData")}</div>
             ) : (
               byAction.slice(0, 10).map((item) => (
                 <div key={item.action} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
@@ -90,8 +93,8 @@ export default function AdminAuditPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">日志列表</CardTitle>
-          <CardDescription>共 {total} 条记录</CardDescription>
+          <CardTitle className="text-base">{t("logListTitle")}</CardTitle>
+          <CardDescription>{t("totalRecords", { count: total })}</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -99,7 +102,7 @@ export default function AdminAuditPage() {
               <Loader2 className="size-6 animate-spin" />
             </div>
           ) : logs.length === 0 ? (
-            <div className="text-muted-foreground py-10 text-center text-sm">暂无审计记录</div>
+            <div className="text-muted-foreground py-10 text-center text-sm">{t("noAuditRecords")}</div>
           ) : (
             <div className="space-y-2">
               {logs.map((item) => (
@@ -109,7 +112,7 @@ export default function AdminAuditPage() {
                       <Badge variant="outline">{item.action}</Badge>
                       <span className="text-muted-foreground text-xs">{formatDateTime(item.created_at)}</span>
                     </div>
-                    <span className="text-muted-foreground text-xs">{item.actor_user_id || "system"}</span>
+                    <span className="text-muted-foreground text-xs">{item.actor_user_id || t("system")}</span>
                   </div>
                   <div className="text-muted-foreground mt-2 text-xs">
                     {item.resource_type}:{item.resource_id}
@@ -121,11 +124,11 @@ export default function AdminAuditPage() {
 
           <div className="mt-4 flex items-center justify-between">
             <span className="text-muted-foreground text-sm">
-              第 {currentPage} / {totalPages} 页
+              {tCommon("pageOf", { current: currentPage, total: totalPages })}
             </span>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => void loadAudit(Math.max(0, offset - PAGE_SIZE))}>
-                上一页
+                {tCommon("previousPage")}
               </Button>
               <Button
                 variant="outline"
@@ -133,7 +136,7 @@ export default function AdminAuditPage() {
                 disabled={offset + PAGE_SIZE >= total}
                 onClick={() => void loadAudit(offset + PAGE_SIZE)}
               >
-                下一页
+                {tCommon("nextPage")}
               </Button>
             </div>
           </div>

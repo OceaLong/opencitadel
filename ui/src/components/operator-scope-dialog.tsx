@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AlertTriangle, Check } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -29,15 +30,15 @@ export function OperatorScopeDialog({
   onConfirm,
 }: OperatorScopeDialogProps) {
   const [scope, setScope] = useState<OperatorScope>("owned");
+  const t = useTranslations("operatorScope");
+  const tCommon = useTranslations("common");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>目标系统归属声明</DialogTitle>
-          <DialogDescription>
-            Web Operator 仅适用于企业自有或自建系统。请选择本次任务的目标系统归属，该声明将写入审计留痕。
-          </DialogDescription>
+          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2">
@@ -50,12 +51,10 @@ export function OperatorScopeDialog({
             onClick={() => setScope("owned")}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium">企业自有 / 自建系统</span>
+              <span className="text-sm font-medium">{t("ownedTitle")}</span>
               {scope === "owned" && <Check className="text-primary size-4" />}
             </div>
-            <p className="text-muted-foreground mt-1 text-xs">
-              您有权操作的目标系统（内网后台、自建演示环境等）。
-            </p>
+            <p className="text-muted-foreground mt-1 text-xs">{t("ownedDescription")}</p>
           </button>
           <button
             type="button"
@@ -66,19 +65,19 @@ export function OperatorScopeDialog({
             onClick={() => setScope("third_party_saas")}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium">第三方 SaaS</span>
+              <span className="text-sm font-medium">{t("thirdPartyTitle")}</span>
               {scope === "third_party_saas" && <Check className="size-4 text-amber-700" />}
             </div>
             <p className="text-muted-foreground mt-1 flex items-start gap-1 text-xs">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
-              可能违反服务条款或触发未授权访问风险；仅建议在明确授权场景下使用，操作将完整审计。
+              {t("thirdPartyDescription")}
             </p>
           </button>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            取消
+            {tCommon("cancel")}
           </Button>
           <Button
             onClick={() => {
@@ -86,7 +85,7 @@ export function OperatorScopeDialog({
               onOpenChange(false);
             }}
           >
-            确认并创建任务
+            {t("confirmCreate")}
           </Button>
         </DialogFooter>
       </DialogContent>

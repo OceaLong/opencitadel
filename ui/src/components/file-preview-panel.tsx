@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Download, FileText, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { MarkdownContent } from "@/components/markdown-content";
@@ -97,6 +98,8 @@ function isMarkdownExtension(extension: string): boolean {
 }
 
 export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
+  const t = useTranslations("filePreview");
+  const tCommon = useTranslations("common");
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -130,14 +133,14 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
           setContent(text);
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "加载文件内容失败";
+        const msg = err instanceof Error ? err.message : t("loadContentFailed");
         setError(msg);
         toast.error(msg);
       } finally {
         setLoading(false);
       }
     },
-    [],
+    [t],
   );
 
   // 下载文件
@@ -154,12 +157,12 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast.success(`已下载「${file.filename}」`);
+      toast.success(t("downloadSuccess", { filename: file.filename }));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "下载失败";
-      toast.error(`下载失败: ${msg}`);
+      const msg = err instanceof Error ? err.message : t("downloadFailed");
+      toast.error(t("downloadFailedWithError", { error: msg }));
     }
-  }, [file]);
+  }, [file, t]);
 
   // 当文件改变时加载内容
   useEffect(() => {
@@ -201,7 +204,7 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
             variant="ghost"
             size="icon-sm"
             onClick={handleDownload}
-            aria-label="下载文件"
+            aria-label={t("downloadFile")}
             className="cursor-pointer"
           >
             <Download size={16} />
@@ -210,7 +213,7 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
             variant="ghost"
             size="icon-sm"
             onClick={onClose}
-            aria-label="关闭"
+            aria-label={tCommon("close")}
             className="cursor-pointer"
           >
             <X size={16} />
@@ -222,7 +225,7 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
       <div className="flex-1 overflow-hidden">
         {loading && (
           <div className="flex h-full items-center justify-center">
-            <p className="text-muted-foreground text-sm">加载中...</p>
+            <p className="text-muted-foreground text-sm">{tCommon("loading")}</p>
           </div>
         )}
 
@@ -238,12 +241,12 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
               <FileText size={32} />
             </div>
             <div className="text-center">
-              <p className="text-foreground text-sm font-medium">暂不支持预览此文件类型</p>
-              <p className="text-muted-foreground mt-1 text-xs">您可以下载文件后查看</p>
+              <p className="text-foreground text-sm font-medium">{t("previewUnsupported")}</p>
+              <p className="text-muted-foreground mt-1 text-xs">{t("downloadHint")}</p>
             </div>
             <Button variant="outline" size="sm" onClick={handleDownload} className="gap-2">
               <Download size={16} />
-              下载文件
+              {t("downloadFile")}
             </Button>
           </div>
         )}

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Plus, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -63,6 +64,9 @@ type Props = {
 };
 
 export function SkillsSettings({ embedded = false }: Props) {
+  const tNav = useTranslations("settingsNav");
+  const t = useTranslations("settingsSkills");
+  const tCommon = useTranslations("common");
   const [skills, setSkills] = useState<Skill[]>([]);
   const [models, setModels] = useState<LLMModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,7 +90,7 @@ export function SkillsSettings({ embedded = false }: Props) {
       setSkills(skillsData.skills);
       setModels(modelsData.models);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "加载失败");
+      toast.error(e instanceof Error ? e.message : tCommon("loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -213,15 +217,15 @@ export function SkillsSettings({ embedded = false }: Props) {
     try {
       if (editing) {
         await skillsApi.update(editing.id, payload);
-        toast.success("Skill 已更新");
+        toast.success(t("skillUpdated"));
       } else {
         await skillsApi.create(payload);
-        toast.success("Skill 已创建");
+        toast.success(t("skillCreated"));
       }
       setDialogOpen(false);
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "保存失败");
+      toast.error(e instanceof Error ? e.message : tCommon("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -230,10 +234,10 @@ export function SkillsSettings({ embedded = false }: Props) {
   const handleDelete = async (id: string) => {
     try {
       await skillsApi.delete(id);
-      toast.success("已删除");
+      toast.success(tCommon("deleted"));
       load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "删除失败");
+      toast.error(e instanceof Error ? e.message : tCommon("deleteFailed"));
     }
   };
 
@@ -248,15 +252,13 @@ export function SkillsSettings({ embedded = false }: Props) {
                 : "text-2xl font-semibold tracking-tight"
             }
           >
-            Skill 模板
+            {tNav("skills")}
           </h2>
-          <p className="text-muted-foreground mt-1 text-sm">
-            创建技能模板，会话级可选择开启（默认不启用）
-          </p>
+          <p className="text-muted-foreground mt-1 text-sm">{t("description")}</p>
         </div>
         <Button size={embedded ? "xs" : "default"} onClick={openCreate}>
           <Plus className="mr-1 size-4" />
-          新建 Skill
+          {t("createSkill")}
         </Button>
       </div>
 
@@ -280,7 +282,7 @@ export function SkillsSettings({ embedded = false }: Props) {
                     <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                       <span>{s.icon}</span>
                       {s.name}
-                      {s.is_builtin && <Badge variant="outline">内置</Badge>}
+                      {s.is_builtin && <Badge variant="outline">{tCommon("builtin")}</Badge>}
                     </CardTitle>
                     <CardDescription>{s.description || s.category}</CardDescription>
                   </div>
@@ -291,7 +293,7 @@ export function SkillsSettings({ embedded = false }: Props) {
                       </Button>
                     )}
                     <Button variant="outline" size="sm" onClick={() => openEdit(s)}>
-                      编辑
+                      {tCommon("edit")}
                     </Button>
                   </div>
                 </div>
@@ -299,7 +301,7 @@ export function SkillsSettings({ embedded = false }: Props) {
             </Card>
           ))}
           {skills.length === 0 && (
-            <p className="text-muted-foreground py-8 text-center text-sm">暂无 Skill</p>
+            <p className="text-muted-foreground py-8 text-center text-sm">{t("noSkills")}</p>
           )}
         </div>
       )}
@@ -307,19 +309,19 @@ export function SkillsSettings({ embedded = false }: Props) {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto shadow-[var(--shadow-panel)]">
           <DialogHeader>
-            <DialogTitle>{editing ? "编辑 Skill" : "新建 Skill"}</DialogTitle>
+            <DialogTitle>{editing ? t("editSkill") : t("createSkill")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-3 gap-4">
               <div className="col-span-2 space-y-2">
-                <Label>名称</Label>
+                <Label>{t("name")}</Label>
                 <Input
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
-                <Label>图标</Label>
+                <Label>{t("icon")}</Label>
                 <Input
                   value={form.icon}
                   onChange={(e) => setForm({ ...form, icon: e.target.value })}
@@ -335,7 +337,7 @@ export function SkillsSettings({ embedded = false }: Props) {
               />
             </div>
             <div className="space-y-2">
-              <Label>描述</Label>
+              <Label>{t("descriptionLabel")}</Label>
               <Input
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
@@ -350,31 +352,29 @@ export function SkillsSettings({ embedded = false }: Props) {
               />
             </div>
             <div className="space-y-2">
-              <Label>工具白名单（逗号分隔，空=不过滤）</Label>
+              <Label>{t("toolWhitelist")}</Label>
               <Input
                 value={toolsText}
                 onChange={(e) => setToolsText(e.target.value)}
                 placeholder="read_file, shell_execute, search_web, mcp_jina_*"
               />
-              <p className="text-muted-foreground text-xs">
-                支持通配符，例如 <code>mcp_*</code>（全部 MCP）、<code>mcp_jina_*</code>（指定 MCP 服务）
-              </p>
+              <p className="text-muted-foreground text-xs">{t("toolWhitelistHint")}</p>
             </div>
             <div className="border-border/70 bg-muted/20 space-y-3 rounded-xl border p-3">
-              <Label>动态工具组</Label>
+              <Label>{t("dynamicToolGroups")}</Label>
               <div className="flex flex-wrap gap-4">
                 <label className="flex items-center gap-2 text-sm">
                   <Switch checked={allowMcpTools} onCheckedChange={setAllowMcpTools} />
-                  允许所有 MCP 工具 (mcp_*)
+                  {t("allowAllMcp")}
                 </label>
                 <label className="flex items-center gap-2 text-sm">
                   <Switch checked={allowA2aTools} onCheckedChange={setAllowA2aTools} />
-                  允许 A2A 远程 Agent (a2a)
+                  {t("allowA2a")}
                 </label>
               </div>
             </div>
             <div className="space-y-2">
-              <Label>绑定的 MCP 服务（空=使用全部已启用服务）</Label>
+              <Label>{t("boundMcpServers")}</Label>
               <div className="flex flex-wrap gap-2">
                 {mcpServers.map((server) => (
                   <Button
@@ -388,12 +388,12 @@ export function SkillsSettings({ embedded = false }: Props) {
                   </Button>
                 ))}
                 {mcpServers.length === 0 && (
-                  <span className="text-muted-foreground text-sm">暂无 MCP 服务</span>
+                  <span className="text-muted-foreground text-sm">{t("noMcpServices")}</span>
                 )}
               </div>
             </div>
             <div className="space-y-2">
-              <Label>绑定的 A2A 服务（空=使用全部已启用服务）</Label>
+              <Label>{t("boundA2aServers")}</Label>
               <div className="flex flex-wrap gap-2">
                 {a2aServers.map((server) => (
                   <Button
@@ -407,17 +407,17 @@ export function SkillsSettings({ embedded = false }: Props) {
                   </Button>
                 ))}
                 {a2aServers.length === 0 && (
-                  <span className="text-muted-foreground text-sm">暂无 A2A 服务</span>
+                  <span className="text-muted-foreground text-sm">{t("noA2aServices")}</span>
                 )}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>最大迭代次数</Label>
+                <Label>{t("maxIterations")}</Label>
                 <Input
                   type="number"
                   min={1}
-                  placeholder="留空=默认"
+                  placeholder={t("leaveBlankDefault")}
                   value={form.agent_params?.max_iterations ?? ""}
                   onChange={(e) =>
                     setForm({
@@ -431,11 +431,11 @@ export function SkillsSettings({ embedded = false }: Props) {
                 />
               </div>
               <div className="space-y-2">
-                <Label>最大重试次数</Label>
+                <Label>{t("maxRetries")}</Label>
                 <Input
                   type="number"
                   min={0}
-                  placeholder="留空=默认"
+                  placeholder={t("leaveBlankDefault")}
                   value={form.agent_params?.max_retries ?? ""}
                   onChange={(e) =>
                     setForm({
@@ -449,11 +449,11 @@ export function SkillsSettings({ embedded = false }: Props) {
                 />
               </div>
               <div className="space-y-2">
-                <Label>最大搜索结果数</Label>
+                <Label>{t("maxSearchResults")}</Label>
                 <Input
                   type="number"
                   min={1}
-                  placeholder="留空=默认"
+                  placeholder={t("leaveBlankDefault")}
                   value={form.agent_params?.max_search_results ?? ""}
                   onChange={(e) =>
                     setForm({
@@ -467,13 +467,13 @@ export function SkillsSettings({ embedded = false }: Props) {
                 />
               </div>
               <div className="space-y-2">
-                <Label>温度覆盖 (0-2)</Label>
+                <Label>{t("temperatureOverride")}</Label>
                 <Input
                   type="number"
                   min={0}
                   max={2}
                   step={0.1}
-                  placeholder="留空=模型默认"
+                  placeholder={t("leaveBlankModelDefault")}
                   value={form.agent_params?.temperature_override ?? ""}
                   onChange={(e) =>
                     setForm({
@@ -488,7 +488,7 @@ export function SkillsSettings({ embedded = false }: Props) {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>推荐模型</Label>
+              <Label>{t("recommendedModel")}</Label>
               <Select
                 value={form.recommended_model_id || "none"}
                 onValueChange={(v) =>
@@ -496,10 +496,10 @@ export function SkillsSettings({ embedded = false }: Props) {
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="无" />
+                  <SelectValue placeholder={tCommon("none")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">无</SelectItem>
+                  <SelectItem value="none">{tCommon("none")}</SelectItem>
                   {models.map((m) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.display_name}
@@ -509,7 +509,7 @@ export function SkillsSettings({ embedded = false }: Props) {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>触发示例（每行一条）</Label>
+              <Label>{t("triggerExamples")}</Label>
               <Textarea
                 rows={3}
                 value={examplesText}
@@ -521,16 +521,16 @@ export function SkillsSettings({ embedded = false }: Props) {
                 checked={form.enabled}
                 onCheckedChange={(v) => setForm({ ...form, enabled: v })}
               />
-              <Label>全局启用</Label>
+              <Label>{t("globallyEnabled")}</Label>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              取消
+              {tCommon("cancel")}
             </Button>
             <Button onClick={handleSave} disabled={saving}>
               {saving && <Loader2 className="mr-1 size-4 animate-spin" />}
-              保存
+              {tCommon("save")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,27 +1,37 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import { SessionItem } from "@/components/session-item";
+import { Button } from "@/components/ui/button";
 import { ItemGroup } from "@/components/ui/item";
 
 import { useSessions } from "@/hooks/use-sessions";
 import type { Session } from "@/lib/api";
+import { getSessionContextKind, type SessionContextKind } from "@/lib/icons";
+import { cn } from "@/lib/utils";
 
-/**
- * 会话列表组件
- * 负责渲染列表、处理路由导航及删除操作
- */
+type ContextFilter = "all" | SessionContextKind;
+
+const FILTER_OPTIONS: ContextFilter[] = ["all", "general", "codebase", "knowledge", "hybrid"];
+
 export function SessionList() {
   const router = useRouter();
   const params = useParams();
+  const t = useTranslations("sessionList");
+  const tCommon = useTranslations("common");
   const { sessions, loading, error, refresh, deleteSession } = useSessions();
-
-  // 待删除的会话
+  const [filter, setFilter] = useState<ContextFilter>("all");
   const [pendingDeleteSession, setPendingDeleteSession] = useState<Session | null>(null);
+
+  const filteredSessions = useMemo(() => {
+    if (filter === "all") return sessions;
+    return sessions.filter((session) => getSessionContextKind(session) === filter);
+  }, [filter, sessions]);
 
   const handleSessionClick = useCallback(
     (sessionId: string) => {
@@ -37,21 +47,20 @@ export function SessionList() {
   const handleDeleteConfirm = useCallback(async () => {
     if (!pendingDeleteSession) return;
 
-    const sessionTitle = pendingDeleteSession.title || "新任务";
+    const sessionTitle = pendingDeleteSession.title || tCommon("newTask");
     const success = await deleteSession(pendingDeleteSession.session_id);
 
     if (success) {
-      toast.success(`已删除任务「${sessionTitle}」`);
-      // 如果删除的是当前正在查看的会话，跳转到首页
+      toast.success(t("deleteSuccess", { title: sessionTitle }));
       if (params?.id === pendingDeleteSession.session_id) {
         router.push("/");
       }
     } else {
-      toast.error(`删除任务「${sessionTitle}」失败，请重试`);
+      toast.error(t("deleteFailed", { title: sessionTitle }));
     }
 
     setPendingDeleteSession(null);
-  }, [pendingDeleteSession, deleteSession, params?.id, router]);
+  }, [pendingDeleteSession, deleteSession, params?.id, router, t, tCommon]);
 
   const handleDialogOpenChange = useCallback((open: boolean) => {
     if (!open) {
@@ -59,7 +68,6 @@ export function SessionList() {
     }
   }, []);
 
-  // 加载态：骨架屏
   if (loading) {
     return (
       <ItemGroup className="gap-1">
@@ -76,41 +84,55 @@ export function SessionList() {
     );
   }
 
-  // 错误态
   if (error) {
     return (
       <div className="text-muted-foreground flex flex-col items-center gap-2 py-8 text-sm">
-        <p>加载失败</p>
+        <p>{t("loadError")}</p>
         <button
           className="text-primary cursor-pointer underline underline-offset-4"
           onClick={refresh}
         >
-          重试
+          {t("retry")}
         </button>
       </div>
     );
   }
 
-  // 空态
-  if (sessions.length === 0) {
-    return <div className="text-muted-foreground py-8 text-center text-sm">暂无任务</div>;
-  }
-
   return (
     <>
-      <ItemGroup className="gap-1">
-        {sessions.map((session) => (
-          <SessionItem
-            key={session.session_id}
-            session={session}
-            isActive={session.session_id === String(params?.id ?? "")}
-            onClick={handleSessionClick}
-            onDelete={handleDeleteRequest}
-          />
+      <div className="mb-2 flex flex-wrap gap-1">
+        {FILTER_OPTIONS.map((option) => (
+          <Button
+            key={option}
+            type="button"
+            size="sm"
+            variant={filter === option ? "secondary" : "ghost"}
+            className={cn("h-6 px-2 text-[10px]", filter === option && "font-medium")}
+            onClick={() => setFilter(option)}
+          >
+            {t(`filter.${option}`)}
+          </Button>
         ))}
-      </ItemGroup>
+      </div>
 
-      {/* 删除确认弹窗 */}
+      {filteredSessions.length === 0 ? (
+        <div className="text-muted-foreground py-8 text-center text-sm">
+          {sessions.length === 0 ? t("empty") : t("filterEmpty")}
+        </div>
+      ) : (
+        <ItemGroup className="gap-1">
+          {filteredSessions.map((session) => (
+            <SessionItem
+              key={session.session_id}
+              session={session}
+              isActive={session.session_id === String(params?.id ?? "")}
+              onClick={handleSessionClick}
+              onDelete={handleDeleteRequest}
+            />
+          ))}
+        </ItemGroup>
+      )}
+
       <DeleteSessionDialog
         open={!!pendingDeleteSession}
         onOpenChange={handleDialogOpenChange}

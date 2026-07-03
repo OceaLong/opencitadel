@@ -1,0 +1,203 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
+import { toast } from "sonner";
+
+import { AddDocumentDialog } from "@/components/knowledge/add-document-dialog";
+import { CreateKBDialog } from "@/components/knowledge/create-kb-dialog";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+
+import { useAuth } from "@/providers/auth-provider";
+import { knowledgeApi } from "@/lib/api/knowledge";
+import { sessionApi } from "@/lib/api/session";
+import type { KnowledgeBase, SessionMode } from "@/lib/api/types";
+import { IconAdd, IconKnowledge, IconLoading, IconRefresh } from "@/lib/icons";
+import { cn } from "@/lib/utils";
+
+export function KnowledgeLibrary() {
+  const router = useRouter();
+  const t = useTranslations("knowledge");
+  const { user } = useAuth();
+  const [items, setItems] = useState<KnowledgeBase[]>([]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [addOpenFor, setAddOpenFor] = useState<string | null>(null);
+  const [startingId, setStartingId] = useState<string | null>(null);
+  const [ingestingIds, setIngestingIds] = useState<Set<string>>(new Set());
+  const ingestCleanupRef = useRef<Map<string, () => void>>(new Map());
+
+  const loadList = useCallback(async () => {
+    if (!user) {
+      setItems([]);
+      return;
+    }
+    try {
+      const data = await knowledgeApi.list();
+      setItems(data.knowledge_bases);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("loadListFailed"));
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void loadList();
+  }, [loadList]);
+
+  useEffect(() => {
+    return () => {
+      ingestCleanupRef.current.forEach((cleanup) => cleanup());
+      ingestCleanupRef.current.clear();
+    };
+  }, []);
+
+  const watchIngest = useCallback(
+    (id: string) => {
+      if (ingestCleanupRef.current.has(id)) return;
+      setIngestingIds((prev) => new Set(prev).add(id));
+      const cleanup = knowledgeApi.ingestStream(
+        id,
+        (ev) => {
+          if (ev.type === "done" || ev.type === "error") {
+            setIngestingIds((prev) => {
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+            ingestCleanupRef.current.delete(id);
+            void loadList();
+          }
+        },
+        () => {
+          setIngestingIds((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+          ingestCleanupRef.current.delete(id);
+        },
+      );
+      ingestCleanupRef.current.set(id, cleanup);
+    },
+    [loadList],
+  );
+
+  const startTask = async (kbId: string, mode: SessionMode = "ask") => {
+    setStartingId(kbId);
+    try {
+      const data = await sessionApi.createSession({ knowledge_base_id: kbId, mode });
+      router.push(`/sessions/${data.session_id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("startTaskFailed"));
+    } finally {
+      setStartingId(null);
+    }
+  };
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="border-border flex items-center justify-between border-b px-4 py-3">
+        <div className="flex items-center gap-2">
+          <IconKnowledge className="size-5" />
+          <div>
+            <h1 className="text-sm font-semibold">{t("title")}</h1>
+            <p className="text-muted-foreground text-xs">{t("librarySubtitle")}</p>
+          </div>
+        </div>
+        <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <IconAdd className="mr-1 size-4" />
+          {t("create")}
+        </Button>
+      </div>
+
+      <ScrollArea className="flex-1">
+        <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((kb) => {
+            const ingesting =
+              ingestingIds.has(kb.id) ||
+              (kb.status !== "ready" && kb.status !== "failed" && Boolean(kb.ingest_task_id));
+            return (
+              <Card key={kb.id} className={cn(ingesting && "border-primary/30")}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="truncate text-base">{kb.name}</CardTitle>
+                  <CardDescription className="text-xs">
+                    {t("statusDocCount", { status: kb.status, count: kb.doc_count ?? 0 })}
+                    {ingesting && (
+                      <span className="ml-2 inline-flex items-center gap-1">
+                        <IconLoading className="size-3 animate-spin" />
+                        {t("indexingShort")}
+                      </span>
+                    )}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    disabled={startingId === kb.id || kb.status !== "ready"}
+                    onClick={() => void startTask(kb.id, "ask")}
+                  >
+                    {startingId === kb.id ? <IconLoading className="size-4 animate-spin" /> : t("startAsk")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={startingId === kb.id || kb.status !== "ready"}
+                    onClick={() => void startTask(kb.id, "agent")}
+                  >
+                    {t("startAgent")}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setAddOpenFor(kb.id)}>
+                    {t("addDocument")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={async () => {
+                      try {
+                        await knowledgeApi.reindex(kb.id);
+                        watchIngest(kb.id);
+                        toast.success(t("reindexStarted"));
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : t("reindexFailed"));
+                      }
+                    }}
+                  >
+                    <IconRefresh className="mr-1 size-3" />
+                    {t("reindex")}
+                  </Button>
+                </CardContent>
+              </Card>
+            );
+          })}
+          {!items.length && (
+            <div className="text-muted-foreground col-span-full py-16 text-center text-sm">
+              {t("empty")}
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+
+      <CreateKBDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(kb) => {
+          setItems((prev) => [kb, ...prev]);
+          watchIngest(kb.id);
+        }}
+      />
+      {addOpenFor && (
+        <AddDocumentDialog
+          kbId={addOpenFor}
+          open={Boolean(addOpenFor)}
+          onOpenChange={(open) => !open && setAddOpenFor(null)}
+          onAdded={() => {
+            watchIngest(addOpenFor);
+            void loadList();
+          }}
+        />
+      )}
+    </div>
+  );
+}

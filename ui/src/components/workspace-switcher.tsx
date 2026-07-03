@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { teamApi, type Team } from "@/lib/api/team";
 import { ACTIVE_WORKSPACE_KEY, LEGACY_ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
@@ -9,6 +10,7 @@ import { useAuth } from "@/providers/auth-provider";
 
 export function WorkspaceSwitcher() {
   const { user } = useAuth();
+  const t = useTranslations("workspace");
   const [teams, setTeams] = useState<Team[]>([]);
   const [active, setActive] = useState("");
 
@@ -33,9 +35,9 @@ export function WorkspaceSwitcher() {
       className="border-input bg-background mb-3 h-9 w-full rounded-md border px-2 text-sm"
       value={active}
       onChange={(event) => change(event.target.value)}
-      aria-label="工作区"
+      aria-label={t("label")}
     >
-      <option value="">个人工作区</option>
+      <option value="">{t("personal")}</option>
       {teams.map((team) => (
         <option key={team.id} value={team.id}>
           {team.name}

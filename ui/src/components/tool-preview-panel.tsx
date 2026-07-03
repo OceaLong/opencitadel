@@ -29,16 +29,16 @@ export type ToolPreviewPanelProps = {
   onOpenVNC?: () => void;
 };
 
-function getToolDescription(kind: ToolKind): string {
+function getToolDescription(kind: ToolKind, t: ReturnType<typeof useTranslations<"toolPreview">>): string {
   const map: Record<ToolKind, string> = {
-    bash: "终端",
-    browser: "浏览器",
-    search: "搜索",
-    file: "文件",
-    mcp: "MCP 服务",
-    a2a: "A2A 智能体",
-    message: "消息",
-    default: "工具",
+    bash: t("toolTerminal"),
+    browser: t("toolBrowser"),
+    search: t("toolSearch"),
+    file: t("toolFile"),
+    mcp: t("toolMcp"),
+    a2a: t("toolA2a"),
+    message: t("toolMessage"),
+    default: t("toolDefault"),
   };
   return map[kind];
 }
@@ -80,7 +80,7 @@ function ToolPreviewHeader({
   const kind = getToolKind(tool);
   const label = getFriendlyToolLabel(tool);
   const ToolIcon = TOOL_ICONS[kind];
-  const toolDesc = getToolDescription(kind);
+  const toolDesc = getToolDescription(kind, t);
   const startedAt = formatToolTime(tool.started_at);
   const endedAt = formatToolTime(tool.ended_at);
 
@@ -92,7 +92,7 @@ function ToolPreviewHeader({
           variant="ghost"
           size="icon-sm"
           onClick={onClose}
-          aria-label="关闭预览"
+          aria-label={t("closePreview")}
           className="cursor-pointer"
         >
           <Maximize2 size={16} />
@@ -124,7 +124,9 @@ function ToolPreviewHeader({
           </span>
         )}
         {tool.duration_ms != null && (
-          <span className="text-muted-foreground">耗时 {formatDuration(tool.duration_ms)}</span>
+          <span className="text-muted-foreground">
+            {t("duration", { duration: formatDuration(tool.duration_ms) ?? "" })}
+          </span>
         )}
         {startedAt && (
           <span className="text-muted-foreground">
@@ -140,7 +142,7 @@ function ToolPreviewHeader({
       )}
       {tool.args && Object.keys(tool.args).length > 0 && (
         <details className="border-border/70 bg-background/60 rounded-lg border px-2.5 py-1.5 text-xs">
-          <summary className="text-muted-foreground cursor-pointer select-none">查看参数</summary>
+          <summary className="text-muted-foreground cursor-pointer select-none">{t("viewArgs")}</summary>
           <pre className="text-muted-foreground mt-2 max-h-40 overflow-auto font-mono whitespace-pre-wrap">
             {formatArgs(tool.args)}
           </pre>
@@ -163,6 +165,7 @@ export function ToolPreviewPanel({
   onJumpToLatest,
   onOpenVNC,
 }: ToolPreviewPanelProps) {
+  const t = useTranslations("toolPreview");
   const hasArtifacts = artifacts.length > 0;
   const hasTool = !!tool;
   const defaultTab = hasArtifacts && !hasTool ? "artifacts" : hasTool ? "tool" : "artifacts";
@@ -203,18 +206,18 @@ export function ToolPreviewPanel({
             <TabsList variant="line">
               <TabsTrigger value="artifacts" className="gap-1.5">
                 <Package className="size-3.5" />
-                交付物
+                {t("artifacts")}
               </TabsTrigger>
               <TabsTrigger value="tool" className="gap-1.5">
                 <Monitor className="size-3.5" />
-                工具预览
+                {t("toolPreviewTab")}
               </TabsTrigger>
             </TabsList>
             <Button
               variant="ghost"
               size="icon-sm"
               onClick={onClose}
-              aria-label="关闭预览"
+              aria-label={t("closePreview")}
               className="cursor-pointer"
             >
               <Maximize2 size={16} />
@@ -249,9 +252,9 @@ export function ToolPreviewPanel({
           <div className="border-border/70 flex flex-shrink-0 items-center justify-between border-b px-4 py-3">
             <h2 className="text-foreground flex items-center gap-2 text-base font-semibold">
               <Package className="size-4" />
-              交付物
+              {t("artifacts")}
             </h2>
-            <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="关闭预览">
+            <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label={t("closePreview")}>
               <Maximize2 size={16} />
             </Button>
           </div>

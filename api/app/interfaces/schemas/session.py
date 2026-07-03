@@ -50,6 +50,9 @@ class ListSessionItem(BaseModel):
     latest_message_at: Optional[datetime] = Field(default_factory=datetime.now)
     status: SessionStatus = SessionStatus.PENDING
     unread_message_count: int = 0
+    codebase_id: Optional[str] = None
+    knowledge_base_id: Optional[str] = None
+    mode: Optional[SessionMode] = None
 
 
 class ListSessionResponse(BaseModel):
@@ -120,6 +123,9 @@ class GetSessionResponse(BaseModel):
     skill: Optional[SkillSummaryResponse] = None
     token_usage: Optional[TokenUsageSummaryResponse] = None
     operator_scope: Optional[str] = None
+    codebase_id: Optional[str] = None
+    knowledge_base_id: Optional[str] = None
+    mode: Optional[SessionMode] = None
 
 
 class GetSessionEventsResponse(BaseModel):

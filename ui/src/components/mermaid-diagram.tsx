@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
 
@@ -12,6 +13,7 @@ export type MermaidDiagramProps = {
 };
 
 export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
+  const t = useTranslations("mermaid");
   const id = useId().replace(/:/g, "");
   const [svg, setSvg] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +38,7 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Mermaid 渲染失败");
+          setError(err instanceof Error ? err.message : t("renderFailed"));
           setSvg("");
         }
       }
@@ -45,7 +47,7 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
     return () => {
       cancelled = true;
     };
-  }, [chart, id]);
+  }, [chart, id, t]);
 
   if (error) {
     return (

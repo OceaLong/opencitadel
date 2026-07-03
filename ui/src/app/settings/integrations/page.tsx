@@ -1,9 +1,13 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import { A2ASetting, MCPSetting } from "@/components/open-citadel-settings";
 import { useOpenCitadelSettings } from "@/hooks/use-open-citadel-settings";
 
 export default function IntegrationsSettingsPage() {
+  const tNav = useTranslations("settingsNav");
+  const t = useTranslations("settingsIntegrations");
   const {
     mcpServers,
     a2aServers,
@@ -20,10 +24,8 @@ export default function IntegrationsSettingsPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-xl font-semibold tracking-tight">协议集成</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          配置 MCP 服务器与 A2A 远程 Agent，供 Skill 与会话任务调用。
-        </p>
+        <h2 className="text-xl font-semibold tracking-tight">{tNav("integrations")}</h2>
+        <p className="text-muted-foreground mt-1 text-sm">{t("description")}</p>
       </div>
       <MCPSetting
         servers={mcpServers}

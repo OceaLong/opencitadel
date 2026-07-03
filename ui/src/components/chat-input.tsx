@@ -2,6 +2,7 @@
 
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { ArrowUp, FileText, Loader2, Paperclip, Pause, XCircle } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Avatar, AvatarGroupCount } from "@/components/ui/avatar";
@@ -55,6 +56,8 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     },
     ref,
   ) => {
+    const t = useTranslations("chatInput");
+    const tCommon = useTranslations("common");
     const [files, setFiles] = useState<FileInfo[]>([]);
     const [uploading, setUploading] = useState(false);
     const [sending, setSending] = useState(false);
@@ -96,8 +99,8 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
             });
             return fileInfo;
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : "上传失败";
-            toast.error(`文件「${file.name}」上传失败: ${errorMessage}`);
+            const errorMessage = error instanceof Error ? error.message : tCommon("uploadFailed");
+            toast.error(t("fileUploadFailed", { name: file.name, error: errorMessage }));
             return null;
           }
         });
@@ -108,10 +111,10 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
 
         if (uploadedFiles.length > 0) {
           setFiles((prev) => [...prev, ...uploadedFiles]);
-          toast.success(`成功上传 ${uploadedFiles.length} 个文件`);
+          toast.success(t("uploadSuccess", { count: uploadedFiles.length }));
         }
       } catch {
-        toast.error("文件上传过程中发生错误");
+        toast.error(t("uploadError"));
       } finally {
         setUploading(false);
         // 重置input，以便可以重复选择同一文件
@@ -134,7 +137,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
 
       // 验证消息不为空
       if (!trimmedMessage) {
-        toast.error("请输入消息内容");
+        toast.error(t("emptyMessage"));
         textareaRef.current?.focus();
         return;
       }
@@ -219,7 +222,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
             value={inputValue}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder="分配一个任务或提问任何问题..."
+            placeholder={t("placeholder")}
             className="scrollbar-hide text-foreground placeholder:text-muted-foreground h-[46px] min-h-[40px] w-full resize-none bg-transparent text-sm outline-none"
             disabled={sending || disabled}
           />

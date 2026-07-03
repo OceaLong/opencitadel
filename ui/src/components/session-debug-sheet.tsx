@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Bug } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,7 @@ function getDebugDescription(type: string): string {
 }
 
 export function SessionDebugSheet({ events, compact, onOpen }: Props) {
+  const t = useTranslations("sessionDebug");
   const [open, setOpen] = useState(false);
   const debugItems = useMemo(() => extractDebugItems(events), [events]);
 
@@ -55,25 +57,22 @@ export function SessionDebugSheet({ events, compact, onOpen }: Props) {
           variant="ghost"
           size={compact ? "icon" : "sm"}
           className={compact ? "size-8" : undefined}
-          title="调试事件"
+          title={t("title")}
         >
           <Bug className="size-4" />
-          {!compact && <span className="ml-1">调试</span>}
+          {!compact && <span className="ml-1">{t("button")}</span>}
         </Button>
       </SheetTrigger>
       <SheetContent side="right" className="w-full sm:max-w-lg">
         <SheetHeader>
-          <SheetTitle>调试事件</SheetTitle>
-          <SheetDescription>
-            内部 planner 输出、reasoning 与 tool args，不会显示在普通聊天气泡中。
-          </SheetDescription>
+          <SheetTitle>{t("title")}</SheetTitle>
+          <SheetDescription>{t("description")}</SheetDescription>
         </SheetHeader>
         <ScrollArea className="mt-4 h-[calc(100vh-8rem)] pr-3">
           <div className="flex flex-col gap-3">
             {debugItems.length === 0 ? (
               <div className="text-muted-foreground border-border/70 bg-muted/30 rounded-lg border p-4 text-sm">
-                暂无调试事件。打开后会请求 debug 事件，新的 planner、reasoning 与 tool args
-                会显示在这里。
+                {t("empty")}
               </div>
             ) : (
               debugItems.map((item, index) => (

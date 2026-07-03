@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { Camera, ImageIcon, Loader2, Upload } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 
@@ -22,10 +23,11 @@ export function ImageUploadZone({
   disabled = false,
   loading = false,
   preview,
-  previewAlt = "图片预览",
-  hint = "点击或拖拽 JPG/PNG 图片到此处，最大 5MB",
+  previewAlt,
+  hint,
   onFile,
 }: Props) {
+  const t = useTranslations("marketplaceApps.imageUpload");
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
@@ -87,8 +89,10 @@ export function ImageUploadZone({
           </div>
         )}
         <div className="space-y-1">
-          <p className="text-foreground text-sm font-medium">{loading ? "处理中…" : "上传图片"}</p>
-          <p className="text-muted-foreground max-w-xs text-xs">{hint}</p>
+          <p className="text-foreground text-sm font-medium">
+            {loading ? t("processing") : t("uploadImage")}
+          </p>
+          <p className="text-muted-foreground max-w-xs text-xs">{hint ?? t("defaultHint")}</p>
         </div>
         {!loading && (
           <div className="flex flex-wrap justify-center gap-2">
@@ -102,7 +106,7 @@ export function ImageUploadZone({
               }}
             >
               <Upload className="size-4" />
-              选择文件
+              {t("selectFile")}
             </Button>
             <Button
               type="button"
@@ -114,7 +118,7 @@ export function ImageUploadZone({
               }}
             >
               <Camera className="size-4" />
-              拍照
+              {t("takePhoto")}
             </Button>
           </div>
         )}
@@ -122,7 +126,7 @@ export function ImageUploadZone({
 
       {preview && (
         <div className="bg-muted/20 overflow-hidden rounded-xl border">
-          <img src={preview} alt={previewAlt} className="max-h-56 w-full object-contain" />
+          <img src={preview} alt={previewAlt ?? t("previewAlt")} className="max-h-56 w-full object-contain" />
         </div>
       )}
     </div>

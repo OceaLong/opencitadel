@@ -200,6 +200,20 @@ def _format_clarify_answers(request: ChatRequest) -> Optional[str]:
     return "\n".join(lines)
 
 
+def _session_to_list_item(session: Session) -> ListSessionItem:
+    return ListSessionItem(
+        session_id=session.id,
+        title=session.title,
+        latest_message=session.latest_message,
+        latest_message_at=session.latest_message_at,
+        status=session.status,
+        unread_message_count=session.unread_message_count,
+        codebase_id=session.codebase_id,
+        knowledge_base_id=session.knowledge_base_id,
+        mode=session.mode,
+    )
+
+
 async def build_get_session_response(
         session: Session,
         llm_model_service: LLMModelService,
@@ -272,6 +286,9 @@ async def build_get_session_response(
         skill=skill_resp,
         token_usage=token_usage_resp,
         operator_scope=session.operator_scope,
+        codebase_id=session.codebase_id,
+        knowledge_base_id=session.knowledge_base_id,
+        mode=session.mode,
     )
 
 # 流式获取会话详情睡眠间隔（config.yaml server.sessions_stream_interval_seconds）
@@ -342,14 +359,7 @@ async def stream_sessions(
         async def build_sessions_event() -> ServerSentEvent:
             sessions = await session_service.get_all_sessions(limit=limit, offset=offset, scope=ctx.scope)
             session_items = [
-                ListSessionItem(
-                    session_id=session.id,
-                    title=session.title,
-                    latest_message=session.latest_message,
-                    latest_message_at=session.latest_message_at,
-                    status=session.status,
-                    unread_message_count=session.unread_message_count,
-                )
+                _session_to_list_item(session)
                 for session in sessions
             ]
             return ServerSentEvent(
@@ -393,14 +403,7 @@ async def get_all_sessions(
     """获取 OpenCitadel 项目中所有任务会话基础信息列表"""
     sessions = await session_service.get_all_sessions(limit=limit, offset=offset, scope=ctx.scope)
     session_items = [
-        ListSessionItem(
-            session_id=session.id,
-            title=session.title,
-            latest_message=session.latest_message,
-            latest_message_at=session.latest_message_at,
-            status=session.status,
-            unread_message_count=session.unread_message_count,
-        )
+        _session_to_list_item(session)
         for session in sessions
     ]
     return Response.success(

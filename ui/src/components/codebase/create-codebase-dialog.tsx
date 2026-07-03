@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { FolderArchive, GitBranch, Loader2, Upload } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,9 @@ export function CreateCodebaseDialog({
   onOpenChange,
   onCreated,
 }: CreateCodebaseDialogProps) {
+  const t = useTranslations("codebase.createDialog");
+  const tCommon = useTranslations("common");
+  const tChatInput = useTranslations("chatInput");
   const [name, setName] = useState("");
   const [gitUrl, setGitUrl] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -50,9 +54,9 @@ export function CreateCodebaseDialog({
       const info = await fileApi.uploadFile({ file });
       setUploadedZipId(info.id);
       if (!name) setName(file.name.replace(/\.(zip|tar\.gz|tgz)$/i, ""));
-      toast.success("压缩包上传成功");
+      toast.success(t("zipUploadSuccess"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "上传失败");
+      toast.error(err instanceof Error ? err.message : tCommon("uploadFailed"));
     } finally {
       setUploading(false);
     }
@@ -69,9 +73,9 @@ export function CreateCodebaseDialog({
         ids.push(info.id);
       }
       setUploadedFileIds((prev) => [...prev, ...ids]);
-      toast.success(`已上传 ${ids.length} 个文件`);
+      toast.success(tChatInput("uploadSuccess", { count: ids.length }));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "上传失败");
+      toast.error(err instanceof Error ? err.message : tCommon("uploadFailed"));
     } finally {
       setUploading(false);
     }
@@ -83,31 +87,31 @@ export function CreateCodebaseDialog({
       let codebase: Codebase;
       if (tab === "git") {
         if (!gitUrl.trim()) {
-          toast.error("请输入 Git 仓库 URL");
+          toast.error(t("gitUrlRequired"));
           return;
         }
         codebase = await codebaseApi.create({
-          name: name || "Git 代码库",
+          name: name || t("defaultGitName"),
           source_type: "git",
           git_url: gitUrl.trim(),
         });
       } else if (tab === "zip") {
         if (!uploadedZipId) {
-          toast.error("请先上传 zip 压缩包");
+          toast.error(t("zipRequired"));
           return;
         }
         codebase = await codebaseApi.create({
-          name: name || "Zip 代码库",
+          name: name || t("defaultZipName"),
           source_type: "zip",
           file_id: uploadedZipId,
         });
       } else {
         if (!uploadedFileIds.length) {
-          toast.error("请先上传文件");
+          toast.error(t("filesRequired"));
           return;
         }
         codebase = await codebaseApi.create({
-          name: name || "文件代码库",
+          name: name || t("defaultFilesName"),
           source_type: "files",
           file_ids: uploadedFileIds,
         });
@@ -119,36 +123,34 @@ export function CreateCodebaseDialog({
       setUploadedZipId(null);
       setUploadedFileIds([]);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "创建失败");
+      toast.error(err instanceof Error ? err.message : t("createFailed"));
     } finally {
       setCreating(false);
     }
-  }, [tab, name, gitUrl, uploadedZipId, uploadedFileIds, onCreated, onOpenChange]);
+  }, [tab, name, gitUrl, uploadedZipId, uploadedFileIds, onCreated, onOpenChange, t]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>新建代码知识库</DialogTitle>
-          <DialogDescription>
-            上传 zip、Git 仓库或多文件，系统将自动分析并建立专属代码知识库
-          </DialogDescription>
+          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="cb-name">名称</Label>
+            <Label htmlFor="cb-name">{tCommon("name")}</Label>
             <Input
               id="cb-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="我的项目"
+              placeholder={t("namePlaceholder")}
             />
           </div>
           <Tabs value={tab} onValueChange={(v) => setTab(v as CodebaseSourceType)}>
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="zip">Zip</TabsTrigger>
               <TabsTrigger value="git">Git</TabsTrigger>
-              <TabsTrigger value="files">文件</TabsTrigger>
+              <TabsTrigger value="files">{t("tabFiles")}</TabsTrigger>
             </TabsList>
             <TabsContent value="zip" className="space-y-3 pt-2">
               <input
@@ -169,7 +171,7 @@ export function CreateCodebaseDialog({
                 ) : (
                   <FolderArchive className="mr-2 size-4" />
                 )}
-                {uploadedZipId ? "已上传，点击更换" : "选择 zip 压缩包"}
+                {uploadedZipId ? t("zipUploaded") : t("selectZip")}
               </Button>
             </TabsContent>
             <TabsContent value="git" className="space-y-3 pt-2">
@@ -201,18 +203,18 @@ export function CreateCodebaseDialog({
                 ) : (
                   <Upload className="mr-2 size-4" />
                 )}
-                选择文件 ({uploadedFileIds.length} 已选)
+                {t("selectFiles", { count: uploadedFileIds.length })}
               </Button>
             </TabsContent>
           </Tabs>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            取消
+            {tCommon("cancel")}
           </Button>
           <Button onClick={handleCreate} disabled={creating || uploading}>
             {creating && <Loader2 className="mr-2 size-4 animate-spin" />}
-            创建并分析
+            {t("createAndAnalyze")}
           </Button>
         </DialogFooter>
       </DialogContent>

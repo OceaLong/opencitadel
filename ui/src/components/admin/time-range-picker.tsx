@@ -1,13 +1,15 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 import type { AdminTimeRange } from "@/lib/admin-utils";
 import { cn } from "@/lib/utils";
 
-const OPTIONS: Array<{ value: AdminTimeRange; label: string }> = [
-  { value: "7d", label: "近 7 天" },
-  { value: "30d", label: "近 30 天" },
-  { value: "90d", label: "近 90 天" },
-  { value: "all", label: "全部" },
+const OPTIONS: Array<{ value: AdminTimeRange; labelKey: "timeRange7d" | "timeRange30d" | "timeRange90d" | "timeRangeAll" }> = [
+  { value: "7d", labelKey: "timeRange7d" },
+  { value: "30d", labelKey: "timeRange30d" },
+  { value: "90d", labelKey: "timeRange90d" },
+  { value: "all", labelKey: "timeRangeAll" },
 ];
 
 export function AdminTimeRangePicker({
@@ -19,6 +21,8 @@ export function AdminTimeRangePicker({
   onChange: (value: AdminTimeRange) => void;
   className?: string;
 }) {
+  const t = useTranslations("admin");
+
   return (
     <div className={cn("bg-muted/40 inline-flex rounded-xl border p-1", className)}>
       {OPTIONS.map((option) => (
@@ -33,7 +37,7 @@ export function AdminTimeRangePicker({
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          {option.label}
+          {t(option.labelKey)}
         </button>
       ))}
     </div>

@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Copy, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Copy, Loader2, Plus, RefreshCw } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { ChatHeader } from "@/components/chat-header";
+import { ContextSelector } from "@/components/context-selector";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -29,11 +31,12 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { scheduledJobsApi } from "@/lib/api/scheduled-jobs";
 import type { CreateScheduledJobParams, ScheduledJob } from "@/lib/api/types";
+import { IconDelete } from "@/lib/icons";
 
 const TRIGGER_LABEL: Record<string, string> = {
-  interval: "间隔（秒）",
-  cron: "Cron 表达式",
-  webhook: "Webhook",
+  interval: "triggerInterval",
+  cron: "triggerCron",
+  webhook: "triggerWebhook",
 };
 
 type WebhookCredentials = {
@@ -43,23 +46,18 @@ type WebhookCredentials = {
   webhookSecret: string;
 };
 
-function formatTime(value?: string | null): string {
+function formatTime(value: string | null | undefined, locale: string): string {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("zh-CN");
-}
-
-async function copyText(label: string, value: string) {
-  try {
-    await navigator.clipboard.writeText(value);
-    toast.success(`${label} 已复制`);
-  } catch {
-    toast.error("复制失败");
-  }
+  return date.toLocaleString(locale);
 }
 
 export default function AutomationPage() {
+  const locale = useLocale();
+  const t = useTranslations("automation");
+  const tCommon = useTranslations("common");
+  const tSessionMemory = useTranslations("sessionMemory");
   const [jobs, setJobs] = useState<ScheduledJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -74,17 +72,29 @@ export default function AutomationPage() {
     enabled: true,
   });
 
+  const copyText = useCallback(
+    async (label: string, value: string) => {
+      try {
+        await navigator.clipboard.writeText(value);
+        toast.success(t("copiedWithLabel", { label }));
+      } catch {
+        toast.error(tSessionMemory("copyFailed"));
+      }
+    },
+    [t, tSessionMemory],
+  );
+
   const loadJobs = useCallback(async () => {
     setLoading(true);
     try {
       const data = await scheduledJobsApi.list();
       setJobs(data.jobs);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载任务失败");
+      toast.error(error instanceof Error ? error.message : t("loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadJobs();
@@ -92,7 +102,7 @@ export default function AutomationPage() {
 
   const handleCreate = async () => {
     if (!form.name.trim() || !form.prompt_template.trim()) {
-      toast.error("请填写任务名称和提示词模板");
+      toast.error(t("nameRequired"));
       return;
     }
     setCreating(true);
@@ -115,10 +125,10 @@ export default function AutomationPage() {
           webhookSecret: result.webhook_secret,
         });
       } else {
-        toast.success("任务已创建");
+        toast.success(t("jobCreated"));
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "创建任务失败");
+      toast.error(error instanceof Error ? error.message : t("jobCreateFailed"));
     } finally {
       setCreating(false);
     }
@@ -128,9 +138,9 @@ export default function AutomationPage() {
     try {
       await scheduledJobsApi.delete(jobId);
       setJobs((prev) => prev.filter((job) => job.id !== jobId));
-      toast.success("任务已删除");
+      toast.success(t("jobDeleted"));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "删除失败");
+      toast.error(error instanceof Error ? error.message : t("deleteFailed"));
     }
   };
 
@@ -150,7 +160,7 @@ export default function AutomationPage() {
         ),
       );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "轮换密钥失败");
+      toast.error(error instanceof Error ? error.message : t("rotateSecretFailed"));
     } finally {
       setRotatingJobId(null);
     }
@@ -161,25 +171,25 @@ export default function AutomationPage() {
 
   return (
     <div className="flex h-full min-h-screen flex-col">
-      <ChatHeader showSidebarTrigger={false} />
+      <ChatHeader />
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-4 py-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-foreground text-xl font-semibold">自动化任务</h1>
-            <p className="text-muted-foreground text-sm">定时或 Webhook 触发 Agent 任务</p>
+            <h1 className="text-foreground text-xl font-semibold">{t("title")}</h1>
+            <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
           </div>
           <Button onClick={() => setShowForm((value) => !value)}>
             <Plus className="size-4" />
-            新建任务
+            {t("newJob")}
           </Button>
         </div>
 
         <Dialog open={webhookCredentials != null} onOpenChange={(open) => !open && setWebhookCredentials(null)}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Webhook 凭证（仅显示一次）</DialogTitle>
+              <DialogTitle>{t("webhookCredentialsTitle")}</DialogTitle>
               <DialogDescription>
-                请立即保存密钥。请求须携带 Header{" "}
+                {t("webhookCredentialsDescription")}{" "}
                 <code className="text-xs">X-Webhook-Signature: HMAC-SHA256(body, secret)</code>
               </DialogDescription>
             </DialogHeader>
@@ -193,7 +203,7 @@ export default function AutomationPage() {
                       type="button"
                       variant="outline"
                       size="icon"
-                      aria-label="复制 Webhook URL"
+                      aria-label={t("copyWebhookUrlAria")}
                       onClick={() => void copyText("Webhook URL", webhookUrl(webhookCredentials.webhookToken))}
                     >
                       <Copy className="size-4" />
@@ -208,7 +218,7 @@ export default function AutomationPage() {
                       type="button"
                       variant="outline"
                       size="icon"
-                      aria-label="复制 Token"
+                      aria-label={t("copyTokenAria")}
                       onClick={() => void copyText("Token", webhookCredentials.webhookToken)}
                     >
                       <Copy className="size-4" />
@@ -223,7 +233,7 @@ export default function AutomationPage() {
                       type="button"
                       variant="outline"
                       size="icon"
-                      aria-label="复制 Secret"
+                      aria-label={t("copySecretAria")}
                       onClick={() => void copyText("Secret", webhookCredentials.webhookSecret)}
                     >
                       <Copy className="size-4" />
@@ -233,7 +243,7 @@ export default function AutomationPage() {
               </div>
             )}
             <DialogFooter>
-              <Button onClick={() => setWebhookCredentials(null)}>我已保存</Button>
+              <Button onClick={() => setWebhookCredentials(null)}>{t("credentialsSaved")}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -241,21 +251,21 @@ export default function AutomationPage() {
         {showForm && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">新建自动化任务</CardTitle>
+              <CardTitle className="text-base">{t("newJob")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="job-name">任务名称</Label>
+                <Label htmlFor="job-name">{t("fields.name")}</Label>
                 <Input
                   id="job-name"
                   value={form.name}
                   onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="例如：每日摘要"
+                  placeholder={t("namePlaceholder")}
                 />
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>触发类型</Label>
+                  <Label>{t("fields.triggerType")}</Label>
                   <Select
                     value={form.trigger_type}
                     onValueChange={(value) =>
@@ -269,14 +279,14 @@ export default function AutomationPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="interval">间隔</SelectItem>
+                      <SelectItem value="interval">{t("triggerTypeInterval")}</SelectItem>
                       <SelectItem value="cron">Cron</SelectItem>
                       <SelectItem value="webhook">Webhook</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>{TRIGGER_LABEL[form.trigger_type ?? "interval"]}</Label>
+                  <Label>{t(TRIGGER_LABEL[form.trigger_type ?? "interval"])}</Label>
                   <Input
                     value={form.trigger_spec}
                     onChange={(event) =>
@@ -288,7 +298,7 @@ export default function AutomationPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="job-prompt">提示词模板</Label>
+                <Label htmlFor="job-prompt">{t("fields.prompt")}</Label>
                 <Textarea
                   id="job-prompt"
                   rows={4}
@@ -296,7 +306,23 @@ export default function AutomationPage() {
                   onChange={(event) =>
                     setForm((prev) => ({ ...prev, prompt_template: event.target.value }))
                   }
-                  placeholder="任务触发时发送给 Agent 的指令…"
+                  placeholder={t("promptPlaceholder")}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>{t("contextLabel")}</Label>
+                <ContextSelector
+                  value={{
+                    codebaseId: form.codebase_id ?? undefined,
+                    knowledgeBaseId: form.knowledge_base_id ?? undefined,
+                  }}
+                  onChange={(ctx) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      codebase_id: ctx.codebaseId ?? null,
+                      knowledge_base_id: ctx.knowledgeBaseId ?? null,
+                    }))
+                  }
                 />
               </div>
               <div className="flex items-center gap-2">
@@ -304,14 +330,14 @@ export default function AutomationPage() {
                   checked={form.enabled ?? true}
                   onCheckedChange={(checked) => setForm((prev) => ({ ...prev, enabled: checked }))}
                 />
-                <Label>启用任务</Label>
+                <Label>{t("fields.enabled")}</Label>
               </div>
               <div className="flex gap-2">
                 <Button onClick={() => void handleCreate()} disabled={creating}>
-                  {creating ? "创建中…" : "创建"}
+                  {creating ? t("creating") : t("create")}
                 </Button>
                 <Button variant="ghost" onClick={() => setShowForm(false)}>
-                  取消
+                  {tCommon("cancel")}
                 </Button>
               </div>
             </CardContent>
@@ -321,10 +347,10 @@ export default function AutomationPage() {
         {loading ? (
           <div className="text-muted-foreground flex items-center justify-center gap-2 py-12">
             <Loader2 className="size-4 animate-spin" />
-            加载中…
+            {tCommon("loading")}
           </div>
         ) : jobs.length === 0 ? (
-          <p className="text-muted-foreground py-12 text-center text-sm">暂无自动化任务</p>
+          <p className="text-muted-foreground py-12 text-center text-sm">{t("empty")}</p>
         ) : (
           <div className="space-y-3">
             {jobs.map((job) => (
@@ -340,13 +366,13 @@ export default function AutomationPage() {
                             : "text-muted-foreground text-xs"
                         }
                       >
-                        {job.enabled ? "已启用" : "已停用"}
+                        {job.enabled ? t("statusEnabled") : t("statusDisabled")}
                       </span>
                     </div>
                     <p className="text-muted-foreground line-clamp-2 text-sm">{job.prompt_template}</p>
                     <p className="text-muted-foreground text-xs">
                       {job.trigger_type} · {job.trigger_spec}
-                      {job.next_run_at ? ` · 下次 ${formatTime(job.next_run_at)}` : ""}
+                      {job.next_run_at ? ` · ${t("nextRunAt", { time: formatTime(job.next_run_at, locale) })}` : ""}
                     </p>
                     {job.trigger_type === "webhook" && job.webhook_token && (
                       <p className="text-muted-foreground break-all text-xs">
@@ -355,7 +381,7 @@ export default function AutomationPage() {
                     )}
                     {job.last_run_at && (
                       <p className="text-muted-foreground text-xs">
-                        上次运行 {formatTime(job.last_run_at)}
+                        {t("lastRunAt", { time: formatTime(job.last_run_at, locale) })}
                         {job.last_run_status ? ` · ${job.last_run_status}` : ""}
                         {job.last_run_session_id ? (
                           <>
@@ -364,7 +390,7 @@ export default function AutomationPage() {
                               href={`/sessions/${job.last_run_session_id}`}
                               className="text-primary underline"
                             >
-                              查看会话
+                              {t("viewSession")}
                             </a>
                           </>
                         ) : null}
@@ -376,7 +402,7 @@ export default function AutomationPage() {
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        aria-label="轮换 Webhook 密钥"
+                        aria-label={t("rotateSecretAria")}
                         disabled={rotatingJobId === job.id}
                         onClick={() => void handleRotateSecret(job)}
                       >
@@ -390,10 +416,10 @@ export default function AutomationPage() {
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label="删除任务"
+                      aria-label={t("deleteJobAria")}
                       onClick={() => void handleDelete(job.id)}
                     >
-                      <Trash2 className="size-4" />
+                      <IconDelete className="size-4" />
                     </Button>
                   </div>
                 </CardContent>

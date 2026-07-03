@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 
 import { LeftPanel } from "@/components/left-panel";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -30,12 +31,6 @@ function isShelllessRoute(pathname: string): boolean {
     isAuthRoute(pathname) ||
     pathname === "/admin" ||
     pathname.startsWith("/admin/") ||
-    pathname === "/codebase" ||
-    pathname.startsWith("/codebase/") ||
-    pathname === "/knowledge" ||
-    pathname.startsWith("/knowledge/") ||
-    pathname === "/automation" ||
-    pathname.startsWith("/automation/") ||
     SHELLLESS_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   );
 }
@@ -50,6 +45,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading } = useAuth();
+  const tCommon = useTranslations("common");
   const shelllessRoute = isShelllessRoute(pathname);
   const authRequiredRoute = requiresAuth(pathname);
 
@@ -60,7 +56,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [loading, authRequiredRoute, router, user]);
 
   if (loading && authRequiredRoute) {
-    return <div className="bg-background flex min-h-screen items-center justify-center text-sm">加载中...</div>;
+    return <div className="bg-background flex min-h-screen items-center justify-center text-sm">{tCommon("loading")}</div>;
   }
 
   if (!user && authRequiredRoute) {

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Bell } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,10 +21,10 @@ import { notificationsApi } from "@/lib/api/notifications";
 import type { Notification } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
-function formatTime(value: string): string {
+function formatTime(value: string, locale: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("zh-CN", {
+  return date.toLocaleString(locale, {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -38,6 +39,8 @@ function notificationHref(item: Notification): string | null {
 }
 
 export function NotificationInbox({ className }: { className?: string }) {
+  const t = useTranslations("notifications");
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -99,8 +102,8 @@ export function NotificationInbox({ className }: { className?: string }) {
           variant="outline"
           size="icon-sm"
           className={cn("relative", className)}
-          aria-label="通知"
-          title="通知"
+          aria-label={t("title")}
+          title={t("title")}
         >
           <Bell className="size-4" />
           {unreadCount > 0 && (
@@ -115,20 +118,22 @@ export function NotificationInbox({ className }: { className?: string }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80">
         <DropdownMenuLabel className="flex items-center justify-between">
-          <span>通知</span>
-          {loading && <span className="text-muted-foreground text-xs">刷新中…</span>}
+          <span>{t("title")}</span>
+          {loading && <span className="text-muted-foreground text-xs">{t("refreshing")}</span>}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <ScrollArea className="max-h-72">
           {items.length === 0 ? (
-            <p className="text-muted-foreground px-3 py-6 text-center text-sm">暂无通知</p>
+            <p className="text-muted-foreground px-3 py-6 text-center text-sm">{t("empty")}</p>
           ) : (
             items.map((item) => {
               const href = notificationHref(item);
               const content = (
                 <div className="flex flex-col gap-0.5">
                   <span className={cn("text-sm", !item.read && "font-medium")}>{item.message}</span>
-                  <span className="text-muted-foreground text-xs">{formatTime(item.created_at)}</span>
+                  <span className="text-muted-foreground text-xs">
+                    {formatTime(item.created_at, locale)}
+                  </span>
                 </div>
               );
               return (

@@ -5,6 +5,7 @@ import logging
 from typing import Callable, Optional, Type
 
 from app.application.services.audit_service import AuditService
+from app.application.services.codebase_service import CodebaseService
 from app.application.services.artifact_service import ArtifactService
 from app.application.services.config_provider import AppConfigProvider, get_runtime_config
 from app.application.services.llm_model_service import LLMModelService
@@ -16,6 +17,7 @@ from app.application.services.skill_service import SkillService
 from app.domain.external.connection_pool import A2AConnectionPoolPort, MCPConnectionPoolPort
 from app.domain.external.event_sequence import EventSequencePort
 from app.domain.external.file_storage import FileStorage
+from app.domain.external.object_storage import ObjectStoragePort
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.observability import ObservabilityPort
 from app.domain.external.sandbox import Sandbox
@@ -87,6 +89,8 @@ class TaskRunnerFactory:
             a2a_connection_pool: A2AConnectionPoolPort,
             artifact_service: Optional[ArtifactService] = None,
             audit_service: Optional[AuditService] = None,
+            codebase_service: Optional[CodebaseService] = None,
+            object_storage: Optional[ObjectStoragePort] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm_model_service = llm_model_service
@@ -106,6 +110,8 @@ class TaskRunnerFactory:
         self._a2a_connection_pool = a2a_connection_pool
         self._artifact_service = artifact_service
         self._audit_service = audit_service
+        self._codebase_service = codebase_service
+        self._object_storage = object_storage
         self._agent_config = AgentConfig()
         self._mcp_config = MCPConfig()
         self._a2a_config = A2AConfig()
@@ -177,11 +183,39 @@ class TaskRunnerFactory:
         llm, agent_config, skill, skill_prompt, ltm_block, llm_model = await self._resolve_llm_and_config(session)
         model_id = llm_model.id
 
+        on_ready = None
+        if (
+            session.codebase_id
+            and session.mode == SessionMode.AGENT
+            and self._codebase_service
+            and self._object_storage
+        ):
+            codebase_id = session.codebase_id
+            codebase_service = self._codebase_service
+            object_storage = self._object_storage
+
+            async def ensure_codebase_attached(sandbox: Sandbox) -> None:
+                try:
+                    await codebase_service.attach_to_session_sandbox(
+                        codebase_id,
+                        sandbox,
+                        object_storage,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "代码库物化到会话沙箱失败 session=%s: %s",
+                        session.id,
+                        exc,
+                    )
+
+            on_ready = ensure_codebase_attached
+
         sandbox_provider = SandboxProvider(
             session_id=session.id,
             sandbox_id=session.sandbox_id,
             sandbox_cls=self._sandbox_cls,
             uow_factory=self._uow_factory,
+            on_ready=on_ready,
         )
         sandbox = LazySandbox(sandbox_provider)
         browser = LazyBrowser(

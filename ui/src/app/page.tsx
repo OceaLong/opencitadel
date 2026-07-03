@@ -3,11 +3,15 @@
 import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Code2, Shield } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { ChatHeader } from "@/components/chat-header";
 import { ChatInput, type ChatInputRef } from "@/components/chat-input";
+import {
+  ContextSelector,
+  type SessionContextSelection,
+} from "@/components/context-selector";
 import {
   OperatorScopeDialog,
   type OperatorScope,
@@ -20,10 +24,12 @@ import { ThinkingToggle } from "@/components/thinking-toggle";
 import { invalidateModelsCache, loadModels, resolveDefaultModelId } from "@/lib/api/models-cache";
 import { sessionApi } from "@/lib/api/session";
 import type { FileInfo, Skill } from "@/lib/api/types";
+import { IconSecurity } from "@/lib/icons";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 
 export default function Page() {
   const router = useRouter();
+  const t = useTranslations("home");
   const { requireAuth } = useRequireAuth();
   const chatInputRef = useRef<ChatInputRef>(null);
   const [sending, setSending] = useState(false);
@@ -33,6 +39,7 @@ export default function Page() {
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [hasModels, setHasModels] = useState<boolean | null>(null);
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
+  const [context, setContext] = useState<SessionContextSelection>({});
   const pendingSendRef = useRef<{ message: string; files: FileInfo[] } | null>(null);
 
   const handleDefaultModelLoaded = useCallback((id: string | undefined) => {
@@ -68,7 +75,7 @@ export default function Page() {
     }
 
     if (hasModels === false || !resolvedModelId) {
-      toast.error("请先在设置中添加模型");
+      toast.error(t("noModel"));
       setSending(false);
       return;
     }
@@ -76,11 +83,15 @@ export default function Page() {
     setSending(true);
 
     try {
+      const hasContext = Boolean(context.codebaseId || context.knowledgeBaseId);
       const session = await sessionApi.createSession({
         model_id: resolvedModelId,
         skill_id: skillId,
         thinking_enabled: thinkingEnabled,
         operator_scope: operatorScope,
+        codebase_id: context.codebaseId,
+        knowledge_base_id: context.knowledgeBaseId,
+        mode: hasContext ? "ask" : undefined,
       });
       const sessionId = session.session_id;
 
@@ -90,7 +101,7 @@ export default function Page() {
 
       router.push(`/sessions/${sessionId}?init=${encoded}`);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "创建会话失败";
+      const errorMessage = error instanceof Error ? error.message : t("createFailed");
       toast.error(errorMessage);
       setSending(false);
       throw error;
@@ -99,7 +110,7 @@ export default function Page() {
 
   const handleSend = async (message: string, files: FileInfo[]) => {
     if (sending) return;
-    if (!requireAuth("登录后即可开始 AI 对话")) return;
+    if (!requireAuth(t("loginRequired"))) return;
 
     if (activeSkill?.slug === "web-operator") {
       pendingSendRef.current = { message, files };
@@ -128,11 +139,11 @@ export default function Page() {
         <div className="mx-auto w-full max-w-full sm:max-w-[768px] sm:min-w-[390px]">
           <div className="mb-4 text-center text-[24px] font-bold tracking-tight sm:mb-6 sm:text-left sm:text-[32px]">
             <div className="text-foreground flex items-center justify-center gap-2 sm:justify-start">
-              <Shield className="text-primary hidden size-7 sm:inline" />
-              监管级自主执行 Agent
+              <IconSecurity className="text-primary hidden size-7 sm:inline" />
+              {t("title")}
             </div>
             <div className="text-muted-foreground mt-1 text-base font-normal sm:text-lg">
-              规划 · 审批 · VNC 接管 · 检查点回滚 · 全工具审计
+              {t("subtitle")}
             </div>
           </div>
           <ChatInput
@@ -142,6 +153,7 @@ export default function Page() {
             disabled={sending}
             toolbarRight={
               <>
+                <ContextSelector value={context} onChange={setContext} disabled={sending} />
                 <ThinkingToggle
                   enabled={thinkingEnabled}
                   onChange={setThinkingEnabled}
@@ -163,20 +175,15 @@ export default function Page() {
               </>
             }
           />
-          <Link
-            href="/codebase"
-            className="border-border bg-card hover:bg-muted/60 mb-4 flex items-center gap-3 rounded-xl border p-4 shadow-[var(--shadow-card)] transition-colors sm:mb-6"
-          >
-            <div className="bg-primary/10 flex size-10 items-center justify-center rounded-lg">
-              <Code2 className="text-primary size-5" />
-            </div>
-            <div className="text-left">
-              <div className="text-sm font-semibold">代码知识库</div>
-              <div className="text-muted-foreground text-xs">
-                上传代码库，生成架构图与调用链，Ask 问答 / Agent 改码
-              </div>
-            </div>
-          </Link>
+          <div className="text-muted-foreground mb-4 flex flex-wrap gap-2 text-xs sm:mb-6">
+            <Link href="/codebase" className="hover:text-foreground underline-offset-4 hover:underline">
+              {t("manageCodebase")}
+            </Link>
+            <span>·</span>
+            <Link href="/knowledge" className="hover:text-foreground underline-offset-4 hover:underline">
+              {t("manageKnowledge")}
+            </Link>
+          </div>
           <SuggestedQuestions onQuestionClick={handleQuestionClick} />
         </div>
       </div>

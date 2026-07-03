@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, Plus, Star, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,9 @@ export function ModelsSettings({ embedded = false }: Props) {
     handleSetDefault,
     handleProbe,
   } = useModelsSettings();
+  const tNav = useTranslations("settingsNav");
+  const t = useTranslations("settingsModels");
+  const tCommon = useTranslations("common");
 
   return (
     <div className={embedded ? "w-full px-1" : "max-w-4xl"}>
@@ -65,15 +69,13 @@ export function ModelsSettings({ embedded = false }: Props) {
                 : "text-2xl font-semibold tracking-tight"
             }
           >
-            模型管理
+            {tNav("models")}
           </h2>
-          <p className="text-muted-foreground mt-1 text-sm">
-            全局新增多 Provider 模型，会话级可选择使用
-          </p>
+          <p className="text-muted-foreground mt-1 text-sm">{t("description")}</p>
         </div>
         <Button size={embedded ? "xs" : "default"} onClick={openCreate}>
           <Plus className="mr-1 size-4" />
-          新增模型
+          {t("addModel")}
         </Button>
       </div>
 
@@ -93,21 +95,21 @@ export function ModelsSettings({ embedded = false }: Props) {
                   <div className="min-w-0">
                     <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                       {m.display_name}
-                      {m.is_default && <Badge variant="secondary">默认</Badge>}
-                      {m.supports_multimodal && <Badge variant="outline">多模态</Badge>}
+                      {m.is_default && <Badge variant="secondary">{tCommon("default")}</Badge>}
+                      {m.supports_multimodal && <Badge variant="outline">{t("multimodal")}</Badge>}
                       {probeStatus[m.id] === "ok" && (
                         <Badge variant="outline" className="text-green-600">
-                          已校验
+                          {t("verified")}
                         </Badge>
                       )}
                       {probeStatus[m.id] === "error" && (
                         <Badge variant="outline" className="text-red-600">
-                          探测失败
+                          {t("probeFailed")}
                         </Badge>
                       )}
                       {!SUPPORTED_PROVIDERS.some((p) => p.value === m.provider) && (
                         <Badge variant="outline" className="text-amber-600">
-                          未实现
+                          {t("notImplemented")}
                         </Badge>
                       )}
                     </CardTitle>
@@ -128,11 +130,11 @@ export function ModelsSettings({ embedded = false }: Props) {
                         disabled={probingId === m.id}
                         onClick={() => handleProbe(m.id)}
                       >
-                        {probingId === m.id ? "探测中..." : "测试多模态"}
+                        {probingId === m.id ? t("probing") : t("testMultimodal")}
                       </Button>
                     )}
                     <Button variant="ghost" size="sm" onClick={() => openEdit(m)}>
-                      编辑
+                      {tCommon("edit")}
                     </Button>
                     <Button variant="ghost" size="icon" onClick={() => handleDelete(m.id)}>
                       <Trash2 className="text-destructive size-4" />
@@ -146,7 +148,7 @@ export function ModelsSettings({ embedded = false }: Props) {
             </Card>
           ))}
           {models.length === 0 && (
-            <p className="text-muted-foreground py-8 text-center text-sm">暂无模型，请先新增</p>
+            <p className="text-muted-foreground py-8 text-center text-sm">{t("noModels")}</p>
           )}
         </div>
       )}
@@ -154,11 +156,11 @@ export function ModelsSettings({ embedded = false }: Props) {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg shadow-[var(--shadow-panel)]">
           <DialogHeader>
-            <DialogTitle>{editing ? "编辑模型" : "新增模型"}</DialogTitle>
+            <DialogTitle>{editing ? t("editModel") : t("addModel")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label>显示名称</Label>
+              <Label>{t("displayName")}</Label>
               <Input
                 value={form.display_name}
                 onChange={(e) => setForm({ ...form, display_name: e.target.value })}
@@ -190,7 +192,7 @@ export function ModelsSettings({ embedded = false }: Props) {
               />
             </div>
             <div className="space-y-2">
-              <Label>API Key {editing && "(留空不更新)"}</Label>
+              <Label>{editing ? t("apiKeyLeaveBlank") : "API Key"}</Label>
               <Input
                 type="password"
                 value={form.api_key}
@@ -206,10 +208,8 @@ export function ModelsSettings({ embedded = false }: Props) {
             </div>
             <div className="border-border/70 bg-muted/20 flex items-center justify-between rounded-xl border p-3">
               <div>
-                <Label>支持多模态理解</Label>
-                <p className="text-muted-foreground mt-1 text-xs">
-                  开启后可将用户图片与浏览器截图直接传给模型
-                </p>
+                <Label>{t("supportsMultimodal")}</Label>
+                <p className="text-muted-foreground mt-1 text-xs">{t("supportsMultimodalDesc")}</p>
               </div>
               <Switch
                 checked={form.capabilities?.vision ?? form.supports_multimodal ?? false}
@@ -229,7 +229,7 @@ export function ModelsSettings({ embedded = false }: Props) {
             {(form.capabilities?.vision ?? form.supports_multimodal) && (
               <div className="border-border/70 bg-muted/20 grid grid-cols-2 gap-4 rounded-xl border p-3">
                 <div className="space-y-2">
-                  <Label>单图最大字节</Label>
+                  <Label>{t("maxImageBytes")}</Label>
                   <Input
                     type="number"
                     value={
@@ -249,7 +249,7 @@ export function ModelsSettings({ embedded = false }: Props) {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>单次最多图片数</Label>
+                  <Label>{t("maxImagesPerRequest")}</Label>
                   <Input
                     type="number"
                     value={
@@ -270,7 +270,7 @@ export function ModelsSettings({ embedded = false }: Props) {
                   />
                 </div>
                 <div className="col-span-2 flex items-center justify-between">
-                  <Label>携带工具时仍发送图片</Label>
+                  <Label>{t("visionWithTools")}</Label>
                   <Switch
                     checked={form.capabilities?.vision_with_tools ?? true}
                     onCheckedChange={(checked) =>
@@ -310,11 +310,11 @@ export function ModelsSettings({ embedded = false }: Props) {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              取消
+              {tCommon("cancel")}
             </Button>
             <Button onClick={handleSave} disabled={saving}>
               {saving && <Loader2 className="mr-1 size-4 animate-spin" />}
-              保存
+              {tCommon("save")}
             </Button>
           </DialogFooter>
         </DialogContent>

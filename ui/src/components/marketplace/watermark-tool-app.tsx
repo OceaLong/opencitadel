@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Download, Droplets, Eraser, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { ImageUploadZone } from "@/components/marketplace/image-upload-zone";
@@ -34,6 +35,7 @@ function applyCanvasTextWatermark(
   opacity: number,
   rotation: number,
   tile: boolean,
+  errors: { canvasCreateFailed: string; imageLoadFailed: string },
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -43,7 +45,7 @@ function applyCanvasTextWatermark(
       canvas.height = img.height;
       const ctx = canvas.getContext("2d");
       if (!ctx) {
-        reject(new Error("无法创建画布"));
+        reject(new Error(errors.canvasCreateFailed));
         return;
       }
       ctx.drawImage(img, 0, 0);
@@ -74,7 +76,7 @@ function applyCanvasTextWatermark(
       }
       resolve(canvas.toDataURL("image/png"));
     };
-    img.onerror = () => reject(new Error("图片加载失败"));
+    img.onerror = () => reject(new Error(errors.imageLoadFailed));
     img.src = imageUrl;
   });
 }
@@ -86,6 +88,8 @@ export function WatermarkToolApp({
   initialMode?: Mode;
   initialText?: string;
 }) {
+  const t = useTranslations("marketplaceApps.watermarkTool");
+  const tShared = useTranslations("marketplaceApps.shared");
   const { requireAuth } = useRequireAuth();
   const addDocRef = useRef<HTMLInputElement>(null);
   const removeDocRef = useRef<HTMLInputElement>(null);
@@ -114,12 +118,12 @@ export function WatermarkToolApp({
   const handleDocFile = (picked: File | undefined) => {
     if (!picked) return;
     if (picked.size > MAX_SIZE) {
-      toast.error("文件不能超过 20MB");
+      toast.error(tShared("fileTooLarge20mb"));
       return;
     }
     const kind = getFileKind(picked);
     if (kind === "unknown") {
-      toast.error("仅支持图片或 PDF");
+      toast.error(t("imageOrPdfOnly"));
       return;
     }
     setFile(picked);
@@ -134,11 +138,11 @@ export function WatermarkToolApp({
 
   const processAdd = async () => {
     if (!file) {
-      toast.error("请先上传文件");
+      toast.error(t("uploadFileFirst"));
       return;
     }
     if (!text.trim()) {
-      toast.error("请输入水印文字");
+      toast.error(t("watermarkTextRequired"));
       return;
     }
 
@@ -146,12 +150,15 @@ export function WatermarkToolApp({
       if (!preview) return;
       setLoading(true);
       try {
-        const dataUrl = await applyCanvasTextWatermark(preview, text, opacity, rotation, tile);
+        const dataUrl = await applyCanvasTextWatermark(preview, text, opacity, rotation, tile, {
+          canvasCreateFailed: t("canvasCreateFailed"),
+          imageLoadFailed: t("imageLoadFailed"),
+        });
         setResultUrl(dataUrl);
         setResultFileId(null);
-        toast.message("图片水印已生成，可下载");
+        toast.message(t("imageWatermarkDone"));
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "加水印失败");
+        toast.error(e instanceof Error ? e.message : t("addWatermarkFailed"));
       } finally {
         setLoading(false);
       }
@@ -160,7 +167,7 @@ export function WatermarkToolApp({
 
     setLoading(true);
     try {
-      if (!requireAuth("登录后即可使用 AI 水印处理")) {
+      if (!requireAuth(t("loginRequired"))) {
         setLoading(false);
         return;
       }
@@ -175,9 +182,9 @@ export function WatermarkToolApp({
       });
       setResultFileId(data.result_file_id);
       setResultFilename(data.result_filename);
-      toast.message("PDF 水印已添加");
+      toast.message(t("pdfWatermarkAdded"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "加水印失败");
+      toast.error(e instanceof Error ? e.message : t("addWatermarkFailed"));
     } finally {
       setLoading(false);
     }
@@ -185,10 +192,10 @@ export function WatermarkToolApp({
 
   const processRemove = async () => {
     if (!file) {
-      toast.error("请先上传文件");
+      toast.error(t("uploadFileFirst"));
       return;
     }
-    if (!requireAuth("登录后即可使用 AI 水印处理")) return;
+    if (!requireAuth(t("loginRequired"))) return;
     setLoading(true);
     resetResult();
     try {
@@ -206,12 +213,10 @@ export function WatermarkToolApp({
         setResultUrl(URL.createObjectURL(blob));
       }
       toast.message(
-        data.method === "ai_inpaint"
-          ? "AI 去水印完成"
-          : "去水印完成（部分场景为最佳努力）",
+        data.method === "ai_inpaint" ? t("removeWatermarkDoneAi") : t("removeWatermarkDoneBestEffort"),
       );
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "去水印失败");
+      toast.error(e instanceof Error ? e.message : t("removeWatermarkFailed"));
     } finally {
       setLoading(false);
     }
@@ -239,16 +244,14 @@ export function WatermarkToolApp({
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-foreground text-lg font-semibold tracking-tight">水印工具</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          图片文字水印本地处理；PDF 加/去水印与图片 AI 去水印走后端（best-effort）
-        </p>
+        <h2 className="text-foreground text-lg font-semibold tracking-tight">{t("title")}</h2>
+        <p className="text-muted-foreground mt-1 text-sm">{t("subtitle")}</p>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Mode)}>
         <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="add">加水印</TabsTrigger>
-          <TabsTrigger value="remove">去水印</TabsTrigger>
+          <TabsTrigger value="add">{t("tabAdd")}</TabsTrigger>
+          <TabsTrigger value="remove">{t("tabRemove")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="add" className="space-y-4">
@@ -259,11 +262,11 @@ export function WatermarkToolApp({
                   preview={preview}
                   loading={loading}
                   onFile={handleDocFile}
-                  hint="上传 JPG/PNG 图片，本地添加文字水印"
+                  hint={t("imageUploadHint")}
                 />
               ) : (
                 <div className="space-y-2">
-                  <Label>上传 PDF 或图片</Label>
+                  <Label>{t("uploadPdfOrImage")}</Label>
                   <input
                     ref={addDocRef}
                     type="file"
@@ -272,18 +275,26 @@ export function WatermarkToolApp({
                     onChange={(e) => handleDocFile(e.target.files?.[0])}
                   />
                   <Button variant="outline" onClick={() => addDocRef.current?.click()}>
-                    选择文件
+                    {tShared("selectFile")}
                   </Button>
-                  {file && <p className="text-muted-foreground text-xs">已选择：{file.name}</p>}
+                  {file && (
+                    <p className="text-muted-foreground text-xs">
+                      {tShared("selectedFile", { name: file.name })}
+                    </p>
+                  )}
                 </div>
               )}
 
               <div className="space-y-2">
-                <Label>水印文字</Label>
-                <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="例如：内部资料" />
+                <Label>{t("watermarkTextLabel")}</Label>
+                <Input
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder={t("watermarkTextPlaceholder")}
+                />
               </div>
               <div className="space-y-2">
-                <Label>透明度 {Math.round(opacity * 100)}%</Label>
+                <Label>{t("opacityLabel", { percent: Math.round(opacity * 100) })}</Label>
                 <input
                   type="range"
                   min={0.1}
@@ -295,7 +306,7 @@ export function WatermarkToolApp({
                 />
               </div>
               <div className="space-y-2">
-                <Label>旋转角度 {rotation}°</Label>
+                <Label>{t("rotationLabel", { degrees: rotation })}</Label>
                 <input
                   type="range"
                   min={-90}
@@ -307,12 +318,12 @@ export function WatermarkToolApp({
                 />
               </div>
               <div className="flex items-center justify-between">
-                <Label>平铺水印</Label>
+                <Label>{t("tileLabel")}</Label>
                 <Switch checked={tile} onCheckedChange={setTile} />
               </div>
               <Button onClick={processAdd} disabled={loading || !file}>
                 {loading ? <Loader2 className="size-4 animate-spin" /> : <Droplets className="size-4" />}
-                添加水印
+                {t("addWatermark")}
               </Button>
             </CardContent>
           </Card>
@@ -322,7 +333,7 @@ export function WatermarkToolApp({
           <Card>
             <CardContent className="space-y-4 py-5">
               <div className="space-y-2">
-                <Label>上传图片或 PDF</Label>
+                <Label>{t("uploadImageOrPdf")}</Label>
                 <input
                   ref={removeDocRef}
                   type="file"
@@ -331,23 +342,27 @@ export function WatermarkToolApp({
                   onChange={(e) => handleDocFile(e.target.files?.[0])}
                 />
                 <Button variant="outline" onClick={() => removeDocRef.current?.click()}>
-                  选择文件
+                  {tShared("selectFile")}
                 </Button>
-                {file && <p className="text-muted-foreground text-xs">已选择：{file.name}</p>}
+                {file && (
+                  <p className="text-muted-foreground text-xs">
+                    {tShared("selectedFile", { name: file.name })}
+                  </p>
+                )}
               </div>
               {fileKind === "pdf" && (
                 <div className="space-y-2">
-                  <Label>PDF 水印文字（可选，提高命中率）</Label>
+                  <Label>{t("pdfWatermarkTextLabel")}</Label>
                   <Input
                     value={watermarkText}
                     onChange={(e) => setWatermarkText(e.target.value)}
-                    placeholder="若知道水印文字可填写"
+                    placeholder={t("pdfWatermarkTextPlaceholder")}
                   />
                 </div>
               )}
               <Button onClick={processRemove} disabled={loading || !file}>
                 {loading ? <Loader2 className="size-4 animate-spin" /> : <Eraser className="size-4" />}
-                去除水印
+                {t("removeWatermark")}
               </Button>
             </CardContent>
           </Card>
@@ -358,14 +373,14 @@ export function WatermarkToolApp({
         <Card className="border-primary/20 bg-primary/5">
           <CardContent className="space-y-4 py-5">
             {resultUrl && (
-              <img src={resultUrl} alt="处理结果" className="max-h-64 w-full rounded-xl object-contain" />
+              <img src={resultUrl} alt={t("resultAlt")} className="max-h-64 w-full rounded-xl object-contain" />
             )}
             {method && (
-              <p className="text-muted-foreground text-xs">处理方式：{method}</p>
+              <p className="text-muted-foreground text-xs">{t("processMethod", { method })}</p>
             )}
             <Button variant="outline" onClick={downloadResult}>
               <Download className="size-4" />
-              下载结果
+              {t("downloadResult")}
             </Button>
           </CardContent>
         </Card>

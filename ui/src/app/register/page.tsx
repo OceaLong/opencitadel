@@ -2,6 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ export default function RegisterPage() {
   const params = useSearchParams();
   const inviteToken = useMemo(() => params.get("invite_token") || "", [params]);
   const { refresh } = useAuth();
+  const t = useTranslations("auth");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -29,7 +31,7 @@ export default function RegisterPage() {
       await refresh();
       router.replace("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "注册失败");
+      setError(err instanceof Error ? err.message : t("registerFailed"));
     } finally {
       setLoading(false);
     }
@@ -39,15 +41,15 @@ export default function RegisterPage() {
     <main className="bg-background flex min-h-screen items-center justify-center p-6">
       <form onSubmit={onSubmit} className="border-border bg-card w-full max-w-sm space-y-4 rounded-xl border p-6 shadow-sm">
         <div>
-          <h1 className="text-xl font-semibold">接受邀请</h1>
-          <p className="text-muted-foreground mt-1 text-sm">使用管理员提供的邀请链接创建账号。</p>
+          <h1 className="text-xl font-semibold">{t("registerTitle")}</h1>
+          <p className="text-muted-foreground mt-1 text-sm">{t("registerDescription")}</p>
         </div>
-        {!inviteToken && <p className="text-destructive text-sm">缺少邀请 token。</p>}
-        <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="邮箱" />
-        <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="用户名" />
-        <Input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="密码（至少 8 位）" type="password" />
+        {!inviteToken && <p className="text-destructive text-sm">{t("missingInviteToken")}</p>}
+        <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("emailPlaceholder")} />
+        <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t("usernamePlaceholder")} />
+        <Input value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("passwordMinPlaceholder")} type="password" />
         {error && <p className="text-destructive text-sm">{error}</p>}
-        <Button className="w-full" disabled={loading || !inviteToken}>{loading ? "注册中..." : "注册并登录"}</Button>
+        <Button className="w-full" disabled={loading || !inviteToken}>{loading ? t("registering") : t("registerAndLogin")}</Button>
       </form>
     </main>
   );

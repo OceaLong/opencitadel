@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +24,8 @@ type DeleteSessionDialogProps = {
  * 确认后才发起 API 删除请求
  */
 export function DeleteSessionDialog({ open, onOpenChange, onConfirm }: DeleteSessionDialogProps) {
+  const t = useTranslations("deleteSession");
+  const tCommon = useTranslations("common");
   const [deleting, setDeleting] = useState(false);
 
   const handleConfirm = async () => {
@@ -38,9 +41,9 @@ export function DeleteSessionDialog({ open, onOpenChange, onConfirm }: DeleteSes
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle className="text-lg font-semibold">要删除任务信息吗？</DialogTitle>
+          <DialogTitle className="text-lg font-semibold">{t("title")}</DialogTitle>
           <DialogDescription className="text-muted-foreground text-sm leading-relaxed">
-            删除任务信息后，该任务下的所有聊天记录将被永远删除，无法找回，所上传的文件与生成文件均无法查看&下载。
+            {t("description")}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -50,10 +53,10 @@ export function DeleteSessionDialog({ open, onOpenChange, onConfirm }: DeleteSes
             onClick={() => onOpenChange(false)}
             disabled={deleting}
           >
-            取消
+            {tCommon("cancel")}
           </Button>
           <Button className="cursor-pointer" onClick={handleConfirm} disabled={deleting}>
-            {deleting ? "删除中..." : "确认"}
+            {deleting ? t("deleting") : tCommon("confirm")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Activity, Coins, Download, FileSearchCorner, FileText } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { SessionDebugSheet } from "@/components/session-debug-sheet";
@@ -73,6 +74,8 @@ export const SessionHeader = memo(function SessionHeader({
   onDebugOpen,
   observationSummary,
 }: SessionHeaderProps) {
+  const t = useTranslations("sessionHeader");
+  const tCommon = useTranslations("common");
   const { open, isMobile } = useSidebar();
   const [mounted, setMounted] = useState(false);
   const [internalOpen, setInternalOpen] = useState(false);
@@ -117,13 +120,13 @@ export const SessionHeader = memo(function SessionHeader({
       const data = await sessionApi.getTokenUsage(sessionId);
       setTokenRecords(data.records ?? []);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "加载 Token 明细失败";
+      const msg = err instanceof Error ? err.message : t("loadTokenDetailFailed");
       toast.error(msg);
       setTokenRecords([]);
     } finally {
       setTokenDetailLoading(false);
     }
-  }, [sessionId]);
+  }, [sessionId, t]);
 
   const handleDownload = useCallback(
     async (file: SessionFile, e: React.MouseEvent) => {
@@ -140,15 +143,15 @@ export const SessionHeader = memo(function SessionHeader({
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        toast.success(`已下载「${file.filename}」`);
+        toast.success(t("downloadSuccess", { filename: file.filename }));
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "下载失败";
-        toast.error(`下载「${file.filename}」失败: ${msg}`);
+        const msg = err instanceof Error ? err.message : t("downloadFailed");
+        toast.error(t("downloadFailedWithName", { filename: file.filename, error: msg }));
       } finally {
         setDownloadingId(null);
       }
     },
-    [downloadingId],
+    [downloadingId, t],
   );
 
   const handleFileItemClick = useCallback(
@@ -169,14 +172,18 @@ export const SessionHeader = memo(function SessionHeader({
     <header className="bg-background/95 sticky top-0 z-10 flex flex-shrink-0 flex-row items-center justify-between gap-2 pt-3 pb-2">
       {(!open || isMobile) && <SidebarTrigger className="flex-shrink-0 cursor-pointer" />}
       <div className="text-foreground min-w-0 flex-1 overflow-hidden text-lg font-medium text-ellipsis whitespace-nowrap">
-        {title || "未命名任务"}
+        {title || t("untitledTask")}
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
         {observationSummary &&
           (observationSummary.toolCount > 0 || observationSummary.errorCount > 0) && (
             <div
               className="border-border/70 bg-card text-muted-foreground flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)]"
-              title={`工具: ${observationSummary.toolCount} · 错误: ${observationSummary.errorCount} · 等待: ${observationSummary.waitCount}`}
+              title={t("observationTitle", {
+                tools: observationSummary.toolCount,
+                errors: observationSummary.errorCount,
+                waits: observationSummary.waitCount,
+              })}
             >
               <Activity className="size-3.5 shrink-0" />
               <span>{observationSummary.toolCount} tools</span>
@@ -195,7 +202,11 @@ export const SessionHeader = memo(function SessionHeader({
             type="button"
             onClick={handleOpenTokenDetail}
             className="border-border/70 bg-card text-muted-foreground hover:bg-muted/70 flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)] transition-colors"
-            title={`Prompt: ${tokenUsage.prompt_tokens.toLocaleString()} · Completion: ${tokenUsage.completion_tokens.toLocaleString()} · Calls: ${tokenUsage.call_count} · 点击查看明细`}
+            title={t("tokenUsageTitle", {
+              prompt: tokenUsage.prompt_tokens.toLocaleString(),
+              completion: tokenUsage.completion_tokens.toLocaleString(),
+              calls: tokenUsage.call_count,
+            })}
           >
             <Coins className="size-3.5 shrink-0 text-amber-600" />
             <span>{tokenUsage.total_tokens.toLocaleString()} tok</span>
@@ -219,12 +230,12 @@ export const SessionHeader = memo(function SessionHeader({
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>此任务中的所有文件</DialogTitle>
+                <DialogTitle>{t("allFilesTitle")}</DialogTitle>
               </DialogHeader>
               <ScrollArea className="h-[500px]">
                 <div className="flex flex-col gap-1">
                   {uniqueFileList.length === 0 ? (
-                    <p className="text-muted-foreground py-4 text-sm">暂无文件</p>
+                    <p className="text-muted-foreground py-4 text-sm">{t("noFiles")}</p>
                   ) : (
                     uniqueFileList.map((file) => (
                       <Item
@@ -253,7 +264,7 @@ export const SessionHeader = memo(function SessionHeader({
                             className="cursor-pointer"
                             onClick={(e) => handleDownload(file, e)}
                             disabled={downloadingId === file.id}
-                            aria-label={`下载 ${file.filename}`}
+                            aria-label={t("downloadFile", { filename: file.filename })}
                           >
                             <Download />
                           </Button>
@@ -274,13 +285,13 @@ export const SessionHeader = memo(function SessionHeader({
           <Dialog open={tokenDetailOpen} onOpenChange={setTokenDetailOpen}>
             <DialogContent className="max-w-2xl">
               <DialogHeader>
-                <DialogTitle>Token 用量明细</DialogTitle>
+                <DialogTitle>{t("tokenDetailTitle")}</DialogTitle>
               </DialogHeader>
               <ScrollArea className="h-[420px]">
                 {tokenDetailLoading ? (
-                  <p className="text-muted-foreground py-4 text-sm">加载中...</p>
+                  <p className="text-muted-foreground py-4 text-sm">{tCommon("loading")}</p>
                 ) : tokenRecords.length === 0 ? (
-                  <p className="text-muted-foreground py-4 text-sm">暂无调用记录</p>
+                  <p className="text-muted-foreground py-4 text-sm">{t("noCallRecords")}</p>
                 ) : (
                   <div className="flex flex-col gap-2">
                     {tokenRecords.map((record) => (

@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { MarkdownContent } from "@/components/markdown-content";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,8 @@ import { artifactsApi } from "@/lib/api/artifacts";
 function ShareArtifactContent() {
   const params = useParams<{ token: string }>();
   const token = params.token;
+  const t = useTranslations("shareArtifact");
+  const tCommon = useTranslations("common");
   const [content, setContent] = useState("");
   const [contentType, setContentType] = useState("text/markdown");
   const [loading, setLoading] = useState(true);
@@ -32,7 +35,7 @@ function ShareArtifactContent() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "加载失败");
+        setError(err instanceof Error ? err.message : tCommon("loadFailed"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -40,7 +43,7 @@ function ShareArtifactContent() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, tCommon]);
 
   const isHtml = contentType.includes("html");
 
@@ -50,27 +53,27 @@ function ShareArtifactContent() {
         <Button variant="ghost" size="sm" asChild>
           <Link href="/">
             <ArrowLeft className="mr-1 size-4" />
-            首页
+            {t("home")}
           </Link>
         </Button>
-        <span className="text-muted-foreground text-sm">交付物分享</span>
+        <span className="text-muted-foreground text-sm">{t("title")}</span>
       </header>
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col p-6">
         {loading ? (
           <div className="text-muted-foreground flex flex-1 items-center justify-center gap-2">
             <Loader2 className="size-5 animate-spin" />
-            加载中…
+            {tCommon("loading")}
           </div>
         ) : error ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-4">
             <p className="text-muted-foreground text-sm">{error}</p>
             <Button asChild variant="outline">
-              <Link href="/">返回首页</Link>
+              <Link href="/">{tCommon("backHome")}</Link>
             </Button>
           </div>
         ) : isHtml ? (
           <iframe
-            title="交付物"
+            title={t("artifactTitle")}
             srcDoc={content}
             className="bg-background h-[calc(100vh-120px)] w-full rounded-xl border shadow-[var(--shadow-panel)]"
             sandbox="allow-scripts"
@@ -86,11 +89,13 @@ function ShareArtifactContent() {
 }
 
 export default function ShareArtifactPage() {
+  const tCommon = useTranslations("common");
+
   return (
     <Suspense
       fallback={
         <div className="flex min-h-screen items-center justify-center">
-          <Loader2 className="size-5 animate-spin" />
+          <Loader2 className="size-5 animate-spin" aria-label={tCommon("loading")} />
         </div>
       }
     >

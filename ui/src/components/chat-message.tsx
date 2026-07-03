@@ -5,11 +5,12 @@ import {
   AlertCircle,
   CheckIcon,
   ChevronDown,
-  Clock3,
+  Clock,
   History,
   Languages,
   Loader2,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { AttachmentsMessage } from "@/components/attachments-message";
 import { ClarifyQuestions } from "@/components/clarify-questions";
@@ -50,6 +51,7 @@ function RestoreCheckpointButton({
   onRestore?: (checkpoint: SessionCheckpoint) => Promise<void> | void;
   disabled?: boolean;
 }) {
+  const t = useTranslations("chatMessage");
   if (!onRestore) return null;
 
   return (
@@ -58,15 +60,16 @@ function RestoreCheckpointButton({
       disabled={disabled}
       onClick={() => onRestore(checkpoint)}
       className="text-muted-foreground hover:text-foreground border-border/70 bg-card/80 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-      title="回退到此处"
+      title={t("restoreTitle")}
     >
       <History className="size-3" />
-      <span>回退到此处</span>
+      <span>{t("restoreHere")}</span>
     </button>
   );
 }
 
 function ToolRow({ className, timeLabel, children }: ToolRowProps) {
+  const tCommon = useTranslations("common");
   const [hovered, setHovered] = useState(false);
   return (
     <div
@@ -81,7 +84,7 @@ function ToolRow({ className, timeLabel, children }: ToolRowProps) {
           hovered ? "opacity-100" : "opacity-0",
         )}
       >
-        {timeLabel ?? "刚刚"}
+        {timeLabel ?? tCommon("justNow")}
       </span>
     </div>
   );
@@ -100,6 +103,7 @@ function ChatMessageComponent({
   restoringCheckpoint,
   onSourceClick,
 }: ChatMessageProps) {
+  const t = useTranslations("chatMessage");
   if (item.kind === "user") {
     return (
       <div className={cn("group mt-3 flex w-full flex-col items-end justify-end gap-1", className)}>
@@ -168,14 +172,14 @@ function ChatMessageComponent({
   if (item.kind === "subagent") {
     const statusLabel =
       item.data.status === "completed"
-        ? "已完成"
+        ? t("completed")
         : item.data.status === "failed"
-          ? "失败"
-          : "执行中";
+          ? t("failed")
+          : t("running");
     return (
       <div className={cn("mt-3 flex w-full", className)}>
         <div className="border-border/70 bg-muted/30 w-full rounded-lg border px-3 py-2 text-sm">
-          <div className="text-muted-foreground mb-1 text-xs">子 Agent · {statusLabel}</div>
+          <div className="text-muted-foreground mb-1 text-xs">{t("subAgent")} {statusLabel}</div>
           <div className="font-medium">{item.data.goal}</div>
           {item.data.result_preview ? (
             <div className="text-muted-foreground mt-2 text-xs">{item.data.result_preview}</div>
@@ -204,7 +208,7 @@ function ChatMessageComponent({
     return (
       <div className={cn("mt-3 flex w-full", className)}>
         <div className="border-border/70 bg-muted/40 text-muted-foreground flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
-          <Clock3 className="size-4 shrink-0" />
+          <Clock className="size-4 shrink-0" />
           <span>{item.message}</span>
         </div>
       </div>
@@ -237,7 +241,7 @@ function ChatMessageComponent({
           {item.contextLabel && (
             <div className="mb-1 flex items-center gap-1 text-xs text-red-500">
               <AlertCircle className="size-3.5" />
-              <span>可能发生在{item.contextLabel}之后</span>
+              <span>{t("errorAfter", { context: item.contextLabel })}</span>
             </div>
           )}
           <MarkdownContent content={item.error} />

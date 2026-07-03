@@ -3,7 +3,7 @@
 """Lazy sandbox/browser provisioning for agent tasks."""
 import asyncio
 import logging
-from typing import BinaryIO, Callable, Optional, Type
+from typing import Awaitable, BinaryIO, Callable, Optional, Type
 
 from app.domain.external.browser import Browser
 from app.domain.external.llm import LLM
@@ -23,13 +23,16 @@ class SandboxProvider:
             sandbox_id: Optional[str],
             sandbox_cls: Type[Sandbox],
             uow_factory: Callable[[], IUnitOfWork],
+            on_ready: Optional[Callable[[Sandbox], Awaitable[None]]] = None,
     ) -> None:
         self._session_id = session_id
         self._initial_sandbox_id = sandbox_id
         self._sandbox_cls = sandbox_cls
         self._uow_factory = uow_factory
+        self._on_ready = on_ready
         self._lock = asyncio.Lock()
         self._sandbox: Optional[Sandbox] = None
+        self._prepared = False
 
     def materialized(self) -> Optional[Sandbox]:
         """Return the live sandbox instance without triggering creation."""
@@ -53,6 +56,9 @@ class SandboxProvider:
                         session.sandbox_id = sandbox.id
                         await uow.session.save(session)
             self._sandbox = sandbox
+            if self._on_ready and not self._prepared:
+                self._prepared = True
+                await self._on_ready(sandbox)
             return sandbox
 
 

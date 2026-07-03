@@ -256,3 +256,39 @@ class CodebaseService:
         async with self._uow_factory() as uow:
             await uow.codebase.save(codebase)
         return key
+
+    async def attach_to_session_sandbox(
+            self,
+            codebase_id: str,
+            session_sandbox: Sandbox,
+            object_storage: ObjectStoragePort,
+            scope: Optional[OwnerScope] = None,
+    ) -> None:
+        """Restore codebase snapshot into a session sandbox for Agent code editing (idempotent)."""
+        import io
+
+        codebase = await self.get_codebase(codebase_id, scope=scope)
+        sentinel_path = f"/home/ubuntu/.oc_codebase_attached_{codebase_id}"
+        exists = await session_sandbox.check_file_exists(sentinel_path)
+        if exists.success and exists.data:
+            logger.debug("代码库 %s 已附着到会话沙箱，跳过 restore", codebase_id)
+            return
+
+        snapshot_key = codebase.snapshot_key
+        if not snapshot_key:
+            if not codebase.sandbox_id:
+                raise NotFoundError("代码库沙箱未就绪")
+            snapshot_key = await self.package_download(codebase_id, object_storage, scope=scope)
+        snapshot_bytes = await object_storage.get_bytes(snapshot_key)
+        await session_sandbox.restore_workspace_snapshot(
+            f"codebase-{codebase_id}",
+            io.BytesIO(snapshot_bytes),
+        )
+        await session_sandbox.ensure_sandbox()
+        await session_sandbox.write_file(
+            sentinel_path,
+            f"attached:{codebase_id}\n",
+            leading_newline=False,
+            trailing_newline=False,
+        )
+        logger.info("已将代码库 %s 快照物化到会话沙箱", codebase_id)

@@ -1,6 +1,7 @@
 "use client";
 
 import { FileSearch, FileText } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 
@@ -66,6 +67,7 @@ export function AttachmentsMessage({
   onViewAllFiles,
   onFileClick,
 }: AttachmentsMessageProps) {
+  const t = useTranslations("attachmentsMessage");
   const sizeLabel = (f: AttachmentFile) => f.sizeLabel ?? formatFileSize(f.size);
 
   if (role === "user") {
@@ -107,7 +109,7 @@ export function AttachmentsMessage({
             onClick={onViewAllFiles}
           >
             <FileSearch size={18} className="shrink-0" />
-            <span className="text-sm whitespace-nowrap">查看此任务中所有的文件</span>
+            <span className="text-sm whitespace-nowrap">{t("viewAllFiles")}</span>
           </Button>
         )}
       </div>

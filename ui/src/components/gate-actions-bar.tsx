@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, Hand, ShieldAlert, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,8 @@ export function GateActionsBar({
   className,
   operatorScope,
 }: GateActionsBarProps) {
+  const t = useTranslations("gateActions");
+  const tCommon = useTranslations("common");
   const [rejectOpen, setRejectOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -41,7 +44,7 @@ export function GateActionsBar({
     try {
       await onSend(message);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "发送失败");
+      toast.error(error instanceof Error ? error.message : t("sendFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -59,15 +62,13 @@ export function GateActionsBar({
           <div>
             <p className="text-foreground flex items-center gap-1.5 text-sm font-medium">
               <Hand className="size-4" />
-              需要人工接管
+              {t("takeoverTitle")}
             </p>
-            <p className="text-muted-foreground mt-1 text-xs">
-              浏览器操作可能需要您手动完成，完成后点击「已接管」继续任务。
-            </p>
+            <p className="text-muted-foreground mt-1 text-xs">{t("takeoverDescription")}</p>
           </div>
           <div className="flex gap-2">
             <Button size="sm" disabled={disabled || submitting} onClick={() => void send("takeover")}>
-              已接管
+              {t("takeoverDone")}
             </Button>
             <Button
               size="sm"
@@ -75,7 +76,7 @@ export function GateActionsBar({
               disabled={disabled || submitting}
               onClick={() => void send("skip")}
             >
-              跳过
+              {t("skip")}
             </Button>
           </div>
         </div>
@@ -86,22 +87,22 @@ export function GateActionsBar({
   if (approval.kind !== "tool") return null;
 
   const payload = approval.payload as ToolPayload;
-  const toolName = payload.tool_name ?? "未知工具";
+  const toolName = payload.tool_name ?? t("unknownTool");
   const argsPreview = payload.args ? JSON.stringify(payload.args, null, 2) : "";
   const domainNote = payload.first_visit_domain
-    ? `首次访问域名: ${payload.first_visit_domain}`
+    ? t("firstVisitDomain", { domain: payload.first_visit_domain })
     : payload.note;
   const scopeLabel =
     operatorScope === "third_party_saas"
-      ? "第三方 SaaS（已声明）"
+      ? t("scopeThirdParty")
       : operatorScope === "owned"
-        ? "企业自有/自建"
+        ? t("scopeOwned")
         : null;
 
   const handleReject = async () => {
     const text = feedback.trim();
     if (!text) {
-      toast.error("请填写拒绝原因");
+      toast.error(t("rejectReasonRequired"));
       return;
     }
     await send(`reject: ${text}`);
@@ -120,21 +121,21 @@ export function GateActionsBar({
         <div>
           <p className="text-foreground flex items-center gap-1.5 text-sm font-medium">
             <ShieldAlert className="size-4" />
-            工具操作待确认
+            {t("toolConfirmTitle")}
           </p>
           <p className="text-muted-foreground text-xs">{toolName}</p>
           {domainNote && (
             <p className="text-amber-700 mt-1 text-xs">{domainNote}</p>
           )}
           {scopeLabel && (
-            <p className="text-muted-foreground mt-1 text-xs">目标系统: {scopeLabel}</p>
+            <p className="text-muted-foreground mt-1 text-xs">{t("targetSystem", { scope: scopeLabel })}</p>
           )}
         </div>
         {!rejectOpen && (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" disabled={disabled || submitting} onClick={() => void send("approve")}>
               <Check className="size-3.5" />
-              批准
+              {t("approve")}
             </Button>
             <Button
               size="sm"
@@ -142,7 +143,7 @@ export function GateActionsBar({
               disabled={disabled || submitting}
               onClick={() => void send("approve_same")}
             >
-              批准同类
+              {t("approveSame")}
             </Button>
             <Button
               size="sm"
@@ -151,7 +152,7 @@ export function GateActionsBar({
               onClick={() => setRejectOpen(true)}
             >
               <X className="size-3.5" />
-              拒绝
+              {t("reject")}
             </Button>
           </div>
         )}
@@ -168,15 +169,15 @@ export function GateActionsBar({
           <Textarea
             value={feedback}
             onChange={(event) => setFeedback(event.target.value)}
-            placeholder="请说明拒绝原因…"
+            placeholder={t("rejectPlaceholder")}
             rows={2}
           />
           <div className="flex gap-2">
             <Button size="sm" variant="destructive" disabled={submitting} onClick={() => void handleReject()}>
-              确认拒绝
+              {t("confirmReject")}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setRejectOpen(false)}>
-              取消
+              {tCommon("cancel")}
             </Button>
           </div>
         </div>

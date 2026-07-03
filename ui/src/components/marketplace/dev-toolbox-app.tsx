@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Copy, Wrench } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -11,13 +12,17 @@ import { Textarea } from "@/components/ui/textarea";
 
 type JsonMode = "format" | "minify" | "validate";
 
-function processJson(input: string, mode: JsonMode): { output: string; error?: string } {
+function processJson(
+  input: string,
+  mode: JsonMode,
+  messages: { valid: string; parseFailed: string },
+): { output: string; error?: string } {
   const trimmed = input.trim();
   if (!trimmed) return { output: "" };
   try {
     const parsed = JSON.parse(trimmed);
     if (mode === "validate") {
-      return { output: "JSON 格式有效" };
+      return { output: messages.valid };
     }
     if (mode === "minify") {
       return { output: JSON.stringify(parsed) };
@@ -26,24 +31,30 @@ function processJson(input: string, mode: JsonMode): { output: string; error?: s
   } catch (error) {
     return {
       output: "",
-      error: error instanceof Error ? error.message : "JSON 解析失败",
+      error: error instanceof Error ? error.message : messages.parseFailed,
     };
   }
 }
 
-function encodeBase64(input: string): { output: string; error?: string } {
+function encodeBase64(
+  input: string,
+  encodeFailed: string,
+): { output: string; error?: string } {
   if (!input) return { output: "" };
   try {
     return { output: btoa(unescape(encodeURIComponent(input))) };
   } catch (error) {
     return {
       output: "",
-      error: error instanceof Error ? error.message : "Base64 编码失败",
+      error: error instanceof Error ? error.message : encodeFailed,
     };
   }
 }
 
-function decodeBase64(input: string): { output: string; error?: string } {
+function decodeBase64(
+  input: string,
+  decodeFailed: string,
+): { output: string; error?: string } {
   const trimmed = input.trim();
   if (!trimmed) return { output: "" };
   try {
@@ -51,24 +62,24 @@ function decodeBase64(input: string): { output: string; error?: string } {
   } catch (error) {
     return {
       output: "",
-      error: error instanceof Error ? error.message : "Base64 解码失败",
+      error: error instanceof Error ? error.message : decodeFailed,
     };
   }
 }
 
-function encodeUrl(input: string): { output: string; error?: string } {
+function encodeUrl(input: string, encodeFailed: string): { output: string; error?: string } {
   if (!input) return { output: "" };
   try {
     return { output: encodeURIComponent(input) };
   } catch (error) {
     return {
       output: "",
-      error: error instanceof Error ? error.message : "URL 编码失败",
+      error: error instanceof Error ? error.message : encodeFailed,
     };
   }
 }
 
-function decodeUrl(input: string): { output: string; error?: string } {
+function decodeUrl(input: string, decodeFailed: string): { output: string; error?: string } {
   const trimmed = input.trim();
   if (!trimmed) return { output: "" };
   try {
@@ -76,12 +87,14 @@ function decodeUrl(input: string): { output: string; error?: string } {
   } catch (error) {
     return {
       output: "",
-      error: error instanceof Error ? error.message : "URL 解码失败",
+      error: error instanceof Error ? error.message : decodeFailed,
     };
   }
 }
 
 export function DevToolboxApp({ initialText = "" }: { initialText?: string }) {
+  const t = useTranslations("marketplaceApps.devToolbox");
+  const tShared = useTranslations("marketplaceApps.shared");
   const [jsonInput, setJsonInput] = useState(initialText);
   const [jsonMode, setJsonMode] = useState<JsonMode>("format");
   const [base64Input, setBase64Input] = useState("");
@@ -89,36 +102,45 @@ export function DevToolboxApp({ initialText = "" }: { initialText?: string }) {
   const [urlInput, setUrlInput] = useState("");
   const [urlDecode, setUrlDecode] = useState(false);
 
-  const jsonResult = useMemo(() => processJson(jsonInput, jsonMode), [jsonInput, jsonMode]);
+  const jsonResult = useMemo(
+    () =>
+      processJson(jsonInput, jsonMode, {
+        valid: t("jsonValid"),
+        parseFailed: t("jsonParseFailed"),
+      }),
+    [jsonInput, jsonMode, t],
+  );
   const base64Result = useMemo(
-    () => (base64Decode ? decodeBase64(base64Input) : encodeBase64(base64Input)),
-    [base64Decode, base64Input],
+    () =>
+      base64Decode
+        ? decodeBase64(base64Input, t("base64DecodeFailed"))
+        : encodeBase64(base64Input, t("base64EncodeFailed")),
+    [base64Decode, base64Input, t],
   );
   const urlResult = useMemo(
-    () => (urlDecode ? decodeUrl(urlInput) : encodeUrl(urlInput)),
-    [urlDecode, urlInput],
+    () =>
+      urlDecode ? decodeUrl(urlInput, t("urlDecodeFailed")) : encodeUrl(urlInput, t("urlEncodeFailed")),
+    [urlDecode, urlInput, t],
   );
 
   const copy = async (value: string) => {
     if (!value) return;
     await navigator.clipboard.writeText(value);
-    toast.message("已复制到剪贴板");
+    toast.message(tShared("copiedToClipboard"));
   };
 
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-foreground text-lg font-semibold tracking-tight">开发者工具箱</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          JSON 格式化、Base64 与 URL 编解码，本地处理不上传
-        </p>
+        <h2 className="text-foreground text-lg font-semibold tracking-tight">{t("title")}</h2>
+        <p className="text-muted-foreground mt-1 text-sm">{t("subtitle")}</p>
       </div>
 
       <Tabs defaultValue="json">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="json">JSON</TabsTrigger>
-          <TabsTrigger value="base64">Base64</TabsTrigger>
-          <TabsTrigger value="url">URL</TabsTrigger>
+          <TabsTrigger value="json">{t("tabJson")}</TabsTrigger>
+          <TabsTrigger value="base64">{t("tabBase64")}</TabsTrigger>
+          <TabsTrigger value="url">{t("tabUrl")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="json" className="space-y-4">
@@ -130,21 +152,21 @@ export function DevToolboxApp({ initialText = "" }: { initialText?: string }) {
                   variant={jsonMode === "format" ? "default" : "outline"}
                   onClick={() => setJsonMode("format")}
                 >
-                  格式化
+                  {t("format")}
                 </Button>
                 <Button
                   size="sm"
                   variant={jsonMode === "minify" ? "default" : "outline"}
                   onClick={() => setJsonMode("minify")}
                 >
-                  压缩
+                  {t("minify")}
                 </Button>
                 <Button
                   size="sm"
                   variant={jsonMode === "validate" ? "default" : "outline"}
                   onClick={() => setJsonMode("validate")}
                 >
-                  校验
+                  {t("validate")}
                 </Button>
               </div>
               <Textarea
@@ -156,9 +178,11 @@ export function DevToolboxApp({ initialText = "" }: { initialText?: string }) {
             </CardContent>
           </Card>
           <ResultCard
-            title="JSON 结果"
+            title={t("jsonResult")}
             value={jsonResult.output}
             error={jsonResult.error}
+            emptyLabel={t("emptyResult")}
+            copyLabel={tShared("copy")}
             onCopy={() => copy(jsonResult.output)}
           />
         </TabsContent>
@@ -172,28 +196,30 @@ export function DevToolboxApp({ initialText = "" }: { initialText?: string }) {
                   variant={!base64Decode ? "default" : "outline"}
                   onClick={() => setBase64Decode(false)}
                 >
-                  编码
+                  {tShared("encode")}
                 </Button>
                 <Button
                   size="sm"
                   variant={base64Decode ? "default" : "outline"}
                   onClick={() => setBase64Decode(true)}
                 >
-                  解码
+                  {tShared("decode")}
                 </Button>
               </div>
               <Textarea
                 value={base64Input}
                 onChange={(e) => setBase64Input(e.target.value)}
-                placeholder={base64Decode ? "粘贴 Base64 字符串" : "输入要编码的文本"}
+                placeholder={base64Decode ? t("base64DecodePlaceholder") : t("base64EncodePlaceholder")}
                 className="min-h-36 font-mono text-sm"
               />
             </CardContent>
           </Card>
           <ResultCard
-            title="Base64 结果"
+            title={t("base64Result")}
             value={base64Result.output}
             error={base64Result.error}
+            emptyLabel={t("emptyResult")}
+            copyLabel={tShared("copy")}
             onCopy={() => copy(base64Result.output)}
           />
         </TabsContent>
@@ -207,28 +233,30 @@ export function DevToolboxApp({ initialText = "" }: { initialText?: string }) {
                   variant={!urlDecode ? "default" : "outline"}
                   onClick={() => setUrlDecode(false)}
                 >
-                  编码
+                  {tShared("encode")}
                 </Button>
                 <Button
                   size="sm"
                   variant={urlDecode ? "default" : "outline"}
                   onClick={() => setUrlDecode(true)}
                 >
-                  解码
+                  {tShared("decode")}
                 </Button>
               </div>
               <Textarea
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
-                placeholder={urlDecode ? "粘贴 URL 编码字符串" : "输入要编码的文本或参数"}
+                placeholder={urlDecode ? t("urlDecodePlaceholder") : t("urlEncodePlaceholder")}
                 className="min-h-36 font-mono text-sm"
               />
             </CardContent>
           </Card>
           <ResultCard
-            title="URL 结果"
+            title={t("urlResult")}
             value={urlResult.output}
             error={urlResult.error}
+            emptyLabel={t("emptyResult")}
+            copyLabel={tShared("copy")}
             onCopy={() => copy(urlResult.output)}
           />
         </TabsContent>
@@ -241,11 +269,15 @@ function ResultCard({
   title,
   value,
   error,
+  emptyLabel,
+  copyLabel,
   onCopy,
 }: {
   title: string;
   value: string;
   error?: string;
+  emptyLabel: string;
+  copyLabel: string;
   onCopy: () => void;
 }) {
   return (
@@ -257,7 +289,7 @@ function ResultCard({
         </CardTitle>
         <Button variant="outline" size="sm" onClick={onCopy} disabled={!value}>
           <Copy className="size-4" />
-          复制
+          {copyLabel}
         </Button>
       </CardHeader>
       <CardContent>
@@ -265,7 +297,7 @@ function ResultCard({
           <p className="text-destructive text-sm">{error}</p>
         ) : (
           <pre className="border-border/70 bg-background/80 text-foreground overflow-auto rounded-xl border p-4 text-sm leading-relaxed whitespace-pre-wrap">
-            {value || "处理结果将显示在这里"}
+            {value || emptyLabel}
           </pre>
         )}
       </CardContent>

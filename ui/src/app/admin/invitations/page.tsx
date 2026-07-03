@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Copy, Loader2, MailPlus } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,7 @@ import { formatDateTime } from "@/lib/admin-utils";
 import { adminApi, type PlatformInvitation } from "@/lib/api/admin";
 
 export default function AdminInvitationsPage() {
+  const t = useTranslations("admin");
   const [invitations, setInvitations] = useState<PlatformInvitation[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -37,18 +39,18 @@ export default function AdminInvitationsPage() {
 
   async function createInvite() {
     if (!inviteEmail.trim()) {
-      toast.error("请输入邮箱");
+      toast.error(t("enterEmail"));
       return;
     }
     setCreating(true);
     try {
       const data = await adminApi.invite(inviteEmail.trim());
       setInviteUrl(data.url);
-      toast.success("邀请链接已生成");
+      toast.success(t("inviteLinkGenerated"));
       setInviteEmail("");
       await loadInvitations();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "生成失败");
+      toast.error(error instanceof Error ? error.message : t("generateFailed"));
     } finally {
       setCreating(false);
     }
@@ -56,7 +58,7 @@ export default function AdminInvitationsPage() {
 
   async function copyUrl(url: string) {
     await navigator.clipboard.writeText(url);
-    toast.success("已复制邀请链接");
+    toast.success(t("inviteLinkCopied"));
   }
 
   const pending = invitations.filter((item) => item.status === "pending").length;
@@ -66,20 +68,20 @@ export default function AdminInvitationsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold tracking-tight">平台邀请</h2>
-        <p className="text-muted-foreground mt-1 text-sm">创建邀请链接并跟踪注册转化</p>
+        <h2 className="text-2xl font-semibold tracking-tight">{t("platformInvite")}</h2>
+        <p className="text-muted-foreground mt-1 text-sm">{t("invitationsSubtitle")}</p>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
-        <SummaryCard label="待注册" value={pending} />
-        <SummaryCard label="已接受" value={accepted} />
-        <SummaryCard label="已过期" value={expired} />
+        <SummaryCard label={t("summaryPending")} value={pending} />
+        <SummaryCard label={t("summaryAccepted")} value={accepted} />
+        <SummaryCard label={t("summaryExpired")} value={expired} />
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">生成邀请</CardTitle>
-          <CardDescription>邀请链接有效期 7 天</CardDescription>
+          <CardTitle className="text-base">{t("generateInviteTitle")}</CardTitle>
+          <CardDescription>{t("inviteValidDays")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -90,7 +92,7 @@ export default function AdminInvitationsPage() {
             />
             <Button disabled={creating} onClick={() => void createInvite()}>
               {creating ? <Loader2 className="mr-1 size-4 animate-spin" /> : <MailPlus className="mr-1 size-4" />}
-              生成邀请链接
+              {t("generateInviteLink")}
             </Button>
           </div>
           {inviteUrl ? (
@@ -106,8 +108,8 @@ export default function AdminInvitationsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">邀请记录</CardTitle>
-          <CardDescription>共 {total} 条记录</CardDescription>
+          <CardTitle className="text-base">{t("invitationRecordsTitle")}</CardTitle>
+          <CardDescription>{t("totalRecords", { count: total })}</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -115,15 +117,15 @@ export default function AdminInvitationsPage() {
               <Loader2 className="size-6 animate-spin" />
             </div>
           ) : invitations.length === 0 ? (
-            <div className="text-muted-foreground py-10 text-center text-sm">暂无邀请记录</div>
+            <div className="text-muted-foreground py-10 text-center text-sm">{t("noInvitationRecords")}</div>
           ) : (
             <div className="space-y-2">
               {invitations.map((item) => (
                 <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-3">
                   <div className="min-w-0">
-                    <div className="truncate font-medium">{item.email || "未指定邮箱"}</div>
+                    <div className="truncate font-medium">{item.email || t("noEmailSpecified")}</div>
                     <div className="text-muted-foreground mt-1 text-xs">
-                      创建于 {formatDateTime(item.created_at)} · 过期 {formatDateTime(item.expires_at)}
+                      {t("createdAt", { time: formatDateTime(item.created_at) })} · {t("expiresAt", { time: formatDateTime(item.expires_at) })}
                     </div>
                   </div>
                   <StatusBadge status={item.status} />
@@ -149,7 +151,9 @@ function SummaryCard({ label, value }: { label: string; value: number }) {
 }
 
 function StatusBadge({ status }: { status: PlatformInvitation["status"] }) {
-  const label = status === "accepted" ? "已接受" : status === "pending" ? "待注册" : "已过期";
+  const t = useTranslations("admin");
+  const label =
+    status === "accepted" ? t("inviteAccepted") : status === "pending" ? t("invitePending") : t("inviteExpired");
   const variant = status === "accepted" ? "secondary" : status === "pending" ? "outline" : "destructive";
   return <Badge variant={variant}>{label}</Badge>;
 }

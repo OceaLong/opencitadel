@@ -1,7 +1,9 @@
 "use client";
 
 import { ArrowUpRight, Bot, Eye, Sparkles, Zap } from "lucide-react";
+import { useTranslations } from "next-intl";
 
+import { getCategoryLabel } from "@/components/marketplace/app-registry";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -30,19 +32,16 @@ type Props = {
   onClick: () => void;
 };
 
-const DEPENDENCY_BADGE: Record<
-  ModelDependency,
-  { label: string; variant: "secondary" | "outline"; icon: typeof Bot }
-> = {
-  none: { label: "无需模型 · 可直接使用", variant: "secondary", icon: Zap },
-  optional: { label: "AI 增强 · 可降级", variant: "outline", icon: Sparkles },
-  required: { label: "需要模型", variant: "outline", icon: Bot },
-};
-
 export function AppCard({ app, selected, compact, wide, modelUnavailable, onClick }: Props) {
+  const t = useTranslations("marketplace");
+  const tCommon = useTranslations("common");
   const accent = ACCENTS[app.accent] ?? ACCENTS.blue;
   const dependency = app.model_dependency ?? "optional";
-  const depBadge = DEPENDENCY_BADGE[dependency];
+  const depBadge = {
+    none: { label: t("noModelDirect"), variant: "secondary" as const, icon: Zap },
+    optional: { label: t("aiEnhanced"), variant: "outline" as const, icon: Sparkles },
+    required: { label: t("modelRequired"), variant: "outline" as const, icon: Bot },
+  }[dependency];
   const DepIcon = depBadge.icon;
   const disabled = modelUnavailable && dependency === "required";
 
@@ -51,7 +50,7 @@ export function AppCard({ app, selected, compact, wide, modelUnavailable, onClic
       type="button"
       onClick={onClick}
       disabled={disabled}
-      title={disabled ? "需要模型，当前不可用" : undefined}
+      title={disabled ? t("modelRequiredUnavailable") : undefined}
       className="group w-full text-left disabled:cursor-not-allowed disabled:opacity-60"
     >
       <Card
@@ -82,18 +81,18 @@ export function AppCard({ app, selected, compact, wide, modelUnavailable, onClic
           <div className="mt-2.5 min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-1.5">
               <Badge variant="secondary" className="text-[10px] font-normal">
-                {app.category}
+                {getCategoryLabel(app.category, t)}
               </Badge>
               {app.featured && (
                 <Badge className="bg-primary/10 text-primary hover:bg-primary/10 text-[10px]">
                   <Sparkles className="size-3" />
-                  精选
+                  {tCommon("featured")}
                 </Badge>
               )}
               {app.needs_vision && (
                 <Badge variant="outline" className="text-[10px]">
                   <Eye className="size-3" />
-                  视觉
+                  {tCommon("vision")}
                 </Badge>
               )}
               <Badge variant={depBadge.variant} className="text-[10px]">

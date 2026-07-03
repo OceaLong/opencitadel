@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Calculator, MessageSquareText, Package } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { ImageUploadZone } from "@/components/marketplace/image-upload-zone";
@@ -26,6 +27,9 @@ export function ConsumptionCalculatorApp({
   initialTotalGrams?: number;
   initialServingGrams?: number;
 }) {
+  const t = useTranslations("marketplaceApps.consumptionCalculator");
+  const tShared = useTranslations("marketplaceApps.shared");
+  const tAuth = useTranslations("auth");
   const { requireAuth } = useRequireAuth();
   const [preview, setPreview] = useState<string | null>(null);
   const [servingGrams, setServingGrams] = useState(String(initialServingGrams ?? 50));
@@ -36,18 +40,18 @@ export function ConsumptionCalculatorApp({
   const autoCalculatedRef = useRef(false);
 
   const handleFile = async (file: File) => {
-    if (!requireAuth("登录后即可使用 AI 消耗计算")) return;
+    if (!requireAuth(tAuth("loginToConsumption"))) return;
     if (!ALLOWED_TYPES.includes(file.type)) {
-      toast.error("仅支持 JPG/PNG 图片");
+      toast.error(tShared("jpgPngOnly"));
       return;
     }
     if (file.size > MAX_SIZE) {
-      toast.error("图片不能超过 5MB");
+      toast.error(tShared("imageTooLarge5mb"));
       return;
     }
     const serving = Number(servingGrams);
     if (!serving || serving <= 0) {
-      toast.error("请输入有效的单次食用量");
+      toast.error(t("invalidServing"));
       return;
     }
 
@@ -63,10 +67,10 @@ export function ConsumptionCalculatorApp({
       });
       setResult(data);
       if (!data.recognized) {
-        toast.message("未能自动识别，可手动输入总量后计算");
+        toast.message(t("notRecognizedToast"));
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "识别失败");
+      toast.error(e instanceof Error ? e.message : t("recognizeFailed"));
     } finally {
       setLoading(false);
     }
@@ -76,10 +80,10 @@ export function ConsumptionCalculatorApp({
     const total = Number(manualTotal);
     const serving = Number(servingGrams);
     if (!total || total <= 0 || !serving || serving <= 0) {
-      toast.error("请输入有效的总量和单次食用量");
+      toast.error(t("invalidTotalAndServing"));
       return;
     }
-    if (!requireAuth("登录后即可使用 AI 消耗计算")) return;
+    if (!requireAuth(tAuth("loginToConsumption"))) return;
     setLoading(true);
     try {
       const data = await marketplaceApi.calculateConsumption({
@@ -88,7 +92,7 @@ export function ConsumptionCalculatorApp({
       });
       setResult(data);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "计算失败");
+      toast.error(e instanceof Error ? e.message : t("calculateFailed"));
     } finally {
       setLoading(false);
     }
@@ -97,10 +101,10 @@ export function ConsumptionCalculatorApp({
   const handleCorrection = async () => {
     const serving = Number(servingGrams);
     if (!correction.trim() || !serving || serving <= 0) {
-      toast.error("请输入修正说明和有效单次食用量");
+      toast.error(t("correctionRequired"));
       return;
     }
-    if (!requireAuth("登录后即可使用 AI 消耗计算")) return;
+    if (!requireAuth(tAuth("loginToConsumption"))) return;
     setLoading(true);
     try {
       const data = await marketplaceApi.correctConsumption({
@@ -109,7 +113,7 @@ export function ConsumptionCalculatorApp({
       });
       setResult(data);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "修正失败");
+      toast.error(e instanceof Error ? e.message : t("correctionFailed"));
     } finally {
       setLoading(false);
     }
@@ -126,14 +130,12 @@ export function ConsumptionCalculatorApp({
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-foreground text-lg font-semibold tracking-tight">实物消耗计算器</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          拍摄包装净含量标识，结合单次用量计算可食用次数
-        </p>
+        <h2 className="text-foreground text-lg font-semibold tracking-tight">{t("title")}</h2>
+        <p className="text-muted-foreground mt-1 text-sm">{t("subtitle")}</p>
       </div>
 
       <div className="max-w-xs space-y-2">
-        <Label htmlFor="serving">单次食用量 (g)</Label>
+        <Label htmlFor="serving">{t("servingLabel")}</Label>
         <Input
           id="serving"
           type="number"
@@ -145,8 +147,8 @@ export function ConsumptionCalculatorApp({
       <ImageUploadZone
         loading={loading}
         preview={preview}
-        previewAlt="包装预览"
-        hint="上传包装净含量照片，支持点击或拖拽，JPG/PNG 最大 5MB"
+        previewAlt={t("packagePreviewAlt")}
+        hint={t("uploadHint")}
         onFile={handleFile}
       />
 
@@ -160,10 +162,8 @@ export function ConsumptionCalculatorApp({
       {!loading && !result && !preview && (
         <div className="bg-muted/20 flex flex-col items-center justify-center rounded-xl border border-dashed px-4 py-10 text-center">
           <Package className="text-muted-foreground/50 mb-3 size-10" />
-          <p className="text-foreground text-sm font-medium">上传包装照片开始识别</p>
-          <p className="text-muted-foreground mt-1 max-w-sm text-xs">
-            先填写单次食用量，系统将自动识别净含量并计算可食用次数
-          </p>
+          <p className="text-foreground text-sm font-medium">{t("emptyTitle")}</p>
+          <p className="text-muted-foreground mt-1 max-w-sm text-xs">{t("emptyHint")}</p>
         </div>
       )}
 
@@ -173,23 +173,23 @@ export function ConsumptionCalculatorApp({
             <p className="text-foreground text-sm">{result.message}</p>
             {result.ocr_text && (
               <p className="text-muted-foreground bg-background/60 rounded-md px-2 py-1.5 text-xs">
-                识别文本: {result.ocr_text}
+                {t("ocrTextLabel", { text: result.ocr_text })}
               </p>
             )}
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
               <div className="flex-1 space-y-2">
-                <Label htmlFor="manual-total">手动输入总量 (g)</Label>
+                <Label htmlFor="manual-total">{t("manualTotalLabel")}</Label>
                 <Input
                   id="manual-total"
                   type="number"
-                  placeholder="如 1000"
+                  placeholder={t("manualTotalPlaceholder")}
                   value={manualTotal}
                   onChange={(e) => setManualTotal(e.target.value)}
                 />
               </div>
               <Button onClick={handleManualCalculate} disabled={loading} className="shrink-0">
                 <Calculator className="size-4" />
-                重新计算
+                {t("recalculate")}
               </Button>
             </div>
           </CardContent>
@@ -206,46 +206,50 @@ export function ConsumptionCalculatorApp({
               <div className="min-w-0">
                 <p className="text-muted-foreground text-sm">{result.message}</p>
                 <p className="text-foreground mt-1 text-3xl font-bold">
-                  约 {result.servings}
-                  <span className="text-muted-foreground ml-1 text-base font-normal">次</span>
+                  {t("servingsApprox", { count: result.servings ?? 0 })}
+                  <span className="text-muted-foreground ml-1 text-base font-normal">
+                    {t("servingsUnit")}
+                  </span>
                 </p>
-                <p className="text-muted-foreground mt-1 text-xs">可食用次数</p>
+                <p className="text-muted-foreground mt-1 text-xs">{t("servingsLabel")}</p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
               <div className="border-border/70 bg-background/80 rounded-xl border px-3 py-2">
-                <p className="text-muted-foreground text-[11px]">总量</p>
+                <p className="text-muted-foreground text-[11px]">{t("totalLabel")}</p>
                 <p className="font-medium">{result.total_grams} g</p>
               </div>
               <div className="border-border/70 bg-background/80 rounded-xl border px-3 py-2">
-                <p className="text-muted-foreground text-[11px]">每次</p>
+                <p className="text-muted-foreground text-[11px]">{t("perServingLabel")}</p>
                 <p className="font-medium">{result.serving_grams} g</p>
               </div>
               <div className="border-border/70 bg-background/80 rounded-xl border px-3 py-2">
-                <p className="text-muted-foreground text-[11px]">可食用</p>
-                <p className="text-primary font-medium">{result.servings} 次</p>
+                <p className="text-muted-foreground text-[11px]">{t("consumableLabel")}</p>
+                <p className="text-primary font-medium">
+                  {result.servings} {t("servingsUnit")}
+                </p>
               </div>
             </div>
 
             {result.ocr_text && (
               <p className="text-muted-foreground bg-background/60 rounded-md px-2 py-1.5 text-xs">
-                识别: {result.ocr_text}
+                {t("ocrLabel", { text: result.ocr_text })}
               </p>
             )}
             <div className="border-border/70 bg-background/70 space-y-2 rounded-xl border p-3">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <MessageSquareText className="size-4" />
-                自然语言修正
+                {t("nlCorrectionTitle")}
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Input
                   value={correction}
                   onChange={(e) => setCorrection(e.target.value)}
-                  placeholder="如：其实净含量是 1.2kg"
+                  placeholder={t("correctionPlaceholder")}
                 />
                 <Button onClick={handleCorrection} disabled={loading} className="shrink-0">
-                  重新计算
+                  {t("recalculate")}
                 </Button>
               </div>
             </div>

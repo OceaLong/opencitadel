@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { Download, FileText, Loader2, Printer } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -28,13 +29,6 @@ const CONVERSION_MATRIX: Record<string, string[]> = {
   docx: ["md", "txt"],
 };
 
-const FORMAT_LABELS: Record<string, string> = {
-  pdf: "PDF",
-  docx: "Word (DOCX)",
-  md: "Markdown",
-  txt: "纯文本",
-};
-
 const ACCEPT =
   ".md,.txt,.pdf,.docx,text/markdown,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -47,11 +41,10 @@ function isLocalConversion(source: string, target: string): boolean {
   return (source === "md" || source === "txt") && target === "pdf";
 }
 
-function printTextAsPdf(content: string, title: string) {
+function printTextAsPdf(content: string, title: string, printHint: string) {
   const printWindow = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
   if (!printWindow) {
-    toast.error("无法打开打印窗口，请允许弹窗后重试");
-    return;
+    return false;
   }
   printWindow.document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>${title}</title>
@@ -65,7 +58,8 @@ function printTextAsPdf(content: string, title: string) {
 <script>window.onload = () => { window.print(); };</script>
 </body></html>`);
   printWindow.document.close();
-  toast.message("请在打印对话框中选择「另存为 PDF」");
+  toast.message(printHint);
+  return true;
 }
 
 export function DocumentConverterApp({
@@ -73,6 +67,8 @@ export function DocumentConverterApp({
 }: {
   initialTargetFormat?: "pdf" | "docx" | "md" | "txt";
 }) {
+  const t = useTranslations("marketplaceApps.documentConverter");
+  const tShared = useTranslations("marketplaceApps.shared");
   const { requireAuth } = useRequireAuth();
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -82,6 +78,16 @@ export function DocumentConverterApp({
   const [resultFileId, setResultFileId] = useState<string | null>(null);
   const [resultFilename, setResultFilename] = useState("");
 
+  const formatLabels: Record<string, string> = useMemo(
+    () => ({
+      pdf: t("formatPdf"),
+      docx: t("formatDocx"),
+      md: t("formatMd"),
+      txt: t("formatTxt"),
+    }),
+    [t],
+  );
+
   const targetOptions = useMemo(() => {
     if (!sourceExt) return [];
     return CONVERSION_MATRIX[sourceExt] ?? [];
@@ -90,12 +96,12 @@ export function DocumentConverterApp({
   const handleFile = (picked: File | undefined) => {
     if (!picked) return;
     if (picked.size > MAX_SIZE) {
-      toast.error("文件不能超过 20MB");
+      toast.error(tShared("fileTooLarge20mb"));
       return;
     }
     const ext = getExtension(picked.name);
     if (!CONVERSION_MATRIX[ext]) {
-      toast.error("仅支持 md、txt、pdf、docx 文件");
+      toast.error(t("unsupportedFormat"));
       return;
     }
     setFile(picked);
@@ -110,17 +116,20 @@ export function DocumentConverterApp({
 
   const convert = async () => {
     if (!file || !sourceExt || !targetFormat) {
-      toast.error("请选择文件和目标格式");
+      toast.error(t("selectFileAndFormat"));
       return;
     }
 
     if (isLocalConversion(sourceExt, targetFormat)) {
       const text = await file.text();
-      printTextAsPdf(text, file.name);
+      const opened = printTextAsPdf(text, file.name, t("printHint"));
+      if (!opened) {
+        toast.error(t("printWindowFailed"));
+      }
       return;
     }
 
-    if (!requireAuth("登录后即可使用文档格式转换")) return;
+    if (!requireAuth(t("loginRequired"))) return;
 
     setLoading(true);
     setResultFileId(null);
@@ -132,9 +141,9 @@ export function DocumentConverterApp({
       });
       setResultFileId(data.result_file_id);
       setResultFilename(data.result_filename);
-      toast.message("转换完成，可下载结果文件");
+      toast.message(t("convertCompleteToast"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "转换失败");
+      toast.error(e instanceof Error ? e.message : t("convertFailed"));
     } finally {
       setLoading(false);
     }
@@ -154,16 +163,14 @@ export function DocumentConverterApp({
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-foreground text-lg font-semibold tracking-tight">文档格式转换</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          支持 md/txt 本地转 PDF，PDF 转 Word、常用文档格式互转（docx→pdf 暂不支持）
-        </p>
+        <h2 className="text-foreground text-lg font-semibold tracking-tight">{t("title")}</h2>
+        <p className="text-muted-foreground mt-1 text-sm">{t("subtitle")}</p>
       </div>
 
       <Card>
         <CardContent className="space-y-4 py-5">
           <div className="space-y-2">
-            <Label>源文件</Label>
+            <Label>{t("sourceFileLabel")}</Label>
             <input
               ref={fileRef}
               type="file"
@@ -173,30 +180,33 @@ export function DocumentConverterApp({
             />
             <Button variant="outline" onClick={() => fileRef.current?.click()}>
               <FileText className="size-4" />
-              选择文档
+              {t("selectDocument")}
             </Button>
             {file && (
               <p className="text-muted-foreground text-xs">
-                已选择：{file.name}（{FORMAT_LABELS[sourceExt] ?? sourceExt}）
+                {t("selectedFile", {
+                  name: file.name,
+                  format: formatLabels[sourceExt] ?? sourceExt,
+                })}
               </p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label>目标格式</Label>
+            <Label>{t("targetFormatLabel")}</Label>
             <Select
               value={targetFormat}
               onValueChange={setTargetFormat}
               disabled={!sourceExt}
             >
               <SelectTrigger>
-                <SelectValue placeholder="选择目标格式" />
+                <SelectValue placeholder={t("selectTargetFormatPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
                 {targetOptions.map((fmt) => (
                   <SelectItem key={fmt} value={fmt}>
-                    {FORMAT_LABELS[fmt] ?? fmt}
-                    {isLocalConversion(sourceExt, fmt) ? "（本地打印）" : ""}
+                    {formatLabels[fmt] ?? fmt}
+                    {isLocalConversion(sourceExt, fmt) ? t("localPrintSuffix") : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -205,7 +215,7 @@ export function DocumentConverterApp({
 
           <Button onClick={convert} disabled={!file || !targetFormat || loading}>
             {loading ? <Loader2 className="size-4 animate-spin" /> : isLocalConversion(sourceExt, targetFormat) ? <Printer className="size-4" /> : <FileText className="size-4" />}
-            {isLocalConversion(sourceExt, targetFormat) ? "打印为 PDF" : "开始转换"}
+            {isLocalConversion(sourceExt, targetFormat) ? t("printAsPdf") : t("startConvert")}
           </Button>
         </CardContent>
       </Card>
@@ -214,12 +224,12 @@ export function DocumentConverterApp({
         <Card className="border-primary/20 bg-primary/5">
           <CardContent className="flex flex-col gap-3 py-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-foreground text-sm font-medium">转换完成</p>
+              <p className="text-foreground text-sm font-medium">{t("convertComplete")}</p>
               <p className="text-muted-foreground text-xs">{resultFilename}</p>
             </div>
             <Button variant="outline" onClick={download}>
               <Download className="size-4" />
-              下载文件
+              {t("downloadFile")}
             </Button>
           </CardContent>
         </Card>
