@@ -311,6 +311,7 @@
     "skills": "Skill 模板",
     "memory": "长期记忆",
     "integrations": "协议集成",
+    "runtime": "运行时配置",
     "a2a": "A2A Agent 配置",
     "mcp": "MCP 服务器",
     "language": "语言",
@@ -330,6 +331,7 @@
     "addServer": "添加服务器",
     "addMcpServer": "添加新的 MCP 服务器",
     "mcpAddDescription": "OpenCitadel 使用标准的 JSON MCP 配置来创建新服务器。请将您的配置粘贴到下方，然后点击「添加」即可添加新服务器。",
+    "mcpAddDescriptionNonAdmin": "请粘贴远程 MCP 配置（SSE 或 streamable_http）。stdio 类型服务器仅管理员可配置。",
     "a2aAddDescription": "OpenCitadel 使用标准的 A2A 协议来连接远程 Agent。请将您的配置粘贴到下方，然后点击「添加」即可添加 Agent。",
     "enterMcpConfig": "请输入 MCP 服务器配置",
     "noMcpServers": "暂无 MCP 服务器，请点击上方按钮添加"
@@ -552,7 +554,11 @@
     "userTotalCount": "共 {count} 位用户",
     "userUpdated": "用户已更新",
     "usersSubtitle": "管理平台用户、角色与配额",
-    "usersTitle": "用户管理"
+    "usersTitle": "用户管理",
+    "timeRange7d": "近 7 天",
+    "timeRange30d": "近 30 天",
+    "timeRange90d": "近 90 天",
+    "timeRangeAll": "全部时间"
   },
   "adminNav": {
     "title": "管理后台",
@@ -1307,8 +1313,14 @@
     "subtitle": "安排周期性或 Webhook 触发的 Agent 任务",
     "title": "自动化",
     "triggerTypeInterval": "间隔（秒）",
+    "triggerInterval": "间隔（秒）",
     "triggerCron": "Cron 表达式",
     "triggerWebhook": "Webhook Token",
+    "scopeOwned": "自有基础设施",
+    "scopeThirdPartySaas": "第三方 SaaS",
+    "gateLoose": "宽松",
+    "gateStandard": "标准",
+    "gateStrict": "严格",
     "updateFailed": "更新任务失败",
     "viewSession": "查看会话",
     "runNow": "立即运行",

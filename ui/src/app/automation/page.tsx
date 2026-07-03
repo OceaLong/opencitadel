@@ -455,8 +455,8 @@ export default function AutomationPage() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">—</SelectItem>
-                      <SelectItem value="owned">owned</SelectItem>
-                      <SelectItem value="third_party_saas">third_party_saas</SelectItem>
+                      <SelectItem value="owned">{t("scopeOwned")}</SelectItem>
+                      <SelectItem value="third_party_saas">{t("scopeThirdPartySaas")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -488,9 +488,9 @@ export default function AutomationPage() {
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="loose">loose</SelectItem>
-                    <SelectItem value="standard">standard</SelectItem>
-                    <SelectItem value="strict">strict</SelectItem>
+                    <SelectItem value="loose">{t("gateLoose")}</SelectItem>
+                    <SelectItem value="standard">{t("gateStandard")}</SelectItem>
+                    <SelectItem value="strict">{t("gateStrict")}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

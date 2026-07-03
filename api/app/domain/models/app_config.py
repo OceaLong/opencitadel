@@ -68,6 +68,7 @@ class WorkerConfig(BaseModel):
     max_concurrent_tasks: int = 4
     task_dispatch_max_retries: int = 3
     tool_timeout_seconds: int = 120
+    mcp_connect_timeout_seconds: int = 30
     max_sandboxes_per_node: int = 4
     max_dynamic_sandboxes_global: int = 0
     admission_min_host_available_mb: int = 3072

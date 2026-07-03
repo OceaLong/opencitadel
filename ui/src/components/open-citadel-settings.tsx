@@ -21,6 +21,7 @@ import {
 
 import { MemorySettings } from "@/components/settings/memory-settings";
 import { ModelsSettings } from "@/components/settings/models-settings";
+import { RuntimeSettings } from "@/components/settings/runtime-settings";
 import { SkillsSettings } from "@/components/settings/skills-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,6 +51,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { type SettingTab, useOpenCitadelSettings } from "@/hooks/use-open-citadel-settings";
 import type { AgentConfig, ListA2AServerItem, ListMCPServerItem } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
 // ==================== 通用配置 ====================
@@ -329,6 +331,7 @@ type MCPSettingProps = {
   onDelete: (serverName: string) => void;
   onAdd: (config: string) => Promise<boolean>;
   readOnly?: boolean;
+  isAdmin?: boolean;
 };
 
 export function MCPSetting({
@@ -338,6 +341,7 @@ export function MCPSetting({
   onDelete,
   onAdd,
   readOnly = false,
+  isAdmin = false,
 }: MCPSettingProps) {
   const t = useTranslations("settings");
   const tCommon = useTranslations("common");
@@ -345,7 +349,8 @@ export function MCPSetting({
   const [addConfig, setAddConfig] = useState("");
   const [adding, setAdding] = useState(false);
 
-  const mcpConfigPlaceholder = `{
+  const mcpConfigPlaceholder = isAdmin
+    ? `{
   "mcpServers": {
     "qiniu": {
       "command": "uvx",
@@ -356,6 +361,14 @@ export function MCPSetting({
         "QINIU_ACCESS_KEY": "YOUR_ACCESS_KEY",
         "QINIU_SECRET_KEY": "YOUR_SECRET_KEY"
       }
+    }
+  }
+}`
+    : `{
+  "mcpServers": {
+    "remote-tools": {
+      "transport": "streamable_http",
+      "url": "https://example.com/mcp"
     }
   }
 }`;
@@ -394,7 +407,7 @@ export function MCPSetting({
                 <DialogHeader>
                   <DialogTitle className="text-foreground">{t("addMcpServer")}</DialogTitle>
                   <DialogDescription className="text-muted-foreground">
-                    {t("mcpAddDescription")}
+                    {isAdmin ? t("mcpAddDescription") : t("mcpAddDescriptionNonAdmin")}
                   </DialogDescription>
                 </DialogHeader>
                 <form
@@ -434,7 +447,9 @@ export function MCPSetting({
             </Dialog>
             ) : null}
           </FieldLegend>
-          <FieldDescription className="text-sm">{t("mcpAddDescription")}</FieldDescription>
+          <FieldDescription className="text-sm">
+            {isAdmin ? t("mcpAddDescription") : t("mcpAddDescriptionNonAdmin")}
+          </FieldDescription>
 
           {/* 加载态 */}
           {loading && (
@@ -508,13 +523,15 @@ export function MCPSetting({
 const SETTING_MENUS: Array<{
   key: SettingTab;
   icon: typeof Settings;
-  labelKey: "common" | "models" | "skills" | "memory" | "integrations";
+  labelKey: "common" | "models" | "skills" | "memory" | "integrations" | "runtime";
+  adminOnly?: boolean;
 }> = [
   { key: "common-setting", icon: Settings, labelKey: "common" },
   { key: "models-setting", icon: IconModel, labelKey: "models" },
   { key: "skills-setting", icon: IconSkill, labelKey: "skills" },
   { key: "memory-setting", icon: IconMemory, labelKey: "memory" },
   { key: "integrations-setting", icon: IconIntegration, labelKey: "integrations" },
+  { key: "runtime-setting", icon: LayoutGrid, labelKey: "runtime", adminOnly: true },
 ];
 
 export type SettingsDialogProps = {
@@ -540,7 +557,7 @@ export function SettingsDialog({
     }
   }, [open, initialTab]);
 
-  const showFooterSave = activeSetting === "common-setting" && isAdmin;
+  const showFooterSave = activeSetting === "common-setting";
   const {
     agentConfig,
     setAgentConfig,
@@ -561,18 +578,18 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!max-w-[920px] shadow-[var(--shadow-panel)]">
-        <DialogHeader className="border-border/70 border-b pb-4">
+      <DialogContent className="!max-w-[920px] flex h-[640px] flex-col overflow-hidden shadow-[var(--shadow-panel)]">
+        <DialogHeader className="border-border/70 shrink-0 border-b pb-4">
           <DialogTitle className="text-foreground">{t("title")}</DialogTitle>
           <DialogDescription className="text-muted-foreground">
             {t("description")}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-row gap-4">
+        <div className="flex min-h-0 flex-1 flex-row gap-4">
           <div className="w-[168px] shrink-0">
             <div className="flex flex-col gap-0">
-              {SETTING_MENUS.map((menu) => (
+              {SETTING_MENUS.filter((menu) => !menu.adminOnly || isAdmin).map((menu) => (
                 <Button
                   key={menu.key}
                   variant={activeSetting === menu.key ? "default" : "ghost"}
@@ -588,7 +605,7 @@ export function SettingsDialog({
 
           <Separator orientation="vertical" />
 
-          <div className="scrollbar-hide h-[500px] flex-1 overflow-y-auto">
+          <div className="scrollbar-hide h-full min-h-0 flex-1 overflow-y-auto">
             {loadingConfig && activeSetting === "common-setting" ? (
               <div className="flex h-full items-center justify-center">
                 <Loader2 className="text-muted-foreground size-6 animate-spin" />
@@ -596,7 +613,10 @@ export function SettingsDialog({
             ) : (
               <>
                 {activeSetting === "common-setting" && (
-                  <CommonSetting config={agentConfig} onChange={setAgentConfig} readOnly={!isAdmin} />
+                  <CommonSetting config={agentConfig} onChange={setAgentConfig} readOnly={false} />
+                )}
+                {activeSetting === "runtime-setting" && isAdmin && (
+                  <RuntimeSettings isAdmin={isAdmin} />
                 )}
               </>
             )}
@@ -611,7 +631,8 @@ export function SettingsDialog({
                   onToggleEnabled={handleMCPToggle}
                   onDelete={handleMCPDelete}
                   onAdd={handleMCPAdd}
-                  readOnly={!isAdmin}
+                  readOnly={false}
+                  isAdmin={isAdmin}
                 />
                 <A2ASetting
                   servers={a2aServers}
@@ -619,28 +640,35 @@ export function SettingsDialog({
                   onToggleEnabled={handleA2AToggle}
                   onDelete={handleA2ADelete}
                   onAdd={handleA2AAdd}
-                  readOnly={!isAdmin}
+                  readOnly={false}
                 />
               </div>
             )}
           </div>
         </div>
 
-        {showFooterSave && (
-          <DialogFooter className="border-t pt-4">
-            <Button
-              variant="outline"
-              className="cursor-pointer"
-              onClick={() => onOpenChange(false)}
-            >
-              {tCommon("cancel")}
-            </Button>
-            <Button className="cursor-pointer" disabled={saving} onClick={handleSave}>
-              {saving && <Loader2 className="animate-spin" />}
-              {tCommon("save")}
-            </Button>
-          </DialogFooter>
-        )}
+        <DialogFooter
+          className={cn(
+            "h-[56px] shrink-0 items-center",
+            showFooterSave && "border-t pt-4",
+          )}
+        >
+          {showFooterSave && (
+            <>
+              <Button
+                variant="outline"
+                className="cursor-pointer"
+                onClick={() => onOpenChange(false)}
+              >
+                {tCommon("cancel")}
+              </Button>
+              <Button className="cursor-pointer" disabled={saving} onClick={handleSave}>
+                {saving && <Loader2 className="animate-spin" />}
+                {tCommon("save")}
+              </Button>
+            </>
+          )}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

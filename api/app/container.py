@@ -20,6 +20,7 @@ from app.application.services.codebase_service import CodebaseService
 from app.application.services.compliance_service import ComplianceService
 from app.application.services.config_provider import AppConfigProvider, create_app_config_provider
 from app.application.services.evidence_service import EvidenceService
+from app.application.services.integration_server_service import A2AServerConfigService, MCPServerService
 from app.application.services.file_service import FileService
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.application.services.llm_model_service import LLMModelService
@@ -138,23 +139,10 @@ async def _warm_app_config(_postgres: Postgres, config_provider: AppConfigProvid
 
 
 async def _configure_runtime_from_config(config_provider: AppConfigProvider) -> None:
-    from app.infrastructure.external.runtime_settings import (
-        AdmissionRuntimeSettings,
-        SandboxRuntimeSettings,
-        TaskQueueRuntimeSettings,
-        configure_admission_runtime,
-    )
-    from app.infrastructure.external.sandbox.docker_sandbox import configure_sandbox_runtime
-    from app.infrastructure.external.task.task_state import configure_task_state_runtime
+    from app.application.services.runtime_settings_apply import apply_runtime_settings
 
     app_config = await config_provider.get()
-    configure_sandbox_runtime(SandboxRuntimeSettings.from_config(app_config.sandbox))
-    configure_admission_runtime(
-        AdmissionRuntimeSettings.from_config(app_config.sandbox, app_config.worker),
-    )
-    configure_task_state_runtime(
-        TaskQueueRuntimeSettings.from_config(app_config.streams, app_config.worker),
-    )
+    apply_runtime_settings(app_config)
 
 
 async def _start_sandbox_pool(_: None) -> None:
@@ -291,10 +279,6 @@ class BaseContainer(containers.DeclarativeContainer):
         task_state_port=task_state_port,
     )
 
-    app_config_service = providers.Singleton(
-        AppConfigService,
-        app_config_repository=providers.Factory(create_app_config_repository),
-    )
     auth_service = providers.Singleton(
         AuthService,
         uow_factory=uow_factory,
@@ -302,6 +286,23 @@ class BaseContainer(containers.DeclarativeContainer):
         jwt_service=jwt_service,
     )
     audit_service = providers.Singleton(AuditService, uow_factory=uow_factory)
+    mcp_server_service = providers.Singleton(
+        MCPServerService,
+        uow_factory=uow_factory,
+        cipher=cipher,
+        audit_service=audit_service,
+    )
+    a2a_server_config_service = providers.Singleton(
+        A2AServerConfigService,
+        uow_factory=uow_factory,
+        audit_service=audit_service,
+    )
+    app_config_service = providers.Singleton(
+        AppConfigService,
+        app_config_repository=providers.Factory(create_app_config_repository),
+        mcp_server_service=mcp_server_service,
+        a2a_server_service=a2a_server_config_service,
+    )
     compliance_service = providers.Singleton(
         ComplianceService,
         uow_factory=uow_factory,
@@ -383,6 +384,8 @@ class BaseContainer(containers.DeclarativeContainer):
         session_state_factory=session_state_factory,
         mcp_connection_pool=mcp_connection_pool,
         a2a_connection_pool=a2a_connection_pool,
+        mcp_server_service=mcp_server_service,
+        a2a_server_config_service=a2a_server_config_service,
         artifact_service=artifact_service,
         audit_service=audit_service,
         codebase_service=codebase_service,

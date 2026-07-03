@@ -3,40 +3,193 @@
 import logging
 import uuid
 import asyncio
-from typing import List
+from typing import Any, Dict, List, Optional, Type
 
-from app.application.errors.exceptions import NotFoundError, BadRequestError
+from pydantic import BaseModel
+
+from app.application.errors.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from app.application.services.config_provider import invalidate_runtime_config
-from app.domain.models.app_config import AppConfig, AgentConfig, MCPConfig, A2AConfig, A2AServerConfig
+from app.application.services.integration_server_service import A2AServerConfigService, MCPServerService
+from app.application.services.owner_config_resolver import (
+    merge_configs,
+    validate_global_section,
+    validate_user_override_payload,
+)
+from app.domain.models.app_config import (
+    AppConfig,
+    AgentConfig,
+    MCPConfig,
+    MCPTransport,
+    A2AConfig,
+)
+from app.domain.models.app_config_revision import AppConfigRevision
+from app.domain.models.app_config_scope import (
+    ALL_APP_CONFIG_SECTIONS,
+    GLOBAL_ONLY_SECTIONS,
+    USER_OVERRIDABLE_SECTIONS,
+    user_config_id,
+)
+from app.domain.models.integration_server import MCPServerRecord
+from app.domain.models.scope import OwnerScope
 from app.domain.repositories.app_config_repository import AppConfigRepository
 from app.infrastructure.external.tools.connection_pool import A2AConnectionPool, MCPConnectionPool
 from app.interfaces.schemas.app_config import ListMCPServerItem, ListA2AServerItem
 
 logger = logging.getLogger(__name__)
 
+_SECTION_MODELS: Dict[str, Type[BaseModel]] = {
+    name: AppConfig.model_fields[name].annotation
+    for name in ALL_APP_CONFIG_SECTIONS
+}
+
 
 class AppConfigService:
     """应用配置服务"""
 
-    def __init__(self, app_config_repository: AppConfigRepository) -> None:
-        """构造函数，完成应用配置服务的初始化"""
+    def __init__(
+        self,
+        app_config_repository: AppConfigRepository,
+        mcp_server_service: Optional[MCPServerService] = None,
+        a2a_server_service: Optional[A2AServerConfigService] = None,
+    ) -> None:
         self.app_config_repository = app_config_repository
+        self._mcp_server_service = mcp_server_service
+        self._a2a_server_service = a2a_server_service
 
-    async def _load_app_config(self) -> AppConfig:
-        """加载获取所有的应用配置"""
-        config = await self.app_config_repository.load()
+    async def _load_global_config(self) -> AppConfig:
+        config = await self.app_config_repository.load_global()
         return config or AppConfig()
 
-    async def get_agent_config(self) -> AgentConfig:
-        """获取Agent通用配置"""
-        app_config = await self._load_app_config()
-        return app_config.agent_config
-
-    async def _save_app_config(self, app_config: AppConfig) -> None:
-        await self.app_config_repository.save(app_config)
+    async def _save_global_config(
+        self,
+        app_config: AppConfig,
+        *,
+        changed_by: Optional[str] = None,
+        note: str = "",
+    ) -> None:
+        await self.app_config_repository.save_global(app_config, changed_by=changed_by, note=note)
         invalidate_runtime_config()
         self._invalidate_runtime_pools()
         self._notify_config_invalidate()
+
+    async def resolve_for_owner(self, scope: Optional[OwnerScope] = None) -> AppConfig:
+        global_config = await self._load_global_config()
+        if scope is None:
+            return global_config
+        override_payload = await self.app_config_repository.load_user_override_payload(scope.user_id)
+        return merge_configs(global_config, override_payload)
+
+    async def get_section(
+        self,
+        section: str,
+        *,
+        scope: Optional[OwnerScope] = None,
+        use_user_override: bool = False,
+    ) -> BaseModel:
+        validate_global_section(section)
+        if use_user_override and scope is not None and section in USER_OVERRIDABLE_SECTIONS:
+            override_payload = await self.app_config_repository.load_user_override_payload(scope.user_id)
+            if section in override_payload:
+                section_type = type(getattr(AppConfig(), section))
+                return section_type.model_validate(override_payload[section])
+        config = await self.resolve_for_owner(scope)
+        return getattr(config, section)
+
+    async def update_section(
+        self,
+        section: str,
+        payload: dict,
+        *,
+        changed_by: Optional[str] = None,
+        scope: Optional[OwnerScope] = None,
+        is_admin: bool = False,
+    ) -> BaseModel:
+        validate_global_section(section)
+        section_model = _SECTION_MODELS[section].model_validate(payload)
+
+        if section in GLOBAL_ONLY_SECTIONS:
+            if not is_admin:
+                raise BadRequestError("仅管理员可修改全局配置段")
+            app_config = await self._load_global_config()
+            setattr(app_config, section, section_model)
+            await self._save_global_config(app_config, changed_by=changed_by, note=f"update:{section}")
+            return section_model
+
+        if scope is None:
+            raise BadRequestError("用户级配置段需要登录上下文")
+        if is_admin:
+            app_config = await self._load_global_config()
+            setattr(app_config, section, section_model)
+            await self._save_global_config(app_config, changed_by=changed_by, note=f"update:{section}")
+            return section_model
+        existing_payload = await self.app_config_repository.load_user_override_payload(scope.user_id)
+        existing_payload[section] = section_model.model_dump(mode="json")
+        validate_user_override_payload(existing_payload)
+        await self.app_config_repository.save_user_override_payload(
+            scope.user_id,
+            existing_payload,
+            changed_by=changed_by,
+            note=f"update:{section}",
+        )
+        invalidate_runtime_config()
+        self._notify_config_invalidate()
+        return section_model
+
+    async def delete_user_override(self, user_id: str, *, changed_by: Optional[str] = None) -> None:
+        await self.app_config_repository.delete_user_override(user_id)
+        invalidate_runtime_config()
+        self._notify_config_invalidate()
+
+    async def list_revisions(
+        self,
+        *,
+        scope: Optional[str] = None,
+        owner_user_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[AppConfigRevision]:
+        config_id = user_config_id(owner_user_id) if owner_user_id else "global"
+        return await self.app_config_repository.list_revisions(
+            config_id=config_id if scope else None,
+            scope=scope,
+            owner_user_id=owner_user_id,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def rollback_revision(
+        self,
+        revision_id: str,
+        *,
+        changed_by: Optional[str] = None,
+    ) -> AppConfig:
+        restored = await self.app_config_repository.rollback_to_revision(
+            revision_id,
+            changed_by=changed_by,
+        )
+        invalidate_runtime_config()
+        self._invalidate_runtime_pools()
+        self._notify_config_invalidate()
+        return restored
+
+    async def get_agent_config(self, scope: Optional[OwnerScope] = None) -> AgentConfig:
+        return await self.get_section("agent_config", scope=scope, use_user_override=False)  # type: ignore[return-value]
+
+    async def update_agent_config(
+        self,
+        agent_config: AgentConfig,
+        *,
+        changed_by: Optional[str] = None,
+        scope: Optional[OwnerScope] = None,
+        is_admin: bool = True,
+    ) -> AgentConfig:
+        return await self.update_section(  # type: ignore[return-value]
+            "agent_config",
+            agent_config.model_dump(mode="json"),
+            changed_by=changed_by,
+            scope=scope,
+            is_admin=is_admin,
+        )
 
     @staticmethod
     def _notify_config_invalidate() -> None:
@@ -56,108 +209,127 @@ class AppConfigService:
         loop.create_task(MCPConnectionPool.invalidate_all())
         loop.create_task(A2AConnectionPool.invalidate_all())
 
-    async def update_agent_config(self, agent_config: AgentConfig) -> AgentConfig:
-        """根据传递的agent_config更新Agent通用配置"""
-        app_config = await self._load_app_config()
-        app_config.agent_config = agent_config
-        await self._save_app_config(app_config)
-        return app_config.agent_config
-
-    async def get_mcp_servers(self) -> List[ListMCPServerItem]:
-        """获取MCP服务器列表"""
-        # 1.获取当前应用配置
-        app_config = await self._load_app_config()
-
-        # 2.复用运行时连接池，避免设置页每次请求都冷启动 MCP 连接
-        mcp_servers = []
+    async def get_mcp_servers(self, scope: Optional[OwnerScope] = None) -> List[ListMCPServerItem]:
+        if self._mcp_server_service is None:
+            raise BadRequestError("MCP 服务未启用")
+        app_config = AppConfig(mcp_config=await self._mcp_server_service.resolve_mcp_config(scope))
         mcp_client_manager = await MCPConnectionPool.acquire(app_config.mcp_config)
-
-        # 3.获取mcp客户端管理器的工具列表
         tools = mcp_client_manager.tools
+        records = await self._mcp_server_service.list_servers(scope=scope)
+        return [
+            ListMCPServerItem(
+                server_name=record.name,
+                server_id=record.id,
+                enabled=record.enabled,
+                transport=record.transport,
+                tools=[tool.name for tool in tools.get(record.name, [])],
+            )
+            for record in records
+        ]
 
-        # 4.循环组装响应的工具格式
-        for server_name, server_config in app_config.mcp_config.mcpServers.items():
-            mcp_servers.append(ListMCPServerItem(
-                server_name=server_name,
-                enabled=server_config.enabled,
-                transport=server_config.transport,
-                tools=[tool.name for tool in tools.get(server_name, [])]
-            ))
+    async def update_and_create_mcp_servers(
+        self,
+        mcp_config: MCPConfig,
+        *,
+        scope: Optional[OwnerScope] = None,
+        actor_user_id: Optional[str] = None,
+        is_admin: bool = False,
+    ) -> MCPConfig:
+        if self._mcp_server_service is None:
+            raise BadRequestError("MCP 服务未启用")
+        for name, cfg in mcp_config.mcpServers.items():
+            if not is_admin and cfg.transport == MCPTransport.STDIO:
+                raise ForbiddenError("仅管理员可配置 stdio 类型的 MCP 服务")
+            record = MCPServerRecord(
+                id=str(uuid.uuid4()),
+                name=name,
+                transport=cfg.transport,
+                enabled=cfg.enabled,
+                description=cfg.description,
+                env=cfg.env,
+                command=cfg.command,
+                args=cfg.args,
+                url=cfg.url,
+                headers=cfg.headers,
+            )
+            if not is_admin:
+                from app.domain.models.llm_model import ResourceVisibility
+                record.visibility = ResourceVisibility.PRIVATE
+            await self._mcp_server_service.create_server(
+                record,
+                scope=scope,
+                actor_user_id=actor_user_id,
+                is_admin=is_admin,
+            )
+        self._invalidate_runtime_pools()
+        self._notify_config_invalidate()
+        return await self._mcp_server_service.resolve_mcp_config(scope)
 
-        return mcp_servers
-
-    async def update_and_create_mcp_servers(self, mcp_config: MCPConfig) -> MCPConfig:
-        """根据传递的数据新增或更新MCP配置"""
-        # 1.获取应用配置
-        app_config = await self._load_app_config()
-
-        # 2.使用新的mcp_config更新原始的配置
-        app_config.mcp_config.mcpServers.update(mcp_config.mcpServers)
-
-        # 3.调用数据仓库完成存储or更新
-        await self._save_app_config(app_config)
-        return app_config.mcp_config
-
-    async def delete_mcp_server(self, server_name: str) -> MCPConfig:
-        """根据名字删除MCP服务"""
-        # 1.获取应用配置
-        app_config = await self._load_app_config()
-
-        # 2.查询对应服务的名字是否存在
-        if server_name not in app_config.mcp_config.mcpServers:
+    async def delete_mcp_server(
+        self,
+        server_name: str,
+        *,
+        scope: Optional[OwnerScope] = None,
+        actor_user_id: Optional[str] = None,
+    ) -> None:
+        if self._mcp_server_service is None:
+            raise BadRequestError("MCP 服务未启用")
+        records = await self._mcp_server_service.list_servers(mask=False, scope=scope)
+        target = next((r for r in records if r.name == server_name), None)
+        if target is None:
             raise NotFoundError(f"该MCP服务[{server_name}]不存在，请核实后重试")
+        await self._mcp_server_service.delete_server(target.id, scope=scope, actor_user_id=actor_user_id)
+        self._invalidate_runtime_pools()
+        self._notify_config_invalidate()
 
-        # 3.如果存在则删除字典中对应的服务
-        del app_config.mcp_config.mcpServers[server_name]
-        await self._save_app_config(app_config)
-        return app_config.mcp_config
-
-    async def set_mcp_server_enabled(self, server_name: str, enabled: bool) -> MCPConfig:
-        """更新MCP服务的启用状态"""
-        # 1.获取应用配置
-        app_config = await self._load_app_config()
-
-        # 2.查询对应服务的名字是否存在
-        if server_name not in app_config.mcp_config.mcpServers:
+    async def set_mcp_server_enabled(
+        self,
+        server_name: str,
+        enabled: bool,
+        *,
+        scope: Optional[OwnerScope] = None,
+        actor_user_id: Optional[str] = None,
+    ) -> None:
+        if self._mcp_server_service is None:
+            raise BadRequestError("MCP 服务未启用")
+        records = await self._mcp_server_service.list_servers(mask=False, scope=scope)
+        target = next((r for r in records if r.name == server_name), None)
+        if target is None:
             raise NotFoundError(f"该MCP服务[{server_name}]不存在，请核实后重试")
+        await self._mcp_server_service.set_enabled(target.id, enabled, scope=scope, actor_user_id=actor_user_id)
+        self._invalidate_runtime_pools()
+        self._notify_config_invalidate()
 
-        # 3.如果存在则更新该MCP服务的启用状态
-        app_config.mcp_config.mcpServers[server_name].enabled = enabled
-        await self._save_app_config(app_config)
-        return app_config.mcp_config
-
-    async def create_a2a_server(self, base_url: str) -> A2AConfig:
-        """根据传递的配置新增a2a服务器"""
-        # 1.获取当前的应用配置
-        app_config = await self._load_app_config()
-
-        # 2.往数据中新增a2a服务(在新增之前其实可以检测下当前Agent是否存在)
-        a2a_server_config = A2AServerConfig(
-            id=str(uuid.uuid4()),
-            base_url=base_url,
-            enabled=True,
+    async def create_a2a_server(
+        self,
+        base_url: str,
+        *,
+        scope: Optional[OwnerScope] = None,
+        actor_user_id: Optional[str] = None,
+        is_admin: bool = False,
+    ) -> A2AConfig:
+        if self._a2a_server_service is None:
+            raise BadRequestError("A2A 服务未启用")
+        from app.domain.models.llm_model import ResourceVisibility
+        visibility = ResourceVisibility.GLOBAL if is_admin else ResourceVisibility.PRIVATE
+        await self._a2a_server_service.create_server(
+            base_url,
+            scope=scope,
+            actor_user_id=actor_user_id,
+            visibility=visibility,
         )
-        app_config.a2a_config.a2a_servers.append(a2a_server_config)
+        self._invalidate_runtime_pools()
+        self._notify_config_invalidate()
+        return await self._a2a_server_service.resolve_a2a_config(scope)
 
-        # 3.调用数据仓库更新
-        await self._save_app_config(app_config)
-        return app_config.a2a_config
-
-    async def get_a2a_servers(self) -> List[ListA2AServerItem]:
-        """获取A2A服务列表"""
-        # 1.获取当前的应用配置
-        app_config = await self._load_app_config()
-
-        # 2.复用运行时连接池，避免设置页每次请求都冷启动 A2A 连接
-        a2a_servers = []
+    async def get_a2a_servers(self, scope: Optional[OwnerScope] = None) -> List[ListA2AServerItem]:
+        if self._a2a_server_service is None:
+            raise BadRequestError("A2A 服务未启用")
+        app_config = AppConfig(a2a_config=await self._a2a_server_service.resolve_a2a_config(scope))
         a2a_client_manager = await A2AConnectionPool.acquire(app_config.a2a_config)
-
-        # 3.获取Agent卡片列表
         agent_cards = a2a_client_manager.agent_cards
-
-        # 4.组装响应结构
-        for id, agent_card in agent_cards.items():
-            a2a_servers.append(ListA2AServerItem(
+        return [
+            ListA2AServerItem(
                 id=id,
                 name=agent_card.get("name", ""),
                 description=agent_card.get("description", ""),
@@ -166,44 +338,33 @@ class AppConfigService:
                 streaming=agent_card.get("capabilities", {}).get("streaming", False),
                 push_notifications=agent_card.get("capabilities", {}).get("push_notifications", False),
                 enabled=agent_card.get("enabled", False),
-            ))
+            )
+            for id, agent_card in agent_cards.items()
+        ]
 
-        return a2a_servers
+    async def set_a2a_server_enabled(
+        self,
+        a2a_id: str,
+        enabled: bool,
+        *,
+        scope: Optional[OwnerScope] = None,
+        actor_user_id: Optional[str] = None,
+    ) -> None:
+        if self._a2a_server_service is None:
+            raise BadRequestError("A2A 服务未启用")
+        await self._a2a_server_service.set_enabled(a2a_id, enabled, scope=scope, actor_user_id=actor_user_id)
+        self._invalidate_runtime_pools()
+        self._notify_config_invalidate()
 
-    async def set_a2a_server_enabled(self, a2a_id: str, enabled: bool) -> A2AConfig:
-        """根据传递的id+enabled更新服务启用状态"""
-        # 1.获取当前的应用配置
-        app_config = await self._load_app_config()
-
-        # 2.计算需要更新位置的索引并判断是否存在
-        idx = None
-        for item_idx, item in enumerate(app_config.a2a_config.a2a_servers):
-            if item.id == a2a_id:
-                idx = item_idx
-                break
-        if idx is None:
-            raise NotFoundError(f"该A2A服务[{a2a_id}]不存在，请核实后重试")
-
-        # 3.如果存在则更新数据
-        app_config.a2a_config.a2a_servers[idx].enabled = enabled
-        await self._save_app_config(app_config)
-        return app_config.a2a_config
-
-    async def delete_a2a_server(self, a2a_id: str) -> A2AConfig:
-        """根据传递的id删除指定的a2a服务"""
-        # 1.获取当前的应用配置
-        app_config = await self._load_app_config()
-
-        # 2.计算需要操作位置的索引并判断是否存在
-        idx = None
-        for item_idx, item in enumerate(app_config.a2a_config.a2a_servers):
-            if item.id == a2a_id:
-                idx = item_idx
-                break
-        if idx is None:
-            raise NotFoundError(f"该A2A服务[{a2a_id}]不存在，请核实后重试")
-
-        # 3.删除a2a服务器
-        del app_config.a2a_config.a2a_servers[idx]
-        await self._save_app_config(app_config)
-        return app_config.a2a_config
+    async def delete_a2a_server(
+        self,
+        a2a_id: str,
+        *,
+        scope: Optional[OwnerScope] = None,
+        actor_user_id: Optional[str] = None,
+    ) -> None:
+        if self._a2a_server_service is None:
+            raise BadRequestError("A2A 服务未启用")
+        await self._a2a_server_service.delete_server(a2a_id, scope=scope, actor_user_id=actor_user_id)
+        self._invalidate_runtime_pools()
+        self._notify_config_invalidate()

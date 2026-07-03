@@ -39,8 +39,6 @@ import { formatDuration, sessionFileToAttachment } from "@/lib/session-events";
 import { formatFileSize } from "@/lib/utils";
 
 export type SessionHeaderProps = {
-  /** 任务/会话标题 */
-  title?: string;
   /** 此任务下的文件列表（用于「此任务中所有文件」弹窗） */
   files?: SessionFile[];
   /** 受控：文件列表弹窗是否打开（用于从页面其他处打开，如「查看此任务中所有的文件」） */
@@ -66,7 +64,6 @@ export type SessionHeaderProps = {
 };
 
 export const SessionHeader = memo(function SessionHeader({
-  title = "",
   files,
   fileListOpen,
   onFileListOpenChange,
@@ -173,10 +170,7 @@ export const SessionHeader = memo(function SessionHeader({
   }, []);
 
   return (
-    <header className="bg-background/95 sticky top-0 z-10 flex flex-shrink-0 flex-row items-center justify-between gap-2 border-b px-4 pt-2 pb-2">
-      <div className="text-foreground min-w-0 flex-1 overflow-hidden text-lg font-medium text-ellipsis whitespace-nowrap">
-        {title || t("untitledTask")}
-      </div>
+    <header className="bg-background/95 sticky top-0 z-10 flex flex-shrink-0 flex-row items-center justify-end gap-2 px-4 pt-2 pb-2">
       <div className="flex shrink-0 items-center gap-0.5">
         {observationSummary &&
           (observationSummary.toolCount > 0 || observationSummary.errorCount > 0) && (

@@ -6,7 +6,10 @@ import logging
 from typing import Optional
 
 from app.application.services.app_config_repository_factory import create_app_config_repository
+from app.application.services.owner_config_resolver import resolve_config_for_owner
+from app.application.services.runtime_settings_apply import apply_runtime_settings
 from app.domain.models.app_config import AppConfig
+from app.domain.models.scope import OwnerScope
 from app.domain.repositories.app_config_repository import AppConfigRepository
 
 logger = logging.getLogger(__name__)
@@ -31,14 +34,19 @@ class AppConfigProvider:
     async def get(self, *, force_reload: bool = False) -> AppConfig:
         async with self._lock:
             if self._cache is None or force_reload:
-                self._cache = await self._repository.load() or AppConfig()
+                self._cache = await self._repository.load_global() or AppConfig()
                 self._version += 1
                 _set_sync_cache(self._cache)
                 logger.debug("AppConfigProvider loaded config version=%s", self._version)
             return self._cache
 
+    async def resolve_for_owner(self, scope: Optional[OwnerScope] = None) -> AppConfig:
+        return await resolve_config_for_owner(self._repository, scope)
+
     async def refresh(self) -> AppConfig:
-        return await self.get(force_reload=True)
+        config = await self.get(force_reload=True)
+        apply_runtime_settings(config)
+        return config
 
     def invalidate(self) -> None:
         self._cache = None
@@ -63,6 +71,10 @@ def create_app_config_provider() -> AppConfigProvider:
     global _provider
     if _provider is None:
         _provider = AppConfigProvider(create_app_config_repository())
+    return _provider
+
+
+def get_app_config_provider() -> Optional[AppConfigProvider]:
     return _provider
 
 

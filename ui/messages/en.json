@@ -311,6 +311,7 @@
     "skills": "Skill templates",
     "memory": "Long-term memory",
     "integrations": "Integrations",
+    "runtime": "Runtime Config",
     "a2a": "A2A Agent",
     "mcp": "MCP servers",
     "language": "Language",
@@ -330,6 +331,7 @@
     "addServer": "Add server",
     "addMcpServer": "Add new MCP server",
     "mcpAddDescription": "OpenCitadel uses standard JSON MCP configuration. Paste your config below and click Add.",
+    "mcpAddDescriptionNonAdmin": "Paste a remote MCP config (SSE or streamable_http). stdio servers require an administrator.",
     "a2aAddDescription": "OpenCitadel uses the standard A2A protocol to connect remote agents. Paste your config below and click Add.",
     "enterMcpConfig": "Please enter MCP server configuration",
     "noMcpServers": "No MCP servers yet. Click above to add one."
@@ -552,7 +554,11 @@
     "userTotalCount": "{count} users total",
     "userUpdated": "User updated",
     "usersSubtitle": "Manage platform users, roles, and quotas",
-    "usersTitle": "User management"
+    "usersTitle": "User management",
+    "timeRange7d": "Last 7 days",
+    "timeRange30d": "Last 30 days",
+    "timeRange90d": "Last 90 days",
+    "timeRangeAll": "All time"
   },
   "adminNav": {
     "title": "Administration",
@@ -1307,8 +1313,14 @@
     "subtitle": "Schedule recurring or webhook-triggered agent tasks",
     "title": "Automation",
     "triggerTypeInterval": "Interval (seconds)",
+    "triggerInterval": "Interval (seconds)",
     "triggerCron": "Cron expression",
     "triggerWebhook": "Webhook token",
+    "scopeOwned": "Owned",
+    "scopeThirdPartySaas": "Third-party SaaS",
+    "gateLoose": "Loose",
+    "gateStandard": "Standard",
+    "gateStrict": "Strict",
     "updateFailed": "Failed to update job",
     "viewSession": "View session",
     "runNow": "Run now",

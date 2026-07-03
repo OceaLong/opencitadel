@@ -51,8 +51,35 @@ flowchart TD
 
 ## Production Deployment
 
-- **Must** set `USE_DB_APP_CONFIG=true`; Docker Compose does not enforce this by default—set explicitly in `.env`; Helm `env` is already configured
+- **Must** set `USE_DB_APP_CONFIG=true` (now the code default); Helm `env` is already configured; Docker Compose should set explicitly in `.env`
 - `config.yaml` / Helm `appConfig` are initial defaults; migrate job seeds DB when the table is empty
+
+## Three-tier storage (2026-07)
+
+| Tier | Storage | Examples | Admin UI |
+|------|---------|----------|----------|
+| Bootstrap secrets | `.env` / `Settings` | Postgres, Redis, JWT, COS keys | N/A |
+| Behavioral config | `app_configs` JSONB (`scope=global` + optional `scope=user` overrides) | `worker`, `sandbox`, `feature_flags`, per-user `agent_config` | Settings → Runtime / Common |
+| Integration entities | `mcp_servers`, `a2a_servers` tables (owner + visibility, encrypted secrets) | MCP headers/env, A2A base URLs | Settings → Integrations |
+
+### Per-user overrides
+
+Only session-scoped sections may be overridden per user: `agent_config`, `memory`, `hitl`, `model_resilience`, `knowledge_base`. Process-scoped sections remain global: `server`, `worker`, `streams`, `sandbox`, `scheduler`, `observability`, `feature_flags`.
+
+### Hot reload vs restart
+
+- Hot reload (Redis invalidate → reload `app_configs` → re-apply sandbox/worker/streams module settings): most `AppConfig` sections
+- Requires API restart: `server.cors_origins` (CORS middleware registered at app build time)
+
+### Audit / rollback
+
+- `app_config_revisions` stores snapshots on every `app_configs` save (global and user rows)
+- MCP/A2A CRUD is recorded via `AuditService`
+
+### Known limitations
+
+- `OwnerScope.team(...)` does not filter MCP/A2A (or existing `llm_model`) by `team_id`; team members do not automatically share those resources. This is an existing architectural limitation.
+- Global `app_configs` JSONB row uses read-modify-write without optimistic locking; concurrent edits may race (low priority, consistent with prior patterns).
 
 ## Prohibited
 

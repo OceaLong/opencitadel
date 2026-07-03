@@ -9,10 +9,11 @@ from app.domain.models.app_config import MCPTransport
 
 class ListMCPServerItem(BaseModel):
     """MCP服务列表条目选项"""
-    server_name: str = ""  # 服务名字
-    enabled: bool = True  # 启用状态
-    transport: MCPTransport = MCPTransport.STREAMABLE_HTTP  # 传输协议
-    tools: List[str] = Field(default_factory=list)  # 工具名字列表
+    server_name: str = ""
+    server_id: str = ""
+    enabled: bool = True
+    transport: MCPTransport = MCPTransport.STREAMABLE_HTTP
+    tools: List[str] = Field(default_factory=list)
 
 
 class ListMCPServerResponse(BaseModel):

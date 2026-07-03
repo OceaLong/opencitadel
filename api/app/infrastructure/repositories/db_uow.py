@@ -26,6 +26,7 @@ from .db_service_api_key_repository import DBServiceApiKeyRepository
 from .db_skill_repository import DBSkillRepository
 from .db_team_repository import DBTeamRepository
 from .db_artifact_repository import DBArtifactRepository
+from .db_integration_server_repository import DBA2AServerRepository, DBMCPServerRepository
 from .db_scheduled_job_repository import DBScheduledJobRepository
 from .db_notification_repository import DBNotificationRepository
 from .db_user_repository import DBUserRepository
@@ -79,6 +80,8 @@ class DBUnitOfWork(IUnitOfWork):
         self.llm_token_usage = DBLLMTokenUsageRepository(db_session=self.db_session)
         self.user = DBUserRepository(db_session=self.db_session)
         self.artifact = DBArtifactRepository(db_session=self.db_session)
+        self.mcp_server = DBMCPServerRepository(db_session=self.db_session, cipher=cipher)
+        self.a2a_server = DBA2AServerRepository(db_session=self.db_session)
         self.scheduled_job = DBScheduledJobRepository(db_session=self.db_session)
         self.notification = DBNotificationRepository(db_session=self.db_session)
 

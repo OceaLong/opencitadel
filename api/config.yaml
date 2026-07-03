@@ -1,3 +1,4 @@
+# 应用运行时配置（仅作种子/默认值；生产环境运行时来源为 PostgreSQL app_configs 表，USE_DB_APP_CONFIG=true）
 server:
   cors_origins: '*'
   rate_limit_enabled: true
@@ -53,6 +54,7 @@ worker:
   max_concurrent_tasks: 4
   task_dispatch_max_retries: 3
   tool_timeout_seconds: 120
+  mcp_connect_timeout_seconds: 30
   max_sandboxes_per_node: 4
   max_dynamic_sandboxes_global: 0
   admission_min_host_available_mb: 3072

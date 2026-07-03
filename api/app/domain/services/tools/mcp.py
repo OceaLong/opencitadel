@@ -6,6 +6,7 @@ import os
 import re
 import asyncio
 from contextlib import AsyncExitStack
+from datetime import timedelta
 from typing import Optional, Dict, List, Any, Tuple
 
 from mcp import ClientSession, Tool, StdioServerParameters, stdio_client
@@ -13,6 +14,7 @@ from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 
 from app.application.errors.exceptions import NotFoundError
+from app.application.services.config_provider import get_runtime_config
 from app.domain.external.connection_pool import MCPConnectionPoolPort
 from app.domain.models.app_config import MCPConfig, MCPServerConfig, MCPTransport
 from app.domain.models.tool_result import ToolResult
@@ -79,12 +81,26 @@ class MCPClientManager:
         self._clients: Dict[str, ClientSession] = {}  # 缓存的客户端会话
         self._tools: Dict[str, List[Tool]] = {}  # 缓存的MCP工具参数声明
         self._canonical_to_source: Dict[str, Tuple[str, str]] = {}  # 规范名 -> (server, 原始工具名)
+        self._connection_errors: Dict[str, str] = {}  # 连接失败的服务 -> 错误信息
         self._initialized: bool = False  # 是否初始化标识
 
     @property
     def tools(self) -> Dict[str, List[Tool]]:
         """只读属性，返回缓存的MCP工具参数声明，键就是服务名字，值就是服务对应的工具声明"""
         return self._tools
+
+    @property
+    def connection_errors(self) -> Dict[str, str]:
+        """只读属性，返回连接失败的 MCP 服务及错误信息"""
+        return dict(self._connection_errors)
+
+    @staticmethod
+    def _connect_read_timeout() -> timedelta:
+        return timedelta(seconds=get_runtime_config().worker.mcp_connect_timeout_seconds)
+
+    @staticmethod
+    def _tool_call_read_timeout() -> timedelta:
+        return timedelta(seconds=get_runtime_config().worker.tool_timeout_seconds)
 
     async def initialize(self) -> None:
         """初始化函数，用于连接所有配置的MCP服务器"""
@@ -119,7 +135,9 @@ class MCPClientManager:
         try:
             await self._connect_mcp_server(server_name, server_config)
         except Exception as e:
-            logger.error(f"连接MCP服务器[{server_name}]出错: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"连接MCP服务器[{server_name}]出错: {error_msg}")
+            self._connection_errors[server_name] = error_msg
             return
 
     async def _connect_mcp_server(self, server_name: str, server_config: MCPServerConfig) -> None:
@@ -169,7 +187,11 @@ class MCPClientManager:
 
             # 5.根据读取与写入流构建会话
             session: ClientSession = await self._exit_stack.enter_async_context(
-                ClientSession(read_stream, write_stream),
+                ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=self._connect_read_timeout(),
+                ),
             )
 
             # 6.初始化MCP服务会话
@@ -202,7 +224,11 @@ class MCPClientManager:
 
             # 3.创建客户端会话
             session: ClientSession = await self._exit_stack.enter_async_context(
-                ClientSession(read_stream, write_stream),
+                ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=self._connect_read_timeout(),
+                ),
             )
 
             # 4.初始化MCP服务会话
@@ -240,7 +266,11 @@ class MCPClientManager:
 
             # 4.创建客户端会话
             session: ClientSession = await self._exit_stack.enter_async_context(
-                ClientSession(read_stream, write_stream),
+                ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=self._connect_read_timeout(),
+                ),
             )
 
             # 5.初始化MCP服务会话
@@ -266,7 +296,9 @@ class MCPClientManager:
             logger.info(f"MCP服务器[{server_name}]提供了{len(tools)}个工具")
         except Exception as e:
             # 记录日志并将缓存设置为空
-            logger.error(f"获取MCP服务器[{server_name}]工具列表失败: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"获取MCP服务器[{server_name}]工具列表失败: {error_msg}")
+            self._connection_errors[server_name] = error_msg
             self._tools[server_name] = []
 
     async def get_all_tools(self) -> List[Dict[str, Any]]:
@@ -322,7 +354,11 @@ class MCPClientManager:
                 return ToolResult(success=False, message=f"MCP服务器[{original_server_name}]未连接")
 
             # 8.使用会话调用工具
-            result = await session.call_tool(original_tool_name, arguments)
+            result = await session.call_tool(
+                original_tool_name,
+                arguments,
+                read_timeout_seconds=self._tool_call_read_timeout(),
+            )
 
             # 9.判断结果是否存在执行不同的操作
             if result:
@@ -377,6 +413,7 @@ class MCPClientManager:
             self._clients.clear()
             self._tools.clear()
             self._canonical_to_source.clear()
+            self._connection_errors.clear()
             self._initialized = False
 
 
@@ -406,6 +443,13 @@ class MCPTool(BaseTool):
     def get_tools(self) -> List[Dict[str, Any]]:
         """同步获取工具包下的所有工具列表"""
         return self._tools
+
+    @property
+    def connection_errors(self) -> Dict[str, str]:
+        """返回连接失败的 MCP 服务及错误信息"""
+        if self._manager is None:
+            return {}
+        return self._manager.connection_errors
 
     def has_tool(self, tool_name: str) -> bool:
         """传递工具名字判断工具是否存在"""

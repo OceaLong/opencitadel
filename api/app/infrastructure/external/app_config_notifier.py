@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import Optional
 
-from app.application.services.config_provider import invalidate_runtime_config
+from app.application.services.config_provider import get_app_config_provider, invalidate_runtime_config
 from app.infrastructure.storage.redis import get_redis
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,19 @@ async def publish_config_invalidate() -> None:
         logger.warning("发布配置失效通知失败: %s", exc)
 
 
+async def _reload_and_apply_runtime_settings() -> None:
+    provider = get_app_config_provider()
+    if provider is None:
+        invalidate_runtime_config()
+        return
+    try:
+        await provider.refresh()
+        logger.debug("配置失效后已热重载并重推 sandbox/worker/streams 模块级设置")
+    except Exception as exc:
+        logger.warning("配置热重载失败: %s", exc)
+        invalidate_runtime_config()
+
+
 async def _listen_config_invalidate() -> None:
     redis = get_redis()
     pubsub = redis.client.pubsub()
@@ -30,8 +43,7 @@ async def _listen_config_invalidate() -> None:
         async for message in pubsub.listen():
             if message.get("type") != "message":
                 continue
-            invalidate_runtime_config()
-            logger.debug("收到跨进程配置失效通知，已刷新本地缓存")
+            await _reload_and_apply_runtime_settings()
     except asyncio.CancelledError:
         raise
     except Exception as exc:

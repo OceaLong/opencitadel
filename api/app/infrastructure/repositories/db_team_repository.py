@@ -61,6 +61,7 @@ class DBTeamRepository(TeamRepository):
             record.update_from_domain(team)
         else:
             self.db_session.add(TeamORM.from_domain(team))
+        await self.db_session.flush()
 
     async def delete_by_id(self, team_id: str) -> None:
         await self.db_session.execute(delete(TeamORM).where(TeamORM.id == team_id))

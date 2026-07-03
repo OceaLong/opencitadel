@@ -8,6 +8,7 @@ from app.application.services.audit_service import AuditService
 from app.application.services.codebase_service import CodebaseService
 from app.application.services.artifact_service import ArtifactService
 from app.application.services.config_provider import AppConfigProvider, get_runtime_config
+from app.application.services.integration_server_service import A2AServerConfigService, MCPServerService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.memory_extractor_service import MemoryExtractorService
 from app.application.services.notification_service import NotificationService
@@ -28,6 +29,7 @@ from app.domain.models.agent_runtime_settings import AgentMemoryRuntimeSettings,
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
 from app.domain.models.codebase import SessionMode
 from app.domain.models.session import Session, SessionStatus
+from app.domain.models.scope import OwnerScope
 from app.domain.models.skill import Skill
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agent_task_runner import AgentTaskRunner
@@ -87,6 +89,8 @@ class TaskRunnerFactory:
             session_state_factory: Callable[[], SessionStatePort],
             mcp_connection_pool: MCPConnectionPoolPort,
             a2a_connection_pool: A2AConnectionPoolPort,
+            mcp_server_service: Optional[MCPServerService] = None,
+            a2a_server_config_service: Optional[A2AServerConfigService] = None,
             artifact_service: Optional[ArtifactService] = None,
             audit_service: Optional[AuditService] = None,
             codebase_service: Optional[CodebaseService] = None,
@@ -108,6 +112,8 @@ class TaskRunnerFactory:
         self._session_state_factory = session_state_factory
         self._mcp_connection_pool = mcp_connection_pool
         self._a2a_connection_pool = a2a_connection_pool
+        self._mcp_server_service = mcp_server_service
+        self._a2a_server_config_service = a2a_server_config_service
         self._artifact_service = artifact_service
         self._audit_service = audit_service
         self._codebase_service = codebase_service
@@ -117,12 +123,19 @@ class TaskRunnerFactory:
         self._a2a_config = A2AConfig()
         self._auto_extract_memory = True
 
-    async def _refresh_runtime_config(self) -> None:
-        app_config = await self._config_provider.get()
+    async def _refresh_runtime_config(self, session: Optional[Session] = None) -> None:
+        scope = OwnerScope.personal(session.owner_user_id) if session and session.owner_user_id else None
+        app_config = await self._config_provider.resolve_for_owner(scope)
         self._agent_config = app_config.agent_config
-        self._mcp_config = app_config.mcp_config
-        self._a2a_config = app_config.a2a_config
         self._auto_extract_memory = app_config.memory.auto_extract_enabled
+        if self._mcp_server_service is not None:
+            self._mcp_config = await self._mcp_server_service.resolve_mcp_config(scope)
+        else:
+            self._mcp_config = app_config.mcp_config
+        if self._a2a_server_config_service is not None:
+            self._a2a_config = await self._a2a_server_config_service.resolve_a2a_config(scope)
+        else:
+            self._a2a_config = app_config.a2a_config
 
     def _apply_skill_agent_params(self, agent_config: AgentConfig, skill: Skill) -> AgentConfig:
         params = skill.agent_params
@@ -178,7 +191,7 @@ class TaskRunnerFactory:
             return ""
 
     async def create_runner(self, session: Session) -> AgentTaskRunner:
-        await self._refresh_runtime_config()
+        await self._refresh_runtime_config(session)
 
         llm, agent_config, skill, skill_prompt, ltm_block, llm_model = await self._resolve_llm_and_config(session)
         model_id = llm_model.id

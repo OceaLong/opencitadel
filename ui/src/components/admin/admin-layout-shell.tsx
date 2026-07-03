@@ -36,7 +36,7 @@ const NAV: NavItem[] = [
     adminOnly: true,
   },
   { href: "/admin/audit", labelKey: "audit", icon: IconAudit },
-  { href: "/admin/compliance", labelKey: "evidence", icon: IconAudit },
+  { href: "/admin/compliance", labelKey: "evidence", icon: IconAudit, exact: true },
   { href: "/admin/compliance/report", labelKey: "complianceReport", icon: IconAudit },
 ];
 
@@ -72,7 +72,7 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
   const visibleNav = NAV.filter((item) => !item.adminOnly || isAdmin);
 
   return (
-    <div className="bg-background flex min-h-screen flex-col">
+    <div className="bg-background flex h-screen flex-col overflow-hidden">
       <header className="border-border/70 bg-card/80 flex items-center gap-4 border-b px-6 py-4">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/">
@@ -82,7 +82,7 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
         </Button>
         <p className="text-muted-foreground text-sm">{isAuditor ? t("auditorSubtitle") : t("subtitle")}</p>
       </header>
-      <div className="flex flex-1">
+      <div className="flex min-h-0 flex-1">
         <nav className="border-border/70 bg-card/40 w-56 shrink-0 space-y-1.5 border-r p-4">
           {visibleNav.map(({ href, labelKey, icon: Icon, exact }) => {
             const active = exact ? pathname === href : pathname.startsWith(href);
@@ -103,7 +103,7 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
             );
           })}
         </nav>
-        <main className="flex-1 overflow-auto p-6">
+        <main className="min-h-0 flex-1 overflow-auto p-6">
           <div className="mx-auto w-full max-w-6xl">{children}</div>
         </main>
       </div>

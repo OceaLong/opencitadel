@@ -198,14 +198,13 @@ export function SessionDetailView({
 
   return (
     <>
-      <div className="flex h-screen w-full flex-row overflow-hidden">
+      <div className="flex h-full w-full flex-row overflow-hidden">
         <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
           <div
             className={`mx-auto flex h-full w-full min-w-0 flex-col px-4 ${hasPreview && !isMobile ? "" : hasContext ? "" : "max-w-content"}`}
           >
             <div className="flex-shrink-0">
               <SessionHeader
-                title={session.title}
                 files={files}
                 fileListOpen={fileListOpen}
                 onFileListOpenChange={setFileListOpen}

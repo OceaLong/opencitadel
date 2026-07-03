@@ -16,6 +16,7 @@ from .oauth_identity_repository import OAuthIdentityRepository
 from .quota_repository import QuotaRepository
 from .refresh_token_repository import RefreshTokenRepository
 from .artifact_repository import ArtifactRepository
+from .integration_server_repository import A2AServerRepository, MCPServerRepository
 from .scheduled_job_repository import ScheduledJobRepository
 from .notification_repository import NotificationRepository
 from .session_repository import SessionRepository
@@ -47,6 +48,8 @@ class IUnitOfWork(ABC):
     team: TeamRepository
     user: UserRepository
     artifact: ArtifactRepository
+    mcp_server: MCPServerRepository
+    a2a_server: A2AServerRepository
     scheduled_job: ScheduledJobRepository
     notification: NotificationRepository
 

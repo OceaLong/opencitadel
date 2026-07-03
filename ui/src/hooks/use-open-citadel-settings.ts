@@ -11,7 +11,8 @@ export type SettingTab =
   | "models-setting"
   | "skills-setting"
   | "memory-setting"
-  | "integrations-setting";
+  | "integrations-setting"
+  | "runtime-setting";
 
 export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab) {
   const [agentConfig, setAgentConfig] = useState<AgentConfig>({});

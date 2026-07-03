@@ -186,11 +186,23 @@ export type AgentConfig = {
   [key: string]: unknown;
 };
 
+export type AppConfigRevision = {
+  id: string;
+  config_id: string;
+  scope: string;
+  owner_user_id?: string | null;
+  payload: Record<string, unknown>;
+  changed_by?: string | null;
+  note?: string;
+  created_at: string;
+};
+
 /**
  * MCP 服务器列表项（GET 响应）
  */
 export type ListMCPServerItem = {
   server_name: string;
+  server_id?: string;
   enabled: boolean;
   transport: MCPTransport;
   tools: string[];

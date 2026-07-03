@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = ""
 
     # 应用配置存储：false=本地 config.yaml，true=PostgreSQL app_configs 表
-    use_db_app_config: bool = False
+    use_db_app_config: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Clock,
   History,
-  Languages,
   Loader2,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -128,7 +127,6 @@ function ChatMessageComponent({
       <div className={cn("group mt-3 flex w-full flex-col gap-2", className)}>
         <div className="group flex h-7 items-center justify-between">
           <div className="text-foreground flex items-center justify-center gap-1">
-            <Languages size={18} />
             <OpenCitadelIcon variant="icon" />
           </div>
         </div>
@@ -144,7 +142,6 @@ function ChatMessageComponent({
       <div className={cn("group mt-3 flex w-full flex-col gap-2", className)}>
         <div className="group flex h-7 items-center justify-between">
           <div className="text-foreground flex items-center justify-center gap-1">
-            <Languages size={18} />
             <OpenCitadelIcon variant="icon" />
           </div>
         </div>
@@ -233,7 +230,6 @@ function ChatMessageComponent({
       <div className={cn("group mt-3 flex w-full flex-col gap-2", className)}>
         <div className="group flex h-7 items-center justify-between">
           <div className="flex items-center justify-center gap-1 text-red-600">
-            <Languages size={18} />
             <OpenCitadelIcon variant="icon" />
           </div>
         </div>

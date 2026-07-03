@@ -421,6 +421,18 @@ class AgentTaskRunner(TaskRunner):
             await self._mcp_tool.initialize(self._mcp_config)
             await self._a2a_tool.initialize(self._a2a_config)
             await self._emit_session_status(task, SessionStatus.RUNNING)
+            mcp_errors = self._mcp_tool.connection_errors
+            if mcp_errors:
+                parts = [f"{name}（{err}）" for name, err in mcp_errors.items()]
+                await self._put_and_add_event(
+                    task,
+                    AssistantNoticeEvent(
+                        message=(
+                            "以下 MCP 服务连接失败，本次任务将不可用："
+                            + "；".join(parts)
+                        ),
+                    ),
+                )
             self._run_started_at = time.monotonic()
 
             processed_input = False
