@@ -112,7 +112,12 @@ stateDiagram-v2
 
 - **独立于** `fallback_enabled`：无需开启通用 transient fallback 即可启用 quota fallback。
 - 候选来自 `llm_models` 表（同 Provider 优先，再跨 Provider）；不做实时 probe，直接调用，失败继续下一个。
+- 同一端点 / API Key 下不同 `model_name` 可拥有**独立配额**；quota fallback 会依次尝试所有已配置模型（含同端点 sibling），**不会在同一个模型上重试**。
+- 已确认 quota 耗尽的模型会在同一任务后续 LLM 调用中跳过，直接尝试其余候选。
+- Quota 驱动的模型切换**不消耗** Agent retry budget；全部候选均 quota 失败时才抛出 `MODEL_QUOTA_EXCEEDED`。
 - 切换成功后 Agent 发出 `assistant_notice`（`sessionDetail.modelFallbackNotice`），任务继续；全部失败则仍为 `MODEL_QUOTA_EXCEEDED` + session failed。
+- 同一任务内，每个 fallback **目标模型**最多提示一次（按 `ResilientLLMClient` 会话级去重）；若后续再次切换到不同备用模型，会再提示一次新目标。
+- 会话开启 Thinking 时，同 Provider 备用模型优先选用已配置 `thinking_request_params` / `thinking_extra_body` 的条目；未配置的备用模型以普通模式调用，避免重复告警。
 - 运行前提：至少配置 2 个有效模型（含 API Key）。
 
 ## 健康、SLO 与告警

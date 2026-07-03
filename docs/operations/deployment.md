@@ -276,8 +276,8 @@ See [MCP integrations](../tutorials/03-mcp-integrations.md) for configuring MCP 
 
 ### Models, Skills, and memory
 
-- **Default models are not imported on first boot.** Add models in Settings → Model Management and set a default before starting a chat. Models are stored in PostgreSQL `llm_models`; API keys are encrypted with `API_KEY_SECRET`.
-- The `llm_models.api_key_encryption` field indicates storage format: `legacy_plaintext` (historical plaintext) or `fernet_v1` (encrypted). `opencitadel-migrate` encrypts legacy plaintext automatically after Alembic—no extra command needed.
+- **Default models are not imported on first boot.** In Settings → Model Management, add an **endpoint** (Provider / Base URL / API Key) first, then add multiple **models** under the same endpoint (differing only by model name), and set a default before starting a chat. Connection settings live in PostgreSQL `llm_endpoints`; models live in `llm_models`. API keys are encrypted with `API_KEY_SECRET`.
+- The `llm_endpoints.api_key_encryption` field indicates storage format: `legacy_plaintext` (historical plaintext) or `fernet_v1` (encrypted). `opencitadel-migrate` encrypts legacy plaintext automatically after Alembic—no extra command needed. Updating an endpoint URL or API key applies to all models under that endpoint.
 - Built-in Skill templates (coding assistant, research, data analysis, content writing) are created automatically; customize them in Settings → Skill Templates.
 - Long-term memory is managed in Settings → Long-term Memory (global and session scopes). Relevant memories are recalled at task start (time decay + optional pgvector hybrid search).
 - Enable vector memory with `memory.vector_enabled: true` in `config.yaml` and `EMBEDDING_API_KEY` in `.env`. PostgreSQL uses the `pgvector/pgvector:pg16` image.
@@ -513,7 +513,7 @@ Manual repair if needed:
 docker compose run --rm opencitadel-api python -m app.migrate_llm_api_keys
 ```
 
-After rotating `API_KEY_SECRET`, re-save encrypted model keys in the UI.
+After rotating `API_KEY_SECRET`, re-save encrypted endpoint keys in Settings → Model Management → Edit endpoint.
 
 ---
 

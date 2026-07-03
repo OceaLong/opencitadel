@@ -1,12 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import asyncio
-import base64
 import logging
 from typing import Callable, List, Optional
 
 from app.application.errors.exceptions import NotFoundError, BadRequestError, ServerRequestsError
-from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities, ResourceVisibility
+from app.domain.models.llm_model import LLMModel, LLMProvider, ResourceVisibility
 from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.external.llm.factory import LLMFactory
@@ -28,26 +26,24 @@ class LLMModelService:
         self._uow_factory = uow_factory
         self._cipher = cipher
 
-    def _validate_model(self, model: LLMModel, *, require_api_key: bool = False) -> None:
+    def _validate_model(self, model: LLMModel) -> None:
+        if not model.endpoint_id.strip():
+            raise BadRequestError("必须选择 LLM 端点")
         if not model.display_name.strip():
             raise BadRequestError("模型显示名称不能为空")
         if not model.model_name.strip():
             raise BadRequestError("模型名称(model_name)不能为空")
-        if not model.base_url.strip():
-            raise BadRequestError("模型 Base URL 不能为空")
         if model.provider not in _SUPPORTED_PROVIDERS:
             raise BadRequestError(
                 f"Provider「{model.provider.value}」尚未实现，"
                 f"请使用 OpenAI/Ollama/Azure/Anthropic/Gemini"
             )
-        if require_api_key and not model.api_key.strip():
-            raise BadRequestError("API Key 不能为空")
 
     def _ensure_invokable(self, model: LLMModel) -> None:
         self._validate_model(model)
         if model.provider != LLMProvider.OLLAMA and not model.api_key.strip():
             raise BadRequestError(
-                f"模型「{model.display_name}」未配置 API Key，请在设置中补充后再调用"
+                f"模型「{model.display_name}」所属端点未配置 API Key，请在设置中补充后再调用"
             )
 
     def _mask(self, model: LLMModel) -> LLMModel:
@@ -88,15 +84,24 @@ class LLMModelService:
         visibility = model.visibility.value if hasattr(model.visibility, "value") else model.visibility
         if scope is not None and visibility != "global":
             model.owner_user_id = scope.user_id
-        self._validate_model(model, require_api_key=model.provider != LLMProvider.OLLAMA)
-        encrypted = self._cipher.encrypt(model.api_key) if model.api_key else ""
         async with self._uow_factory() as uow:
+            endpoint = await uow.llm_endpoint.get_by_id(model.endpoint_id, scope=scope)
+            if not endpoint:
+                raise BadRequestError(f"端点[{model.endpoint_id}]不存在或不可访问")
+            model = model.model_copy(
+                update={
+                    "provider": endpoint.provider,
+                    "base_url": endpoint.base_url,
+                    "api_key": endpoint.api_key,
+                }
+            )
+            self._validate_model(model)
             count = await uow.llm_model.count()
             if count == 0:
                 model.is_default = True
             if model.is_default:
                 await uow.llm_model.clear_default()
-            await uow.llm_model.save(model, encrypted)
+            await uow.llm_model.save(model)
         return self._mask(model)
 
     async def update_model(self, model_id: str, updates: LLMModel, scope: Optional[OwnerScope] = None) -> LLMModel:
@@ -104,14 +109,19 @@ class LLMModelService:
             existing = await uow.llm_model.get_by_id(model_id, scope=scope)
             if not existing:
                 raise NotFoundError(f"模型[{model_id}]不存在")
+            endpoint_id = updates.endpoint_id.strip() or existing.endpoint_id
+            endpoint = await uow.llm_endpoint.get_by_id(endpoint_id, scope=scope)
+            if not endpoint:
+                raise BadRequestError(f"端点[{endpoint_id}]不存在或不可访问")
             updates.id = model_id
-            if not updates.api_key.strip() or "****" in updates.api_key:
-                updates.api_key = existing.api_key
+            updates.endpoint_id = endpoint_id
+            updates.provider = endpoint.provider
+            updates.base_url = endpoint.base_url
+            updates.api_key = endpoint.api_key
             self._validate_model(updates)
-            encrypted = self._cipher.encrypt(updates.api_key) if updates.api_key else ""
             if updates.is_default:
                 await uow.llm_model.clear_default()
-            await uow.llm_model.save(updates, encrypted)
+            await uow.llm_model.save(updates)
         return self._mask(updates)
 
     async def delete_model(self, model_id: str, scope: Optional[OwnerScope] = None) -> None:
@@ -129,8 +139,7 @@ class LLMModelService:
                 if models:
                     models[0].is_default = True
                     await uow.llm_model.clear_default()
-                    # 仅更新默认标记，保留数据库中已加密的 api_key
-                    await uow.llm_model.save(models[0], "")
+                    await uow.llm_model.save(models[0])
 
     async def set_default(self, model_id: str) -> LLMModel:
         async with self._uow_factory() as uow:
@@ -142,7 +151,7 @@ class LLMModelService:
             self._validate_model(model)
             await uow.llm_model.clear_default()
             model.is_default = True
-            await uow.llm_model.save(model, "")
+            await uow.llm_model.save(model)
         return self._mask(model)
 
     async def probe_multimodal(self, model_id: str) -> dict:
@@ -158,36 +167,8 @@ class LLMModelService:
             caps = model.capabilities.model_copy(update={"vision": False})
             model = model.model_copy(update={"capabilities": caps, "supports_multimodal": False})
         async with self._uow_factory() as uow:
-            encrypted = self._cipher.encrypt(model.api_key) if model.api_key else ""
-            await uow.llm_model.save(model, encrypted)
+            await uow.llm_model.save(model)
         return probe
-
-    async def _auto_probe_capabilities(self, model: LLMModel) -> LLMModel:
-        """保存模型时自动探测 vision / vision_with_tools 能力。"""
-        if model.provider == LLMProvider.OLLAMA:
-            return model
-        try:
-            self._ensure_invokable(model)
-        except BadRequestError:
-            return model
-
-        if model.extra_params.get("skip_capability_probe"):
-            return model
-
-        caps = model.capabilities
-        if not (caps.vision or model.supports_multimodal):
-            return model
-
-        probe = await self._run_vision_probe(model)
-        if probe.get("status") == "ok":
-            caps = caps.model_copy(update={"vision": True})
-            if probe.get("vision_with_tools") is False:
-                caps = caps.model_copy(update={"vision_with_tools": False})
-        elif probe.get("status") == "error":
-            caps = caps.model_copy(update={"vision": False})
-        model = model.model_copy(update={"capabilities": caps})
-        model.supports_multimodal = caps.vision
-        return model
 
     async def _run_vision_probe(self, model: LLMModel) -> dict:
         if not model.capabilities.vision and not model.supports_multimodal:

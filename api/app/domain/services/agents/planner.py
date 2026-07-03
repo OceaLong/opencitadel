@@ -11,6 +11,7 @@ from app.domain.models.plan import Plan, Step
 from app.domain.schemas.planner_output import PlannerPlanSchema, PlannerUpdateSchema
 from app.domain.services.agents.structured_parse import StructuredParseError, parse_structured_output
 from app.domain.services.prompts.loader import compose_system_prompt, detect_locale_from_text, load_prompts, resolve_writing_style
+from app.domain.utils.prompt_context import format_user_attachments_for_prompt
 from .base import BaseAgent
 
 """
@@ -45,6 +46,7 @@ class PlannerAgent(BaseAgent):
     async def create_plan(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         """根据用户传递的消息创建计划/规划，迭代返回对应的事件"""
         self.set_current_step("create_plan")
+        self._refresh_retry_budget()
         prompts = load_prompts(detect_locale_from_text(message.message))
         self.set_locale(prompts.locale)
         saved_prompt = self._system_prompt
@@ -63,7 +65,7 @@ class PlannerAgent(BaseAgent):
         # 1.根据用户传递的消息生成创建plan的提示词
         query = prompts.planner.CREATE_PLAN_PROMPT.format(
             message=message.message,
-            attachments="\n".join(message.attachments),
+            attachments=format_user_attachments_for_prompt(message, locale=prompts.locale),
         )
 
         max_repair_attempts = 2
@@ -83,11 +85,13 @@ class PlannerAgent(BaseAgent):
                                 event.message,
                                 PlannerPlanSchema,
                                 self._json_parser,
-                                retry_budget=getattr(self, "_retry_budget", None),
                             )
                         except StructuredParseError as exc:
                             if attempt >= max_repair_attempts:
                                 raise
+                            budget = getattr(self, "_retry_budget", None)
+                            if budget is not None:
+                                budget.consume("structured_validation_retry", ignore_deadline=True)
                             current_query = (
                                 f"{query}\n\n"
                                 f"{prompts.internal.STRUCTURED_REPAIR_HINT.format(errors=exc)}"
@@ -104,6 +108,7 @@ class PlannerAgent(BaseAgent):
     async def update_plan(self, plan: Plan, step: Step) -> AsyncGenerator[BaseEvent, None]:
         """根据传递的原始规划+子步骤更新事件"""
         self.set_current_step(f"update_plan:{step.id}")
+        self._refresh_retry_budget()
         prompts = load_prompts(plan.language)
         self.set_locale(prompts.locale)
         saved_prompt = self._system_prompt
@@ -147,11 +152,13 @@ class PlannerAgent(BaseAgent):
                                 event.message,
                                 PlannerUpdateSchema,
                                 self._json_parser,
-                                retry_budget=getattr(self, "_retry_budget", None),
                             )
                         except StructuredParseError as exc:
                             if attempt >= max_repair_attempts:
                                 raise
+                            budget = getattr(self, "_retry_budget", None)
+                            if budget is not None:
+                                budget.consume("structured_validation_retry", ignore_deadline=True)
                             current_query = (
                                 f"{query}\n\n"
                                 f"{prompts.internal.STRUCTURED_REPAIR_HINT.format(errors=exc)}"

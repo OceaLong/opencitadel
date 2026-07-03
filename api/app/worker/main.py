@@ -29,7 +29,12 @@ from app.infrastructure.external.task.task_lease import (
     renew_task_lease,
     try_acquire_task_lease,
 )
+from app.application.services.recoverable_task_retry import (
+    prepare_recoverable_retry,
+    requeue_latest_user_message,
+)
 from app.domain.models.error_codes import MODEL_UNAVAILABLE
+from app.domain.utils.llm_retry import classify_llm_error_code
 from app.infrastructure.external.llm.circuit_breaker import get_llm_circuit_breaker
 from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError, create_resilient_llm
 from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
@@ -252,7 +257,11 @@ class AgentWorker:
                     session.id,
                     self._task_state,
                 )
-                if not checkpoint or not await self._requeue_latest_user_message(task, session.id):
+                if not checkpoint or not await requeue_latest_user_message(
+                        task,
+                        session.id,
+                        get_uow,
+                ):
                     logger.warning(
                         "孤儿任务无可恢复输入，标记失败: session_id=%s task_id=%s",
                         session.id,
@@ -280,21 +289,6 @@ class AgentWorker:
                     task_id,
                     exc,
                 )
-
-    async def _requeue_latest_user_message(self, task: RedisStreamTask, session_id: str) -> bool:
-        try:
-            if await task.input_stream.size() > 0:
-                return True
-            async with get_uow() as uow:
-                records = await uow.session.list_events(session_id, limit=500, latest=True)
-            for _, event in reversed(records):
-                if isinstance(event, MessageEvent) and event.role == "user" and event.message:
-                    await task.input_stream.put(event.model_dump_json())
-                    return True
-            return False
-        except Exception as exc:
-            logger.warning("恢复任务输入失败 session_id=%s task_id=%s: %s", session_id, task.id, exc)
-            return False
 
     async def _handle_claimed_job(
             self,
@@ -356,11 +350,21 @@ class AgentWorker:
                     session_id,
                     exc,
                 )
+                error_code = classify_llm_error_code(exc)
+                await prepare_recoverable_retry(
+                    session_id=session_id,
+                    task_id=task_id,
+                    task_cls=self._task_cls,
+                    uow_factory=get_uow,
+                    checkpoint_service=self._checkpoint_service,
+                    error_code=error_code,
+                )
                 await self._task_state.mark_dispatch_failure(
                     message_id=message_id,
                     task_id=task_id,
                     session_id=session_id,
                     error=str(exc),
+                    error_code=error_code,
                 )
             finally:
                 await release_task_lease(task_id)
@@ -434,17 +438,26 @@ class AgentWorker:
             await self._task_state.set_status(task_id, TaskStatus.FAILED)
             raise RuntimeError(f"任务会话不存在: {session_id}")
         if session.status in {SessionStatus.CANCELLED, SessionStatus.FAILED}:
-            logger.info(
-                "Worker 跳过终态会话: session_id=%s task_id=%s status=%s",
-                session_id,
-                task_id,
-                session.status.value,
+            meta = await self._task_state.get_task_meta(task_id) or {}
+            allow_failed_retry = (
+                session.status == SessionStatus.FAILED
+                and meta.get("status") == TaskStatus.PENDING.value
+                and int(meta.get("retry_count") or 0) > 0
             )
-            await self._task_state.set_status(
-                task_id,
-                TaskStatus.CANCELLED if session.status == SessionStatus.CANCELLED else TaskStatus.FAILED,
-            )
-            return
+            if not allow_failed_retry:
+                logger.info(
+                    "Worker 跳过终态会话: session_id=%s task_id=%s status=%s",
+                    session_id,
+                    task_id,
+                    session.status.value,
+                )
+                await self._task_state.set_status(
+                    task_id,
+                    TaskStatus.CANCELLED if session.status == SessionStatus.CANCELLED else TaskStatus.FAILED,
+                )
+                return
+            async with get_uow() as uow:
+                await uow.session.update_status(session_id, SessionStatus.RUNNING)
 
         async with get_uow() as uow:
             await uow.session.update_status(session_id, SessionStatus.RUNNING)

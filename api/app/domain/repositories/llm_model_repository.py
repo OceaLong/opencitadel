@@ -21,7 +21,11 @@ class LLMModelRepository(ABC):
         ...
 
     @abstractmethod
-    async def save(self, model: LLMModel, encrypted_api_key: str) -> None:
+    async def get_by_endpoint_id(self, endpoint_id: str, scope: Optional[OwnerScope] = None) -> List[LLMModel]:
+        ...
+
+    @abstractmethod
+    async def save(self, model: LLMModel) -> None:
         ...
 
     @abstractmethod
@@ -34,4 +38,8 @@ class LLMModelRepository(ABC):
 
     @abstractmethod
     async def count(self) -> int:
+        ...
+
+    @abstractmethod
+    async def count_by_endpoint_id(self, endpoint_id: str) -> int:
         ...

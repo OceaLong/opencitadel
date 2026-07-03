@@ -175,7 +175,7 @@ def test_migrate_legacy_plaintext_skips_cipher_when_no_candidates(monkeypatch):
         from app.infrastructure.security.llm_key_inspector import LLMApiKeyInspectionReport
 
         return LLMApiKeyInspectionReport(
-            total_models=0,
+            total_endpoints=0,
             empty_key_count=0,
             legacy_plaintext_count=0,
             fernet_v1_count=0,
@@ -196,7 +196,7 @@ def test_migrate_legacy_plaintext_skips_cipher_when_no_candidates(monkeypatch):
     async def _count_zero(_session):
         return 0
 
-    monkeypatch.setattr("app.migrate_llm_api_keys.count_legacy_plaintext_models", _count_zero)
+    monkeypatch.setattr("app.migrate_llm_api_keys.count_legacy_plaintext_endpoints", _count_zero)
     monkeypatch.setattr("app.migrate_llm_api_keys.ApiKeyCipher", _cipher_ctor)
 
     import asyncio

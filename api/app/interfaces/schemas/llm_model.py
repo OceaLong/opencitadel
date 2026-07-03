@@ -5,14 +5,12 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from app.domain.models.llm_model import LLMProvider, ModelCapabilities
+from app.domain.models.llm_model import ModelCapabilities
 
 
 class LLMModelCreateRequest(BaseModel):
+    endpoint_id: str
     display_name: str
-    provider: LLMProvider = LLMProvider.OPENAI
-    base_url: str = "https://api.openai.com/v1"
-    api_key: str = ""
     model_name: str = "gpt-4o"
     temperature: float = Field(default=0.7, ge=0, le=2)
     max_tokens: int = Field(default=8192, ge=1)
@@ -25,10 +23,8 @@ class LLMModelCreateRequest(BaseModel):
 
 
 class LLMModelUpdateRequest(BaseModel):
+    endpoint_id: Optional[str] = None
     display_name: Optional[str] = None
-    provider: Optional[LLMProvider] = None
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
     model_name: Optional[str] = None
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
     max_tokens: Optional[int] = Field(default=None, ge=1)
@@ -42,8 +38,9 @@ class LLMModelUpdateRequest(BaseModel):
 
 class LLMModelResponse(BaseModel):
     id: str
+    endpoint_id: str
     display_name: str
-    provider: LLMProvider
+    provider: str
     base_url: str
     api_key: str = ""
     model_name: str

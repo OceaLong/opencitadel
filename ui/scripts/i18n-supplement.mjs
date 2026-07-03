@@ -83,6 +83,10 @@ export const supplement = {
     statusFinal: { en: "Final", zh: "定稿" },
     statusUpdated: { en: "Updated", zh: "已更新" },
     version: { en: "Version", zh: "版本" },
+    incompleteContentWarning: {
+      en: "Artifact content may be incomplete (truncated during storage or generation). Regenerate or compare with the sandbox attachment.",
+      zh: "交付物内容可能不完整（存储或生成时被截断），建议重新生成或下载沙箱附件核对。",
+    },
   },
   auth: {
     loginToConsumption: { en: "Sign in to use consumption calculator", zh: "登录后即可使用消耗量计算器" },

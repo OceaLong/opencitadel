@@ -196,7 +196,7 @@ alembic revision --autogenerate -m "描述"
 
 ### LLM API Key 加密迁移
 
-生产环境需在 `.env` 设置强随机 `API_KEY_SECRET`（`openssl rand -hex 32`）。`llm_models.api_key_encryption` 标识存储格式：
+生产环境需在 `.env` 设置强随机 `API_KEY_SECRET`（`openssl rand -hex 32`）。`llm_endpoints.api_key_encryption` 标识存储格式：
 
 | 值 | 含义 |
 |----|------|

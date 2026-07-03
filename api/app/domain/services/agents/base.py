@@ -148,6 +148,10 @@ class BaseAgent(ABC):
             max_seconds=resilience_cfg.max_call_budget_seconds,
         )
 
+    def _refresh_retry_budget(self) -> None:
+        resilience_cfg = get_runtime_config().model_resilience
+        self._retry_budget.refresh_deadline(resilience_cfg.max_call_budget_seconds)
+
     def _tool_cache_signature_value(self) -> str:
         names = sorted(
             schema.get("function", {}).get("name", "")
@@ -426,17 +430,25 @@ class BaseAgent(ABC):
 
         if not isinstance(llm, ResilientLLMClient):
             return None
-        active = llm.active_model
-        if active.id == llm.model_id:
-            return None
-        return AssistantNoticeEvent(
-            message="",
-            i18n_key="sessionDetail.modelFallbackNotice",
-            i18n_params={"modelName": active.display_name},
-        )
+        return llm.consume_fallback_notice_event()
 
     def _fallback_notice_if_needed(self) -> Optional[AssistantNoticeEvent]:
         return self._fallback_notice_if_needed_for(self._llm)
+
+    async def _maybe_inject_fallback_structured_hint(self) -> None:
+        from app.domain.services.agents.react import ReActAgent
+
+        if type(self) is not ReActAgent or self._current_step == "summarize":
+            return
+        await self._add_to_memory([
+            {
+                "role": "user",
+                "content": (
+                    "模型已切换。步骤完成时必须只返回 JSON："
+                    '{"success": bool, "result": str, "attachments": []}。'
+                ),
+            },
+        ], persist=False)
 
     async def _record_token_usage(self, usage: Dict[str, int]) -> None:
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
@@ -511,6 +523,7 @@ class BaseAgent(ABC):
                         if notice is not None:
                             yield notice
                             fallback_notice_emitted = True
+                            await self._maybe_inject_fallback_structured_hint()
                     if usage_delta := delta.get("usage"):
                         call_usage = usage_delta
                         continue
@@ -1128,9 +1141,10 @@ class BaseAgent(ABC):
             )
 
         # 14.在指定步骤内完成了迭代则返回消息事件
-        if message and message.get("content") is not None:
+        content = message.get("content") if message else None
+        if content is not None and str(content).strip():
             yield MessageEvent(
-                message=message["content"],
+                message=content,
                 stream_id=message.get("stream_id"),
             )
         else:

@@ -13,6 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 import type { ClarifyAnswer, ClarifyQuestion } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
+const CUSTOM_OPTION_ID = "__custom__";
+
 type ClarifyQuestionsProps = {
   title?: string | null;
   questions: ClarifyQuestion[];
@@ -21,14 +23,36 @@ type ClarifyQuestionsProps = {
   className?: string;
 };
 
+function getPresetSelectionIds(selectedIds: string[]) {
+  return selectedIds.filter((id) => id !== CUSTOM_OPTION_ID);
+}
+
+function isCustomSelected(selectedIds: string[]) {
+  return selectedIds.includes(CUSTOM_OPTION_ID);
+}
+
 function isQuestionAnswered(
   question: ClarifyQuestion,
   selections: Record<string, string[]>,
   customAnswers: Record<string, string>,
 ) {
   const selected = selections[question.id] ?? [];
+  const presetSelected = getPresetSelectionIds(selected);
+  const customSelected = isCustomSelected(selected);
   const custom = (customAnswers[question.id] ?? "").trim();
-  return selected.length > 0 || custom.length > 0;
+  return presetSelected.length > 0 || (customSelected && custom.length > 0);
+}
+
+function applyCustomSelection(
+  question: ClarifyQuestion,
+  current: string[],
+): string[] {
+  if (question.allow_multiple) {
+    return current.includes(CUSTOM_OPTION_ID)
+      ? current
+      : [...current, CUSTOM_OPTION_ID];
+  }
+  return [CUSTOM_OPTION_ID];
 }
 
 export function ClarifyQuestions({
@@ -57,7 +81,7 @@ export function ClarifyQuestions({
     return questions.every((question) => isQuestionAnswered(question, selections, customAnswers));
   }, [customAnswers, interactive, questions, selections]);
 
-  const toggleOption = (question: ClarifyQuestion, optionId: string) => {
+  const selectOption = (question: ClarifyQuestion, optionId: string) => {
     if (!interactive) return;
     setSelections((prev) => {
       const current = prev[question.id] ?? [];
@@ -71,14 +95,46 @@ export function ClarifyQuestions({
     });
   };
 
+  const handleCustomChange = (question: ClarifyQuestion, value: string) => {
+    setCustomAnswers((prev) => ({ ...prev, [question.id]: value }));
+    const trimmed = value.trim();
+    setSelections((prev) => {
+      const current = prev[question.id] ?? [];
+      if (!trimmed) {
+        return { ...prev, [question.id]: current.filter((id) => id !== CUSTOM_OPTION_ID) };
+      }
+      return { ...prev, [question.id]: applyCustomSelection(question, current) };
+    });
+  };
+
+  const selectCustom = (question: ClarifyQuestion) => {
+    if (!interactive) return;
+    const trimmed = (customAnswers[question.id] ?? "").trim();
+    if (!trimmed) return;
+    setSelections((prev) => {
+      const current = prev[question.id] ?? [];
+      return { ...prev, [question.id]: applyCustomSelection(question, current) };
+    });
+  };
+
+  const deselectCustom = (question: ClarifyQuestion) => {
+    if (!interactive) return;
+    setSelections((prev) => ({
+      ...prev,
+      [question.id]: (prev[question.id] ?? []).filter((id) => id !== CUSTOM_OPTION_ID),
+    }));
+  };
+
   const buildAnswer = () => {
     const lines = [t("header")];
     for (const question of questions) {
       const selectedIds = selections[question.id] ?? [];
+      const presetIds = getPresetSelectionIds(selectedIds);
       const selectedLabels = question.options
-        .filter((option) => selectedIds.includes(option.id))
+        .filter((option) => presetIds.includes(option.id))
         .map((option) => option.label);
-      const custom = (customAnswers[question.id] ?? "").trim();
+      const customSelected = isCustomSelected(selectedIds);
+      const custom = customSelected ? (customAnswers[question.id] ?? "").trim() : "";
       const parts = [...selectedLabels];
       if (custom) parts.push(`${t("customPrefix")}: ${custom}`);
       lines.push(`- ${question.prompt}: ${parts.join("；")}`);
@@ -89,14 +145,16 @@ export function ClarifyQuestions({
   const buildStructuredAnswers = (): ClarifyAnswer[] => {
     return questions.map((question) => {
       const selectedIds = selections[question.id] ?? [];
+      const presetIds = getPresetSelectionIds(selectedIds);
       const selectedLabels = question.options
-        .filter((option) => selectedIds.includes(option.id))
+        .filter((option) => presetIds.includes(option.id))
         .map((option) => option.label);
-      const custom = (customAnswers[question.id] ?? "").trim();
+      const customSelected = isCustomSelected(selectedIds);
+      const custom = customSelected ? (customAnswers[question.id] ?? "").trim() : "";
       return {
         question_id: question.id,
         prompt: question.prompt,
-        option_ids: selectedIds,
+        option_ids: presetIds,
         option_labels: selectedLabels,
         custom_text: custom || undefined,
       };
@@ -126,6 +184,9 @@ export function ClarifyQuestions({
     return null;
   }
 
+  const currentSelected = currentQuestion ? (selections[currentQuestion.id] ?? []) : [];
+  const currentCustomSelected = isCustomSelected(currentSelected);
+
   return (
     <Card className={cn("gap-4 py-4", className)}>
       <CardHeader className="gap-2 px-4">
@@ -150,7 +211,7 @@ export function ClarifyQuestions({
             <div className="text-foreground text-sm font-medium">{currentQuestion.prompt}</div>
             <div className="flex flex-col gap-2">
               {currentQuestion.options.map((option) => {
-                const selected = (selections[currentQuestion.id] ?? []).includes(option.id);
+                const selected = currentSelected.includes(option.id);
                 return (
                   <button
                     key={option.id}
@@ -160,13 +221,13 @@ export function ClarifyQuestions({
                       "border-border/70 hover:bg-muted/60 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60",
                       selected && "border-primary/60 bg-primary/5",
                     )}
-                    onClick={() => toggleOption(currentQuestion, option.id)}
+                    onClick={() => selectOption(currentQuestion, option.id)}
                   >
                     {currentQuestion.allow_multiple ? (
                       <Checkbox
                         checked={selected}
                         disabled={!interactive || submitting}
-                        onCheckedChange={() => toggleOption(currentQuestion, option.id)}
+                        onCheckedChange={() => selectOption(currentQuestion, option.id)}
                         onClick={(event) => event.stopPropagation()}
                       />
                     ) : selected ? (
@@ -180,18 +241,39 @@ export function ClarifyQuestions({
               })}
             </div>
             {(currentQuestion.allow_custom ?? true) && (
-              <Textarea
-                value={customAnswers[currentQuestion.id] ?? ""}
-                disabled={!interactive || submitting}
-                placeholder={t("customPlaceholder")}
-                className="min-h-16 text-sm"
-                onChange={(event) =>
-                  setCustomAnswers((prev) => ({
-                    ...prev,
-                    [currentQuestion.id]: event.target.value,
-                  }))
-                }
-              />
+              <div
+                className={cn(
+                  "border-border/70 hover:bg-muted/60 flex w-full items-start gap-2 rounded-lg border px-3 py-2 transition-colors",
+                  currentCustomSelected && "border-primary/60 bg-primary/5",
+                  (!interactive || submitting) && "opacity-60",
+                )}
+                onClick={() => selectCustom(currentQuestion)}
+              >
+                {currentQuestion.allow_multiple ? (
+                  <Checkbox
+                    checked={currentCustomSelected}
+                    disabled={!interactive || submitting}
+                    onCheckedChange={(checked) =>
+                      checked ? selectCustom(currentQuestion) : deselectCustom(currentQuestion)
+                    }
+                    onClick={(event) => event.stopPropagation()}
+                    className="mt-0.5"
+                  />
+                ) : currentCustomSelected ? (
+                  <CheckCircle2 className="text-primary mt-0.5 size-4 shrink-0" />
+                ) : (
+                  <Circle className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+                )}
+                <Textarea
+                  value={customAnswers[currentQuestion.id] ?? ""}
+                  disabled={!interactive || submitting}
+                  placeholder={t("customPlaceholder")}
+                  className="min-h-16 flex-1 border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
+                  onChange={(event) => handleCustomChange(currentQuestion, event.target.value)}
+                  onFocus={() => selectCustom(currentQuestion)}
+                  onClick={(event) => event.stopPropagation()}
+                />
+              </div>
             )}
           </div>
         )}

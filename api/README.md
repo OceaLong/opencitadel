@@ -196,7 +196,7 @@ alembic revision --autogenerate -m "description"
 
 ### LLM API Key Encryption Migration
 
-Set a strong random `API_KEY_SECRET` in `.env` for production (`openssl rand -hex 32`). `llm_models.api_key_encryption` indicates storage format:
+Set a strong random `API_KEY_SECRET` in `.env` for production (`openssl rand -hex 32`). `llm_endpoints.api_key_encryption` indicates storage format:
 
 | Value | Meaning |
 |-------|---------|

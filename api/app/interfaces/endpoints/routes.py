@@ -15,6 +15,7 @@ from . import (
     team_routes,
     session_routes,
     llm_model_routes,
+    llm_endpoint_routes,
     skill_routes,
     memory_routes,
     metrics_routes,
@@ -48,6 +49,7 @@ def create_api_routes() -> APIRouter:
     authenticated_router.include_router(app_config_routes.router)
     authenticated_router.include_router(file_routes.router)
     authenticated_router.include_router(session_routes.router)
+    authenticated_router.include_router(llm_endpoint_routes.router)
     authenticated_router.include_router(llm_model_routes.router)
     authenticated_router.include_router(skill_routes.router)
     authenticated_router.include_router(memory_routes.memory_router)

@@ -17,6 +17,7 @@ from app.application.services.evidence_service import EvidenceService
 from app.application.services.file_service import FileService
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.application.services.llm_status_service import LLMStatusService
+from app.application.services.llm_endpoint_service import LLMEndpointService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.marketplace_service import MarketplaceService
@@ -93,6 +94,13 @@ async def get_app_config_service(
 async def get_llm_model_service(
         service: LLMModelService = Depends(Provide[ApiContainer.llm_model_service]),
 ) -> LLMModelService:
+    return service
+
+
+@inject
+async def get_llm_endpoint_service(
+        service: LLMEndpointService = Depends(Provide[ApiContainer.llm_endpoint_service]),
+) -> LLMEndpointService:
     return service
 
 

@@ -16,7 +16,7 @@ def test_build_inspection_report_without_leaking_values():
         ("maybe-fernet", None),
     ])
 
-    assert report.total_models == 4
+    assert report.total_endpoints == 4
     assert report.empty_key_count == 1
     assert report.legacy_plaintext_count == 1
     assert report.fernet_v1_count == 1

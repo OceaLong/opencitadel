@@ -83,7 +83,7 @@
     "streamReadFailed": "读取流失败",
     "modelUnavailable": "模型或向量服务暂不可用，请检查模型设置或稍后重试",
     "modelQuotaExceeded": "该模型 API 配额已耗尽，请在提供商控制台完成付费或切换到其他可用模型。",
-    "infraFailed": "系统基础设施异常，请稍后重试或联系管理员",
+    "infraFailed": "任务执行超时或重试次数耗尽，请简化任务或稍后重试",
     "saveFailed": "保存失败",
     "updateFailed": "更新失败",
     "addFailed": "添加失败",
@@ -237,7 +237,7 @@
   },
   "sessionHeader": {
     "untitledTask": "未命名任务",
-    "observationTitle": "工具: {tools} · 等待: {waits}",
+    "observationTitle": "工具: {tools} · 错误: {errors} · 等待: {waits}",
     "tokenUsageTitle": "Prompt: {prompt} · Completion: {completion} · Calls: {calls} · 点击查看明细",
     "allFilesTitle": "此任务中的所有文件",
     "noFiles": "暂无文件",
@@ -253,6 +253,8 @@
     "thinking": "正在思考中...",
     "taskNotFound": "未找到该任务",
     "taskFailed": "任务执行失败，可修改配置后重新发送消息继续。",
+    "taskFailedNotice": "任务执行失败，可修改配置后重新发送消息继续。",
+    "taskCancelledNotice": "任务已取消。",
     "streamStale": "后台任务正在恢复，事件流暂时中断。",
     "streamError": "会话流连接异常，正在尝试恢复。",
     "streamReconnecting": "会话流正在重新连接...",
@@ -311,18 +313,18 @@
   "sessionDebug": {
     "title": "调试事件",
     "button": "调试",
-    "description": "查看任务错误详情，以及内部 planner 输出、reasoning 与 tool args（不会显示在普通聊天气泡中）。",
-    "empty": "暂无错误与调试事件。打开后会请求 debug 事件；任务进行中的 planner、reasoning 与 tool args 会显示在下方。",
-    "debugSectionTitle": "调试事件",
-    "errorsTitle": "错误 ({count})",
-    "errorSourceTool": "工具 {name}",
-    "errorSourceSystem": "系统错误",
-    "debugEmpty": "暂无调试事件。reasoning 与 tool args 仅在任务进行中实时显示；已持久化的 planner 输出会显示在这里。",
-    "debugEmptyClosed": "正在加载调试事件…",
+    "description": "内部 planner 输出、reasoning 与 tool args，不会显示在普通聊天气泡中。",
+    "empty": "暂无调试事件。打开后会请求 debug 事件，新的 planner、reasoning 与 tool args 会显示在这里。",
     "typePlanner": "Planner",
     "typeReasoning": "Reasoning",
     "typeToolArgs": "Tool Args",
-    "typeDebug": "Debug"
+    "typeDebug": "Debug",
+    "errorsTitle": "错误 ({count})",
+    "errorSourceSystem": "系统",
+    "errorSourceTool": "工具: {name}",
+    "debugSectionTitle": "调试事件",
+    "debugEmpty": "暂无调试事件。",
+    "debugEmptyClosed": "开启调试模式后可查看 planner、reasoning 与 tool args。"
   },
   "planPanel": {
     "noSteps": "暂无步骤",
@@ -498,7 +500,18 @@
     }
   },
   "settingsModels": {
-    "description": "全局新增多 Provider 模型，会话级可选择使用",
+    "description": "管理共享端点与模型，会话级可选择使用",
+    "addEndpoint": "新增端点",
+    "editEndpoint": "编辑端点",
+    "endpointDisplayName": "端点名称",
+    "endpoint": "端点",
+    "addModelUnderEndpoint": "新增模型",
+    "noEndpoints": "暂无端点，请先新增端点",
+    "noModelsUnderEndpoint": "此端点下暂无模型",
+    "endpointCreated": "端点已创建",
+    "endpointUpdated": "端点已更新",
+    "fillEndpointRequiredFields": "请填写端点名称和 Base URL",
+    "fillModelRequiredFields": "请填写显示名称和模型名",
     "addModel": "新增模型",
     "editModel": "编辑模型",
     "multimodal": "多模态",
@@ -516,7 +529,7 @@
     "temperature": "Temperature",
     "maxTokens": "Max Tokens",
     "fillRequiredFields": "请填写显示名称、模型名和 Base URL",
-    "apiKeyRequired": "新建模型时必须填写 API Key",
+    "apiKeyRequired": "新建端点时必须填写 API Key",
     "modelUpdated": "模型已更新",
     "modelCreated": "模型已创建",
     "deleted": "已删除",
@@ -1504,7 +1517,8 @@
     "statusDraft": "草稿",
     "statusFinal": "定稿",
     "statusUpdated": "已更新",
-    "version": "版本"
+    "version": "版本",
+    "incompleteContentWarning": "交付物内容可能不完整（存储或生成时被截断），建议重新生成或下载沙箱附件核对。"
   },
   "automation": {
     "contextLabel": "任务上下文",
@@ -1670,7 +1684,8 @@
   "shareArtifact": {
     "artifactTitle": "分享的交付物",
     "home": "首页",
-    "title": "分享的交付物"
+    "title": "分享的交付物",
+    "incompleteContentWarning": "交付物内容可能不完整，建议联系分享者重新生成。"
   },
   "workspaceContext": {
     "codebasePanelTitle": "代码库上下文",

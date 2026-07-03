@@ -2,7 +2,11 @@
 # -*- coding: utf-8 -*-
 """Default (English) prompt exports for backward compatibility."""
 
-from app.domain.services.prompts.en.clarify import CLARIFY_PROMPT, CLARIFY_SYSTEM_PROMPT
+from app.domain.services.prompts.en.clarify import (
+    CLARIFY_AGENT_SYSTEM_PROMPT,
+    CLARIFY_PROMPT,
+    CLARIFY_SYSTEM_PROMPT,
+)
 from app.domain.services.prompts.en.planner import (
     CREATE_PLAN_PROMPT,
     PLANNER_SYSTEM_PROMPT,
@@ -21,4 +25,5 @@ __all__ = [
     "SUMMARIZE_PROMPT",
     "CLARIFY_PROMPT",
     "CLARIFY_SYSTEM_PROMPT",
+    "CLARIFY_AGENT_SYSTEM_PROMPT",
 ]

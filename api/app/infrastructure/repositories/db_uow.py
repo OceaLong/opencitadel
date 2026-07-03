@@ -15,6 +15,7 @@ from .db_codebase_repository import DBCodebaseRepository
 from .db_file_repository import DBFileRepository
 from .db_invitation_repository import DBInvitationRepository
 from .db_knowledge_base_repository import DBKnowledgeBaseRepository
+from .db_llm_endpoint_repository import DBLLMEndpointRepository
 from .db_llm_model_repository import DBLLMModelRepository
 from .db_llm_token_usage_repository import DBLLMTokenUsageRepository
 from .db_memory_entry_repository import DBMemoryEntryRepository
@@ -69,6 +70,7 @@ class DBUnitOfWork(IUnitOfWork):
             db_session=self.db_session,
             session_list_notifier=default_session_list_notifier(),
         )
+        self.llm_endpoint = DBLLMEndpointRepository(db_session=self.db_session, cipher=cipher)
         self.llm_model = DBLLMModelRepository(db_session=self.db_session, cipher=cipher)
         self.skill = DBSkillRepository(db_session=self.db_session)
         self.memory_entry = DBMemoryEntryRepository(db_session=self.db_session)

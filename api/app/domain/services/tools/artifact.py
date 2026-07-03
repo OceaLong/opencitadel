@@ -30,7 +30,10 @@ class ArtifactTool(BaseTool):
 
     @tool(
         name="artifact_write",
-        description="创建或更新会话交付物（文档 Markdown 或网页 HTML）。产出最终结果时必须使用此工具，而非 write_file。",
+        description=(
+            "创建或更新会话交付物（文档 Markdown 或网页 HTML）。产出最终结果时必须使用此工具，而非 write_file。"
+            "长文档应先用 write_file 写入沙箱，再传 source_path 引用该文件；不要内联大段 content。"
+        ),
         parameters={
             "artifact_id": {
                 "type": "string",
@@ -42,23 +45,40 @@ class ArtifactTool(BaseTool):
                 "description": "交付物类型：doc=Markdown 文档，web=HTML 网页",
             },
             "title": {"type": "string", "description": "交付物标题"},
-            "content": {"type": "string", "description": "完整内容（Markdown 或 HTML）"},
+            "content": {
+                "type": "string",
+                "description": "短内容可直接内联（Markdown 或 HTML）；长文档请改用 source_path",
+            },
+            "source_path": {
+                "type": "string",
+                "description": "沙箱内源文件绝对路径；长文档优先使用此参数而非 content",
+            },
         },
-        required=["kind", "title", "content"],
+        required=["kind", "title"],
     )
     async def artifact_write(
             self,
             kind: str,
             title: str,
-            content: str,
+            content: Optional[str] = None,
             artifact_id: Optional[str] = None,
+            source_path: Optional[str] = None,
     ) -> ToolResult:
-        data, event = await self._write_fn(
-            artifact_id=artifact_id,
-            kind=kind,
-            title=title,
-            content=content,
-        )
+        if not content and not source_path:
+            return ToolResult(
+                success=False,
+                message="artifact_write 需要 content 或 source_path 至少其一",
+            )
+        try:
+            data, event = await self._write_fn(
+                artifact_id=artifact_id,
+                kind=kind,
+                title=title,
+                content=content or "",
+                source_path=source_path,
+            )
+        except ValueError as exc:
+            return ToolResult(success=False, message=str(exc))
         self._pending_events.append(event)
         return ToolResult(
             success=True,

@@ -44,9 +44,10 @@ class _SummarizeAgent(ReActAgent):
             format: Optional[str] = None,
             vision_attachments: Optional[List[VisionAttachment]] = None,
             emit_deltas: bool = True,
+            response_schema=None,
     ) -> AsyncGenerator[MessageEvent, None]:
         assert vision_attachments is None
-        assert emit_deltas is False
+        assert response_schema is not None
         yield MessageEvent(role="assistant", message='{"message":"done","attachments":[]}')
 
 
@@ -61,8 +62,8 @@ class _StepAgent(ReActAgent):
             format: Optional[str] = None,
             vision_attachments: Optional[List[VisionAttachment]] = None,
             emit_deltas: bool = True,
+            response_schema=None,
     ) -> AsyncGenerator[MessageEvent, None]:
-        assert emit_deltas is False
         self.received_vision_counts.append(len(vision_attachments or []))
         yield MessageEvent(role="assistant", message='{"success":true,"result":"ok","attachments":[]}')
 
@@ -78,23 +79,16 @@ class _RepairStepAgent(ReActAgent):
             format: Optional[str] = None,
             vision_attachments: Optional[List[VisionAttachment]] = None,
             emit_deltas: bool = True,
-    ) -> AsyncGenerator[MessageEvent, None]:
-        yield MessageEvent(role="assistant", message='{"result":"incomplete"}')
-
-    async def continue_tool_iteration_loop(
-            self,
-            *,
-            inject_tool_messages: Optional[List[dict]] = None,
-            format: Optional[str] = None,
-            emit_deltas: bool = True,
             response_schema=None,
     ) -> AsyncGenerator[MessageEvent, None]:
-        if inject_tool_messages:
-            self.repair_hints.append(inject_tool_messages[0]["content"])
-        yield MessageEvent(
-            role="assistant",
-            message='{"success":true,"result":"fixed","attachments":[]}',
-        )
+        if response_schema is not None:
+            self.repair_hints.append(query)
+            yield MessageEvent(
+                role="assistant",
+                message='{"success":true,"result":"fixed","attachments":[]}',
+            )
+            return
+        yield MessageEvent(role="assistant", message='{"result":"incomplete"}')
 
 
 def _agent_kwargs(**overrides):

@@ -23,8 +23,11 @@ class LLMRetryBudget:
             deadline_monotonic=time.monotonic() + max(1.0, float(max_seconds)),
         )
 
-    def consume(self, reason: str = "llm_call") -> None:
-        if time.monotonic() >= self.deadline_monotonic:
+    def refresh_deadline(self, max_seconds: float) -> None:
+        self.deadline_monotonic = time.monotonic() + max(1.0, float(max_seconds))
+
+    def consume(self, reason: str = "llm_call", *, ignore_deadline: bool = False) -> None:
+        if not ignore_deadline and time.monotonic() >= self.deadline_monotonic:
             raise RetryBudgetExceeded(f"LLM重试预算耗时已耗尽: reason={reason}")
         if self.used_calls >= self.max_calls:
             raise RetryBudgetExceeded(f"LLM重试预算调用次数已耗尽: reason={reason}")

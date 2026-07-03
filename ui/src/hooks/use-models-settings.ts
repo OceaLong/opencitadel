@@ -6,18 +6,9 @@ import { toast } from "sonner";
 
 import { modelsApi } from "@/lib/api/models";
 import { invalidateModelsCache } from "@/lib/api/models-cache";
-import type {
-  CreateLLMModelParams,
-  LLMModel,
-  LLMProvider,
-  ModelCapabilities,
-} from "@/lib/api/types";
+import type { CreateLLMModelParams, LLMModel, ModelCapabilities } from "@/lib/api/types";
 
-export const SUPPORTED_PROVIDERS: { value: LLMProvider; label: string }[] = [
-  { value: "openai", label: "OpenAI" },
-  { value: "ollama", label: "Ollama" },
-  { value: "azure", label: "Azure OpenAI" },
-];
+export { SUPPORTED_PROVIDERS } from "@/hooks/use-endpoints-settings";
 
 export const defaultCapabilities: ModelCapabilities = {
   vision: false,
@@ -27,19 +18,17 @@ export const defaultCapabilities: ModelCapabilities = {
   image_encoding: "data_url",
 };
 
-const emptyForm: CreateLLMModelParams = {
+const emptyForm = (endpointId: string): CreateLLMModelParams => ({
+  endpoint_id: endpointId,
   display_name: "",
-  provider: "openai",
-  base_url: "https://api.openai.com/v1",
-  api_key: "",
-  model_name: "gpt-4o",
+  model_name: "",
   temperature: 0.7,
-  max_tokens: 8192,
+  max_tokens: 65536,
   capabilities: defaultCapabilities,
   supports_multimodal: false,
-};
+});
 
-export function useModelsSettings() {
+export function useModelsSettings(onModelsChanged?: () => void) {
   const t = useTranslations("settingsModels");
   const tCommon = useTranslations("common");
   const tErrors = useTranslations("errors");
@@ -47,7 +36,8 @@ export function useModelsSettings() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<LLMModel | null>(null);
-  const [form, setForm] = useState<CreateLLMModelParams>(emptyForm);
+  const [form, setForm] = useState<CreateLLMModelParams>(emptyForm(""));
+  const [displayNameAutoSync, setDisplayNameAutoSync] = useState(true);
   const [saving, setSaving] = useState(false);
   const [probingId, setProbingId] = useState<string | null>(null);
   const [probeStatus, setProbeStatus] = useState<Record<string, string>>({});
@@ -65,22 +55,22 @@ export function useModelsSettings() {
   }, [tCommon]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
-  const openCreate = () => {
+  const openCreate = (endpointId: string) => {
     setEditing(null);
-    setForm(emptyForm);
+    setForm(emptyForm(endpointId));
+    setDisplayNameAutoSync(true);
     setDialogOpen(true);
   };
 
   const openEdit = (model: LLMModel) => {
     setEditing(model);
+    setDisplayNameAutoSync(false);
     setForm({
+      endpoint_id: model.endpoint_id,
       display_name: model.display_name,
-      provider: model.provider,
-      base_url: model.base_url,
-      api_key: "",
       model_name: model.model_name,
       temperature: model.temperature,
       max_tokens: model.max_tokens,
@@ -94,13 +84,25 @@ export function useModelsSettings() {
     setDialogOpen(true);
   };
 
+  const updateModelName = useCallback(
+    (value: string) => {
+      setForm((prev) =>
+        displayNameAutoSync
+          ? { ...prev, model_name: value, display_name: value }
+          : { ...prev, model_name: value },
+      );
+    },
+    [displayNameAutoSync],
+  );
+
+  const updateDisplayName = useCallback((value: string) => {
+    setDisplayNameAutoSync(false);
+    setForm((prev) => ({ ...prev, display_name: value }));
+  }, []);
+
   const handleSave = async () => {
-    if (!form.display_name.trim() || !form.model_name.trim() || !form.base_url.trim()) {
-      toast.error(t("fillRequiredFields"));
-      return;
-    }
-    if (!editing && !form.api_key?.trim()) {
-      toast.error(t("apiKeyRequired"));
+    if (!form.display_name.trim() || !form.model_name.trim() || !form.endpoint_id.trim()) {
+      toast.error(t("fillModelRequiredFields"));
       return;
     }
 
@@ -125,7 +127,8 @@ export function useModelsSettings() {
       }
       setDialogOpen(false);
       invalidateModelsCache();
-      load();
+      await load();
+      onModelsChanged?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tErrors("saveFailed"));
     } finally {
@@ -138,7 +141,8 @@ export function useModelsSettings() {
       await modelsApi.delete(id);
       toast.success(t("deleted"));
       invalidateModelsCache();
-      load();
+      await load();
+      onModelsChanged?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tErrors("deleteFailed"));
     }
@@ -149,7 +153,7 @@ export function useModelsSettings() {
       await modelsApi.setDefault(id);
       toast.success(t("setDefaultSuccess"));
       invalidateModelsCache();
-      load();
+      await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("operationFailed"));
     }
@@ -184,8 +188,11 @@ export function useModelsSettings() {
     saving,
     probingId,
     probeStatus,
+    load,
     openCreate,
     openEdit,
+    updateModelName,
+    updateDisplayName,
     handleSave,
     handleDelete,
     handleSetDefault,

@@ -23,6 +23,7 @@ from app.application.services.evidence_service import EvidenceService
 from app.application.services.integration_server_service import A2AServerConfigService, MCPServerService
 from app.application.services.file_service import FileService
 from app.application.services.knowledge_base_service import KnowledgeBaseService
+from app.application.services.llm_endpoint_service import LLMEndpointService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.marketplace_service import MarketplaceService
@@ -315,6 +316,11 @@ class BaseContainer(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         cipher=cipher,
     )
+    llm_endpoint_service = providers.Singleton(
+        LLMEndpointService,
+        uow_factory=uow_factory,
+        cipher=cipher,
+    )
     skill_service = providers.Singleton(SkillService, uow_factory=uow_factory)
     team_service = providers.Singleton(TeamService, uow_factory=uow_factory)
     service_api_key_service = providers.Singleton(
@@ -360,6 +366,7 @@ class BaseContainer(containers.DeclarativeContainer):
         ArtifactService,
         uow_factory=uow_factory,
         object_storage=object_storage,
+        file_storage=file_storage,
     )
     evidence_service = providers.Singleton(
         EvidenceService,

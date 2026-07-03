@@ -55,6 +55,19 @@ logger = logging.getLogger(__name__)
 CLARIFY_PENDING_PHASE = "clarify"
 
 
+def _should_resume_failed_plan(session, plan: Optional[Plan]) -> bool:
+    if not plan:
+        return False
+    if session.status == SessionStatus.FAILED:
+        return True
+    for event in reversed(session.events or []):
+        if isinstance(event, ErrorEvent):
+            return True
+        if isinstance(event, MessageEvent) and event.role == "user":
+            return False
+    return False
+
+
 def _skill_agent_overrides(skill: Optional[Skill]) -> dict:
     if not skill:
         return {"writing_style_override": None, "override_base_rules": False}
@@ -316,6 +329,26 @@ class PlannerReActFlow(BaseFlow):
         # 6.获取当前会话中最新事件（计划审批恢复时保留已批准计划）
         if not (plan_approval_resume and self.plan and self.status == FlowStatus.EXECUTING):
             self.plan = session.get_latest_plan()
+
+        if (
+            not clarify_resume
+            and not plan_approval_resume
+            and self.plan
+            and _should_resume_failed_plan(session, self.plan)
+        ):
+            if self.plan.get_next_step() is not None:
+                logger.info(
+                    "Planner&ReAct流从失败状态恢复执行 session=%s",
+                    self._session_id,
+                )
+                self.status = FlowStatus.EXECUTING
+            elif self.plan.status != ExecutionStatus.COMPLETED:
+                logger.info(
+                    "Planner&ReAct流从失败状态恢复总结 session=%s",
+                    self._session_id,
+                )
+                self.status = FlowStatus.SUMMARIZING
+
         logger.info(f"Planner&ReAct流接收消息: {message.message[:50]}...")
 
         # 7.定义当前正在执行的子步骤
@@ -354,7 +387,15 @@ class PlannerReActFlow(BaseFlow):
                     return
 
                 await self._set_pending_phase(None)
-                brief = self.clarify.last_brief or message.message
+                brief = (self.clarify.last_brief or "").strip()
+                if not brief:
+                    logger.error(
+                        "Planner&ReAct流澄清阶段未生成有效 brief session=%s",
+                        self._session_id,
+                    )
+                    yield ErrorEvent(error="澄清阶段未生成有效需求摘要，无法继续规划")
+                    self.status = FlowStatus.COMPLETED
+                    break
                 message = Message(
                     message=brief,
                     attachments=message.attachments,

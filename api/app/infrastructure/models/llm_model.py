@@ -9,7 +9,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
 from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities
-from app.infrastructure.security.api_key_encryption import ApiKeyEncryption
 
 
 class LLMModelORM(Base):
@@ -17,15 +16,12 @@ class LLMModelORM(Base):
     __tablename__ = "llm_models"
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
-    display_name: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
-    provider: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'openai'"))
-    base_url: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    api_key_encryption: Mapped[str] = mapped_column(
-        String(32),
+    endpoint_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("llm_endpoints.id", ondelete="RESTRICT"),
         nullable=False,
-        server_default=text("'legacy_plaintext'"),
     )
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
     model_name: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
     temperature: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0.7"))
     max_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("8192"))
@@ -59,20 +55,11 @@ class LLMModelORM(Base):
     )
 
     @classmethod
-    def from_domain(
-        cls,
-        model: LLMModel,
-        encrypted_api_key: str,
-        *,
-        api_key_encryption: str = ApiKeyEncryption.LEGACY_PLAINTEXT,
-    ) -> "LLMModelORM":
+    def from_domain(cls, model: LLMModel) -> "LLMModelORM":
         return cls(
             id=model.id,
+            endpoint_id=model.endpoint_id,
             display_name=model.display_name,
-            provider=model.provider.value,
-            base_url=model.base_url,
-            api_key=encrypted_api_key,
-            api_key_encryption=api_key_encryption,
             model_name=model.model_name,
             temperature=model.temperature,
             max_tokens=model.max_tokens,
@@ -86,7 +73,13 @@ class LLMModelORM(Base):
             visibility=model.visibility.value,
         )
 
-    def to_domain(self, decrypted_api_key: str) -> LLMModel:
+    def to_domain(
+        self,
+        *,
+        provider: LLMProvider,
+        base_url: str,
+        api_key: str,
+    ) -> LLMModel:
         raw_capabilities = self.capabilities or {}
         if raw_capabilities:
             capabilities = ModelCapabilities.model_validate(raw_capabilities)
@@ -94,10 +87,11 @@ class LLMModelORM(Base):
             capabilities = ModelCapabilities.from_legacy_flag(self.supports_multimodal)
         return LLMModel(
             id=self.id,
+            endpoint_id=self.endpoint_id,
             display_name=self.display_name,
-            provider=LLMProvider(self.provider),
-            base_url=self.base_url,
-            api_key=decrypted_api_key,
+            provider=provider,
+            base_url=base_url,
+            api_key=api_key,
             model_name=self.model_name,
             temperature=self.temperature,
             max_tokens=self.max_tokens,

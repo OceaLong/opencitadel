@@ -7,6 +7,7 @@ from .session import SessionModel
 from .session_agent_memory import SessionAgentMemoryModel
 from .session_file_attachment import SessionFileAttachmentModel
 from .invitation import InvitationORM
+from .llm_endpoint import LLMEndpointORM
 from .llm_model import LLMModelORM
 from .oauth_identity import OAuthIdentityORM
 from .refresh_token import RefreshTokenORM
@@ -47,6 +48,7 @@ __all__ = [
     "SessionFileAttachmentModel",
     "FileModel",
     "InvitationORM",
+    "LLMEndpointORM",
     "LLMModelORM",
     "OAuthIdentityORM",
     "RefreshTokenORM",

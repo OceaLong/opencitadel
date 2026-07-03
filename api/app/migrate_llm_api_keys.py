@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Encrypt legacy plaintext llm_models.api_key values."""
+"""Encrypt legacy plaintext llm_endpoints.api_key values."""
 from __future__ import annotations
 
 import asyncio
@@ -9,11 +9,11 @@ import logging
 from sqlalchemy import select
 
 from app.infrastructure.logging import setup_logging
-from app.infrastructure.models.llm_model import LLMModelORM
+from app.infrastructure.models.llm_endpoint import LLMEndpointORM
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.security.api_key_encryption import ApiKeyEncryption
 from app.infrastructure.security.llm_key_inspector import (
-    count_legacy_plaintext_models,
+    count_legacy_plaintext_endpoints,
     inspect_llm_api_keys,
 )
 from app.infrastructure.storage.postgres import get_postgres
@@ -37,19 +37,19 @@ async def migrate_legacy_plaintext_api_keys() -> int:
             for line in report.as_log_lines():
                 logger.info("LLM API key inspection: %s", line)
 
-            legacy_count = await count_legacy_plaintext_models(session)
+            legacy_count = await count_legacy_plaintext_endpoints(session)
             if legacy_count == 0:
-                logger.info("No legacy plaintext LLM API keys to migrate")
+                logger.info("No legacy plaintext LLM endpoint API keys to migrate")
                 return 0
 
             cipher = ApiKeyCipher(settings.api_key_secret)
             stmt = (
-                select(LLMModelORM)
+                select(LLMEndpointORM)
                 .where(
-                    LLMModelORM.api_key_encryption == ApiKeyEncryption.LEGACY_PLAINTEXT,
-                    LLMModelORM.api_key != "",
+                    LLMEndpointORM.api_key_encryption == ApiKeyEncryption.LEGACY_PLAINTEXT,
+                    LLMEndpointORM.api_key != "",
                 )
-                .order_by(LLMModelORM.created_at)
+                .order_by(LLMEndpointORM.created_at)
             )
             result = await session.execute(stmt)
             records = list(result.scalars().all())
@@ -59,20 +59,20 @@ async def migrate_legacy_plaintext_api_keys() -> int:
                 record.api_key = encrypted
                 record.api_key_encryption = ApiKeyEncryption.FERNET_V1
                 migrated += 1
-                logger.info("Encrypted legacy plaintext LLM API key for model_id=%s", record.id)
+                logger.info("Encrypted legacy plaintext LLM API key for endpoint_id=%s", record.id)
 
             await session.commit()
     finally:
         await postgres.shutdown()
 
-    logger.info("LLM API key migration complete: migrated=%s", migrated)
+    logger.info("LLM endpoint API key migration complete: migrated=%s", migrated)
     return migrated
 
 
 def main() -> None:
     setup_logging()
     migrated = asyncio.run(migrate_legacy_plaintext_api_keys())
-    print(f"LLM API key migration complete: migrated={migrated}")
+    print(f"LLM endpoint API key migration complete: migrated={migrated}")
 
 
 if __name__ == "__main__":

@@ -15,6 +15,12 @@ describe("modelErrorMessage", () => {
     expect(message).not.toBe(modelErrorMessage("MODEL_QUOTA_EXCEEDED"));
   });
 
+  it("returns infra message for TASK_INFRA_FAILED", () => {
+    const message = modelErrorMessage("TASK_INFRA_FAILED");
+    expect(message).toBeTruthy();
+    expect(message).not.toBe(modelErrorMessage("MODEL_UNAVAILABLE"));
+  });
+
   it("returns null for unknown codes", () => {
     expect(modelErrorMessage("UNKNOWN")).toBeNull();
     expect(modelErrorMessage(null)).toBeNull();

@@ -112,6 +112,9 @@ Notes:
 
 - **Independent of** `fallback_enabled`: quota fallback works without enabling general transient fallback.
 - Candidates come from `llm_models` (same provider first, then cross-provider); no runtime probe—call directly and continue on failure.
+- Different `model_name` values under the same endpoint / API Key may have **independent quotas**; quota fallback walks all configured models (including same-endpoint siblings) with **no retry on the same model**.
+- Models confirmed quota-exhausted are skipped on subsequent LLM calls within the same task.
+- Quota-driven model switches **do not consume** Agent retry budget; `MODEL_QUOTA_EXCEEDED` is raised only when all candidates fail.
 - On success, Agent emits `assistant_notice` (`sessionDetail.modelFallbackNotice`) and the task continues; if all candidates fail, behavior remains `MODEL_QUOTA_EXCEEDED` + session failed.
 - Requires at least two valid configured models.
 

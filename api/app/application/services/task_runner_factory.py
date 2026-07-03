@@ -26,7 +26,7 @@ from app.domain.external.search import SearchEngine
 from app.domain.external.session_state import SessionStatePort
 from app.domain.external.task_state_port import TaskStatePort
 from app.domain.models.agent_runtime_settings import AgentMemoryRuntimeSettings, AgentRuntimeSettings
-from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
+from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig, ModelResilienceConfig
 from app.domain.models.codebase import SessionMode
 from app.domain.models.session import Session, SessionStatus
 from app.domain.models.scope import OwnerScope
@@ -125,12 +125,14 @@ class TaskRunnerFactory:
         self._mcp_config = MCPConfig()
         self._a2a_config = A2AConfig()
         self._auto_extract_memory = True
+        self._model_resilience = ModelResilienceConfig()
 
     async def _refresh_runtime_config(self, session: Optional[Session] = None) -> None:
         scope = OwnerScope.personal(session.owner_user_id) if session and session.owner_user_id else None
         app_config = await self._config_provider.resolve_for_owner(scope)
         self._agent_config = app_config.agent_config
         self._auto_extract_memory = app_config.memory.auto_extract_enabled
+        self._model_resilience = app_config.model_resilience
         if self._mcp_server_service is not None:
             self._mcp_config = await self._mcp_server_service.resolve_mcp_config(scope)
         else:
@@ -185,6 +187,7 @@ class TaskRunnerFactory:
             llm_model,
             thinking_enabled=session.thinking_enabled,
             llm_model_service=self._llm_model_service,
+            resilience_config=self._model_resilience,
         )
         long_term_memory_block = await self._memory_recall(session.id)
         return llm, agent_config, skill, skill_prompt, long_term_memory_block, llm_model
@@ -295,12 +298,26 @@ class TaskRunnerFactory:
             artifact_service = self._artifact_service
 
             async def write_artifact(**kwargs):
+                content = kwargs.get("content") or ""
+                source_path = kwargs.get("source_path")
+                if source_path:
+                    read_result = await sandbox.read_file(source_path, max_length=None)
+                    if not read_result.success:
+                        raise ValueError(
+                            f"无法从沙箱读取交付物源文件[{source_path}]: {read_result.message or '读取失败'}"
+                        )
+                    file_content = (read_result.data or {}).get("content")
+                    if not isinstance(file_content, str) or not file_content:
+                        raise ValueError(f"沙箱文件[{source_path}]内容为空")
+                    content = file_content
+                elif not content:
+                    raise ValueError("artifact_write 需要 content 或 source_path 至少其一")
                 artifact, event = await artifact_service.write_content(
                     session_id=session.id,
                     artifact_id=kwargs.get("artifact_id"),
                     kind=kwargs["kind"],
                     title=kwargs["title"],
-                    content=kwargs["content"],
+                    content=content,
                 )
                 return artifact.model_dump(mode="json"), event
 
@@ -311,9 +328,11 @@ class TaskRunnerFactory:
             extra_tools.append(ArtifactTool(write_fn=write_artifact, finalize_fn=finalize_artifact))
             skill_prompt = (
                 f"{skill_prompt}\n\n交付物规则：产出最终文档或网页时必须调用 artifact_write / artifact_finalize，"
-                f"不要仅用 write_file 写入交付物。"
+                f"不要仅用 write_file 写入交付物。长文档先用 write_file 写入沙箱，"
+                f"再调用 artifact_write 时传 source_path（沙箱路径），不要内联大段 content。"
             ).strip() if skill_prompt else (
                 "交付物规则：产出最终文档或网页时必须调用 artifact_write / artifact_finalize。"
+                "长文档先用 write_file 写入沙箱，再传 source_path，不要内联大段 content。"
             )
 
         codebase_prompt = ""

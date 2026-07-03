@@ -27,8 +27,9 @@ router = APIRouter(prefix="/llm-models", tags=["模型管理"])
 def _to_response(model: LLMModel) -> LLMModelResponse:
     return LLMModelResponse(
         id=model.id,
+        endpoint_id=model.endpoint_id,
         display_name=model.display_name,
-        provider=model.provider,
+        provider=model.provider.value if hasattr(model.provider, "value") else model.provider,
         base_url=model.base_url,
         api_key=model.api_key,
         model_name=model.model_name,

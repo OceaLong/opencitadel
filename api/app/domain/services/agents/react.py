@@ -26,6 +26,7 @@ from app.domain.models.plan import Plan, Step, ExecutionStatus
 from app.domain.schemas.react_output import ReactStepSchema, ReactSummarySchema
 from app.domain.services.agents.structured_parse import StructuredParseError, parse_structured_output
 from app.domain.services.prompts.loader import compose_system_prompt, detect_locale_from_text, load_prompts, resolve_writing_style
+from app.domain.utils.prompt_context import format_user_attachments_for_prompt
 from .base import BaseAgent
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,101 @@ class ReActAgent(BaseAgent):
     def _should_emit_deltas(self) -> bool:
         return type(self) is ReActAgent
 
+    async def _complete_step_from_message(
+            self,
+            step: Step,
+            message: str,
+    ) -> AsyncGenerator[BaseEvent, None]:
+        internal = self._internal_prompts()
+        max_repair_attempts = 2
+        current_message = message
+        parsed = None
+        for attempt in range(max_repair_attempts + 1):
+            try:
+                parsed = await parse_structured_output(
+                    current_message,
+                    ReactStepSchema,
+                    self._json_parser,
+                    allow_plain_text_coercion=True,
+                )
+                break
+            except StructuredParseError as exc:
+                if attempt >= max_repair_attempts:
+                    raise
+                repair_hint = internal.STRUCTURED_REPAIR_HINT.format(errors=exc)
+                budget = getattr(self, "_retry_budget", None)
+                if budget is not None:
+                    budget.consume("structured_validation_retry", ignore_deadline=True)
+                got_message = False
+                async for repair_event in self.invoke(
+                        repair_hint,
+                        emit_deltas=self._should_emit_deltas(),
+                        response_schema=ReactStepSchema,
+                ):
+                    if isinstance(repair_event, MessageEvent):
+                        current_message = repair_event.message
+                        got_message = True
+                        break
+                    yield repair_event
+                if not got_message:
+                    raise
+        step.success = parsed.success
+        step.result = parsed.result
+        step.attachments = parsed.attachments
+        yield StepEvent(step=step, status=StepEventStatus.COMPLETED)
+        if step.result:
+            yield MessageEvent(role="assistant", message=step.result)
+
+    async def _complete_summary_from_message(
+            self,
+            message: str,
+            *,
+            base_query: str,
+    ) -> AsyncGenerator[BaseEvent, None]:
+        """Parse summary output; yields repair events or final MessageEvent."""
+        internal = self._internal_prompts()
+        max_repair_attempts = 2
+        current_message = message
+        current_query = base_query
+        for attempt in range(max_repair_attempts + 1):
+            try:
+                summary_message = await parse_structured_output(
+                    current_message,
+                    ReactSummarySchema,
+                    self._json_parser,
+                    allow_plain_text_coercion=True,
+                )
+                attachments = [File(filepath=filepath) for filepath in summary_message.attachments]
+                yield MessageEvent(
+                    role="assistant",
+                    message=summary_message.message,
+                    attachments=attachments,
+                )
+                return
+            except StructuredParseError as exc:
+                if attempt >= max_repair_attempts:
+                    raise
+                budget = getattr(self, "_retry_budget", None)
+                if budget is not None:
+                    budget.consume("structured_validation_retry", ignore_deadline=True)
+                current_query = (
+                    f"{base_query}\n\n"
+                    f"{internal.STRUCTURED_REPAIR_HINT.format(errors=exc)}"
+                )
+                got_message = False
+                async for repair_event in self.invoke(
+                        current_query,
+                        emit_deltas=self._should_emit_deltas(),
+                        response_schema=ReactSummarySchema,
+                ):
+                    if isinstance(repair_event, MessageEvent):
+                        current_message = repair_event.message
+                        got_message = True
+                        break
+                    yield repair_event
+                if not got_message:
+                    raise
+
     async def execute_step(
             self,
             plan: Plan,
@@ -84,13 +180,14 @@ class ReActAgent(BaseAgent):
         # 1.根据传递的内容生成执行消息
         query = prompts.react.EXECUTION_PROMPT.format(
             message=message.message,
-            attachments="\n".join(message.attachments),
+            attachments=format_user_attachments_for_prompt(message, locale=prompts.locale),
             language=plan.language,
             step=step.description,
             plan_snapshot=render_plan_snapshot(plan, step.id),
         )
 
         # 2.更新步骤的执行状态为运行中并返回Step事件
+        self._refresh_retry_budget()
         step.status = ExecutionStatus.RUNNING
         self.set_current_step(step.id)
         yield StepEvent(step=step, status=StepEventStatus.STARTED)
@@ -203,41 +300,8 @@ class ReActAgent(BaseAgent):
             return
         if isinstance(event, MessageEvent):
             step.status = ExecutionStatus.COMPLETED
-            internal = self._internal_prompts()
-            max_repair_attempts = 2
-            current_message = event.message
-            parsed = None
-            for attempt in range(max_repair_attempts + 1):
-                try:
-                    parsed = await parse_structured_output(
-                        current_message,
-                        ReactStepSchema,
-                        self._json_parser,
-                        retry_budget=getattr(self, "_retry_budget", None),
-                    )
-                    break
-                except StructuredParseError as exc:
-                    if attempt >= max_repair_attempts:
-                        raise
-                    repair_hint = internal.STRUCTURED_REPAIR_HINT.format(errors=exc)
-                    got_message = False
-                    async for repair_event in self.continue_tool_iteration_loop(
-                            inject_tool_messages=[{"role": "user", "content": repair_hint}],
-                            emit_deltas=self._should_emit_deltas(),
-                    ):
-                        if isinstance(repair_event, MessageEvent):
-                            current_message = repair_event.message
-                            got_message = True
-                            break
-                        yield repair_event
-                    if not got_message:
-                        raise
-            step.success = parsed.success
-            step.result = parsed.result
-            step.attachments = parsed.attachments
-            yield StepEvent(step=step, status=StepEventStatus.COMPLETED)
-            if step.result:
-                yield MessageEvent(role="assistant", message=step.result)
+            async for out in self._complete_step_from_message(step, event.message):
+                yield out
             return
         if isinstance(event, ErrorEvent):
             step.status = ExecutionStatus.FAILED
@@ -373,48 +437,23 @@ class ReActAgent(BaseAgent):
             writing_style=style,
         )
         # 1.构建请求query
+        self._refresh_retry_budget()
         query = prompts.react.SUMMARIZE_PROMPT
 
-        max_repair_attempts = 2
-        current_query = query
         try:
-            for attempt in range(max_repair_attempts + 1):
-                # 2.调用invoke方法获取Agent生成的事件（汇总阶段不再重传用户图片）
-                async for event in self.invoke(current_query, emit_deltas=self._should_emit_deltas()):
-                    # 3.判断事件类型是否为消息事件，如果是则表示Agent结构化生成汇总内容
-                    if isinstance(event, MessageEvent):
-                        # 4.记录日志并解析输出内容
-                        logger.info(f"执行Agent生成汇总内容: {event.message}")
-                        try:
-                            # 5.将解析数据转换为Message对象
-                            summary_message = await parse_structured_output(
-                                event.message,
-                                ReactSummarySchema,
-                                self._json_parser,
-                                retry_budget=getattr(self, "_retry_budget", None),
-                            )
-                        except StructuredParseError as exc:
-                            if attempt >= max_repair_attempts:
-                                raise
-                            internal = prompts.internal
-                            current_query = (
-                                f"{query}\n\n"
-                                f"{internal.STRUCTURED_REPAIR_HINT.format(errors=exc)}"
-                            )
-                            break
-
-                        # 6.提取消息中的附件信息
-                        attachments = [File(filepath=filepath) for filepath in summary_message.attachments]
-
-                        # 7.返回消息事件并将消息+附件进行相应
-                        yield MessageEvent(
-                            role="assistant",
-                            message=summary_message.message,
-                            attachments=attachments,
-                        )
-                        return
-                    else:
-                        # 8.其他事件则直接返回
-                        yield event
+            async for event in self.invoke(
+                    query,
+                    emit_deltas=self._should_emit_deltas(),
+                    response_schema=ReactSummarySchema,
+            ):
+                if isinstance(event, MessageEvent):
+                    logger.info(f"执行Agent生成汇总内容: {event.message}")
+                    async for out in self._complete_summary_from_message(
+                            event.message,
+                            base_query=query,
+                    ):
+                        yield out
+                    return
+                yield event
         finally:
             self._system_prompt = saved_prompt

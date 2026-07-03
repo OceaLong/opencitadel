@@ -217,7 +217,7 @@ MINIO_SECURE=false
 NGINX_PORT=8088
 ```
 
-本地 LLM：在 UI 添加模型，Provider=ollama，`base_url=http://host.docker.internal:11434/v1`。
+本地 LLM：在 UI「模型管理」新增端点，Provider=ollama，`base_url=http://host.docker.internal:11434/v1`，再在该端点下添加模型。
 
 行为类配置（CORS、限流、沙箱、记忆、Worker 并发、OTEL 开关等）统一在 `api/config.yaml` 维护，不要写入 `.env`。
 
@@ -272,8 +272,8 @@ a2a_config:
 
 ### 模型、Skill 与记忆
 
-- **首次启动不会自动导入默认模型**，请在前端「设置中心 → 模型管理」添加模型并设置默认项后才能发起对话。模型存储在 PostgreSQL `llm_models` 表，API Key 由 `API_KEY_SECRET` 加密。
-- `llm_models.api_key_encryption` 字段标识存储格式：`legacy_plaintext`（历史明文）或 `fernet_v1`（加密存储）。`opencitadel-migrate` 会在 Alembic 后自动加密历史明文，无需额外命令。
+- **首次启动不会自动导入默认模型**，请在前端「设置中心 → 模型管理」先添加 **端点**（Provider / Base URL / API Key），再在同一端点下添加多个 **模型**（仅 model name 不同），并设置默认项后才能发起对话。连接信息存储在 PostgreSQL `llm_endpoints` 表，模型存储在 `llm_models` 表；API Key 由 `API_KEY_SECRET` 加密。
+- `llm_endpoints.api_key_encryption` 字段标识存储格式：`legacy_plaintext`（历史明文）或 `fernet_v1`（加密存储）。`opencitadel-migrate` 会在 Alembic 后自动加密历史明文，无需额外命令。修改端点 URL 或 API Key 后，同端点下所有模型会同步生效。
 - 系统会自动创建内置 Skill 模板（编程助手、研究分析、数据分析、内容写作），也可在「设置中心 → Skill 模板」维护自定义模板。
 - 长期记忆在「设置中心 → 长期记忆」维护，支持全局和会话两种作用域；任务开始时会自动召回相关记忆（时间衰减 + 可选 pgvector 向量混合检索）。
 - 开启向量记忆需在 `config.yaml` 设置 `memory.vector_enabled: true`，并在 `.env` 配置 `EMBEDDING_API_KEY`；PostgreSQL 使用 `pgvector/pgvector:pg16` 镜像。
@@ -507,7 +507,7 @@ docker compose up -d --build --force-recreate opencitadel-migrate opencitadel-ap
 docker compose run --rm opencitadel-api python -m app.migrate_llm_api_keys
 ```
 
-轮换 `API_KEY_SECRET` 后，已加密的模型密钥需在前端重新保存。
+轮换 `API_KEY_SECRET` 后，已加密的端点密钥需在前端「模型管理 → 编辑端点」中重新保存。
 
 ---
 

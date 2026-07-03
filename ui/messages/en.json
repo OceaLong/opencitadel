@@ -83,7 +83,7 @@
     "streamReadFailed": "Failed to read stream",
     "modelUnavailable": "Model or embedding service is unavailable. Check model settings or try again later.",
     "modelQuotaExceeded": "This model's API quota is exhausted. Complete billing in the provider console or switch to another model.",
-    "infraFailed": "System infrastructure error. Try again later or contact an administrator.",
+    "infraFailed": "Task execution timed out or retry limit was reached. Simplify the task or try again later.",
     "saveFailed": "Save failed",
     "updateFailed": "Update failed",
     "addFailed": "Add failed",
@@ -237,7 +237,7 @@
   },
   "sessionHeader": {
     "untitledTask": "Untitled task",
-    "observationTitle": "Tools: {tools} · Waits: {waits}",
+    "observationTitle": "Tools: {tools} · Errors: {errors} · Waits: {waits}",
     "tokenUsageTitle": "Prompt: {prompt} · Completion: {completion} · Calls: {calls} · Click for details",
     "allFilesTitle": "All files in this task",
     "noFiles": "No files yet",
@@ -253,6 +253,8 @@
     "thinking": "Thinking...",
     "taskNotFound": "Task not found",
     "taskFailed": "Task execution failed. Adjust settings and send a message to continue.",
+    "taskFailedNotice": "Task execution failed. Adjust settings and send a message to continue.",
+    "taskCancelledNotice": "Task cancelled.",
     "streamStale": "Background task is recovering; the event stream is temporarily interrupted.",
     "streamError": "Session stream connection error. Attempting to recover.",
     "streamReconnecting": "Reconnecting session stream...",
@@ -311,18 +313,18 @@
   "sessionDebug": {
     "title": "Debug events",
     "button": "Debug",
-    "description": "View task error details plus internal planner output, reasoning, and tool args — not shown in regular chat bubbles.",
-    "empty": "No errors or debug events yet. Opening this panel requests debug events; planner, reasoning, and tool args during a run appear below.",
-    "debugSectionTitle": "Debug events",
-    "errorsTitle": "Errors ({count})",
-    "errorSourceTool": "Tool {name}",
-    "errorSourceSystem": "System error",
-    "debugEmpty": "No debug events yet. Reasoning and tool args appear live during a run; persisted planner output shows here.",
-    "debugEmptyClosed": "Loading debug events…",
+    "description": "Internal planner output, reasoning, and tool args — not shown in regular chat bubbles.",
+    "empty": "No debug events yet. Opening this panel requests debug events; new planner, reasoning, and tool args will appear here.",
     "typePlanner": "Planner",
     "typeReasoning": "Reasoning",
     "typeToolArgs": "Tool Args",
-    "typeDebug": "Debug"
+    "typeDebug": "Debug",
+    "errorsTitle": "Errors ({count})",
+    "errorSourceSystem": "System",
+    "errorSourceTool": "Tool: {name}",
+    "debugSectionTitle": "Debug events",
+    "debugEmpty": "No debug events in this session.",
+    "debugEmptyClosed": "Enable debug mode to see planner/reasoning/tool args."
   },
   "planPanel": {
     "noSteps": "No steps yet",
@@ -498,7 +500,18 @@
     }
   },
   "settingsModels": {
-    "description": "Add models from multiple providers globally; sessions can choose which to use",
+    "description": "Manage shared endpoints and models; sessions choose a model at runtime",
+    "addEndpoint": "Add endpoint",
+    "editEndpoint": "Edit endpoint",
+    "endpointDisplayName": "Endpoint name",
+    "endpoint": "Endpoint",
+    "addModelUnderEndpoint": "Add model",
+    "noEndpoints": "No endpoints yet. Add an endpoint first.",
+    "noModelsUnderEndpoint": "No models under this endpoint yet.",
+    "endpointCreated": "Endpoint created",
+    "endpointUpdated": "Endpoint updated",
+    "fillEndpointRequiredFields": "Please fill in endpoint name and Base URL",
+    "fillModelRequiredFields": "Please fill in display name and model name",
     "addModel": "Add model",
     "editModel": "Edit model",
     "multimodal": "Multimodal",
@@ -516,7 +529,7 @@
     "temperature": "Temperature",
     "maxTokens": "Max Tokens",
     "fillRequiredFields": "Please fill in display name, model name, and Base URL",
-    "apiKeyRequired": "API Key is required when creating a model",
+    "apiKeyRequired": "API Key is required when creating an endpoint",
     "modelUpdated": "Model updated",
     "modelCreated": "Model created",
     "deleted": "Deleted",
@@ -1504,7 +1517,8 @@
     "statusDraft": "Draft",
     "statusFinal": "Final",
     "statusUpdated": "Updated",
-    "version": "Version"
+    "version": "Version",
+    "incompleteContentWarning": "Artifact content may be incomplete (truncated during storage or generation). Regenerate or compare with the sandbox attachment."
   },
   "automation": {
     "contextLabel": "Task context",
@@ -1670,7 +1684,8 @@
   "shareArtifact": {
     "artifactTitle": "Shared artifact",
     "home": "Home",
-    "title": "Shared artifact"
+    "title": "Shared artifact",
+    "incompleteContentWarning": "Artifact content may be incomplete. Contact the sharer to regenerate."
   },
   "workspaceContext": {
     "codebasePanelTitle": "Codebase context",

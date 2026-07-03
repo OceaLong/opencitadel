@@ -45,6 +45,7 @@ class ModelCapabilities(BaseModel):
 class LLMModel(BaseModel):
     """LLM模型配置领域模型"""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    endpoint_id: str = ""
     display_name: str = ""
     provider: LLMProvider = LLMProvider.OPENAI
     base_url: str = "https://api.openai.com/v1"

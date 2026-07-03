@@ -99,6 +99,21 @@ def resolve_writing_style(
     return global_default if global_default in ("prose", "adaptive") else "prose"
 
 
+def compose_clarify_system_prompt(
+        prompts: PromptBundle,
+        *,
+        skill_prompt: str = "",
+        long_term_memory_block: str = "",
+) -> str:
+    clarify_mod = prompts.clarify
+    content = clarify_mod.CLARIFY_AGENT_SYSTEM_PROMPT + clarify_mod.CLARIFY_SYSTEM_PROMPT
+    if skill_prompt:
+        content += f"\n\n--- Skill Instructions ---\n{skill_prompt}"
+    if long_term_memory_block:
+        content += f"\n\n{long_term_memory_block}"
+    return content
+
+
 def compose_system_prompt(
         prompts: PromptBundle,
         extra: str = "",

@@ -134,7 +134,7 @@ class LazySandbox:
             start_line: Optional[int] = None,
             end_line: Optional[int] = None,
             sudo: bool = False,
-            max_length: int = 10000,
+            max_length: Optional[int] = 10000,
     ) -> ToolResult:
         return await (await self._resolve()).read_file(
             filepath, start_line=start_line, end_line=end_line, sudo=sudo, max_length=max_length,

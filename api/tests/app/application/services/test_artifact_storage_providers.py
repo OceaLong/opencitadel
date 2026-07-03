@@ -90,6 +90,6 @@ def test_artifact_write_and_read_via_storage_adapter(adapter_cls, client_kwarg):
         assert data == b"# Hello"
         assert artifact.storage_ref in object_store
         client.put_bytes.assert_awaited_once()
-        client.get_bytes.assert_awaited_once()
+        assert client.get_bytes.await_count >= 2
 
     asyncio.run(_run())

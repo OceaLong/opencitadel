@@ -74,6 +74,20 @@ def test_quota_fallback_eligible_is_not_retriable():
     assert is_retriable_llm_error(err) is False
 
 
+def test_is_quota_exhausted_error_detects_chinese_server_requests_error():
+    err = ServerRequestsError("调用LLM失败: 模型 qwen-plus API 配额已耗尽")
+    assert is_quota_exhausted_error(err) is True
+    assert is_quota_fallback_eligible(err) is True
+    assert classify_llm_error_code(err) == MODEL_QUOTA_EXCEEDED
+
+
+def test_is_quota_exhausted_error_detects_cause_chain():
+    original = Exception(QUOTA_ERROR_SAMPLE)
+    wrapped = ServerRequestsError("调用LLM失败: 模型 qwen-plus API 配额已耗尽")
+    wrapped.__cause__ = original
+    assert is_quota_exhausted_error(wrapped) is True
+
+
 def test_extract_llm_text_content_prefers_content():
     assert _extract_llm_text_content({"content": "[]", "reasoning_content": "x"}) == "[]"
 

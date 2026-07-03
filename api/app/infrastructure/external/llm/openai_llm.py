@@ -151,6 +151,7 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         self._client = AsyncOpenAI(
             base_url=base_url,
             api_key=api_key or "sk-placeholder",
+            max_retries=0,
             **{k: v for k, v in extra.items() if k not in _CLIENT_EXTRA_KEYS},
             **kwargs,
         )
@@ -222,9 +223,9 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             )
             raise ServerRequestsError(
                 f"调用LLM超时(>{self._timeout}s): 请检查模型服务或减小多模态图片体积"
-            )
+            ) from error
         logger.error(f"调用OpenAI客户端发生错误: {str(error)}", exc_info=True)
-        raise ServerRequestsError(_format_llm_error(error, request_model))
+        raise ServerRequestsError(_format_llm_error(error, request_model)) from error
 
     async def invoke(
             self,

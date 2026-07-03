@@ -47,6 +47,7 @@ export type ModelCapabilities = {
 
 export type LLMModel = {
   id: string;
+  endpoint_id: string;
   display_name: string;
   provider: LLMProvider;
   base_url: string;
@@ -69,10 +70,8 @@ export type LLMModelsData = {
 };
 
 export type CreateLLMModelParams = {
+  endpoint_id: string;
   display_name: string;
-  provider: LLMProvider;
-  base_url: string;
-  api_key?: string;
   model_name: string;
   temperature?: number;
   max_tokens?: number;
@@ -80,6 +79,38 @@ export type CreateLLMModelParams = {
   capabilities?: ModelCapabilities;
   supports_multimodal?: boolean;
   is_default?: boolean;
+};
+
+export type LLMEndpointModelSummary = {
+  id: string;
+  display_name: string;
+  model_name: string;
+  is_default: boolean;
+};
+
+export type LLMEndpoint = {
+  id: string;
+  display_name: string;
+  provider: LLMProvider;
+  base_url: string;
+  api_key?: string;
+  visibility?: "global" | "private";
+  owner_user_id?: string | null;
+  model_count?: number;
+  models?: LLMEndpointModelSummary[];
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type LLMEndpointsData = {
+  endpoints: LLMEndpoint[];
+};
+
+export type CreateLLMEndpointParams = {
+  display_name: string;
+  provider: LLMProvider;
+  base_url: string;
+  api_key?: string;
 };
 
 export type MultimodalProbeResult = {

@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import asyncio
 import logging
 from functools import lru_cache
-from typing import Optional
+from typing import Any, Optional
 
 from qcloud_cos import CosS3Client, CosConfig
 from starlette.concurrency import run_in_threadpool
@@ -10,6 +11,32 @@ from starlette.concurrency import run_in_threadpool
 from core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
+
+_READ_CHUNK_SIZE = 65536
+_GET_BYTES_MAX_ATTEMPTS = 3
+_GET_BYTES_RETRY_DELAYS_SECONDS = (0.2, 0.5, 1.0)
+
+
+def _read_body_fully(body: Any) -> bytes:
+    if not hasattr(body, "read"):
+        return bytes(body)
+    chunks: list[bytes] = []
+    while True:
+        chunk = body.read(_READ_CHUNK_SIZE)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _parse_content_length(response: dict) -> Optional[int]:
+    expected_length = response.get("Content-Length")
+    if expected_length is None:
+        return None
+    try:
+        return int(expected_length)
+    except (TypeError, ValueError):
+        return None
 
 
 class Cos:
@@ -67,22 +94,62 @@ class Cos:
 
     async def put_bytes(self, key: str, data: bytes) -> None:
         """Upload raw bytes to COS without creating a file record."""
+        logger.debug("COS put_bytes key=%s byte_size=%d", key, len(data))
         await run_in_threadpool(
             self.client.put_object,
             Bucket=self.bucket,
             Body=data,
             Key=key,
+            ContentLength=len(data),
         )
 
-    async def get_bytes(self, key: str) -> bytes:
-        """Download raw bytes from COS."""
+    async def _fetch_object_bytes(self, key: str) -> tuple[bytes, Optional[int]]:
         response = await run_in_threadpool(
             self.client.get_object,
             Bucket=self.bucket,
             Key=key,
         )
         body = response["Body"]
-        return body.read() if hasattr(body, "read") else bytes(body)
+        expected_length = _parse_content_length(response)
+        data = _read_body_fully(body)
+        return data, expected_length
+
+    async def get_bytes(self, key: str) -> bytes:
+        """Download raw bytes from COS."""
+        last_data = b""
+        last_expected_length: Optional[int] = None
+
+        for attempt in range(_GET_BYTES_MAX_ATTEMPTS):
+            if attempt > 0:
+                delay = _GET_BYTES_RETRY_DELAYS_SECONDS[attempt - 1]
+                logger.warning(
+                    "COS get_bytes 重试 key=%s attempt=%s/%s delay=%.1fs",
+                    key,
+                    attempt + 1,
+                    _GET_BYTES_MAX_ATTEMPTS,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+
+            data, expected_length = await self._fetch_object_bytes(key)
+            last_data = data
+            last_expected_length = expected_length
+
+            if expected_length is not None and len(data) != expected_length:
+                logger.warning(
+                    "COS get_bytes 长度不一致 key=%s expected=%s got=%d",
+                    key,
+                    expected_length,
+                    len(data),
+                )
+                continue
+
+            return data
+
+        raise RuntimeError(
+            f"COS get_bytes 读取失败 key={key} "
+            f"expected={last_expected_length} got={len(last_data)}"
+        )
 
     async def presigned_get_url(self, key: str, expires_seconds: int = 604800) -> Optional[str]:
         """Generate a presigned download URL for LLM-accessible image references."""

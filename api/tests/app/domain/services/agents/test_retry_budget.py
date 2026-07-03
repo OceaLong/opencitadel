@@ -1,13 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import asyncio
+import time
 from unittest.mock import MagicMock
+
+import pytest
 
 from app.domain.models.agent_runtime_settings import AgentMemoryRuntimeSettings, AgentRuntimeSettings
 from app.domain.models.app_config import AgentConfig
 from app.domain.models.llm_model import ModelCapabilities
 from app.domain.models.memory import Memory
 from app.domain.services.agents.base import BaseAgent
+from app.domain.services.agents.retry_budget import LLMRetryBudget, RetryBudgetExceeded
 from tests.app.domain.services.agents.conftest import agent_test_observability_port
 
 
@@ -58,3 +62,20 @@ def test_many_successful_llm_calls_do_not_exhaust_retry_budget():
 
     asyncio.run(_run())
     assert agent._retry_budget.used_calls == 0
+
+
+def test_refresh_deadline_allows_late_consume():
+    budget = LLMRetryBudget.create(max_calls=3, max_seconds=1.0)
+    budget.deadline_monotonic = time.monotonic() - 1.0
+    with pytest.raises(RetryBudgetExceeded):
+        budget.consume("late_retry")
+    budget.refresh_deadline(120.0)
+    budget.consume("late_retry")
+    assert budget.used_calls == 1
+
+
+def test_ignore_deadline_skips_time_check():
+    budget = LLMRetryBudget.create(max_calls=3, max_seconds=1.0)
+    budget.deadline_monotonic = time.monotonic() - 1.0
+    budget.consume("structured_validation_retry", ignore_deadline=True)
+    assert budget.used_calls == 1

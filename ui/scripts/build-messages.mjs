@@ -92,8 +92,8 @@ const messages = {
       zh: "该模型 API 配额已耗尽，请在提供商控制台完成付费或切换到其他可用模型。",
     },
     infraFailed: {
-      en: "System infrastructure error. Try again later or contact an administrator.",
-      zh: "系统基础设施异常，请稍后重试或联系管理员",
+      en: "Task execution timed out or retry limit was reached. Simplify the task or try again later.",
+      zh: "任务执行超时或重试次数耗尽，请简化任务或稍后重试",
     },
     saveFailed: { en: "Save failed", zh: "保存失败" },
     updateFailed: { en: "Update failed", zh: "更新失败" },
@@ -277,6 +277,14 @@ const messages = {
       en: "Task execution failed. Adjust settings and send a message to continue.",
       zh: "任务执行失败，可修改配置后重新发送消息继续。",
     },
+    taskFailedNotice: {
+      en: "Task execution failed. Adjust settings and send a message to continue.",
+      zh: "任务执行失败，可修改配置后重新发送消息继续。",
+    },
+    taskCancelledNotice: {
+      en: "Task cancelled.",
+      zh: "任务已取消。",
+    },
     streamStale: {
       en: "Background task is recovering; the event stream is temporarily interrupted.",
       zh: "后台任务正在恢复，事件流暂时中断。",
@@ -351,6 +359,15 @@ const messages = {
     typeReasoning: { en: "Reasoning", zh: "Reasoning" },
     typeToolArgs: { en: "Tool Args", zh: "Tool Args" },
     typeDebug: { en: "Debug", zh: "Debug" },
+    errorsTitle: { en: "Errors ({count})", zh: "错误 ({count})" },
+    errorSourceSystem: { en: "System", zh: "系统" },
+    errorSourceTool: { en: "Tool: {name}", zh: "工具: {name}" },
+    debugSectionTitle: { en: "Debug events", zh: "调试事件" },
+    debugEmpty: { en: "No debug events in this session.", zh: "暂无调试事件。" },
+    debugEmptyClosed: {
+      en: "Enable debug mode to see planner/reasoning/tool args.",
+      zh: "开启调试模式后可查看 planner、reasoning 与 tool args。",
+    },
   },
   planPanel: {
     noSteps: { en: "No steps yet", zh: "暂无步骤" },
@@ -614,8 +631,25 @@ const messages = {
   },
   settingsModels: {
     description: {
-      en: "Add models from multiple providers globally; sessions can choose which to use",
-      zh: "全局新增多 Provider 模型，会话级可选择使用",
+      en: "Manage shared endpoints and models; sessions choose a model at runtime",
+      zh: "管理共享端点与模型，会话级可选择使用",
+    },
+    addEndpoint: { en: "Add endpoint", zh: "新增端点" },
+    editEndpoint: { en: "Edit endpoint", zh: "编辑端点" },
+    endpointDisplayName: { en: "Endpoint name", zh: "端点名称" },
+    endpoint: { en: "Endpoint", zh: "端点" },
+    addModelUnderEndpoint: { en: "Add model", zh: "新增模型" },
+    noEndpoints: { en: "No endpoints yet. Add an endpoint first.", zh: "暂无端点，请先新增端点" },
+    noModelsUnderEndpoint: { en: "No models under this endpoint yet.", zh: "此端点下暂无模型" },
+    endpointCreated: { en: "Endpoint created", zh: "端点已创建" },
+    endpointUpdated: { en: "Endpoint updated", zh: "端点已更新" },
+    fillEndpointRequiredFields: {
+      en: "Please fill in endpoint name and Base URL",
+      zh: "请填写端点名称和 Base URL",
+    },
+    fillModelRequiredFields: {
+      en: "Please fill in display name and model name",
+      zh: "请填写显示名称和模型名",
     },
     addModel: { en: "Add model", zh: "新增模型" },
     editModel: { en: "Edit model", zh: "编辑模型" },
@@ -637,7 +671,7 @@ const messages = {
       en: "Please fill in display name, model name, and Base URL",
       zh: "请填写显示名称、模型名和 Base URL",
     },
-    apiKeyRequired: { en: "API Key is required when creating a model", zh: "新建模型时必须填写 API Key" },
+    apiKeyRequired: { en: "API Key is required when creating an endpoint", zh: "新建端点时必须填写 API Key" },
     modelUpdated: { en: "Model updated", zh: "模型已更新" },
     modelCreated: { en: "Model created", zh: "模型已创建" },
     deleted: { en: "Deleted", zh: "已删除" },

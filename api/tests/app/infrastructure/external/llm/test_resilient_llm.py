@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.application.errors.exceptions import ServerRequestsError
 from app.domain.models.error_codes import MODEL_QUOTA_EXCEEDED
 from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities
 from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError, ResilientLLMClient
@@ -432,6 +433,93 @@ def test_quota_exhausted_falls_back_without_general_fallback():
     asyncio.run(_test_quota_exhausted_falls_back_without_general_fallback())
 
 
+async def _test_quota_exhausted_falls_back_through_server_requests_error():
+    primary = _model("m1")
+    fallback = _model("m2")
+    quota_wrapped = ServerRequestsError("调用LLM失败: 模型 gpt-m1 API 配额已耗尽")
+    primary_llm = _FakeLLM(error=quota_wrapped)
+    fallback_llm = _FakeLLM(response={"content": "fallback"})
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary, fallback])
+    breaker = MagicMock()
+    breaker.allow_request = AsyncMock(return_value="allow")
+    breaker.record_success = AsyncMock()
+    breaker.record_failure = AsyncMock()
+
+    client = ResilientLLMClient(primary_llm, primary, llm_model_service=llm_model_service)
+    client._breaker = breaker
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False, fallback_on_quota_exceeded=True),
+    ), patch(
+        "app.infrastructure.external.llm.resilient_llm.LLMFactory.create",
+        return_value=fallback_llm,
+    ):
+        result = await client.invoke([{"role": "user", "content": "hi"}])
+
+    assert result == {"content": "fallback"}
+    assert client.active_model.id == "m2"
+    assert fallback_llm.invoke_count == 1
+
+
+def test_quota_exhausted_falls_back_through_server_requests_error():
+    asyncio.run(_test_quota_exhausted_falls_back_through_server_requests_error())
+
+
+async def _test_stream_quota_exhausted_falls_back_through_server_requests_error():
+    primary = _model("m1")
+    fallback = _model("m2")
+    quota_wrapped = ServerRequestsError("调用LLM失败: 模型 gpt-m1 API 配额已耗尽")
+
+    class _QuotaStreamLLM:
+        model_name = "fake"
+        temperature = 0.7
+        max_tokens = 1024
+        supports_multimodal = False
+
+        @property
+        def capabilities(self):
+            return ModelCapabilities()
+
+        async def stream_invoke(self, *args, **kwargs):
+            raise quota_wrapped
+            yield  # pragma: no cover
+
+        async def invoke(self, *args, **kwargs):
+            raise quota_wrapped
+
+    primary_llm = _QuotaStreamLLM()
+    fallback_llm = _SuccessStreamLLM()
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary, fallback])
+    breaker = MagicMock()
+    breaker.allow_request = AsyncMock(return_value="allow")
+    breaker.record_success = AsyncMock()
+    breaker.record_failure = AsyncMock()
+
+    client = ResilientLLMClient(primary_llm, primary, llm_model_service=llm_model_service)
+    client._breaker = breaker
+
+    chunks = []
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False, fallback_on_quota_exceeded=True),
+    ), patch(
+        "app.infrastructure.external.llm.resilient_llm.LLMFactory.create",
+        return_value=fallback_llm,
+    ):
+        async for chunk in client.stream_invoke([{"role": "user", "content": "hi"}]):
+            chunks.append(chunk)
+
+    assert chunks == [{"content": "hello"}]
+    assert client.active_model.id == "m2"
+
+
+def test_stream_quota_exhausted_falls_back_through_server_requests_error():
+    asyncio.run(_test_stream_quota_exhausted_falls_back_through_server_requests_error())
+
+
 async def _test_quota_exhausted_without_candidates_raises_quota_code():
     primary = _model("m1")
     llm_model_service = MagicMock()
@@ -560,3 +648,281 @@ async def _test_stream_quota_fallback_before_first_token():
 
 def test_stream_quota_fallback_before_first_token():
     asyncio.run(_test_stream_quota_fallback_before_first_token())
+
+
+async def _test_quota_fallback_does_not_consume_budget():
+    primary = _model("m1")
+    fallback = _model("m2")
+    primary_llm = _FakeLLM(error=QUOTA_ERROR)
+    fallback_llm = _FakeLLM(response={"content": "fallback"})
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary, fallback])
+    breaker = MagicMock()
+    breaker.allow_request = AsyncMock(return_value="allow")
+    breaker.record_success = AsyncMock()
+    breaker.record_failure = AsyncMock()
+
+    client = ResilientLLMClient(primary_llm, primary, llm_model_service=llm_model_service)
+    client._breaker = breaker
+    budget = _Budget()
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False, fallback_on_quota_exceeded=True),
+    ), patch(
+        "app.infrastructure.external.llm.resilient_llm.LLMFactory.create",
+        return_value=fallback_llm,
+    ):
+        result = await client.invoke(
+            [{"role": "user", "content": "hi"}],
+            retry_budget=budget,
+        )
+
+    assert result == {"content": "fallback"}
+    assert budget.calls == []
+
+
+def test_quota_fallback_does_not_consume_budget():
+    asyncio.run(_test_quota_fallback_does_not_consume_budget())
+
+
+async def _test_all_same_endpoint_models_quota_exhausted_raises_quota_code():
+    endpoint_id = "shared-endpoint"
+    primary = _model("m1").model_copy(update={"endpoint_id": endpoint_id})
+    second = _model("m2").model_copy(update={"endpoint_id": endpoint_id})
+    third = _model("m3").model_copy(update={"endpoint_id": endpoint_id})
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary, second, third])
+    breaker = MagicMock()
+    breaker.allow_request = AsyncMock(return_value="allow")
+    breaker.record_success = AsyncMock()
+    breaker.record_failure = AsyncMock()
+
+    def _create(model, **kwargs):
+        return _FakeLLM(error=QUOTA_ERROR)
+
+    client = ResilientLLMClient(_FakeLLM(error=QUOTA_ERROR), primary, llm_model_service=llm_model_service)
+    client._breaker = breaker
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False, fallback_on_quota_exceeded=True),
+    ), patch(
+        "app.infrastructure.external.llm.resilient_llm.LLMFactory.create",
+        side_effect=_create,
+    ):
+        with pytest.raises(ModelUnavailableError) as exc_info:
+            await client.invoke([{"role": "user", "content": "hi"}])
+
+    assert exc_info.value.error_code == MODEL_QUOTA_EXCEEDED
+    assert client._quota_exhausted_model_ids == {"m1", "m2", "m3"}
+
+
+def test_all_same_endpoint_models_quota_exhausted_raises_quota_code():
+    asyncio.run(_test_all_same_endpoint_models_quota_exhausted_raises_quota_code())
+
+
+async def _test_same_endpoint_quota_fallback_to_available_model():
+    endpoint_id = "shared-endpoint"
+    primary = _model("m1").model_copy(update={"endpoint_id": endpoint_id})
+    second = _model("m2").model_copy(update={"endpoint_id": endpoint_id})
+    third = _model("m3").model_copy(update={"endpoint_id": endpoint_id})
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary, second, third])
+    breaker = MagicMock()
+    breaker.allow_request = AsyncMock(return_value="allow")
+    breaker.record_success = AsyncMock()
+    breaker.record_failure = AsyncMock()
+    third_llm = _FakeLLM(response={"content": "from-m3"})
+
+    def _create(model, **kwargs):
+        if model.id == "m3":
+            return third_llm
+        return _FakeLLM(error=QUOTA_ERROR)
+
+    client = ResilientLLMClient(_FakeLLM(error=QUOTA_ERROR), primary, llm_model_service=llm_model_service)
+    client._breaker = breaker
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False, fallback_on_quota_exceeded=True),
+    ), patch(
+        "app.infrastructure.external.llm.resilient_llm.LLMFactory.create",
+        side_effect=_create,
+    ):
+        result = await client.invoke([{"role": "user", "content": "hi"}])
+
+    assert result == {"content": "from-m3"}
+    assert client.active_model.id == "m3"
+    assert third_llm.invoke_count == 1
+
+
+def test_same_endpoint_quota_fallback_to_available_model():
+    asyncio.run(_test_same_endpoint_quota_fallback_to_available_model())
+
+
+async def _test_quota_exhausted_model_skipped_on_subsequent_invoke():
+    primary = _model("m1")
+    fallback = _model("m2")
+    primary_llm = _FakeLLM(error=QUOTA_ERROR)
+    fallback_llm = _FakeLLM(response={"content": "fallback"})
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary, fallback])
+    breaker = MagicMock()
+    breaker.allow_request = AsyncMock(return_value="allow")
+    breaker.record_success = AsyncMock()
+    breaker.record_failure = AsyncMock()
+
+    client = ResilientLLMClient(primary_llm, primary, llm_model_service=llm_model_service)
+    client._breaker = breaker
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False, fallback_on_quota_exceeded=True),
+    ), patch(
+        "app.infrastructure.external.llm.resilient_llm.LLMFactory.create",
+        return_value=fallback_llm,
+    ):
+        first = await client.invoke([{"role": "user", "content": "hi"}])
+        assert first == {"content": "fallback"}
+        assert primary_llm.invoke_count == 1
+
+        second = await client.invoke([{"role": "user", "content": "again"}])
+        assert second == {"content": "fallback"}
+        assert primary_llm.invoke_count == 1
+        assert fallback_llm.invoke_count == 2
+
+
+def test_quota_exhausted_model_skipped_on_subsequent_invoke():
+    asyncio.run(_test_quota_exhausted_model_skipped_on_subsequent_invoke())
+
+
+def test_consume_fallback_notice_emits_once_per_target():
+    primary = _model("m1")
+    fallback = _model("m2")
+    tertiary = _model("m3")
+    client = ResilientLLMClient(_FakeLLM(), primary)
+
+    assert client.consume_fallback_notice_event() is None
+
+    client._active_model = fallback
+    first = client.consume_fallback_notice_event()
+    assert first is not None
+    assert first.i18n_key == "sessionDetail.modelFallbackNotice"
+    assert first.i18n_params == {"modelName": "m2"}
+
+    assert client.consume_fallback_notice_event() is None
+
+    client._active_model = tertiary
+    third = client.consume_fallback_notice_event()
+    assert third is not None
+    assert third.i18n_params == {"modelName": "m3"}
+
+
+def test_thinking_enabled_for_requires_extra_params():
+    model = _model("m1")
+    assert ResilientLLMClient._thinking_enabled_for(model, session_thinking=False) is False
+    assert ResilientLLMClient._thinking_enabled_for(model, session_thinking=True) is False
+
+    model.extra_params = {"thinking_request_params": {"enable_thinking": True}}
+    assert ResilientLLMClient._thinking_enabled_for(model, session_thinking=True) is True
+
+
+async def _test_build_candidate_chain_prefers_thinking_configured_models():
+    primary = _model("m1")
+    plain = _model("m-plain")
+    thinking = _model("m-think")
+    thinking.extra_params = {"thinking_request_params": {"enable_thinking": True}}
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary, plain, thinking])
+
+    client = ResilientLLMClient(
+        _FakeLLM(),
+        primary,
+        llm_model_service=llm_model_service,
+        thinking_enabled=True,
+    )
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False, fallback_on_quota_exceeded=True),
+    ):
+        chain = await client._build_candidate_chain(require_vision=False)
+
+    assert [model.id for model in chain] == ["m1", "m-think", "m-plain"]
+
+
+def test_build_candidate_chain_prefers_thinking_configured_models():
+    asyncio.run(_test_build_candidate_chain_prefers_thinking_configured_models())
+
+
+async def _test_client_for_caches_fallback_clients():
+    primary = _model("m1")
+    fallback = _model("m2")
+    client = ResilientLLMClient(_FakeLLM(), primary, thinking_enabled=True)
+    created = _FakeLLM()
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.LLMFactory.create",
+        return_value=created,
+    ) as create_mock:
+        first = client._client_for(fallback)
+        second = client._client_for(fallback)
+
+    assert first is second
+    assert create_mock.call_count == 1
+    create_mock.assert_called_once_with(fallback, thinking_enabled=False)
+
+
+def test_client_for_caches_fallback_clients():
+    asyncio.run(_test_client_for_caches_fallback_clients())
+
+
+async def _test_invoke_fallback_notice_after_quota_switch():
+    primary = _model("m1")
+    fallback = _model("m2")
+    primary_llm = _FakeLLM(error=QUOTA_ERROR)
+    fallback_llm = _FakeLLM(response={"content": "fallback"})
+    llm_model_service = MagicMock()
+    llm_model_service.list_models = AsyncMock(return_value=[primary, fallback])
+    breaker = MagicMock()
+    breaker.allow_request = AsyncMock(return_value="allow")
+    breaker.record_success = AsyncMock()
+    breaker.record_failure = AsyncMock()
+
+    client = ResilientLLMClient(primary_llm, primary, llm_model_service=llm_model_service)
+    client._breaker = breaker
+
+    with patch(
+        "app.infrastructure.external.llm.resilient_llm.get_runtime_config",
+        return_value=_runtime_config(fallback_enabled=False, fallback_on_quota_exceeded=True),
+    ), patch(
+        "app.infrastructure.external.llm.resilient_llm.LLMFactory.create",
+        return_value=fallback_llm,
+    ):
+        await client.invoke([{"role": "user", "content": "hi"}])
+        first_notice = client.consume_fallback_notice_event()
+        second_notice = client.consume_fallback_notice_event()
+
+    assert first_notice is not None
+    assert first_notice.i18n_params == {"modelName": "m2"}
+    assert second_notice is None
+
+
+def test_invoke_fallback_notice_after_quota_switch():
+    asyncio.run(_test_invoke_fallback_notice_after_quota_switch())
+
+
+def test_base_agent_fallback_notice_delegates_to_resilient_client():
+    from app.domain.services.agents.base import BaseAgent
+
+    primary = _model("m1")
+    fallback = _model("m2")
+    client = ResilientLLMClient(_FakeLLM(), primary)
+    client._active_model = fallback
+
+    notice = BaseAgent._fallback_notice_if_needed_for(client)
+    assert notice is not None
+    assert notice.i18n_params == {"modelName": "m2"}
+    assert BaseAgent._fallback_notice_if_needed_for(client) is None
+    assert BaseAgent._fallback_notice_if_needed_for(_FakeLLM()) is None

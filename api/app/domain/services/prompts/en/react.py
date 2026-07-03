@@ -50,6 +50,7 @@ The task is complete. Deliver the final result to the user.
 Notes:
 - Explain the final result to the user, but the `message` field is for an executive summary and key conclusions only (aim for ≤1500 characters); **never** paste the full report body.
 - Short replies may go directly in `message`; long documents, reports, and Markdown bodies must be written via `write_file` and listed in `attachments`.
+- To publish to the artifact workbench, call `artifact_write` with `source_path` (sandbox file path) for long documents; do not inline large `content`.
 - If multiple draft files exist, merge them into one final file before attaching; if the body was already written in a step, summarize briefly and reference attachments.
 - Return structured JSON with fields: message, attachments (sandbox file paths).
 """

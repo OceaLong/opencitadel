@@ -50,6 +50,7 @@ SUMMARIZE_PROMPT = """
 注意事项：
 - 你应该向用户解释最终结果，但 `message` 字段仅用于执行摘要与关键结论（建议 ≤1500 字），**禁止**粘贴完整报告正文。
 - 短回复可直接写在 `message` 中；长文档、报告、Markdown 正文必须通过 `write_file` 写入沙箱，并在 `attachments` 中列出文件路径。
+- 若需写入交付物工作台，长文档应调用 `artifact_write` 并传 `source_path`（沙箱文件路径），不要内联大段 `content`。
 - 若有多节草稿文件，先合并为最终文件再 attach；若正文已在步骤中写入文件，summarize 只需简述并引用附件。
 - 返回结构化 JSON，字段：message、attachments（沙箱文件路径）。
 """
