@@ -65,17 +65,13 @@ export const complianceApi = {
     framework?: string;
     start?: string;
     end?: string;
-    format?: "json" | "md" | "pdf";
   }) => {
     const qs = new URLSearchParams();
     if (params?.framework) qs.set("framework", params.framework);
     if (params?.start) qs.set("start", params.start);
     if (params?.end) qs.set("end", params.end);
-    if (params?.format) qs.set("format", params.format);
+    qs.set("format", "json");
     const q = qs.toString();
-    if (params?.format === "md" || params?.format === "pdf") {
-      return fetch(`/api/admin/compliance/report?${q}`, { credentials: "include" });
-    }
     return get<{ report: ComplianceReport }>(`/admin/compliance/report?${q}`);
   },
 

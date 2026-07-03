@@ -35,7 +35,6 @@ export default function AdminComplianceReportPage() {
         framework: framework === "all" ? undefined : framework,
         start: dateParams.start_at,
         end: dateParams.end_at,
-        format: "json",
       });
       setReport(res.report);
     } finally {

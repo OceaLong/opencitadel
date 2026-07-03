@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Cpu, MailPlus, PhoneCall, Users } from "lucide-react";
+import { Cpu, Layers, MailPlus, PhoneCall, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { AdminStatCard } from "@/components/admin/stat-card";
@@ -110,11 +110,13 @@ export default function AdminOverviewPage() {
         <AdminTimeRangePicker value={range} onChange={setRange} />
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <AdminStatCard label={t("statTotalUsers")} value={overview?.total_users ?? 0} hint={t("statActiveHint", { count: overview?.active_users ?? 0 })} icon={Users} />
+        <AdminStatCard label={t("statTotalTeams")} value={overview?.total_teams ?? 0} hint={t("statTotalSessionsHint", { count: overview?.total_sessions ?? 0 })} icon={Layers} />
         <AdminStatCard label={t("statTotalTokens")} value={usage?.total_tokens ?? 0} hint={t("statPromptHint", { count: usage?.prompt_tokens ?? 0 })} icon={Cpu} />
         <AdminStatCard label={t("statLlmCalls")} value={usage?.call_count ?? 0} hint={t("statCachedHint", { count: usage?.cached_tokens ?? 0 })} icon={PhoneCall} />
         <AdminStatCard label={t("statPendingInvites")} value={overview?.pending_invitations ?? 0} hint={t("statAcceptedHint", { count: overview?.accepted_invitations ?? 0 })} icon={MailPlus} />
+        <AdminStatCard label={t("statTotalSessions")} value={overview?.total_sessions ?? 0} hint={t("statTotalSessionsDesc")} icon={Layers} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">

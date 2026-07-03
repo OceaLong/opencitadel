@@ -19,6 +19,12 @@ class DBUserRepository(UserRepository):
         record = result.scalar_one_or_none()
         return record.to_domain() if record else None
 
+    async def list_by_ids(self, user_ids: List[str]) -> List[User]:
+        if not user_ids:
+            return []
+        result = await self.db_session.execute(select(UserORM).where(UserORM.id.in_(user_ids)))
+        return [record.to_domain() for record in result.scalars().all()]
+
     async def get_by_email(self, email: str) -> Optional[User]:
         result = await self.db_session.execute(select(UserORM).where(UserORM.email == email.lower()))
         record = result.scalar_one_or_none()

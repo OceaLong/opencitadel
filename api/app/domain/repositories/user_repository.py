@@ -12,6 +12,10 @@ class UserRepository(ABC):
         ...
 
     @abstractmethod
+    async def list_by_ids(self, user_ids: List[str]) -> List[User]:
+        ...
+
+    @abstractmethod
     async def get_by_email(self, email: str) -> Optional[User]:
         ...
 

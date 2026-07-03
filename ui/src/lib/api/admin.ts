@@ -1,5 +1,6 @@
 import type { AuthUser } from "./auth";
 import { del, get, patch, post, put } from "./fetch";
+import type { TeamMember, TeamMemberDetail } from "./team";
 
 export type AdminUser = AuthUser & { token_version: number };
 
@@ -70,6 +71,17 @@ export type AdminOverview = {
   pending_invitations: number;
   accepted_invitations: number;
   expired_invitations: number;
+  total_teams: number;
+  total_sessions: number;
+};
+
+export type AdminTeam = {
+  id: string;
+  name: string;
+  description: string;
+  created_by?: string | null;
+  created_at: string;
+  member_count: number;
 };
 
 export type AdminDateRangeParams = {
@@ -80,7 +92,7 @@ export type AdminDateRangeParams = {
 };
 
 export type PatchUserPayload = {
-  global_role?: "admin" | "user";
+  global_role?: "admin" | "user" | "auditor";
   status?: "active" | "disabled";
   display_name?: string;
 };
@@ -142,4 +154,17 @@ export const adminApi = {
     get<AuditSummary>("/admin/audit/summary", buildParams(params)),
 
   exportAuditCsvUrl: () => "/api/admin/audit/export",
+
+  teams: (params?: { limit?: number; offset?: number }) =>
+    get<{ teams: AdminTeam[]; total: number }>("/admin/teams", buildParams(params)),
+
+  teamMembers: (teamId: string) => get<{ members: TeamMemberDetail[] }>(`/admin/teams/${teamId}/members`),
+
+  deleteTeam: (teamId: string) => del(`/admin/teams/${teamId}`),
+
+  removeTeamMember: (teamId: string, userId: string) =>
+    del(`/admin/teams/${teamId}/members/${userId}`),
+
+  updateTeamMemberRole: (teamId: string, userId: string, role: TeamMember["role"]) =>
+    patch<TeamMember>(`/admin/teams/${teamId}/members/${userId}`, { role }),
 };

@@ -165,3 +165,19 @@ class AdminOverviewResponse(BaseModel):
     pending_invitations: int
     accepted_invitations: int
     expired_invitations: int
+    total_teams: int
+    total_sessions: int
+
+
+class AdminTeamResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    created_by: str | None
+    created_at: datetime
+    member_count: int
+
+
+class ListAdminTeamsResponse(BaseModel):
+    teams: list[AdminTeamResponse]
+    total: int

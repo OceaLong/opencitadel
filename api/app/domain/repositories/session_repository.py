@@ -21,6 +21,10 @@ class SessionRepository(Protocol):
         """获取所有会话列表信息"""
         ...
 
+    async def count(self) -> int:
+        """Count all sessions platform-wide."""
+        ...
+
     async def list_recoverable_running(
             self,
             limit: int = 100,

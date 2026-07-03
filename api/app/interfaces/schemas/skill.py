@@ -56,6 +56,8 @@ class SkillResponse(BaseModel):
     examples: List[str]
     is_builtin: bool
     enabled: bool
+    visibility: str = "global"
+    owner_user_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

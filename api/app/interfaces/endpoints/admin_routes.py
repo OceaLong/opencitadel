@@ -10,6 +10,7 @@ from starlette.responses import StreamingResponse
 
 from app.application.errors.exceptions import BadRequestError, NotFoundError
 from app.application.services.audit_service import AuditService
+from app.application.services.team_service import TeamService
 from app.application.services.usage_stats_service import UsageBreakdownDimension, UsageStatsService
 from app.domain.models.audit_log import AuditLog
 from app.domain.models.invitation import Invitation, InvitationType
@@ -19,11 +20,13 @@ from app.interfaces.auth_dependencies import get_current_principal, require_admi
 from app.interfaces.schemas import Response
 from app.interfaces.schemas.admin import (
     AdminOverviewResponse,
+    AdminTeamResponse,
     AdminUserResponse,
     AuditLogResponse,
     AuditSummaryResponse,
     CreatePlatformInvitationRequest,
     InvitationStatus,
+    ListAdminTeamsResponse,
     ListAdminUsersResponse,
     ListAuditLogsResponse,
     ListPlatformInvitationsResponse,
@@ -34,8 +37,13 @@ from app.interfaces.schemas.admin import (
     UsageSummaryResponse,
     UsageTimeseriesResponse,
 )
-from app.interfaces.schemas.team import InvitationLinkResponse
-from app.interfaces.service_dependencies import get_audit_service, get_usage_stats_service
+from app.interfaces.schemas.team import (
+    InvitationLinkResponse,
+    ListTeamMemberDetailsResponse,
+    TeamMemberResponse,
+    UpdateTeamMemberRoleRequest,
+)
+from app.interfaces.service_dependencies import get_audit_service, get_team_service, get_usage_stats_service
 from app.infrastructure.models.user import UserORM
 from app.infrastructure.storage.postgres import get_uow
 from core.config import get_settings
@@ -405,6 +413,8 @@ async def overview() -> Response[AdminOverviewResponse]:
             select(func.count()).select_from(UserORM).where(UserORM.global_role == "admin"),
         )
         invitations = await uow.invitation.list(invitation_type=InvitationType.PLATFORM, limit=500)
+        total_teams = await uow.team.count()
+        total_sessions = await uow.session.count()
     pending = accepted = expired = 0
     for invitation in invitations:
         status = PlatformInvitationResponse.from_domain(invitation, now=now).status
@@ -423,5 +433,120 @@ async def overview() -> Response[AdminOverviewResponse]:
             pending_invitations=pending,
             accepted_invitations=accepted,
             expired_invitations=expired,
+            total_teams=total_teams,
+            total_sessions=total_sessions,
         ),
     )
+
+
+@router.get("/teams", response_model=Response[ListAdminTeamsResponse], dependencies=[Depends(require_admin)])
+async def list_teams(
+        limit: int = Query(100, ge=1, le=500),
+        offset: int = Query(0, ge=0),
+        team_service: TeamService = Depends(get_team_service),
+) -> Response[ListAdminTeamsResponse]:
+    teams, total = await team_service.admin_list_all(limit=limit, offset=offset)
+    async with get_uow() as uow:
+        member_counts = await uow.team.count_members_by_teams([team.id for team in teams])
+    return Response.success(
+        data=ListAdminTeamsResponse(
+            teams=[
+                AdminTeamResponse(
+                    id=team.id,
+                    name=team.name,
+                    description=team.description,
+                    created_by=team.created_by,
+                    created_at=team.created_at,
+                    member_count=member_counts.get(team.id, 0),
+                )
+                for team in teams
+            ],
+            total=total,
+        ),
+    )
+
+
+@router.get(
+    "/teams/{team_id}/members",
+    response_model=Response[ListTeamMemberDetailsResponse],
+    dependencies=[Depends(require_admin)],
+)
+async def list_team_members_admin(
+        team_id: str,
+        team_service: TeamService = Depends(get_team_service),
+) -> Response[ListTeamMemberDetailsResponse]:
+    members = await team_service.admin_list_member_details(team_id)
+    return Response.success(data=ListTeamMemberDetailsResponse(members=members))
+
+
+@router.delete("/teams/{team_id}", response_model=Response[None], dependencies=[Depends(require_admin)])
+async def delete_team_admin(
+        team_id: str,
+        request: Request,
+        principal=Depends(get_current_principal),
+        team_service: TeamService = Depends(get_team_service),
+        audit_service: AuditService = Depends(get_audit_service),
+) -> Response[None]:
+    await team_service.admin_delete_team(team_id)
+    await _record_admin_audit(
+        audit_service,
+        actor_user_id=principal.user_id,
+        action="admin.team.delete",
+        resource_type="team",
+        resource_id=team_id,
+        request=request,
+    )
+    return Response.success(msg="团队已解散")
+
+
+@router.delete(
+    "/teams/{team_id}/members/{user_id}",
+    response_model=Response[None],
+    dependencies=[Depends(require_admin)],
+)
+async def remove_team_member_admin(
+        team_id: str,
+        user_id: str,
+        request: Request,
+        principal=Depends(get_current_principal),
+        team_service: TeamService = Depends(get_team_service),
+        audit_service: AuditService = Depends(get_audit_service),
+) -> Response[None]:
+    await team_service.admin_remove_member(team_id, user_id)
+    await _record_admin_audit(
+        audit_service,
+        actor_user_id=principal.user_id,
+        action="admin.team.member.remove",
+        resource_type="team_member",
+        resource_id=f"{team_id}:{user_id}",
+        request=request,
+        metadata={"team_id": team_id, "user_id": user_id},
+    )
+    return Response.success(msg="成员已移除")
+
+
+@router.patch(
+    "/teams/{team_id}/members/{user_id}",
+    response_model=Response[TeamMemberResponse],
+    dependencies=[Depends(require_admin)],
+)
+async def update_team_member_role_admin(
+        team_id: str,
+        user_id: str,
+        request_body: UpdateTeamMemberRoleRequest,
+        request: Request,
+        principal=Depends(get_current_principal),
+        team_service: TeamService = Depends(get_team_service),
+        audit_service: AuditService = Depends(get_audit_service),
+) -> Response[TeamMemberResponse]:
+    member = await team_service.admin_update_member_role(team_id, user_id, request_body.role)
+    await _record_admin_audit(
+        audit_service,
+        actor_user_id=principal.user_id,
+        action="admin.team.member.role",
+        resource_type="team_member",
+        resource_id=f"{team_id}:{user_id}",
+        request=request,
+        metadata={"team_id": team_id, "user_id": user_id, "role": request_body.role.value},
+    )
+    return Response.success(data=TeamMemberResponse.from_domain(member), msg="成员角色已更新")

@@ -55,6 +55,8 @@ class LLMModelResponse(BaseModel):
     capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     supports_multimodal: bool = False
     is_default: bool
+    visibility: str = "global"
+    owner_user_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

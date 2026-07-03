@@ -40,6 +40,8 @@ def _to_response(model: LLMModel) -> LLMModelResponse:
         capabilities=model.capabilities,
         supports_multimodal=model.supports_multimodal,
         is_default=model.is_default,
+        visibility=model.visibility.value if hasattr(model.visibility, "value") else model.visibility,
+        owner_user_id=model.owner_user_id,
         created_at=model.created_at,
         updated_at=model.updated_at,
     )

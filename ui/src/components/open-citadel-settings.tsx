@@ -50,15 +50,17 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { type SettingTab, useOpenCitadelSettings } from "@/hooks/use-open-citadel-settings";
 import type { AgentConfig, ListA2AServerItem, ListMCPServerItem } from "@/lib/api";
+import { useAuth } from "@/providers/auth-provider";
 
 // ==================== 通用配置 ====================
 
 type CommonSettingProps = {
   config: AgentConfig;
   onChange: (config: AgentConfig) => void;
+  readOnly?: boolean;
 };
 
-function CommonSetting({ config, onChange }: CommonSettingProps) {
+function CommonSetting({ config, onChange, readOnly = false }: CommonSettingProps) {
   const t = useTranslations("settings");
   const handleChange = (field: keyof AgentConfig, value: string) => {
     const numValue = value === "" ? undefined : Number(value);
@@ -81,6 +83,8 @@ function CommonSetting({ config, onChange }: CommonSettingProps) {
                 onChange={(e) => handleChange("max_iterations", e.target.value)}
                 min={0}
                 max={200}
+                readOnly={readOnly}
+                disabled={readOnly}
               />
               <FieldDescription className="text-xs">{t("maxIterationsDesc")}</FieldDescription>
             </Field>
@@ -94,6 +98,8 @@ function CommonSetting({ config, onChange }: CommonSettingProps) {
                 onChange={(e) => handleChange("max_retries", e.target.value)}
                 min={0}
                 max={10}
+                readOnly={readOnly}
+                disabled={readOnly}
               />
               <FieldDescription className="text-xs">{t("maxRetriesDesc")}</FieldDescription>
             </Field>
@@ -107,6 +113,8 @@ function CommonSetting({ config, onChange }: CommonSettingProps) {
                 onChange={(e) => handleChange("max_search_results", e.target.value)}
                 min={0}
                 max={30}
+                readOnly={readOnly}
+                disabled={readOnly}
               />
               <FieldDescription className="text-xs">{t("maxSearchResultsDesc")}</FieldDescription>
             </Field>
@@ -125,9 +133,17 @@ type A2ASettingProps = {
   onToggleEnabled: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   onAdd: (baseUrl: string) => Promise<boolean>;
+  readOnly?: boolean;
 };
 
-export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: A2ASettingProps) {
+export function A2ASetting({
+  servers,
+  loading,
+  onToggleEnabled,
+  onDelete,
+  onAdd,
+  readOnly = false,
+}: A2ASettingProps) {
   const t = useTranslations("settings");
   const tCommon = useTranslations("common");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -157,6 +173,7 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
         <FieldSet>
           <FieldLegend className="text-foreground flex w-full items-center justify-between text-lg font-semibold">
             {t("a2a")}
+            {!readOnly ? (
             <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
               <DialogTrigger asChild>
                 <Button type="button" size="xs" className="cursor-pointer">
@@ -205,6 +222,7 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+            ) : null}
           </FieldLegend>
           <FieldDescription className="text-sm">{t("a2aDescription")}</FieldDescription>
 
@@ -232,6 +250,8 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                         {!server.enabled && <Badge>{tCommon("disabled")}</Badge>}
                       </div>
                       <div className="flex items-center justify-center gap-2">
+                        {!readOnly ? (
+                          <>
                         <Button
                           type="button"
                           variant="ghost"
@@ -245,6 +265,8 @@ export function A2ASetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                           checked={server.enabled}
                           onCheckedChange={(checked) => onToggleEnabled(server.id, checked)}
                         />
+                          </>
+                        ) : null}
                       </div>
                     </ItemTitle>
                     {server.description && <ItemDescription>{server.description}</ItemDescription>}
@@ -306,9 +328,17 @@ type MCPSettingProps = {
   onToggleEnabled: (serverName: string, enabled: boolean) => void;
   onDelete: (serverName: string) => void;
   onAdd: (config: string) => Promise<boolean>;
+  readOnly?: boolean;
 };
 
-export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd }: MCPSettingProps) {
+export function MCPSetting({
+  servers,
+  loading,
+  onToggleEnabled,
+  onDelete,
+  onAdd,
+  readOnly = false,
+}: MCPSettingProps) {
   const t = useTranslations("settings");
   const tCommon = useTranslations("common");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -353,6 +383,7 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
         <FieldSet>
           <FieldLegend className="text-foreground flex w-full items-center justify-between text-lg font-semibold">
             {t("mcp")}
+            {!readOnly ? (
             <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
               <DialogTrigger asChild>
                 <Button type="button" size="xs" className="cursor-pointer">
@@ -401,6 +432,7 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+            ) : null}
           </FieldLegend>
           <FieldDescription className="text-sm">{t("mcpAddDescription")}</FieldDescription>
 
@@ -429,6 +461,8 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                         {!server.enabled && <Badge>{tCommon("disabled")}</Badge>}
                       </div>
                       <div className="flex items-center justify-center gap-2">
+                        {!readOnly ? (
+                          <>
                         <Button
                           type="button"
                           variant="ghost"
@@ -444,6 +478,8 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
                             onToggleEnabled(server.server_name, checked)
                           }
                         />
+                          </>
+                        ) : null}
                       </div>
                     </ItemTitle>
                     {server.tools.length > 0 && (
@@ -494,6 +530,8 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const t = useTranslations("settings");
   const tCommon = useTranslations("common");
+  const { user } = useAuth();
+  const isAdmin = user?.global_role === "admin";
   const [activeSetting, setActiveSetting] = useState<SettingTab>(initialTab);
 
   useEffect(() => {
@@ -502,7 +540,7 @@ export function SettingsDialog({
     }
   }, [open, initialTab]);
 
-  const showFooterSave = activeSetting === "common-setting";
+  const showFooterSave = activeSetting === "common-setting" && isAdmin;
   const {
     agentConfig,
     setAgentConfig,
@@ -558,12 +596,12 @@ export function SettingsDialog({
             ) : (
               <>
                 {activeSetting === "common-setting" && (
-                  <CommonSetting config={agentConfig} onChange={setAgentConfig} />
+                  <CommonSetting config={agentConfig} onChange={setAgentConfig} readOnly={!isAdmin} />
                 )}
               </>
             )}
-            {activeSetting === "models-setting" && <ModelsSettings embedded />}
-            {activeSetting === "skills-setting" && <SkillsSettings embedded />}
+            {activeSetting === "models-setting" && <ModelsSettings embedded isAdmin={isAdmin} userId={user?.id} />}
+            {activeSetting === "skills-setting" && <SkillsSettings embedded isAdmin={isAdmin} userId={user?.id} />}
             {activeSetting === "memory-setting" && <MemorySettings embedded />}
             {activeSetting === "integrations-setting" && (
               <div className="space-y-6 px-1">
@@ -573,6 +611,7 @@ export function SettingsDialog({
                   onToggleEnabled={handleMCPToggle}
                   onDelete={handleMCPDelete}
                   onAdd={handleMCPAdd}
+                  readOnly={!isAdmin}
                 />
                 <A2ASetting
                   servers={a2aServers}
@@ -580,6 +619,7 @@ export function SettingsDialog({
                   onToggleEnabled={handleA2AToggle}
                   onDelete={handleA2ADelete}
                   onAdd={handleA2AAdd}
+                  readOnly={!isAdmin}
                 />
               </div>
             )}

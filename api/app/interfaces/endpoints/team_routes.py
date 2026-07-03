@@ -9,10 +9,11 @@ from app.interfaces.schemas.team import (
     CreateTeamInvitationRequest,
     CreateTeamRequest,
     InvitationLinkResponse,
-    ListTeamMembersResponse,
+    ListTeamMemberDetailsResponse,
     ListTeamsResponse,
     TeamMemberResponse,
     TeamResponse,
+    UpdateTeamMemberRoleRequest,
 )
 from app.interfaces.service_dependencies import get_team_service
 
@@ -43,16 +44,34 @@ async def list_my_teams(
     return Response.success(data=ListTeamsResponse(teams=[TeamResponse.from_domain(t) for t in teams]))
 
 
-@router.get("/{team_id}/members", response_model=Response[ListTeamMembersResponse])
+@router.get("/{team_id}", response_model=Response[TeamResponse])
+async def get_team(
+        team_id: str,
+        principal=Depends(get_current_principal),
+        service: TeamService = Depends(get_team_service),
+) -> Response[TeamResponse]:
+    team = await service.get_team(team_id, principal.user_id)
+    return Response.success(data=TeamResponse.from_domain(team))
+
+
+@router.get("/{team_id}/members", response_model=Response[ListTeamMemberDetailsResponse])
 async def list_members(
         team_id: str,
         principal=Depends(get_current_principal),
         service: TeamService = Depends(get_team_service),
-) -> Response[ListTeamMembersResponse]:
-    members = await service.list_members(team_id, principal.user_id)
-    return Response.success(
-        data=ListTeamMembersResponse(members=[TeamMemberResponse.from_domain(m) for m in members])
-    )
+) -> Response[ListTeamMemberDetailsResponse]:
+    members = await service.list_member_details(team_id, principal.user_id)
+    return Response.success(data=ListTeamMemberDetailsResponse(members=members))
+
+
+@router.post("/{team_id}/leave", response_model=Response[None])
+async def leave_team(
+        team_id: str,
+        principal=Depends(get_current_principal),
+        service: TeamService = Depends(get_team_service),
+) -> Response[None]:
+    await service.leave_team(team_id=team_id, user_id=principal.user_id)
+    return Response.success(msg="已退出团队")
 
 
 @router.post("/{team_id}/invitations", response_model=Response[InvitationLinkResponse])
@@ -78,3 +97,41 @@ async def accept_invitation(
 ) -> Response[TeamMemberResponse]:
     member = await service.accept_invitation(token=token, user_id=principal.user_id)
     return Response.success(data=TeamMemberResponse.from_domain(member), msg="已加入团队")
+
+
+@router.delete("/{team_id}", response_model=Response[None])
+async def delete_team(
+        team_id: str,
+        principal=Depends(get_current_principal),
+        service: TeamService = Depends(get_team_service),
+) -> Response[None]:
+    await service.delete_team(team_id=team_id, actor_user_id=principal.user_id)
+    return Response.success(msg="团队已解散")
+
+
+@router.delete("/{team_id}/members/{user_id}", response_model=Response[None])
+async def remove_member(
+        team_id: str,
+        user_id: str,
+        principal=Depends(get_current_principal),
+        service: TeamService = Depends(get_team_service),
+) -> Response[None]:
+    await service.remove_member(team_id=team_id, actor_user_id=principal.user_id, target_user_id=user_id)
+    return Response.success(msg="成员已移除")
+
+
+@router.patch("/{team_id}/members/{user_id}", response_model=Response[TeamMemberResponse])
+async def update_member_role(
+        team_id: str,
+        user_id: str,
+        request: UpdateTeamMemberRoleRequest,
+        principal=Depends(get_current_principal),
+        service: TeamService = Depends(get_team_service),
+) -> Response[TeamMemberResponse]:
+    member = await service.update_member_role(
+        team_id=team_id,
+        actor_user_id=principal.user_id,
+        target_user_id=user_id,
+        role=request.role,
+    )
+    return Response.success(data=TeamMemberResponse.from_domain(member), msg="成员角色已更新")

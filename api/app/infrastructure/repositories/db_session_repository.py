@@ -156,6 +156,10 @@ class DBSessionRepository(SessionRepository):
         records = result.scalars().all()
         return [record.to_domain() for record in records]
 
+    async def count(self) -> int:
+        result = await self.db_session.execute(select(func.count()).select_from(SessionModel))
+        return int(result.scalar_one() or 0)
+
     async def list_recoverable_running(
             self,
             limit: int = 100,

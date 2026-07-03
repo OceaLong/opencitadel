@@ -28,6 +28,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { href: "/admin", labelKey: "overview", icon: IconAdmin, exact: true },
   { href: "/admin/users", labelKey: "users", icon: IconUsers, adminOnly: true },
+  { href: "/admin/teams", labelKey: "teams", icon: IconUsers, adminOnly: true },
   {
     href: "/admin/invitations",
     labelKey: "invitations",

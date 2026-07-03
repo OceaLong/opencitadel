@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 from typing import List, Optional
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.team import Team, TeamMember, TeamRole
@@ -27,6 +27,33 @@ class DBTeamRepository(TeamRepository):
         )
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
+
+    async def list_all(self, limit: int = 100, offset: int = 0) -> List[Team]:
+        stmt = select(TeamORM).order_by(TeamORM.created_at.desc()).limit(limit).offset(offset)
+        result = await self.db_session.execute(stmt)
+        return [record.to_domain() for record in result.scalars().all()]
+
+    async def count(self) -> int:
+        result = await self.db_session.execute(select(func.count()).select_from(TeamORM))
+        return int(result.scalar_one() or 0)
+
+    async def count_members(self, team_id: str) -> int:
+        result = await self.db_session.execute(
+            select(func.count())
+            .select_from(TeamMemberORM)
+            .where(TeamMemberORM.team_id == team_id),
+        )
+        return int(result.scalar_one() or 0)
+
+    async def count_members_by_teams(self, team_ids: List[str]) -> dict[str, int]:
+        if not team_ids:
+            return {}
+        result = await self.db_session.execute(
+            select(TeamMemberORM.team_id, func.count())
+            .where(TeamMemberORM.team_id.in_(team_ids))
+            .group_by(TeamMemberORM.team_id),
+        )
+        return {team_id: int(count) for team_id, count in result.all()}
 
     async def save(self, team: Team) -> None:
         record = await self.db_session.get(TeamORM, team.id)

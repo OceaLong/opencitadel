@@ -58,6 +58,8 @@ export type LLMModel = {
   capabilities?: ModelCapabilities;
   supports_multimodal?: boolean;
   is_default: boolean;
+  visibility?: "global" | "private";
+  owner_user_id?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -111,6 +113,8 @@ export type Skill = {
   examples: string[];
   is_builtin: boolean;
   enabled: boolean;
+  visibility?: "global" | "private";
+  owner_user_id?: string | null;
   created_at?: string;
   updated_at?: string;
 };

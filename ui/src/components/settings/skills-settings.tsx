@@ -61,9 +61,21 @@ const emptyForm: CreateSkillParams = {
 
 type Props = {
   embedded?: boolean;
+  isAdmin?: boolean;
+  userId?: string;
 };
 
-export function SkillsSettings({ embedded = false }: Props) {
+function canManageSkill(
+  skill: { visibility?: string; owner_user_id?: string | null; is_builtin: boolean },
+  isAdmin: boolean,
+  userId?: string,
+) {
+  if (isAdmin) return !skill.is_builtin;
+  if (skill.is_builtin || skill.visibility === "global") return false;
+  return skill.owner_user_id === userId;
+}
+
+export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Props) {
   const tNav = useTranslations("settingsNav");
   const t = useTranslations("settingsSkills");
   const tCommon = useTranslations("common");
@@ -287,14 +299,16 @@ export function SkillsSettings({ embedded = false }: Props) {
                     <CardDescription>{s.description || s.category}</CardDescription>
                   </div>
                   <div className="flex shrink-0 gap-1">
-                    {!s.is_builtin && (
-                      <Button variant="ghost" size="icon" onClick={() => handleDelete(s.id)}>
-                        <Trash2 className="text-destructive size-4" />
-                      </Button>
-                    )}
+                    {canManageSkill(s, isAdmin, userId) ? (
+                      <>
+                    <Button variant="ghost" size="icon" onClick={() => handleDelete(s.id)}>
+                      <Trash2 className="text-destructive size-4" />
+                    </Button>
                     <Button variant="outline" size="sm" onClick={() => openEdit(s)}>
                       {tCommon("edit")}
                     </Button>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               </CardHeader>

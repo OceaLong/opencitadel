@@ -16,6 +16,22 @@ class TeamRepository(ABC):
         ...
 
     @abstractmethod
+    async def list_all(self, limit: int = 100, offset: int = 0) -> List[Team]:
+        ...
+
+    @abstractmethod
+    async def count(self) -> int:
+        ...
+
+    @abstractmethod
+    async def count_members(self, team_id: str) -> int:
+        ...
+
+    @abstractmethod
+    async def count_members_by_teams(self, team_ids: List[str]) -> dict[str, int]:
+        ...
+
+    @abstractmethod
     async def save(self, team: Team) -> None:
         ...
 

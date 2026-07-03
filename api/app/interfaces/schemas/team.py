@@ -39,12 +39,29 @@ class TeamMemberResponse(BaseModel):
         return cls(**member.model_dump())
 
 
+class TeamMemberDetailResponse(BaseModel):
+    user_id: str
+    role: TeamRole
+    joined_at: datetime
+    display_name: str = ""
+    email: str = ""
+    avatar_url: str = ""
+
+
 class ListTeamMembersResponse(BaseModel):
     members: list[TeamMemberResponse]
 
 
+class ListTeamMemberDetailsResponse(BaseModel):
+    members: list[TeamMemberDetailResponse]
+
+
 class CreateTeamInvitationRequest(BaseModel):
     role: TeamRole = TeamRole.MEMBER
+
+
+class UpdateTeamMemberRoleRequest(BaseModel):
+    role: TeamRole
 
 
 class InvitationLinkResponse(BaseModel):

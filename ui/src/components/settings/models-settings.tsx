@@ -33,9 +33,16 @@ import type { LLMProvider } from "@/lib/api/types";
 
 type Props = {
   embedded?: boolean;
+  isAdmin?: boolean;
+  userId?: string;
 };
 
-export function ModelsSettings({ embedded = false }: Props) {
+function canManageModel(model: { visibility?: string; owner_user_id?: string | null }, isAdmin: boolean, userId?: string) {
+  if (isAdmin) return true;
+  return model.visibility === "private" && model.owner_user_id === userId;
+}
+
+export function ModelsSettings({ embedded = false, isAdmin = false, userId }: Props) {
   const {
     models,
     loading,
@@ -118,7 +125,7 @@ export function ModelsSettings({ embedded = false }: Props) {
                     </CardDescription>
                   </div>
                   <div className="flex shrink-0 gap-1">
-                    {!m.is_default && (
+                    {isAdmin && !m.is_default && (
                       <Button variant="ghost" size="icon" onClick={() => handleSetDefault(m.id)}>
                         <Star className="size-4" />
                       </Button>
@@ -133,12 +140,16 @@ export function ModelsSettings({ embedded = false }: Props) {
                         {probingId === m.id ? t("probing") : t("testMultimodal")}
                       </Button>
                     )}
+                    {canManageModel(m, isAdmin, userId) ? (
+                      <>
                     <Button variant="ghost" size="sm" onClick={() => openEdit(m)}>
                       {tCommon("edit")}
                     </Button>
                     <Button variant="ghost" size="icon" onClick={() => handleDelete(m.id)}>
                       <Trash2 className="text-destructive size-4" />
                     </Button>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               </CardHeader>

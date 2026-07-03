@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 
@@ -16,8 +17,22 @@ export function WorkspaceSwitcher() {
 
   useEffect(() => {
     if (!user) return;
-    setActive(readLocalStorageKey(LEGACY_ACTIVE_WORKSPACE_KEY, ACTIVE_WORKSPACE_KEY));
-    void teamApi.list().then((data) => setTeams(data.teams)).catch(() => setTeams([]));
+    const stored = readLocalStorageKey(LEGACY_ACTIVE_WORKSPACE_KEY, ACTIVE_WORKSPACE_KEY);
+    void teamApi
+      .list()
+      .then((data) => {
+        const teamIds = new Set(data.teams.map((team) => team.id));
+        const nextActive = stored && teamIds.has(stored) ? stored : "";
+        if (nextActive !== stored) {
+          writeLocalStorageKey(LEGACY_ACTIVE_WORKSPACE_KEY, ACTIVE_WORKSPACE_KEY, "");
+        }
+        setActive(nextActive);
+        setTeams(data.teams);
+      })
+      .catch(() => {
+        setTeams([]);
+        setActive("");
+      });
   }, [user]);
 
   if (!user) {
@@ -31,18 +46,26 @@ export function WorkspaceSwitcher() {
   }
 
   return (
-    <select
-      className="border-input bg-background mb-3 h-9 w-full rounded-md border px-2 text-sm"
-      value={active}
-      onChange={(event) => change(event.target.value)}
-      aria-label={t("label")}
-    >
-      <option value="">{t("personal")}</option>
-      {teams.map((team) => (
-        <option key={team.id} value={team.id}>
-          {team.name}
-        </option>
-      ))}
-    </select>
+    <div className="mb-3 space-y-2">
+      <select
+        className="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
+        value={active}
+        onChange={(event) => change(event.target.value)}
+        aria-label={t("label")}
+      >
+        <option value="">{t("personal")}</option>
+        {teams.map((team) => (
+          <option key={team.id} value={team.id}>
+            {team.name}
+          </option>
+        ))}
+      </select>
+      <Link
+        href="/teams"
+        className="text-muted-foreground hover:text-foreground block text-xs underline-offset-4 hover:underline"
+      >
+        {t("manageTeams")}
+      </Link>
+    </div>
   );
 }
