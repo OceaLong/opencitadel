@@ -11,12 +11,21 @@ import { AuthProvider } from "@/providers/auth-provider";
 
 import "./globals.css";
 
+const themeInitScript = `(function(){try{var t=localStorage.getItem("opencitadel-theme")||localStorage.getItem("my-manus-theme");if(t==="dark")document.documentElement.classList.add("dark");}catch(e){}})();`;
+
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("metadata");
 
   return {
     title: t("title"),
     description: t("description"),
+    icons: {
+      icon: [
+        { url: "/icon.svg", type: "image/svg+xml" },
+        { url: "/icon.png", type: "image/png" },
+      ],
+      apple: [{ url: "/icon.png", type: "image/png" }],
+    },
   };
 }
 
@@ -30,6 +39,9 @@ export default async function RootLayout({
 
   return (
     <html lang={locale === "zh" ? "zh-CN" : "en"} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body className="h-screen overflow-hidden">
         <NextIntlClientProvider locale={locale} messages={messages}>
           <ThemeProvider>

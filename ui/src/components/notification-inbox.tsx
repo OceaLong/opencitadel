@@ -109,7 +109,7 @@ export function NotificationInbox({ className }: { className?: string }) {
           {unreadCount > 0 && (
             <Badge
               variant="destructive"
-              className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full p-0 text-[10px]"
+              className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full p-0 text-2xs"
             >
               {unreadCount > 9 ? "9+" : unreadCount}
             </Badge>

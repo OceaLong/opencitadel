@@ -729,12 +729,18 @@ export type SessionDetail = Session & {
   codebase_id?: string | null;
   knowledge_base_id?: string | null;
   mode?: SessionMode;
+  operator_scope?: string | null;
+  operator_domains?: string[];
+  gate_profile?: string | null;
+  awaiting_human?: boolean;
 };
 
 export type UpdateSessionConfigParams = {
   model_id?: string;
   skill_id?: string;
   thinking_enabled?: boolean;
+  gate_profile?: string;
+  operator_domains?: string[];
 };
 
 /**
@@ -1028,6 +1034,7 @@ export type ScheduledJob = {
   last_run_at?: string | null;
   last_run_status?: string | null;
   last_run_session_id?: string | null;
+  last_run_error?: string | null;
   webhook_token?: string | null;
 };
 

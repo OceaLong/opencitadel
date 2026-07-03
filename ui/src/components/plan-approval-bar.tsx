@@ -5,12 +5,12 @@ import { Check, Pencil, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { ApprovalBar } from "@/components/approval-bar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
 import { patch } from "@/lib/api/fetch";
 import type { ApprovalEventData, PlanStep } from "@/lib/api/types";
-import { cn } from "@/lib/utils";
 
 export type PlanApprovalBarProps = {
   sessionId: string;
@@ -25,9 +25,27 @@ type PlanPayload = {
   risk_tools?: string[];
 };
 
+const DEFAULT_PLAN_OPTIONS = ["approve", "approve_with_edits", "reject"] as const;
+
 function extractSteps(approval: ApprovalEventData): PlanStep[] {
   const payload = approval.payload as PlanPayload;
   return payload.plan?.steps ?? [];
+}
+
+function planOptionLabel(
+  option: string,
+  t: ReturnType<typeof useTranslations<"planApproval">>,
+): string {
+  switch (option) {
+    case "approve":
+      return t("approve");
+    case "approve_with_edits":
+      return t("editSteps");
+    case "reject":
+      return t("reject");
+    default:
+      return option;
+  }
 }
 
 export function PlanApprovalBar({
@@ -50,6 +68,8 @@ export function PlanApprovalBar({
   }, [approval.approval_id]);
 
   const riskTools = (approval.payload as PlanPayload).risk_tools ?? [];
+  const options =
+    approval.options.length > 0 ? approval.options : [...DEFAULT_PLAN_OPTIONS];
 
   const handleApprove = async () => {
     setSubmitting(true);
@@ -95,48 +115,51 @@ export function PlanApprovalBar({
     }
   };
 
+  const handleOptionClick = (option: string) => {
+    if (option === "approve") {
+      void handleApprove();
+      return;
+    }
+    if (option === "approve_with_edits") {
+      setEditing(true);
+      return;
+    }
+    if (option === "reject") {
+      setRejectOpen(true);
+    }
+  };
+
   const updateStepDescription = (index: number, description: string) => {
     setSteps((prev) =>
       prev.map((step, i) => (i === index ? { ...step, description } : step)),
     );
   };
 
+  const actionOptions = options.filter((o) => o !== "approve_with_edits" || !editing);
+
   return (
-    <div
-      className={cn(
-        "border-amber-500/30 bg-amber-500/5 rounded-xl border px-4 py-3 shadow-[var(--shadow-card)]",
-        className,
-      )}
-    >
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <div>
+    <ApprovalBar className={className}>
+      <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
           <p className="text-foreground text-sm font-medium">{t("title")}</p>
           <p className="text-muted-foreground text-xs">{t("subtitle")}</p>
         </div>
         {!editing && !rejectOpen && (
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => void handleApprove()} disabled={disabled || submitting}>
-              <Check className="size-3.5" />
-              {t("approve")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setEditing(true)}
-              disabled={disabled || submitting}
-            >
-              <Pencil className="size-3.5" />
-              {t("editSteps")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setRejectOpen(true)}
-              disabled={disabled || submitting}
-            >
-              <X className="size-3.5" />
-              {t("reject")}
-            </Button>
+            {actionOptions.map((option) => (
+              <Button
+                key={option}
+                size="sm"
+                variant={option === "reject" ? "outline" : option === "approve_with_edits" ? "outline" : "default"}
+                onClick={() => handleOptionClick(option)}
+                disabled={disabled || submitting}
+              >
+                {option === "approve" && <Check className="size-3.5" />}
+                {option === "approve_with_edits" && <Pencil className="size-3.5" />}
+                {option === "reject" && <X className="size-3.5" />}
+                {planOptionLabel(option, t)}
+              </Button>
+            ))}
           </div>
         )}
       </div>
@@ -150,7 +173,7 @@ export function PlanApprovalBar({
       )}
 
       {editing ? (
-        <div className="space-y-2">
+        <div className="mt-2 space-y-2">
           {steps.map((step, index) => (
             <Textarea
               key={step.id || index}
@@ -195,6 +218,6 @@ export function PlanApprovalBar({
           </div>
         </div>
       )}
-    </div>
+    </ApprovalBar>
   );
 }

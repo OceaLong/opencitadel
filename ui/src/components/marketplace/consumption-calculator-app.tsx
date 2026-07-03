@@ -217,15 +217,15 @@ export function ConsumptionCalculatorApp({
 
             <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
               <div className="border-border/70 bg-background/80 rounded-xl border px-3 py-2">
-                <p className="text-muted-foreground text-[11px]">{t("totalLabel")}</p>
+                <p className="text-muted-foreground text-xs-plus">{t("totalLabel")}</p>
                 <p className="font-medium">{result.total_grams} g</p>
               </div>
               <div className="border-border/70 bg-background/80 rounded-xl border px-3 py-2">
-                <p className="text-muted-foreground text-[11px]">{t("perServingLabel")}</p>
+                <p className="text-muted-foreground text-xs-plus">{t("perServingLabel")}</p>
                 <p className="font-medium">{result.serving_grams} g</p>
               </div>
               <div className="border-border/70 bg-background/80 rounded-xl border px-3 py-2">
-                <p className="text-muted-foreground text-[11px]">{t("consumableLabel")}</p>
+                <p className="text-muted-foreground text-xs-plus">{t("consumableLabel")}</p>
                 <p className="text-primary font-medium">
                   {result.servings} {t("servingsUnit")}
                 </p>

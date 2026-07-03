@@ -225,16 +225,16 @@ function MemoryMessageCard({
             <div className="flex min-w-0 items-center gap-1.5">
               <Badge
                 variant="outline"
-                className={cn("px-1.5 py-0 text-[10px] font-medium", roleStyle.badgeClass)}
+                className={cn("px-1.5 py-0 text-2xs font-medium", roleStyle.badgeClass)}
               >
                 {t(`roles.${role}`)}
               </Badge>
-              <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px] opacity-70">
+              <Badge variant="outline" className="px-1.5 py-0 font-mono text-2xs opacity-70">
                 #{index + 1}
               </Badge>
             </div>
             {meta && (
-              <span className="text-muted-foreground truncate font-mono text-[10px]">{meta}</span>
+              <span className="text-muted-foreground truncate font-mono text-2xs">{meta}</span>
             )}
           </div>
         </div>

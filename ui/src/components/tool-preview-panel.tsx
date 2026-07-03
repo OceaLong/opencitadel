@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import type { ArtifactEventSummary, ToolEvent } from "@/lib/api/types";
 import { formatDuration } from "@/lib/session-events";
-import { cn } from "@/lib/utils";
+import { StatusBadge } from "@/components/status-badge";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -109,19 +109,18 @@ function ToolPreviewHeader({
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs">
         {tool.status && (
-          <span
-            className={cn(
-              "rounded-full border px-2 py-0.5 uppercase tracking-wide",
-              tool.status === "calling" &&
-                "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-              tool.status === "called" &&
-                "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-              tool.status === "error" &&
-                "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
-            )}
+          <StatusBadge
+            variant={
+              tool.status === "calling"
+                ? "warning"
+                : tool.status === "called"
+                  ? "success"
+                  : "destructive"
+            }
+            className="uppercase tracking-wide"
           >
             {tool.status === "calling" ? "running" : tool.status}
-          </span>
+          </StatusBadge>
         )}
         {tool.duration_ms != null && (
           <span className="text-muted-foreground">

@@ -12,6 +12,7 @@
 2. [内部知识库教程](tutorials/02-internal-knowledge-base.zh-CN.md)
 3. [MCP 集成教程](tutorials/03-mcp-integrations.zh-CN.md)
 4. [受治理 Web Operator](tutorials/04-governed-web-operator.zh-CN.md)
+5. [退款对账与合规审计](tutorials/05-refund-reconciliation-compliance.zh-CN.md)
 
 ### 运维与部署
 
@@ -31,6 +32,10 @@
 | [事件系统](architecture/events.zh-CN.md) | 领域事件、SSE 契约、持久化与 replay |
 | [检查点与 HITL](architecture/checkpoints-and-hitl.zh-CN.md) | 门控契约、回滚、Web Operator、浏览器 Profile 快照 |
 | [Web Operator](architecture/web-operator.zh-CN.md) | 门控档位、审计契约、OpsConsole 演示 |
+| [团队与工作区](architecture/teams-and-workspaces.zh-CN.md) | 团队角色、`X-Workspace-Id`、邀请 |
+| [管理、审计与合规](architecture/admin-auditor-compliance.zh-CN.md) | 平台管理、证据链、合规报告 |
+| [A2A 与服务 API Key](architecture/integrations-a2a-service-keys.zh-CN.md) | 入站/出站 A2A、`X-Api-Key` |
+| [交付物与分享](architecture/artifacts-sharing.zh-CN.md) | 会话交付物、公开分享链接 |
 | [自动化与调度](architecture/automation-scheduler.zh-CN.md) | Cron/Webhook 任务、Leader 选举、通知 |
 | [应用市场](architecture/marketplace.zh-CN.md) | LLM 小应用目录与契约 |
 | [配置来源治理](architecture/config-source-governance.zh-CN.md) | AppConfig、config.yaml、环境变量边界 |
@@ -61,3 +66,5 @@
 - **配置事实来源**：环境变量以 `.env.example` 为准；行为配置以 `api/config.yaml` 为准。
 - **双语成对**：新增或修改文档时，同步更新对应语言的配对文件。
 - **链接约定**：中文文档优先链接 `*.zh-CN.md`；英文文档优先链接 `*.md`。
+- **索引同步**：新增教程或架构文档时，同步更新本索引、根目录 [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) 文档地图，并在中英文文件文首添加语言切换链接。
+- **PR 清单** — [文档维护检查清单](MAINTENANCE_CHECKLIST.zh-CN.md)；提交文档变更前运行 `./scripts/check-docs.sh`。

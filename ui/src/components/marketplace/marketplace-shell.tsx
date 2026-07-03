@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { ArrowLeft, Home, Layers3, Loader2, Search, Sparkles, WandSparkles } from "lucide-react";
+import { ArrowLeft, Layers3, Search, Sparkles, WandSparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { AppCard } from "@/components/marketplace/app-card";
+import { EmptyState } from "@/components/empty-state";
+import { LoadingSpinner } from "@/components/loading-spinner";
+import { PageHeader } from "@/components/page-header";
 import {
   FALLBACK_APPS,
   getCategoryLabel,
@@ -191,15 +193,6 @@ export function MarketplaceShell() {
     }
   }, [command, displayApps, openApp, requireAuth, t, tAuth]);
 
-  const modelStatusLabel =
-    llmStatus === "unknown"
-      ? t("statusUnknown")
-      : modelUnavailable
-        ? t("unavailable")
-        : llmStatus === "degraded"
-          ? t("degraded")
-          : t("normal");
-
   return (
     <div className="h-full min-h-0 overflow-hidden">
       {activeApp ? (
@@ -223,7 +216,7 @@ export function MarketplaceShell() {
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {activeApp.tags.slice(0, 4).map((tag) => (
-                  <Badge key={tag} variant="secondary" className="text-[10px]">
+                  <Badge key={tag} variant="secondary" className="text-2xs">
                     {tag}
                   </Badge>
                 ))}
@@ -235,34 +228,21 @@ export function MarketplaceShell() {
           </div>
         </main>
       ) : (
-        <div className="h-full overflow-auto rounded-2xl">
-          <div className="mb-2">
-            <Button variant="ghost" size="icon" className="size-8" asChild>
-              <Link href="/" aria-label={t("backHome")}>
-                <Home className="size-4" />
-              </Link>
-            </Button>
-          </div>
-          <section className="border-border/70 bg-card/80 relative overflow-hidden rounded-2xl border p-4 shadow-[var(--shadow-card)] sm:p-5">
+        <div className="h-full overflow-auto rounded-2xl p-4 sm:p-6">
+          <section className="border-border/70 bg-card/80 relative overflow-hidden rounded-2xl border p-4 shadow-card sm:p-5">
             <div className="from-primary/20 via-sky-500/10 absolute inset-0 bg-gradient-to-br to-transparent" />
             <div className="relative max-w-3xl">
-              <Badge className="bg-primary/10 text-primary hover:bg-primary/10 mb-2 text-[10px]">
+              <Badge className="bg-primary/10 text-primary hover:bg-primary/10 mb-2 text-2xs">
                 <Sparkles className="size-3" />
                 {t("badge")}
               </Badge>
-              <Badge
-                variant={modelUnavailable ? "destructive" : "secondary"}
-                className="mb-2 ml-1 text-[10px]"
-              >
-                {t("modelStatus")}
-                {modelStatusLabel}
-              </Badge>
-              <h1 className="text-foreground text-xl font-semibold tracking-tight sm:text-2xl">
-                {t("heroTitle")}
-              </h1>
-              <p className="text-muted-foreground mt-1.5 max-w-2xl text-xs leading-relaxed sm:text-sm">
-                {t("heroDescription")}
-              </p>
+              <PageHeader
+                bordered={false}
+                size="md"
+                className="mb-0"
+                title={t("heroTitle")}
+                description={t("heroDescription")}
+              />
               <div className="mt-4 flex flex-col gap-1.5 rounded-xl border bg-background/80 p-1.5 shadow-[var(--shadow-card)] backdrop-blur sm:flex-row">
                 <div className="relative flex-1">
                   <WandSparkles className="text-muted-foreground absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2" />
@@ -275,7 +255,7 @@ export function MarketplaceShell() {
                   />
                 </div>
                 <Button size="sm" onClick={routeCommand} disabled={routing} className="shrink-0">
-                  {routing ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                  {routing ? <LoadingSpinner /> : <Sparkles className="size-3.5" />}
                   {t("smartLaunch")}
                 </Button>
               </div>
@@ -288,7 +268,7 @@ export function MarketplaceShell() {
                       key={example}
                       type="button"
                       onClick={() => setCommand(example)}
-                      className="text-muted-foreground hover:text-foreground rounded-full border bg-background/70 px-2.5 py-0.5 text-[11px] transition-colors"
+                      className="text-muted-foreground hover:text-foreground rounded-full border bg-background/70 px-2.5 py-0.5 text-xs-plus transition-colors"
                     >
                       {example}
                     </button>
@@ -390,11 +370,12 @@ export function MarketplaceShell() {
                     ))}
                   </div>
                   {filteredApps.length === 0 && (
-                    <div className="border-border/70 bg-muted/20 flex flex-col items-center justify-center rounded-2xl border border-dashed px-4 py-12 text-center">
-                      <Layers3 className="text-muted-foreground/50 mb-3 size-9" />
-                      <p className="text-foreground text-sm font-medium">{t("noMatch")}</p>
-                      <p className="text-muted-foreground mt-1 text-xs">{t("noMatchHint")}</p>
-                    </div>
+                    <EmptyState
+                      variant="dashed"
+                      icon={Layers3}
+                      title={t("noMatch")}
+                      description={t("noMatchHint")}
+                    />
                   )}
                 </section>
               </>

@@ -36,6 +36,7 @@ from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.mcp import MCPTool
 from app.domain.services.tools.subagent import SubAgentTool
+from app.domain.services.tools.tool_registry import ToolRegistry
 from app.domain.services.agent.sandbox_lifecycle import SandboxLifecycleCoordinator
 from app.domain.models.event import StepEvent, StepEventStatus, MessageEvent
 from app.domain.external.observability import ObservabilityPort

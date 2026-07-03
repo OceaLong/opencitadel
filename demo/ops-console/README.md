@@ -1,15 +1,27 @@
 # OpsConsole — Demo Internal Ticket Backend
 
-Form-only internal ticket operations console for **OpenCitadel Web Operator** demos and e2e tests. No REST API — browser automation only.
+Form-first internal ticket and settlement console for **OpenCitadel Web Operator** demos and e2e tests. Day-to-day operations are browser-driven; a **read-only REST API** is available for reconciliation skills.
 
 ## Features
 
 - Cookie-based login (`agent` / `agent123`)
 - Ticket list with status/assignee filters
-- Normal operations: update status, assign, add notes
+- Settlement ledger and reconciliation expected-values views
+- Normal operations: update status, assign, add notes (form POST only)
 - High-risk operations (separate confirmation pages):
   - **Close ticket** — type `close` to confirm
   - **Process refund** — type `refund` to confirm
+
+## Read-only REST API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/tickets` | Ticket list (JSON) |
+| GET | `/api/settlements` | Settlement ledger |
+| GET | `/api/reconciliation/expected` | Expected reconciliation values |
+| GET | `/health` | Health check |
+
+All write paths are HTML form POST only — no write REST API. `POST /api/_seed/reset` exists for demo seed reset in development.
 
 ## Run locally
 

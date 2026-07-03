@@ -82,7 +82,7 @@ export function SessionDebugSheet({ events, compact, onOpen }: Props) {
                 >
                   <div className="border-border/60 bg-muted/50 flex items-center justify-between gap-2 border-b px-3 py-2">
                     <div className="flex min-w-0 items-center gap-2">
-                      <Badge variant="outline" className="font-mono text-[10px]">
+                      <Badge variant="outline" className="font-mono text-2xs">
                         {getDebugDescription(item.item_type)}
                       </Badge>
                       <span className="text-muted-foreground truncate font-mono text-xs">
@@ -90,7 +90,7 @@ export function SessionDebugSheet({ events, compact, onOpen }: Props) {
                       </span>
                     </div>
                     {item.created_at && (
-                      <span className="text-muted-foreground text-[10px]">
+                      <span className="text-muted-foreground text-2xs">
                         {new Date(item.created_at * 1000).toLocaleTimeString()}
                       </span>
                     )}

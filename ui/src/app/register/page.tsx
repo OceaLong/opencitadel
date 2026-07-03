@@ -4,7 +4,9 @@ import { FormEvent, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 
+import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
 import { authApi } from "@/lib/api/auth";
@@ -39,18 +41,36 @@ export default function RegisterPage() {
 
   return (
     <main className="bg-background flex min-h-screen items-center justify-center p-6">
-      <form onSubmit={onSubmit} className="border-border bg-card w-full max-w-sm space-y-4 rounded-xl border p-6 shadow-sm">
-        <div>
-          <h1 className="text-xl font-semibold">{t("registerTitle")}</h1>
-          <p className="text-muted-foreground mt-1 text-sm">{t("registerDescription")}</p>
-        </div>
-        {!inviteToken && <p className="text-destructive text-sm">{t("missingInviteToken")}</p>}
-        <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("emailPlaceholder")} />
-        <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t("usernamePlaceholder")} />
-        <Input value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("passwordMinPlaceholder")} type="password" />
-        {error && <p className="text-destructive text-sm">{error}</p>}
-        <Button className="w-full" disabled={loading || !inviteToken}>{loading ? t("registering") : t("registerAndLogin")}</Button>
-      </form>
+      <Card className="w-full max-w-[360px] shadow-card">
+        <CardHeader className="items-center text-center">
+          <OpenCitadelIcon variant="icon" className="mb-2 size-10" />
+          <CardTitle className="text-xl">{t("registerTitle")}</CardTitle>
+          <CardDescription>{t("registerDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onSubmit} className="space-y-4">
+            {!inviteToken ? (
+              <p className="text-destructive text-sm">{t("missingInviteToken")}</p>
+            ) : null}
+            <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("emailPlaceholder")} />
+            <Input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={t("usernamePlaceholder")}
+            />
+            <Input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={t("passwordMinPlaceholder")}
+              type="password"
+            />
+            {error ? <p className="text-destructive text-sm">{error}</p> : null}
+            <Button className="w-full" disabled={loading || !inviteToken}>
+              {loading ? t("registering") : t("registerAndLogin")}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </main>
   );
 }

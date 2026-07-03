@@ -190,19 +190,19 @@ export function MemorySettings({ embedded = false }: Props) {
                 <div className="min-w-0 flex-1">
                   <h3 className="text-foreground truncate text-sm font-semibold">{e.title}</h3>
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                    <Badge variant="outline" className="px-1.5 py-0 text-2xs">
                       {e.scope}
                     </Badge>
                     {e.session_id && (
-                      <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px]">
+                      <Badge variant="outline" className="px-1.5 py-0 font-mono text-2xs">
                         {e.session_id.slice(0, 8)}…
                       </Badge>
                     )}
-                    <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                    <Badge variant="secondary" className="px-1.5 py-0 text-2xs">
                       {e.source}
                     </Badge>
                     {e.use_count > 0 && (
-                      <span className="text-muted-foreground text-[10px]">
+                      <span className="text-muted-foreground text-2xs">
                         {t("usedCount", { count: e.use_count })}
                       </span>
                     )}
@@ -212,7 +212,7 @@ export function MemorySettings({ embedded = false }: Props) {
                       {e.tags.map((tag) => (
                         <span
                           key={tag}
-                          className="bg-background border-border/60 text-muted-foreground rounded border px-1.5 py-0.5 text-[10px]"
+                          className="bg-background border-border/60 text-muted-foreground rounded border px-1.5 py-0.5 text-2xs"
                         >
                           {tag}
                         </span>

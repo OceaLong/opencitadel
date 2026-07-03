@@ -138,6 +138,30 @@ async def rotate_secret(
     return ApiResponse.success(WebhookSecretResponse(webhook_secret=secret, webhook_token=token))
 
 
+@scheduled_router.post("/{job_id}/trigger", response_model=ApiResponse[dict])
+async def trigger_job_now(
+        job_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
+        service: ScheduledJobService = Depends(get_scheduled_job_service),
+        notification_service: NotificationService = Depends(get_notification_service),
+):
+    job = await service.get_job(job_id)
+    if not job or job.owner_user_id != ctx.principal.user_id:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    try:
+        session_id = await service.manual_trigger(
+            job_id,
+            ctx.principal.user_id,
+            notification_service=notification_service,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not session_id:
+        raise HTTPException(status_code=400, detail="任务触发失败")
+    return ApiResponse.success({"session_id": session_id})
+
+
 @notification_router.get("", response_model=ApiResponse[NotificationListResponse])
 async def list_notifications(
         unread_only: bool = False,

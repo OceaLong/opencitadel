@@ -2,7 +2,24 @@
 
 # Codebase 向量降级与重新索引
 
-本文档是 Codebase 摄取过程中向量降级、语义检索不可用提示与手动重新索引的权威说明。
+本文档是 **Codebase 模块**的权威说明：导入来源、Ask/Agent 模式、摄取管线、向量降级与手动重新索引。
+
+## Codebase 模块概览
+
+| 能力 | 路由 / API | 说明 |
+|------|------------|------|
+| 列表 / 创建 | `/codebase`、`POST /api/codebases` | ZIP 上传或 Git URL 导入 |
+| 详情 | `/codebase/[id]` | 文件、符号、架构视图 |
+| Ask 模式 | 带 `codebase_id` + ASK 的会话 | `CodeAskFlow` — 基于符号的 RAG |
+| Agent 模式 | 带 `codebase_id` + AGENT 的会话 | 带代码库工具的 `PlannerReActFlow` |
+| 重新索引 | `POST /api/codebases/{id}/reanalyze` | embedding 恢复后重跑摄取 |
+
+导入方式：
+
+- **ZIP 上传** — 在沙箱工作区解压归档
+- **Git clone** — 沙箱内浅克隆（`git clone --depth 1`）
+
+Agent 路由（`AgentTaskRunner`）：设置 `codebase_id` 且模式为 ASK → `CodeAskFlow`；否则使用带代码库工具的 Planner/ReAct。
 
 ## 完整摄取管线
 

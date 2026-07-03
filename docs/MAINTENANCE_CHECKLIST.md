@@ -1,0 +1,49 @@
+[简体中文](MAINTENANCE_CHECKLIST.zh-CN.md)
+
+# Documentation Maintenance Checklist
+
+Use this checklist when changing features, routes, configuration, deployment, or UI copy.
+
+## When to update docs
+
+- [ ] New or changed API route → `api/README.md` + `api/README.zh-CN.md`, relevant `docs/architecture/*.md`
+- [ ] New or changed UI route → `ui/README.md` + `ui/README.zh-CN.md`, root README module table
+- [ ] New env var → `.env.example`, `docs/operations/deployment.md` (+ zh), `config-source-governance.md` (+ zh)
+- [ ] New `AppConfig` field → `api/config.yaml`, Helm `appConfig`, `config-source-governance.md` (+ zh)
+- [ ] New tutorial or architecture doc → both language files, `docs/README.md` (+ zh), root `README.md` (+ zh), top language links
+- [ ] Docker image name/count change → `deployment.md` (+ zh), Helm README (+ zh), `release.yml` comment if needed
+
+## Bilingual sync
+
+- [ ] English `topic.md` and Chinese `topic.zh-CN.md` updated together
+- [ ] Top-of-file links: `[English](topic.md) · [简体中文](topic.zh-CN.md)` (or reverse on zh file)
+- [ ] Internal links: English docs → `*.md`; Chinese docs → `*.zh-CN.md`
+- [ ] UI i18n keys added in `ui/scripts/build-messages.mjs` for both `en` and `zh`
+
+## Accuracy checks (manual)
+
+| Area | Verify against |
+|------|----------------|
+| UI routes | `ui/src/app/**/page.tsx` |
+| API routes | `api/app/interfaces/endpoints/routes.py` and route modules |
+| Compose images | `docker-compose.yml`, `.github/workflows/release.yml` |
+| Sandbox boundary | Chromium in sandbox; Playwright in Worker via CDP |
+| Integrations UI | Settings modal → Integrations tab (not `/settings/integrations`) |
+| Object storage | `.env.example` defaults; `COMPOSE_PROFILES=local` + `STORAGE_PROVIDER=minio` for local |
+| Service API Key | `X-Api-Key` header; inbound `/api/a2a` only |
+| Share links | Default TTL 168h; `/share/artifact/[token]` UI route |
+
+## Automated check
+
+Run before opening a docs PR:
+
+```bash
+./scripts/check-docs.sh
+```
+
+CI runs the same script on every pull request.
+
+## Related
+
+- [Docs index](README.md)
+- [Contributing](../.github/CONTRIBUTING.md)

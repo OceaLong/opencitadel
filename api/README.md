@@ -13,7 +13,7 @@ Agent tasks run in a **separate Worker process**; the API layer is stateless and
 - SQLAlchemy (asyncpg) + Alembic + **pgvector**
 - Redis 7 (task dispatch consumer groups + Streams event pipeline)
 - Docker SDK + SandboxProvider (sandbox pooling abstraction)
-- Playwright (browser automation in API/Worker processes)
+- Playwright (browser control in Worker; Chromium runs inside sandbox via CDP)
 - OpenTelemetry + Prometheus (optional observability)
 - MCP SDK / httpx (MCP, A2A, Anthropic, Gemini)
 

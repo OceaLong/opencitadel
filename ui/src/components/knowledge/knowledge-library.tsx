@@ -7,6 +7,8 @@ import { toast } from "sonner";
 
 import { AddDocumentDialog } from "@/components/knowledge/add-document-dialog";
 import { CreateKBDialog } from "@/components/knowledge/create-kb-dialog";
+import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -98,19 +100,23 @@ export function KnowledgeLibrary() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-border flex items-center justify-between border-b px-4 py-3">
-        <div className="flex items-center gap-2">
-          <IconKnowledge className="size-5" />
-          <div>
-            <h1 className="text-sm font-semibold">{t("title")}</h1>
-            <p className="text-muted-foreground text-xs">{t("librarySubtitle")}</p>
-          </div>
-        </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <IconAdd className="mr-1 size-4" />
-          {t("create")}
-        </Button>
-      </div>
+      <PageHeader
+        size="sm"
+        className="px-4 py-3"
+        title={
+          <span className="inline-flex items-center gap-2">
+            <IconKnowledge className="size-5" />
+            {t("title")}
+          </span>
+        }
+        description={t("librarySubtitle")}
+        actions={
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <IconAdd className="mr-1 size-4" />
+            {t("create")}
+          </Button>
+        }
+      />
 
       <ScrollArea className="flex-1">
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -171,11 +177,7 @@ export function KnowledgeLibrary() {
               </Card>
             );
           })}
-          {!items.length && (
-            <div className="text-muted-foreground col-span-full py-16 text-center text-sm">
-              {t("empty")}
-            </div>
-          )}
+          {!items.length && <EmptyState title={t("empty")} className="col-span-full" />}
         </div>
       </ScrollArea>
 

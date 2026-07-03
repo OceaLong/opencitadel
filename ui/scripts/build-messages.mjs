@@ -2,6 +2,8 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
+import { deepMergeMessages, supplement } from "./i18n-supplement.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
 
@@ -56,6 +58,8 @@ const messages = {
     description: { en: "Choose your preferred interface language.", zh: "选择界面显示语言。" },
     localeEn: { en: "English", zh: "English" },
     localeZh: { en: "中文", zh: "中文" },
+    localeShortEn: { en: "EN", zh: "EN" },
+    localeShortZh: { en: "中", zh: "中" },
   },
   auth: {
     loginTitle: { en: "Sign in to OpenCitadel", zh: "登录 OpenCitadel" },
@@ -519,6 +523,17 @@ const messages = {
     exportCsv: { en: "Export CSV", zh: "导出 CSV" },
     chainIntact: { en: "Audit chain intact", zh: "审计链完整" },
     chainBroken: { en: "Audit chain broken", zh: "审计链异常" },
+    verifyChain: { en: "Verify chain", zh: "验证链" },
+    chainCheckedAt: { en: "Checked {time}", zh: "验证于 {time}" },
+    chainBrokenAt: { en: "Broken at seq {seq}", zh: "断裂于序号 {seq}" },
+    filterAction: { en: "Filter by action", zh: "按动作筛选" },
+    filterActionAll: { en: "All actions", zh: "全部动作" },
+    filterActor: { en: "Actor user ID", zh: "操作者 ID" },
+    viewDetail: { en: "View detail", zh: "查看详情" },
+    auditDetailTitle: { en: "Audit log detail", zh: "审计记录详情" },
+    metadataLabel: { en: "Metadata", zh: "元数据" },
+    actorIpLabel: { en: "Actor IP", zh: "操作者 IP" },
+    chainSeqLabel: { en: "Chain sequence", zh: "链序号" },
     actionDistributionTitle: { en: "Action distribution", zh: "动作分布" },
     actionDistributionDesc: { en: "Top audit actions in range", zh: "时间范围内主要审计动作" },
     overviewTitle: { en: "Overview", zh: "概览" },
@@ -711,6 +726,9 @@ const messages = {
     offlineOnly: { en: "No model required", zh: "仅无需模型" },
     noMatch: { en: "No matching apps found", zh: "没有找到匹配应用" },
     noMatchHint: { en: "Try a different keyword or use the AI command bar above", zh: "试试换个关键词或使用上方 AI 指令栏" },
+    categoryAll: { en: "All", zh: "全部" },
+    categoryHealth: { en: "Health", zh: "健康" },
+    categoryLife: { en: "Life", zh: "生活" },
     categoryOffice: { en: "Office", zh: "办公" },
     categoryProductivity: { en: "Productivity", zh: "效率" },
     noModelDirect: { en: "No model · ready to use", zh: "无需模型 · 可直接使用" },
@@ -718,6 +736,36 @@ const messages = {
     modelRequired: { en: "Model required", zh: "需要模型" },
     modelRequiredUnavailable: { en: "Model required, currently unavailable", zh: "需要模型，当前不可用" },
     apps: {
+      nutritionAnalysis: {
+        name: { en: "Nutrition analysis", zh: "营养分析" },
+        description: {
+          en: "Upload a meal photo, analyze macros, and get personalized nutrition advice",
+          zh: "上传餐食照片，分析宏量营养素并获取个性化营养建议",
+        },
+        tags: {
+          en: ["Nutrition", "Meal photo", "Calories", "Health"],
+          zh: ["营养", "餐食照片", "热量", "健康"],
+        },
+        examples: {
+          en: ["Analyze this lunch for a cut goal", "Is this meal high in protein?"],
+          zh: ["分析这顿午餐是否适合减脂", "这餐蛋白质够吗？"],
+        },
+      },
+      consumptionCalculator: {
+        name: { en: "Consumption calculator", zh: "消耗量计算器" },
+        description: {
+          en: "Upload a nutrition label to estimate servings and consumption amounts",
+          zh: "上传营养成分表，估算份量与消耗量",
+        },
+        tags: {
+          en: ["Nutrition label", "Servings", "OCR", "Calculator"],
+          zh: ["营养成分表", "份量", "OCR", "计算器"],
+        },
+        examples: {
+          en: ["How many servings in this package?", "Calculate consumption for 50g per serving"],
+          zh: ["这包有多少份？", "按每份 50 克计算消耗量"],
+        },
+      },
       documentQa: {
         name: { en: "Document/Image Q&A", zh: "文档/图片问答" },
         description: { en: "Upload materials or screenshots, AI extracts key points and answers questions", zh: "上传资料或截图，AI 提炼重点并回答问题" },
@@ -1171,6 +1219,8 @@ const messages = {
     renderFailed: { en: "Mermaid render failed", zh: "Mermaid 渲染失败" },
   },
 };
+
+deepMergeMessages(messages, supplement);
 
 function flatten(obj, prefix = "") {
   const result = {};

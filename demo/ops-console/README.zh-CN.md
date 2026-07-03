@@ -1,15 +1,27 @@
 # OpsConsole — 演示用内部工单运营后台
 
-纯表单、无 REST API 的内部工单运营后台，供 **OpenCitadel Web Operator** 演示与 e2e 测试使用，仅支持浏览器自动化操作。
+面向 **OpenCitadel Web Operator** 演示与 e2e 测试的内部工单与结算后台。日常操作为浏览器表单驱动；同时提供**只读 REST API** 供对账 Skill 使用。
 
 ## 功能
 
 - Cookie 登录（`agent` / `agent123`）
 - 工单列表（按状态/负责人筛选）
-- 普通操作：改状态、指派、添加备注
+- 结算台账与对账期望值视图
+- 普通操作：改状态、指派、添加备注（仅表单 POST）
 - 高危操作（独立二次确认页）：
   - **关闭工单** — 输入 `close` 确认
   - **处理退款** — 输入 `refund` 确认
+
+## 只读 REST API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/tickets` | 工单列表（JSON） |
+| GET | `/api/settlements` | 结算台账 |
+| GET | `/api/reconciliation/expected` | 对账期望值 |
+| GET | `/health` | 健康检查 |
+
+所有写操作仅通过 HTML 表单 POST，无写 REST API。开发环境提供 `POST /api/_seed/reset` 用于重置演示数据。
 
 ## 本地运行
 

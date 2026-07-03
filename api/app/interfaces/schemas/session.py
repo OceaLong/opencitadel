@@ -86,6 +86,14 @@ class UpdateSessionConfigRequest(BaseModel):
     model_id: Optional[str] = None
     skill_id: Optional[str] = None
     thinking_enabled: Optional[bool] = None
+    gate_profile: Optional[str] = Field(
+        default=None,
+        description="门控档位: loose | standard | strict",
+    )
+    operator_domains: Optional[List[str]] = Field(
+        default=None,
+        description="Web Operator 域名白名单",
+    )
 
 
 class TokenUsageSummaryResponse(BaseModel):

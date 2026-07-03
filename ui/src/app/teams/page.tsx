@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Plus, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { LoadingSpinner } from "@/components/loading-spinner";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -21,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { formatDateTime } from "@/lib/admin-utils";
 import { teamApi, type Team } from "@/lib/api/team";
+import { IconAdd, IconLoading, IconUsers } from "@/lib/icons";
 
 export default function TeamsPage() {
   const t = useTranslations("teams");
@@ -70,20 +72,21 @@ export default function TeamsPage() {
 
   return (
     <div className="mx-auto flex h-full max-w-4xl flex-col gap-6 overflow-auto p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
-          <p className="text-muted-foreground mt-1 text-sm">{t("subtitle")}</p>
-        </div>
-        <Button onClick={() => setDialogOpen(true)}>
-          <Plus className="mr-1 size-4" />
-          {t("createTeam")}
-        </Button>
-      </div>
+      <PageHeader
+        bordered={false}
+        title={t("title")}
+        description={t("subtitle")}
+        actions={
+          <Button onClick={() => setDialogOpen(true)}>
+            <IconAdd className="mr-1 size-4" />
+            {t("createTeam")}
+          </Button>
+        }
+      />
 
       {loading ? (
         <div className="flex justify-center py-16">
-          <Loader2 className="size-6 animate-spin" />
+          <LoadingSpinner />
         </div>
       ) : teams.length === 0 ? (
         <Card>
@@ -108,7 +111,7 @@ export default function TeamsPage() {
                   </div>
                   <Button variant="outline" size="sm" asChild>
                     <Link href={`/teams/${team.id}`}>
-                      <Users className="mr-1 size-4" />
+                      <IconUsers className="mr-1 size-4" />
                       {t("manageMembers")}
                     </Link>
                   </Button>
@@ -149,7 +152,7 @@ export default function TeamsPage() {
               {tCommon("cancel")}
             </Button>
             <Button onClick={() => void handleCreate()} disabled={creating}>
-              {creating ? <Loader2 className="animate-spin" /> : null}
+              {creating ? <IconLoading className="animate-spin" /> : null}
               {tCommon("create")}
             </Button>
           </DialogFooter>

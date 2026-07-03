@@ -23,11 +23,11 @@ import { formatCompactNumber, formatShortDate } from "@/lib/admin-utils";
 import type { UsageBreakdownItem, UsageTimeseriesPoint } from "@/lib/api/admin";
 
 const CHART_COLORS = [
-  "hsl(var(--chart-1))",
-  "hsl(var(--chart-2))",
-  "hsl(var(--chart-3))",
-  "hsl(var(--chart-4))",
-  "hsl(var(--chart-5))",
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
 ];
 
 function ChartTooltip({
@@ -167,14 +167,7 @@ export function UsageBreakdownChart({
                   <Cell key={entry.fullName} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip
-                formatter={(value: number) => formatCompactNumber(value)}
-                contentStyle={{
-                  borderRadius: "0.75rem",
-                  border: "1px solid hsl(var(--border))",
-                  background: "hsl(var(--popover))",
-                }}
-              />
+              <Tooltip content={<ChartTooltip />} />
               <Legend />
             </PieChart>
           </ResponsiveContainer>

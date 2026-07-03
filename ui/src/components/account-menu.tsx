@@ -44,8 +44,8 @@ export function AccountMenu() {
     return (
       <SidebarFooter className="border-border/60 border-t p-2">
         <Button
-          variant="outline"
-          className="w-full justify-start gap-2"
+          variant="ghost"
+          className="w-full justify-center gap-2"
           onClick={() => promptLogin()}
         >
           <LogIn className="size-4" />

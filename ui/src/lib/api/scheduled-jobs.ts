@@ -32,4 +32,8 @@ export const scheduledJobsApi = {
       {},
     );
   },
+
+  trigger: (jobId: string): Promise<{ session_id: string }> => {
+    return post<{ session_id: string }>(`/scheduled-jobs/${jobId}/trigger`, {});
+  },
 };

@@ -5,8 +5,11 @@ import { Copy, Loader2, Plus, RefreshCw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { ChatHeader } from "@/components/chat-header";
+import { PageHeader } from "@/components/page-header";
 import { ContextSelector } from "@/components/context-selector";
+import { SessionModelPicker } from "@/components/session-model-picker";
+import { SessionSkillPicker } from "@/components/session-skill-picker";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -64,6 +67,8 @@ export default function AutomationPage() {
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [rotatingJobId, setRotatingJobId] = useState<string | null>(null);
+  const [triggeringJobId, setTriggeringJobId] = useState<string | null>(null);
+  const [togglingJobId, setTogglingJobId] = useState<string | null>(null);
   const [webhookCredentials, setWebhookCredentials] = useState<WebhookCredentials | null>(null);
   const [form, setForm] = useState<CreateScheduledJobParams>({
     name: "",
@@ -190,23 +195,52 @@ export default function AutomationPage() {
     }
   };
 
+  const handleToggleEnabled = async (job: ScheduledJob, enabled: boolean) => {
+    setTogglingJobId(job.id);
+    try {
+      await scheduledJobsApi.update(job.id, { enabled });
+      await loadJobs();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("toggleEnabledFailed"));
+    } finally {
+      setTogglingJobId(null);
+    }
+  };
+
+  const handleRunNow = async (job: ScheduledJob) => {
+    setTriggeringJobId(job.id);
+    try {
+      const result = await scheduledJobsApi.trigger(job.id);
+      toast.success(t("runNowStarted"));
+      await loadJobs();
+      if (result.session_id) {
+        window.location.href = `/sessions/${result.session_id}`;
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("runNowFailed"));
+    } finally {
+      setTriggeringJobId(null);
+    }
+  };
+
   const webhookUrl = (token: string) =>
     `${typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/${token}`;
 
   return (
     <div className="flex h-full min-h-screen flex-col">
-      <ChatHeader />
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-4 py-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-foreground text-xl font-semibold">{t("title")}</h1>
-            <p className="text-muted-foreground text-sm">{t("subtitle")}</p>
-          </div>
-          <Button onClick={() => setShowForm((value) => !value)}>
-            <Plus className="size-4" />
-            {t("newJob")}
-          </Button>
-        </div>
+        <PageHeader
+          bordered={false}
+          size="md"
+          title={t("title")}
+          description={t("subtitle")}
+          actions={
+            <Button onClick={() => setShowForm((value) => !value)}>
+              <Plus className="size-4" />
+              {t("newJob")}
+            </Button>
+          }
+        />
 
         <Dialog open={webhookCredentials != null} onOpenChange={(open) => !open && setWebhookCredentials(null)}>
           <DialogContent>
@@ -321,6 +355,12 @@ export default function AutomationPage() {
                     placeholder={form.trigger_type === "cron" ? "0 9 * * *" : "3600"}
                     disabled={form.trigger_type === "webhook"}
                   />
+                  {form.trigger_type === "cron" && (
+                    <p className="text-muted-foreground text-xs">{t("cronHelp")}</p>
+                  )}
+                  {form.trigger_type === "interval" && (
+                    <p className="text-muted-foreground text-xs">{t("triggerTypeInterval")}</p>
+                  )}
                 </div>
               </div>
               <div className="space-y-2">
@@ -334,6 +374,7 @@ export default function AutomationPage() {
                   }
                   placeholder={t("promptPlaceholder")}
                 />
+                <p className="text-muted-foreground text-xs">{t("promptHelp")}</p>
               </div>
               <div className="space-y-2">
                 <Label>{t("contextLabel")}</Label>
@@ -353,25 +394,17 @@ export default function AutomationPage() {
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="job-model">{t("fields.modelId")}</Label>
-                  <Input
-                    id="job-model"
-                    value={form.model_id ?? ""}
-                    onChange={(event) =>
-                      setForm((prev) => ({ ...prev, model_id: event.target.value || null }))
-                    }
-                    placeholder="optional"
+                  <Label>{t("fields.modelId")}</Label>
+                  <SessionModelPicker
+                    value={form.model_id ?? undefined}
+                    onChange={(id) => setForm((prev) => ({ ...prev, model_id: id ?? null }))}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="job-skill">{t("fields.skillId")}</Label>
-                  <Input
-                    id="job-skill"
-                    value={form.skill_id ?? ""}
-                    onChange={(event) =>
-                      setForm((prev) => ({ ...prev, skill_id: event.target.value || null }))
-                    }
-                    placeholder="web-operator skill id"
+                  <Label>{t("fields.skillId")}</Label>
+                  <SessionSkillPicker
+                    value={form.skill_id ?? undefined}
+                    onChange={(id) => setForm((prev) => ({ ...prev, skill_id: id ?? null }))}
                   />
                 </div>
               </div>
@@ -495,15 +528,28 @@ export default function AutomationPage() {
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-foreground font-medium">{job.name}</p>
-                      <span
-                        className={
-                          job.enabled
-                            ? "text-emerald-600 text-xs"
-                            : "text-muted-foreground text-xs"
-                        }
-                      >
-                        {job.enabled ? t("statusEnabled") : t("statusDisabled")}
-                      </span>
+                      <Switch
+                        checked={job.enabled}
+                        disabled={togglingJobId === job.id}
+                        onCheckedChange={(checked) => void handleToggleEnabled(job, checked)}
+                        aria-label={job.enabled ? t("statusEnabled") : t("statusDisabled")}
+                      />
+                      {job.last_run_status ? (
+                        <StatusBadge
+                          variant={
+                            job.last_run_status === "failed"
+                              ? "destructive"
+                              : job.last_run_status === "running"
+                                ? "warning"
+                                : job.last_run_status === "success" ||
+                                    job.last_run_status === "completed"
+                                  ? "success"
+                                  : "secondary"
+                          }
+                        >
+                          {job.last_run_status}
+                        </StatusBadge>
+                      ) : null}
                     </div>
                     <p className="text-muted-foreground line-clamp-2 text-sm">{job.prompt_template}</p>
                     <p className="text-muted-foreground text-xs">
@@ -518,7 +564,6 @@ export default function AutomationPage() {
                     {job.last_run_at && (
                       <p className="text-muted-foreground text-xs">
                         {t("lastRunAt", { time: formatTime(job.last_run_at, locale) })}
-                        {job.last_run_status ? ` · ${job.last_run_status}` : ""}
                         {job.last_run_session_id ? (
                           <>
                             {" · "}
@@ -532,8 +577,27 @@ export default function AutomationPage() {
                         ) : null}
                       </p>
                     )}
+                    {job.last_run_error && (
+                      <p className="text-destructive text-xs">
+                        {t("lastRunError", { error: job.last_run_error })}
+                      </p>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex flex-wrap items-center gap-1">
+                    {job.trigger_type !== "webhook" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!job.enabled || triggeringJobId === job.id}
+                        onClick={() => void handleRunNow(job)}
+                      >
+                        {triggeringJobId === job.id ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          t("runNow")
+                        )}
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"

@@ -1,3 +1,5 @@
+[简体中文](04-governed-web-operator.zh-CN.md)
+
 # Governed Web Operator (end-to-end runbook)
 
 This tutorial walks through the **governed enterprise Web Operator** scenario using the bundled **OpsConsole** demo backend.

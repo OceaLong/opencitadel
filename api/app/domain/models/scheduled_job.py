@@ -37,6 +37,7 @@ class ScheduledJob(BaseModel):
     last_run_at: Optional[datetime] = None
     last_run_status: Optional[str] = None
     last_run_session_id: Optional[str] = None
+    last_run_error: Optional[str] = None
     webhook_token: Optional[str] = None
     webhook_secret_hash: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)

@@ -80,22 +80,22 @@ export function AppCard({ app, selected, compact, wide, modelUnavailable, onClic
 
           <div className="mt-2.5 min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-1.5">
-              <Badge variant="secondary" className="text-[10px] font-normal">
+              <Badge variant="secondary" className="text-2xs font-normal">
                 {getCategoryLabel(app.category, t)}
               </Badge>
               {app.featured && (
-                <Badge className="bg-primary/10 text-primary hover:bg-primary/10 text-[10px]">
+                <Badge className="bg-primary/10 text-primary hover:bg-primary/10 text-2xs">
                   <Sparkles className="size-3" />
                   {tCommon("featured")}
                 </Badge>
               )}
               {app.needs_vision && (
-                <Badge variant="outline" className="text-[10px]">
+                <Badge variant="outline" className="text-2xs">
                   <Eye className="size-3" />
                   {tCommon("vision")}
                 </Badge>
               )}
-              <Badge variant={depBadge.variant} className="text-[10px]">
+              <Badge variant={depBadge.variant} className="text-2xs">
                 <DepIcon className="size-3" />
                 {depBadge.label}
               </Badge>
@@ -109,7 +109,7 @@ export function AppCard({ app, selected, compact, wide, modelUnavailable, onClic
                 {app.tags.slice(0, wide ? 4 : 3).map((tag) => (
                   <span
                     key={tag}
-                    className="text-muted-foreground bg-muted/60 rounded-full px-2 py-0.5 text-[10px]"
+                    className="text-muted-foreground bg-muted/60 rounded-full px-2 py-0.5 text-2xs"
                   >
                     {tag}
                   </span>

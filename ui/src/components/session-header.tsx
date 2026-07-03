@@ -1,7 +1,6 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Coins, Download, FileSearchCorner, FileText } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -25,10 +24,16 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
 import { fileApi, sessionApi } from "@/lib/api";
 import type { SessionFile, SSEEventData, TokenUsageSummary, TokenUsageRecord } from "@/lib/api/types";
+import {
+  IconActivity,
+  IconCoins,
+  IconDownload,
+  IconFilePreview,
+  IconFileSearch,
+} from "@/lib/icons";
 import type { AttachmentFile, TaskObservationSummary } from "@/lib/session-events";
 import { formatDuration, sessionFileToAttachment } from "@/lib/session-events";
 import { formatFileSize } from "@/lib/utils";
@@ -76,7 +81,6 @@ export const SessionHeader = memo(function SessionHeader({
 }: SessionHeaderProps) {
   const t = useTranslations("sessionHeader");
   const tCommon = useTranslations("common");
-  const { open, isMobile } = useSidebar();
   const [mounted, setMounted] = useState(false);
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = fileListOpen !== undefined;
@@ -169,8 +173,7 @@ export const SessionHeader = memo(function SessionHeader({
   }, []);
 
   return (
-    <header className="bg-background/95 sticky top-0 z-10 flex flex-shrink-0 flex-row items-center justify-between gap-2 pt-3 pb-2">
-      {(!open || isMobile) && <SidebarTrigger className="flex-shrink-0 cursor-pointer" />}
+    <header className="bg-background/95 sticky top-0 z-10 flex flex-shrink-0 flex-row items-center justify-between gap-2 border-b px-4 pt-2 pb-2">
       <div className="text-foreground min-w-0 flex-1 overflow-hidden text-lg font-medium text-ellipsis whitespace-nowrap">
         {title || t("untitledTask")}
       </div>
@@ -185,7 +188,7 @@ export const SessionHeader = memo(function SessionHeader({
                 waits: observationSummary.waitCount,
               })}
             >
-              <Activity className="size-3.5 shrink-0" />
+              <IconActivity className="size-3.5 shrink-0" />
               <span>{observationSummary.toolCount} tools</span>
               {observationSummary.durationMs !== undefined && (
                 <span className="text-muted-foreground/70">
@@ -208,7 +211,7 @@ export const SessionHeader = memo(function SessionHeader({
               calls: tokenUsage.call_count,
             })}
           >
-            <Coins className="size-3.5 shrink-0 text-amber-600" />
+            <IconCoins className="size-3.5 shrink-0 text-amber-600" />
             <span>{tokenUsage.total_tokens.toLocaleString()} tok</span>
             {tokenUsage.estimated_cost_usd > 0 && (
               <span className="text-muted-foreground/70">
@@ -225,7 +228,7 @@ export const SessionHeader = memo(function SessionHeader({
           <Dialog open={openState} onOpenChange={setOpenState}>
             <DialogTrigger asChild>
               <Button variant="ghost" size="icon-sm" className="flex-shrink-0 cursor-pointer">
-                <FileSearchCorner />
+                <IconFileSearch />
               </Button>
             </DialogTrigger>
             <DialogContent>
@@ -247,7 +250,7 @@ export const SessionHeader = memo(function SessionHeader({
                         <ItemMedia>
                           <Avatar className="size-8">
                             <AvatarGroupCount>
-                              <FileText />
+                              <IconFilePreview />
                             </AvatarGroupCount>
                           </Avatar>
                         </ItemMedia>
@@ -266,7 +269,7 @@ export const SessionHeader = memo(function SessionHeader({
                             disabled={downloadingId === file.id}
                             aria-label={t("downloadFile", { filename: file.filename })}
                           >
-                            <Download />
+                            <IconDownload />
                           </Button>
                         </ItemActions>
                       </Item>
@@ -278,7 +281,7 @@ export const SessionHeader = memo(function SessionHeader({
           </Dialog>
         ) : (
           <Button variant="ghost" size="icon-sm" className="flex-shrink-0 cursor-pointer">
-            <FileSearchCorner />
+            <IconFileSearch />
           </Button>
         )}
         {sessionId && (

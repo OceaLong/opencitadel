@@ -80,12 +80,7 @@ export function AdminLayoutShell({ children }: { children: ReactNode }) {
             {t("back")}
           </Link>
         </Button>
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">{t("title")}</h1>
-          <p className="text-muted-foreground text-xs">
-            {isAuditor ? t("auditorSubtitle") : t("subtitle")}
-          </p>
-        </div>
+        <p className="text-muted-foreground text-sm">{isAuditor ? t("auditorSubtitle") : t("subtitle")}</p>
       </header>
       <div className="flex flex-1">
         <nav className="border-border/70 bg-card/40 w-56 shrink-0 space-y-1.5 border-r p-4">

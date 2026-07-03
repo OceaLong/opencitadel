@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, Loader2, MailPlus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { LoadingSpinner } from "@/components/loading-spinner";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +13,7 @@ import { Input } from "@/components/ui/input";
 
 import { formatDateTime } from "@/lib/admin-utils";
 import { adminApi, type PlatformInvitation } from "@/lib/api/admin";
+import { IconCopy, IconInvitation } from "@/lib/icons";
 
 export default function AdminInvitationsPage() {
   const t = useTranslations("admin");
@@ -67,10 +69,11 @@ export default function AdminInvitationsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold tracking-tight">{t("platformInvite")}</h2>
-        <p className="text-muted-foreground mt-1 text-sm">{t("invitationsSubtitle")}</p>
-      </div>
+      <PageHeader
+        bordered={false}
+        title={t("platformInvite")}
+        description={t("invitationsSubtitle")}
+      />
 
       <div className="grid gap-3 md:grid-cols-3">
         <SummaryCard label={t("summaryPending")} value={pending} />
@@ -91,7 +94,7 @@ export default function AdminInvitationsPage() {
               placeholder="user@example.com"
             />
             <Button disabled={creating} onClick={() => void createInvite()}>
-              {creating ? <Loader2 className="mr-1 size-4 animate-spin" /> : <MailPlus className="mr-1 size-4" />}
+              {creating ? <LoadingSpinner /> : <IconInvitation className="mr-1 size-4" />}
               {t("generateInviteLink")}
             </Button>
           </div>
@@ -99,7 +102,7 @@ export default function AdminInvitationsPage() {
             <div className="bg-muted/30 flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm">
               <span className="truncate">{inviteUrl}</span>
               <Button variant="ghost" size="icon" onClick={() => void copyUrl(inviteUrl)}>
-                <Copy className="size-4" />
+                <IconCopy className="size-4" />
               </Button>
             </div>
           ) : null}
@@ -114,7 +117,7 @@ export default function AdminInvitationsPage() {
         <CardContent>
           {loading ? (
             <div className="flex justify-center py-12">
-              <Loader2 className="size-6 animate-spin" />
+              <LoadingSpinner />
             </div>
           ) : invitations.length === 0 ? (
             <div className="text-muted-foreground py-10 text-center text-sm">{t("noInvitationRecords")}</div>

@@ -12,6 +12,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 2. [Internal knowledge base](tutorials/02-internal-knowledge-base.md)
 3. [MCP integrations](tutorials/03-mcp-integrations.md)
 4. [Governed Web Operator](tutorials/04-governed-web-operator.md)
+5. [Refund reconciliation & compliance](tutorials/05-refund-reconciliation-compliance.md)
 
 ### Operations & deployment
 
@@ -31,6 +32,10 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [Events](architecture/events.md) | Domain events, SSE contract, persistence, replay |
 | [Checkpoints & HITL](architecture/checkpoints-and-hitl.md) | Gate contracts, rollback, Web Operator, browser profile snapshots |
 | [Web Operator](architecture/web-operator.md) | Gate profiles, audit contract, OpsConsole demo |
+| [Teams & workspaces](architecture/teams-and-workspaces.md) | Team roles, `X-Workspace-Id`, invitations |
+| [Admin, auditor & compliance](architecture/admin-auditor-compliance.md) | Platform admin, evidence chain, compliance reports |
+| [A2A & service API keys](architecture/integrations-a2a-service-keys.md) | Inbound/outbound A2A, `X-Api-Key` |
+| [Artifacts & sharing](architecture/artifacts-sharing.md) | Session artifacts, public share links |
 | [Automation & scheduler](architecture/automation-scheduler.md) | Cron/webhook jobs, leader election, notifications |
 | [Marketplace](architecture/marketplace.md) | LLM mini-app catalog and contracts |
 | [Config source governance](architecture/config-source-governance.md) | AppConfig, config.yaml, env var boundaries |
@@ -61,3 +66,5 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 - **Config source of truth** — `.env.example` for env vars; `api/config.yaml` for behavior config.
 - **Bilingual pairs** — update both language files when changing a topic.
 - **Link convention** — English docs link to `*.md`; Chinese docs link to `*.zh-CN.md`.
+- **Index sync** — when adding a tutorial or architecture doc, update this index, the root [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) doc map, and add top-of-file language switch links in both language files.
+- **PR checklist** — [Documentation maintenance checklist](MAINTENANCE_CHECKLIST.md); run `./scripts/check-docs.sh` before submitting doc changes.

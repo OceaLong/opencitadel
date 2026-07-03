@@ -5,11 +5,12 @@ import { Check, Hand, ShieldAlert, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { ApprovalBar } from "@/components/approval-bar";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
 import type { ApprovalEventData } from "@/lib/api/types";
-import { cn } from "@/lib/utils";
 
 export type GateActionsBarProps = {
   approval: ApprovalEventData;
@@ -25,6 +26,36 @@ type ToolPayload = {
   first_visit_domain?: string;
   note?: string;
 };
+
+const DEFAULT_TOOL_OPTIONS = ["approve", "approve_same", "reject"] as const;
+const DEFAULT_TAKEOVER_OPTIONS = ["takeover", "skip"] as const;
+
+function optionLabel(
+  option: string,
+  t: ReturnType<typeof useTranslations<"gateActions">>,
+): string {
+  switch (option) {
+    case "approve":
+      return t("approve");
+    case "approve_same":
+      return t("approveSame");
+    case "reject":
+      return t("reject");
+    case "takeover":
+      return t("takeoverDone");
+    case "skip":
+      return t("skip");
+    default:
+      return option;
+  }
+}
+
+function optionVariant(option: string): "default" | "outline" | "destructive" {
+  if (option === "reject") return "outline";
+  if (option === "skip") return "outline";
+  if (option === "approve_same") return "outline";
+  return "default";
+}
 
 export function GateActionsBar({
   approval,
@@ -50,14 +81,20 @@ export function GateActionsBar({
     }
   };
 
+  const handleOptionClick = async (option: string) => {
+    if (option === "reject") {
+      setRejectOpen(true);
+      return;
+    }
+    await send(option);
+  };
+
   if (approval.kind === "takeover") {
+    const options =
+      approval.options.length > 0 ? approval.options : [...DEFAULT_TAKEOVER_OPTIONS];
+
     return (
-      <div
-        className={cn(
-          "border-blue-500/30 bg-blue-500/5 rounded-xl border px-4 py-3 shadow-[var(--shadow-card)]",
-          className,
-        )}
-      >
+      <ApprovalBar tone="blue" className={className}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-foreground flex items-center gap-1.5 text-sm font-medium">
@@ -67,20 +104,20 @@ export function GateActionsBar({
             <p className="text-muted-foreground mt-1 text-xs">{t("takeoverDescription")}</p>
           </div>
           <div className="flex gap-2">
-            <Button size="sm" disabled={disabled || submitting} onClick={() => void send("takeover")}>
-              {t("takeoverDone")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={disabled || submitting}
-              onClick={() => void send("skip")}
-            >
-              {t("skip")}
-            </Button>
+            {options.map((option) => (
+              <Button
+                key={option}
+                size="sm"
+                variant={optionVariant(option)}
+                disabled={disabled || submitting}
+                onClick={() => void handleOptionClick(option)}
+              >
+                {optionLabel(option, t)}
+              </Button>
+            ))}
           </div>
         </div>
-      </div>
+      </ApprovalBar>
     );
   }
 
@@ -89,8 +126,9 @@ export function GateActionsBar({
   const payload = approval.payload as ToolPayload;
   const toolName = payload.tool_name ?? t("unknownTool");
   const argsPreview = payload.args ? JSON.stringify(payload.args, null, 2) : "";
-  const domainNote = payload.first_visit_domain
-    ? t("firstVisitDomain", { domain: payload.first_visit_domain })
+  const isFirstVisit = Boolean(payload.first_visit_domain);
+  const domainNote = isFirstVisit
+    ? t("firstVisitDomain", { domain: payload.first_visit_domain! })
     : payload.note;
   const scopeLabel =
     operatorScope === "third_party_saas"
@@ -98,6 +136,11 @@ export function GateActionsBar({
       : operatorScope === "owned"
         ? t("scopeOwned")
         : null;
+
+  const options =
+    approval.options.length > 0 ? approval.options : [...DEFAULT_TOOL_OPTIONS];
+  const visibleOptions = rejectOpen ? options.filter((o) => o !== "reject") : options;
+  const showApproveSameHelp = options.includes("approve_same");
 
   const handleReject = async () => {
     const text = feedback.trim();
@@ -111,12 +154,7 @@ export function GateActionsBar({
   };
 
   return (
-    <div
-      className={cn(
-        "border-amber-500/30 bg-amber-500/5 rounded-xl border px-4 py-3 shadow-[var(--shadow-card)]",
-        className,
-      )}
-    >
+    <ApprovalBar className={className}>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-foreground flex items-center gap-1.5 text-sm font-medium">
@@ -127,33 +165,37 @@ export function GateActionsBar({
           {domainNote && (
             <p className="text-amber-700 mt-1 text-xs">{domainNote}</p>
           )}
-          {scopeLabel && (
-            <p className="text-muted-foreground mt-1 text-xs">{t("targetSystem", { scope: scopeLabel })}</p>
-          )}
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            {isFirstVisit && (
+              <p className="text-muted-foreground text-xs">{t("firstVisitHelp")}</p>
+            )}
+            {showApproveSameHelp && !rejectOpen && (
+              <p className="text-muted-foreground text-xs">{t("approveSameHelp")}</p>
+            )}
+            {scopeLabel && (
+              <StatusBadge
+                variant={operatorScope === "third_party_saas" ? "warning" : "secondary"}
+              >
+                {t("targetSystem", { scope: scopeLabel })}
+              </StatusBadge>
+            )}
+          </div>
         </div>
         {!rejectOpen && (
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" disabled={disabled || submitting} onClick={() => void send("approve")}>
-              <Check className="size-3.5" />
-              {t("approve")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={disabled || submitting}
-              onClick={() => void send("approve_same")}
-            >
-              {t("approveSame")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={disabled || submitting}
-              onClick={() => setRejectOpen(true)}
-            >
-              <X className="size-3.5" />
-              {t("reject")}
-            </Button>
+            {visibleOptions.map((option) => (
+              <Button
+                key={option}
+                size="sm"
+                variant={optionVariant(option)}
+                disabled={disabled || submitting}
+                onClick={() => void handleOptionClick(option)}
+              >
+                {option === "approve" && <Check className="size-3.5" />}
+                {option === "reject" && <X className="size-3.5" />}
+                {optionLabel(option, t)}
+              </Button>
+            ))}
           </div>
         )}
       </div>
@@ -182,6 +224,6 @@ export function GateActionsBar({
           </div>
         </div>
       )}
-    </div>
+    </ApprovalBar>
   );
 }

@@ -39,13 +39,25 @@
     "new": "New",
     "create": "Create",
     "name": "Name",
-    "thinking": "Thinking..."
+    "thinking": "Thinking...",
+    "deleteFailed": "Delete failed",
+    "deleted": "Deleted",
+    "edit": "Edit",
+    "global": "Global",
+    "nextPage": "Next",
+    "none": "None",
+    "pageOf": "Page {current} of {total}",
+    "previousPage": "Previous",
+    "saveFailed": "Save failed",
+    "session": "Session"
   },
   "language": {
     "title": "Language",
     "description": "Choose your preferred interface language.",
     "localeEn": "English",
-    "localeZh": "中文"
+    "localeZh": "中文",
+    "localeShortEn": "EN",
+    "localeShortZh": "中"
   },
   "auth": {
     "loginTitle": "Sign in to OpenCitadel",
@@ -75,7 +87,9 @@
     "selectModelAfterLogin": "Select model after sign in",
     "loginToMarketplace": "Sign in to use AI smart launch",
     "loginToDocQa": "Sign in to use AI document Q&A",
-    "loginToTranslate": "Sign in to use AI translation"
+    "loginToTranslate": "Sign in to use AI translation",
+    "loginToConsumption": "Sign in to use consumption calculator",
+    "loginToNutrition": "Sign in to use nutrition analysis"
   },
   "home": {
     "greeting": "Hello there",
@@ -83,7 +97,13 @@
     "addModelFirst": "Please add a model in Settings first",
     "createSessionFailed": "Failed to create session",
     "codebaseTitle": "Code knowledge base",
-    "codebaseDescription": "Upload a codebase, generate architecture diagrams and call chains, Ask Q&A / Agent code edits"
+    "codebaseDescription": "Upload a codebase, generate architecture diagrams and call chains, Ask Q&A / Agent code edits",
+    "createFailed": "Failed to create session",
+    "loginRequired": "Sign in to create a new task",
+    "manageCodebase": "Manage code knowledge base",
+    "manageKnowledge": "Manage document knowledge base",
+    "noModel": "Please configure a model first",
+    "title": "OpenCitadel"
   },
   "chatHeader": {
     "backHome": "Back to home",
@@ -93,10 +113,14 @@
     "normal": "normal",
     "codebase": "Code knowledge base",
     "knowledge": "Document knowledge base",
-    "marketplace": "App marketplace"
+    "marketplace": "App marketplace",
+    "automation": "Automation",
+    "modelStatus": "{status, select, unknown {Model status unknown} unavailable {Model unavailable} ok {Model OK} other {Model status}}",
+    "workspaceMenu": "Workspace"
   },
   "leftPanel": {
-    "newTask": "New task"
+    "newTask": "New task",
+    "loginRequired": "Sign in to create a new task"
   },
   "workspace": {
     "label": "Workspace",
@@ -104,7 +128,8 @@
     "manageTeams": "Manage teams"
   },
   "account": {
-    "settings": "System settings"
+    "settings": "System settings",
+    "adminPanel": "Admin panel"
   },
   "theme": {
     "switchToLight": "Switch to light mode",
@@ -136,7 +161,18 @@
   "sessionList": {
     "deleteSuccess": "Deleted task \"{title}\"",
     "deleteFailed": "Failed to delete task \"{title}\", please retry",
-    "noTasks": "No tasks yet"
+    "noTasks": "No tasks yet",
+    "empty": "No tasks yet",
+    "filter": {
+      "all": "All",
+      "codebase": "Codebase",
+      "general": "General",
+      "hybrid": "Hybrid",
+      "knowledge": "Knowledge"
+    },
+    "filterEmpty": "No tasks match this filter",
+    "loadError": "Failed to load tasks",
+    "retry": "Retry"
   },
   "sessions": {
     "fetchFailed": "Failed to fetch session list",
@@ -166,7 +202,19 @@
     "streamReconnecting": "Reconnecting session stream...",
     "resync": "Resync",
     "loadEarlier": "Load earlier messages",
-    "emptyTimeline": "No conversation yet. Enter a task or question below."
+    "emptyTimeline": "No conversation yet. Enter a task or question below.",
+    "operator": {
+      "awaitingHuman": "Awaiting human",
+      "domainsLabel": "Domains: {domains}",
+      "editGateSettings": "Gate settings",
+      "gateProfileLabel": "Gate: {profile}",
+      "gateSettingsSaved": "Gate settings updated",
+      "modeLabel": "Operator",
+      "owned": "Owned",
+      "thirdPartySaas": "Third-party SaaS",
+      "waitingApproval": "Waiting approval",
+      "webOperator": "Web Operator"
+    }
   },
   "sessionMemory": {
     "roles": {
@@ -189,7 +237,9 @@
     "sheetTitle": "Session memory",
     "messageCount": "{count} messages",
     "sheetDescription": "View and edit Agent short-term context (Tier 1)",
-    "agentCounts": "Planner {planner} · ReAct {react}"
+    "agentCounts": "Planner {planner} · ReAct {react}",
+    "deleteTitle": "Delete message",
+    "emptyMessage": "(empty)"
   },
   "sessionDebug": {
     "title": "Debug events",
@@ -327,7 +377,10 @@
     "triggerExamples": "Trigger examples (one per line)",
     "globallyEnabled": "Globally enabled",
     "skillUpdated": "Skill updated",
-    "skillCreated": "Skill created"
+    "skillCreated": "Skill created",
+    "maxIterations": "Max plan iterations",
+    "maxRetries": "Max retries",
+    "maxSearchResults": "Max search results"
   },
   "settingsMemory": {
     "description": "Cross-session memory management; recalled and injected into the agent when tasks start",
@@ -374,7 +427,9 @@
     "waitingResult": "Waiting for result...",
     "agentCallInfo": "Agent call info",
     "toolLabel": "Tool:",
-    "instructionLabel": "Instruction:"
+    "instructionLabel": "Instruction:",
+    "artifacts": "Artifacts",
+    "toolPreviewTab": "Tool preview"
   },
   "vnc": {
     "connectionFailed": "Connection failed",
@@ -398,6 +453,17 @@
     "exportCsv": "Export CSV",
     "chainIntact": "Audit chain intact",
     "chainBroken": "Audit chain broken",
+    "verifyChain": "Verify chain",
+    "chainCheckedAt": "Checked {time}",
+    "chainBrokenAt": "Broken at seq {seq}",
+    "filterAction": "Filter by action",
+    "filterActionAll": "All actions",
+    "filterActor": "Actor user ID",
+    "viewDetail": "View detail",
+    "auditDetailTitle": "Audit log detail",
+    "metadataLabel": "Metadata",
+    "actorIpLabel": "Actor IP",
+    "chainSeqLabel": "Chain sequence",
     "actionDistributionTitle": "Action distribution",
     "actionDistributionDesc": "Top audit actions in range",
     "overviewTitle": "Overview",
@@ -433,7 +499,60 @@
     "noEmailSpecified": "No email specified",
     "inviteAccepted": "Accepted",
     "invitePending": "Pending",
-    "inviteExpired": "Expired"
+    "inviteExpired": "Expired",
+    "auditActivityDesc": "Daily audit event volume",
+    "auditActivityTitle": "Audit activity",
+    "callsTrendDesc": "LLM call volume over time",
+    "callsTrendTitle": "LLM calls trend",
+    "chartCalls": "Calls",
+    "chartCompletion": "Completion tokens",
+    "chartEvents": "Events",
+    "chartPrompt": "Prompt tokens",
+    "chartTotal": "Total tokens",
+    "createdAt": "Created {time}",
+    "disableUser": "Disable user",
+    "displayName": "Display name",
+    "editUser": "Edit user",
+    "enterEmail": "Please enter an email address",
+    "expiresAt": "Expires {time}",
+    "generateFailed": "Failed to generate invite link",
+    "generateInviteTitle": "Generate registration invite",
+    "invitationRecordsTitle": "Invitation records",
+    "invitationsSubtitle": "Create and manage platform registration invites",
+    "inviteLinkCopied": "Invite link copied",
+    "inviteLinkGenerated": "Invite link generated",
+    "inviteValidDays": "Invites are valid for 7 days by default",
+    "lastLogin": "Last login {time}",
+    "logListTitle": "Audit log entries",
+    "noAuditData": "No audit activity in this range",
+    "noBreakdownData": "No breakdown data",
+    "noCallsData": "No call data in this range",
+    "noUsageData": "No usage data in this range",
+    "operationFailed": "Operation failed",
+    "quota": "Quota",
+    "quotaDailySessionLimit": "Daily session limit",
+    "quotaMaxConcurrentTasks": "Max concurrent tasks",
+    "quotaMaxStorageBytes": "Max storage (bytes)",
+    "quotaMonthlyTokenLimit": "Monthly token limit",
+    "quotaUpdated": "Quota updated",
+    "role": "Role",
+    "searchUsersPlaceholder": "Search by email, username, or name",
+    "status": "Status",
+    "summaryAccepted": "Accepted",
+    "summaryExpired": "Expired",
+    "summaryPending": "Pending",
+    "system": "System",
+    "tokenTrendDesc": "Token usage over time",
+    "tokenTrendTitle": "Token usage trend",
+    "totalRecords": "{count} records total",
+    "updateFailed": "Update failed",
+    "userDisabled": "User disabled",
+    "userListTitle": "User list",
+    "userQuota": "User quota",
+    "userTotalCount": "{count} users total",
+    "userUpdated": "User updated",
+    "usersSubtitle": "Manage platform users, roles, and quotas",
+    "usersTitle": "User management"
   },
   "adminNav": {
     "title": "Administration",
@@ -575,6 +694,9 @@
     "offlineOnly": "No model required",
     "noMatch": "No matching apps found",
     "noMatchHint": "Try a different keyword or use the AI command bar above",
+    "categoryAll": "All",
+    "categoryHealth": "Health",
+    "categoryLife": "Life",
     "categoryOffice": "Office",
     "categoryProductivity": "Productivity",
     "noModelDirect": "No model · ready to use",
@@ -582,6 +704,34 @@
     "modelRequired": "Model required",
     "modelRequiredUnavailable": "Model required, currently unavailable",
     "apps": {
+      "nutritionAnalysis": {
+        "name": "Nutrition analysis",
+        "description": "Upload a meal photo, analyze macros, and get personalized nutrition advice",
+        "tags": [
+          "Nutrition",
+          "Meal photo",
+          "Calories",
+          "Health"
+        ],
+        "examples": [
+          "Analyze this lunch for a cut goal",
+          "Is this meal high in protein?"
+        ]
+      },
+      "consumptionCalculator": {
+        "name": "Consumption calculator",
+        "description": "Upload a nutrition label to estimate servings and consumption amounts",
+        "tags": [
+          "Nutrition label",
+          "Servings",
+          "OCR",
+          "Calculator"
+        ],
+        "examples": [
+          "How many servings in this package?",
+          "Calculate consumption for 50g per serving"
+        ]
+      },
       "documentQa": {
         "name": "Document/Image Q&A",
         "description": "Upload materials or screenshots, AI extracts key points and answers questions",
@@ -709,7 +859,9 @@
       "copy": "Copy",
       "copyAll": "Copy all",
       "encode": "Encode",
-      "decode": "Decode"
+      "decode": "Decode",
+      "imageTooLarge5mb": "Image must not exceed 5MB",
+      "jpgPngOnly": "Only JPG and PNG images are supported"
     },
     "imageUpload": {
       "previewAlt": "Image preview",
@@ -868,7 +1020,10 @@
       "printAsPdf": "Print as PDF",
       "startConvert": "Convert",
       "convertComplete": "Conversion complete",
-      "downloadFile": "Download file"
+      "downloadFile": "Download file",
+      "formatDocx": "Word (.docx)",
+      "formatMd": "Markdown (.md)",
+      "formatPdf": "PDF (.pdf)"
     },
     "watermarkTool": {
       "title": "Watermark tool",
@@ -902,6 +1057,68 @@
       "resultAlt": "Result",
       "processMethod": "Method: {method}",
       "downloadResult": "Download result"
+    },
+    "consumptionCalculator": {
+      "calculateFailed": "Calculation failed",
+      "consumableLabel": "Consumable",
+      "correctionFailed": "Correction failed",
+      "correctionPlaceholder": "e.g. this is instant noodles, serving is half the pack",
+      "correctionRequired": "Please enter a correction",
+      "emptyHint": "Upload a nutrition label photo to calculate servings",
+      "emptyTitle": "Consumption calculator",
+      "invalidServing": "Please enter a valid serving size in grams",
+      "invalidTotalAndServing": "Please enter valid total and serving weights",
+      "manualTotalLabel": "Total package weight (g)",
+      "manualTotalPlaceholder": "e.g. 500",
+      "nlCorrectionTitle": "Natural language correction",
+      "notRecognizedToast": "Could not recognize nutrition label; enter values manually",
+      "ocrLabel": "OCR result",
+      "ocrTextLabel": "Recognized text",
+      "packagePreviewAlt": "Package preview",
+      "perServingLabel": "Per serving",
+      "recalculate": "Recalculate",
+      "recognizeFailed": "Recognition failed",
+      "servingLabel": "Serving size (g)",
+      "servingsApprox": "≈ {count} servings",
+      "servingsLabel": "Servings",
+      "servingsUnit": "servings",
+      "subtitle": "Upload a nutrition label to estimate servings and consumption",
+      "title": "Consumption calculator",
+      "totalLabel": "Total",
+      "uploadHint": "Upload JPG/PNG nutrition label, max 5MB"
+    },
+    "nutritionAnalysis": {
+      "analyzeFailed": "Analysis failed",
+      "assessmentTitle": "Nutrition assessment",
+      "caloriesAssessment": "Calories",
+      "emptyHint": "Upload a meal photo to analyze nutrition",
+      "emptyTitle": "Nutrition analysis",
+      "followupFailed": "Follow-up failed",
+      "followupPlaceholder": "Ask a follow-up question about this meal...",
+      "followupRequired": "Please enter a question",
+      "followupTitle": "Follow-up Q&A",
+      "generateAdvice": "Generate advice",
+      "goalBulk": "Bulk",
+      "goalCut": "Cut",
+      "goalLabel": "Goal",
+      "goalMaintain": "Maintain",
+      "ingredientsTitle": "Detected ingredients",
+      "itemNutrition": "Item nutrition",
+      "mealPreviewAlt": "Meal preview",
+      "metricCalories": "Calories",
+      "metricCarbs": "Carbs",
+      "metricFat": "Fat",
+      "metricProtein": "Protein",
+      "overallGreen": "Balanced",
+      "overallLabel": "Overall",
+      "overallRed": "Needs attention",
+      "overallYellow": "Moderate",
+      "proteinAssessment": "Protein",
+      "subtitle": "Analyze meal photos and get personalized nutrition advice",
+      "title": "Nutrition analysis",
+      "uploadHint": "Upload JPG/PNG meal photo, max 5MB",
+      "weightLabel": "Weight (kg)",
+      "weightPlaceholder": "e.g. 70"
     }
   },
   "knowledge": {
@@ -951,7 +1168,16 @@
       "namePlaceholder": "e.g. Company policy knowledge base",
       "defaultName": "Enterprise document knowledge base",
       "createFailed": "Failed to create knowledge base"
-    }
+    },
+    "create": "New knowledge base",
+    "empty": "No knowledge bases yet",
+    "indexingShort": "Indexing...",
+    "librarySubtitle": "Manage document knowledge bases and start tasks",
+    "startAgent": "Agent",
+    "startAsk": "Ask",
+    "startTaskFailed": "Failed to start task",
+    "statusDocCount": "{status} · {count} documents",
+    "title": "Document knowledge base"
   },
   "codebase": {
     "loadListFailed": "Failed to load codebases",
@@ -1003,9 +1229,204 @@
       "defaultFilesName": "Files codebase",
       "createFailed": "Failed to create codebase",
       "createAndAnalyze": "Create & analyze"
-    }
+    },
+    "create": "New codebase",
+    "download": "Download",
+    "empty": "No codebases yet",
+    "indexingShort": "Indexing...",
+    "librarySubtitle": "Manage code knowledge bases and start tasks",
+    "loadError": "Failed to load codebases",
+    "startAgent": "Agent",
+    "startAsk": "Ask",
+    "startTaskFailed": "Failed to start task",
+    "statusFileCount": "{status} · {count} files",
+    "title": "Code knowledge base"
   },
   "mermaid": {
     "renderFailed": "Mermaid render failed"
+  },
+  "artifactWorkbench": {
+    "empty": "No artifacts yet",
+    "emptyContent": "Select an artifact to preview",
+    "export": "Export",
+    "exportSuccess": "Artifact exported",
+    "generating": "Generating...",
+    "loadFailed": "Failed to load artifact",
+    "selectArtifact": "Select artifact",
+    "sessionLabel": "Session",
+    "share": "Share",
+    "shareLinkCopied": "Share link copied",
+    "shareLinkFailed": "Failed to create share link",
+    "statusDraft": "Draft",
+    "statusFinal": "Final",
+    "statusUpdated": "Updated",
+    "version": "Version"
+  },
+  "automation": {
+    "contextLabel": "Task context",
+    "copiedWithLabel": "Copied {label}",
+    "copySecretAria": "Copy webhook secret",
+    "copyTokenAria": "Copy webhook token",
+    "copyWebhookUrlAria": "Copy webhook URL",
+    "create": "Create job",
+    "creating": "Creating...",
+    "credentialsSaved": "Done",
+    "deleteFailed": "Failed to delete job",
+    "deleteJobAria": "Delete scheduled job",
+    "editJob": "Edit job",
+    "empty": "No scheduled jobs yet",
+    "fields": {
+      "enabled": "Enabled",
+      "gateProfile": "Gate profile",
+      "modelId": "Model ID",
+      "name": "Job name",
+      "notifyChannel": "Notify channel",
+      "notifyServer": "Notify MCP server",
+      "operatorDomains": "Operator domains",
+      "operatorScope": "Operator scope",
+      "prompt": "Prompt template",
+      "skillId": "Skill ID",
+      "triggerType": "Trigger type"
+    },
+    "jobCreateFailed": "Failed to create job",
+    "jobCreated": "Job created",
+    "jobDeleted": "Job deleted",
+    "jobUpdated": "Job updated",
+    "lastRunAt": "Last run",
+    "loadFailed": "Failed to load jobs",
+    "namePlaceholder": "e.g. Daily report",
+    "nameRequired": "Please enter a job name and prompt",
+    "newJob": "New job",
+    "nextRunAt": "Next run",
+    "promptPlaceholder": "Describe what this job should do...",
+    "rotateSecretAria": "Rotate webhook secret",
+    "rotateSecretFailed": "Failed to rotate secret",
+    "saveJob": "Save job",
+    "statusDisabled": "Disabled",
+    "statusEnabled": "Enabled",
+    "subtitle": "Schedule recurring or webhook-triggered agent tasks",
+    "title": "Automation",
+    "triggerTypeInterval": "Interval (seconds)",
+    "triggerCron": "Cron expression",
+    "triggerWebhook": "Webhook token",
+    "updateFailed": "Failed to update job",
+    "viewSession": "View session",
+    "runNow": "Run now",
+    "runNowFailed": "Failed to trigger job",
+    "runNowStarted": "Job started",
+    "toggleEnabledFailed": "Failed to update job status",
+    "lastRunError": "Last error: {error}",
+    "promptHelp": "Use {{payload.key}} for webhook JSON fields",
+    "cronHelp": "Cron: HH:MM or minute hour * * * (e.g. 0 9 * * *)",
+    "webhookCredentialsDescription": "Save these credentials now. The secret is shown only once. Sign requests with",
+    "webhookCredentialsTitle": "Webhook credentials"
+  },
+  "contextSelector": {
+    "clear": "Clear context",
+    "codebase": "Codebase",
+    "codebaseSection": "Code knowledge base",
+    "knowledge": "Knowledge base",
+    "knowledgeSection": "Document knowledge base",
+    "noCodebase": "No ready codebases",
+    "noKnowledge": "No ready knowledge bases",
+    "none": "No context",
+    "title": "Session context"
+  },
+  "errors": {
+    "pageLoadError": "Page failed to load",
+    "unknownError": "An unknown error occurred. Please retry or return home."
+  },
+  "gateActions": {
+    "approve": "Approve",
+    "approveSame": "Approve same tool",
+    "approveSameHelp": "Also allow this tool type without asking again this session",
+    "firstVisitHelp": "First visit to this domain requires explicit approval",
+    "confirmReject": "Confirm reject",
+    "firstVisitDomain": "First visit to domain: {domain}",
+    "reject": "Reject",
+    "rejectPlaceholder": "Reason for rejection...",
+    "rejectReasonRequired": "Please enter a rejection reason",
+    "scopeOwned": "Owned system",
+    "scopeThirdParty": "Third-party SaaS",
+    "sendFailed": "Failed to send response",
+    "skip": "Skip",
+    "takeoverDescription": "The agent paused for human takeover. Complete the action in the remote desktop, then continue.",
+    "takeoverDone": "Takeover complete",
+    "takeoverTitle": "Human takeover required",
+    "targetSystem": "Target system: {scope}",
+    "toolConfirmTitle": "Tool action requires approval",
+    "unknownTool": "Unknown tool"
+  },
+  "notifications": {
+    "empty": "No notifications",
+    "refreshing": "Refreshing...",
+    "title": "Notifications"
+  },
+  "operatorScope": {
+    "confirmCreate": "Start Web Operator session",
+    "description": "Configure operator scope and gate profile before starting.",
+    "domainsHint": "Comma or newline separated hostnames the operator may visit",
+    "domainsLabel": "Allowed domains",
+    "domainsPlaceholder": "ops-console, localhost",
+    "gateProfile": {
+      "loose": {
+        "title": "Loose",
+        "description": "Minimal confirmations; suitable for trusted internal systems"
+      },
+      "standard": {
+        "title": "Standard",
+        "description": "Confirm risky tools and first visits to new domains"
+      },
+      "strict": {
+        "title": "Strict",
+        "description": "Confirm every tool action; recommended for third-party SaaS"
+      }
+    },
+    "gateProfileLabel": "Gate profile",
+    "ownedDescription": "Systems you operate and control",
+    "ownedTitle": "Owned infrastructure",
+    "ownershipLabel": "System ownership",
+    "thirdPartyDescription": "External SaaS with elevated risk; strict gate recommended",
+    "thirdPartyTitle": "Third-party SaaS",
+    "title": "Web Operator scope",
+    "editTitle": "Gate settings",
+    "save": "Save"
+  },
+  "planApproval": {
+    "approve": "Approve plan",
+    "confirmReject": "Confirm reject",
+    "editSteps": "Edit steps",
+    "reject": "Reject",
+    "rejectPlaceholder": "Reason for rejection...",
+    "rejectReasonRequired": "Please enter a rejection reason",
+    "riskTools": "Risk tools: {tools}",
+    "saveAndApprove": "Save & approve",
+    "sendFailed": "Failed to send response",
+    "submitEditsFailed": "Failed to save plan edits",
+    "subtitle": "Review the agent plan before execution continues",
+    "title": "Plan approval required"
+  },
+  "redirect": {
+    "openingCodebaseTask": "Opening codebase task...",
+    "openingKnowledgeTask": "Opening knowledge task...",
+    "startTaskFailed": "Failed to start task"
+  },
+  "settingsNav": {
+    "memory": "Long-term memory",
+    "models": "Models",
+    "skills": "Skill templates"
+  },
+  "shareArtifact": {
+    "artifactTitle": "Shared artifact",
+    "home": "Home",
+    "title": "Shared artifact"
+  },
+  "workspaceContext": {
+    "codebasePanelTitle": "Codebase context",
+    "codebaseTab": "Codebase",
+    "knowledgePanelTitle": "Knowledge context",
+    "knowledgeTab": "Knowledge",
+    "sourceHintKb": "Click a document citation in an answer to view the source",
+    "tabOriginalText": "Source"
   }
 }

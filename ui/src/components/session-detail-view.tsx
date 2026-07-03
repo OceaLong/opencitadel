@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Settings2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 
 import { ChatInput } from "@/components/chat-input";
 import { CheckpointRestoreDialog } from "@/components/checkpoint-restore-dialog";
 import { FilePreviewPanel } from "@/components/file-preview-panel";
 import { GateActionsBar } from "@/components/gate-actions-bar";
+import { OperatorScopeDialog, type GateProfile } from "@/components/operator-scope-dialog";
 import { PlanApprovalBar } from "@/components/plan-approval-bar";
 import { PlanPanel } from "@/components/plan-panel";
 import { SessionHeader } from "@/components/session-header";
@@ -28,6 +30,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSessionDetailView } from "@/hooks/use-session-detail-view";
+import { sessionApi } from "@/lib/api/session";
 import type { SessionMode } from "@/lib/api/types";
 
 export type SessionDetailViewProps = {
@@ -47,6 +50,8 @@ export function SessionDetailView({
   const tCommon = useTranslations("common");
   const isMobile = useIsMobile();
   const [mode, setMode] = useState<SessionMode>("agent");
+  const [gateSettingsOpen, setGateSettingsOpen] = useState(false);
+  const [savingGateSettings, setSavingGateSettings] = useState(false);
   const { codeSourceRef, kbSourceRef, handleTimelineSourceClick } = useSessionContextRefs();
   const {
     session,
@@ -117,6 +122,28 @@ export function SessionDetailView({
 
   const hasContext = Boolean(session?.codebase_id || session?.knowledge_base_id);
 
+  const handleGateSettingsSave = async (config: {
+    operatorDomains: string[];
+    gateProfile: GateProfile;
+  }) => {
+    setSavingGateSettings(true);
+    try {
+      await sessionApi.updateSessionConfig(sessionId, {
+        gate_profile: config.gateProfile,
+        operator_domains: config.operatorDomains,
+      });
+      toast.success(t("operator.gateSettingsSaved"));
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : tCommon("retry"));
+    } finally {
+      setSavingGateSettings(false);
+    }
+  };
+
+  const showOperatorPanel =
+    Boolean(session?.operator_scope) || activeSkill?.slug === "web-operator";
+
   const previewPanel = (
     <>
       {previewFile && (
@@ -174,7 +201,7 @@ export function SessionDetailView({
       <div className="flex h-screen w-full flex-row overflow-hidden">
         <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
           <div
-            className={`mx-auto flex h-full w-full min-w-0 flex-col px-4 ${hasPreview && !isMobile ? "" : hasContext ? "" : "max-w-[768px]"}`}
+            className={`mx-auto flex h-full w-full min-w-0 flex-col px-4 ${hasPreview && !isMobile ? "" : hasContext ? "" : "max-w-content"}`}
           >
             <div className="flex-shrink-0">
               <SessionHeader
@@ -195,16 +222,41 @@ export function SessionDetailView({
 
             <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
               <div className="flex w-full flex-col gap-3 pt-3">
-                {(session.operator_scope || activeSkill?.slug === "web-operator") && (
-                  <div className="border-primary/20 bg-primary/5 text-muted-foreground rounded-lg border px-3 py-2 text-xs">
-                    {t("operator.modeLabel")} ·{" "}
-                    {session.operator_scope === "third_party_saas"
-                      ? t("operator.thirdPartySaas")
-                      : session.operator_scope === "owned"
-                        ? t("operator.owned")
-                        : t("operator.webOperator")}
-                    {session.status === "waiting" && ` · ${t("operator.waitingApproval")}`}
-                    {Boolean(session.awaiting_human) && ` · ${t("operator.awaitingHuman")}`}
+                {showOperatorPanel && (
+                  <div className="border-primary/20 bg-primary/5 text-muted-foreground flex flex-wrap items-start justify-between gap-2 rounded-lg border px-3 py-2 text-xs">
+                    <div className="space-y-1">
+                      <p>
+                        {t("operator.modeLabel")} ·{" "}
+                        {session.operator_scope === "third_party_saas"
+                          ? t("operator.thirdPartySaas")
+                          : session.operator_scope === "owned"
+                            ? t("operator.owned")
+                            : t("operator.webOperator")}
+                        {session.gate_profile
+                          ? ` · ${t("operator.gateProfileLabel", { profile: session.gate_profile })}`
+                          : ""}
+                        {session.status === "waiting" && ` · ${t("operator.waitingApproval")}`}
+                        {Boolean(session.awaiting_human) && ` · ${t("operator.awaitingHuman")}`}
+                      </p>
+                      {session.operator_domains && session.operator_domains.length > 0 && (
+                        <p>
+                          {t("operator.domainsLabel", {
+                            domains: session.operator_domains.join(", "),
+                          })}
+                        </p>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 shrink-0 text-xs"
+                      disabled={savingGateSettings}
+                      onClick={() => setGateSettingsOpen(true)}
+                    >
+                      <Settings2 className="size-3.5" />
+                      {t("operator.editGateSettings")}
+                    </Button>
                   </div>
                 )}
                 {session.status === "failed" && (
@@ -385,6 +437,19 @@ export function SessionDetailView({
         restoring={restoringCheckpoint}
         onOpenChange={setCheckpointDialogOpen}
         onConfirm={confirmRestoreCheckpoint}
+      />
+
+      <OperatorScopeDialog
+        open={gateSettingsOpen}
+        onOpenChange={setGateSettingsOpen}
+        mode="edit"
+        initialConfig={{
+          scope:
+            session?.operator_scope === "third_party_saas" ? "third_party_saas" : "owned",
+          operatorDomains: session?.operator_domains ?? [],
+          gateProfile: (session?.gate_profile as GateProfile | undefined) ?? "standard",
+        }}
+        onConfirm={(config) => void handleGateSettingsSave(config)}
       />
     </>
   );

@@ -66,6 +66,7 @@ class DBAuditRepository(AuditRepository):
         start_at: Optional[datetime] = None,
         end_at: Optional[datetime] = None,
         resource_id: Optional[str] = None,
+        resource_type: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> List[AuditLog]:
@@ -76,6 +77,8 @@ class DBAuditRepository(AuditRepository):
             stmt = stmt.where(AuditLogORM.action == action)
         if resource_id:
             stmt = stmt.where(AuditLogORM.resource_id == resource_id)
+        if resource_type:
+            stmt = stmt.where(AuditLogORM.resource_type == resource_type)
         if start_at:
             stmt = stmt.where(AuditLogORM.created_at >= start_at)
         if end_at:
@@ -87,6 +90,12 @@ class DBAuditRepository(AuditRepository):
         )
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
+
+    async def get_by_id(self, log_id: str) -> Optional[AuditLog]:
+        stmt = select(AuditLogORM).where(AuditLogORM.id == log_id)
+        result = await self.db_session.execute(stmt)
+        record = result.scalar_one_or_none()
+        return record.to_domain() if record else None
 
     async def list_chained(
         self,
@@ -110,12 +119,18 @@ class DBAuditRepository(AuditRepository):
         action: Optional[str] = None,
         start_at: Optional[datetime] = None,
         end_at: Optional[datetime] = None,
+        resource_id: Optional[str] = None,
+        resource_type: Optional[str] = None,
     ) -> int:
         stmt = select(func.count()).select_from(AuditLogORM)
         if actor_user_id:
             stmt = stmt.where(AuditLogORM.actor_user_id == actor_user_id)
         if action:
             stmt = stmt.where(AuditLogORM.action == action)
+        if resource_id:
+            stmt = stmt.where(AuditLogORM.resource_id == resource_id)
+        if resource_type:
+            stmt = stmt.where(AuditLogORM.resource_type == resource_type)
         if start_at:
             stmt = stmt.where(AuditLogORM.created_at >= start_at)
         if end_at:

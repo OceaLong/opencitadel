@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { ChatHeader } from "@/components/chat-header";
 import { ChatInput, type ChatInputRef } from "@/components/chat-input";
 import {
   ContextSelector,
@@ -125,7 +124,6 @@ export default function Page() {
 
   return (
     <div className="flex h-full flex-col">
-      <ChatHeader />
       <OperatorScopeDialog
         open={scopeDialogOpen}
         onOpenChange={setScopeDialogOpen}
@@ -137,9 +135,9 @@ export default function Page() {
           }
         }}
       />
-      <div className="-mt-12 flex flex-1 items-center justify-center px-4 py-6 sm:-mt-16 sm:py-8">
-        <div className="mx-auto w-full max-w-full sm:max-w-[768px] sm:min-w-[390px]">
-          <div className="mb-4 text-center text-[24px] font-bold tracking-tight sm:mb-6 sm:text-left sm:text-[32px]">
+      <div className="flex flex-1 items-center justify-center px-4 py-6 sm:py-8">
+        <div className="mx-auto w-full max-w-full sm:max-w-content sm:min-w-[390px]">
+          <div className="mb-4 text-center text-2xl font-bold tracking-tight sm:mb-6 sm:text-left sm:text-3xl">
             <div className="text-foreground flex items-center justify-center gap-2 sm:justify-start">
               <IconSecurity className="text-primary hidden size-7 sm:inline" />
               {t("title")}

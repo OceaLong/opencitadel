@@ -43,7 +43,7 @@ docker compose --profile local up --build
 2. 保持变更聚焦；每个 PR 只做一类逻辑变更。
 3. API 变更请添加或更新测试（`api/tests/`）。
 4. 提交前运行 `uv run pytest` 与 `npm run test`。
-5. 若行为或配置有变，请同步更新文档。
+5. 若行为或配置有变，请同步更新文档 — 见 [文档维护检查清单](../docs/MAINTENANCE_CHECKLIST.zh-CN.md)，并运行 `./scripts/check-docs.sh`。
 6. 提交信息清晰（推荐 [Conventional Commits](https://www.conventionalcommits.org/)）。
 
 ## 代码风格

@@ -11,6 +11,29 @@ This document is the authoritative reference for OpenCitadel configuration sourc
 | Behavioral config | `AppConfig`, backed by DB; `config.yaml` / Helm `appConfig` are seed only | `model_resilience`, `feature_flags`, `worker`, `sandbox` |
 | Secrets / connections | `Settings` environment variables | `EMBEDDING_API_KEY`, Postgres, Redis, COS |
 
+## Configuration flow
+
+```mermaid
+flowchart LR
+  subgraph secrets ["Secrets Settings .env"]
+    Env[".env / K8s Secret"]
+    Settings["Settings pydantic"]
+  end
+  subgraph behavior ["Behavior AppConfig"]
+    Yaml["api/config.yaml seed"]
+    Helm["Helm appConfig seed"]
+    DB["app_configs table"]
+    Runtime["AppConfig runtime"]
+  end
+  Env --> Settings
+  Yaml -->|"USE_DB_APP_CONFIG=false Compose default"| Runtime
+  Yaml -->|"migrate seed if empty"| DB
+  Helm -->|"USE_DB_APP_CONFIG=true Helm default"| DB
+  DB -->|"USE_DB_APP_CONFIG=true"| Runtime
+  Settings --> API["API / Worker processes"]
+  Runtime --> API
+```
+
 ## Decision Tree
 
 ```mermaid

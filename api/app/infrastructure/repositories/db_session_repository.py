@@ -466,6 +466,8 @@ class DBSessionRepository(SessionRepository):
             model_id: Optional[str] = None,
             skill_id: Optional[str] = None,
             thinking_enabled: Optional[bool] = None,
+            gate_profile: Optional[str] = None,
+            operator_domains: Optional[list] = None,
             clear_model: bool = False,
             clear_skill: bool = False,
     ) -> None:
@@ -480,6 +482,10 @@ class DBSessionRepository(SessionRepository):
             values["skill_id"] = skill_id
         if thinking_enabled is not None:
             values["thinking_enabled"] = thinking_enabled
+        if gate_profile is not None:
+            values["gate_profile"] = gate_profile
+        if operator_domains is not None:
+            values["operator_domains"] = operator_domains
         if not values:
             return
         stmt = update(SessionModel).where(SessionModel.id == session_id).values(**values)

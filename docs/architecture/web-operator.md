@@ -1,6 +1,25 @@
+[English](web-operator.md) · [简体中文](web-operator.zh-CN.md)
+
 # Web Operator architecture
 
 Governed browser automation for enterprise-owned systems without APIs.
+
+## Flow
+
+```mermaid
+flowchart TD
+  Create["Create Web Operator session"] --> Scope["Set operator_scope domains gate_profile"]
+  Scope --> Plan["Planner plan approval"]
+  Plan --> Gate{"Per-tool gate match?"}
+  Gate -->|"yes"| Approve["HITL approval or VNC takeover"]
+  Gate -->|"no"| Invoke["Tool invoke in sandbox"]
+  Approve --> Invoke
+  Invoke --> Audit["agent_tool_invoke + HMAC chain"]
+  Audit --> End["Session end"]
+  End --> Artifacts["audit-report.md/json artifacts"]
+  Artifacts --> Evidence["Admin Evidence center ZIP+PDF"]
+  Evidence --> Compliance["Compliance report 等保2.0 / ISO27001"]
+```
 
 ## Components
 

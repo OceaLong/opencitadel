@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
+import { AppHeader } from "@/components/app-header";
 import { LeftPanel } from "@/components/left-panel";
 import { SidebarProvider } from "@/components/ui/sidebar";
 
@@ -75,7 +76,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     <SessionsProvider>
       <SidebarProvider style={sidebarStyle}>
         <LeftPanel />
-        <div className="bg-background h-screen flex-1 overflow-hidden">{children}</div>
+        <div className="bg-background flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
+          <AppHeader />
+          <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+        </div>
       </SidebarProvider>
     </SessionsProvider>
   );

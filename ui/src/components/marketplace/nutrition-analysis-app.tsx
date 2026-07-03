@@ -32,7 +32,7 @@ const ALLOWED_TYPES = ["image/jpeg", "image/jpg", "image/png"];
 function MetricCard({ label, value, unit }: { label: string; value: number; unit: string }) {
   return (
     <div className="border-border/70 bg-muted/20 rounded-xl border px-3 py-2.5 text-center">
-      <p className="text-muted-foreground text-[11px]">{label}</p>
+      <p className="text-muted-foreground text-xs-plus">{label}</p>
       <p className="text-foreground mt-0.5 text-base font-semibold">
         {value}
         <span className="text-muted-foreground ml-0.5 text-xs font-normal">{unit}</span>

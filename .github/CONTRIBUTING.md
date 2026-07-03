@@ -43,7 +43,7 @@ docker compose --profile local up --build
 2. Keep changes focused; one logical change per PR.
 3. Add or update tests for API changes (`api/tests/`).
 4. Run `uv run pytest` and `npm run test` before submitting.
-5. Update documentation if behavior or configuration changes.
+5. Update documentation if behavior or configuration changes — see [Documentation maintenance checklist](../docs/MAINTENANCE_CHECKLIST.md) and run `./scripts/check-docs.sh`.
 6. Write clear commit messages (Conventional Commits preferred).
 
 ## Code Style

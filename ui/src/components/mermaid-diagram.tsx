@@ -4,8 +4,10 @@ import { useEffect, useId, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/providers/theme-provider";
 
 let mermaidInitialized = false;
+let mermaidTheme: "neutral" | "dark" | null = null;
 
 export type MermaidDiagramProps = {
   chart: string;
@@ -14,22 +16,25 @@ export type MermaidDiagramProps = {
 
 export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
   const t = useTranslations("mermaid");
+  const { theme } = useTheme();
   const id = useId().replace(/:/g, "");
   const [svg, setSvg] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const mermaidThemeName = theme === "dark" ? "dark" : "neutral";
 
   useEffect(() => {
     let cancelled = false;
     const render = async () => {
       try {
         const mermaid = (await import("mermaid")).default;
-        if (!mermaidInitialized) {
+        if (!mermaidInitialized || mermaidTheme !== mermaidThemeName) {
           mermaid.initialize({
             startOnLoad: false,
-            theme: "neutral",
+            theme: mermaidThemeName,
             securityLevel: "loose",
           });
           mermaidInitialized = true;
+          mermaidTheme = mermaidThemeName;
         }
         const { svg: rendered } = await mermaid.render(`mmd-${id}`, chart);
         if (!cancelled) {
@@ -47,7 +52,7 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
     return () => {
       cancelled = true;
     };
-  }, [chart, id, t]);
+  }, [chart, id, mermaidThemeName, t]);
 
   if (error) {
     return (
@@ -59,7 +64,10 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
 
   return (
     <div
-      className={cn("mermaid-diagram my-2 overflow-x-auto rounded-lg bg-white p-3", className)}
+      className={cn(
+        "mermaid-diagram bg-card my-2 overflow-x-auto rounded-lg border p-3",
+        className,
+      )}
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );

@@ -119,6 +119,21 @@ Compose 构建后的应用镜像统一命名为：`opencitadel-api`、`opencitad
 
 `.env` 顶部通过两个变量选择部署模式：
 
+```mermaid
+flowchart TD
+  Start["选择部署模式"] --> Profile{"COMPOSE_PROFILES"}
+  Profile -->|"留空"| Cloud["cloud 模式"]
+  Profile -->|"local"| Local["local 模式"]
+  Cloud --> Cos["STORAGE_PROVIDER=cos"]
+  Local --> Minio["STORAGE_PROVIDER=minio"]
+  Cos --> CosCreds["配置 COS_* 凭证"]
+  Minio --> MinioUp["local profile 启动 MinIO"]
+  Start --> SandboxDriver{"sandbox.driver"}
+  SandboxDriver -->|"auto/docker"| DockerSock["Worker 挂载 docker.sock"]
+  SandboxDriver -->|"kubernetes"| K8sRBAC["Worker SA 创建 Pod"]
+  DockerSock --> BuildImg["构建 opencitadel-sandbox 镜像"]
+```
+
 | 模式 | `COMPOSE_PROFILES` | `STORAGE_PROVIDER` | 需填写 |
 |------|-------------------|-------------------|--------|
 | **cloud**（默认） | 留空 | `cos` | `COS_*` 凭证 |
@@ -720,12 +735,15 @@ docker compose up -d opencitadel-nginx
 Helm Chart 位于 `deploy/helm/opencitadel/`，支持全栈部署（Postgres/Redis/UI/Ingress + API/Worker + K8s Pod 沙箱 driver）。
 
 ```bash
-# 构建并推送四镜像
+# 构建并推送五镜像（api、worker、migrate 复用 api 镜像 tag）
 docker build --target api -t your-registry/opencitadel-api ./api
 docker build --target worker -t your-registry/opencitadel-worker ./api
+docker build --target api -t your-registry/opencitadel-migrate ./api
 docker build -t your-registry/opencitadel-ui ./ui
 docker build -t your-registry/opencitadel-sandbox ./sandbox
-docker push your-registry/opencitadel-api your-registry/opencitadel-worker your-registry/opencitadel-ui your-registry/opencitadel-sandbox
+docker push your-registry/opencitadel-api your-registry/opencitadel-worker your-registry/opencitadel-migrate your-registry/opencitadel-ui your-registry/opencitadel-sandbox
+
+> **Helm 说明**：migrate initContainer 复用 `image.api`（同一 Dockerfile target）。独立的 `opencitadel-migrate` 标签供 Docker Compose 一次性任务与 release 发布使用。
 
 helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --set image.api.repository=your-registry/opencitadel-api \

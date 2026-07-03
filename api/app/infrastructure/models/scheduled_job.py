@@ -37,6 +37,7 @@ class ScheduledJobModel(Base):
     last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_run_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     last_run_session_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    last_run_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     webhook_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     webhook_secret_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP(0)"))
@@ -64,6 +65,7 @@ class ScheduledJobModel(Base):
             "last_run_at": self.last_run_at,
             "last_run_status": self.last_run_status,
             "last_run_session_id": self.last_run_session_id,
+            "last_run_error": self.last_run_error,
             "webhook_token": self.webhook_token,
             "webhook_secret_hash": self.webhook_secret_hash,
             "created_at": self.created_at,

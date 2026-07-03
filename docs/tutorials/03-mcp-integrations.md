@@ -11,7 +11,7 @@ MCP servers expose tools (e.g. `maps_geocode`, `read_url`) that the Agent calls 
 - `stdio` — local process
 - `sse` / `streamable_http` — remote HTTP servers
 
-Configuration lives in `api/config.yaml` under `mcp_config.mcpServers` (a dictionary keyed by server name). You can also manage MCP servers from **Settings → Integrations** (`/settings/integrations`).
+Configuration lives in `api/config.yaml` under `mcp_config.mcpServers` (a dictionary keyed by server name). You can also manage MCP servers from **Settings → Integrations** (Settings modal tab).
 
 ## Example: add a remote MCP server
 

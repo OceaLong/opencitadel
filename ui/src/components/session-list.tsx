@@ -107,7 +107,7 @@ export function SessionList() {
             type="button"
             size="sm"
             variant={filter === option ? "secondary" : "ghost"}
-            className={cn("h-6 px-2 text-[10px]", filter === option && "font-medium")}
+            className={cn("h-6 px-2 text-2xs", filter === option && "font-medium")}
             onClick={() => setFilter(option)}
           >
             {t(`filter.${option}`)}

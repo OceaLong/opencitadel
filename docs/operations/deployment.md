@@ -121,6 +121,21 @@ Built application images are named: `opencitadel-api`, `opencitadel-worker`, `op
 
 Choose the deployment mode with two variables at the top of `.env`:
 
+```mermaid
+flowchart TD
+  Start["Choose deployment mode"] --> Profile{"COMPOSE_PROFILES"}
+  Profile -->|"empty"| Cloud["cloud mode"]
+  Profile -->|"local"| Local["local mode"]
+  Cloud --> Cos["STORAGE_PROVIDER=cos"]
+  Local --> Minio["STORAGE_PROVIDER=minio"]
+  Cos --> CosCreds["Set COS_* credentials"]
+  Minio --> MinioUp["MinIO via local profile"]
+  Start --> SandboxDriver{"sandbox.driver"}
+  SandboxDriver -->|"auto/docker"| DockerSock["Worker mounts docker.sock"]
+  SandboxDriver -->|"kubernetes"| K8sRBAC["Worker SA creates Pods"]
+  DockerSock --> BuildImg["Build opencitadel-sandbox image"]
+```
+
 | Mode | `COMPOSE_PROFILES` | `STORAGE_PROVIDER` | Required |
 |------|-------------------|-------------------|----------|
 | **cloud** (default) | empty | `cos` | `COS_*` credentials |
@@ -726,12 +741,15 @@ Full domain binding, certificate setup (Let's Encrypt or custom), verification, 
 Helm chart at `deploy/helm/opencitadel/` supports full-stack deploy (Postgres/Redis/UI/Ingress + API/Worker + K8s Pod sandbox driver).
 
 ```bash
-# Build and push four images
+# Build and push five images (api, worker, migrate reuses api image tag)
 docker build --target api -t your-registry/opencitadel-api ./api
 docker build --target worker -t your-registry/opencitadel-worker ./api
+docker build --target api -t your-registry/opencitadel-migrate ./api
 docker build -t your-registry/opencitadel-ui ./ui
 docker build -t your-registry/opencitadel-sandbox ./sandbox
-docker push your-registry/opencitadel-api your-registry/opencitadel-worker your-registry/opencitadel-ui your-registry/opencitadel-sandbox
+docker push your-registry/opencitadel-api your-registry/opencitadel-worker your-registry/opencitadel-migrate your-registry/opencitadel-ui your-registry/opencitadel-sandbox
+
+> **Helm note**: the migrate initContainer reuses `image.api` (same Dockerfile target). The separate `opencitadel-migrate` tag is used by Docker Compose one-off jobs and release publishing.
 
 helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --set image.api.repository=your-registry/opencitadel-api \

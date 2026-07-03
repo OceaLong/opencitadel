@@ -95,6 +95,8 @@ class SessionRepository(Protocol):
             model_id: Optional[str] = None,
             skill_id: Optional[str] = None,
             thinking_enabled: Optional[bool] = None,
+            gate_profile: Optional[str] = None,
+            operator_domains: Optional[List[str]] = None,
             clear_model: bool = False,
             clear_skill: bool = False,
     ) -> None:

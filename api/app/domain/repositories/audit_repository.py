@@ -21,9 +21,14 @@ class AuditRepository(ABC):
         start_at: Optional[datetime] = None,
         end_at: Optional[datetime] = None,
         resource_id: Optional[str] = None,
+        resource_type: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> List[AuditLog]:
+        ...
+
+    @abstractmethod
+    async def get_by_id(self, log_id: str) -> Optional[AuditLog]:
         ...
 
     @abstractmethod
@@ -34,6 +39,8 @@ class AuditRepository(ABC):
         action: Optional[str] = None,
         start_at: Optional[datetime] = None,
         end_at: Optional[datetime] = None,
+        resource_id: Optional[str] = None,
+        resource_type: Optional[str] = None,
     ) -> int:
         ...
 

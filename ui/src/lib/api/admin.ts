@@ -22,6 +22,12 @@ export type AuditLog = {
   created_at: string;
 };
 
+export type AuditLogDetail = AuditLog & {
+  actor_ip?: string;
+  metadata?: Record<string, unknown>;
+  chain_seq?: number | null;
+};
+
 export type UsageSummary = {
   prompt_tokens: number;
   completion_tokens: number;
@@ -146,14 +152,33 @@ export const adminApi = {
     limit?: number;
     offset?: number;
     action?: string;
+    actor_user_id?: string;
+    resource_type?: string;
+    resource_id?: string;
     start_at?: string;
     end_at?: string;
   }) => get<{ logs: AuditLog[]; total: number }>("/admin/audit", buildParams(params)),
 
+  auditDetail: (logId: string) => get<AuditLogDetail>(`/admin/audit/${logId}`),
+
   auditSummary: (params?: AdminDateRangeParams) =>
     get<AuditSummary>("/admin/audit/summary", buildParams(params)),
 
-  exportAuditCsvUrl: () => "/api/admin/audit/export",
+  exportAuditCsvUrl: (params?: {
+    action?: string;
+    actor_user_id?: string;
+    resource_type?: string;
+    resource_id?: string;
+    start_at?: string;
+    end_at?: string;
+  }) => {
+    const built = buildParams(params ?? {});
+    if (!built) return "/api/admin/audit/export";
+    const query = new URLSearchParams(
+      Object.entries(built).map(([key, value]) => [key, String(value)]),
+    ).toString();
+    return `/api/admin/audit/export?${query}`;
+  },
 
   teams: (params?: { limit?: number; offset?: number }) =>
     get<{ teams: AdminTeam[]; total: number }>("/admin/teams", buildParams(params)),

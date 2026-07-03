@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Cpu, Layers, MailPlus, PhoneCall, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { AdminStatCard } from "@/components/admin/stat-card";
@@ -12,6 +11,8 @@ import {
   UsageCallsChart,
   UsageTimeseriesChart,
 } from "@/components/admin/usage-charts";
+import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -25,6 +26,13 @@ import {
   type UsageSummary,
   type UsageTimeseriesPoint,
 } from "@/lib/api/admin";
+import {
+  IconInvitation,
+  IconLayers,
+  IconModel,
+  IconPhoneCall,
+  IconUsers,
+} from "@/lib/icons";
 
 export default function AdminOverviewPage() {
   const t = useTranslations("admin");
@@ -102,21 +110,20 @@ export default function AdminOverviewPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">{t("overviewTitle")}</h2>
-          <p className="text-muted-foreground mt-1 text-sm">{t("overviewSubtitle")}</p>
-        </div>
-        <AdminTimeRangePicker value={range} onChange={setRange} />
-      </div>
+      <PageHeader
+        bordered={false}
+        title={t("overviewTitle")}
+        description={t("overviewSubtitle")}
+        actions={<AdminTimeRangePicker value={range} onChange={setRange} />}
+      />
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <AdminStatCard label={t("statTotalUsers")} value={overview?.total_users ?? 0} hint={t("statActiveHint", { count: overview?.active_users ?? 0 })} icon={Users} />
-        <AdminStatCard label={t("statTotalTeams")} value={overview?.total_teams ?? 0} hint={t("statTotalSessionsHint", { count: overview?.total_sessions ?? 0 })} icon={Layers} />
-        <AdminStatCard label={t("statTotalTokens")} value={usage?.total_tokens ?? 0} hint={t("statPromptHint", { count: usage?.prompt_tokens ?? 0 })} icon={Cpu} />
-        <AdminStatCard label={t("statLlmCalls")} value={usage?.call_count ?? 0} hint={t("statCachedHint", { count: usage?.cached_tokens ?? 0 })} icon={PhoneCall} />
-        <AdminStatCard label={t("statPendingInvites")} value={overview?.pending_invitations ?? 0} hint={t("statAcceptedHint", { count: overview?.accepted_invitations ?? 0 })} icon={MailPlus} />
-        <AdminStatCard label={t("statTotalSessions")} value={overview?.total_sessions ?? 0} hint={t("statTotalSessionsDesc")} icon={Layers} />
+        <AdminStatCard label={t("statTotalUsers")} value={overview?.total_users ?? 0} hint={t("statActiveHint", { count: overview?.active_users ?? 0 })} icon={IconUsers} />
+        <AdminStatCard label={t("statTotalTeams")} value={overview?.total_teams ?? 0} hint={t("statTotalSessionsHint", { count: overview?.total_sessions ?? 0 })} icon={IconLayers} />
+        <AdminStatCard label={t("statTotalTokens")} value={usage?.total_tokens ?? 0} hint={t("statPromptHint", { count: usage?.prompt_tokens ?? 0 })} icon={IconModel} />
+        <AdminStatCard label={t("statLlmCalls")} value={usage?.call_count ?? 0} hint={t("statCachedHint", { count: usage?.cached_tokens ?? 0 })} icon={IconPhoneCall} />
+        <AdminStatCard label={t("statPendingInvites")} value={overview?.pending_invitations ?? 0} hint={t("statAcceptedHint", { count: overview?.accepted_invitations ?? 0 })} icon={IconInvitation} />
+        <AdminStatCard label={t("statTotalSessions")} value={overview?.total_sessions ?? 0} hint={t("statTotalSessionsDesc")} icon={IconLayers} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -153,7 +160,7 @@ export default function AdminOverviewPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {recentAudit.length === 0 ? (
-              <EmptyHint text={t("noAuditRecords")} />
+              <EmptyState title={t("noAuditRecords")} className="py-8" />
             ) : (
               recentAudit.map((item) => (
                 <div key={item.id} className="rounded-lg border px-3 py-2 text-sm">
@@ -177,7 +184,7 @@ export default function AdminOverviewPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {recentInvitations.length === 0 ? (
-              <EmptyHint text={t("noInvitationRecords")} />
+              <EmptyState title={t("noInvitationRecords")} className="py-8" />
             ) : (
               recentInvitations.map((item) => (
                 <div key={item.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
@@ -203,10 +210,6 @@ function MetricRow({ label, value }: { label: string; value: number }) {
       <div className="mt-1 text-xl font-semibold">{value}</div>
     </div>
   );
-}
-
-function EmptyHint({ text }: { text: string }) {
-  return <div className="text-muted-foreground py-8 text-center text-sm">{text}</div>;
 }
 
 function InvitationStatusBadge({ status }: { status: PlatformInvitation["status"] }) {

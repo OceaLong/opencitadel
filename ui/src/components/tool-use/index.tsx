@@ -43,7 +43,7 @@ export function ToolUse({ data, onClick }: ToolUseProps) {
       {status && (
         <span
           className={cn(
-            "rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
+            "rounded-full border px-1.5 py-0.5 text-2xs uppercase tracking-wide",
             status === "calling" &&
               "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
             status === "called" &&

@@ -4,7 +4,9 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
+import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
 import { authApi } from "@/lib/api/auth";
@@ -36,35 +38,48 @@ export default function LoginPage() {
 
   return (
     <main className="bg-background flex min-h-screen items-center justify-center p-6">
-      <form onSubmit={onSubmit} className="border-border bg-card w-full max-w-sm space-y-4 rounded-xl border p-6 shadow-sm">
-        <div>
-          <h1 className="text-xl font-semibold">{t("loginTitle")}</h1>
-          <p className="text-muted-foreground mt-1 text-sm">{t("loginPageDescription")}</p>
-        </div>
-        <Input
-          value={identifier}
-          onChange={(e) => setIdentifier(e.target.value)}
-          placeholder={t("identifierPlaceholder")}
-        />
-        <Input
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder={t("passwordPlaceholder")}
-          type="password"
-        />
-        {error && <p className="text-destructive text-sm">{error}</p>}
-        <Button className="w-full" disabled={loading}>
-          {loading ? t("loggingIn") : t("login")}
-        </Button>
-        <div className="grid grid-cols-2 gap-2">
-          <Button type="button" variant="outline" onClick={() => (window.location.href = "/api/auth/oauth/google/login")}>
-            Google
-          </Button>
-          <Button type="button" variant="outline" onClick={() => (window.location.href = "/api/auth/oauth/github/login")}>
-            GitHub
-          </Button>
-        </div>
-      </form>
+      <Card className="w-full max-w-[360px] shadow-card">
+        <CardHeader className="items-center text-center">
+          <OpenCitadelIcon variant="icon" className="mb-2 size-10" />
+          <CardTitle className="text-xl">{t("loginTitle")}</CardTitle>
+          <CardDescription>{t("loginPageDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onSubmit} className="space-y-4">
+            <Input
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder={t("identifierPlaceholder")}
+            />
+            <Input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={t("passwordPlaceholder")}
+              type="password"
+            />
+            {error ? <p className="text-destructive text-sm">{error}</p> : null}
+            <Button className="w-full" disabled={loading}>
+              {loading ? t("loggingIn") : t("login")}
+            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => (window.location.href = "/api/auth/oauth/google/login")}
+              >
+                Google
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => (window.location.href = "/api/auth/oauth/github/login")}
+              >
+                GitHub
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </main>
   );
 }

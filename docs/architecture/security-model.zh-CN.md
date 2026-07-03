@@ -54,11 +54,11 @@ flowchart TB
 每个 Agent 会话（或池化实例）获得独立运行时，包含：
 
 - Ubuntu 22.04 基础镜像，Python、Node.js
-- Chromium + Playwright（网页自动化）
+- Chromium（浏览器运行时，位于沙箱内）
 - Xvfb + x11vnc + websockify（可选 VNC 观测）
 - FastAPI 侧车（`sandbox/`），通过 HTTP 向 Worker 暴露 shell、文件、浏览器工具
 
-Worker 编排沙箱；面向用户的工具（shell、browser、文件 I/O）在**沙箱边界内**执行。
+Worker 编排沙箱，并通过 **Worker 进程内的 Playwright** 经 CDP 连接沙箱内 Chromium 驱动浏览器自动化。面向用户的工具（shell、browser、文件 I/O）在**沙箱边界内**执行。
 
 ### 隔离机制
 

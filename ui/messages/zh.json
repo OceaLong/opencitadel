@@ -39,13 +39,25 @@
     "new": "新建",
     "create": "创建",
     "name": "名称",
-    "thinking": "正在思考中..."
+    "thinking": "正在思考中...",
+    "deleteFailed": "删除失败",
+    "deleted": "已删除",
+    "edit": "编辑",
+    "global": "全局",
+    "nextPage": "下一页",
+    "none": "无",
+    "pageOf": "第 {current} / {total} 页",
+    "previousPage": "上一页",
+    "saveFailed": "保存失败",
+    "session": "会话"
   },
   "language": {
     "title": "语言",
     "description": "选择界面显示语言。",
     "localeEn": "English",
-    "localeZh": "中文"
+    "localeZh": "中文",
+    "localeShortEn": "EN",
+    "localeShortZh": "中"
   },
   "auth": {
     "loginTitle": "登录 OpenCitadel",
@@ -75,7 +87,9 @@
     "selectModelAfterLogin": "登录后选择模型",
     "loginToMarketplace": "登录后即可使用 AI 智能启动",
     "loginToDocQa": "登录后即可使用 AI 文档问答",
-    "loginToTranslate": "登录后即可使用 AI 翻译"
+    "loginToTranslate": "登录后即可使用 AI 翻译",
+    "loginToConsumption": "登录后即可使用消耗量计算器",
+    "loginToNutrition": "登录后即可使用营养分析"
   },
   "home": {
     "greeting": "你好，同学",
@@ -83,7 +97,13 @@
     "addModelFirst": "请先在设置中添加模型",
     "createSessionFailed": "创建会话失败",
     "codebaseTitle": "代码知识库",
-    "codebaseDescription": "上传代码库，生成架构图与调用链，Ask 问答 / Agent 改码"
+    "codebaseDescription": "上传代码库，生成架构图与调用链，Ask 问答 / Agent 改码",
+    "createFailed": "创建会话失败",
+    "loginRequired": "登录后即可创建新任务",
+    "manageCodebase": "管理代码知识库",
+    "manageKnowledge": "管理文档知识库",
+    "noModel": "请先配置模型",
+    "title": "OpenCitadel"
   },
   "chatHeader": {
     "backHome": "返回首页",
@@ -93,10 +113,14 @@
     "normal": "正常",
     "codebase": "代码知识库",
     "knowledge": "文档知识库",
-    "marketplace": "应用市场"
+    "marketplace": "应用市场",
+    "automation": "自动化",
+    "modelStatus": "{status, select, unknown {模型状态未知} unavailable {模型不可用} ok {模型正常} other {模型状态}}",
+    "workspaceMenu": "工作区"
   },
   "leftPanel": {
-    "newTask": "新建任务"
+    "newTask": "新建任务",
+    "loginRequired": "登录后即可创建新任务"
   },
   "workspace": {
     "label": "工作区",
@@ -104,7 +128,8 @@
     "manageTeams": "管理团队"
   },
   "account": {
-    "settings": "系统设置"
+    "settings": "系统设置",
+    "adminPanel": "管理后台"
   },
   "theme": {
     "switchToLight": "切换到浅色模式",
@@ -136,7 +161,18 @@
   "sessionList": {
     "deleteSuccess": "已删除任务「{title}」",
     "deleteFailed": "删除任务「{title}」失败，请重试",
-    "noTasks": "暂无任务"
+    "noTasks": "暂无任务",
+    "empty": "暂无任务",
+    "filter": {
+      "all": "全部",
+      "codebase": "代码库",
+      "general": "通用",
+      "hybrid": "混合",
+      "knowledge": "知识库"
+    },
+    "filterEmpty": "没有符合筛选条件的任务",
+    "loadError": "加载任务失败",
+    "retry": "重试"
   },
   "sessions": {
     "fetchFailed": "获取会话列表失败",
@@ -166,7 +202,19 @@
     "streamReconnecting": "会话流正在重新连接...",
     "resync": "重新同步",
     "loadEarlier": "加载更早对话",
-    "emptyTimeline": "暂无对话记录，在下方输入任务或提问"
+    "emptyTimeline": "暂无对话记录，在下方输入任务或提问",
+    "operator": {
+      "awaitingHuman": "等待人工",
+      "domainsLabel": "域名：{domains}",
+      "editGateSettings": "门控设置",
+      "gateProfileLabel": "门控：{profile}",
+      "gateSettingsSaved": "门控设置已更新",
+      "modeLabel": "Operator",
+      "owned": "自有",
+      "thirdPartySaas": "第三方 SaaS",
+      "waitingApproval": "等待审批",
+      "webOperator": "Web Operator"
+    }
   },
   "sessionMemory": {
     "roles": {
@@ -189,7 +237,9 @@
     "sheetTitle": "会话内存",
     "messageCount": "共 {count} 条",
     "sheetDescription": "查看与编辑 Agent 短期上下文（Tier 1）",
-    "agentCounts": "Planner {planner} 条 · ReAct {react} 条"
+    "agentCounts": "Planner {planner} 条 · ReAct {react} 条",
+    "deleteTitle": "删除消息",
+    "emptyMessage": "（空）"
   },
   "sessionDebug": {
     "title": "调试事件",
@@ -327,7 +377,10 @@
     "triggerExamples": "触发示例（每行一条）",
     "globallyEnabled": "全局启用",
     "skillUpdated": "Skill 已更新",
-    "skillCreated": "Skill 已创建"
+    "skillCreated": "Skill 已创建",
+    "maxIterations": "最大计划迭代次数",
+    "maxRetries": "最大重试次数",
+    "maxSearchResults": "最大搜索结果数"
   },
   "settingsMemory": {
     "description": "跨会话记忆管理，任务开始时自动召回注入 Agent",
@@ -374,7 +427,9 @@
     "waitingResult": "等待执行结果...",
     "agentCallInfo": "Agent 调用信息",
     "toolLabel": "工具：",
-    "instructionLabel": "指令："
+    "instructionLabel": "指令：",
+    "artifacts": "交付物",
+    "toolPreviewTab": "工具预览"
   },
   "vnc": {
     "connectionFailed": "连接失败",
@@ -398,6 +453,17 @@
     "exportCsv": "导出 CSV",
     "chainIntact": "审计链完整",
     "chainBroken": "审计链异常",
+    "verifyChain": "验证链",
+    "chainCheckedAt": "验证于 {time}",
+    "chainBrokenAt": "断裂于序号 {seq}",
+    "filterAction": "按动作筛选",
+    "filterActionAll": "全部动作",
+    "filterActor": "操作者 ID",
+    "viewDetail": "查看详情",
+    "auditDetailTitle": "审计记录详情",
+    "metadataLabel": "元数据",
+    "actorIpLabel": "操作者 IP",
+    "chainSeqLabel": "链序号",
     "actionDistributionTitle": "动作分布",
     "actionDistributionDesc": "时间范围内主要审计动作",
     "overviewTitle": "概览",
@@ -433,7 +499,60 @@
     "noEmailSpecified": "未指定邮箱",
     "inviteAccepted": "已接受",
     "invitePending": "待处理",
-    "inviteExpired": "已过期"
+    "inviteExpired": "已过期",
+    "auditActivityDesc": "每日审计事件量",
+    "auditActivityTitle": "审计活动",
+    "callsTrendDesc": "LLM 调用量趋势",
+    "callsTrendTitle": "LLM 调用趋势",
+    "chartCalls": "调用次数",
+    "chartCompletion": "Completion Token",
+    "chartEvents": "事件数",
+    "chartPrompt": "Prompt Token",
+    "chartTotal": "总 Token",
+    "createdAt": "创建于 {time}",
+    "disableUser": "禁用用户",
+    "displayName": "显示名称",
+    "editUser": "编辑用户",
+    "enterEmail": "请输入邮箱地址",
+    "expiresAt": "过期于 {time}",
+    "generateFailed": "生成邀请链接失败",
+    "generateInviteTitle": "生成注册邀请",
+    "invitationRecordsTitle": "邀请记录",
+    "invitationsSubtitle": "创建并管理平台注册邀请",
+    "inviteLinkCopied": "邀请链接已复制",
+    "inviteLinkGenerated": "邀请链接已生成",
+    "inviteValidDays": "邀请链接默认 7 天内有效",
+    "lastLogin": "上次登录 {time}",
+    "logListTitle": "审计日志条目",
+    "noAuditData": "该时间范围内暂无审计活动",
+    "noBreakdownData": "暂无分布数据",
+    "noCallsData": "该时间范围内暂无调用数据",
+    "noUsageData": "该时间范围内暂无用量数据",
+    "operationFailed": "操作失败",
+    "quota": "配额",
+    "quotaDailySessionLimit": "每日会话上限",
+    "quotaMaxConcurrentTasks": "最大并发任务数",
+    "quotaMaxStorageBytes": "最大存储（字节）",
+    "quotaMonthlyTokenLimit": "每月 Token 上限",
+    "quotaUpdated": "配额已更新",
+    "role": "角色",
+    "searchUsersPlaceholder": "按邮箱、用户名或名称搜索",
+    "status": "状态",
+    "summaryAccepted": "已接受",
+    "summaryExpired": "已过期",
+    "summaryPending": "待处理",
+    "system": "系统",
+    "tokenTrendDesc": "Token 用量趋势",
+    "tokenTrendTitle": "Token 用量趋势",
+    "totalRecords": "共 {count} 条记录",
+    "updateFailed": "更新失败",
+    "userDisabled": "用户已禁用",
+    "userListTitle": "用户列表",
+    "userQuota": "用户配额",
+    "userTotalCount": "共 {count} 位用户",
+    "userUpdated": "用户已更新",
+    "usersSubtitle": "管理平台用户、角色与配额",
+    "usersTitle": "用户管理"
   },
   "adminNav": {
     "title": "管理后台",
@@ -575,6 +694,9 @@
     "offlineOnly": "仅无需模型",
     "noMatch": "没有找到匹配应用",
     "noMatchHint": "试试换个关键词或使用上方 AI 指令栏",
+    "categoryAll": "全部",
+    "categoryHealth": "健康",
+    "categoryLife": "生活",
     "categoryOffice": "办公",
     "categoryProductivity": "效率",
     "noModelDirect": "无需模型 · 可直接使用",
@@ -582,6 +704,34 @@
     "modelRequired": "需要模型",
     "modelRequiredUnavailable": "需要模型，当前不可用",
     "apps": {
+      "nutritionAnalysis": {
+        "name": "营养分析",
+        "description": "上传餐食照片，分析宏量营养素并获取个性化营养建议",
+        "tags": [
+          "营养",
+          "餐食照片",
+          "热量",
+          "健康"
+        ],
+        "examples": [
+          "分析这顿午餐是否适合减脂",
+          "这餐蛋白质够吗？"
+        ]
+      },
+      "consumptionCalculator": {
+        "name": "消耗量计算器",
+        "description": "上传营养成分表，估算份量与消耗量",
+        "tags": [
+          "营养成分表",
+          "份量",
+          "OCR",
+          "计算器"
+        ],
+        "examples": [
+          "这包有多少份？",
+          "按每份 50 克计算消耗量"
+        ]
+      },
       "documentQa": {
         "name": "文档/图片问答",
         "description": "上传资料或截图，AI 提炼重点并回答问题",
@@ -709,7 +859,9 @@
       "copy": "复制",
       "copyAll": "复制全部",
       "encode": "编码",
-      "decode": "解码"
+      "decode": "解码",
+      "imageTooLarge5mb": "图片不能超过 5MB",
+      "jpgPngOnly": "仅支持 JPG 和 PNG 图片"
     },
     "imageUpload": {
       "previewAlt": "图片预览",
@@ -868,7 +1020,10 @@
       "printAsPdf": "打印为 PDF",
       "startConvert": "开始转换",
       "convertComplete": "转换完成",
-      "downloadFile": "下载文件"
+      "downloadFile": "下载文件",
+      "formatDocx": "Word (.docx)",
+      "formatMd": "Markdown (.md)",
+      "formatPdf": "PDF (.pdf)"
     },
     "watermarkTool": {
       "title": "水印工具",
@@ -902,6 +1057,68 @@
       "resultAlt": "处理结果",
       "processMethod": "处理方式：{method}",
       "downloadResult": "下载结果"
+    },
+    "consumptionCalculator": {
+      "calculateFailed": "计算失败",
+      "consumableLabel": "可食用部分",
+      "correctionFailed": "修正失败",
+      "correctionPlaceholder": "例如：这是方便面，每份是半包",
+      "correctionRequired": "请输入修正说明",
+      "emptyHint": "上传营养成分表照片以计算份量",
+      "emptyTitle": "消耗量计算器",
+      "invalidServing": "请输入有效的每份克数",
+      "invalidTotalAndServing": "请输入有效的总重和每份重量",
+      "manualTotalLabel": "包装总重（克）",
+      "manualTotalPlaceholder": "例如：500",
+      "nlCorrectionTitle": "自然语言修正",
+      "notRecognizedToast": "未能识别营养成分表，请手动输入",
+      "ocrLabel": "OCR 结果",
+      "ocrTextLabel": "识别文本",
+      "packagePreviewAlt": "包装预览",
+      "perServingLabel": "每份",
+      "recalculate": "重新计算",
+      "recognizeFailed": "识别失败",
+      "servingLabel": "每份克数",
+      "servingsApprox": "≈ {count} 份",
+      "servingsLabel": "份数",
+      "servingsUnit": "份",
+      "subtitle": "上传营养成分表，估算份量与消耗量",
+      "title": "消耗量计算器",
+      "totalLabel": "总量",
+      "uploadHint": "上传 JPG/PNG 营养成分表，最大 5MB"
+    },
+    "nutritionAnalysis": {
+      "analyzeFailed": "分析失败",
+      "assessmentTitle": "营养评估",
+      "caloriesAssessment": "热量",
+      "emptyHint": "上传餐食照片以分析营养",
+      "emptyTitle": "营养分析",
+      "followupFailed": "追问失败",
+      "followupPlaceholder": "针对这餐继续提问...",
+      "followupRequired": "请输入问题",
+      "followupTitle": "追问",
+      "generateAdvice": "生成建议",
+      "goalBulk": "增肌",
+      "goalCut": "减脂",
+      "goalLabel": "目标",
+      "goalMaintain": "维持",
+      "ingredientsTitle": "识别到的食材",
+      "itemNutrition": "单项营养",
+      "mealPreviewAlt": "餐食预览",
+      "metricCalories": "热量",
+      "metricCarbs": "碳水",
+      "metricFat": "脂肪",
+      "metricProtein": "蛋白质",
+      "overallGreen": "均衡",
+      "overallLabel": "总体",
+      "overallRed": "需关注",
+      "overallYellow": "适中",
+      "proteinAssessment": "蛋白质",
+      "subtitle": "分析餐食照片并获取个性化营养建议",
+      "title": "营养分析",
+      "uploadHint": "上传 JPG/PNG 餐食照片，最大 5MB",
+      "weightLabel": "体重（kg）",
+      "weightPlaceholder": "例如：70"
     }
   },
   "knowledge": {
@@ -951,7 +1168,16 @@
       "namePlaceholder": "例如：公司制度知识库",
       "defaultName": "企业文档知识库",
       "createFailed": "创建失败"
-    }
+    },
+    "create": "新建知识库",
+    "empty": "暂无知识库",
+    "indexingShort": "索引中...",
+    "librarySubtitle": "管理文档知识库并启动任务",
+    "startAgent": "Agent",
+    "startAsk": "Ask",
+    "startTaskFailed": "启动任务失败",
+    "statusDocCount": "{status} · {count} 篇文档",
+    "title": "文档知识库"
   },
   "codebase": {
     "loadListFailed": "加载代码库失败",
@@ -1003,9 +1229,204 @@
       "defaultFilesName": "文件代码库",
       "createFailed": "创建失败",
       "createAndAnalyze": "创建并分析"
-    }
+    },
+    "create": "新建代码库",
+    "download": "下载",
+    "empty": "暂无代码库",
+    "indexingShort": "索引中...",
+    "librarySubtitle": "管理代码知识库并启动任务",
+    "loadError": "加载代码库失败",
+    "startAgent": "Agent",
+    "startAsk": "Ask",
+    "startTaskFailed": "启动任务失败",
+    "statusFileCount": "{status} · {count} 个文件",
+    "title": "代码知识库"
   },
   "mermaid": {
     "renderFailed": "Mermaid 渲染失败"
+  },
+  "artifactWorkbench": {
+    "empty": "暂无交付物",
+    "emptyContent": "选择交付物以预览",
+    "export": "导出",
+    "exportSuccess": "交付物已导出",
+    "generating": "生成中...",
+    "loadFailed": "加载交付物失败",
+    "selectArtifact": "选择交付物",
+    "sessionLabel": "会话",
+    "share": "分享",
+    "shareLinkCopied": "分享链接已复制",
+    "shareLinkFailed": "创建分享链接失败",
+    "statusDraft": "草稿",
+    "statusFinal": "定稿",
+    "statusUpdated": "已更新",
+    "version": "版本"
+  },
+  "automation": {
+    "contextLabel": "任务上下文",
+    "copiedWithLabel": "已复制 {label}",
+    "copySecretAria": "复制 Webhook 密钥",
+    "copyTokenAria": "复制 Webhook Token",
+    "copyWebhookUrlAria": "复制 Webhook URL",
+    "create": "创建任务",
+    "creating": "创建中...",
+    "credentialsSaved": "完成",
+    "deleteFailed": "删除任务失败",
+    "deleteJobAria": "删除定时任务",
+    "editJob": "编辑任务",
+    "empty": "暂无定时任务",
+    "fields": {
+      "enabled": "启用",
+      "gateProfile": "门控配置",
+      "modelId": "模型 ID",
+      "name": "任务名称",
+      "notifyChannel": "通知频道",
+      "notifyServer": "通知 MCP 服务",
+      "operatorDomains": "Operator 域名",
+      "operatorScope": "Operator 范围",
+      "prompt": "提示词模板",
+      "skillId": "Skill ID",
+      "triggerType": "触发类型"
+    },
+    "jobCreateFailed": "创建任务失败",
+    "jobCreated": "任务已创建",
+    "jobDeleted": "任务已删除",
+    "jobUpdated": "任务已更新",
+    "lastRunAt": "上次运行",
+    "loadFailed": "加载任务失败",
+    "namePlaceholder": "例如：每日报告",
+    "nameRequired": "请输入任务名称和提示词",
+    "newJob": "新建任务",
+    "nextRunAt": "下次运行",
+    "promptPlaceholder": "描述该任务应执行的内容...",
+    "rotateSecretAria": "轮换 Webhook 密钥",
+    "rotateSecretFailed": "轮换密钥失败",
+    "saveJob": "保存任务",
+    "statusDisabled": "已禁用",
+    "statusEnabled": "已启用",
+    "subtitle": "安排周期性或 Webhook 触发的 Agent 任务",
+    "title": "自动化",
+    "triggerTypeInterval": "间隔（秒）",
+    "triggerCron": "Cron 表达式",
+    "triggerWebhook": "Webhook Token",
+    "updateFailed": "更新任务失败",
+    "viewSession": "查看会话",
+    "runNow": "立即运行",
+    "runNowFailed": "触发任务失败",
+    "runNowStarted": "任务已开始",
+    "toggleEnabledFailed": "更新任务状态失败",
+    "lastRunError": "上次错误：{error}",
+    "promptHelp": "Webhook 可使用 {{payload.key}} 引用 JSON 字段",
+    "cronHelp": "Cron：HH:MM 或 minute hour * * *（如 0 9 * * *）",
+    "webhookCredentialsDescription": "请立即保存这些凭据，密钥仅显示一次。请使用以下方式签名请求：",
+    "webhookCredentialsTitle": "Webhook 凭据"
+  },
+  "contextSelector": {
+    "clear": "清除上下文",
+    "codebase": "代码库",
+    "codebaseSection": "代码知识库",
+    "knowledge": "知识库",
+    "knowledgeSection": "文档知识库",
+    "noCodebase": "暂无可用代码库",
+    "noKnowledge": "暂无可用知识库",
+    "none": "无上下文",
+    "title": "会话上下文"
+  },
+  "errors": {
+    "pageLoadError": "页面加载失败",
+    "unknownError": "发生了未知错误，请重试或返回首页。"
+  },
+  "gateActions": {
+    "approve": "批准",
+    "approveSame": "批准同类工具",
+    "approveSameHelp": "本会话内同类工具不再询问",
+    "firstVisitHelp": "首次访问该域名需明确批准",
+    "confirmReject": "确认拒绝",
+    "firstVisitDomain": "首次访问域名：{domain}",
+    "reject": "拒绝",
+    "rejectPlaceholder": "拒绝原因...",
+    "rejectReasonRequired": "请输入拒绝原因",
+    "scopeOwned": "自有系统",
+    "scopeThirdParty": "第三方 SaaS",
+    "sendFailed": "发送响应失败",
+    "skip": "跳过",
+    "takeoverDescription": "Agent 已暂停等待人工接管。请在远程桌面完成操作后继续。",
+    "takeoverDone": "接管完成",
+    "takeoverTitle": "需要人工接管",
+    "targetSystem": "目标系统：{scope}",
+    "toolConfirmTitle": "工具操作需要审批",
+    "unknownTool": "未知工具"
+  },
+  "notifications": {
+    "empty": "暂无通知",
+    "refreshing": "刷新中...",
+    "title": "通知"
+  },
+  "operatorScope": {
+    "confirmCreate": "启动 Web Operator 会话",
+    "description": "启动前配置 Operator 范围与门控配置。",
+    "domainsHint": "Operator 可访问的主机名，逗号或换行分隔",
+    "domainsLabel": "允许域名",
+    "domainsPlaceholder": "ops-console, localhost",
+    "gateProfile": {
+      "loose": {
+        "title": "宽松",
+        "description": "最少确认；适用于可信内部系统"
+      },
+      "standard": {
+        "title": "标准",
+        "description": "确认高风险工具及首次访问新域名"
+      },
+      "strict": {
+        "title": "严格",
+        "description": "确认每次工具操作；推荐用于第三方 SaaS"
+      }
+    },
+    "gateProfileLabel": "门控配置",
+    "ownedDescription": "您运营和控制的系统",
+    "ownedTitle": "自有基础设施",
+    "ownershipLabel": "系统归属",
+    "thirdPartyDescription": "外部 SaaS，风险较高；建议使用严格门控",
+    "thirdPartyTitle": "第三方 SaaS",
+    "title": "Web Operator 范围",
+    "editTitle": "门控设置",
+    "save": "保存"
+  },
+  "planApproval": {
+    "approve": "批准计划",
+    "confirmReject": "确认拒绝",
+    "editSteps": "编辑步骤",
+    "reject": "拒绝",
+    "rejectPlaceholder": "拒绝原因...",
+    "rejectReasonRequired": "请输入拒绝原因",
+    "riskTools": "风险工具：{tools}",
+    "saveAndApprove": "保存并批准",
+    "sendFailed": "发送响应失败",
+    "submitEditsFailed": "保存计划修改失败",
+    "subtitle": "在继续执行前审阅 Agent 计划",
+    "title": "需要批准计划"
+  },
+  "redirect": {
+    "openingCodebaseTask": "正在打开代码库任务...",
+    "openingKnowledgeTask": "正在打开知识库任务...",
+    "startTaskFailed": "启动任务失败"
+  },
+  "settingsNav": {
+    "memory": "长期记忆",
+    "models": "模型",
+    "skills": "Skill 模板"
+  },
+  "shareArtifact": {
+    "artifactTitle": "分享的交付物",
+    "home": "首页",
+    "title": "分享的交付物"
+  },
+  "workspaceContext": {
+    "codebasePanelTitle": "代码库上下文",
+    "codebaseTab": "代码库",
+    "knowledgePanelTitle": "知识库上下文",
+    "knowledgeTab": "知识库",
+    "sourceHintKb": "点击回答中的文档引用查看原文",
+    "tabOriginalText": "原文"
   }
 }

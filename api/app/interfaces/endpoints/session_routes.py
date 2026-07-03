@@ -667,6 +667,8 @@ async def patch_session(
         model_id=request.model_id,
         skill_id=request.skill_id,
         thinking_enabled=request.thinking_enabled,
+        gate_profile=request.gate_profile,
+        operator_domains=request.operator_domains,
         scope=ctx.scope,
     )
     session = await session_service.get_session(session_id, scope=ctx.scope)

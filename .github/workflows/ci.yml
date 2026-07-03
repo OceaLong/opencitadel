@@ -125,3 +125,11 @@ jobs:
             NPM_CONFIG_REGISTRY=https://registry.npmjs.org
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  docs-check:
+    name: Documentation checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run documentation consistency script
+        run: ./scripts/check-docs.sh

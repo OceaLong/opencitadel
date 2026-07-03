@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <style>
+    .mark { fill: #1e293b; }
+    @media (prefers-color-scheme: dark) {
+      .mark { fill: #f8fafc; }
+    }
+  </style>
+  <path
+    class="mark"
+    fill-rule="evenodd"
+    d="M4 12 H7 V9 H11 V12 H14 V9 H18 V12 H21 V9 H25 V12 H28 V28 H4 Z M13 28 V21 C13 19.3 14.3 18 16 18 C17.7 18 19 19.3 19 21 V28 Z"
+  />
+</svg>

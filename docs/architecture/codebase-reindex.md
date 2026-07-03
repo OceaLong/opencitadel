@@ -2,7 +2,24 @@
 
 [简体中文](codebase-reindex.zh-CN.md)
 
-This document is the authoritative reference for vector degradation during Codebase ingestion, semantic search unavailability notices, and manual reindexing.
+This document is the authoritative reference for the **Codebase module**: import sources, Ask/Agent modes, ingestion pipeline, vector degradation, and manual reindexing.
+
+## Codebase module overview
+
+| Capability | Route / API | Description |
+|------------|-------------|-------------|
+| List / create | `/codebase`, `POST /api/codebases` | ZIP upload or Git URL import |
+| Detail | `/codebase/[id]` | Files, symbols, architecture view |
+| Ask mode | Session with `codebase_id` + ASK | `CodeAskFlow` — RAG over symbols |
+| Agent mode | Session with `codebase_id` + AGENT | `PlannerReActFlow` with codebase tools |
+| Reindex | `POST /api/codebases/{id}/reanalyze` | Re-run ingestion after embedding recovery |
+
+Import paths:
+
+- **ZIP upload** — archive extracted in sandbox workspace
+- **Git clone** — shallow clone (`git clone --depth 1`) inside sandbox
+
+Agent routing (`AgentTaskRunner`): when `codebase_id` is set and mode is ASK → `CodeAskFlow`; otherwise default Planner/ReAct with codebase tools.
 
 ## Full Ingestion Pipeline
 

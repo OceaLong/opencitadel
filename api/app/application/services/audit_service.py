@@ -29,6 +29,7 @@ class AuditService:
             actor_user_id: Optional[str] = None,
             action: Optional[str] = None,
             resource_id: Optional[str] = None,
+            resource_type: Optional[str] = None,
             start_at: Optional[datetime] = None,
             end_at: Optional[datetime] = None,
             limit: int = 100,
@@ -39,11 +40,16 @@ class AuditService:
                 actor_user_id=actor_user_id,
                 action=action,
                 resource_id=resource_id,
+                resource_type=resource_type,
                 start_at=start_at,
                 end_at=end_at,
                 limit=limit,
                 offset=offset,
             )
+
+    async def get_log(self, log_id: str) -> Optional[AuditLog]:
+        async with self._uow_factory() as uow:
+            return await uow.audit.get_by_id(log_id)
 
     async def build_session_audit_report(self, session_id: str) -> str:
         payload = await self.build_session_audit_report_json(session_id)
@@ -217,11 +223,29 @@ class AuditService:
             ],
         }
 
-    async def export_csv(self) -> AsyncGenerator[str, None]:
+    async def export_csv(
+            self,
+            *,
+            actor_user_id: Optional[str] = None,
+            action: Optional[str] = None,
+            resource_id: Optional[str] = None,
+            resource_type: Optional[str] = None,
+            start_at: Optional[datetime] = None,
+            end_at: Optional[datetime] = None,
+    ) -> AsyncGenerator[str, None]:
         yield "id,actor_user_id,action,resource_type,resource_id,team_id,request_id,created_at\n"
         offset = 0
         while True:
-            logs = await self.list_logs(limit=500, offset=offset)
+            logs = await self.list_logs(
+                actor_user_id=actor_user_id,
+                action=action,
+                resource_id=resource_id,
+                resource_type=resource_type,
+                start_at=start_at,
+                end_at=end_at,
+                limit=500,
+                offset=offset,
+            )
             if not logs:
                 break
             buffer = io.StringIO()

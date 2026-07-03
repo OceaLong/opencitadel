@@ -54,11 +54,11 @@ flowchart TB
 Each Agent session (or pooled instance) receives an independent runtime containing:
 
 - Ubuntu 22.04 base image with Python and Node.js
-- Chromium + Playwright (web automation)
+- Chromium (browser runtime inside the sandbox)
 - Xvfb + x11vnc + websockify (optional VNC observation)
 - FastAPI sidecar (`sandbox/`) exposing shell, file, and browser tools to the Worker via HTTP
 
-The Worker orchestrates sandboxes; user-facing tools (shell, browser, file I/O) execute **inside the sandbox boundary**.
+The Worker orchestrates sandboxes and drives browser automation via **Playwright in the Worker process**, connecting to Chromium inside the sandbox over CDP. User-facing tools (shell, browser, file I/O) execute **inside the sandbox boundary**.
 
 ### Isolation Mechanisms
 

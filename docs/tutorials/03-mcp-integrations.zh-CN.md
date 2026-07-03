@@ -11,7 +11,7 @@ MCP 服务器暴露工具（如 `maps_geocode`、`read_url`），Agent 可像调
 - `stdio` — 本地进程
 - `sse` / `streamable_http` — 远程 HTTP 服务
 
-配置位于 `api/config.yaml` 的 `mcp_config.mcpServers`（以服务器名为键的字典）。也可在 **设置 → 集成**（`/settings/integrations`）中管理。
+配置位于 `api/config.yaml` 的 `mcp_config.mcpServers`（以服务器名为键的字典）。也可在 **设置 → 集成**（设置弹窗 Tab）中管理。
 
 ## 示例：添加远程 MCP 服务器
 

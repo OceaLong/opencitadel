@@ -22,7 +22,9 @@ ui/
 │   │   ├── sessions/      # Session pages
 │   │   ├── marketplace/   # Marketplace mini-apps
 │   │   ├── automation/    # Scheduled jobs
-│   │   └── settings/      # Settings (models, Skills, memory, integrations)
+│   │   ├── teams/         # Team workspaces
+│   │   ├── admin/         # Admin console
+│   │   └── share/         # Public artifact share pages
 │   ├── components/        # Components
 │   │   ├── ui/            # Base UI components
 │   │   └── tool-use/      # Tool-use components
@@ -46,7 +48,7 @@ ui/
 - **Model management**: Settings → Models for multi-provider CRUD and default model.
 - **Skill templates**: Settings → Skills for system prompts, tools, recommended models, Agent params, and example questions.
 - **Long-term memory**: Settings → Memory for global or session memory; compact, clear, or delete Agent memory on session page.
-- **Settings modal**: general config; MCP and A2A management also available at **Settings → Integrations** (`/settings/integrations`).
+- **Settings modal**: general config; MCP and A2A management in **Settings → Integrations** tab (modal, not a standalone route).
 - **Marketplace**: `/marketplace` LLM mini-apps catalog.
 - **Automation**: `/automation` scheduled jobs and notifications.
 
@@ -101,3 +103,11 @@ UI deploys via root `docker-compose.yml`. Multi-stage Dockerfile:
 3. **runner** — minimal production image
 
 Build with `NEXT_PUBLIC_API_BASE_URL=/api` so Nginx proxies API requests.
+
+## Internationalization (i18n)
+
+- Framework: `next-intl` with locales `en` and `zh` (default `en`)
+- Message source: `scripts/build-messages.mjs` → run `npm run i18n:build` → `messages/en.json` and `messages/zh.json`
+- Runtime locale code is `zh`; documentation filenames use `*.zh-CN.md` for Chinese — same language, different identifiers
+- URL has no locale prefix (`localePrefix: "never"`); locale persisted in `NEXT_LOCALE` cookie
+- Language switch UI infrastructure exists (`setLocale` in `src/i18n/locale.ts`); wire-up in Settings is planned

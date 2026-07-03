@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, Check } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -31,20 +31,41 @@ type OperatorScopeDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: (config: OperatorSessionConfig) => void;
+  mode?: "create" | "edit";
+  initialConfig?: Partial<OperatorSessionConfig>;
 };
 
 const GATE_PROFILES: GateProfile[] = ["loose", "standard", "strict"];
+
+const DEFAULT_CONFIG: OperatorSessionConfig = {
+  scope: "owned",
+  operatorDomains: ["ops-console", "localhost"],
+  gateProfile: "standard",
+};
 
 export function OperatorScopeDialog({
   open,
   onOpenChange,
   onConfirm,
+  mode = "create",
+  initialConfig,
 }: OperatorScopeDialogProps) {
-  const [scope, setScope] = useState<OperatorScope>("owned");
-  const [domainsText, setDomainsText] = useState("ops-console,localhost");
-  const [gateProfile, setGateProfile] = useState<GateProfile>("standard");
+  const [scope, setScope] = useState<OperatorScope>(DEFAULT_CONFIG.scope);
+  const [domainsText, setDomainsText] = useState(DEFAULT_CONFIG.operatorDomains.join(", "));
+  const [gateProfile, setGateProfile] = useState<GateProfile>(DEFAULT_CONFIG.gateProfile);
   const t = useTranslations("operatorScope");
   const tCommon = useTranslations("common");
+  const isEdit = mode === "edit";
+
+  useEffect(() => {
+    if (!open) return;
+    const nextScope = initialConfig?.scope ?? DEFAULT_CONFIG.scope;
+    const nextDomains = initialConfig?.operatorDomains ?? DEFAULT_CONFIG.operatorDomains;
+    const nextProfile = initialConfig?.gateProfile ?? DEFAULT_CONFIG.gateProfile;
+    setScope(nextScope);
+    setDomainsText(nextDomains.join(", "));
+    setGateProfile(nextProfile);
+  }, [open, initialConfig]);
 
   const parseDomains = (raw: string): string[] =>
     raw
@@ -56,45 +77,47 @@ export function OperatorScopeDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{t("title")}</DialogTitle>
+          <DialogTitle>{isEdit ? t("editTitle") : t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>{t("ownershipLabel")}</Label>
-            <button
-              type="button"
-              className={cn(
-                "hover:bg-muted/60 w-full rounded-lg border p-3 text-left transition-colors",
-                scope === "owned" && "border-primary bg-primary/5",
-              )}
-              onClick={() => setScope("owned")}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium">{t("ownedTitle")}</span>
-                {scope === "owned" && <Check className="text-primary size-4" />}
-              </div>
-              <p className="text-muted-foreground mt-1 text-xs">{t("ownedDescription")}</p>
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "hover:bg-muted/60 w-full rounded-lg border border-amber-500/40 p-3 text-left transition-colors",
-                scope === "third_party_saas" && "border-amber-600 bg-amber-500/10",
-              )}
-              onClick={() => setScope("third_party_saas")}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium">{t("thirdPartyTitle")}</span>
-                {scope === "third_party_saas" && <Check className="size-4 text-amber-700" />}
-              </div>
-              <p className="text-muted-foreground mt-1 flex items-start gap-1 text-xs">
-                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
-                {t("thirdPartyDescription")}
-              </p>
-            </button>
-          </div>
+          {!isEdit && (
+            <div className="space-y-2">
+              <Label>{t("ownershipLabel")}</Label>
+              <button
+                type="button"
+                className={cn(
+                  "hover:bg-muted/60 w-full rounded-lg border p-3 text-left transition-colors",
+                  scope === "owned" && "border-primary bg-primary/5",
+                )}
+                onClick={() => setScope("owned")}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">{t("ownedTitle")}</span>
+                  {scope === "owned" && <Check className="text-primary size-4" />}
+                </div>
+                <p className="text-muted-foreground mt-1 text-xs">{t("ownedDescription")}</p>
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "hover:bg-muted/60 w-full rounded-lg border border-amber-500/40 p-3 text-left transition-colors",
+                  scope === "third_party_saas" && "border-amber-600 bg-amber-500/10",
+                )}
+                onClick={() => setScope("third_party_saas")}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">{t("thirdPartyTitle")}</span>
+                  {scope === "third_party_saas" && <Check className="size-4 text-amber-700" />}
+                </div>
+                <p className="text-muted-foreground mt-1 flex items-start gap-1 text-xs">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+                  {t("thirdPartyDescription")}
+                </p>
+              </button>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="operator-domains">{t("domainsLabel")}</Label>
@@ -147,7 +170,7 @@ export function OperatorScopeDialog({
               onOpenChange(false);
             }}
           >
-            {t("confirmCreate")}
+            {isEdit ? t("save") : t("confirmCreate")}
           </Button>
         </DialogFooter>
       </DialogContent>

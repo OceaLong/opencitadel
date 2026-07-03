@@ -96,6 +96,8 @@ class SessionService:
             model_id: Optional[str] = None,
             skill_id: Optional[str] = None,
             thinking_enabled: Optional[bool] = None,
+            gate_profile: Optional[str] = None,
+            operator_domains: Optional[list] = None,
             scope: Optional[OwnerScope] = None,
     ) -> Session:
         async with self._uow_factory() as uow:
@@ -110,6 +112,8 @@ class SessionService:
                 model_id=model_id,
                 skill_id=skill_id,
                 thinking_enabled=thinking_enabled,
+                gate_profile=gate_profile,
+                operator_domains=operator_domains,
                 clear_model=model_id == "",
                 clear_skill=skill_id == "",
             )

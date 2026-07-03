@@ -139,7 +139,7 @@ export function SessionModelPicker({
     <div className={className}>
       {options.length === 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <Badge variant="destructive" className="text-[10px]">
+          <Badge variant="destructive" className="text-2xs">
             {llmUnavailable ? t("unavailable") : t("notConfigured")}
           </Badge>
           <button

@@ -11,6 +11,29 @@
 | 行为配置 | `AppConfig`，由 DB 承载，`config.yaml` / Helm `appConfig` 只做种子 | `model_resilience`, `feature_flags`, `worker`, `sandbox` |
 | 密钥/连接 | `Settings` 环境变量 | `EMBEDDING_API_KEY`, Postgres, Redis, COS |
 
+## 配置流转
+
+```mermaid
+flowchart LR
+  subgraph secrets ["密钥 Settings .env"]
+    Env[".env / K8s Secret"]
+    Settings["Settings pydantic"]
+  end
+  subgraph behavior ["行为 AppConfig"]
+    Yaml["api/config.yaml 种子"]
+    Helm["Helm appConfig 种子"]
+    DB["app_configs 表"]
+    Runtime["AppConfig 运行时"]
+  end
+  Env --> Settings
+  Yaml -->|"USE_DB_APP_CONFIG=false Compose 默认"| Runtime
+  Yaml -->|"migrate 表空时种子写入"| DB
+  Helm -->|"USE_DB_APP_CONFIG=true Helm 默认"| DB
+  DB -->|"USE_DB_APP_CONFIG=true"| Runtime
+  Settings --> API["API / Worker 进程"]
+  Runtime --> API
+```
+
 ## 决策树
 
 ```mermaid

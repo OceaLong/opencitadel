@@ -61,7 +61,17 @@ class AuditLogResponse(BaseModel):
 
     @classmethod
     def from_domain(cls, log: AuditLog) -> "AuditLogResponse":
-        return cls(**log.model_dump(exclude={"actor_ip", "metadata"}))
+        return cls(**log.model_dump(exclude={"actor_ip", "metadata", "prev_hash", "entry_hash"}))
+
+
+class AuditLogDetailResponse(AuditLogResponse):
+    actor_ip: str = ""
+    metadata: dict = {}
+    chain_seq: Optional[int] = None
+
+    @classmethod
+    def from_domain(cls, log: AuditLog) -> "AuditLogDetailResponse":
+        return cls(**log.model_dump(exclude={"prev_hash", "entry_hash"}))
 
 
 class ListAuditLogsResponse(BaseModel):

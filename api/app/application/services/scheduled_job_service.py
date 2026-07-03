@@ -115,6 +115,27 @@ class ScheduledJobService:
         async with self._uow_factory() as uow:
             return await uow.scheduled_job.get_by_id(job_id)
 
+    async def manual_trigger(
+            self,
+            job_id: str,
+            owner_user_id: str,
+            *,
+            notification_service=None,
+            mcp_pool=None,
+            app_config=None,
+    ) -> Optional[str]:
+        job = await self.get_job(job_id)
+        if not job or job.owner_user_id != owner_user_id:
+            return None
+        if not job.enabled:
+            raise ValueError("任务已禁用")
+        return await self.trigger_job(
+            job,
+            notification_service=notification_service,
+            mcp_pool=mcp_pool,
+            app_config=app_config,
+        )
+
     async def update_job(self, job: ScheduledJob) -> ScheduledJob:
         if job.trigger_type != "webhook":
             job.next_run_at = compute_next_run(job.trigger_type, job.trigger_spec)
@@ -168,6 +189,7 @@ class ScheduledJobService:
 
     async def record_trigger_failure(self, job: ScheduledJob, error: str) -> None:
         job.last_run_status = "failed"
+        job.last_run_error = error[:2000] if error else None
         job.updated_at = datetime.now()
         if job.trigger_type != "webhook":
             retry_at = compute_next_run(job.trigger_type, job.trigger_spec)
@@ -267,6 +289,7 @@ class ScheduledJobService:
         job.last_run_at = datetime.now()
         job.last_run_status = "running"
         job.last_run_session_id = session.id
+        job.last_run_error = None
         if job.trigger_type != "webhook":
             job.next_run_at = compute_next_run(job.trigger_type, job.trigger_spec)
         async with self._uow_factory() as uow:

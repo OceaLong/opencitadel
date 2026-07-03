@@ -24,9 +24,11 @@ make quickstart
 
 ### 2. 启动服务栈
 
-`make quickstart` 会执行 `docker compose up -d --build`。首次构建可能需要 5–10 分钟。
+`make quickstart` 会执行 `docker compose up -d --build`。首次构建可能需要 5–10 分钟，并会构建动态沙箱所需的 `opencitadel-sandbox` 镜像。
 
 健康检查通过后，打开 **http://localhost:8088**。
+
+> **对象存储默认**：`.env.example` 默认 `STORAGE_PROVIDER=cos` 且未配置凭证。为减少首次体验摩擦，建议在启动前于 `.env` 设置 `COMPOSE_PROFILES=local` 与 `STORAGE_PROVIDER=minio`（见下文[完全离线](#完全离线可选)）。文件上传与附件依赖可用的对象存储。
 
 ### 3. 登录
 

@@ -22,12 +22,14 @@ import {
   Home,
   LayoutDashboard,
   LayoutGrid,
+  Layers,
   Loader2,
   LogIn,
   LogOut,
   MailPlus,
   MessageCircleQuestion,
   PanelLeft,
+  PhoneCall,
   Plug,
   Plus,
   RefreshCw,
@@ -42,6 +44,11 @@ import {
   Wand2,
   Wrench,
   ClipboardList,
+  Coins,
+  Copy,
+  MoreHorizontal,
+  ShieldCheck,
+  ShieldX,
 } from "lucide-react";
 
 /** Code repository / codebase context */
@@ -68,6 +75,10 @@ export const IconThinking: LucideIcon = Sparkles;
 export const IconSkill: LucideIcon = Wand2;
 /** LLM model management */
 export const IconModel: LucideIcon = Cpu;
+/** Layered resources / teams grouping */
+export const IconLayers: LucideIcon = Layers;
+/** Voice / call metrics */
+export const IconPhoneCall: LucideIcon = PhoneCall;
 /** Long-term memory */
 export const IconMemory: LucideIcon = Brain;
 /** MCP / protocol integrations */
@@ -102,6 +113,8 @@ export const IconSecurity: LucideIcon = Shield;
 export const IconApproval: LucideIcon = ShieldAlert;
 /** Activity / debug */
 export const IconActivity: LucideIcon = Activity;
+/** Token usage / billing */
+export const IconCoins: LucideIcon = Coins;
 /** Ask / Q&A mode */
 export const IconAsk: LucideIcon = MessageCircleQuestion;
 /** Sidebar toggle */
@@ -112,6 +125,14 @@ export const IconNotification: LucideIcon = Bell;
 export const IconUsers: LucideIcon = Users;
 /** Invitations */
 export const IconInvitation: LucideIcon = MailPlus;
+/** Copy to clipboard */
+export const IconCopy: LucideIcon = Copy;
+/** Overflow menu */
+export const IconMore: LucideIcon = MoreHorizontal;
+/** Compliance pass */
+export const IconShieldCheck: LucideIcon = ShieldCheck;
+/** Compliance fail */
+export const IconShieldX: LucideIcon = ShieldX;
 /** Audit log */
 export const IconAudit: LucideIcon = ClipboardList;
 /** Generic tool / MCP server row */

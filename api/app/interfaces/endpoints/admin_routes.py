@@ -22,6 +22,7 @@ from app.interfaces.schemas.admin import (
     AdminOverviewResponse,
     AdminTeamResponse,
     AdminUserResponse,
+    AuditLogDetailResponse,
     AuditLogResponse,
     AuditSummaryResponse,
     CreatePlatformInvitationRequest,
@@ -292,25 +293,49 @@ async def list_audit_logs(
         limit: int = Query(100, ge=1, le=1000),
         offset: int = Query(0, ge=0),
         action: Optional[str] = Query(None),
+        actor_user_id: Optional[str] = Query(None),
+        resource_type: Optional[str] = Query(None),
+        resource_id: Optional[str] = Query(None),
         start_at: Optional[datetime] = Query(None),
         end_at: Optional[datetime] = Query(None),
         service: AuditService = Depends(get_audit_service),
 ) -> Response[ListAuditLogsResponse]:
     logs = await service.list_logs(
         action=action,
+        actor_user_id=actor_user_id,
+        resource_type=resource_type,
+        resource_id=resource_id,
         start_at=start_at,
         end_at=end_at,
         limit=limit,
         offset=offset,
     )
     async with get_uow() as uow:
-        total = await uow.audit.count(action=action, start_at=start_at, end_at=end_at)
+        total = await uow.audit.count(
+            action=action,
+            actor_user_id=actor_user_id,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            start_at=start_at,
+            end_at=end_at,
+        )
     return Response.success(
         data=ListAuditLogsResponse(
             logs=[AuditLogResponse.from_domain(log) for log in logs],
             total=total,
         ),
     )
+
+
+@router.get("/audit/{log_id}", response_model=Response[AuditLogDetailResponse], dependencies=[Depends(require_auditor_or_admin)])
+async def get_audit_log(
+        log_id: str,
+        service: AuditService = Depends(get_audit_service),
+) -> Response[AuditLogDetailResponse]:
+    log = await service.get_log(log_id)
+    if not log:
+        raise NotFoundError("审计记录不存在")
+    return Response.success(data=AuditLogDetailResponse.from_domain(log))
 
 
 @router.get("/audit/summary", response_model=Response[AuditSummaryResponse], dependencies=[Depends(require_auditor_or_admin)])
@@ -324,9 +349,24 @@ async def audit_summary(
 
 
 @router.get("/audit/export", dependencies=[Depends(require_auditor_or_admin)])
-async def export_audit_logs(service: AuditService = Depends(get_audit_service)) -> StreamingResponse:
+async def export_audit_logs(
+        action: Optional[str] = Query(None),
+        actor_user_id: Optional[str] = Query(None),
+        resource_type: Optional[str] = Query(None),
+        resource_id: Optional[str] = Query(None),
+        start_at: Optional[datetime] = Query(None),
+        end_at: Optional[datetime] = Query(None),
+        service: AuditService = Depends(get_audit_service),
+) -> StreamingResponse:
     return StreamingResponse(
-        service.export_csv(),
+        service.export_csv(
+            action=action,
+            actor_user_id=actor_user_id,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            start_at=start_at,
+            end_at=end_at,
+        ),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=audit_logs.csv"},
     )

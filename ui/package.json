@@ -12,7 +12,8 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "i18n:build": "node scripts/build-messages.mjs"
+    "i18n:build": "node scripts/build-messages.mjs",
+    "i18n:check": "node scripts/check-i18n-keys.mjs"
   },
   "dependencies": {
     "@novnc/novnc": "^1.5.0",
