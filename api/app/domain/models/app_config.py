@@ -199,6 +199,13 @@ class FeatureFlagsConfig(BaseModel):
     enable_scheduled_jobs: bool = True
 
 
+class GateProfileSettings(BaseModel):
+    """Per-profile HITL behavior for Web Operator sessions."""
+    first_visit_domain_gate: bool = True
+    tool_gate_call_level_enabled: bool = False
+    selective_critical_only: bool = False
+
+
 class HitlConfig(BaseModel):
     """Human-in-the-loop gate configuration."""
     plan_gate_enabled: bool = True
@@ -209,6 +216,27 @@ class HitlConfig(BaseModel):
         "browser_click", "browser_input", "browser_select_option",
         "browser_press_key", "browser_console_exec",
     ])
+    critical_action_patterns: List[str] = Field(default_factory=lambda: [
+        "删除", "关闭", "关单", "退款", "delete", "close", "refund", "remove",
+        "confirm close", "confirm refund", "btn-confirm-close", "btn-confirm-refund",
+    ])
+    gate_profiles: Dict[str, GateProfileSettings] = Field(default_factory=lambda: {
+        "loose": GateProfileSettings(
+            first_visit_domain_gate=True,
+            tool_gate_call_level_enabled=False,
+            selective_critical_only=False,
+        ),
+        "standard": GateProfileSettings(
+            first_visit_domain_gate=True,
+            tool_gate_call_level_enabled=True,
+            selective_critical_only=True,
+        ),
+        "strict": GateProfileSettings(
+            first_visit_domain_gate=True,
+            tool_gate_call_level_enabled=True,
+            selective_critical_only=False,
+        ),
+    })
     takeover_timeout_minutes: int = 30
 
 

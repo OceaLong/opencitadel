@@ -107,6 +107,15 @@ class SessionModel(Base):
         String(32),
         nullable=True,
     )  # Web Operator 目标系统归属
+    operator_domains: Mapped[list] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )  # 域名白名单
+    gate_profile: Mapped[Optional[str]] = mapped_column(
+        String(16),
+        nullable=True,
+    )  # loose | standard | strict
     status: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
@@ -158,6 +167,8 @@ class SessionModel(Base):
             "pending_phase": self.pending_phase,
             "pending_metadata": self.pending_metadata,
             "operator_scope": self.operator_scope,
+            "operator_domains": self.operator_domains or [],
+            "gate_profile": self.gate_profile,
             "status": self.status,
             "updated_at": self.updated_at,
             "created_at": self.created_at,

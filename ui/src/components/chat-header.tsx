@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
+import { Settings } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { CSSProperties } from "react";
 
@@ -30,11 +30,7 @@ import {
   IconMarketplace,
   IconWorkspace,
 } from "@/lib/icons";
-
-const OpenCitadelSettings = dynamic(
-  () => import("@/components/open-citadel-settings").then((mod) => mod.OpenCitadelSettings),
-  { ssr: false },
-);
+import { useSettingsDialog } from "@/providers/settings-dialog-provider";
 
 function ChatHeaderSidebarTrigger() {
   const { open, isMobile } = useSidebar();
@@ -46,7 +42,9 @@ function ChatHeaderSidebarTrigger() {
 
 export function ChatHeader() {
   const t = useTranslations("chatHeader");
+  const tSettings = useTranslations("settings");
   const tMeta = useTranslations("metadata");
+  const { openSettings } = useSettingsDialog();
   const [llmStatus, setLlmStatus] = useState<LLMStatusData["status"]>("unknown");
 
   const modelStatusKey =
@@ -137,7 +135,16 @@ export function ChatHeader() {
         </DropdownMenu>
         <NotificationInbox />
         <ThemeToggle />
-        <OpenCitadelSettings />
+        <Button
+          variant="outline"
+          size="icon-sm"
+          className="cursor-pointer"
+          aria-label={tSettings("openLabel")}
+          title={tSettings("settingsTitle")}
+          onClick={() => openSettings()}
+        >
+          <Settings className="size-4" />
+        </Button>
       </div>
     </header>
   );

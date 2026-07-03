@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ticket #{{ ticket.id }} — OpsConsole</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1 id="page-title">Ticket #{{ ticket.id }}</h1>
+      <a href="/tickets" id="btn-back-list">&larr; Back to list</a>
+    </div>
+    <div class="user-bar">
+      <span id="current-user">{{ user }}</span>
+      <a href="/logout" id="btn-logout">Logout</a>
+    </div>
+  </header>
+  <main class="container">
+    {% if message %}
+    <div class="alert alert-success" id="flash-message">Action completed: {{ message }}</div>
+    {% endif %}
+    <section class="detail-card" id="ticket-detail">
+      <h2>{{ ticket.title }}</h2>
+      <dl class="meta-grid">
+        <dt>Customer</dt><dd id="field-customer">{{ ticket.customer }}</dd>
+        <dt>Status</dt><dd id="field-status"><span class="status status-{{ ticket.status }}">{{ ticket.status }}</span></dd>
+        <dt>Assignee</dt><dd id="field-assignee">{{ ticket.assignee }}</dd>
+        <dt>Priority</dt><dd id="field-priority">{{ ticket.priority }}</dd>
+        <dt>Amount</dt><dd id="field-amount">${{ '%.2f'|format(ticket.amount) }}</dd>
+        <dt>Updated</dt><dd id="field-updated">{{ ticket.updated_at }}</dd>
+      </dl>
+      <div class="notes-block">
+        <h3>Notes</h3>
+        <pre id="field-notes">{{ ticket.notes or '(none)' }}</pre>
+      </div>
+    </section>
+
+    <section class="detail-card" id="section-update">
+      <h3>Update ticket (normal operation)</h3>
+      <form method="post" action="/tickets/{{ ticket.id }}/update" id="form-update">
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          {% for s in ['open', 'pending', 'in_progress', 'closed', 'refunded'] %}
+          <option value="{{ s }}" {% if ticket.status == s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+        <label for="assignee">Assignee</label>
+        <select id="assignee" name="assignee">
+          {% for a in ['unassigned', 'agent', 'supervisor'] %}
+          <option value="{{ a }}" {% if ticket.assignee == a %}selected{% endif %}>{{ a }}</option>
+          {% endfor %}
+        </select>
+        <label for="note">Add note</label>
+        <textarea id="note" name="note" rows="3" placeholder="Optional note"></textarea>
+        <button type="submit" id="btn-save-update">Save changes</button>
+      </form>
+    </section>
+
+    <section class="detail-card danger-zone" id="section-danger">
+      <h3>High-risk operations</h3>
+      <p>These actions require a separate confirmation page.</p>
+      <div class="danger-actions">
+        <a href="/tickets/{{ ticket.id }}/close" class="btn-danger" id="btn-close-ticket">Close ticket</a>
+        {% if ticket.amount > 0 %}
+        <a href="/tickets/{{ ticket.id }}/refund" class="btn-danger" id="btn-refund-ticket">Process refund</a>
+        {% endif %}
+      </div>
+    </section>
+  </main>
+</body>
+</html>

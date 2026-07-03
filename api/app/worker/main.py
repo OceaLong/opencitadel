@@ -571,6 +571,17 @@ async def main() -> None:
             stop_event=scheduler_stop,
         )
     )
+    from app.application.services.audit_service import AuditService
+    from app.application.services.takeover_timeout_sweep import run_takeover_timeout_loop
+
+    takeover_stop = asyncio.Event()
+    takeover_task = asyncio.create_task(
+        run_takeover_timeout_loop(
+            get_uow,
+            AuditService(uow_factory=get_uow),
+            stop_event=takeover_stop,
+        )
+    )
     worker = AgentWorker(
         runner_factory=await container.task_runner_factory(),
         checkpoint_service=await container.checkpoint_service(),
@@ -594,6 +605,12 @@ async def main() -> None:
         scheduler_task.cancel()
         try:
             await scheduler_task
+        except asyncio.CancelledError:
+            pass
+        takeover_stop.set()
+        takeover_task.cancel()
+        try:
+            await takeover_task
         except asyncio.CancelledError:
             pass
         sandbox_cleanup_task.cancel()

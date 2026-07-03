@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import logging
+import time
 import uuid
 from hashlib import sha256
 from abc import ABC
@@ -41,7 +42,12 @@ from app.domain.utils.hitl import (
     TOOL_APPROVAL_PHASE,
     merge_pending_metadata,
     tool_matches_risk_list,
+    domain_in_whitelist,
+    matches_critical_action,
+    resolve_gate_profile_settings,
 )
+from app.domain.utils.audit_redaction import redact_tool_args, summarize_tool_result
+from app.domain.models.audit_log import AuditLog
 from app.domain.services.agent.sandbox_lifecycle import SandboxLifecycleCoordinator
 from app.infrastructure.external.llm.structured_output import schema_payload
 from pydantic import BaseModel
@@ -541,6 +547,8 @@ class BaseAgent(ABC):
 
     async def _invoke_tool(self, tool: BaseTool, tool_name: str, arguments: Dict[str, Any]) -> ToolResult:
         """传递工具包+工具名字+对应参数调用指定工具"""
+        started = time.monotonic()
+        normalized_args = arguments if isinstance(arguments, dict) else {}
         # 1.执行循环调用工具获取结果
         err = ""
         timeout_seconds = max(1, self._runtime_settings.tool_timeout_seconds)
@@ -555,12 +563,19 @@ class BaseAgent(ABC):
                     logger.warning("调用工具[%s]返回失败，准备重试: %s", tool_name, err)
                     await asyncio.sleep(self._retry_interval)
                     continue
-                return self._truncate_tool_result(
+                truncated = self._truncate_tool_result(
                     result,
                     self._agent_config.tool_result_max_chars,
                     function_name=tool_name,
-                    function_args=arguments if isinstance(arguments, dict) else {},
+                    function_args=normalized_args,
                 )
+                await self._maybe_record_tool_audit(
+                    tool_name=tool_name,
+                    arguments=normalized_args,
+                    result=truncated,
+                    started=started,
+                )
+                return truncated
             except asyncio.TimeoutError:
                 err = f"调用工具[{tool_name}]超时({timeout_seconds}s)"
                 logger.warning(err)
@@ -573,7 +588,14 @@ class BaseAgent(ABC):
                 continue
 
         # 2.循环最大重试次数后没有结果则将错误作为工具的执行结果，让LLM自行处理
-        return ToolResult(success=False, message=err)
+        failed = ToolResult(success=False, message=err)
+        await self._maybe_record_tool_audit(
+            tool_name=tool_name,
+            arguments=normalized_args,
+            result=failed,
+            started=started,
+        )
+        return failed
 
     async def _add_to_memory(self, messages: List[Dict[str, Any]], persist: bool = True) -> None:
         """将对应的信息添加到记忆中"""
@@ -1023,6 +1045,13 @@ class BaseAgent(ABC):
         parsed = urlparse(url if "://" in url else f"https://{url}")
         return (parsed.hostname or "").lower()
 
+    def _effective_gate_profile(self) -> str:
+        return (self._runtime_settings.gate_profile or "standard").lower()
+
+    def _gate_profile_settings(self):
+        runtime = get_runtime_config()
+        return resolve_gate_profile_settings(self._effective_gate_profile(), runtime.hitl)
+
     def _tool_gate_call_level_enabled(self) -> bool:
         runtime = get_runtime_config()
         if not runtime.feature_flags.enable_hitl_gates:
@@ -1030,7 +1059,90 @@ class BaseAgent(ABC):
         override = self._runtime_settings.tool_gate_call_level_enabled
         if override is not None:
             return bool(override)
+        if self._runtime_settings.gate_profile:
+            return bool(self._gate_profile_settings().tool_gate_call_level_enabled)
         return runtime.hitl.tool_gate_call_level_enabled
+
+    def _should_audit_tool(self, tool_name: str) -> bool:
+        if not self._runtime_settings.gate_profile:
+            return False
+        lowered = tool_name.lower()
+        if lowered.startswith("browser_"):
+            return True
+        if lowered in {"shell_execute", "a2a"}:
+            return True
+        if lowered.startswith("mcp_") or tool_name == "mcp":
+            return True
+        return False
+
+    def _compute_tool_gated_flag(self, tool_name: str, arguments: Dict[str, Any]) -> bool:
+        """Whether this tool call would match per-call gate rules (risk list / critical action)."""
+        if not self._runtime_settings.gate_profile:
+            return False
+        runtime = get_runtime_config()
+        if not tool_matches_risk_list(tool_name, runtime.hitl.tool_gate_risk_list):
+            return False
+        profile_settings = self._gate_profile_settings()
+        if profile_settings.selective_critical_only:
+            return matches_critical_action(
+                tool_name,
+                arguments,
+                runtime.hitl.critical_action_patterns,
+            )
+        return self._tool_gate_call_level_enabled()
+
+    async def _maybe_record_tool_audit(
+            self,
+            *,
+            tool_name: str,
+            arguments: Dict[str, Any],
+            result: ToolResult,
+            started: float,
+    ) -> None:
+        if not self._should_audit_tool(tool_name):
+            return
+        duration_ms = int((time.monotonic() - started) * 1000)
+        try:
+            await self._record_tool_audit(
+                tool_name=tool_name,
+                arguments=arguments,
+                result=result,
+                duration_ms=duration_ms,
+                gated=self._compute_tool_gated_flag(tool_name, arguments),
+            )
+        except Exception:
+            logger.exception("写入工具审计失败 session=%s tool=%s", self._session_id, tool_name)
+
+    async def _record_tool_audit(
+            self,
+            *,
+            tool_name: str,
+            arguments: Dict[str, Any],
+            result: ToolResult,
+            duration_ms: int,
+            gated: bool = False,
+    ) -> None:
+        if not self._should_audit_tool(tool_name):
+            return
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(self._session_id)
+            await uow.audit.add(AuditLog(
+                actor_user_id=session.owner_user_id if session else None,
+                action="agent_tool_invoke",
+                resource_type="session",
+                resource_id=self._session_id,
+                team_id=session.team_id if session else None,
+                metadata={
+                    "tool": tool_name,
+                    "args": redact_tool_args(arguments if isinstance(arguments, dict) else {}),
+                    "success": result.success,
+                    "result_summary": summarize_tool_result(result),
+                    "duration_ms": duration_ms,
+                    "gate_profile": self._runtime_settings.gate_profile,
+                    "gated": gated,
+                },
+            ))
+            await uow.commit()
 
     async def _record_visited_domain(self, function_args: Dict[str, Any]) -> None:
         url = function_args.get("url") if isinstance(function_args, dict) else None
@@ -1075,6 +1187,9 @@ class BaseAgent(ABC):
                 return False
             if not session.operator_scope:
                 return False
+            whitelist = list(self._runtime_settings.operator_domains or session.operator_domains or [])
+            if domain_in_whitelist(domain, whitelist):
+                return False
             meta = session.pending_metadata or {}
             visited = set(meta.get("visited_domains") or [])
             approved = set(meta.get("approved_domains") or [])
@@ -1103,6 +1218,18 @@ class BaseAgent(ABC):
         runtime = get_runtime_config()
         if not tool_matches_risk_list(function_name, runtime.hitl.tool_gate_risk_list):
             return False
+        profile_settings = (
+            self._gate_profile_settings()
+            if self._runtime_settings.gate_profile
+            else None
+        )
+        if profile_settings and profile_settings.selective_critical_only:
+            if not matches_critical_action(
+                    function_name,
+                    function_args if isinstance(function_args, dict) else {},
+                    runtime.hitl.critical_action_patterns,
+            ):
+                return False
         async with self._uow_factory() as uow:
             session = await uow.session.get_by_id(self._session_id)
             if not session:

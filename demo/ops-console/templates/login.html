@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpsConsole — Login</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="login-card">
+    <h1 id="page-title">OpsConsole</h1>
+    <p class="subtitle">Internal Ticket Operations</p>
+    {% if error %}
+    <div class="alert alert-error" id="login-error">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/login" id="login-form">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" required autocomplete="username" value="agent">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required autocomplete="current-password" value="agent123">
+      <button type="submit" id="btn-login">Sign in</button>
+    </form>
+    <p class="hint">Demo credentials: agent / agent123</p>
+  </main>
+</body>
+</html>

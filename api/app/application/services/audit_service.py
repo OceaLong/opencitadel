@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 import csv
 import io
-from datetime import datetime
-from typing import AsyncGenerator, Callable, Optional
+import json
+from datetime import datetime, timezone
+from typing import AsyncGenerator, Callable, Optional, Any, Dict, List
 
 from sqlalchemy import desc, func, select
 
@@ -43,17 +44,73 @@ class AuditService:
             )
 
     async def build_session_audit_report(self, session_id: str) -> str:
-        logs = await self.list_logs(resource_id=session_id, limit=500)
-        lines = [f"# 会话审计报告\n\nSession: `{session_id}`\n\n"]
-        if not logs:
-            lines.append("_无 API 层审计记录_\n")
-            return "".join(lines)
-        for log in logs:
-            lines.append(
-                f"- **{log.created_at.isoformat()}** `{log.action}` "
-                f"actor={log.actor_user_id or 'system'} metadata={log.metadata}\n"
-            )
+        payload = await self.build_session_audit_report_json(session_id)
+        lines = [
+            f"# 会话审计报告\n\nSession: `{session_id}`\n\n",
+            "## 治理动作\n\n",
+        ]
+        governance = payload.get("governance_actions") or []
+        if not governance:
+            lines.append("_无治理动作记录_\n\n")
+        else:
+            for item in governance:
+                lines.append(
+                    f"- **{item.get('created_at')}** `{item.get('action')}` "
+                    f"actor={item.get('actor_user_id') or 'system'} metadata={item.get('metadata')}\n"
+                )
+            lines.append("\n")
+        lines.append("## 工具调用明细\n\n")
+        tools = payload.get("tool_invocations") or []
+        if not tools:
+            lines.append("_无工具调用记录_\n\n")
+        else:
+            for item in tools:
+                lines.append(
+                    f"- **{item.get('created_at')}** `{item.get('tool')}` "
+                    f"success={item.get('success')} duration_ms={item.get('duration_ms')} "
+                    f"args={item.get('args')} result={item.get('result_summary')}\n"
+                )
         return "".join(lines)
+
+    async def build_session_audit_report_json(self, session_id: str) -> Dict[str, Any]:
+        logs = await self.list_logs(resource_id=session_id, limit=1000)
+        governance: List[Dict[str, Any]] = []
+        tool_invocations: List[Dict[str, Any]] = []
+        for log in logs:
+            entry = {
+                "id": log.id,
+                "created_at": log.created_at.isoformat(),
+                "action": log.action,
+                "actor_user_id": log.actor_user_id,
+                "metadata": log.metadata,
+            }
+            if log.action == "agent_tool_invoke":
+                meta = log.metadata or {}
+                tool_invocations.append({
+                    **entry,
+                    "tool": meta.get("tool"),
+                    "args": meta.get("args"),
+                    "success": meta.get("success"),
+                    "result_summary": meta.get("result_summary"),
+                    "duration_ms": meta.get("duration_ms"),
+                    "gate_profile": meta.get("gate_profile"),
+                    "gated": meta.get("gated"),
+                })
+            else:
+                governance.append(entry)
+        return {
+            "session_id": session_id,
+            "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "governance_actions": governance,
+            "tool_invocations": tool_invocations,
+        }
+
+    async def build_session_audit_report_json_text(self, session_id: str) -> str:
+        return json.dumps(
+            await self.build_session_audit_report_json(session_id),
+            ensure_ascii=False,
+            indent=2,
+        )
 
     async def summarize(
             self,

@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl";
 
 import {
   IconDelete,
+  IconIntegration,
   IconMemory,
   IconModel,
   IconSkill,
@@ -471,27 +472,35 @@ export function MCPSetting({ servers, loading, onToggleEnabled, onDelete, onAdd 
 const SETTING_MENUS: Array<{
   key: SettingTab;
   icon: typeof Settings;
-  labelKey: "common" | "models" | "skills" | "memory";
+  labelKey: "common" | "models" | "skills" | "memory" | "integrations";
 }> = [
   { key: "common-setting", icon: Settings, labelKey: "common" },
   { key: "models-setting", icon: IconModel, labelKey: "models" },
   { key: "skills-setting", icon: IconSkill, labelKey: "skills" },
   { key: "memory-setting", icon: IconMemory, labelKey: "memory" },
+  { key: "integrations-setting", icon: IconIntegration, labelKey: "integrations" },
 ];
 
-export function OpenCitadelSettings() {
+export type SettingsDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialTab?: SettingTab;
+};
+
+export function SettingsDialog({
+  open,
+  onOpenChange,
+  initialTab = "common-setting",
+}: SettingsDialogProps) {
   const t = useTranslations("settings");
   const tCommon = useTranslations("common");
-  // ---- 防止 SSR hydration 不匹配（Radix Dialog 在服务端/客户端生成不同的 aria-controls ID）----
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    const id = window.setTimeout(() => setMounted(true), 0);
-    return () => window.clearTimeout(id);
-  }, []);
+  const [activeSetting, setActiveSetting] = useState<SettingTab>(initialTab);
 
-  // ---- 弹窗 & 导航 ----
-  const [open, setOpen] = useState(false);
-  const [activeSetting, setActiveSetting] = useState<SettingTab>("common-setting");
+  useEffect(() => {
+    if (open) {
+      setActiveSetting(initialTab);
+    }
+  }, [open, initialTab]);
 
   const showFooterSave = activeSetting === "common-setting";
   const {
@@ -512,33 +521,9 @@ export function OpenCitadelSettings() {
     handleA2AAdd,
   } = useOpenCitadelSettings(open, activeSetting);
 
-  // 客户端挂载前，仅渲染普通按钮占位，避免 Radix Dialog SSR hydration 不匹配
-  if (!mounted) {
-    return (
-      <Button variant="outline" size="icon-sm" className="cursor-pointer">
-        <Settings />
-      </Button>
-    );
-  }
-
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      {/* 触发按钮 */}
-      <DialogTrigger asChild>
-        <Button
-          variant="outline"
-          size="icon-sm"
-          className="cursor-pointer"
-          aria-label={t("openLabel")}
-          title={t("settingsTitle")}
-        >
-          <Settings />
-        </Button>
-      </DialogTrigger>
-
-      {/* 弹窗内容 */}
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="!max-w-[920px] shadow-[var(--shadow-panel)]">
-        {/* 头部 */}
         <DialogHeader className="border-border/70 border-b pb-4">
           <DialogTitle className="text-foreground">{t("title")}</DialogTitle>
           <DialogDescription className="text-muted-foreground">
@@ -546,9 +531,7 @@ export function OpenCitadelSettings() {
           </DialogDescription>
         </DialogHeader>
 
-        {/* 中间主体 */}
         <div className="flex flex-row gap-4">
-          {/* 左侧导航菜单 */}
           <div className="w-[168px] shrink-0">
             <div className="flex flex-col gap-0">
               {SETTING_MENUS.map((menu) => (
@@ -565,10 +548,8 @@ export function OpenCitadelSettings() {
             </div>
           </div>
 
-          {/* 分隔符 */}
           <Separator orientation="vertical" />
 
-          {/* 右侧内容 */}
           <div className="scrollbar-hide h-[500px] flex-1 overflow-y-auto">
             {loadingConfig && activeSetting === "common-setting" ? (
               <div className="flex h-full items-center justify-center">
@@ -584,32 +565,36 @@ export function OpenCitadelSettings() {
             {activeSetting === "models-setting" && <ModelsSettings embedded />}
             {activeSetting === "skills-setting" && <SkillsSettings embedded />}
             {activeSetting === "memory-setting" && <MemorySettings embedded />}
-            {activeSetting === "a2a-setting" && (
-              <p className="text-muted-foreground text-sm">
-                {t("a2aMovedTo")}{" "}
-                <a href="/settings/integrations" className="text-primary underline">
-                  {t("integrationsLink")}
-                </a>
-              </p>
-            )}
-            {activeSetting === "mcp-setting" && (
-              <p className="text-muted-foreground text-sm">
-                {t("mcpMovedTo")}{" "}
-                <a href="/settings/integrations" className="text-primary underline">
-                  {t("integrationsLink")}
-                </a>
-              </p>
+            {activeSetting === "integrations-setting" && (
+              <div className="space-y-6 px-1">
+                <MCPSetting
+                  servers={mcpServers}
+                  loading={loadingMCP}
+                  onToggleEnabled={handleMCPToggle}
+                  onDelete={handleMCPDelete}
+                  onAdd={handleMCPAdd}
+                />
+                <A2ASetting
+                  servers={a2aServers}
+                  loading={loadingA2A}
+                  onToggleEnabled={handleA2AToggle}
+                  onDelete={handleA2ADelete}
+                  onAdd={handleA2AAdd}
+                />
+              </div>
             )}
           </div>
         </div>
 
         {showFooterSave && (
           <DialogFooter className="border-t pt-4">
-            <DialogClose asChild>
-              <Button variant="outline" className="cursor-pointer">
-                {tCommon("cancel")}
-              </Button>
-            </DialogClose>
+            <Button
+              variant="outline"
+              className="cursor-pointer"
+              onClick={() => onOpenChange(false)}
+            >
+              {tCommon("cancel")}
+            </Button>
             <Button className="cursor-pointer" disabled={saving} onClick={handleSave}>
               {saving && <Loader2 className="animate-spin" />}
               {tCommon("save")}

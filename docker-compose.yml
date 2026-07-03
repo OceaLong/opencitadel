@@ -228,6 +228,30 @@ services:
       retries: 5
       start_period: 30s
 
+  # ==================== Demo: OpsConsole 样板工单后台 ====================
+
+  ops-console:
+    profiles:
+      - demo
+    build:
+      context: ./demo/ops-console
+      dockerfile: Dockerfile
+    image: opencitadel-ops-console
+    container_name: opencitadel-ops-console
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: "0.50"
+    networks:
+      - opencitadel-network
+    ports:
+      - "${OPS_CONSOLE_PORT:-9099}:9099"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9099/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   # ==================== Nginx 网关 ====================
 
   opencitadel-nginx:

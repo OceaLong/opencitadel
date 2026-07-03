@@ -26,6 +26,14 @@ class CreateSessionRequest(BaseModel):
         default=None,
         description="Web Operator 目标系统归属: owned | third_party_saas",
     )
+    operator_domains: List[str] = Field(
+        default_factory=list,
+        description="Web Operator 域名白名单",
+    )
+    gate_profile: Optional[str] = Field(
+        default="standard",
+        description="门控档位: loose | standard | strict",
+    )
 
 
 class CreateSessionResponse(BaseModel):
@@ -123,6 +131,9 @@ class GetSessionResponse(BaseModel):
     skill: Optional[SkillSummaryResponse] = None
     token_usage: Optional[TokenUsageSummaryResponse] = None
     operator_scope: Optional[str] = None
+    operator_domains: List[str] = Field(default_factory=list)
+    gate_profile: Optional[str] = None
+    awaiting_human: bool = False
     codebase_id: Optional[str] = None
     knowledge_base_id: Optional[str] = None
     mode: Optional[SessionMode] = None

@@ -91,7 +91,46 @@ def preserve_session_tracking_metadata(meta: Optional[Dict[str, Any]]) -> Option
         return None
     preserved = {
         key: meta[key]
-        for key in ("visited_domains", "approved_domains", "approved_tools", "takeover")
+        for key in ("visited_domains", "approved_domains", "approved_tools", "takeover", "awaiting_human")
         if meta.get(key)
     }
     return preserved or None
+
+
+def domain_in_whitelist(domain: str, whitelist: List[str]) -> bool:
+    normalized = (domain or "").lower().strip()
+    if not normalized or not whitelist:
+        return False
+    for entry in whitelist:
+        item = (entry or "").lower().strip()
+        if not item:
+            continue
+        if normalized == item or normalized.endswith(f".{item}"):
+            return True
+    return False
+
+
+def matches_critical_action(
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        patterns: List[str],
+) -> bool:
+    """Return True when a browser tool call looks like an irreversible high-risk action."""
+    if not patterns:
+        return False
+    blob_parts: List[str] = [tool_name.lower()]
+    if isinstance(tool_args, dict):
+        for key in ("text", "selector", "element", "url", "value", "name", "id"):
+            val = tool_args.get(key)
+            if val is not None:
+                blob_parts.append(str(val).lower())
+    blob = " ".join(blob_parts)
+    return any(p.lower() in blob for p in patterns if p)
+
+
+def resolve_gate_profile_settings(profile: Optional[str], hitl_config: Any) -> Any:
+    profiles = getattr(hitl_config, "gate_profiles", None) or {}
+    key = (profile or "standard").lower()
+    if key in profiles:
+        return profiles[key]
+    return profiles.get("standard")

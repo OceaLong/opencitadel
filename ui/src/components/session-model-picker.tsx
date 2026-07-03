@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { Cpu } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -19,6 +18,7 @@ import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
 import type { LLMModel } from "@/lib/api/types";
 import { useAuth } from "@/providers/auth-provider";
 import { useLoginPrompt } from "@/providers/login-prompt-provider";
+import { useSettingsDialog } from "@/providers/settings-dialog-provider";
 
 type Props = {
   value?: string | null;
@@ -44,6 +44,7 @@ export function SessionModelPicker({
   const tCommon = useTranslations("common");
   const { user } = useAuth();
   const { promptLogin } = useLoginPrompt();
+  const { openSettings } = useSettingsDialog();
   const [models, setModels] = useState<LLMModel[]>([]);
   const [llmUnavailable, setLlmUnavailable] = useState(false);
 
@@ -141,9 +142,13 @@ export function SessionModelPicker({
           <Badge variant="destructive" className="text-[10px]">
             {llmUnavailable ? t("unavailable") : t("notConfigured")}
           </Badge>
-          <Link href="/settings" className="text-primary text-xs underline">
+          <button
+            type="button"
+            className="text-primary text-xs underline"
+            onClick={() => openSettings("models-setting")}
+          >
             {t("goSettings")}
-          </Link>
+          </button>
         </div>
       )}
       <InlineOptionPicker

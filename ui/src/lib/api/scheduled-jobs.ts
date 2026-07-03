@@ -1,8 +1,10 @@
-import { del, get, post } from "./fetch";
+import { del, get, patch, post } from "./fetch";
 import type {
   CreateScheduledJobParams,
   CreateScheduledJobResult,
+  ScheduledJob,
   ScheduledJobsData,
+  UpdateScheduledJobParams,
 } from "./types";
 
 export const scheduledJobsApi = {
@@ -12,6 +14,10 @@ export const scheduledJobsApi = {
 
   create: (params: CreateScheduledJobParams): Promise<CreateScheduledJobResult> => {
     return post<CreateScheduledJobResult>("/scheduled-jobs", params);
+  },
+
+  update: (jobId: string, params: UpdateScheduledJobParams): Promise<ScheduledJob> => {
+    return patch<ScheduledJob>(`/scheduled-jobs/${jobId}`, params);
   },
 
   delete: (jobId: string): Promise<{ deleted: boolean }> => {

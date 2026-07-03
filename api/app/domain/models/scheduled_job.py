@@ -29,6 +29,9 @@ class ScheduledJob(BaseModel):
     codebase_id: Optional[str] = None
     knowledge_base_id: Optional[str] = None
     notify_channels: List[NotifyChannel] = Field(default_factory=list)
+    operator_scope: Optional[str] = None
+    operator_domains: List[str] = Field(default_factory=list)
+    gate_profile: Optional[str] = None
     enabled: bool = True
     next_run_at: Optional[datetime] = None
     last_run_at: Optional[datetime] = None

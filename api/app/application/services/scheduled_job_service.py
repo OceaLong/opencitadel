@@ -72,6 +72,9 @@ class ScheduledJobService:
             codebase_id: Optional[str] = None,
             knowledge_base_id: Optional[str] = None,
             notify_channels: Optional[List[NotifyChannel]] = None,
+            operator_scope: Optional[str] = None,
+            operator_domains: Optional[List[str]] = None,
+            gate_profile: Optional[str] = None,
             enabled: bool = True,
     ) -> tuple[ScheduledJob, Optional[str]]:
         webhook_secret: Optional[str] = None
@@ -86,6 +89,9 @@ class ScheduledJobService:
             codebase_id=codebase_id,
             knowledge_base_id=knowledge_base_id,
             notify_channels=notify_channels or [],
+            operator_scope=operator_scope,
+            operator_domains=list(operator_domains or []),
+            gate_profile=gate_profile,
             enabled=enabled,
         )
         if trigger_type == "webhook":
@@ -117,6 +123,30 @@ class ScheduledJobService:
             await uow.scheduled_job.save(job)
             await uow.commit()
         return job
+
+    async def patch_job(
+            self,
+            job_id: str,
+            owner_user_id: str,
+            **fields,
+    ) -> Optional[ScheduledJob]:
+        async with self._uow_factory() as uow:
+            job = await uow.scheduled_job.get_by_id(job_id)
+            if not job or job.owner_user_id != owner_user_id:
+                return None
+            for key, value in fields.items():
+                if value is None:
+                    continue
+                if key == "notify_channels":
+                    job.notify_channels = value
+                else:
+                    setattr(job, key, value)
+            if job.trigger_type != "webhook":
+                job.next_run_at = compute_next_run(job.trigger_type, job.trigger_spec)
+            job.updated_at = datetime.now()
+            await uow.scheduled_job.save(job)
+            await uow.commit()
+            return job
 
     async def delete_job(self, job_id: str) -> None:
         async with self._uow_factory() as uow:
@@ -216,6 +246,9 @@ class ScheduledJobService:
             codebase_id=job.codebase_id,
             knowledge_base_id=job.knowledge_base_id,
             owner_user_id=job.owner_user_id,
+            operator_scope=job.operator_scope,
+            operator_domains=list(job.operator_domains or []),
+            gate_profile=job.gate_profile or ("standard" if job.operator_scope else None),
             mode=SessionMode.AGENT,
         )
         task_state = get_task_state()

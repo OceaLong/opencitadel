@@ -318,13 +318,24 @@ class TaskRunnerFactory:
             tool_output_offload_enabled=runtime.memory.tool_output_offload_enabled,
             tool_output_offload_threshold_chars=runtime.memory.tool_output_offload_threshold_chars,
         )
+        tool_gate_override = None
+        gate_profile = session.gate_profile
+        operator_domains = list(session.operator_domains or [])
+        if session.operator_scope:
+            profile_key = (gate_profile or "standard").lower()
+            profile_settings = runtime.hitl.gate_profiles.get(profile_key)
+            if profile_settings is None:
+                profile_settings = runtime.hitl.gate_profiles.get("standard")
+            if profile_settings is not None:
+                tool_gate_override = profile_settings.tool_gate_call_level_enabled
+        elif skill and skill.agent_params:
+            tool_gate_override = skill.agent_params.tool_gate_call_level_enabled
+
         agent_runtime_settings = AgentRuntimeSettings(
             tool_timeout_seconds=runtime.worker.tool_timeout_seconds,
-            tool_gate_call_level_enabled=(
-                skill.agent_params.tool_gate_call_level_enabled
-                if skill and skill.agent_params
-                else None
-            ),
+            tool_gate_call_level_enabled=tool_gate_override,
+            gate_profile=gate_profile if session.operator_scope else None,
+            operator_domains=operator_domains,
             memory=runtime_settings,
         )
 
@@ -392,13 +403,21 @@ class TaskRunnerFactory:
                     session_row = await uow.session.get_by_id(session_id)
                 if session_row and session_row.operator_scope:
                     try:
-                        report = await self._audit_service.build_session_audit_report(session_id)
+                        report_md = await self._audit_service.build_session_audit_report(session_id)
+                        report_json = await self._audit_service.build_session_audit_report_json_text(session_id)
                         await self._artifact_service.write_content(
                             session_id=session_id,
                             artifact_id=None,
                             kind="doc",
-                            title="会话审计报告",
-                            content=report,
+                            title="audit-report.md",
+                            content=report_md,
+                        )
+                        await self._artifact_service.write_content(
+                            session_id=session_id,
+                            artifact_id=None,
+                            kind="doc",
+                            title="audit-report.json",
+                            content=report_json,
                         )
                     except Exception as exc:
                         logger.warning("生成会话审计 artifact 失败 session=%s: %s", session_id, exc)

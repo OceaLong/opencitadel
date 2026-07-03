@@ -14,7 +14,7 @@ import {
 } from "@/components/context-selector";
 import {
   OperatorScopeDialog,
-  type OperatorScope,
+  type OperatorSessionConfig,
 } from "@/components/operator-scope-dialog";
 import { SessionModelPicker } from "@/components/session-model-picker";
 import { SessionSkillPicker } from "@/components/session-skill-picker";
@@ -57,7 +57,7 @@ export default function Page() {
   const createSessionAndNavigate = async (
     message: string,
     files: FileInfo[],
-    operatorScope?: OperatorScope,
+    operatorConfig?: OperatorSessionConfig,
   ) => {
     let resolvedModelId = modelId;
 
@@ -88,7 +88,9 @@ export default function Page() {
         model_id: resolvedModelId,
         skill_id: skillId,
         thinking_enabled: thinkingEnabled,
-        operator_scope: operatorScope,
+        operator_scope: operatorConfig?.scope,
+        operator_domains: operatorConfig?.operatorDomains,
+        gate_profile: operatorConfig?.gateProfile,
         codebase_id: context.codebaseId,
         knowledge_base_id: context.knowledgeBaseId,
         mode: hasContext ? "ask" : undefined,
@@ -127,10 +129,10 @@ export default function Page() {
       <OperatorScopeDialog
         open={scopeDialogOpen}
         onOpenChange={setScopeDialogOpen}
-        onConfirm={(scope) => {
+        onConfirm={(config) => {
           const pending = pendingSendRef.current;
           if (pending) {
-            void createSessionAndNavigate(pending.message, pending.files, scope);
+            void createSessionAndNavigate(pending.message, pending.files, config);
             pendingSendRef.current = null;
           }
         }}

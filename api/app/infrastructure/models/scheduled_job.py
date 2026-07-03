@@ -29,6 +29,9 @@ class ScheduledJobModel(Base):
         String(255), ForeignKey("knowledge_bases.id", ondelete="SET NULL"),
     )
     notify_channels: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    operator_scope: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    operator_domains: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    gate_profile: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -53,6 +56,9 @@ class ScheduledJobModel(Base):
             "codebase_id": self.codebase_id,
             "knowledge_base_id": self.knowledge_base_id,
             "notify_channels": channels,
+            "operator_scope": self.operator_scope,
+            "operator_domains": self.operator_domains or [],
+            "gate_profile": self.gate_profile,
             "enabled": self.enabled,
             "next_run_at": self.next_run_at,
             "last_run_at": self.last_run_at,

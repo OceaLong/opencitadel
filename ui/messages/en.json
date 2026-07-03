@@ -246,7 +246,8 @@
       "thirdPartySaas": "Third-party SaaS (declared and audited)",
       "owned": "Enterprise-owned/self-hosted system",
       "webOperator": "Web Operator",
-      "waitingApproval": "Awaiting approval or takeover"
+      "waitingApproval": "Awaiting approval or takeover",
+      "awaitingHuman": "Awaiting human (takeover timeout)"
     }
   },
   "sessionMemory": {
@@ -375,6 +376,7 @@
     "models": "Models",
     "skills": "Skill templates",
     "memory": "Long-term memory",
+    "integrations": "Integrations",
     "a2a": "A2A Agent",
     "mcp": "MCP servers",
     "language": "Language",
@@ -640,7 +642,26 @@
     "ownedDescription": "Systems you are authorized to operate (internal admin panels, self-hosted demo environments, etc.).",
     "thirdPartyTitle": "Third-party SaaS",
     "thirdPartyDescription": "May violate terms of service or trigger unauthorized access risks; use only with explicit authorization. All actions will be fully audited.",
-    "confirmCreate": "Confirm and create task"
+    "confirmCreate": "Confirm and create task",
+    "ownershipLabel": "Ownership declaration",
+    "domainsLabel": "Domain allowlist",
+    "domainsPlaceholder": "ops-console, internal.example.com",
+    "domainsHint": "Comma or newline separated hostnames. First visit to hosts outside this list requires approval.",
+    "gateProfileLabel": "Gate profile",
+    "gateProfile": {
+      "loose": {
+        "title": "Loose",
+        "description": "Plan approval + first-visit domain gate only"
+      },
+      "standard": {
+        "title": "Standard (recommended)",
+        "description": "Plan approval + first-visit domain + critical actions (close/refund/delete)"
+      },
+      "strict": {
+        "title": "Strict",
+        "description": "All high-risk browser tools require per-call approval"
+      }
+    }
   },
   "marketplace": {
     "selectApp": "Select an app to get started",
@@ -1237,8 +1258,19 @@
       "prompt": "Prompt template",
       "triggerType": "Trigger type",
       "triggerSpec": "Trigger config",
-      "enabled": "Enabled"
+      "enabled": "Enabled",
+      "modelId": "Model ID",
+      "skillId": "Skill ID",
+      "notifyServer": "MCP notify server",
+      "notifyChannel": "Notify channel arg",
+      "operatorScope": "Web Operator scope",
+      "operatorDomains": "Operator domains",
+      "gateProfile": "Gate profile"
     },
+    "editJob": "Edit",
+    "saveJob": "Save",
+    "jobUpdated": "Job updated",
+    "updateFailed": "Failed to update job",
     "copiedWithLabel": "{label} copied",
     "jobCreated": "Job created",
     "jobCreateFailed": "Failed to create job",

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirm Close — Ticket #{{ ticket.id }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1 id="page-title">Confirm close ticket</h1>
+      <a href="/tickets/{{ ticket.id }}" id="btn-cancel">&larr; Cancel</a>
+    </div>
+  </header>
+  <main class="container">
+    <section class="detail-card danger-zone" id="confirm-close-page">
+      <h2>Close ticket #{{ ticket.id }}?</h2>
+      <p><strong>{{ ticket.title }}</strong></p>
+      <p class="warning">This action is irreversible. The ticket will be marked as closed.</p>
+      <form method="post" action="/tickets/{{ ticket.id }}/close" id="form-close">
+        <label for="confirm">Type <code>close</code> to confirm</label>
+        <input type="text" id="confirm" name="confirm" required placeholder="close" autocomplete="off">
+        <button type="submit" class="btn-danger" id="btn-confirm-close">Confirm close ticket</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

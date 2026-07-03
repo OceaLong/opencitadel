@@ -19,6 +19,7 @@ from app.interfaces.schemas.scheduled_job import (
     CreateScheduledJobResponse,
     ScheduledJobListResponse,
     ScheduledJobResponse,
+    UpdateScheduledJobRequest,
     WebhookSecretResponse,
 )
 from app.interfaces.service_dependencies import (
@@ -68,9 +69,44 @@ async def create_job(
         codebase_id=body.codebase_id,
         knowledge_base_id=body.knowledge_base_id,
         notify_channels=channels,
+        operator_scope=body.operator_scope,
+        operator_domains=body.operator_domains,
+        gate_profile=body.gate_profile,
         enabled=body.enabled,
     )
     return ApiResponse.success(CreateScheduledJobResponse(job=_job_response(job), webhook_secret=secret))
+
+
+@scheduled_router.patch("/{job_id}", response_model=ApiResponse[ScheduledJobResponse])
+async def update_job(
+        job_id: str,
+        body: UpdateScheduledJobRequest,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        service: ScheduledJobService = Depends(get_scheduled_job_service),
+):
+    channels = None
+    if body.notify_channels is not None:
+        channels = [NotifyChannel.model_validate(c.model_dump()) for c in body.notify_channels]
+    job = await service.patch_job(
+        job_id,
+        ctx.principal.user_id,
+        name=body.name,
+        trigger_type=body.trigger_type,
+        trigger_spec=body.trigger_spec,
+        prompt_template=body.prompt_template,
+        skill_id=body.skill_id,
+        model_id=body.model_id,
+        codebase_id=body.codebase_id,
+        knowledge_base_id=body.knowledge_base_id,
+        notify_channels=channels,
+        operator_scope=body.operator_scope,
+        operator_domains=body.operator_domains,
+        gate_profile=body.gate_profile,
+        enabled=body.enabled,
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return ApiResponse.success(_job_response(job))
 
 
 @scheduled_router.delete("/{job_id}", response_model=ApiResponse[dict])

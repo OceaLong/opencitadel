@@ -641,6 +641,8 @@ export type CreateSessionParams = {
   knowledge_base_id?: string;
   mode?: SessionMode;
   operator_scope?: "owned" | "third_party_saas";
+  operator_domains?: string[];
+  gate_profile?: "loose" | "standard" | "strict";
   [key: string]: unknown;
 };
 
@@ -1013,6 +1015,9 @@ export type ScheduledJob = {
   model_id?: string | null;
   codebase_id?: string | null;
   knowledge_base_id?: string | null;
+  operator_scope?: "owned" | "third_party_saas" | null;
+  operator_domains?: string[];
+  gate_profile?: "loose" | "standard" | "strict" | null;
   notify_channels: NotifyChannel[];
   enabled: boolean;
   next_run_at?: string | null;
@@ -1036,8 +1041,13 @@ export type CreateScheduledJobParams = {
   codebase_id?: string | null;
   knowledge_base_id?: string | null;
   notify_channels?: NotifyChannel[];
+  operator_scope?: "owned" | "third_party_saas" | null;
+  operator_domains?: string[];
+  gate_profile?: "loose" | "standard" | "strict" | null;
   enabled?: boolean;
 };
+
+export type UpdateScheduledJobParams = Partial<CreateScheduledJobParams>;
 
 export type CreateScheduledJobResult = {
   job: ScheduledJob;

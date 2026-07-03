@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirm Refund — Ticket #{{ ticket.id }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1 id="page-title">Confirm refund</h1>
+      <a href="/tickets/{{ ticket.id }}" id="btn-cancel">&larr; Cancel</a>
+    </div>
+  </header>
+  <main class="container">
+    <section class="detail-card danger-zone" id="confirm-refund-page">
+      <h2>Process refund for ticket #{{ ticket.id }}?</h2>
+      <p><strong>{{ ticket.title }}</strong></p>
+      <p>Refund amount: <strong id="refund-amount">${{ '%.2f'|format(ticket.amount) }}</strong></p>
+      <p class="warning">This action is irreversible. Funds will be returned to the customer.</p>
+      <form method="post" action="/tickets/{{ ticket.id }}/refund" id="form-refund">
+        <label for="confirm">Type <code>refund</code> to confirm</label>
+        <input type="text" id="confirm" name="confirm" required placeholder="refund" autocomplete="off">
+        <button type="submit" class="btn-danger" id="btn-confirm-refund">Confirm refund</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

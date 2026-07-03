@@ -11,6 +11,7 @@
 1. [10 分钟自托管](tutorials/01-self-host-10-minutes.zh-CN.md)
 2. [内部知识库教程](tutorials/02-internal-knowledge-base.zh-CN.md)
 3. [MCP 集成教程](tutorials/03-mcp-integrations.zh-CN.md)
+4. [受治理 Web Operator](tutorials/04-governed-web-operator.zh-CN.md)
 
 ### 运维与部署
 
@@ -29,6 +30,7 @@
 | [安全模型](architecture/security-model.zh-CN.md) | 信任边界、沙箱隔离、认证与授权 |
 | [事件系统](architecture/events.zh-CN.md) | 领域事件、SSE 契约、持久化与 replay |
 | [检查点与 HITL](architecture/checkpoints-and-hitl.zh-CN.md) | 门控契约、回滚、Web Operator、浏览器 Profile 快照 |
+| [Web Operator](architecture/web-operator.zh-CN.md) | 门控档位、审计契约、OpsConsole 演示 |
 | [自动化与调度](architecture/automation-scheduler.zh-CN.md) | Cron/Webhook 任务、Leader 选举、通知 |
 | [应用市场](architecture/marketplace.zh-CN.md) | LLM 小应用目录与契约 |
 | [配置来源治理](architecture/config-source-governance.zh-CN.md) | AppConfig、config.yaml、环境变量边界 |

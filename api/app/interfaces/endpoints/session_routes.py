@@ -286,6 +286,9 @@ async def build_get_session_response(
         skill=skill_resp,
         token_usage=token_usage_resp,
         operator_scope=session.operator_scope,
+        operator_domains=session.operator_domains or [],
+        gate_profile=session.gate_profile,
+        awaiting_human=bool((session.pending_metadata or {}).get("awaiting_human")),
         codebase_id=session.codebase_id,
         knowledge_base_id=session.knowledge_base_id,
         mode=session.mode,
@@ -320,6 +323,8 @@ async def create_session(
         knowledge_base_id=request.knowledge_base_id,
         mode=request.mode,
         operator_scope=request.operator_scope,
+        operator_domains=request.operator_domains,
+        gate_profile=request.gate_profile,
         scope=ctx.scope,
     )
     if request.operator_scope:
@@ -330,7 +335,11 @@ async def create_session(
             resource_type="session",
             resource_id=session.id,
             team_id=ctx.scope.team_id if ctx.scope.type == OwnerScopeType.TEAM else None,
-            metadata={"ownership": request.operator_scope},
+            metadata={
+                "ownership": request.operator_scope,
+                "operator_domains": request.operator_domains,
+                "gate_profile": request.gate_profile or "standard",
+            },
         ))
     return Response.success(
         msg="创建任务会话成功",

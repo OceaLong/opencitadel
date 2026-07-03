@@ -17,6 +17,7 @@ import { SidebarFooter } from "@/components/ui/sidebar";
 
 import { useAuth } from "@/providers/auth-provider";
 import { useLoginPrompt } from "@/providers/login-prompt-provider";
+import { useSettingsDialog } from "@/providers/settings-dialog-provider";
 
 function getDisplayName(
   user: { display_name?: string; username?: string; email?: string },
@@ -34,6 +35,7 @@ function getInitials(name: string): string {
 export function AccountMenu() {
   const { user, logout } = useAuth();
   const { promptLogin } = useLoginPrompt();
+  const { openSettings } = useSettingsDialog();
   const tAccount = useTranslations("account");
   const tAuth = useTranslations("auth");
   const tCommon = useTranslations("common");
@@ -79,11 +81,12 @@ export function AccountMenu() {
               </Link>
             </DropdownMenuItem>
           ) : null}
-          <DropdownMenuItem asChild>
-            <Link href="/settings">
-              <Settings className="size-4" />
-              {tAccount("settings")}
-            </Link>
+          <DropdownMenuItem
+            className="cursor-pointer"
+            onClick={() => openSettings()}
+          >
+            <Settings className="size-4" />
+            {tAccount("settings")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem

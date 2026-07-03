@@ -61,6 +61,7 @@ export default function AutomationPage() {
   const [jobs, setJobs] = useState<ScheduledJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [rotatingJobId, setRotatingJobId] = useState<string | null>(null);
   const [webhookCredentials, setWebhookCredentials] = useState<WebhookCredentials | null>(null);
@@ -70,7 +71,22 @@ export default function AutomationPage() {
     trigger_spec: "3600",
     prompt_template: "",
     enabled: true,
+    notify_channels: [],
+    operator_domains: [],
   });
+
+  const resetForm = () => {
+    setForm({
+      name: "",
+      trigger_type: "interval",
+      trigger_spec: "3600",
+      prompt_template: "",
+      enabled: true,
+      notify_channels: [],
+      operator_domains: [],
+    });
+    setEditingJobId(null);
+  };
 
   const copyText = useCallback(
     async (label: string, value: string) => {
@@ -107,16 +123,18 @@ export default function AutomationPage() {
     }
     setCreating(true);
     try {
+      if (editingJobId) {
+        const updated = await scheduledJobsApi.update(editingJobId, form);
+        setJobs((prev) => prev.map((job) => (job.id === updated.id ? updated : job)));
+        setShowForm(false);
+        resetForm();
+        toast.success(t("jobUpdated"));
+        return;
+      }
       const result = await scheduledJobsApi.create(form);
       setJobs((prev) => [result.job, ...prev]);
       setShowForm(false);
-      setForm({
-        name: "",
-        trigger_type: "interval",
-        trigger_spec: "3600",
-        prompt_template: "",
-        enabled: true,
-      });
+      resetForm();
       if (result.webhook_secret && result.job.webhook_token) {
         setWebhookCredentials({
           jobId: result.job.id,
@@ -128,7 +146,13 @@ export default function AutomationPage() {
         toast.success(t("jobCreated"));
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("jobCreateFailed"));
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : editingJobId
+            ? t("updateFailed")
+            : t("jobCreateFailed"),
+      );
     } finally {
       setCreating(false);
     }
@@ -251,7 +275,9 @@ export default function AutomationPage() {
         {showForm && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">{t("newJob")}</CardTitle>
+              <CardTitle className="text-base">
+                {editingJobId ? t("editJob") : t("newJob")}
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -325,6 +351,116 @@ export default function AutomationPage() {
                   }
                 />
               </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="job-model">{t("fields.modelId")}</Label>
+                  <Input
+                    id="job-model"
+                    value={form.model_id ?? ""}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, model_id: event.target.value || null }))
+                    }
+                    placeholder="optional"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="job-skill">{t("fields.skillId")}</Label>
+                  <Input
+                    id="job-skill"
+                    value={form.skill_id ?? ""}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, skill_id: event.target.value || null }))
+                    }
+                    placeholder="web-operator skill id"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="notify-server">{t("fields.notifyServer")}</Label>
+                  <Input
+                    id="notify-server"
+                    value={form.notify_channels?.[0]?.server_name ?? ""}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        notify_channels: event.target.value
+                          ? [{ type: "mcp", server_name: event.target.value, channel_arg: prev.notify_channels?.[0]?.channel_arg ?? "" }]
+                          : [],
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="notify-channel">{t("fields.notifyChannel")}</Label>
+                  <Input
+                    id="notify-channel"
+                    value={form.notify_channels?.[0]?.channel_arg ?? ""}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        notify_channels: prev.notify_channels?.[0]?.server_name
+                          ? [{ ...prev.notify_channels[0], channel_arg: event.target.value }]
+                          : [],
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>{t("fields.operatorScope")}</Label>
+                  <Select
+                    value={form.operator_scope ?? "none"}
+                    onValueChange={(value) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        operator_scope: value === "none" ? null : (value as "owned" | "third_party_saas"),
+                      }))
+                    }
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">—</SelectItem>
+                      <SelectItem value="owned">owned</SelectItem>
+                      <SelectItem value="third_party_saas">third_party_saas</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="operator-domains">{t("fields.operatorDomains")}</Label>
+                  <Input
+                    id="operator-domains"
+                    value={(form.operator_domains ?? []).join(", ")}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        operator_domains: event.target.value.split(/[,\n]+/).map((s) => s.trim()).filter(Boolean),
+                      }))
+                    }
+                    placeholder="ops-console"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>{t("fields.gateProfile")}</Label>
+                <Select
+                  value={form.gate_profile ?? "standard"}
+                  onValueChange={(value) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      gate_profile: value as CreateScheduledJobParams["gate_profile"],
+                    }))
+                  }
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="loose">loose</SelectItem>
+                    <SelectItem value="standard">standard</SelectItem>
+                    <SelectItem value="strict">strict</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="flex items-center gap-2">
                 <Switch
                   checked={form.enabled ?? true}
@@ -334,9 +470,9 @@ export default function AutomationPage() {
               </div>
               <div className="flex gap-2">
                 <Button onClick={() => void handleCreate()} disabled={creating}>
-                  {creating ? t("creating") : t("create")}
+                  {creating ? t("creating") : editingJobId ? t("saveJob") : t("create")}
                 </Button>
-                <Button variant="ghost" onClick={() => setShowForm(false)}>
+                <Button variant="ghost" onClick={() => { setShowForm(false); resetForm(); }}>
                   {tCommon("cancel")}
                 </Button>
               </div>
@@ -398,6 +534,31 @@ export default function AutomationPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setEditingJobId(job.id);
+                        setForm({
+                          name: job.name,
+                          trigger_type: job.trigger_type as CreateScheduledJobParams["trigger_type"],
+                          trigger_spec: job.trigger_spec,
+                          prompt_template: job.prompt_template,
+                          skill_id: job.skill_id,
+                          model_id: job.model_id,
+                          codebase_id: job.codebase_id,
+                          knowledge_base_id: job.knowledge_base_id,
+                          notify_channels: job.notify_channels ?? [],
+                          operator_scope: job.operator_scope ?? null,
+                          operator_domains: job.operator_domains ?? [],
+                          gate_profile: job.gate_profile ?? "standard",
+                          enabled: job.enabled,
+                        });
+                        setShowForm(true);
+                      }}
+                    >
+                      {t("editJob")}
+                    </Button>
                     {job.trigger_type === "webhook" && (
                       <Button
                         variant="ghost"

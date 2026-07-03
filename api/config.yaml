@@ -176,6 +176,32 @@ hitl:
     - browser_select_option
     - browser_press_key
     - browser_console_exec
+  critical_action_patterns:
+    - 删除
+    - 关闭
+    - 关单
+    - 退款
+    - delete
+    - close
+    - refund
+    - remove
+    - confirm close
+    - confirm refund
+    - btn-confirm-close
+    - btn-confirm-refund
+  gate_profiles:
+    loose:
+      first_visit_domain_gate: true
+      tool_gate_call_level_enabled: false
+      selective_critical_only: false
+    standard:
+      first_visit_domain_gate: true
+      tool_gate_call_level_enabled: true
+      selective_critical_only: true
+    strict:
+      first_visit_domain_gate: true
+      tool_gate_call_level_enabled: true
+      selective_critical_only: false
   takeover_timeout_minutes: 30
 
 scheduler:

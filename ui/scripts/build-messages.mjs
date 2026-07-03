@@ -322,6 +322,7 @@ const messages = {
     models: { en: "Models", zh: "模型管理" },
     skills: { en: "Skill templates", zh: "Skill 模板" },
     memory: { en: "Long-term memory", zh: "长期记忆" },
+    integrations: { en: "Integrations", zh: "协议集成" },
     a2a: { en: "A2A Agent", zh: "A2A Agent 配置" },
     mcp: { en: "MCP servers", zh: "MCP 服务器" },
     language: { en: "Language", zh: "语言" },

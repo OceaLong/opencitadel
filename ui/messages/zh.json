@@ -246,7 +246,8 @@
       "thirdPartySaas": "第三方 SaaS（已声明并审计）",
       "owned": "企业自有/自建系统",
       "webOperator": "Web Operator",
-      "waitingApproval": "等待审批或接管"
+      "waitingApproval": "等待审批或接管",
+      "awaitingHuman": "待人工（接管超时）"
     }
   },
   "sessionMemory": {
@@ -375,6 +376,7 @@
     "models": "模型管理",
     "skills": "Skill 模板",
     "memory": "长期记忆",
+    "integrations": "协议集成",
     "a2a": "A2A Agent 配置",
     "mcp": "MCP 服务器",
     "language": "语言",
@@ -640,7 +642,26 @@
     "ownedDescription": "您有权操作的目标系统（内网后台、自建演示环境等）。",
     "thirdPartyTitle": "第三方 SaaS",
     "thirdPartyDescription": "可能违反服务条款或触发未授权访问风险；仅建议在明确授权场景下使用，操作将完整审计。",
-    "confirmCreate": "确认并创建任务"
+    "confirmCreate": "确认并创建任务",
+    "ownershipLabel": "归属声明",
+    "domainsLabel": "域名白名单",
+    "domainsPlaceholder": "ops-console, internal.example.com",
+    "domainsHint": "逗号或换行分隔的主机名。访问白名单外域名首次需审批。",
+    "gateProfileLabel": "门控档位",
+    "gateProfile": {
+      "loose": {
+        "title": "宽松",
+        "description": "仅计划审批 + 首访新域名门控"
+      },
+      "standard": {
+        "title": "标准（推荐）",
+        "description": "计划审批 + 首访域名 + 高危操作（关单/退款/删除）逐次审批"
+      },
+      "strict": {
+        "title": "严格",
+        "description": "所有高风险浏览器工具逐次审批"
+      }
+    }
   },
   "marketplace": {
     "selectApp": "请选择一个应用开始使用",
@@ -1237,8 +1258,19 @@
       "prompt": "提示词模板",
       "triggerType": "触发类型",
       "triggerSpec": "触发配置",
-      "enabled": "启用"
+      "enabled": "启用",
+      "modelId": "模型 ID",
+      "skillId": "Skill ID",
+      "notifyServer": "MCP 通知服务",
+      "notifyChannel": "通知频道参数",
+      "operatorScope": "Web Operator 归属",
+      "operatorDomains": "Operator 域名",
+      "gateProfile": "门控档位"
     },
+    "editJob": "编辑",
+    "saveJob": "保存",
+    "jobUpdated": "任务已更新",
+    "updateFailed": "更新任务失败",
     "copiedWithLabel": "{label} 已复制",
     "jobCreated": "任务已创建",
     "jobCreateFailed": "创建任务失败",

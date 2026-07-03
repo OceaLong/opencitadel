@@ -22,7 +22,26 @@ class CreateScheduledJobRequest(BaseModel):
     codebase_id: Optional[str] = None
     knowledge_base_id: Optional[str] = None
     notify_channels: List[NotifyChannelRequest] = Field(default_factory=list)
+    operator_scope: Optional[str] = None
+    operator_domains: List[str] = Field(default_factory=list)
+    gate_profile: Optional[str] = None
     enabled: bool = True
+
+
+class UpdateScheduledJobRequest(BaseModel):
+    name: Optional[str] = None
+    trigger_type: Optional[Literal["cron", "interval", "webhook"]] = None
+    trigger_spec: Optional[str] = None
+    prompt_template: Optional[str] = None
+    skill_id: Optional[str] = None
+    model_id: Optional[str] = None
+    codebase_id: Optional[str] = None
+    knowledge_base_id: Optional[str] = None
+    notify_channels: Optional[List[NotifyChannelRequest]] = None
+    operator_scope: Optional[str] = None
+    operator_domains: Optional[List[str]] = None
+    gate_profile: Optional[str] = None
+    enabled: Optional[bool] = None
 
 
 class ScheduledJobResponse(BaseModel):
@@ -37,6 +56,9 @@ class ScheduledJobResponse(BaseModel):
     codebase_id: Optional[str] = None
     knowledge_base_id: Optional[str] = None
     notify_channels: List[NotifyChannelRequest] = Field(default_factory=list)
+    operator_scope: Optional[str] = None
+    operator_domains: List[str] = Field(default_factory=list)
+    gate_profile: Optional[str] = None
     enabled: bool
     next_run_at: Optional[datetime] = None
     last_run_at: Optional[datetime] = None

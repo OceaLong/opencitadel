@@ -11,6 +11,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 
 import { useAuth } from "@/providers/auth-provider";
 import { LoginPromptProvider } from "@/providers/login-prompt-provider";
+import { SettingsDialogProvider } from "@/providers/settings-dialog-provider";
 import { SessionsProvider } from "@/providers/sessions-provider";
 
 type SidebarLayoutStyle = React.CSSProperties & {
@@ -20,7 +21,7 @@ type SidebarLayoutStyle = React.CSSProperties & {
 
 const AUTH_PREFIXES = ["/login", "/register"];
 const SHELLLESS_PREFIXES = ["/share/artifact", "/admin"];
-const AUTH_REQUIRED_PREFIXES = ["/settings", "/admin"];
+const AUTH_REQUIRED_PREFIXES = ["/admin"];
 
 function isAuthRoute(pathname: string): boolean {
   return AUTH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
@@ -79,5 +80,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     </SessionsProvider>
   );
 
-  return <LoginPromptProvider>{content}</LoginPromptProvider>;
+  return (
+    <SettingsDialogProvider>
+      <LoginPromptProvider>{content}</LoginPromptProvider>
+    </SettingsDialogProvider>
+  );
 }

@@ -11,6 +11,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 1. [Self-host in 10 minutes](tutorials/01-self-host-10-minutes.md)
 2. [Internal knowledge base](tutorials/02-internal-knowledge-base.md)
 3. [MCP integrations](tutorials/03-mcp-integrations.md)
+4. [Governed Web Operator](tutorials/04-governed-web-operator.md)
 
 ### Operations & deployment
 
@@ -29,6 +30,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [Security model](architecture/security-model.md) | Trust boundaries, sandbox isolation, auth |
 | [Events](architecture/events.md) | Domain events, SSE contract, persistence, replay |
 | [Checkpoints & HITL](architecture/checkpoints-and-hitl.md) | Gate contracts, rollback, Web Operator, browser profile snapshots |
+| [Web Operator](architecture/web-operator.md) | Gate profiles, audit contract, OpsConsole demo |
 | [Automation & scheduler](architecture/automation-scheduler.md) | Cron/webhook jobs, leader election, notifications |
 | [Marketplace](architecture/marketplace.md) | LLM mini-app catalog and contracts |
 | [Config source governance](architecture/config-source-governance.md) | AppConfig, config.yaml, env var boundaries |

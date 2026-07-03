@@ -48,6 +48,8 @@ class Session(BaseModel):
     pending_phase: Optional[str] = None  # 等待恢复的内部阶段
     pending_metadata: Optional[Dict[str, Any]] = None  # 门控状态细节（Plan、tool call 等）
     operator_scope: Optional[str] = None  # owned | third_party_saas — Web Operator 目标系统归属
+    operator_domains: List[str] = Field(default_factory=list)  # 域名白名单
+    gate_profile: Optional[str] = None  # loose | standard | strict
     status: SessionStatus = SessionStatus.PENDING  # 状态
     updated_at: datetime = Field(default_factory=datetime.now)  # 更新时间
     created_at: datetime = Field(default_factory=datetime.now)  # 创建时间

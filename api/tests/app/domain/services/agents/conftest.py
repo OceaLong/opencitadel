@@ -47,7 +47,11 @@ def agent_test_runtime_settings(**overrides) -> AgentRuntimeSettings:
     )
     return AgentRuntimeSettings(
         tool_timeout_seconds=overrides.pop("tool_timeout_seconds", 120),
+        gate_profile=overrides.pop("gate_profile", None),
+        operator_domains=overrides.pop("operator_domains", []),
+        tool_gate_call_level_enabled=overrides.pop("tool_gate_call_level_enabled", None),
         memory=memory,
+        **overrides,
     )
 
 

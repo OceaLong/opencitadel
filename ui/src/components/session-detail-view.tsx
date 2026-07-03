@@ -204,6 +204,7 @@ export function SessionDetailView({
                         ? t("operator.owned")
                         : t("operator.webOperator")}
                     {session.status === "waiting" && ` · ${t("operator.waitingApproval")}`}
+                    {Boolean(session.awaiting_human) && ` · ${t("operator.awaitingHuman")}`}
                   </div>
                 )}
                 {session.status === "failed" && (

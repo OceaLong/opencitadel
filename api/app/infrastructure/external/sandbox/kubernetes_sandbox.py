@@ -357,17 +357,71 @@ class KubernetesSandbox(Sandbox):
         return ToolResult.from_sandbox(**response.json())
 
     async def create_workspace_snapshot(self, snapshot_id: str) -> bytes:
-        raise NotImplementedError("K8s 沙箱暂不支持工作区快照，浏览器回滚需先补工作区快照")
+        from app.domain.services.sandbox_snapshot_excludes import build_tar_exclude_args
+
+        archive_path = f"/tmp/cp_{snapshot_id}.tgz"
+        exclude_args = build_tar_exclude_args()
+        create_cmd = f"tar czf {archive_path} -C /home/ubuntu {exclude_args} ."
+        result = await self.exec_command("checkpoint", "/home/ubuntu", create_cmd)
+        if not result.success:
+            raise RuntimeError(f"创建 K8s 沙箱工作区快照失败: {result.message or result.data}")
+        try:
+            stream = await self.download_file(archive_path)
+            return stream.read()
+        finally:
+            await self.exec_command("checkpoint", "/home/ubuntu", f"rm -f {archive_path}")
 
     async def restore_workspace_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
-        raise NotImplementedError("K8s 沙箱暂不支持工作区快照")
+        archive_path = f"/tmp/cp_restore_{snapshot_id}.tgz"
+        upload_result = await self.upload_file(
+            file_data=snapshot_data,
+            filepath=archive_path,
+            filename=f"cp_restore_{snapshot_id}.tgz",
+        )
+        if not upload_result.success:
+            raise RuntimeError(f"上传 K8s 沙箱快照失败: {upload_result.message or upload_result.data}")
+        restore_cmd = (
+            "find /home/ubuntu -mindepth 1 -maxdepth 1 "
+            "! -name '.snapshots' ! -name '.browser-profile' -exec rm -rf {} + && "
+            f"tar xzf {archive_path} -C /home/ubuntu && rm -f {archive_path}"
+        )
+        result = await self.exec_command("checkpoint", "/home/ubuntu", restore_cmd)
+        if not result.success:
+            raise RuntimeError(f"恢复 K8s 沙箱快照失败: {result.message or result.data}")
 
     async def create_browser_profile_snapshot(self, snapshot_id: str) -> bytes:
-        raise NotImplementedError("K8s 沙箱暂不支持浏览器 profile 回滚（前置：先补工作区快照）")
+        archive_path = f"/tmp/bp_{snapshot_id}.tgz"
+        create_cmd = f"tar czf {archive_path} -C /home/ubuntu .browser-profile"
+        try:
+            result = await self.exec_command("checkpoint", "/home/ubuntu", create_cmd)
+            if not result.success:
+                raise RuntimeError(f"创建 K8s 浏览器快照失败: {result.message or result.data}")
+            stream = await self.download_file(archive_path)
+            return stream.read()
+        finally:
+            await self.exec_command("checkpoint", "/home/ubuntu", f"rm -f {archive_path}")
 
     async def restore_browser_profile_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
-        raise NotImplementedError("K8s 沙箱暂不支持浏览器 profile 回滚（前置：先补工作区快照）")
+        archive_path = f"/tmp/bp_restore_{snapshot_id}.tgz"
+        upload_result = await self.upload_file(
+            file_data=snapshot_data,
+            filepath=archive_path,
+            filename=f"bp_restore_{snapshot_id}.tgz",
+        )
+        if not upload_result.success:
+            raise RuntimeError(f"上传 K8s 浏览器快照失败: {upload_result.message or upload_result.data}")
+        restore_cmd = (
+            "rm -rf /home/ubuntu/.browser-profile && "
+            f"tar xzf {archive_path} -C /home/ubuntu && rm -f {archive_path}"
+        )
+        result = await self.exec_command("checkpoint", "/home/ubuntu", restore_cmd)
+        if not result.success:
+            raise RuntimeError(f"恢复 K8s 浏览器快照失败: {result.message or result.data}")
 
     async def restart_browser(self) -> None:
-        raise NotImplementedError("K8s 沙箱暂不支持浏览器 profile 回滚")
+        response = await self.client.post(f"{self._base_url}/api/supervisor/restart-chrome")
+        response.raise_for_status()
+        tool_result = ToolResult.from_sandbox(**response.json())
+        if not tool_result.success:
+            raise RuntimeError(f"重启 K8s 浏览器失败: {tool_result.message or tool_result.data}")
 
