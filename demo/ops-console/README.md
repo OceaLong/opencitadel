@@ -1,5 +1,7 @@
 # OpsConsole — Demo Internal Ticket Backend
 
+[简体中文](README.zh-CN.md)
+
 Form-first internal ticket and settlement console for **OpenCitadel Web Operator** demos and e2e tests. Day-to-day operations are browser-driven; a **read-only REST API** is available for reconciliation skills.
 
 ## Features

@@ -24,22 +24,45 @@ check_pair() {
   fi
 }
 
-echo "==> Checking docs/ bilingual pairs ..."
-while IFS= read -r -d '' en; do
-  base="$(basename "$en")"
-  case "$base" in
-    README.md|MAINTENANCE_CHECKLIST.md) continue ;;
-  esac
-  check_pair "$en"
-done < <(find docs/architecture docs/operations docs/tutorials -name '*.md' ! -name '*.zh-CN.md' -print0 2>/dev/null)
-
-echo "==> Checking reverse pairs ..."
-while IFS= read -r -d '' zh; do
-  en="${zh%.zh-CN.md}.md"
-  if [[ ! -f "$en" ]]; then
-    fail "orphan Chinese doc without English pair: $zh (expected $en)"
+check_pair_dir() {
+  local dir="$1"
+  if [[ ! -d "$dir" ]]; then
+    return
   fi
-done < <(find docs/architecture docs/operations docs/tutorials -name '*.zh-CN.md' -print0 2>/dev/null)
+  echo "==> Checking bilingual pairs in $dir ..."
+  while IFS= read -r -d '' en; do
+    base="$(basename "$en")"
+    case "$base" in
+      README.md|MAINTENANCE_CHECKLIST.md|DOCUMENTATION_INVENTORY.md) continue ;;
+    esac
+    check_pair "$en"
+  done < <(find "$dir" -name '*.md' ! -name '*.zh-CN.md' -print0 2>/dev/null)
+
+  while IFS= read -r -d '' zh; do
+    en="${zh%.zh-CN.md}.md"
+    if [[ ! -f "$en" ]]; then
+      fail "orphan Chinese doc without English pair: $zh (expected $en)"
+    fi
+  done < <(find "$dir" -name '*.zh-CN.md' -print0 2>/dev/null)
+}
+
+echo "==> Checking docs/ bilingual pairs ..."
+check_pair_dir docs/architecture
+check_pair_dir docs/operations
+check_pair_dir docs/tutorials
+check_pair docs/DOCUMENTATION_INVENTORY.md
+
+echo "==> Checking module README bilingual pairs ..."
+for en in README.md api/README.md ui/README.md sandbox/README.md \
+  deploy/helm/opencitadel/README.md demo/ops-console/README.md; do
+  check_pair "$en"
+done
+
+echo "==> Checking .github/ bilingual pairs ..."
+for en in .github/CONTRIBUTING.md .github/SECURITY.md .github/CODE_OF_CONDUCT.md \
+  .github/pull_request_template.md; do
+  check_pair "$en"
+done
 
 echo "==> Checking tutorial 05 in indexes ..."
 for f in docs/README.md docs/README.zh-CN.md README.md README.zh-CN.md; do
@@ -48,10 +71,31 @@ for f in docs/README.md docs/README.zh-CN.md README.md README.zh-CN.md; do
   fi
 done
 
+echo "==> Checking new architecture docs in indexes ..."
+for topic in llm-endpoints-and-models frontend-ui task-recovery technical-decisions; do
+  for f in docs/README.md docs/README.zh-CN.md; do
+    if ! grep -q "$topic" "$f"; then
+      fail "architecture doc $topic not listed in $f"
+    fi
+  done
+done
+
 echo "==> Checking stale /settings/integrations references in docs ..."
 if rg -n '/settings/integrations' docs README.md README.zh-CN.md ui/README.md ui/README.zh-CN.md \
   --glob '!MAINTENANCE_CHECKLIST*.md' 2>/dev/null; then
   fail "found stale /settings/integrations route in documentation (use Settings modal → Integrations tab)"
+fi
+
+echo "==> Checking stale checkpoint rollback API path ..."
+if rg -n 'checkpoints/\{[^}]+\}/rollback' docs/architecture/checkpoints-and-hitl.md \
+  docs/architecture/checkpoints-and-hitl.zh-CN.md 2>/dev/null; then
+  fail "checkpoint API should use /restore not /rollback"
+fi
+
+echo "==> Checking stale /admin/usage UI route in docs ..."
+if rg -n '\| `/admin/usage` \|' docs/architecture/admin-auditor-compliance.md \
+  docs/architecture/admin-auditor-compliance.zh-CN.md 2>/dev/null; then
+  fail "UI usage charts are on /admin overview, not /admin/usage"
 fi
 
 echo "==> Checking four-images Helm wording ..."

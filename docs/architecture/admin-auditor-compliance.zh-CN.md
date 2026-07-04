@@ -24,7 +24,8 @@
 | `/admin/invitations` | 平台邀请令牌 |
 | `/admin/audit` | 审计日志查看 |
 | `/admin/compliance` | 证据中心、链校验、合规报告 |
-| `/admin/usage` | Token 用量统计 |
+
+Token 用量图表在 **`/admin` 概览页**展示（无独立 `/admin/usage` 页面）。后端用量 API 仍在 `/api/admin/usage/*`。
 
 首次 migrate 时根据 `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` 创建引导管理员。
 

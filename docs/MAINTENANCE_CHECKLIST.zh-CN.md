@@ -7,7 +7,8 @@
 ## 何时更新文档
 
 - [ ] 新增或变更 API 路由 → `api/README.md` + `api/README.zh-CN.md`，相关 `docs/architecture/*.md`
-- [ ] 新增或变更 UI 路由 → `ui/README.md` + `ui/README.zh-CN.md`，根 README 模块表
+- [ ] 新增或变更 LLM 端点/模型行为 → `llm-endpoints-and-models.md`（+ 英文）、`deployment.md`（+ 中文）、`ui/README.md`（+ 中文）
+- [ ] 新增或变更 UI 路由或 HITL 组件 → `ui/README.md` + `ui/README.zh-CN.md`、`frontend-ui.md`（+ 中文）、根 README 模块表
 - [ ] 新增环境变量 → `.env.example`、`docs/operations/deployment.md`（+ 中文）、`config-source-governance.md`（+ 中文）
 - [ ] 新增 `AppConfig` 字段 → `api/config.yaml`、Helm `appConfig`、`config-source-governance.md`（+ 中文）
 - [ ] 新增教程或架构文档 → 中英文文件、`docs/README.md`（+ 英文）、根 `README.md`（+ 中文）、文首语言链接
@@ -26,6 +27,8 @@
 |------|----------|
 | UI 路由 | `ui/src/app/**/page.tsx` |
 | API 路由 | `api/app/interfaces/endpoints/routes.py` 及各路由模块 |
+| LLM 端点/模型 | `llm_endpoint_routes.py`、`models-settings.tsx`、设置两步流程 |
+| 任务恢复 | `recoverable_task_retry.py`、`task-recovery.md`（+ 中文） |
 | Compose 镜像 | `docker-compose.yml`、`.github/workflows/release.yml` |
 | 沙箱边界 | Chromium 在沙箱；Worker 内 Playwright 经 CDP |
 | 集成 UI | 设置弹窗 → 集成 Tab（非 `/settings/integrations`） |
@@ -46,4 +49,5 @@ CI 在每个 Pull Request 上运行相同脚本。
 ## 相关
 
 - [文档中心](README.zh-CN.md)
+- [文档清单](DOCUMENTATION_INVENTORY.zh-CN.md)
 - [贡献指南](../.github/CONTRIBUTING.zh-CN.md)

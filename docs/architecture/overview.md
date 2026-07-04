@@ -11,7 +11,7 @@ flowchart LR
   Client["Client UI"] -->|"HTTP or SSE"| Api["FastAPI API"]
   Api -->|"task input and dispatch"| Redis["Redis Streams"]
   Api -->|"read and write"| Postgres["Postgres pgvector"]
-  Api -->|"objects"| COS["COS Object Storage"]
+  Api -->|"objects"| Storage["COS / MinIO"]
   Redis -->|"claim task:dispatch"| Worker["Agent Worker Pool"]
   Worker -->|"run task runner"| AgentRunner["AgentTaskRunner or IngestionRunner"]
   AgentRunner -->|"create or attach"| Sandbox["Sandbox Runtime"]
@@ -22,6 +22,19 @@ flowchart LR
 ```
 
 At runtime, the core boundaries are: stateless API, Workers consuming Redis Streams, Postgres persistence, and sandbox-isolated execution. The API handles ingress and projection; Workers handle execution and resource governance; Migrate handles schema and configuration seed migrations.
+
+### Code layering
+
+| Layer | Path | Responsibility |
+|-------|------|----------------|
+| **interfaces** | `app/interfaces/` | FastAPI routes, schemas, middleware, auth DI |
+| **application** | `app/application/` | Use-case services (sessions, LLM, tasks, artifacts) |
+| **domain** | `app/domain/` | Models, repository ports, agents, flows, tools |
+| **infrastructure** | `app/infrastructure/` | ORM, DB repos, Redis, LLM, sandbox, security adapters |
+
+Ports live in `domain/external/`; adapters in `infrastructure/adapters/`. Shared wiring: `dependency-injector` containers in `app/container.py`.
+
+See [Technical decisions](technical-decisions.md).
 
 ## Process Roles
 
@@ -64,7 +77,7 @@ flowchart TD
 - Claim tasks from the Redis `task:dispatch` consumer group.
 - Admission gate: when `can_admit()` is false, do not claim; tasks remain in the Stream and do not enter the PEL.
 - Task idempotency lock: after claim, use `try_acquire_task_lease()` and related functions in `task_lease.py` to prevent duplicate execution from XAUTOCLAIM.
-- Run `AgentTaskRunner` or `CodebaseIngestionTaskRunner`.
+- Run `AgentTaskRunner`, `CodebaseIngestionTaskRunner`, or `KBIngestionTaskRunner` by `task_type`.
 - Write events to the `task:output` stream.
 - Append persistable events to the `session_events` table.
 - Run sandbox reconcile, idle reclamation, and low-memory reclamation, coordinated by a single active leader via `try_become_reclaim_leader()`.
@@ -76,7 +89,9 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  Start["AgentTaskRunner init"] --> CheckCode{"codebase_id set?"}
+  Start["AgentTaskRunner init"] --> Hybrid{"codebase_id + knowledge_base_id + ASK?"}
+  Hybrid -->|"yes"| HybridAsk["HybridAskFlow"]
+  Hybrid -->|"no"| CheckCode{"codebase_id set?"}
   CheckCode -->|"yes + mode ASK"| CodeAsk["CodeAskFlow"]
   CheckCode -->|"no"| CheckKB{"knowledge_base_id set?"}
   CheckKB -->|"yes + mode ASK"| DocQA["DocQAFlow"]
@@ -85,9 +100,10 @@ flowchart TD
 
 | Condition | Flow | Description |
 |-----------|------|-------------|
-| `codebase_id` + `SessionMode.ASK` | `CodeAskFlow` | Codebase Q&A; takes priority over KB |
+| `codebase_id` + `knowledge_base_id` + `SessionMode.ASK` | `HybridAskFlow` | Combined codebase + KB Q&A |
+| `codebase_id` + `SessionMode.ASK` | `CodeAskFlow` | Codebase Q&A; takes priority over KB-only |
 | `knowledge_base_id` + `SessionMode.ASK` | `DocQAFlow` | Knowledge base Doc QA |
-| Other (including `SessionMode.AGENT`) | `PlannerReActFlow` | Planner → ReAct general Agent |
+| Other (including `SessionMode.AGENT`) | `PlannerReActFlow` | Planner → Clarify → ReAct general Agent |
 
 ## Task Execution Status
 
@@ -126,6 +142,7 @@ stateDiagram-v2
 Recovery and retry paths (not shown as separate states above):
 
 - `RecoverableTaskInputUnavailable`: input unavailable before execution → revert to `pending` and re-dispatch.
+- `TASK_INFRA_FAILED`: transient infra failure → checkpoint restore + requeue user message + re-dispatch (see [Task recovery](task-recovery.md)).
 - `mark_dispatch_failure()`: non-fatal dispatch failure → revert to `pending` and retry dispatch.
 - Task lease conflict: ack dispatch message; do not update `TaskStatus`.
 
@@ -215,7 +232,8 @@ FastAPI dependency injection resolves via `ApiContainer`; the Worker entry initi
 |------|---------------------|-------------|
 | Behavioral config | `AppConfig`, backed by DB | Runtime behavior such as `model_resilience`, `feature_flags`, `worker`, `sandbox` |
 | Initial defaults | `api/config.yaml` / Helm `appConfig` | Migrate job writes seed when `AppConfig` is empty |
-| Secrets and connections | `Settings` environment variables | Deployment secrets: DB, Redis, COS, model keys, etc. |
+| Secrets and connections | `Settings` environment variables | Deployment secrets: DB, Redis, COS/MinIO, JWT, etc. |
+| LLM credentials | `llm_endpoints` table (encrypted) | Per-endpoint API keys; models reference `endpoint_id` |
 
 Production must use `USE_DB_APP_CONFIG=true`; Docker Compose does not enforce this by default—set it explicitly in `.env`; Helm `env` is already configured. When modifying `AppConfig` fields, sync the schema, `config.yaml`, Helm `appConfig`, and related documentation.
 
@@ -226,6 +244,9 @@ Production must use `USE_DB_APP_CONFIG=true`; Docker Compose does not enforce th
 | MCP / A2A connection pool reclamation | API | Release stale connections every 5 minutes |
 | Sandbox maintenance | Worker | `run_sandbox_maintenance()` + leader lease |
 | Sandbox warm pool | Worker | `SandboxPool`, default `pool_enabled=false` |
+| Automation scheduler | Worker | `run_scheduler_loop()` — cron/webhook leader election |
+| Task reconcile | Worker | `_task_reconcile_loop()` — stale task recovery |
+| DLQ replay | Worker | `_dlq_replay_loop()` when enabled |
 
 ## Memory Auto-Extraction
 
@@ -297,6 +318,9 @@ The Chart is located at `deploy/helm/opencitadel/` and provides full-stack one-c
 
 ## Related Documentation
 
+- [LLM endpoints and models](llm-endpoints-and-models.md)
+- [Frontend UI](frontend-ui.md)
+- [Task recovery](task-recovery.md)
 - [Event System](events.md)
 - [Configuration Source Governance](config-source-governance.md)
 - [Model Resilience Design](model-resilience.md)

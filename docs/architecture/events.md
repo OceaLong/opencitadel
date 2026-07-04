@@ -57,6 +57,8 @@ Current `EVENT_SCHEMA_VERSION=3`. Legacy payloads are upgraded via `event_upgrad
 | `step` | Single execution step status | live + replay |
 | `subagent` | Sub-agent delegation status (goal / summary) | live + replay |
 | `tool` | Tool call status and result | live + replay |
+| `artifact` | Artifact workbench update (write/finalize/share) | live + replay |
+| `approval` | Plan or tool approval gate state | live + replay |
 | `wait` | Waiting for user input | live + replay |
 | `usage` | Token usage delta/summary | live + replay |
 | `done` | End of current stream round | live + replay |

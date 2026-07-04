@@ -61,7 +61,7 @@ Configure defaults in `AppConfig.hitl` (`tool_gate_call_level_enabled`, `tool_ga
 
 ```mermaid
 flowchart LR
-  User["User rollback"] --> API["POST /sessions/{id}/checkpoints/{id}/rollback"]
+  User["User rollback"] --> API["POST /sessions/{id}/checkpoints/{id}/restore"]
   API --> CP["CheckpointService"]
   CP --> Mem["Restore memory + files + session_state"]
   CP --> Browser["Restore browser profile tarball"]
@@ -119,7 +119,7 @@ HTML artifacts are sanitized server-side; cross-scope access returns 404. See [S
 |-------|---------|
 | `POST /api/sessions` | Optional `operator_scope` on create |
 | `POST /api/sessions/{id}/checkpoints` | Create checkpoint |
-| `POST /api/sessions/{id}/checkpoints/{id}/rollback` | Roll back |
+| `POST /api/sessions/{id}/checkpoints/{id}/restore` | Restore checkpoint |
 | `GET /api/sessions/{id}/vnc` | WebSocket VNC proxy |
 
 ## Related docs

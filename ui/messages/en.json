@@ -83,6 +83,7 @@
     "streamReadFailed": "Failed to read stream",
     "modelUnavailable": "Model or embedding service is unavailable. Check model settings or try again later.",
     "modelQuotaExceeded": "This model's API quota is exhausted. Complete billing in the provider console or switch to another model.",
+    "modelInvalidRequest": "The model request was rejected due to invalid parameters, often caused by thinking mode or conversation history. Disable thinking mode or switch models and retry.",
     "infraFailed": "Task execution timed out or retry limit was reached. Simplify the task or try again later.",
     "saveFailed": "Save failed",
     "updateFailed": "Update failed",
@@ -212,7 +213,8 @@
     "completed": "Completed",
     "failed": "Failed",
     "running": "Running",
-    "errorAfter": "May have occurred after {context}"
+    "errorAfter": "May have occurred after {context}",
+    "errorRepeated": "Same error repeated {count} times"
   },
   "sessionList": {
     "deleteSuccess": "Deleted task \"{title}\"",

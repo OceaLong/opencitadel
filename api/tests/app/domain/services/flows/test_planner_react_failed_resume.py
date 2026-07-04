@@ -36,6 +36,15 @@ def test_should_not_resume_without_plan_or_error():
     assert _should_resume_failed_plan(session, Plan()) is False
 
 
+def test_flow_aborts_on_error_for_critical_phases():
+    from app.domain.services.flows.planner_react import _flow_aborts_on_error
+    from app.domain.services.flows.base import FlowStatus
+
+    assert _flow_aborts_on_error(FlowStatus.UPDATING) is True
+    assert _flow_aborts_on_error(FlowStatus.PLANNING) is True
+    assert _flow_aborts_on_error(FlowStatus.COMPLETED) is False
+
+
 def test_resume_sets_executing_when_pending_steps_exist():
     plan = Plan(
         steps=[

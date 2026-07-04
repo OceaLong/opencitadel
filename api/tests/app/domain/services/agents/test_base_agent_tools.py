@@ -47,6 +47,16 @@ def test_messages_for_llm_strips_internal_fields():
     }
 
 
+def test_messages_for_llm_replaces_null_assistant_content():
+    messages = [
+        {"role": "assistant", "content": None, "reasoning_content": "trace"},
+    ]
+    sanitized = BaseAgent._messages_for_llm(messages)
+    assert sanitized[0]["content"] == "trace"
+    assert "content" in sanitized[0]
+    assert sanitized[0]["content"] is not None
+
+
 def _agent_config(**overrides):
     defaults = {
         "max_retries": 1,

@@ -28,6 +28,10 @@
 | 文档 | 权威范围 |
 |------|----------|
 | [系统架构](architecture/overview.zh-CN.md) | 总体架构、进程职责、沙箱生命周期、部署形态 |
+| [技术选型](architecture/technical-decisions.zh-CN.md) | 技术选择与替代方案对比 |
+| [LLM 端点与模型](architecture/llm-endpoints-and-models.zh-CN.md) | 端点/模型拆分、加密、UI 流程 |
+| [前端 UI](architecture/frontend-ui.zh-CN.md) | Next.js Shell、SSE 投影、HITL 组件 |
+| [任务恢复](architecture/task-recovery.zh-CN.md) | 可恢复重试、检查点恢复、DLQ |
 | [安全模型](architecture/security-model.zh-CN.md) | 信任边界、沙箱隔离、认证与授权 |
 | [事件系统](architecture/events.zh-CN.md) | 领域事件、SSE 契约、持久化与 replay |
 | [检查点与 HITL](architecture/checkpoints-and-hitl.zh-CN.md) | 门控契约、回滚、Web Operator、浏览器 Profile 快照 |
@@ -51,6 +55,7 @@
 | [API](../api/README.zh-CN.md) | 后端路由、SSE、本地开发 |
 | [UI](../ui/README.zh-CN.md) | 前端技术栈与路由 |
 | [Sandbox](../sandbox/README.zh-CN.md) | 隔离运行时 |
+| [OpsConsole 演示](../demo/ops-console/README.zh-CN.md) | Web Operator 工单后台演示 |
 
 ### 开源治理
 
@@ -67,4 +72,4 @@
 - **双语成对**：新增或修改文档时，同步更新对应语言的配对文件。
 - **链接约定**：中文文档优先链接 `*.zh-CN.md`；英文文档优先链接 `*.md`。
 - **索引同步**：新增教程或架构文档时，同步更新本索引、根目录 [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) 文档地图，并在中英文文件文首添加语言切换链接。
-- **PR 清单** — [文档维护检查清单](MAINTENANCE_CHECKLIST.zh-CN.md)；提交文档变更前运行 `./scripts/check-docs.sh`。
+- **PR 清单** — [文档维护检查清单](MAINTENANCE_CHECKLIST.zh-CN.md)；[文档清单](DOCUMENTATION_INVENTORY.zh-CN.md)；提交文档变更前运行 `./scripts/check-docs.sh`。

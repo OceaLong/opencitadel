@@ -306,6 +306,7 @@ class ReActAgent(BaseAgent):
         if isinstance(event, ErrorEvent):
             step.status = ExecutionStatus.FAILED
             step.error = event.error
+            yield event
             yield ("failed",)
             return
         if isinstance(event, WaitEvent):

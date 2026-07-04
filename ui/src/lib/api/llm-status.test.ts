@@ -15,6 +15,13 @@ describe("modelErrorMessage", () => {
     expect(message).not.toBe(modelErrorMessage("MODEL_QUOTA_EXCEEDED"));
   });
 
+  it("returns invalid-request message for MODEL_INVALID_REQUEST", () => {
+    const message = modelErrorMessage("MODEL_INVALID_REQUEST");
+    expect(message).toBeTruthy();
+    expect(message).not.toBe(modelErrorMessage("MODEL_UNAVAILABLE"));
+    expect(message).not.toBe(modelErrorMessage("MODEL_QUOTA_EXCEEDED"));
+  });
+
   it("returns infra message for TASK_INFRA_FAILED", () => {
     const message = modelErrorMessage("TASK_INFRA_FAILED");
     expect(message).toBeTruthy();

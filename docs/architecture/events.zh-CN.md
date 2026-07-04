@@ -57,6 +57,8 @@ flowchart TD
 | `step` | 单个执行步骤状态 | live + replay |
 | `subagent` | 子 Agent 委派状态（goal / 摘要） | live + replay |
 | `tool` | 工具调用状态与结果 | live + replay |
+| `artifact` | 交付物工作台更新（写入/定稿/分享） | live + replay |
+| `approval` | 计划或工具审批门控状态 | live + replay |
 | `wait` | 等待用户输入 | live + replay |
 | `usage` | Token 用量增量/汇总 | live + replay |
 | `done` | 本轮流结束 | live + replay |

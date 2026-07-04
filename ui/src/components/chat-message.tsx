@@ -244,7 +244,13 @@ function ChatMessageComponent({
               <span>{t("errorAfter", { context: item.contextLabel })}</span>
             </div>
           )}
-          <MarkdownContent content={item.error} />
+          <MarkdownContent
+            content={
+              item.repeatCount && item.repeatCount > 1
+                ? `${item.error}\n\n(${t("errorRepeated", { count: item.repeatCount })})`
+                : item.error
+            }
+          />
         </div>
       </div>
     );

@@ -105,11 +105,16 @@ export type SessionErrorItem = {
   toolName?: string;
   code?: string | null;
   timestamp?: number;
+  repeatCount?: number;
 };
+
+function systemErrorMergeKey(code: string | null | undefined, message: string): string {
+  return `${code ?? ""}\0${message}`;
+}
 
 /** 从事件列表提取去重后的错误项（tool.error 与 type: error） */
 export function extractSessionErrors(events: SSEEventData[]): SessionErrorItem[] {
-  const byKey = new Map<string, SessionErrorItem>();
+  const items: SessionErrorItem[] = [];
 
   for (const ev of events) {
     if (ev.type === "error") {
@@ -121,13 +126,27 @@ export function extractSessionErrors(events: SSEEventData[]): SessionErrorItem[]
       };
       const message = modelErrorMessage(errorData.code) ?? errorData.error;
       if (!message) continue;
-      const key = errorData.event_id ? `error:${errorData.event_id}` : `error:${byKey.size}`;
-      byKey.set(key, {
+      const timestamp = toMillis(errorData.created_at);
+      const mergeKey = systemErrorMergeKey(errorData.code, message);
+      const last = items[items.length - 1];
+      if (
+        last?.source === "system"
+        && systemErrorMergeKey(last.code, last.message) === mergeKey
+      ) {
+        last.repeatCount = (last.repeatCount ?? 1) + 1;
+        if (timestamp !== undefined) {
+          last.timestamp = timestamp;
+        }
+        continue;
+      }
+      const key = errorData.event_id ? `error:${errorData.event_id}` : `error:${items.length}`;
+      items.push({
         id: key,
         message,
         source: "system",
         code: errorData.code,
-        timestamp: toMillis(errorData.created_at),
+        timestamp,
+        repeatCount: 1,
       });
       continue;
     }
@@ -139,8 +158,8 @@ export function extractSessionErrors(events: SSEEventData[]): SessionErrorItem[]
         ? `tool:${tool.tool_call_id}`
         : tool.event_id
           ? `tool:${tool.event_id}`
-          : `tool:${tool.name}:${tool.function}:${byKey.size}`;
-      byKey.set(key, {
+          : `tool:${tool.name}:${tool.function}:${items.length}`;
+      items.push({
         id: key,
         message: tool.error,
         source: "tool",
@@ -150,9 +169,7 @@ export function extractSessionErrors(events: SSEEventData[]): SessionErrorItem[]
     }
   }
 
-  return Array.from(byKey.values()).sort(
-    (a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0),
-  );
+  return items;
 }
 
 /** 后端返回的原始事件（可能用 event 或 type 表示类型） */
@@ -202,7 +219,7 @@ export type TimelineItem =
       anchorEventId?: string;
     }
   | { kind: "wait"; id: string; message: string; timestamp?: number }
-  | { kind: "error"; id: string; error: string; timestamp?: number; contextLabel?: string };
+  | { kind: "error"; id: string; error: string; timestamp?: number; contextLabel?: string; repeatCount?: number };
 
 export type TaskObservationSummary = {
   startedAt?: number;
@@ -672,13 +689,23 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
         };
         const displayError = modelErrorMessage(errorData.code) ?? errorData.error;
         if (displayError) {
-          list.push({
-            kind: "error",
-            id: stableId("error", errorIndex++, String(list.length)),
-            error: displayError,
-            timestamp: errorData.created_at,
-            contextLabel: lastContextLabel,
-          });
+          const last = list[list.length - 1];
+          if (last?.kind === "error" && last.error === displayError) {
+            list[list.length - 1] = {
+              ...last,
+              repeatCount: (last.repeatCount ?? 1) + 1,
+              timestamp: errorData.created_at ?? last.timestamp,
+            };
+          } else {
+            list.push({
+              kind: "error",
+              id: stableId("error", errorIndex++, String(list.length)),
+              error: displayError,
+              timestamp: errorData.created_at,
+              contextLabel: lastContextLabel,
+              repeatCount: 1,
+            });
+          }
         }
         break;
       }

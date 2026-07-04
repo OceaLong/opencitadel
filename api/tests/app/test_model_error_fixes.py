@@ -53,6 +53,15 @@ def test_classify_llm_error_code_quota_exceeded():
     assert classify_llm_error_code(Exception(QUOTA_ERROR_SAMPLE)) == MODEL_QUOTA_EXCEEDED
 
 
+def test_classify_llm_error_code_invalid_request():
+    err = Exception(
+        'data: {"error":{"code":"invalid_parameter_error","message":"The content field is a required field."}}'
+    )
+    from app.domain.models.error_codes import MODEL_INVALID_REQUEST
+
+    assert classify_llm_error_code(err) == MODEL_INVALID_REQUEST
+
+
 def test_is_retriable_llm_error_quota_exhausted():
     assert is_retriable_llm_error(Exception(QUOTA_ERROR_SAMPLE)) is False
 

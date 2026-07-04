@@ -40,6 +40,13 @@ _THINKING_CONFIG_KEYS = frozenset({
 })
 
 
+def _sanitize_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Last-mile guard: OpenAI-compatible APIs reject assistant messages with null content."""
+    from app.domain.services.agents.base import BaseAgent
+
+    return [BaseAgent._normalize_message_for_llm(dict(msg)) for msg in messages]
+
+
 def _resolve_request_model(
         model_name: str,
         tools: List[Dict[str, Any]] | None,
@@ -244,7 +251,7 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         )
         request_kwargs: Dict[str, Any] = {
             "model": request_model,
-            "messages": messages,
+            "messages": _sanitize_messages_for_api(messages),
             "timeout": self._timeout,
         }
         if self._temperature is not None:
@@ -321,7 +328,7 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         )
         request_kwargs: Dict[str, Any] = {
             "model": request_model,
-            "messages": messages,
+            "messages": _sanitize_messages_for_api(messages),
             "timeout": self._timeout,
             "stream": True,
             "stream_options": {"include_usage": True},

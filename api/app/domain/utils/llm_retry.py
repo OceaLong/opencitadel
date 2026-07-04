@@ -93,10 +93,17 @@ def classify_llm_error_code(error: Exception) -> str:
         return EC.TASK_INFRA_FAILED
 
     text = str(error).lower()
-    if "重试预算" in str(error) or "structured_validation_retry" in text:
+    raw = str(error)
+    if "重试预算" in raw or "structured_validation_retry" in text:
         return EC.TASK_INFRA_FAILED
-    if "not configured" in text or "未配置" in text:
+    if "not configured" in text or "未配置" in raw:
         return EC.MODEL_NOT_CONFIGURED
+    if (
+        "content field is a required field" in text
+        or "content field is required" in text
+        or "invalid_parameter_error" in text and "content" in text
+    ):
+        return EC.MODEL_INVALID_REQUEST
     if is_quota_exhausted_error(error):
         return EC.MODEL_QUOTA_EXCEEDED
     if "429" in text or "rate limit" in text or "ratelimit" in text:

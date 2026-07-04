@@ -11,7 +11,7 @@ flowchart LR
   Client["Client UI"] -->|"HTTP or SSE"| Api["FastAPI API"]
   Api -->|"task input and dispatch"| Redis["Redis Streams"]
   Api -->|"read and write"| Postgres["Postgres pgvector"]
-  Api -->|"objects"| COS["COS Object Storage"]
+  Api -->|"objects"| Storage["COS / MinIO"]
   Redis -->|"claim task:dispatch"| Worker["Agent Worker Pool"]
   Worker -->|"run task runner"| AgentRunner["AgentTaskRunner or IngestionRunner"]
   AgentRunner -->|"create or attach"| Sandbox["Sandbox Runtime"]
@@ -22,6 +22,19 @@ flowchart LR
 ```
 
 运行时以 API 无状态、Worker 消费 Redis Streams、Postgres 持久化、沙箱隔离执行为核心边界。API 负责接入和投影，Worker 负责执行和资源治理，Migrate 负责 schema 与配置种子迁移。
+
+### 代码分层
+
+| 层级 | 路径 | 职责 |
+|------|------|------|
+| **interfaces** | `app/interfaces/` | FastAPI 路由、schemas、中间件、认证 DI |
+| **application** | `app/application/` | 用例服务（会话、LLM、任务、交付物） |
+| **domain** | `app/domain/` | 模型、仓储端口、Agent、Flow、工具 |
+| **infrastructure** | `app/infrastructure/` | ORM、DB 仓储、Redis、LLM、沙箱、安全适配器 |
+
+端口在 `domain/external/`，适配器在 `infrastructure/adapters/`。共享装配：`dependency-injector` 容器（`app/container.py`）。
+
+见 [技术选型](technical-decisions.zh-CN.md)。
 
 ## 进程角色
 
@@ -64,7 +77,7 @@ flowchart TD
 - 从 Redis `task:dispatch` 消费组领取任务。
 - 准入门控：`can_admit()` 不满足时不 claim，任务留在 Stream，不进入 PEL。
 - 任务幂等锁：claim 后通过 `task_lease.py` 中的 `try_acquire_task_lease()` 等函数防止 XAUTOCLAIM 重复执行。
-- 运行 `AgentTaskRunner` 或 `CodebaseIngestionTaskRunner`。
+- 按 `task_type` 运行 `AgentTaskRunner`、`CodebaseIngestionTaskRunner` 或 `KBIngestionTaskRunner`。
 - 写入事件到 `task:output` stream。
 - 将可持久化事件追加到 `session_events` 表。
 - 执行沙箱 reconcile、空闲回收、低内存回收，使用 `try_become_reclaim_leader()` 单活协调。
@@ -76,7 +89,9 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  Start["AgentTaskRunner init"] --> CheckCode{"codebase_id set?"}
+  Start["AgentTaskRunner init"] --> Hybrid{"codebase_id + knowledge_base_id + ASK?"}
+  Hybrid -->|"yes"| HybridAsk["HybridAskFlow"]
+  Hybrid -->|"no"| CheckCode{"codebase_id set?"}
   CheckCode -->|"yes + mode ASK"| CodeAsk["CodeAskFlow"]
   CheckCode -->|"no"| CheckKB{"knowledge_base_id set?"}
   CheckKB -->|"yes + mode ASK"| DocQA["DocQAFlow"]
@@ -85,9 +100,10 @@ flowchart TD
 
 | 条件 | 流 | 说明 |
 |------|-----|------|
-| `codebase_id` + `SessionMode.ASK` | `CodeAskFlow` | 代码库问答；优先于 KB |
+| `codebase_id` + `knowledge_base_id` + `SessionMode.ASK` | `HybridAskFlow` | 代码库 + 知识库联合问答 |
+| `codebase_id` + `SessionMode.ASK` | `CodeAskFlow` | 代码库问答；优先于仅 KB |
 | `knowledge_base_id` + `SessionMode.ASK` | `DocQAFlow` | 知识库 Doc QA |
-| 其他（含 `SessionMode.AGENT`） | `PlannerReActFlow` | Planner → ReAct 通用 Agent |
+| 其他（含 `SessionMode.AGENT`） | `PlannerReActFlow` | Planner → Clarify → ReAct 通用 Agent |
 
 ## 任务执行状态
 
@@ -126,6 +142,7 @@ stateDiagram-v2
 恢复与重试路径（未在上图单独画状态）：
 
 - `RecoverableTaskInputUnavailable`：执行前输入不可用 → 回退 `pending` 并重新 dispatch。
+- `TASK_INFRA_FAILED`：瞬时基础设施失败 → 检查点恢复 + 重排队用户消息 + 重新 dispatch（见 [任务恢复](task-recovery.zh-CN.md)）。
 - `mark_dispatch_failure()`：非致命 dispatch 失败 → 回退 `pending` 并重试 dispatch。
 - 任务 lease 冲突：ack dispatch 消息，不更新 `TaskStatus`。
 
@@ -215,7 +232,8 @@ FastAPI 依赖注入通过 `ApiContainer` 解析；Worker 入口通过 `WorkerCo
 |------|----------|------|
 | 行为配置 | `AppConfig`，由 DB 承载 | `model_resilience`、`feature_flags`、`worker`、`sandbox` 等运行行为 |
 | 初始默认值 | `api/config.yaml` / Helm `appConfig` | migrate job 在 `AppConfig` 为空时写入种子 |
-| 密钥与连接 | `Settings` 环境变量 | DB、Redis、COS、模型密钥等部署私密信息 |
+| 密钥与连接 | `Settings` 环境变量 | DB、Redis、COS/MinIO、JWT 等部署私密信息 |
+| LLM 凭证 | `llm_endpoints` 表（加密） | 按端点存 API Key；模型引用 `endpoint_id` |
 
 生产环境必须使用 `USE_DB_APP_CONFIG=true`；Docker Compose 默认不强制设置，需在 `.env` 显式开启，Helm `env` 已配置。修改 `AppConfig` 字段时需同步 schema、`config.yaml`、Helm `appConfig` 与相关文档。
 
@@ -226,6 +244,9 @@ FastAPI 依赖注入通过 `ApiContainer` 解析；Worker 入口通过 `WorkerCo
 | MCP / A2A 连接池回收 | API | 每 5 分钟释放陈旧连接 |
 | 沙箱维护 | Worker | `run_sandbox_maintenance()` + leader lease |
 | 沙箱预热门户 | Worker | `SandboxPool`，默认 `pool_enabled=false` |
+| 自动化调度 | Worker | `run_scheduler_loop()` — Cron/Webhook Leader 选举 |
+| 任务对账 | Worker | `_task_reconcile_loop()` — 陈旧任务恢复 |
+| DLQ 回放 | Worker | 启用时 `_dlq_replay_loop()` |
 
 ## Memory 自动提取
 
@@ -297,6 +318,9 @@ Chart 位于 `deploy/helm/opencitadel/`，提供全栈一键部署：
 
 ## 相关文档
 
+- [LLM 端点与模型](llm-endpoints-and-models.zh-CN.md)
+- [前端 UI](frontend-ui.zh-CN.md)
+- [任务恢复](task-recovery.zh-CN.md)
 - [事件系统](events.zh-CN.md)
 - [配置来源治理](config-source-governance.zh-CN.md)
 - [模型韧性设计](model-resilience.zh-CN.md)

@@ -187,6 +187,9 @@ class PlannerAgent(BaseAgent):
                         # 11.返回规划更新事件
                         yield PlanEvent(plan=plan, status=PlanEventStatus.UPDATED)
                         return
+                    elif isinstance(event, ErrorEvent):
+                        yield event
+                        return
                     else:
                         # 其他事件则直接返回
                         yield event

@@ -35,11 +35,13 @@ make quickstart
 - 邮箱：`BOOTSTRAP_ADMIN_EMAIL` 的值（默认 `admin@example.com`）
 - 密码：你设置的 `BOOTSTRAP_ADMIN_PASSWORD`
 
-### 4. 添加模型
+### 4. 添加端点与模型
+
+LLM 配置分两步：**端点**（Provider + API Key）→ **模型**（该端点下的模型名）。完整说明见 [生产部署 — 模型](operations/deployment.zh-CN.md)。
 
 1. 打开 **Settings → Models**
-2. 点击 **Add model**
-3. 选择提供商（如 OpenAI），粘贴 API Key，选择模型名称
+2. 点击 **Add endpoint** — 选择 Provider、Base URL、粘贴 API Key
+3. 在该端点下点击 **Add model** — 填写模型名
 4. 设为默认模型
 
 ### 5. 运行首个任务
@@ -62,7 +64,7 @@ COOKIE_SECURE=false
 FRONTEND_BASE_URL=http://localhost:8088
 ```
 
-在宿主机安装 [Ollama](https://ollama.com)，拉取能力足够的模型（如 `qwen2.5:14b`），然后在 Settings 中添加，Base URL 设为 `http://host.docker.internal:11434/v1`。
+在宿主机安装 [Ollama](https://ollama.com)，拉取能力足够的模型（如 `qwen2.5:14b`），然后在 **设置 → 模型** 中添加 **端点**（Base URL `http://host.docker.internal:11434/v1`），再在该端点下添加 **模型**。
 
 **注意：** 较小的本地模型可能难以完成多步 Agent 任务。自带云端 API Key 能获得最佳首次体验。
 

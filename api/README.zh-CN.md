@@ -38,19 +38,24 @@ API 与 Worker 为独立进程，共享 `BaseContainer` 中的基础设施与服
 ```
 api/
 ├── app/
+│   ├── interfaces/            # FastAPI 路由、schemas、中间件、认证 DI
 │   ├── application/
-│   │   ├── services/          # AgentService, TaskRunnerFactory, MemoryService...
-│   │   └── ...
+│   │   └── services/          # AgentService, TaskRunnerFactory, LLM*Service...
 │   ├── domain/
-│   │   ├── services/agents/   # BaseAgent, Planner, ReAct
-│   │   ├── services/flows/    # PlannerReActFlow
-│   │   └── schemas/           # PlannerPlanSchema 等结构化输出
+│   │   ├── models/            # 领域实体（session、llm_endpoint、event...）
+│   │   ├── repositories/      # UoW 与仓储端口
+│   │   ├── external/          # 外部服务端口
+│   │   ├── services/agents/   # Planner、Clarify、ReAct、SubAgent
+│   │   ├── services/flows/    # PlannerReActFlow、CodeAskFlow、DocQAFlow、HybridAskFlow
+│   │   └── schemas/           # 结构化 LLM 输出
 │   ├── infrastructure/
-│   │   ├── external/task/     # RedisStreamTask, TaskStateService
-│   │   ├── external/sandbox/  # DockerSandbox, SandboxProvider
-│   │   ├── external/llm/      # OpenAI, Anthropic, Gemini
-│   │   ├── observability/     # OTel, AgentTracer, logging_context
-│   │   └── security/          # ApiKeyCipher, SecretManager
+│   │   ├── repositories/      # DB 仓储实现
+│   │   ├── adapters/          # Redis、存储、事件投影适配器
+│   │   ├── external/task/     # RedisStreamTask、TaskStateService
+│   │   ├── external/sandbox/  # DockerSandbox、SandboxProvider
+│   │   ├── external/llm/      # OpenAI、ResilientLLM、熔断器
+│   │   ├── observability/     # OTel、AgentTracer、logging_context
+│   │   └── security/          # ApiKeyCipher、SecretManager
 │   ├── runtime_role.py        # ProcessRole (api/worker/migrate)
 │   ├── container.py           # BaseContainer / ApiContainer / WorkerContainer
 │   ├── worker/main.py         # Agent Worker 入口
@@ -64,35 +69,98 @@ api/
 
 ## API 路由
 
+以下路径默认前缀为 `/api`。除公开路由外，鉴权路由需有效会话 JWT（部分集成接口支持 `X-Api-Key`）。
+
+### 公开 / 无需登录
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/status` | 健康检查 |
-| GET | `/api/metrics` | Prometheus 指标 |
-| GET/POST | `/api/app-config` | 应用配置管理 |
-| GET/POST | `/api/llm-models` | 模型列表与创建 |
-| GET/PUT/DELETE | `/api/llm-models/{id}` | 模型详情、更新与删除 |
-| POST | `/api/llm-models/{id}/set-default` | 设置默认模型 |
-| GET/POST | `/api/skills` | Skill 模板列表与创建 |
-| GET/PUT/DELETE | `/api/skills/{id}` | Skill 模板详情、更新与删除 |
-| GET/POST | `/api/memories` | 长期记忆列表与创建 |
-| GET/PUT/DELETE | `/api/memories/{id}` | 长期记忆详情、更新与删除 |
-| POST | `/api/files` | 文件上传 |
-| GET | `/api/files/{id}/download` | 文件下载 |
-| POST | `/api/sessions` | 创建会话 |
-| POST | `/api/sessions/stream` | SSE 流式获取会话列表 |
-| GET | `/api/sessions/{id}` | 获取会话详情 |
-| GET | `/api/sessions/{id}/events` | 按游标分页获取会话事件 |
-| PATCH | `/api/sessions/{id}` | 更新会话模型或 Skill 配置 |
-| POST | `/api/sessions/{id}/chat` | SSE 流式对话（含 Token delta 事件） |
-| GET | `/api/sessions/{id}/memory` | 获取会话 Agent 内存 |
-| POST | `/api/sessions/{id}/memory/compact` | 压缩会话 Agent 内存 |
-| POST | `/api/sessions/{id}/memory/clear` | 清空会话 Agent 内存 |
-| DELETE | `/api/sessions/{id}/memory/{agent_name}/messages/{index}` | 删除指定会话内存消息 |
-| WS | `/api/sessions/{id}/vnc` | VNC WebSocket 代理 |
-| GET/POST | `/api/codebases` | 代码知识库导入与管理 |
-| GET | `/api/codebases/{id}/ingest` | 代码库摄取进度 SSE |
-| GET/POST | `/api/knowledge-bases` | 文档知识库管理 |
-| GET/POST | `/api/knowledge-bases/{id}/documents` | 文档上传与摄取 |
+| POST | `/auth/register`、`/auth/login`、`/auth/refresh`、`/auth/logout` | Cookie 会话认证 |
+| GET | `/auth/me` | 当前用户 |
+| GET | `/auth/oauth/{provider}/login`、`/auth/oauth/{provider}/callback` | OAuth（Google/GitHub） |
+| GET | `/status` | 健康检查 |
+| GET | `/llm/status` | LLM 可用性摘要 |
+| GET | `/metrics` | Prometheus 指标 |
+| GET | `/marketplace/apps` | 应用市场目录 |
+| POST | `/marketplace/*` | 应用市场 mini-app 接口 |
+| POST | `/webhooks/{job_token}` | 自动化 Webhook 入口 |
+| GET | `/share/artifact/{token}` | 公开交付物分享 |
+| GET | `/.well-known/agent-card.json` | A2A agent card（功能开关启用时） |
+| POST | `/a2a` | 入站 A2A（功能开关控制） |
+
+### 管理与合规（审计员或管理员）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/PATCH/DELETE | `/admin/users`、`/admin/users/{id}` | 用户管理 |
+| POST | `/admin/invitations` | 平台邀请 |
+| GET/PUT | `/admin/users/{id}/quota` | 用户配额 |
+| GET | `/admin/audit`、`/admin/audit/{id}`、`/admin/audit/summary`、`/admin/audit/export` | 审计日志 |
+| GET | `/admin/usage`、`/admin/usage/summary`、`/admin/usage/timeseries`、`/admin/usage/breakdown` | Token 用量 API |
+| GET | `/admin/overview` | 管理概览指标 |
+| GET/DELETE/PATCH | `/admin/teams`、`/admin/teams/{id}` | 团队管理 |
+| GET | `/admin/audit/verify-chain`、`/admin/audit/verify-chain/sessions/{id}` | 审计链校验 |
+| GET | `/admin/evidence/sessions`、`/admin/evidence/sessions/{id}/package` | 合规证据包 |
+| GET | `/admin/compliance/report` | 合规报告导出 |
+
+### 团队与邀请
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST | `/teams` | 列表/创建团队 |
+| GET/DELETE | `/teams/{id}` | 团队详情/删除 |
+| GET/POST/DELETE/PATCH | `/teams/{id}/members`、`/teams/{id}/invitations` | 成员与邀请 |
+| POST | `/teams/{id}/leave` | 退出团队 |
+| POST | `/invitations/{token}/accept` | 接受邀请 |
+
+### 应用配置与集成
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/app-config/sections` | AppConfig 分段列表 |
+| GET/PUT/DELETE | `/app-config/sections/{section}` | 读取/更新/删除分段 |
+| GET/POST | `/app-config/revisions`、`/app-config/revisions/{id}/rollback` | 配置修订历史 |
+| GET/PUT | `/app-config/agent` | Agent 配置快捷入口 |
+| GET/POST/PUT/DELETE | `/app-config/mcp-servers`、`/app-config/mcp-servers/{name}/*` | MCP 服务 CRUD |
+| GET/POST/DELETE | `/app-config/a2a-servers`、`/app-config/a2a-servers/{id}/*` | A2A 服务 CRUD |
+
+### LLM 端点与模型
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST | `/llm-endpoints` | 列表/创建 Provider 端点（存储加密 API Key） |
+| GET/PUT/DELETE | `/llm-endpoints/{id}` | 端点 CRUD |
+| GET/POST | `/llm-models` | 列表/创建模型（引用 `endpoint_id`） |
+| GET/PUT/DELETE | `/llm-models/{id}` | 模型 CRUD |
+| POST | `/llm-models/{id}/set-default` | 设置默认模型 |
+| POST | `/llm-models/{id}/probe-multimodal` | 探测多模态能力 |
+
+详见 [`../docs/architecture/llm-endpoints-and-models.zh-CN.md`](../docs/architecture/llm-endpoints-and-models.zh-CN.md)。
+
+### 会话、交付物、Skill、记忆、文件
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST/GET/PATCH | `/sessions`、`/sessions/stream`、`/sessions/{id}` | 会话 CRUD 与列表 |
+| POST | `/sessions/{id}/chat` | SSE 流式对话 |
+| GET | `/sessions/{id}/events` | 分页事件回放 |
+| GET/POST | `/sessions/{id}/memory`、`/memory/compact`、`/memory/clear` | 会话 Agent 记忆 |
+| GET/POST | `/sessions/{id}/checkpoints`、`/checkpoints/{id}/restore` | 检查点与回滚 |
+| WS | `/sessions/{id}/vnc` | VNC WebSocket 代理 |
+| GET/POST | `/sessions/{session_id}/artifacts`、`/artifacts/{id}`、`/artifacts/{id}/share` | 交付物 |
+| GET/POST/PUT/DELETE | `/skills`、`/skills/recommend`、`/skills/import` | Skill 模板 |
+| GET/POST/PUT/DELETE | `/memories` | 长期记忆 |
+| POST/GET | `/files`、`/files/{id}/download` | 文件上传/下载 |
+| GET/POST/DELETE | `/service-keys` | 服务 API Key |
+
+### 代码库、知识库、自动化
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST | `/codebases`、`/codebases/{id}/*` | 代码导入、摄取 SSE、符号、会话 |
+| GET/POST | `/knowledge-bases`、`/knowledge-bases/{id}/*` | 知识库 CRUD、文档、摄取、重建索引 |
+| GET/POST/PATCH/DELETE | `/scheduled-jobs`、`/scheduled-jobs/{id}/*` | Cron/Webhook 任务 |
+| GET/POST | `/notifications`、`/notifications/stream` | 用户通知 |
 
 ### SSE 事件类型
 
@@ -100,6 +168,7 @@ api/
 
 | 事件 | 说明 |
 |------|------|
+| `clarify` | ClarifyAgent 澄清问题 |
 | `message` | 用户或助手完整消息 |
 | `message_delta` | 助手文本增量（按 `stream_id` 合并） |
 | `reasoning_delta` | 思考内容增量（默认仅 `include_debug=true`） |
@@ -110,7 +179,10 @@ api/
 | `title` | 会话标题更新 |
 | `plan` | 计划事件（含 steps 列表） |
 | `step` | 步骤事件（含 id/status/description） |
+| `subagent` | 子 Agent 委派状态 |
 | `tool` | 工具调用事件（含 name/function/args/content） |
+| `artifact` | 交付物工作台更新 |
+| `approval` | 计划/工具审批门控状态 |
 | `wait` | 等待用户输入 |
 | `usage` | Token 用量事件 |
 | `done` | 流结束 |

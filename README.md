@@ -49,7 +49,7 @@ cd opencitadel
 make quickstart
 ```
 
-Open **http://localhost:8088**, sign in, add an LLM API key in Settings, and run your first agent task.
+Open **http://localhost:8088**, sign in, add an LLM **endpoint** and **model** in Settings → Models, and run your first agent task.
 
 - Step-by-step: [Self-host in 10 minutes](docs/tutorials/01-self-host-10-minutes.md)
 - Production: [Deployment guide](docs/operations/deployment.md)
@@ -88,7 +88,7 @@ Full design: [Architecture overview](docs/architecture/overview.md).
 
 ```bash
 cp .env.example .env
-# Set BOOTSTRAP_ADMIN_PASSWORD and LLM API keys
+# Set BOOTSTRAP_ADMIN_PASSWORD; configure LLM endpoint + model in Settings after first login
 
 docker compose --profile local up --build
 

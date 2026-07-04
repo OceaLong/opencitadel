@@ -7,7 +7,8 @@ Use this checklist when changing features, routes, configuration, deployment, or
 ## When to update docs
 
 - [ ] New or changed API route → `api/README.md` + `api/README.zh-CN.md`, relevant `docs/architecture/*.md`
-- [ ] New or changed UI route → `ui/README.md` + `ui/README.zh-CN.md`, root README module table
+- [ ] New or changed LLM endpoint/model behavior → `llm-endpoints-and-models.md` (+ zh), `deployment.md` (+ zh), `ui/README.md` (+ zh)
+- [ ] New or changed UI route or HITL component → `ui/README.md` + `ui/README.zh-CN.md`, `frontend-ui.md` (+ zh), root README module table
 - [ ] New env var → `.env.example`, `docs/operations/deployment.md` (+ zh), `config-source-governance.md` (+ zh)
 - [ ] New `AppConfig` field → `api/config.yaml`, Helm `appConfig`, `config-source-governance.md` (+ zh)
 - [ ] New tutorial or architecture doc → both language files, `docs/README.md` (+ zh), root `README.md` (+ zh), top language links
@@ -26,6 +27,8 @@ Use this checklist when changing features, routes, configuration, deployment, or
 |------|----------------|
 | UI routes | `ui/src/app/**/page.tsx` |
 | API routes | `api/app/interfaces/endpoints/routes.py` and route modules |
+| LLM endpoints/models | `llm_endpoint_routes.py`, `models-settings.tsx`, Settings two-step flow |
+| Task recovery | `recoverable_task_retry.py`, `task-recovery.md` (+ zh) |
 | Compose images | `docker-compose.yml`, `.github/workflows/release.yml` |
 | Sandbox boundary | Chromium in sandbox; Playwright in Worker via CDP |
 | Integrations UI | Settings modal → Integrations tab (not `/settings/integrations`) |
@@ -46,4 +49,5 @@ CI runs the same script on every pull request.
 ## Related
 
 - [Docs index](README.md)
+- [Documentation inventory](DOCUMENTATION_INVENTORY.md)
 - [Contributing](../.github/CONTRIBUTING.md)

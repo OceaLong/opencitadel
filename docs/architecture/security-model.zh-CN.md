@@ -141,7 +141,7 @@ sequenceDiagram
 |------|------|------|--------|
 | 用户凭证 | PostgreSQL（`users`） | bcrypt 密码哈希 | 按用户 |
 | JWT access / refresh | HTTP-only Cookie | `JWT_SECRET` 签名 | 按会话 |
-| LLM API Key | PostgreSQL（`llm_models`） | Fernet（`fernet_v1`），`API_KEY_SECRET` | 按模型配置 |
+| LLM API Key | PostgreSQL（`llm_endpoints`） | Fernet（`fernet_v1`），`API_KEY_SECRET` | 按端点（同端点下多模型共享） |
 | Service API Key | PostgreSQL（哈希） | SHA-256 静态哈希 | 按 Key，映射 owner |
 | 会话消息与事件 | PostgreSQL + Redis Streams | 启用 HTTPS 时传输层 TLS | 个人或团队工作区 |
 | 上传文件 / 截图 | 对象存储（COS/MinIO） | 提供商或桶策略 | Key 存 DB |
@@ -267,7 +267,7 @@ server:
 
 | 密钥 | 环境变量 | 轮换说明 |
 |------|----------|----------|
-| LLM Key 加密 | `API_KEY_SECRET` | 轮换后需在 UI 重新保存所有模型 Key |
+| LLM Key 加密 | `API_KEY_SECRET` | 轮换后需在 设置 → 模型 中重新保存所有**端点** Key |
 | JWT 签名 | `JWT_SECRET` | 使所有会话失效 |
 | Session / Cookie | `SESSION_SECRET` | 使 Cookie 会话失效 |
 | DB / Redis / 存储 | `POSTGRES_*`、`REDIS_*`、`COS_*`、`MINIO_*` | 更新 `.env` 后重启服务 |

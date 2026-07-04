@@ -238,6 +238,31 @@ class BaseAgent(ABC):
     def _internal_prompts(self):
         return get_internal_prompts(self._prompt_locale)
 
+    @staticmethod
+    def _normalize_message_for_llm(message: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensure provider-safe message shape (no null content, reasoning fallback)."""
+        normalized = dict(message)
+        role = normalized.get("role")
+        content = normalized.get("content")
+        reasoning = normalized.get("reasoning_content")
+        tool_calls = normalized.get("tool_calls")
+
+        if role == "assistant":
+            if (content is None or (isinstance(content, str) and not content.strip())) and reasoning:
+                if not tool_calls:
+                    normalized["content"] = reasoning if isinstance(reasoning, str) else str(reasoning)
+            if normalized.get("content") is None:
+                normalized["content"] = ""
+            if tool_calls and isinstance(normalized.get("content"), str) and not normalized["content"]:
+                normalized["content"] = ""
+        elif role in {"user", "system"} and "content" in normalized and normalized["content"] is None:
+            normalized["content"] = ""
+
+        if role != "assistant" and "reasoning_content" in normalized:
+            del normalized["reasoning_content"]
+
+        return normalized
+
     @classmethod
     @staticmethod
     def _messages_for_llm(
@@ -257,11 +282,43 @@ class BaseAgent(ABC):
                 })
             else:
                 cleaned = {k: v for k, v in message.items() if not k.startswith("_")}
-                sanitized.append(cleaned)
+                sanitized.append(BaseAgent._normalize_message_for_llm(cleaned))
         inflated = vision_service.inflate_messages_for_llm(sanitized, llm)
         if strip_images or (llm is not None and not vision_service.vision_enabled(llm)):
             return vision_service.strip_images_for_tool_call(inflated)
         return inflated
+
+    @staticmethod
+    def _assistant_message_from_llm_response(
+            *,
+            content: Optional[str],
+            reasoning_content: Optional[str],
+            tool_calls: Optional[List[Dict[str, Any]]],
+            stream_id: str,
+    ) -> Dict[str, Any]:
+        """Build assistant memory entry; never persist content=null."""
+        effective_content = content.strip() if isinstance(content, str) and content.strip() else ""
+        effective_reasoning = (
+            reasoning_content.strip()
+            if isinstance(reasoning_content, str) and reasoning_content.strip()
+            else ""
+        )
+        if not effective_content and not tool_calls and effective_reasoning:
+            logger.warning(
+                "LLM仅返回reasoning_content，回退为content写入记忆"
+            )
+            effective_content = effective_reasoning
+
+        filtered_message: Dict[str, Any] = {
+            "role": "assistant",
+            "content": effective_content,
+        }
+        if effective_reasoning and effective_reasoning != effective_content:
+            filtered_message["reasoning_content"] = effective_reasoning
+        if tool_calls:
+            filtered_message["tool_calls"] = tool_calls
+            filtered_message["stream_id"] = stream_id
+        return filtered_message
 
     async def _build_browser_tool_payload(
             self,
@@ -578,12 +635,6 @@ class BaseAgent(ABC):
                         self._retry_budget.consume("agent_empty_response_retry")
                     await asyncio.sleep(self._retry_interval)
                     continue
-                if not content and not tool_calls and reasoning_content:
-                    logger.warning(
-                        "LLM仅返回reasoning_content，未返回content/tool_calls，"
-                        "请检查思考模式参数或模型兼容性"
-                    )
-
                 if (
                         response_schema_payload is not None
                         and self._is_output_length_limited(finish_reason)
@@ -595,8 +646,14 @@ class BaseAgent(ABC):
                         finish_reason,
                     )
                     internal = self._internal_prompts()
+                    truncated_assistant = self._assistant_message_from_llm_response(
+                        content=content if isinstance(content, str) else "",
+                        reasoning_content=reasoning_content if isinstance(reasoning_content, str) else "",
+                        tool_calls=tool_calls or None,
+                        stream_id=stream_id,
+                    )
                     await self._add_to_memory([
-                        {"role": "assistant", "content": content or None},
+                        truncated_assistant,
                         {"role": "user", "content": internal.LENGTH_TRUNCATION_REPAIR_HINT},
                     ], persist=False)
                     if attempt + 1 < self._agent_config.max_retries:
@@ -604,12 +661,12 @@ class BaseAgent(ABC):
                     await asyncio.sleep(self._retry_interval)
                     continue
 
-                filtered_message = {"role": "assistant", "content": content or None}
-                if reasoning_content:
-                    filtered_message["reasoning_content"] = reasoning_content
-                if tool_calls:
-                    filtered_message["tool_calls"] = tool_calls
-                    filtered_message["stream_id"] = stream_id
+                filtered_message = self._assistant_message_from_llm_response(
+                    content=content if isinstance(content, str) else "",
+                    reasoning_content=reasoning_content if isinstance(reasoning_content, str) else "",
+                    tool_calls=tool_calls or None,
+                    stream_id=stream_id,
+                )
 
                 await self._add_to_memory([filtered_message], persist=False)
                 if call_usage:

@@ -38,17 +38,22 @@ See [`../docs/architecture/overview.md`](../docs/architecture/overview.md) for f
 ```
 api/
 ├── app/
+│   ├── interfaces/            # FastAPI routes, schemas, middleware, auth DI
 │   ├── application/
-│   │   ├── services/          # AgentService, TaskRunnerFactory, MemoryService...
-│   │   └── ...
+│   │   └── services/          # AgentService, TaskRunnerFactory, LLM*Service...
 │   ├── domain/
-│   │   ├── services/agents/   # BaseAgent, Planner, ReAct
-│   │   ├── services/flows/    # PlannerReActFlow
-│   │   └── schemas/           # PlannerPlanSchema and structured outputs
+│   │   ├── models/            # Domain entities (session, llm_endpoint, event...)
+│   │   ├── repositories/      # UoW and repository ports
+│   │   ├── external/          # External service ports
+│   │   ├── services/agents/   # Planner, Clarify, ReAct, SubAgent
+│   │   ├── services/flows/    # PlannerReActFlow, CodeAskFlow, DocQAFlow, HybridAskFlow
+│   │   └── schemas/           # Structured LLM outputs
 │   ├── infrastructure/
+│   │   ├── repositories/      # DB repository implementations
+│   │   ├── adapters/          # Redis, storage, event projection adapters
 │   │   ├── external/task/     # RedisStreamTask, TaskStateService
 │   │   ├── external/sandbox/  # DockerSandbox, SandboxProvider
-│   │   ├── external/llm/      # OpenAI, Anthropic, Gemini
+│   │   ├── external/llm/      # OpenAI, ResilientLLM, circuit breaker
 │   │   ├── observability/     # OTel, AgentTracer, logging_context
 │   │   └── security/          # ApiKeyCipher, SecretManager
 │   ├── runtime_role.py        # ProcessRole (api/worker/migrate)
@@ -64,35 +69,98 @@ api/
 
 ## API Routes
 
+All routes below are prefixed with `/api` unless noted. Authenticated routes require a valid session JWT unless using `X-Api-Key` on supported integration endpoints.
+
+### Public / unauthenticated
+
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/status` | Health check |
-| GET | `/api/metrics` | Prometheus metrics |
-| GET/POST | `/api/app-config` | App configuration |
-| GET/POST | `/api/llm-models` | List and create models |
-| GET/PUT/DELETE | `/api/llm-models/{id}` | Model details, update, delete |
-| POST | `/api/llm-models/{id}/set-default` | Set default model |
-| GET/POST | `/api/skills` | Skill template list and create |
-| GET/PUT/DELETE | `/api/skills/{id}` | Skill template details, update, delete |
-| GET/POST | `/api/memories` | Long-term memory list and create |
-| GET/PUT/DELETE | `/api/memories/{id}` | Memory details, update, delete |
-| POST | `/api/files` | File upload |
-| GET | `/api/files/{id}/download` | File download |
-| POST | `/api/sessions` | Create session |
-| POST | `/api/sessions/stream` | SSE streaming session list |
-| GET | `/api/sessions/{id}` | Session details |
-| GET | `/api/sessions/{id}/events` | Paginated session events by cursor |
-| PATCH | `/api/sessions/{id}` | Update session model or Skill config |
-| POST | `/api/sessions/{id}/chat` | SSE streaming chat (with Token delta events) |
-| GET | `/api/sessions/{id}/memory` | Session Agent memory |
-| POST | `/api/sessions/{id}/memory/compact` | Compact session Agent memory |
-| POST | `/api/sessions/{id}/memory/clear` | Clear session Agent memory |
-| DELETE | `/api/sessions/{id}/memory/{agent_name}/messages/{index}` | Delete a memory message |
-| WS | `/api/sessions/{id}/vnc` | VNC WebSocket proxy |
-| GET/POST | `/api/codebases` | Code knowledge base import and management |
-| GET | `/api/codebases/{id}/ingest` | Codebase ingest progress SSE |
-| GET/POST | `/api/knowledge-bases` | Document knowledge base management |
-| GET/POST | `/api/knowledge-bases/{id}/documents` | Document upload and ingest |
+| POST | `/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout` | Cookie session auth |
+| GET | `/auth/me` | Current user |
+| GET | `/auth/oauth/{provider}/login`, `/auth/oauth/{provider}/callback` | OAuth (Google/GitHub) |
+| GET | `/status` | Health check |
+| GET | `/llm/status` | LLM provider availability summary |
+| GET | `/metrics` | Prometheus metrics |
+| GET | `/marketplace/apps` | Marketplace catalog |
+| POST | `/marketplace/*` | Marketplace mini-app endpoints |
+| POST | `/webhooks/{job_token}` | Automation webhook ingress |
+| GET | `/share/artifact/{token}` | Public artifact share (no auth) |
+| GET | `/.well-known/agent-card.json` | A2A agent card (when enabled) |
+| POST | `/a2a` | Inbound A2A (feature-flagged) |
+
+### Admin & compliance (auditor or admin)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET/PATCH/DELETE | `/admin/users`, `/admin/users/{id}` | User management |
+| POST | `/admin/invitations` | Platform invitations |
+| GET/PUT | `/admin/users/{id}/quota` | User quotas |
+| GET | `/admin/audit`, `/admin/audit/{id}`, `/admin/audit/summary`, `/admin/audit/export` | Audit logs |
+| GET | `/admin/usage`, `/admin/usage/summary`, `/admin/usage/timeseries`, `/admin/usage/breakdown` | Token usage APIs |
+| GET | `/admin/overview` | Admin dashboard metrics |
+| GET/DELETE/PATCH | `/admin/teams`, `/admin/teams/{id}` | Team administration |
+| GET | `/admin/audit/verify-chain`, `/admin/audit/verify-chain/sessions/{id}` | Audit chain verification |
+| GET | `/admin/evidence/sessions`, `/admin/evidence/sessions/{id}/package` | Compliance evidence |
+| GET | `/admin/compliance/report` | Compliance report export |
+
+### Teams & invitations
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET/POST | `/teams` | List/create teams |
+| GET/DELETE | `/teams/{id}` | Team details/delete |
+| GET/POST/DELETE/PATCH | `/teams/{id}/members`, `/teams/{id}/invitations` | Members and invitations |
+| POST | `/teams/{id}/leave` | Leave team |
+| POST | `/invitations/{token}/accept` | Accept invitation |
+
+### App configuration & integrations
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/app-config/sections` | List AppConfig sections |
+| GET/PUT/DELETE | `/app-config/sections/{section}` | Read/update/delete section |
+| GET/POST | `/app-config/revisions`, `/app-config/revisions/{id}/rollback` | Config revision history |
+| GET/PUT | `/app-config/agent` | Agent config shortcut |
+| GET/POST/PUT/DELETE | `/app-config/mcp-servers`, `/app-config/mcp-servers/{name}/*` | MCP server CRUD |
+| GET/POST/DELETE | `/app-config/a2a-servers`, `/app-config/a2a-servers/{id}/*` | A2A server CRUD |
+
+### LLM endpoints & models
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET/POST | `/llm-endpoints` | List/create provider endpoints (stores encrypted API key) |
+| GET/PUT/DELETE | `/llm-endpoints/{id}` | Endpoint CRUD |
+| GET/POST | `/llm-models` | List/create models (references `endpoint_id`) |
+| GET/PUT/DELETE | `/llm-models/{id}` | Model CRUD |
+| POST | `/llm-models/{id}/set-default` | Set default model |
+| POST | `/llm-models/{id}/probe-multimodal` | Probe vision capability |
+
+See [`../docs/architecture/llm-endpoints-and-models.md`](../docs/architecture/llm-endpoints-and-models.md).
+
+### Sessions, artifacts, skills, memory, files
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST/GET/PATCH | `/sessions`, `/sessions/stream`, `/sessions/{id}` | Session CRUD and list |
+| POST | `/sessions/{id}/chat` | SSE streaming chat |
+| GET | `/sessions/{id}/events` | Paginated event replay |
+| GET/POST | `/sessions/{id}/memory`, `/memory/compact`, `/memory/clear` | Session agent memory |
+| GET/POST | `/sessions/{id}/checkpoints`, `/checkpoints/{id}/restore` | Checkpoints and rollback |
+| WS | `/sessions/{id}/vnc` | VNC WebSocket proxy |
+| GET/POST | `/sessions/{session_id}/artifacts`, `/artifacts/{id}`, `/artifacts/{id}/share` | Artifacts |
+| GET/POST/PUT/DELETE | `/skills`, `/skills/recommend`, `/skills/import` | Skill templates |
+| GET/POST/PUT/DELETE | `/memories` | Long-term memory |
+| POST/GET | `/files`, `/files/{id}/download` | File upload/download |
+| GET/POST/DELETE | `/service-keys` | Service API keys |
+
+### Codebase, knowledge base, automation
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET/POST | `/codebases`, `/codebases/{id}/*` | Code import, ingest SSE, symbols, sessions |
+| GET/POST | `/knowledge-bases`, `/knowledge-bases/{id}/*` | KB CRUD, documents, ingest, reindex |
+| GET/POST/PATCH/DELETE | `/scheduled-jobs`, `/scheduled-jobs/{id}/*` | Cron/webhook jobs |
+| GET/POST | `/notifications`, `/notifications/stream` | User notifications |
 
 ### SSE Event Types
 
@@ -100,6 +168,7 @@ All SSE `data` includes `event_id`, `created_at`, `schema_version`, `visibility`
 
 | Event | Description |
 |-------|-------------|
+| `clarify` | Clarifying question from ClarifyAgent |
 | `message` | Full user or assistant message |
 | `message_delta` | Assistant text delta (merged by `stream_id`) |
 | `reasoning_delta` | Reasoning delta (default: `include_debug=true` only) |
@@ -110,7 +179,10 @@ All SSE `data` includes `event_id`, `created_at`, `schema_version`, `visibility`
 | `title` | Session title update |
 | `plan` | Plan event (with steps list) |
 | `step` | Step event (id/status/description) |
+| `subagent` | Sub-agent delegation status |
 | `tool` | Tool call event (name/function/args/content) |
+| `artifact` | Artifact workbench update |
+| `approval` | Plan/tool approval gate state |
 | `wait` | Waiting for user input |
 | `usage` | Token usage event |
 | `done` | Stream end |

@@ -111,7 +111,7 @@ Unlike transient 429/5xx retries, `insufficient_quota` (`MODEL_QUOTA_EXCEEDED`) 
 Notes:
 
 - **Independent of** `fallback_enabled`: quota fallback works without enabling general transient fallback.
-- Candidates come from `llm_models` (same provider first, then cross-provider); no runtime probe—call directly and continue on failure.
+- Candidates come from `llm_models` rows (same `endpoint_id` sibling models first, same provider, then cross-provider); no runtime probe—call directly and continue on failure. See [LLM endpoints and models](llm-endpoints-and-models.md).
 - Different `model_name` values under the same endpoint / API Key may have **independent quotas**; quota fallback walks all configured models (including same-endpoint siblings) with **no retry on the same model**.
 - Models confirmed quota-exhausted are skipped on subsequent LLM calls within the same task.
 - Quota-driven model switches **do not consume** Agent retry budget; `MODEL_QUOTA_EXCEEDED` is raised only when all candidates fail.
@@ -201,6 +201,9 @@ When models are unavailable, A2A JSON-RPC returns:
 | Test | Coverage |
 |------|----------|
 | `test_model_error_fixes.py` | Model error classification and frontend/backend compatibility |
+| `test_llm_endpoint_service.py` | LLM endpoint CRUD and encryption |
+| `test_recoverable_retry.py` | Infra failure checkpoint recovery and requeue |
+| `test_resilient_llm.py` | Fallback and circuit breaker integration |
 | `test_reconcile.py` | Orphan task reconcile |
 | `test_reconcile_circuit.py` | Reconcile and circuit linkage |
 | `test_status_routes.py` | `/api/status` |

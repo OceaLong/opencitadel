@@ -51,12 +51,12 @@ function ShellPreview({ tool }: { tool: ToolEvent }) {
   }, [consoleData]);
 
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
+    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-gray-700 bg-[#1e1e1e]">
         <div className="flex-shrink-0 border-b border-gray-700 bg-[#2d2d2d] py-1.5 text-center text-xs text-gray-400">
           {sessionId || tToolUse("shellFallback")}
         </div>
-        <ScrollArea className="flex-1">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="p-4 font-mono text-sm leading-relaxed">
             {records.length > 0 ? (
               records.map((rec, i) => (
@@ -181,14 +181,14 @@ function FileToolPreview({ tool }: { tool: ToolEvent }) {
   const isMarkdown = isMarkdownPath(filepath);
 
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
+    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-gray-700 bg-[#1e1e1e]">
         {filepath && (
           <div className="flex-shrink-0 truncate border-b border-gray-700 bg-[#2d2d2d] px-4 py-1.5 text-center text-xs text-gray-400">
             {filepath}
           </div>
         )}
-        <ScrollArea className="flex-1">
+        <ScrollArea className="min-h-0 flex-1">
           {isMarkdown && fileContent ? (
             <div className="bg-card p-4">
               <MarkdownContent content={fileContent} />

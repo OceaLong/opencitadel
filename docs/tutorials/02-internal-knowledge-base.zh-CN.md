@@ -45,7 +45,7 @@ flowchart TD
 
 ### 1. 创建知识库
 
-1. 在侧边栏打开 **Knowledge**
+1. 在 **顶栏工作区菜单** 中打开 **Knowledge**（非左侧边栏）
 2. 点击 **New knowledge base**
 3. 命名（如 `Engineering Handbook`）并选择可见性（个人或团队）
 

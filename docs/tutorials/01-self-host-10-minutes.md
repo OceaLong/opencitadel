@@ -35,11 +35,13 @@ Open **http://localhost:8088** when health check passes.
 - Email: value of `BOOTSTRAP_ADMIN_EMAIL` (default `admin@example.com`)
 - Password: your `BOOTSTRAP_ADMIN_PASSWORD`
 
-### 4. Add a model
+### 4. Add an endpoint and model
+
+LLM configuration is two-step: **endpoint** (provider + API key) then **model** (model name under that endpoint). Full details: [Production deployment — Models](../operations/deployment.md#models-skills-and-memory).
 
 1. Open **Settings → Models**
-2. Click **Add model**
-3. Choose provider (e.g. OpenAI), paste API key, select model name
+2. Click **Add endpoint** — choose provider, base URL, paste API key
+3. Under that endpoint, click **Add model** — enter model name
 4. Set as default
 
 ### 5. Run your first task
@@ -62,7 +64,7 @@ COOKIE_SECURE=false
 FRONTEND_BASE_URL=http://localhost:8088
 ```
 
-Install [Ollama](https://ollama.com) on the host, pull a capable model (e.g. `qwen2.5:14b`), then add it in Settings with base URL `http://host.docker.internal:11434/v1`.
+Install [Ollama](https://ollama.com) on the host, pull a capable model (e.g. `qwen2.5:14b`), then in Settings add an **endpoint** with base URL `http://host.docker.internal:11434/v1`, then add a **model** under it.
 
 **Note:** Smaller local models may struggle with multi-step Agent tasks. BYO cloud API keys give the best first-run experience.
 
@@ -71,7 +73,7 @@ Install [Ollama](https://ollama.com) on the host, pull a capable model (e.g. `qw
 | Issue | Fix |
 |-------|-----|
 | 502 on login | Wait for `opencitadel-migrate` to finish; check `docker compose logs opencitadel-migrate` |
-| Agent does nothing | Confirm a default model is set with valid API key |
+| Agent does nothing | Confirm a default model is set and its endpoint has a valid API key |
 | OOM / slow | See [deployment guide](../operations/deployment.md) memory tuning; enable swap on small VMs |
 
 ## Next

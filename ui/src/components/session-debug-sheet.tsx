@@ -114,6 +114,11 @@ export function SessionDebugSheet({ events, includeDebug = false, compact, onOpe
                       </div>
                       <p className="text-destructive p-3 text-sm break-words whitespace-pre-wrap">
                         {item.message}
+                        {item.repeatCount && item.repeatCount > 1 ? (
+                          <span className="text-muted-foreground mt-1 block text-xs">
+                            ×{item.repeatCount}
+                          </span>
+                        ) : null}
                       </p>
                     </div>
                   ))}

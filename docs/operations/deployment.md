@@ -219,7 +219,7 @@ MINIO_SECURE=false
 NGINX_PORT=8088
 ```
 
-For local LLM: add a model in the UI with Provider=ollama, `base_url=http://host.docker.internal:11434/v1`.
+For local LLM: add an **endpoint** in Settings → Models with Provider=ollama, `base_url=http://host.docker.internal:11434/v1`, then add a **model** under that endpoint.
 
 Behavior settings (CORS, rate limits, sandbox, memory, worker concurrency, OTEL, etc.) belong in `api/config.yaml`, not `.env`.
 

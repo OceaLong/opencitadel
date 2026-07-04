@@ -1,3 +1,5 @@
+[English](README.md)
+
 # OpsConsole — 演示用内部工单运营后台
 
 面向 **OpenCitadel Web Operator** 演示与 e2e 测试的内部工单与结算后台。日常操作为浏览器表单驱动；同时提供**只读 REST API** 供对账 Skill 使用。

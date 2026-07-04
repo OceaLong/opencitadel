@@ -26,7 +26,7 @@ flowchart LR
     Runtime["AppConfig 运行时"]
   end
   Env --> Settings
-  Yaml -->|"USE_DB_APP_CONFIG=false Compose 默认"| Runtime
+  Yaml -->|"USE_DB_APP_CONFIG=false（Compose 显式覆盖）"| Runtime
   Yaml -->|"migrate 表空时种子写入"| DB
   Helm -->|"USE_DB_APP_CONFIG=true Helm 默认"| DB
   DB -->|"USE_DB_APP_CONFIG=true"| Runtime
@@ -60,7 +60,7 @@ flowchart TD
 |------|------|------|----------|
 | 引导/密钥 | `.env` / `Settings` | Postgres、Redis、JWT、COS | 无 |
 | 行为配置 | `app_configs` JSONB（`scope=global` + 可选 `scope=user` 覆盖） | `worker`、`sandbox`、`feature_flags`、用户级 `agent_config` | 设置 → 运行时 / 通用 |
-| 集成实体 | `mcp_servers`、`a2a_servers` 表（owner + visibility，密钥加密） | MCP headers/env、A2A URL | 设置 → 集成 |
+| 集成实体 | `mcp_servers`、`a2a_servers`、`llm_endpoints`、`llm_models` 表 | MCP/A2A 连接；LLM Provider 端点与模型配置 | 设置 → 集成 / 模型 |
 
 ### 按用户覆盖
 
@@ -78,7 +78,7 @@ flowchart TD
 
 ### 已知限制
 
-- `OwnerScope.team(...)` 当前未按 `team_id` 过滤 MCP/A2A（以及既有的 `llm_model`）；团队成员之间不会自动共享这些资源。此为现有架构限制。
+- `OwnerScope.team(...)` 当前未按 `team_id` 过滤 MCP/A2A 或 `llm_endpoints` / `llm_models`；团队成员之间不会自动共享这些资源。此为现有架构限制。
 - 全局 `app_configs` JSONB 行采用读-改-写且无乐观锁；并发编辑可能产生竞争（低优先级，与既有模式一致）。
 
 ## 禁止

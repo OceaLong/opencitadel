@@ -55,6 +55,16 @@ logger = logging.getLogger(__name__)
 CLARIFY_PENDING_PHASE = "clarify"
 
 
+def _flow_aborts_on_error(status: FlowStatus) -> bool:
+    return status in {
+        FlowStatus.CLARIFYING,
+        FlowStatus.PLANNING,
+        FlowStatus.EXECUTING,
+        FlowStatus.UPDATING,
+        FlowStatus.SUMMARIZING,
+    }
+
+
 def _should_resume_failed_plan(session, plan: Optional[Plan]) -> bool:
     if not plan:
         return False
@@ -196,6 +206,18 @@ class PlannerReActFlow(BaseFlow):
             **skill_overrides,
         )
         logger.debug(f"创建执行Agent成功, 会话id: {self._session_id}")
+
+    def _abort_flow_on_error(self, event: BaseEvent) -> bool:
+        if not isinstance(event, ErrorEvent) or not _flow_aborts_on_error(self.status):
+            return False
+        logger.warning(
+            "Planner&ReAct流因错误终止 session=%s phase=%s code=%s",
+            self._session_id,
+            self.status.value,
+            event.code,
+        )
+        self.status = FlowStatus.COMPLETED
+        return True
 
     async def _execute_parallel_steps(
             self,
@@ -376,10 +398,16 @@ class PlannerReActFlow(BaseFlow):
                 self._observability.record_agent_step("clarify", "analyze")
                 asked = False
                 with tracer.span("clarify.analyze"):
+                    flow_aborted = False
                     async for event in self.clarify.analyze(message):
                         if isinstance(event, ClarifyEvent):
                             asked = True
                         yield event
+                        if self._abort_flow_on_error(event):
+                            flow_aborted = True
+                            break
+                    if flow_aborted:
+                        break
 
                 if asked:
                     await self._set_pending_phase(CLARIFY_PENDING_PHASE)
@@ -408,6 +436,7 @@ class PlannerReActFlow(BaseFlow):
                 logger.info(f"Planner&ReAct流开始创建计划/Plan")
                 self._observability.record_agent_step("planner", "create_plan")
                 with tracer.span("planner.create_plan"):
+                    flow_aborted = False
                     async for event in self.planner.create_plan(message):
                         # 11.判断规划Agent是否返回规划事件
                         if isinstance(event, PlanEvent) and event.status == PlanEventStatus.CREATED:
@@ -427,6 +456,11 @@ class PlannerReActFlow(BaseFlow):
 
                         # 14.将生成的事件直接输出(一般来说是PlanEvent)
                         yield event
+                        if self._abort_flow_on_error(event):
+                            flow_aborted = True
+                            break
+                    if flow_aborted:
+                        break
 
                 # 15.计划创建完成，更新流状态为执行中
                 logger.info(f"压缩{self.planner.name} Agent记忆/上下文")
@@ -481,6 +515,10 @@ class PlannerReActFlow(BaseFlow):
                     )
                     async for event in self._execute_parallel_steps(batch, message):
                         yield event
+                        if self._abort_flow_on_error(event):
+                            break
+                    if self.status == FlowStatus.COMPLETED:
+                        break
                     step = self._build_parallel_update_step(batch)
                     self.status = FlowStatus.UPDATING
                     continue
@@ -502,6 +540,11 @@ class PlannerReActFlow(BaseFlow):
                         vision_attachments=message.vision_attachments,
                 ):
                     yield event
+                    if self._abort_flow_on_error(event):
+                        break
+
+                if self.status == FlowStatus.COMPLETED:
+                    break
 
                 # 21.压缩执行Agent记忆，避免上下文腐化+消耗大量token
                 logger.info(f"压缩{self.react.name} Agent记忆/上下文")
@@ -516,8 +559,14 @@ class PlannerReActFlow(BaseFlow):
                     self.status = FlowStatus.SUMMARIZING
                     continue
                 logger.info(f"Planner&ReAct流开始更新计划")
+                flow_aborted = False
                 async for event in self.planner.update_plan(self.plan, step):
                     yield event
+                    if self._abort_flow_on_error(event):
+                        flow_aborted = True
+                        break
+                if flow_aborted:
+                    break
                 logger.info(f"压缩{self.planner.name} Agent记忆/上下文")
                 await self.planner.summarize_and_compact()
 
@@ -527,8 +576,14 @@ class PlannerReActFlow(BaseFlow):
             elif self.status == FlowStatus.SUMMARIZING:
                 # 25.流状态为总结中，则意味着所有子步骤都执行完成
                 logger.info(f"Planner&ReAct流开始总结")
+                flow_aborted = False
                 async for event in self.react.summarize(message):
                     yield event
+                    if self._abort_flow_on_error(event):
+                        flow_aborted = True
+                        break
+                if flow_aborted:
+                    break
 
                 # 26.总结完毕，意味着流即将结束
                 logger.info(f"Planner&ReAct流状态从{FlowStatus.SUMMARIZING}变成{FlowStatus.COMPLETED}")

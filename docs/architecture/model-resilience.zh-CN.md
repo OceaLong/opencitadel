@@ -111,7 +111,7 @@ stateDiagram-v2
 行为要点：
 
 - **独立于** `fallback_enabled`：无需开启通用 transient fallback 即可启用 quota fallback。
-- 候选来自 `llm_models` 表（同 Provider 优先，再跨 Provider）；不做实时 probe，直接调用，失败继续下一个。
+- 候选来自 `llm_models` 行（同 `endpoint_id` 兄弟模型优先，同 Provider，再跨 Provider）；不做实时 probe，直接调用，失败继续下一个。见 [LLM 端点与模型](llm-endpoints-and-models.zh-CN.md)。
 - 同一端点 / API Key 下不同 `model_name` 可拥有**独立配额**；quota fallback 会依次尝试所有已配置模型（含同端点 sibling），**不会在同一个模型上重试**。
 - 已确认 quota 耗尽的模型会在同一任务后续 LLM 调用中跳过，直接尝试其余候选。
 - Quota 驱动的模型切换**不消耗** Agent retry budget；全部候选均 quota 失败时才抛出 `MODEL_QUOTA_EXCEEDED`。
@@ -203,6 +203,9 @@ stateDiagram-v2
 | 测试 | 覆盖 |
 |------|------|
 | `test_model_error_fixes.py` | 模型错误分类与前后端兼容 |
+| `test_llm_endpoint_service.py` | LLM 端点 CRUD 与加密 |
+| `test_recoverable_retry.py` | 基础设施失败检查点恢复与重排队 |
+| `test_resilient_llm.py` | 回退与熔断集成 |
 | `test_reconcile.py` | 孤儿任务 reconcile |
 | `test_reconcile_circuit.py` | reconcile 与熔断联动 |
 | `test_status_routes.py` | `/api/status` |

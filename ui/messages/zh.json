@@ -83,6 +83,7 @@
     "streamReadFailed": "读取流失败",
     "modelUnavailable": "模型或向量服务暂不可用，请检查模型设置或稍后重试",
     "modelQuotaExceeded": "该模型 API 配额已耗尽，请在提供商控制台完成付费或切换到其他可用模型。",
+    "modelInvalidRequest": "模型请求参数无效，可能与思考模式或对话历史不兼容。请关闭思考模式或更换模型后重试。",
     "infraFailed": "任务执行超时或重试次数耗尽，请简化任务或稍后重试",
     "saveFailed": "保存失败",
     "updateFailed": "更新失败",
@@ -212,7 +213,8 @@
     "completed": "已完成",
     "failed": "失败",
     "running": "执行中",
-    "errorAfter": "可能发生在{context}之后"
+    "errorAfter": "可能发生在{context}之后",
+    "errorRepeated": "相同错误重复 {count} 次"
   },
   "sessionList": {
     "deleteSuccess": "已删除任务「{title}」",

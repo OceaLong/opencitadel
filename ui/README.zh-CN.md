@@ -1,81 +1,119 @@
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-# OpenCitadel 前端 UI
+# OpenCitadel UI
 
-基于 Next.js 构建的前端用户界面，提供会话管理、AI 对话、模型与 Skill 选择、长期记忆管理、远程桌面（VNC）等交互功能。
+Next.js 前端：会话管理、AI 对话、端点/模型设置、Skill 模板、长期记忆、HITL 门控与远程桌面（VNC）。
 
 ## 技术栈
 
-- Next.js 16 (React 19)
+- Next.js 16（React 19，App Router）
 - TypeScript
 - Tailwind CSS 4
-- Radix UI（组件库）
-- noVNC（远程桌面）
+- Radix UI + Lucide 图标
+- next-intl 4.x（locale：`en` / `zh`）
+- noVNC（远程桌面）、Mermaid（图表）、Recharts（管理后台图表）
 
 ## 项目结构
 
 ```
 ui/
 ├── src/
-│   ├── app/               # 页面路由
-│   │   ├── page.tsx       # 首页
-│   │   ├── sessions/      # 会话页面
+│   ├── app/               # App Router 页面
+│   │   ├── page.tsx       # 首页（新建会话）
+│   │   ├── sessions/      # 会话详情
+│   │   ├── codebase/      # 代码知识库
+│   │   ├── knowledge/     # 文档知识库
 │   │   ├── marketplace/   # 应用市场
-│   │   ├── automation/    # 自动化任务
+│   │   ├── automation/    # 定时任务
 │   │   ├── teams/         # 团队工作区
 │   │   ├── admin/         # 管理后台
-│   │   └── share/         # 公开交付物分享页
-│   ├── components/        # 组件
-│   │   ├── ui/            # 基础 UI 组件
-│   │   └── tool-use/      # 工具使用相关组件
-│   ├── lib/
-│   │   └── api/           # API 客户端
-│   ├── hooks/             # 自定义 Hooks
-│   └── providers/         # Context Providers
-├── public/                # 静态资源
-├── eslint.config.mjs      # ESLint + 导入排序配置
-├── .prettierrc            # Prettier 格式化配置
-├── next.config.ts         # Next.js 配置
-├── Dockerfile
-├── package.json
-└── tsconfig.json
+│   │   ├── login/         # 登录
+│   │   ├── register/      # 注册
+│   │   ├── invitations/   # 接受团队邀请
+│   │   └── share/         # 公开交付物分享
+│   ├── components/
+│   │   ├── settings/      # 设置 Tab（模型、Skill、记忆...）
+│   │   ├── ui/            # Radix 基础组件
+│   │   └── tool-use/      # 工具执行 UI
+│   ├── lib/api/           # API 客户端
+│   ├── hooks/
+│   ├── providers/
+│   └── i18n/
+├── scripts/               # i18n 构建/检查
+├── messages/              # 生成的 en.json / zh.json
+└── public/
 ```
 
-## 主要功能
+## 路由
 
-- **会话配置**：首页和会话详情页支持选择模型与 Skill；会话详情页可在非运行状态下更新配置。
-- **流式对话**：SSE 事件流 + Token 级 `message_delta` 增量合并渲染；历史事件通过 `events_next_cursor` 与 `/sessions/{id}/events` 分页补齐。
-- **模型管理**：通过「设置中心 → 模型管理」维护多 Provider 模型，支持新增、编辑、删除和设置默认模型。
-- **Skill 模板**：通过「设置中心 → Skill 模板」维护系统提示词、可用工具、推荐模型、Agent 参数和示例问题。
-- **长期记忆**：通过「设置中心 → 长期记忆」维护全局或会话级记忆；会话详情页可查看、压缩、清空或删除 Agent 内存消息。
-- **设置弹窗**：保留通用配置；MCP 与 A2A 在 **设置 → 集成** Tab 中管理（弹窗内 Tab，非独立页面路由）。
-- **应用市场**：`/marketplace` LLM 小应用目录。
-- **自动化**：`/automation` 定时任务与通知。
+| 路由 | 页面 | Shell |
+|------|------|-------|
+| `/` | 首页 — 创建会话、选模型/Skill | 侧栏 + 顶栏 |
+| `/sessions/[id]` | 流式对话、HITL、VNC、交付物 | 侧栏 + 顶栏 |
+| `/codebase`、`/codebase/[id]` | 代码导入与 Ask/Agent | 侧栏 + 顶栏 |
+| `/knowledge`、`/knowledge/[id]` | 文档知识库与 RAG | 侧栏 + 顶栏 |
+| `/marketplace` | LLM 小应用 | 侧栏 + 顶栏 |
+| `/automation` | Cron/Webhook 任务 | 侧栏 + 顶栏 |
+| `/teams`、`/teams/[id]` | 团队管理 | 侧栏 + 顶栏 |
+| `/login`、`/register` | 认证 | 无 Shell |
+| `/admin/*` | 管理后台（7 页） | Admin 布局 |
+| `/invitations/[token]` | 接受邀请 | 无 Shell |
+| `/share/artifact/[token]` | 公开交付物 | 无 Shell |
 
-## API 调用
+**导航**：左侧为会话列表；Codebase、Knowledge、Marketplace、Automation 在 **顶栏工作区下拉菜单**（`app-header.tsx`）。
 
-项目通过环境变量 `NEXT_PUBLIC_API_BASE_URL` 配置 API 地址：
+## 功能
 
-- **开发环境**：默认 `http://localhost:8088/api`（直连 API 服务）
-- **生产环境**：构建时设置为 `/api`（通过 Nginx 反向代理）
+- **会话配置**：首页与会话页选择模型与 Skill；空闲时可更新。
+- **流式对话**：SSE + `message_delta` 合并；历史经 `/sessions/{id}/events` 回放。
+- **端点与模型**：设置 → 模型 — 按端点分组（Provider、Base URL、API Key 在端点上）。
+- **Skill 模板**：设置 → Skill。
+- **长期记忆**：设置 → 记忆；会话页可压缩/清空会话记忆。
+- **设置弹窗**（六 Tab）：通用、模型、Skill、记忆、集成（MCP/A2A）、运行时（仅 admin）。
+- **语言切换**：顶栏 `LanguageToggle`（`NEXT_LOCALE` Cookie；URL 无 locale 前缀）。
+- **HITL UI**：澄清问题、计划/工具审批条、VNC 接管、检查点恢复。
+- **Web Operator**：Skill 为 `web-operator` 时弹出 `operator-scope-dialog.tsx`。
+- **模型状态 Badge**：顶栏轮询 `/api/llm/status`。
 
-前端 API 客户端位于 `src/lib/api/`，包含会话、文件、应用配置、模型、Skill 和记忆等模块。
+详见 [`../docs/architecture/frontend-ui.zh-CN.md`](../docs/architecture/frontend-ui.zh-CN.md)。
+
+## API 客户端
+
+基础 URL：`NEXT_PUBLIC_API_BASE_URL`
+
+- **开发**：`http://localhost:8088/api`
+- **生产**：`/api`（Nginx 反代）
+
+核心：`src/lib/api/fetch.ts` — Cookie 认证、CSRF、`X-Workspace-Id`、401 刷新、SSE。
+
+| 模块 | 用途 |
+|------|------|
+| `session.ts` | 会话、chat SSE、检查点 |
+| `endpoints.ts` | `/llm-endpoints` CRUD |
+| `models.ts` | `/llm-models` CRUD |
+| `llm-status.ts` | `/llm/status` |
+| `config.ts` | AppConfig 分段 |
+| `skills.ts`、`memory.ts` | Skill 与记忆 |
+| `admin.ts`、`team.ts` | 管理与团队 |
+| `knowledge.ts`、`codebase.ts` | 知识库 |
+| `artifacts.ts` | 交付物与分享 |
+| `types.ts` | 共享 TypeScript 类型 |
 
 ## 本地开发
 
-### 环境准备
+### 前置
 
 - Node.js >= 22
 - npm >= 10
 
-### 安装与启动
+### 安装与运行
 
 ```bash
 npm install
 npm run dev
 ```
 
-开发服务器默认运行在 `http://localhost:3000`，API 默认请求 `http://localhost:8088/api`。
+开发服务器：`http://localhost:3000`；API 默认：`http://localhost:8088/api`。
 
 ### 代码质量
 
@@ -85,6 +123,7 @@ npm run lint:fix
 npm run typecheck
 npm run format
 npm run format:check
+npm run i18n:check
 ```
 
 ### 构建
@@ -96,18 +135,14 @@ npm run start
 
 ## Docker 部署
 
-UI 服务通过根目录的 `docker-compose.yml` 统一部署。Dockerfile 采用多阶段构建：
+通过根目录 `docker-compose.yml` 部署。多阶段 Dockerfile：deps → builder → runner。
 
-1. **deps** — 安装 npm 依赖
-2. **builder** — 构建 Next.js 应用（standalone 模式）
-3. **runner** — 最小化生产镜像
-
-构建时通过 `NEXT_PUBLIC_API_BASE_URL=/api` 参数将 API 地址设置为相对路径，由 Nginx 统一代理。
+构建时使用 `NEXT_PUBLIC_API_BASE_URL=/api`，由 Nginx 反代 API。
 
 ## 国际化（i18n）
 
-- 框架：`next-intl`，支持 `en` 与 `zh`（默认 `en`）
-- 消息源：`scripts/build-messages.mjs` → 执行 `npm run i18n:build` → 生成 `messages/en.json` 与 `messages/zh.json`
-- 运行时 locale 为 `zh`；文档文件名使用 `*.zh-CN.md` 表示中文 — 同一语言，标识不同
-- URL 无语言前缀（`localePrefix: "never"`）；语言保存在 `NEXT_LOCALE` Cookie
-- 语言切换基础设施已就绪（`src/i18n/locale.ts` 的 `setLocale`）；Settings 入口待接入
+- 框架：`next-intl`，locale `en` / `zh`（默认 `en`）
+- 消息源：`scripts/build-messages.mjs` → `npm run i18n:build` → `messages/en.json`、`zh.json`
+- 运行时 locale 为 `zh`；文档文件名用 `*.zh-CN.md` — 同一语言，不同标识
+- URL 无 locale 前缀（`localePrefix: "never"`）；locale 存于 `NEXT_LOCALE` Cookie
+- 语言切换：**AppHeader** → `LanguageToggle` 组件

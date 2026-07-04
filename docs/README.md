@@ -28,6 +28,10 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | Document | Scope |
 |----------|-------|
 | [Architecture overview](architecture/overview.md) | System design, process roles, sandbox lifecycle, deployment modes |
+| [Technical decisions](architecture/technical-decisions.md) | Technology choices and alternatives |
+| [LLM endpoints & models](architecture/llm-endpoints-and-models.md) | Endpoint/model split, encryption, UI flow |
+| [Frontend UI](architecture/frontend-ui.md) | Next.js shell, SSE projection, HITL components |
+| [Task recovery](architecture/task-recovery.md) | Recoverable retry, checkpoint restore, DLQ |
 | [Security model](architecture/security-model.md) | Trust boundaries, sandbox isolation, auth |
 | [Events](architecture/events.md) | Domain events, SSE contract, persistence, replay |
 | [Checkpoints & HITL](architecture/checkpoints-and-hitl.md) | Gate contracts, rollback, Web Operator, browser profile snapshots |
@@ -51,6 +55,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [API](../api/README.md) | Backend routes, SSE, local dev |
 | [UI](../ui/README.md) | Frontend stack and routes |
 | [Sandbox](../sandbox/README.md) | Isolated runtime |
+| [OpsConsole demo](../demo/ops-console/README.md) | Web Operator ticket backend demo |
 
 ### Open-source governance
 
@@ -67,4 +72,4 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 - **Bilingual pairs** — update both language files when changing a topic.
 - **Link convention** — English docs link to `*.md`; Chinese docs link to `*.zh-CN.md`.
 - **Index sync** — when adding a tutorial or architecture doc, update this index, the root [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) doc map, and add top-of-file language switch links in both language files.
-- **PR checklist** — [Documentation maintenance checklist](MAINTENANCE_CHECKLIST.md); run `./scripts/check-docs.sh` before submitting doc changes.
+- **PR checklist** — [Documentation maintenance checklist](MAINTENANCE_CHECKLIST.md); [Documentation inventory](DOCUMENTATION_INVENTORY.md); run `./scripts/check-docs.sh` before submitting doc changes.

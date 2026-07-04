@@ -45,7 +45,7 @@ flowchart TD
 
 ### 1. Create a knowledge base
 
-1. Open **Knowledge** in the sidebar
+1. Open **Knowledge** from the **header workspace menu** (not the left sidebar)
 2. Click **New knowledge base**
 3. Name it (e.g. `Engineering Handbook`) and choose visibility (personal or team)
 

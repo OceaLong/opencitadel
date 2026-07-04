@@ -15,6 +15,9 @@ export function modelErrorMessage(code: string | null | undefined): string | nul
   if (code === "MODEL_QUOTA_EXCEEDED") {
     return translate("errors.modelQuotaExceeded");
   }
+  if (code === "MODEL_INVALID_REQUEST") {
+    return translate("errors.modelInvalidRequest");
+  }
   if (code.startsWith("MODEL_") || code.startsWith("EMBEDDING_")) {
     return translate("errors.modelUnavailable");
   }

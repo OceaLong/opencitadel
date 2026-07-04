@@ -26,7 +26,7 @@ flowchart LR
     Runtime["AppConfig runtime"]
   end
   Env --> Settings
-  Yaml -->|"USE_DB_APP_CONFIG=false Compose default"| Runtime
+  Yaml -->|"USE_DB_APP_CONFIG=false (Compose override)"| Runtime
   Yaml -->|"migrate seed if empty"| DB
   Helm -->|"USE_DB_APP_CONFIG=true Helm default"| DB
   DB -->|"USE_DB_APP_CONFIG=true"| Runtime
@@ -60,7 +60,7 @@ flowchart TD
 |------|---------|----------|----------|
 | Bootstrap secrets | `.env` / `Settings` | Postgres, Redis, JWT, COS keys | N/A |
 | Behavioral config | `app_configs` JSONB (`scope=global` + optional `scope=user` overrides) | `worker`, `sandbox`, `feature_flags`, per-user `agent_config` | Settings → Runtime / Common |
-| Integration entities | `mcp_servers`, `a2a_servers` tables (owner + visibility, encrypted secrets) | MCP headers/env, A2A base URLs | Settings → Integrations |
+| Integration entities | `mcp_servers`, `a2a_servers`, `llm_endpoints`, `llm_models` tables | MCP/A2A connections; LLM provider endpoints and model configs | Settings → Integrations / Models |
 
 ### Per-user overrides
 
@@ -78,7 +78,7 @@ Only session-scoped sections may be overridden per user: `agent_config`, `memory
 
 ### Known limitations
 
-- `OwnerScope.team(...)` does not filter MCP/A2A (or existing `llm_model`) by `team_id`; team members do not automatically share those resources. This is an existing architectural limitation.
+- `OwnerScope.team(...)` does not filter MCP/A2A or `llm_endpoints` / `llm_models` by `team_id`; team members do not automatically share those resources. This is an existing architectural limitation.
 - Global `app_configs` JSONB row uses read-modify-write without optimistic locking; concurrent edits may race (low priority, consistent with prior patterns).
 
 ## Prohibited

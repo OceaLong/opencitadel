@@ -141,7 +141,7 @@ sequenceDiagram
 |------|---------|------------|-------|
 | User credentials | PostgreSQL (`users`) | bcrypt password hash | Per user |
 | JWT access / refresh | HTTP-only Cookie | Signed with `JWT_SECRET` | Per session |
-| LLM API Key | PostgreSQL (`llm_models`) | Fernet (`fernet_v1`), `API_KEY_SECRET` | Per model config |
+| LLM API Key | PostgreSQL (`llm_endpoints`) | Fernet (`fernet_v1`), `API_KEY_SECRET` | Per endpoint (shared by sibling models) |
 | Service API Key | PostgreSQL (hash) | SHA-256 static hash | Per key, mapped to owner |
 | Session messages and events | PostgreSQL + Redis Streams | Transport TLS when HTTPS enabled | Personal or team workspace |
 | Uploaded files / screenshots | Object storage (COS/MinIO) | Provider or bucket policy | Keys stored in DB |
@@ -267,7 +267,7 @@ Public endpoints (registration, status) are also limited by the rate limiter whe
 
 | Secret | Environment variable | Rotation notes |
 |--------|---------------------|----------------|
-| LLM Key encryption | `API_KEY_SECRET` | After rotation, re-save all model keys in UI |
+| LLM Key encryption | `API_KEY_SECRET` | After rotation, re-save all endpoint keys in Settings → Models |
 | JWT signing | `JWT_SECRET` | Invalidates all sessions |
 | Session / Cookie | `SESSION_SECRET` | Invalidates cookie sessions |
 | DB / Redis / Storage | `POSTGRES_*`, `REDIS_*`, `COS_*`, `MINIO_*` | Update `.env` and restart services |

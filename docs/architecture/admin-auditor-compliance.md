@@ -24,7 +24,8 @@ Auditors can review governance data but cannot create sessions, upload files, or
 | `/admin/invitations` | Platform invitation tokens |
 | `/admin/audit` | Audit log viewer |
 | `/admin/compliance` | Evidence center, chain verification, compliance reports |
-| `/admin/usage` | Token usage statistics |
+
+Usage charts and token statistics appear on the **`/admin` overview dashboard** (not a separate `/admin/usage` page). Backend usage APIs remain under `/api/admin/usage/*`.
 
 Bootstrap admin is created from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` on first migrate.
 
