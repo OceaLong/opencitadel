@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """Parent/child chunking for enterprise document RAG."""
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import List, Tuple
@@ -9,6 +10,8 @@ from app.domain.models.knowledge_base import ChunkLevel, KnowledgeChunk
 from app.domain.services.knowledge_base.parsers import PageBlock
 from app.domain.services.knowledge_base.vector_service import KBVectorService
 from app.domain.services.knowledge_base.zh_tokenizer import segment_for_bm25
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,7 +38,13 @@ class KBChunker:
     ) -> Tuple[List[KnowledgeChunk], List[KnowledgeChunk]]:
         parents = self._build_parent_chunks(kb_id, doc_id, blocks)
         children = self._build_child_chunks(kb_id, doc_id, parents)
-        embeddings = await self._vector.embed_batch([chunk.content for chunk in children])
+        embeddings: list[list[float]] = [[] for _ in children]
+        if children and self._vector.enabled:
+            try:
+                embeddings = await self._vector.embed_batch([chunk.content for chunk in children])
+            except Exception as exc:
+                logger.warning("文档向量化降级 doc=%s: %s", doc_id, exc)
+                embeddings = [[] for _ in children]
         for chunk, embedding in zip(children, embeddings):
             chunk.embedding = embedding
         return parents, children

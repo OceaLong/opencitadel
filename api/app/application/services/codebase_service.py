@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import asyncio
 import json
 import logging
+import time
 import uuid
 from datetime import datetime
 from typing import AsyncGenerator, Callable, List, Optional, Type
 
-from app.application.errors.exceptions import NotFoundError
+from app.application.errors.exceptions import ConflictError, NotFoundError
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.object_storage import ObjectStoragePort
 from app.domain.external.sandbox import Sandbox
@@ -33,6 +35,11 @@ from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
 
+_TERMINAL_CODEBASE_STATUSES = {CodebaseStatus.READY, CodebaseStatus.FAILED}
+_INGEST_STALE_AFTER_SECONDS = 120.0
+_DELETE_TASK_DRAIN_TIMEOUT_SECONDS = 30.0
+_DELETE_TASK_POLL_INTERVAL_SECONDS = 0.5
+
 
 class CodebaseService:
     def __init__(
@@ -45,6 +52,29 @@ class CodebaseService:
         self._sandbox_cls = sandbox_cls
         self._file_storage = file_storage
         self._task_state = get_task_state()
+
+    async def _ingest_in_progress(self, codebase: Codebase) -> bool:
+        if not codebase.ingest_task_id:
+            return False
+        if codebase.status in _TERMINAL_CODEBASE_STATUSES:
+            return False
+        meta = await self._task_state.get_task_meta(codebase.ingest_task_id)
+        if not meta:
+            return False
+        if await self._task_state.is_done(codebase.ingest_task_id):
+            return False
+        if self._task_state.heartbeat_is_stale(meta, _INGEST_STALE_AFTER_SECONDS):
+            return False
+        return True
+
+    async def _wait_for_task_drain(self, task_id: str) -> None:
+        deadline = time.monotonic() + _DELETE_TASK_DRAIN_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            snapshot = await self._task_state.get_runtime_snapshot(task_id)
+            if snapshot.get("is_done"):
+                return
+            await asyncio.sleep(_DELETE_TASK_POLL_INTERVAL_SECONDS)
+        logger.warning("等待代码库摄取任务结束超时 task_id=%s", task_id)
 
     async def create_codebase(
             self,
@@ -293,3 +323,21 @@ class CodebaseService:
             trailing_newline=False,
         )
         logger.info("已将代码库 %s 快照物化到会话沙箱", codebase_id)
+
+    async def delete_codebase(self, codebase_id: str, scope: Optional[OwnerScope] = None) -> None:
+        codebase = await self.get_codebase(codebase_id, scope=scope)
+        if await self._ingest_in_progress(codebase):
+            raise ConflictError("代码库正在索引中，请等待当前任务完成后再删除")
+        if codebase.ingest_task_id:
+            await self._task_state.request_cancel(codebase.ingest_task_id)
+            await self._wait_for_task_drain(codebase.ingest_task_id)
+        if codebase.sandbox_id:
+            try:
+                sandbox = await self._sandbox_cls.get(codebase.sandbox_id)
+                if sandbox:
+                    await sandbox.destroy()
+            except Exception as exc:
+                logger.warning("删除代码库时销毁 sandbox 失败 codebase=%s: %s", codebase_id, exc)
+        async with self._uow_factory() as uow:
+            await uow.codebase.delete_by_id(codebase_id)
+        logger.info("删除代码库[%s]成功", codebase_id)

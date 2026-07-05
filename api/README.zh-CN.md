@@ -71,6 +71,8 @@ api/
 
 以下路径默认前缀为 `/api`。除公开路由外，鉴权路由需有效会话 JWT（部分集成接口支持 `X-Api-Key`）。
 
+> **维护说明**：本路由表为手工维护。新增路由时请同步更新本文件与 `README.md`，并对照 `app/interfaces/endpoints/routes.py` 与在线 OpenAPI `/openapi.json`。提交文档 PR 前运行 `./scripts/check-docs.sh`。
+
 ### 公开 / 无需登录
 
 | 方法 | 路径 | 说明 |

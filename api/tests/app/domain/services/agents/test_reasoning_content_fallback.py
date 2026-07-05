@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from app.domain.models.message import Message
 from app.domain.services.agents.base import BaseAgent
 
 
@@ -42,3 +43,19 @@ def test_assistant_message_from_llm_response_preserves_tool_calls():
     )
     assert message["content"] == ""
     assert message["tool_calls"] == tool_calls
+
+
+def test_normalize_message_for_llm_coerces_message_object_content():
+    normalized = BaseAgent._normalize_message_for_llm({
+        "role": "user",
+        "content": Message(message="分析核心功能"),
+    })
+    assert normalized["content"] == "分析核心功能"
+
+
+def test_normalize_message_for_llm_coerces_dict_content():
+    normalized = BaseAgent._normalize_message_for_llm({
+        "role": "user",
+        "content": {"message": "分析核心功能", "attachments": []},
+    })
+    assert normalized["content"] == "分析核心功能"

@@ -1,4 +1,4 @@
-import { authenticatedFetch, get, parseSSEStream, post } from "./fetch";
+import { authenticatedFetch, del, get, parseSSEStream, post } from "./fetch";
 import type {
   Codebase,
   CodebaseArtifact,
@@ -49,6 +49,10 @@ export const codebaseApi = {
 
   download: (codebaseId: string): Promise<DownloadCodebaseData> => {
     return get<DownloadCodebaseData>(`/codebases/${codebaseId}/download`);
+  },
+
+  delete: (codebaseId: string): Promise<void> => {
+    return del(`/codebases/${codebaseId}`);
   },
 
   createSession: (

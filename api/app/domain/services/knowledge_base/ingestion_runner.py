@@ -108,8 +108,9 @@ class KBIngestionRunner:
 
             all_parents: list[KnowledgeChunk] = []
             all_children: list[KnowledgeChunk] = []
-            vector_degraded = False
+            vector_degraded = not chunker._vector.enabled
             chunk_failed_docs: list[str] = []
+            embed_degraded_warning = "向量化失败，已降级为 BM25 检索"
             for doc_id, blocks in parsed:
                 try:
                     parents, children = await chunker.build_chunks(kb_id, doc_id, blocks)
@@ -117,20 +118,28 @@ class KBIngestionRunner:
                         raise ValueError("未生成可索引子块")
                     all_parents.extend(parents)
                     all_children.extend(children)
+                    doc_warning = None
+                    if chunker._vector.enabled and all(not chunk.embedding for chunk in children):
+                        vector_degraded = True
+                        doc_warning = embed_degraded_warning
+                    if doc_warning:
+                        await self._update_document(doc_id, DocStatus.READY, warning=doc_warning)
                 except Exception as exc:
-                    logger.warning("文档分块/向量化失败 doc=%s: %s", doc_id, exc)
+                    logger.warning("文档分块失败 doc=%s: %s", doc_id, exc)
                     chunk_failed_docs.append(doc_id)
-                    vector_degraded = True
-                    await self._update_document(doc_id, DocStatus.FAILED, error=f"分块/向量化失败: {exc}")
+                    await self._update_document(doc_id, DocStatus.FAILED, error=f"分块失败: {exc}")
             if all_children and all(not chunk.embedding for chunk in all_children):
                 vector_degraded = True
             if not all_children:
                 await self._set_status(kb_id, KBStatus.FAILED, "全部文档分块失败，未生成检索索引")
                 yield ErrorEvent(error="全部文档分块失败", code=DOCUMENT_PARSE_FAILED)
                 return
+            chunk_desc = f"分块完成: 父块 {len(all_parents)}，子块 {len(all_children)}"
+            if vector_degraded:
+                chunk_desc += "（语义向量不可用，已降级为 BM25）"
             yield _step_event(
                 "chunk",
-                f"分块完成: 父块 {len(all_parents)}，子块 {len(all_children)}",
+                chunk_desc,
                 StepEventStatus.COMPLETED,
             )
 

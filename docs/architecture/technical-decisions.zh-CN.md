@@ -31,6 +31,31 @@
 | UI i18n | next-intl + 构建脚本 | 双语 CI 强制校验 |
 | 沙箱 | Docker / K8s Pod / 远程网关 | 从开发到企业可渐进加固 |
 
+```mermaid
+flowchart TB
+  subgraph data ["Data plane"]
+    PG["PostgreSQL + pgvector"]
+    Redis["Redis Streams"]
+    Blob["COS / MinIO"]
+  end
+  subgraph compute ["Compute plane"]
+    API["FastAPI API"]
+    Worker["Agent Worker"]
+    SB["Sandbox runtime"]
+  end
+  subgraph ui ["Presentation"]
+    Next["Next.js UI"]
+  end
+  Next --> API
+  API --> Redis
+  API --> PG
+  Worker --> Redis
+  Worker --> PG
+  Worker --> SB
+  Worker --> Blob
+  API --> Blob
+```
+
 ---
 
 ## 1. FastAPI + SQLAlchemy 2 + Alembic

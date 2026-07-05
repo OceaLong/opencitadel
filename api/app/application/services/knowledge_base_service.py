@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import asyncio
 import json
 import logging
+import time
 import uuid
 from datetime import datetime
 from typing import AsyncGenerator, Callable, List, Optional
@@ -31,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 _TERMINAL_KB_STATUSES = {KBStatus.READY, KBStatus.FAILED}
 _INGEST_STALE_AFTER_SECONDS = 120.0
+_DELETE_TASK_DRAIN_TIMEOUT_SECONDS = 30.0
+_DELETE_TASK_POLL_INTERVAL_SECONDS = 0.5
 
 
 class KnowledgeBaseService:
@@ -56,6 +60,15 @@ class KnowledgeBaseService:
         if self._task_state.heartbeat_is_stale(meta, _INGEST_STALE_AFTER_SECONDS):
             return False
         return True
+
+    async def _wait_for_task_drain(self, task_id: str) -> None:
+        deadline = time.monotonic() + _DELETE_TASK_DRAIN_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            snapshot = await self._task_state.get_runtime_snapshot(task_id)
+            if snapshot.get("is_done"):
+                return
+            await asyncio.sleep(_DELETE_TASK_POLL_INTERVAL_SECONDS)
+        logger.warning("等待知识库摄取任务结束超时 task_id=%s", task_id)
 
     async def _retire_ingest_task(self, task_id: str) -> None:
         try:
@@ -258,3 +271,49 @@ class KnowledgeBaseService:
             chunks = await uow.knowledge_base.list_chunks_for_document(doc_id, page_no=page, limit=limit)
         content = "\n\n".join(chunk.content for chunk in chunks if chunk.level.value == "parent")
         return doc, content
+
+    async def delete_kb(self, kb_id: str, scope: Optional[OwnerScope] = None) -> None:
+        kb = await self.get_kb(kb_id, scope=scope)
+        if await self._ingest_in_progress(kb):
+            raise ConflictError("知识库正在索引中，请等待当前任务完成后再删除")
+        if kb.ingest_task_id:
+            await self._task_state.request_cancel(kb.ingest_task_id)
+            await self._wait_for_task_drain(kb.ingest_task_id)
+        async with self._uow_factory() as uow:
+            await uow.knowledge_base.delete_kb(kb_id)
+        logger.info("删除知识库[%s]成功", kb_id)
+
+    async def delete_document(
+            self,
+            kb_id: str,
+            doc_id: str,
+            scope: Optional[OwnerScope] = None,
+    ) -> KnowledgeBase:
+        kb = await self.get_kb(kb_id, scope=scope)
+        if await self._ingest_in_progress(kb):
+            raise ConflictError("知识库正在索引中，请等待当前任务完成后再删除文档")
+        async with self._uow_factory() as uow:
+            doc = await uow.knowledge_base.get_document(doc_id)
+        if not doc:
+            raise NotFoundError(f"文档[{doc_id}]不存在")
+        if doc.kb_id != kb_id:
+            raise NotFoundError(f"文档[{doc_id}]不属于知识库[{kb_id}]")
+        async with self._uow_factory() as uow:
+            await uow.knowledge_base.delete_document(doc_id)
+            remaining = await uow.knowledge_base.count_documents(kb_id)
+        if remaining > 0:
+            kb.doc_count = remaining
+            kb.updated_at = datetime.now()
+            async with self._uow_factory() as uow:
+                await uow.knowledge_base.save_kb(kb)
+            return await self.reindex(kb_id, scope=scope)
+        async with self._uow_factory() as uow:
+            await uow.knowledge_base.clear_index_data(kb_id)
+            kb.doc_count = 0
+            kb.chunk_count = 0
+            kb.status = KBStatus.PENDING
+            kb.error = None
+            kb.ingest_task_id = None
+            kb.updated_at = datetime.now()
+            await uow.knowledge_base.save_kb(kb)
+        return kb

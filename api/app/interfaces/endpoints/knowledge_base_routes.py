@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, Query
 from sse_starlette import EventSourceResponse, ServerSentEvent
@@ -68,6 +68,17 @@ async def get_knowledge_base(
     return Response.success(data=_to_kb_response(await service.get_kb(kb_id, scope=ctx.scope)))
 
 
+@router.delete("/{kb_id}", response_model=Response[Optional[Dict]])
+async def delete_knowledge_base(
+        kb_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
+        service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+) -> Response[Optional[Dict]]:
+    await service.delete_kb(kb_id, scope=ctx.scope)
+    return Response.success(msg="删除知识库成功")
+
+
 @router.post("/{kb_id}/documents", response_model=Response[KnowledgeBaseResponse])
 async def add_documents(
         kb_id: str,
@@ -95,6 +106,18 @@ async def list_documents(
     return Response.success(
         data=ListKnowledgeDocumentsResponse(documents=[_to_doc_response(doc) for doc in docs])
     )
+
+
+@router.delete("/{kb_id}/documents/{doc_id}", response_model=Response[KnowledgeBaseResponse])
+async def delete_document(
+        kb_id: str,
+        doc_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
+        service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+) -> Response[KnowledgeBaseResponse]:
+    kb = await service.delete_document(kb_id, doc_id, scope=ctx.scope)
+    return Response.success(data=_to_kb_response(kb), msg="删除文档成功")
 
 
 @router.get("/{kb_id}/ingest")

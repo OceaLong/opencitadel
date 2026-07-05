@@ -4,6 +4,14 @@
 
 Use this checklist when changing features, routes, configuration, deployment, or UI copy.
 
+**Related governance docs**
+
+| Document | Role |
+|----------|------|
+| [Documentation inventory](DOCUMENTATION_INVENTORY.md) | Authoritative list of all docs, authority level, stale risk |
+| [Documentation audit report](DOCUMENTATION_AUDIT_REPORT.md) | Dated snapshot of a past audit — do not treat as live status |
+| This checklist | Actionable PR steps for contributors |
+
 ## When to update docs
 
 - [ ] New or changed API route → `api/README.md` + `api/README.zh-CN.md`, relevant `docs/architecture/*.md`
@@ -34,7 +42,7 @@ Use this checklist when changing features, routes, configuration, deployment, or
 | Compose images | `docker-compose.yml`, `.github/workflows/release.yml` |
 | Sandbox boundary | Chromium in sandbox; Playwright in Worker via CDP |
 | Integrations UI | Settings modal → Integrations tab (not `/settings/integrations`) |
-| Object storage | `.env.example` defaults; `COMPOSE_PROFILES=local` + `STORAGE_PROVIDER=minio` for local |
+| Object storage | `.env.example` defaults; quickstart sets `COMPOSE_PROFILES=local` + `STORAGE_PROVIDER=minio` for first run |
 | Upload limits | `nginx/nginx.conf`, `ui/src/lib/constants.ts`, AppConfig `knowledge_base.document.max_bytes`, `server.marketplace_max_upload_bytes` |
 | KB ingest / OCR | `knowledge_base/ingestion_runner.py`, `worker/main.py`, `knowledge-base-ingestion.md` (+ zh) |
 | Service API Key | `X-Api-Key` header; inbound `/api/a2a` only |

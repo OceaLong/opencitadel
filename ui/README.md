@@ -57,7 +57,13 @@ ui/
 | `/automation` | Cron/webhook jobs | Sidebar + header |
 | `/teams`, `/teams/[id]` | Team management | Sidebar + header |
 | `/login`, `/register` | Auth | No shell |
-| `/admin/*` | Admin console (7 pages) | Admin layout |
+| `/admin` | Overview dashboard (usage charts) | Admin layout |
+| `/admin/users` | User management | Admin layout |
+| `/admin/teams` | Team administration | Admin layout |
+| `/admin/invitations` | Platform invitations | Admin layout |
+| `/admin/audit` | Audit log viewer | Admin layout |
+| `/admin/compliance` | Evidence center | Admin layout |
+| `/admin/compliance/report` | Compliance report export | Admin layout |
 | `/invitations/[token]` | Accept invitation | No shell |
 | `/share/artifact/[token]` | Public artifact view | No shell |
 
@@ -77,6 +83,18 @@ ui/
 - **LLM status badge**: Header polls `/api/llm/status`.
 
 See [`../docs/architecture/frontend-ui.md`](../docs/architecture/frontend-ui.md).
+
+## Frontend development conventions
+
+Contributors should follow these conventions (also enforced in `ui/.cursor/rules.general.mdc` for Cursor IDE):
+
+- **TypeScript strict mode**; prefer `type` over `interface`; path alias `@/*` → `./src/*`
+- **App Router**: server components by default; add `"use client"` only when needed; pages in `src/app/**/page.tsx`
+- **Components**: base UI in `@/components/ui/` (shadcn/Radix); business components in `@/components/`; use `cn()` and CVA for variants
+- **Hooks**: extract complex state/effects from large pages into `src/hooks/`
+- **Imports**: React/Next → third-party → `@/components` → `@/lib`/`@/hooks` → relative
+- **Formatting**: Prettier (100 cols, double quotes); run `npm run format:check` before PR
+- **API client**: use `src/lib/api/fetch.ts`; never hardcode routes outside `src/lib/api/`
 
 ## API Client
 

@@ -4,6 +4,14 @@
 
 在变更功能、路由、配置、部署或 UI 文案时使用本清单。
 
+**相关治理文档**
+
+| 文档 | 职责 |
+|------|------|
+| [文档清单](DOCUMENTATION_INVENTORY.zh-CN.md) | 全部文档的权威列表、权威级别、过期风险 |
+| [文档审计报告](DOCUMENTATION_AUDIT_REPORT.zh-CN.md) | 某次审计的日期快照 — 勿当作实时状态 |
+| 本清单 | 贡献者可执行的 PR 步骤 |
+
 ## 何时更新文档
 
 - [ ] 新增或变更 API 路由 → `api/README.md` + `api/README.zh-CN.md`，相关 `docs/architecture/*.md`
@@ -34,7 +42,7 @@
 | Compose 镜像 | `docker-compose.yml`、`.github/workflows/release.yml` |
 | 沙箱边界 | Chromium 在沙箱；Worker 内 Playwright 经 CDP |
 | 集成 UI | 设置弹窗 → 集成 Tab（非 `/settings/integrations`） |
-| 对象存储 | `.env.example` 默认；本地用 `COMPOSE_PROFILES=local` + `STORAGE_PROVIDER=minio` |
+| 对象存储 | `.env.example` 默认；quickstart 首次运行设置 `COMPOSE_PROFILES=local` + `STORAGE_PROVIDER=minio` |
 | 上传限制 | `nginx/nginx.conf`、`ui/src/lib/constants.ts`、AppConfig `knowledge_base.document.max_bytes`、`server.marketplace_max_upload_bytes` |
 | KB 摄取 / OCR | `knowledge_base/ingestion_runner.py`、`worker/main.py`、`knowledge-base-ingestion.md`（+ 中文） |
 | 服务 API Key | `X-Api-Key`；入站仅 `/api/a2a` |

@@ -15,6 +15,10 @@
 
 ## 🚀 快速部署（5分钟）
 
+本地快速体验见 [10 分钟自托管教程](../tutorials/01-self-host-10-minutes.zh-CN.md)（`make quickstart` 会构建沙箱镜像并默认启用本地 MinIO）。
+
+以下为生产服务器部署步骤。
+
 ### 1. 服务器初始化
 
 ```bash

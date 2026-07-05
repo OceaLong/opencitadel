@@ -21,7 +21,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [docs/README.md](README.md) | Documentation navigation hub | index | paired | none | — | low |
 | [docs/MAINTENANCE_CHECKLIST.md](MAINTENANCE_CHECKLIST.md) | PR checklist, sync rules | governance | paired | none | `scripts/check-docs.sh` | low |
 | [docs/DOCUMENTATION_INVENTORY.md](DOCUMENTATION_INVENTORY.md) | This inventory | governance | paired | none | — | low |
-| [docs/DOCUMENTATION_AUDIT_REPORT.md](DOCUMENTATION_AUDIT_REPORT.md) | Latest doc audit summary | governance | paired | none | — | low |
+| [docs/DOCUMENTATION_AUDIT_REPORT.md](DOCUMENTATION_AUDIT_REPORT.md) | Dated audit snapshot (historical) | governance | paired | none | — | low |
 
 ## Architecture (`docs/architecture/`)
 
@@ -32,15 +32,15 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [events.md](architecture/events.md) | Domain events, SSE, replay | primary | paired | mermaid | `domain/models/event.py` | medium |
 | [checkpoints-and-hitl.md](architecture/checkpoints-and-hitl.md) | HITL gates, checkpoints, Web Operator | primary | paired | mermaid | `checkpoint_service.py`, `session_routes.py` | medium |
 | [web-operator.md](architecture/web-operator.md) | Gate profiles, audit contract | primary | paired | mermaid | `domain/services/agents/` | low |
-| [teams-and-workspaces.md](architecture/teams-and-workspaces.md) | Teams, `X-Workspace-Id` | primary | paired | none | `team_routes.py` | low |
-| [admin-auditor-compliance.md](architecture/admin-auditor-compliance.md) | Admin, auditor, compliance | primary | paired | none | `admin_routes.py`, `ui/src/app/admin/` | medium |
-| [integrations-a2a-service-keys.md](architecture/integrations-a2a-service-keys.md) | A2A, service API keys | primary | paired | none | `a2a_routes.py`, `service_api_key_routes.py` | low |
-| [artifacts-sharing.md](architecture/artifacts-sharing.md) | Artifacts, public share | primary | paired | none | `artifact_routes.py` | low |
+| [teams-and-workspaces.md](architecture/teams-and-workspaces.md) | Teams, `X-Workspace-Id` | primary | paired | mermaid | `team_routes.py` | low |
+| [admin-auditor-compliance.md](architecture/admin-auditor-compliance.md) | Admin, auditor, compliance | primary | paired | mermaid | `admin_routes.py`, `ui/src/app/admin/` | medium |
+| [integrations-a2a-service-keys.md](architecture/integrations-a2a-service-keys.md) | A2A, service API keys | primary | paired | mermaid | `a2a_routes.py`, `service_api_key_routes.py` | low |
+| [artifacts-sharing.md](architecture/artifacts-sharing.md) | Artifacts, public share | primary | paired | mermaid | `artifact_routes.py` | low |
 | [automation-scheduler.md](architecture/automation-scheduler.md) | Cron, webhooks, leader election | primary | paired | mermaid | `scheduling_routes.py`, `worker/main.py` | low |
 | [marketplace.md](architecture/marketplace.md) | Marketplace apps | primary | paired | mermaid | `marketplace_routes.py` | low |
 | [config-source-governance.md](architecture/config-source-governance.md) | AppConfig vs env boundaries | primary | paired | mermaid | `core/config.py`, `app_config_routes.py` | medium |
 | [model-resilience.md](architecture/model-resilience.md) | Circuit breaker, fallback | primary | paired | mermaid | `resilient_llm.py` | low |
-| [contract-compatibility.md](architecture/contract-compatibility.md) | API/SSE compatibility window | primary | paired | none | `event_upgrader.py` | low |
+| [contract-compatibility.md](architecture/contract-compatibility.md) | API/SSE compatibility window | primary | paired | mermaid | `event_upgrader.py` | low |
 | [codebase-reindex.md](architecture/codebase-reindex.md) | Codebase ingest, vector recovery | primary | paired | mermaid | `codebase/ingestion_runner.py` | medium |
 | [knowledge-base-ingestion.md](architecture/knowledge-base-ingestion.md) | KB parse, OCR, GraphRAG, ingest failures | primary | paired | mermaid | `knowledge_base/ingestion_runner.py` | medium |
 | [architecture-evolution.md](architecture/architecture-evolution.md) | Compose → K8s evolution | primary | paired | mermaid | `deploy/helm/` | low |
@@ -55,7 +55,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 |------|-------|-----------|-----------|----------|-------------|------------|
 | [operations/deployment.md](operations/deployment.md) | Production deployment | primary | paired | mermaid | `docker-compose.yml` | low |
 | [operations/https-domain-setup.md](operations/https-domain-setup.md) | HTTPS & domain | primary | paired | none | `.env.example` | low |
-| [tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.md) | Quick BYO key onboarding | tutorial | paired | none | UI Settings | medium |
+| [tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.md) | Quick BYO key onboarding | tutorial | paired | none | `scripts/quickstart.sh` | low |
 | [tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.md) | Knowledge base RAG | tutorial | paired | mermaid | `knowledge-base-ingestion.md` | low |
 | [tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.md) | MCP setup | tutorial | paired | none | `app_config_routes.py` | low |
 | [tutorials/04-governed-web-operator.md](tutorials/04-governed-web-operator.md) | Web Operator runbook | tutorial | paired | none | `operator-scope-dialog.tsx` | low |
@@ -71,6 +71,9 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [nginx/README.md](../nginx/README.md) | Gateway, SSE/WS, upload limits | module | paired | mermaid | `nginx/nginx.conf` | low |
 | [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.md) | Helm install | module | paired | none | `deploy/helm/` | low |
 | [demo/ops-console/README.md](../demo/ops-console/README.md) | Web Operator demo backend | module | paired | none | `demo/ops-console/` | low |
+| [e2e/README.md](../e2e/README.md) | Playwright E2E smoke tests | module | paired | none | `e2e/web-operator.spec.ts` | low |
+| [scripts/README.md](../scripts/README.md) | quickstart, check-docs | module | paired | none | `scripts/` | low |
+| [deploy/scripts/README.md](../deploy/scripts/README.md) | Host tuning scripts | module | paired | none | `deploy/scripts/` | low |
 
 ## Open-source governance (`.github/`)
 

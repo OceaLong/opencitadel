@@ -93,7 +93,10 @@ class CodeAskFlow(BaseFlow):
                 sandbox_runtime=runtime.sandbox_runtime,
                 writing_style=runtime.prompt.writing_style,
             )
-            async for event in self._agent.invoke(message):
+            async for event in self._agent.invoke(
+                message.message,
+                vision_attachments=message.vision_attachments or None,
+            ):
                 yield event
             self.status = FlowStatus.COMPLETED
             yield DoneEvent()

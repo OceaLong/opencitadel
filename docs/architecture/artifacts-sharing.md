@@ -13,6 +13,17 @@ Artifacts are versioned outputs produced during Agent sessions:
 
 Storage keys live in object storage (COS/MinIO) under `artifacts/{session_id}/{artifact_id}/v{n}.{ext}`.
 
+```mermaid
+flowchart LR
+  Session["Agent session"] --> Create["ArtifactService"]
+  Create --> Storage["COS / MinIO"]
+  Create --> Share["POST /artifacts/id/share"]
+  Share --> Token["URL-safe token + TTL"]
+  Token --> PublicUI["/share/artifact/token"]
+  Token --> PublicAPI["GET /api/share/artifact/token"]
+  PublicUI --> Preview["Sanitized HTML preview"]
+```
+
 ## UI and API
 
 | Action | API | UI |

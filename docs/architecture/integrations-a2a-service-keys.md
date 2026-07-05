@@ -18,6 +18,23 @@ Skills can restrict which A2A servers are available via `a2a_server_refs`. The A
 
 Remote agent discovery uses `GET {base_url}/.well-known/agent-card.json`.
 
+```mermaid
+flowchart TB
+  subgraph outbound ["Outbound A2A"]
+    Agent["AgentTaskRunner"] --> A2ATool["a2a tool"]
+    A2ATool --> Pool["Worker connection pool"]
+    Pool --> Remote["Remote agent base_url"]
+  end
+  subgraph inbound ["Inbound A2A"]
+    External["External caller"] -->|"X-Api-Key"| A2AEndpoint["POST /api/a2a"]
+    A2AEndpoint --> Session["Create/run session"]
+  end
+  subgraph keys ["Service API Keys"]
+    User["User"] --> CreateKey["POST /api/service-keys"]
+    CreateKey --> Hash["SHA-256 hash in DB"]
+  end
+```
+
 ## Inbound A2A (OpenCitadel as remote agent)
 
 When `feature_flags.enable_agent_features=true`, OpenCitadel exposes:

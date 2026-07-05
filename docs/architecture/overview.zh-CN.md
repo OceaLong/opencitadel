@@ -318,6 +318,8 @@ postgres/redis -> opencitadel-migrate -> opencitadel-api + opencitadel-worker ->
 
 `docker-compose.yml` 向 API / Worker / Sandbox / UI 传入统一 build args：`PIP_INDEX_URL`、`UV_INDEX_URL`、`UV_VERSION`、`UV_HTTP_TIMEOUT`、`NPM_CONFIG_REGISTRY` 等。Compose 构建后的应用镜像统一为 `opencitadel-api`、`opencitadel-worker`、`opencitadel-migrate`、`opencitadel-ui`、`opencitadel-sandbox`。也可使用 GHCR 预构建镜像（见 `docker-compose.yml` 注释）或 `.github/workflows/` CI 流水线构建。
 
+> **动态沙箱镜像**：compose 中 `opencitadel-sandbox` 服务在 `fixed-sandbox` profile 下，**默认不启动**，但 Worker 动态创建的沙箱依赖该镜像。`make quickstart` 与 [部署指南](../operations/deployment.zh-CN.md) 会在启动栈之前显式执行 `docker compose build opencitadel-sandbox`。
+
 ### Kubernetes / Helm
 
 Chart 位于 `deploy/helm/opencitadel/`，提供全栈一键部署：

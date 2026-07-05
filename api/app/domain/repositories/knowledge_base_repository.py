@@ -47,6 +47,12 @@ class KnowledgeBaseRepository(Protocol):
     async def get_document(self, doc_id: str) -> Optional[KnowledgeDocument]:
         ...
 
+    async def delete_document(self, doc_id: str) -> None:
+        ...
+
+    async def count_documents(self, kb_id: str) -> int:
+        ...
+
     async def update_document_status(
             self,
             doc_id: str,

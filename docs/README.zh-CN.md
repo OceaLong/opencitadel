@@ -58,6 +58,9 @@
 | [Sandbox](../sandbox/README.zh-CN.md) | 隔离运行时 |
 | [Nginx 网关](../nginx/README.zh-CN.md) | 边缘代理、SSE/WS、上传限制 |
 | [OpsConsole 演示](../demo/ops-console/README.zh-CN.md) | Web Operator 工单后台演示 |
+| [E2E 测试](../e2e/README.zh-CN.md) | Playwright 冒烟测试、OpsConsole 演示 |
+| [仓库脚本](../scripts/README.zh-CN.md) | `quickstart.sh`、`check-docs.sh` |
+| [部署脚本](../deploy/scripts/README.zh-CN.md) | 生产主机调优工具 |
 
 ### 开源治理
 
@@ -74,4 +77,4 @@
 - **双语成对**：新增或修改文档时，同步更新对应语言的配对文件。
 - **链接约定**：中文文档优先链接 `*.zh-CN.md`；英文文档优先链接 `*.md`。
 - **索引同步**：新增教程或架构文档时，同步更新本索引、根目录 [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) 文档地图，并在中英文文件文首添加语言切换链接。
-- **PR 清单** — [文档维护检查清单](MAINTENANCE_CHECKLIST.zh-CN.md)；[文档清单](DOCUMENTATION_INVENTORY.zh-CN.md)；[审计报告](DOCUMENTATION_AUDIT_REPORT.zh-CN.md)；提交文档变更前运行 `./scripts/check-docs.sh`。
+- **PR 清单** — [文档维护检查清单](MAINTENANCE_CHECKLIST.zh-CN.md)（可执行步骤）；[文档清单](DOCUMENTATION_INVENTORY.zh-CN.md)（实时权威列表）；[审计报告](DOCUMENTATION_AUDIT_REPORT.zh-CN.md)（仅日期快照）；提交文档变更前运行 `./scripts/check-docs.sh`。

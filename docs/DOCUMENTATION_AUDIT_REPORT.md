@@ -2,6 +2,8 @@
 
 # Documentation Audit Report
 
+**Status:** Historical snapshot — not live documentation state. For current inventory and stale-risk tracking, see [Documentation inventory](DOCUMENTATION_INVENTORY.md). For PR workflow, see [Maintenance checklist](MAINTENANCE_CHECKLIST.md).
+
 **Date:** 2026-07-06  
 **Code baseline:** Current working tree (including uncommitted ingestion/OCR/upload changes)  
 **Scope:** All Markdown docs, module READMEs, bilingual pairs, architecture diagrams, consistency with implementation

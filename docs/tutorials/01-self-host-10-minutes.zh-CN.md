@@ -24,11 +24,16 @@ make quickstart
 
 ### 2. 启动服务栈
 
-`make quickstart` 会执行 `docker compose up -d --build`。首次构建可能需要 5–10 分钟，并会构建动态沙箱所需的 `opencitadel-sandbox` 镜像。
+`make quickstart` 会依次执行：
+
+1. `docker compose build opencitadel-sandbox` — 动态沙箱所需镜像（compose 中该服务在 `fixed-sandbox` profile 下，默认不启动，但 Worker 创建的沙箱依赖此镜像）
+2. `docker compose up -d --build` — 启动 API、Worker、UI、Postgres、Redis，以及（quickstart 默认）MinIO
+
+首次构建可能需要 5–10 分钟。
 
 健康检查通过后，打开 **http://localhost:8088**。
 
-> **对象存储默认**：`.env.example` 默认 `STORAGE_PROVIDER=cos` 且未配置凭证。为减少首次体验摩擦，建议在启动前于 `.env` 设置 `COMPOSE_PROFILES=local` 与 `STORAGE_PROVIDER=minio`（见下文[完全离线](#完全离线可选)）。文件上传与附件依赖可用的对象存储。
+> **对象存储默认**：quickstart 在新建 `.env` 时会设置 `COMPOSE_PROFILES=local` 与 `STORAGE_PROVIDER=minio`，以便文件上传开箱可用。若使用腾讯云 COS，请清空 `COMPOSE_PROFILES` 并设置 `STORAGE_PROVIDER=cos` 及 `COS_*` 凭证（见 [部署指南](../operations/deployment.zh-CN.md)）。
 
 ### 3. 登录
 

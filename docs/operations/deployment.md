@@ -15,7 +15,9 @@
 
 ## 🚀 Quick deploy (5 minutes)
 
-For a local trial with minimal setup, see [Self-host in 10 minutes](../tutorials/01-self-host-10-minutes.md).
+For a local trial with minimal setup, see [Self-host in 10 minutes](../tutorials/01-self-host-10-minutes.md) (`make quickstart` builds the sandbox image and defaults to local MinIO).
+
+For production server deploy, continue below.
 
 ### 1. Server initialization
 

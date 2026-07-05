@@ -2,6 +2,8 @@
 
 # 文档审计报告
 
+**状态：** 历史快照 — 不代表当前文档实时状态。最新清单与过期风险见 [文档清单](DOCUMENTATION_INVENTORY.zh-CN.md)；PR 流程见 [维护清单](MAINTENANCE_CHECKLIST.zh-CN.md)。
+
 **日期：** 2026-07-06  
 **代码基线：** 当前工作区（含未提交的 ingestion/OCR/上传相关改动）  
 **范围：** 全部 Markdown、模块 README、双语配对、架构图、与实现的一致性

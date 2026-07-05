@@ -58,10 +58,24 @@ if [[ ! -f .env ]]; then
     sed -i.bak 's|^ENV=.*|ENV=development|' .env
     rm -f .env.bak
   fi
+  # Local-first defaults: bundled MinIO for file uploads (override for cloud COS)
+  if grep -q '^COMPOSE_PROFILES=' .env; then
+    sed -i.bak 's|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=local|' .env
+    rm -f .env.bak
+  fi
+  if grep -q '^STORAGE_PROVIDER=' .env; then
+    sed -i.bak 's|^STORAGE_PROVIDER=.*|STORAGE_PROVIDER=minio|' .env
+    rm -f .env.bak
+  fi
 
   warn "Edit .env and set BOOTSTRAP_ADMIN_PASSWORD before continuing."
   warn "After first login, add your LLM API key in Settings → Models."
-  read -r -p "Press Enter when .env is ready (or Ctrl+C to abort) ..."
+  warn "Quickstart defaults: COMPOSE_PROFILES=local + STORAGE_PROVIDER=minio (see .env for cloud COS)."
+  if [[ -n "${QUICKSTART_NONINTERACTIVE:-}" ]] || [[ ! -t 0 ]]; then
+    info "Non-interactive mode — continuing without prompt."
+  else
+    read -r -p "Press Enter when .env is ready (or Ctrl+C to abort) ..."
+  fi
 else
   info ".env already exists — skipping generation"
 fi
@@ -83,6 +97,9 @@ if [[ -n "$PROFILE" ]]; then
 else
   COMPOSE_CMD=(docker compose)
 fi
+
+info "Building sandbox image (required for dynamic Agent tool execution) ..."
+docker compose build opencitadel-sandbox
 
 info "Building and starting OpenCitadel (this may take several minutes on first run) ..."
 "${COMPOSE_CMD[@]}" up -d --build
@@ -108,7 +125,10 @@ echo "  1. Log in and open Settings → Models"
 echo "  2. Add an OpenAI / Anthropic / compatible API key"
 echo "  3. Start a new Agent session from the home page"
 echo ""
-echo "For fully offline mode (Ollama + MinIO):"
-echo "  COMPOSE_PROFILES=local STORAGE_PROVIDER=minio in .env, then re-run this script"
+echo "For cloud object storage instead of bundled MinIO:"
+echo "  Set COMPOSE_PROFILES= (empty) and STORAGE_PROVIDER=cos + COS_* in .env, then re-run"
+echo ""
+echo "For fully offline LLM (Ollama on host):"
+echo "  Keep COMPOSE_PROFILES=local STORAGE_PROVIDER=minio; install Ollama and add endpoint in Settings"
 echo ""
 info "Logs: ${COMPOSE_CMD[*]} logs -f opencitadel-api opencitadel-worker"

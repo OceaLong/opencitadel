@@ -4,7 +4,7 @@ quickstart:
 	@bash scripts/quickstart.sh
 
 build:
-	docker compose build
+	docker compose build opencitadel-sandbox opencitadel-api opencitadel-worker opencitadel-ui
 
 test-api:
 	cd api && uv run pytest -q

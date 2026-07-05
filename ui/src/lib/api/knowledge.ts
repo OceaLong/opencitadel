@@ -1,4 +1,4 @@
-import { authenticatedFetch, get, parseSSEStream, post } from "./fetch";
+import { authenticatedFetch, del, get, parseSSEStream, post } from "./fetch";
 import type {
   AddKnowledgeDocumentsParams,
   CreateKnowledgeBaseParams,
@@ -25,12 +25,20 @@ export const knowledgeApi = {
     return get<KnowledgeBase>(`/knowledge-bases/${kbId}`);
   },
 
+  delete: (kbId: string): Promise<void> => {
+    return del(`/knowledge-bases/${kbId}`);
+  },
+
   addDocuments: (kbId: string, params: AddKnowledgeDocumentsParams): Promise<KnowledgeBase> => {
     return post<KnowledgeBase>(`/knowledge-bases/${kbId}/documents`, params);
   },
 
   listDocuments: (kbId: string): Promise<KnowledgeDocumentsData> => {
     return get<KnowledgeDocumentsData>(`/knowledge-bases/${kbId}/documents`);
+  },
+
+  deleteDocument: (kbId: string, docId: string): Promise<KnowledgeBase> => {
+    return del<KnowledgeBase>(`/knowledge-bases/${kbId}/documents/${docId}`);
   },
 
   reindex: (kbId: string): Promise<KnowledgeBase> => {

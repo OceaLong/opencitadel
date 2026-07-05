@@ -13,6 +13,17 @@ Agent 会话产生的版本化输出：
 
 存储 Key 位于对象存储（COS/MinIO）：`artifacts/{session_id}/{artifact_id}/v{n}.{ext}`。
 
+```mermaid
+flowchart LR
+  Session["Agent session"] --> Create["ArtifactService"]
+  Create --> Storage["COS / MinIO"]
+  Create --> Share["POST /artifacts/id/share"]
+  Share --> Token["URL-safe token + TTL"]
+  Token --> PublicUI["/share/artifact/token"]
+  Token --> PublicAPI["GET /api/share/artifact/token"]
+  PublicUI --> Preview["Sanitized HTML preview"]
+```
+
 ## UI 与 API
 
 | 操作 | API | UI |

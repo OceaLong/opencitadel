@@ -27,6 +27,15 @@ If the header is omitted, the server uses **personal scope** (`OwnerScope.person
 
 The server validates `principal.team_roles` before accepting a team workspace.
 
+```mermaid
+flowchart LR
+  User["Authenticated user"] --> UI["UI workspace switch"]
+  UI -->|"X-Workspace-Id: team_id"| API["FastAPI"]
+  UI -->|"no header"| Personal["Personal scope"]
+  API --> Validate["Validate team_roles"]
+  Validate --> Query["Filter resources by owner_user_id or team_id"]
+```
+
 ## Team roles
 
 | Role | Capabilities |

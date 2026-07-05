@@ -24,11 +24,16 @@ The script copies `.env.example` → `.env`, generates secrets, and prompts you 
 
 ### 2. Start the stack
 
-`make quickstart` runs `docker compose up -d --build`. First build may take 5–10 minutes and includes the `opencitadel-sandbox` image required for dynamic sandbox creation.
+`make quickstart` runs:
+
+1. `docker compose build opencitadel-sandbox` — required for dynamic sandbox creation (the compose service is under the `fixed-sandbox` profile and is not started by default, but Worker-created sandboxes need this image)
+2. `docker compose up -d --build` — starts API, Worker, UI, Postgres, Redis, and (with quickstart defaults) MinIO
+
+First build may take 5–10 minutes.
 
 Open **http://localhost:8088** when health check passes.
 
-> **Storage default**: `.env.example` defaults to `STORAGE_PROVIDER=cos` without credentials. For a frictionless first run, set `COMPOSE_PROFILES=local` and `STORAGE_PROVIDER=minio` in `.env` before starting (see [Fully offline](#fully-offline-optional) below). File uploads and attachments need a working object store.
+> **Storage default**: quickstart sets `COMPOSE_PROFILES=local` and `STORAGE_PROVIDER=minio` in a new `.env` so file uploads work out of the box. For cloud COS, clear `COMPOSE_PROFILES` and set `STORAGE_PROVIDER=cos` with `COS_*` credentials (see [deployment guide](../operations/deployment.md)).
 
 ### 3. Log in
 

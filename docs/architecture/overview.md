@@ -318,6 +318,8 @@ postgres/redis -> opencitadel-migrate -> opencitadel-api + opencitadel-worker ->
 
 `docker-compose.yml` passes unified build args to API / Worker / Sandbox / UI: `PIP_INDEX_URL`, `UV_INDEX_URL`, `UV_VERSION`, `UV_HTTP_TIMEOUT`, `NPM_CONFIG_REGISTRY`, etc. After Compose build, application images are uniformly named `opencitadel-api`, `opencitadel-worker`, `opencitadel-migrate`, `opencitadel-ui`, `opencitadel-sandbox`. Pre-built GHCR images (see `docker-compose.yml` comments) or CI pipelines in `.github/workflows/` can also be used.
 
+> **Dynamic sandbox image**: The `opencitadel-sandbox` compose service is under the `fixed-sandbox` profile and is **not started by default**, but Worker-created sandboxes require the image. `make quickstart` and [deployment](../operations/deployment.md) run `docker compose build opencitadel-sandbox` explicitly before starting the stack.
+
 ### Kubernetes / Helm
 
 The Chart is located at `deploy/helm/opencitadel/` and provides full-stack one-click deployment:

@@ -6,7 +6,7 @@ import pytest
 
 from app.domain.models.app_config import AppConfig
 from app.domain.models.error_codes import DOCUMENT_PARSE_FAILED
-from app.domain.models.event import ErrorEvent, StepEvent, StepEventStatus
+from app.domain.models.event import DoneEvent, ErrorEvent, StepEvent, StepEventStatus
 from app.domain.models.knowledge_base import KBStatus, KnowledgeBase
 from app.domain.services.knowledge_base.ingestion_runner import KBIngestionRunner
 
@@ -38,6 +38,12 @@ class _FakeKbRepo:
             page_count: int | None = None,
     ):
         self.doc_updates.append((doc_id, status, error, warning, page_count))
+
+    async def replace_index_chunks(self, kb_id: str, chunks):
+        self.replaced_chunks = chunks
+
+    async def save_kb(self, kb: KnowledgeBase) -> None:
+        self._kb = kb
 
 
 class _FakeUow:
@@ -157,3 +163,73 @@ async def test_empty_document_content_fails_at_parse_stage(monkeypatch):
     assert kb_repo.doc_updates
     assert kb_repo.doc_updates[-1][1] == DocStatus.FAILED
     assert "OCR 未执行" in (kb_repo.doc_updates[-1][2] or "")
+
+
+@pytest.mark.anyio
+async def test_run_degrades_when_embedding_fails(monkeypatch):
+    from io import BytesIO
+    from unittest.mock import AsyncMock
+
+    from app.domain.models.file import File
+    from app.domain.models.knowledge_base import DocStatus, KBSourceType, KBStatus, KnowledgeDocument
+    from app.domain.services.knowledge_base.parsers import PageBlock, ParseResult
+
+    doc = KnowledgeDocument(
+        id="doc1",
+        kb_id="kb1",
+        title="sample.pdf",
+        source_type=KBSourceType.UPLOAD,
+        source_ref="{}",
+        file_id="file-1",
+        mime="application/pdf",
+    )
+    kb = KnowledgeBase(id="kb1", name="test")
+    kb_repo = _FakeKbRepo(kb, [doc])
+    file_storage = MagicMock()
+    file_storage.download_file = AsyncMock(
+        return_value=(
+            BytesIO(b"%PDF-1.4 sample"),
+            File(id="file-1", filename="sample.pdf", mime_type="application/pdf", size=16),
+        ),
+    )
+    runner = KBIngestionRunner(uow_factory=lambda: _FakeUow(kb_repo), file_storage=file_storage)
+
+    cfg = AppConfig()
+    cfg.knowledge_base.vector_enabled = True
+    cfg.feature_flags.enable_embeddings = True
+    cfg.knowledge_base.graphrag.enabled = False
+    monkeypatch.setattr(
+        "app.domain.services.knowledge_base.ingestion_runner.get_runtime_config",
+        lambda: cfg,
+    )
+
+    async def _parse_with_text(*_args, **_kwargs):
+        return ParseResult(
+            blocks=[PageBlock(page_no=1, heading_path="sample.pdf", text="hello world " * 20)],
+            page_count=1,
+            warning=None,
+        )
+
+    async def _fail_embed(_self, _contents):
+        raise TimeoutError("Request timed out")
+
+    monkeypatch.setattr(
+        "app.domain.services.knowledge_base.ingestion_runner.parse_document",
+        _parse_with_text,
+    )
+    monkeypatch.setattr(
+        "app.domain.services.knowledge_base.vector_service.KBVectorService.embed_batch",
+        _fail_embed,
+    )
+
+    events = await _collect_events(runner, "kb1")
+
+    assert isinstance(events[-1], DoneEvent)
+    assert kb.status == KBStatus.READY
+    assert kb.vector_degraded is True
+    assert getattr(kb_repo, "replaced_chunks", None)
+    assert all(not chunk.embedding for chunk in kb_repo.replaced_chunks)
+    assert any(
+        update[1] == DocStatus.READY and update[3] == "向量化失败，已降级为 BM25 检索"
+        for update in kb_repo.doc_updates
+    )

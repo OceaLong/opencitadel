@@ -71,6 +71,8 @@ api/
 
 All routes below are prefixed with `/api` unless noted. Authenticated routes require a valid session JWT unless using `X-Api-Key` on supported integration endpoints.
 
+> **Maintenance**: This table is maintained manually. When adding routes, update this file and `README.zh-CN.md`, then verify against `app/interfaces/endpoints/routes.py` and live OpenAPI at `/openapi.json`. Run `./scripts/check-docs.sh` before docs PRs.
+
 ### Public / unauthenticated
 
 | Method | Path | Description |

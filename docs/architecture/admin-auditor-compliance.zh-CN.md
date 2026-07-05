@@ -14,6 +14,17 @@
 
 审计员可审阅治理数据，但无法创建会话、上传文件或修改配置。
 
+```mermaid
+flowchart TD
+  Login["Auditor login"] --> Admin["/admin/compliance"]
+  Admin --> Chain["Verify audit chain"]
+  Admin --> Evidence["Download evidence ZIP"]
+  Admin --> Report["/admin/compliance/report"]
+  Report --> Export["Export JSON / MD / PDF"]
+  Chain --> Integrity["Platform-wide HMAC integrity"]
+  Evidence --> SessionPkg["Per-session tool invoke records"]
+```
+
 ## 管理后台路由
 
 | 路由 | 说明 |
@@ -24,6 +35,7 @@
 | `/admin/invitations` | 平台邀请令牌 |
 | `/admin/audit` | 审计日志查看 |
 | `/admin/compliance` | 证据中心、链校验、合规报告 |
+| `/admin/compliance/report` | 全页合规报告导出（JSON / MD / PDF） |
 
 Token 用量图表在 **`/admin` 概览页**展示（无独立 `/admin/usage` 页面）。后端用量 API 仍在 `/api/admin/usage/*`。
 

@@ -54,7 +54,8 @@ check_pair docs/DOCUMENTATION_INVENTORY.md
 
 echo "==> Checking module README bilingual pairs ..."
 for en in README.md api/README.md ui/README.md sandbox/README.md nginx/README.md \
-  deploy/helm/opencitadel/README.md demo/ops-console/README.md; do
+  deploy/helm/opencitadel/README.md demo/ops-console/README.md \
+  e2e/README.md scripts/README.md deploy/scripts/README.md; do
   check_pair "$en"
 done
 

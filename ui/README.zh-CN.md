@@ -56,7 +56,13 @@ ui/
 | `/automation` | Cron/Webhook 任务 | 侧栏 + 顶栏 |
 | `/teams`、`/teams/[id]` | 团队管理 | 侧栏 + 顶栏 |
 | `/login`、`/register` | 认证 | 无 Shell |
-| `/admin/*` | 管理后台（7 页） | Admin 布局 |
+| `/admin` | 概览仪表盘（用量图表） | Admin 布局 |
+| `/admin/users` | 用户管理 | Admin 布局 |
+| `/admin/teams` | 团队管理 | Admin 布局 |
+| `/admin/invitations` | 平台邀请 | Admin 布局 |
+| `/admin/audit` | 审计日志 | Admin 布局 |
+| `/admin/compliance` | 证据中心 | Admin 布局 |
+| `/admin/compliance/report` | 合规报告导出 | Admin 布局 |
 | `/invitations/[token]` | 接受邀请 | 无 Shell |
 | `/share/artifact/[token]` | 公开交付物 | 无 Shell |
 
@@ -76,6 +82,18 @@ ui/
 - **模型状态 Badge**：顶栏轮询 `/api/llm/status`。
 
 详见 [`../docs/architecture/frontend-ui.zh-CN.md`](../docs/architecture/frontend-ui.zh-CN.md)。
+
+## 前端开发规范
+
+贡献者应遵循以下约定（Cursor IDE 中亦见 `ui/.cursor/rules.general.mdc`）：
+
+- **TypeScript 严格模式**；优先 `type` 而非 `interface`；路径别名 `@/*` → `./src/*`
+- **App Router**：默认服务端组件；仅在需要时加 `"use client"`；页面位于 `src/app/**/page.tsx`
+- **组件**：基础 UI 在 `@/components/ui/`（shadcn/Radix）；业务组件在 `@/components/`；使用 `cn()` 与 CVA 定义变体
+- **Hooks**：复杂状态/副作用从大型页面下沉到 `src/hooks/`
+- **导入顺序**：React/Next → 第三方 → `@/components` → `@/lib`/`@/hooks` → 相对路径
+- **格式化**：Prettier（100 列、双引号）；PR 前运行 `npm run format:check`
+- **API 客户端**：使用 `src/lib/api/fetch.ts`；勿在 `src/lib/api/` 外硬编码路由
 
 ## API 客户端
 

@@ -27,6 +27,15 @@ X-Workspace-Id: <team_id>
 
 服务端会校验 `principal.team_roles` 成员关系。
 
+```mermaid
+flowchart LR
+  User["Authenticated user"] --> UI["UI workspace switch"]
+  UI -->|"X-Workspace-Id: team_id"| API["FastAPI"]
+  UI -->|"no header"| Personal["Personal scope"]
+  API --> Validate["Validate team_roles"]
+  Validate --> Query["Filter resources by owner_user_id or team_id"]
+```
+
 ## 团队角色
 
 | 角色 | 能力 |

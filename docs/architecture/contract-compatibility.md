@@ -4,6 +4,15 @@
 
 This document is the authoritative reference for OpenCitadel API, SSE events, and frontend/backend compatibility windows.
 
+```mermaid
+flowchart LR
+  Backend["Backend release N"] --> Window["Compatibility window >= 2 minor versions"]
+  Window --> Frontend["Frontend release N or N-1"]
+  Backend --> Optional["Optional fields default null"]
+  Optional --> Upgrader["event_upgrader backfill"]
+  Upgrader --> Clients["SSE clients ignore unknown fields"]
+```
+
 ## ErrorEvent.code
 
 | Side | Policy |

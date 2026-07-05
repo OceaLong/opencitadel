@@ -58,6 +58,9 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [Sandbox](../sandbox/README.md) | Isolated runtime |
 | [Nginx gateway](../nginx/README.md) | Edge proxy, SSE/WS, upload limits |
 | [OpsConsole demo](../demo/ops-console/README.md) | Web Operator ticket backend demo |
+| [E2E tests](../e2e/README.md) | Playwright smoke tests, OpsConsole demo |
+| [Repository scripts](../scripts/README.md) | `quickstart.sh`, `check-docs.sh` |
+| [Deploy scripts](../deploy/scripts/README.md) | Production host tuning utilities |
 
 ### Open-source governance
 
@@ -74,4 +77,4 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 - **Bilingual pairs** — update both language files when changing a topic.
 - **Link convention** — English docs link to `*.md`; Chinese docs link to `*.zh-CN.md`.
 - **Index sync** — when adding a tutorial or architecture doc, update this index, the root [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) doc map, and add top-of-file language switch links in both language files.
-- **PR checklist** — [Documentation maintenance checklist](MAINTENANCE_CHECKLIST.md); [Documentation inventory](DOCUMENTATION_INVENTORY.md); [Audit report](DOCUMENTATION_AUDIT_REPORT.md); run `./scripts/check-docs.sh` before submitting doc changes.
+- **PR checklist** — [Documentation maintenance checklist](MAINTENANCE_CHECKLIST.md) (actionable steps); [Documentation inventory](DOCUMENTATION_INVENTORY.md) (live authoritative list); [Audit report](DOCUMENTATION_AUDIT_REPORT.md) (dated snapshot only); run `./scripts/check-docs.sh` before submitting doc changes.

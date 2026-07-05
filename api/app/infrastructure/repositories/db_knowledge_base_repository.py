@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-from sqlalchemy import delete, or_, select, text, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.knowledge_base import (
@@ -174,6 +174,24 @@ class DBKnowledgeBaseRepository(KnowledgeBaseRepository):
         await self.db_session.execute(
             update(KnowledgeDocumentModel).where(KnowledgeDocumentModel.id == doc_id).values(**values)
         )
+
+    async def delete_document(self, doc_id: str) -> None:
+        chunk_ids_stmt = select(KnowledgeChunkModel.id).where(KnowledgeChunkModel.doc_id == doc_id)
+        await self.db_session.execute(
+            delete(KnowledgeRelationModel).where(KnowledgeRelationModel.chunk_id.in_(chunk_ids_stmt))
+        )
+        await self.db_session.execute(
+            delete(KnowledgeDocumentModel).where(KnowledgeDocumentModel.id == doc_id)
+        )
+
+    async def count_documents(self, kb_id: str) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(KnowledgeDocumentModel)
+            .where(KnowledgeDocumentModel.kb_id == kb_id)
+        )
+        result = await self.db_session.execute(stmt)
+        return int(result.scalar_one())
 
     async def clear_index_data(self, kb_id: str) -> None:
         await self.db_session.execute(

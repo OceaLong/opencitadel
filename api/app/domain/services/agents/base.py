@@ -239,6 +239,18 @@ class BaseAgent(ABC):
         return get_internal_prompts(self._prompt_locale)
 
     @staticmethod
+    def _coerce_user_content(content: Any) -> Any:
+        """Coerce mistaken Message/dict payloads into provider-safe user content."""
+        if isinstance(content, (str, list)) or content is None:
+            return content
+        if isinstance(content, Message):
+            return content.message
+        if isinstance(content, dict) and "message" in content:
+            msg = content.get("message")
+            return msg if isinstance(msg, str) else str(msg)
+        return str(content)
+
+    @staticmethod
     def _normalize_message_for_llm(message: Dict[str, Any]) -> Dict[str, Any]:
         """Ensure provider-safe message shape (no null content, reasoning fallback)."""
         normalized = dict(message)
@@ -255,8 +267,11 @@ class BaseAgent(ABC):
                 normalized["content"] = ""
             if tool_calls and isinstance(normalized.get("content"), str) and not normalized["content"]:
                 normalized["content"] = ""
-        elif role in {"user", "system"} and "content" in normalized and normalized["content"] is None:
-            normalized["content"] = ""
+        elif role in {"user", "system"} and "content" in normalized:
+            if normalized["content"] is None:
+                normalized["content"] = ""
+            elif not isinstance(normalized["content"], (str, list)):
+                normalized["content"] = BaseAgent._coerce_user_content(normalized["content"])
 
         if role != "assistant" and "reasoning_content" in normalized:
             del normalized["reasoning_content"]

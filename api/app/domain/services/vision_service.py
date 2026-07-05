@@ -10,7 +10,7 @@ from app.domain.external.file_storage import FileStorage, FileUploadPayload
 from app.domain.external.llm import LLM
 from app.domain.models.file import File
 from app.domain.models.llm_model import ModelCapabilities
-from app.domain.models.message import MediaAttachment, VisionAttachment
+from app.domain.models.message import MediaAttachment, Message, VisionAttachment
 from app.domain.models.multimodal import (
     CONTENT_TYPE_IMAGE_REF,
     CONTENT_TYPE_TEXT,
@@ -27,6 +27,17 @@ from app.domain.utils.vision import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_query_text(text: Any) -> str:
+    if isinstance(text, str):
+        return text
+    if isinstance(text, Message):
+        return text.message
+    if isinstance(text, dict) and "message" in text:
+        msg = text.get("message")
+        return msg if isinstance(msg, str) else str(msg)
+    return str(text)
 
 _IMAGE_REF_TYPE = CONTENT_TYPE_IMAGE_REF
 _FALLBACK_IMAGE_NOTE = "原始消息包含图片附件，因模型服务连接异常已省略图片内容。"
@@ -211,6 +222,7 @@ def build_user_message(
         llm: Optional[LLM] = None,
 ) -> Dict[str, Any]:
     """构建 user 消息；多模态时 content 为 parts 数组（优先 image_ref）。"""
+    text = _coerce_query_text(text)
     capabilities = resolve_capabilities(llm) if llm else ModelCapabilities()
     if not vision_attachments:
         return {"role": "user", "content": text}

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, Query
 from sse_starlette import EventSourceResponse, ServerSentEvent
@@ -203,3 +203,14 @@ async def create_codebase_session(
             mode=session.mode,
         )
     )
+
+
+@router.delete("/{codebase_id}", response_model=Response[Optional[Dict]])
+async def delete_codebase(
+        codebase_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
+        service: CodebaseService = Depends(get_codebase_service),
+) -> Response[Optional[Dict]]:
+    await service.delete_codebase(codebase_id, scope=ctx.scope)
+    return Response.success(msg="删除代码库成功")

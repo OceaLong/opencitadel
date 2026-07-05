@@ -14,6 +14,17 @@ Platform administration, read-only auditor role, and compliance evidence workflo
 
 Auditors can review governance data but cannot create sessions, upload files, or modify configurations.
 
+```mermaid
+flowchart TD
+  Login["Auditor login"] --> Admin["/admin/compliance"]
+  Admin --> Chain["Verify audit chain"]
+  Admin --> Evidence["Download evidence ZIP"]
+  Admin --> Report["/admin/compliance/report"]
+  Report --> Export["Export JSON / MD / PDF"]
+  Chain --> Integrity["Platform-wide HMAC integrity"]
+  Evidence --> SessionPkg["Per-session tool invoke records"]
+```
+
 ## Admin UI routes
 
 | Route | Description |
@@ -24,6 +35,7 @@ Auditors can review governance data but cannot create sessions, upload files, or
 | `/admin/invitations` | Platform invitation tokens |
 | `/admin/audit` | Audit log viewer |
 | `/admin/compliance` | Evidence center, chain verification, compliance reports |
+| `/admin/compliance/report` | Full-page compliance report export (JSON / MD / PDF) |
 
 Usage charts and token statistics appear on the **`/admin` overview dashboard** (not a separate `/admin/usage` page). Backend usage APIs remain under `/api/admin/usage/*`.
 

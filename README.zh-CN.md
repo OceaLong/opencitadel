@@ -51,6 +51,8 @@ make quickstart
 
 打开 **http://localhost:8088**，登录后在 **设置 → 模型** 中添加 LLM **端点**与**模型**，即可运行第一个 Agent 任务。
 
+`make quickstart` 会构建 `opencitadel-sandbox` 镜像（Agent 工具必需）、启动内置 MinIO（`COMPOSE_PROFILES=local`），并在新建 `.env` 时设置 `STORAGE_PROVIDER=minio`。如需腾讯云 COS，请在 `.env` 中自行覆盖。
+
 - 详细步骤：[10 分钟自托管教程（中文）](docs/tutorials/01-self-host-10-minutes.zh-CN.md)
 - 生产部署：[部署指南](docs/operations/deployment.zh-CN.md)
 - 域名与 HTTPS：[HTTPS 配置](docs/operations/https-domain-setup.zh-CN.md)

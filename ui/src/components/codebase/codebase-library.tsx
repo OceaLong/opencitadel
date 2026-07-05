@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { CreateCodebaseDialog } from "@/components/codebase/create-codebase-dialog";
+import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import type { Codebase, CodebaseStatus, SessionMode } from "@/lib/api/types";
 import {
   IconAdd,
   IconCodebase,
+  IconDelete,
   IconDownload,
   IconLoading,
   IconRefresh,
@@ -51,11 +53,13 @@ function truncateError(error: string, maxLength = 120): string {
 export function CodebaseLibrary() {
   const router = useRouter();
   const t = useTranslations("codebase");
+  const tCommon = useTranslations("common");
   const { user } = useAuth();
   const [codebases, setCodebases] = useState<Codebase[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [ingestingIds, setIngestingIds] = useState<Set<string>>(new Set());
+  const [pendingDelete, setPendingDelete] = useState<Codebase | null>(null);
   const ingestCleanupRef = useRef<Map<string, () => void>>(new Map());
 
   const loadCodebases = useCallback(async () => {
@@ -152,6 +156,19 @@ export function CodebaseLibrary() {
     }
   };
 
+  const handleDeleteConfirm = async () => {
+    if (!pendingDelete) return;
+    const name = pendingDelete.name;
+    try {
+      await codebaseApi.delete(pendingDelete.id);
+      setCodebases((prev) => prev.filter((cb) => cb.id !== pendingDelete.id));
+      toast.success(t("deleteSuccess", { name }));
+      setPendingDelete(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("deleteFailed"));
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <PageHeader
@@ -243,6 +260,17 @@ export function CodebaseLibrary() {
                     <IconDownload className="mr-1 size-3" />
                     {t("download")}
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive hover:text-destructive"
+                    disabled={ingesting}
+                    title={ingesting ? t("deleteBlockedIngesting") : undefined}
+                    onClick={() => setPendingDelete(cb)}
+                  >
+                    <IconDelete className="mr-1 size-3" />
+                    {tCommon("delete")}
+                  </Button>
                 </CardContent>
               </Card>
             );
@@ -258,6 +286,14 @@ export function CodebaseLibrary() {
           setCodebases((prev) => [cb, ...prev]);
           watchIngest(cb.id);
         }}
+      />
+
+      <ConfirmDeleteDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+        title={t("deleteTitle")}
+        description={t("deleteDescription")}
+        onConfirm={handleDeleteConfirm}
       />
     </div>
   );

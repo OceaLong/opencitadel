@@ -31,6 +31,31 @@ Each section follows the same structure:
 | UI i18n | next-intl + build scripts | Bilingual CI enforcement |
 | Sandbox | Docker / K8s Pod / remote gateway | Progressive hardening from dev to enterprise |
 
+```mermaid
+flowchart TB
+  subgraph data ["Data plane"]
+    PG["PostgreSQL + pgvector"]
+    Redis["Redis Streams"]
+    Blob["COS / MinIO"]
+  end
+  subgraph compute ["Compute plane"]
+    API["FastAPI API"]
+    Worker["Agent Worker"]
+    SB["Sandbox runtime"]
+  end
+  subgraph ui ["Presentation"]
+    Next["Next.js UI"]
+  end
+  Next --> API
+  API --> Redis
+  API --> PG
+  Worker --> Redis
+  Worker --> PG
+  Worker --> SB
+  Worker --> Blob
+  API --> Blob
+```
+
 ---
 
 ## 1. FastAPI + SQLAlchemy 2 + Alembic
