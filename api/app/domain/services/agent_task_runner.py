@@ -21,6 +21,7 @@ from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.utils.vision import is_image_mime, is_video_mime
+from app.domain.utils.sandbox_result import shell_output
 from app.domain.services import vision_service
 from app.domain.models.codebase import SessionMode
 from app.domain.models.session import SessionStatus
@@ -90,6 +91,7 @@ class AgentTaskRunner(TaskRunner):
             team_id: Optional[str] = None,
     ) -> None:
         """构造函数，完成Agent任务运行器的创建"""
+        self._llm = llm
         self._uow_factory = uow_factory
         self._session_id = session_id
         self._sandbox = sandbox
@@ -276,7 +278,9 @@ class AgentTaskRunner(TaskRunner):
 
     async def _build_vision_attachments(self, files: List[File]) -> List[VisionAttachment]:
         """为多模态模型构建用户附件（图片/音频/视频帧）。"""
-        llm = self._flow.react._llm
+        if not files:
+            return []
+        llm = self._llm
         attachments = await vision_service.prepare_media_attachments_from_files(
             files, llm, self._file_storage,
         )
@@ -358,8 +362,9 @@ class AgentTaskRunner(TaskRunner):
                 workspace,
                 f"cd {workspace} && git diff 2>/dev/null || diff -ruN /dev/null . 2>/dev/null | head -500",
             )
-            if result.success and result.data and result.data.strip():
-                diff_text = result.data[:12000]
+            diff_text = shell_output(result).strip()
+            if result.success and diff_text:
+                diff_text = diff_text[:12000]
                 await self._put_and_add_event(
                     task,
                     MessageEvent(

@@ -46,6 +46,7 @@
 | [模型韧性设计](architecture/model-resilience.zh-CN.md) | 熔断、fallback、SLO 与运行手册 |
 | [API/SSE 协议兼容策略](architecture/contract-compatibility.zh-CN.md) | 前后端契约兼容窗口 |
 | [Codebase 向量降级与重新索引](architecture/codebase-reindex.zh-CN.md) | embedding 不可用时的降级与恢复 |
+| [知识库摄取](architecture/knowledge-base-ingestion.zh-CN.md) | 解析、OCR、GraphRAG、摄取失败 |
 | [架构演进指南](architecture/architecture-evolution.zh-CN.md) | Compose → K8s / 外置沙箱演进 |
 
 ### 模块说明
@@ -55,6 +56,7 @@
 | [API](../api/README.zh-CN.md) | 后端路由、SSE、本地开发 |
 | [UI](../ui/README.zh-CN.md) | 前端技术栈与路由 |
 | [Sandbox](../sandbox/README.zh-CN.md) | 隔离运行时 |
+| [Nginx 网关](../nginx/README.zh-CN.md) | 边缘代理、SSE/WS、上传限制 |
 | [OpsConsole 演示](../demo/ops-console/README.zh-CN.md) | Web Operator 工单后台演示 |
 
 ### 开源治理
@@ -72,4 +74,4 @@
 - **双语成对**：新增或修改文档时，同步更新对应语言的配对文件。
 - **链接约定**：中文文档优先链接 `*.zh-CN.md`；英文文档优先链接 `*.md`。
 - **索引同步**：新增教程或架构文档时，同步更新本索引、根目录 [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) 文档地图，并在中英文文件文首添加语言切换链接。
-- **PR 清单** — [文档维护检查清单](MAINTENANCE_CHECKLIST.zh-CN.md)；[文档清单](DOCUMENTATION_INVENTORY.zh-CN.md)；提交文档变更前运行 `./scripts/check-docs.sh`。
+- **PR 清单** — [文档维护检查清单](MAINTENANCE_CHECKLIST.zh-CN.md)；[文档清单](DOCUMENTATION_INVENTORY.zh-CN.md)；[审计报告](DOCUMENTATION_AUDIT_REPORT.zh-CN.md)；提交文档变更前运行 `./scripts/check-docs.sh`。

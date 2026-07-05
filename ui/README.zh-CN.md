@@ -95,7 +95,8 @@ ui/
 | `config.ts` | AppConfig 分段 |
 | `skills.ts`、`memory.ts` | Skill 与记忆 |
 | `admin.ts`、`team.ts` | 管理与团队 |
-| `knowledge.ts`、`codebase.ts` | 知识库 |
+| `knowledge.ts`、`codebase.ts`、`file.ts` | 知识库、代码库、文件 |
+| `constants.ts` | 共享限制（`CODEBASE_ZIP_MAX_BYTES` = 200 MB，须与 nginx 一致） |
 | `artifacts.ts` | 交付物与分享 |
 | `types.ts` | 共享 TypeScript 类型 |
 

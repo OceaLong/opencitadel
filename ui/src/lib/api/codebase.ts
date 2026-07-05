@@ -63,6 +63,7 @@ export const codebaseApi = {
     onEvent: SSEEventHandler,
     onError?: (error: Error) => void,
     eventId?: string,
+    onComplete?: () => void,
   ): () => void => {
     const controller = new AbortController();
     const url = `/codebases/${codebaseId}/ingest${eventId ? `?event_id=${encodeURIComponent(eventId)}` : ""}`;
@@ -91,6 +92,7 @@ export const codebaseApi = {
           },
           onError,
         );
+        onComplete?.();
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           onError?.(err as Error);

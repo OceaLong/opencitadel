@@ -56,6 +56,7 @@ export const knowledgeApi = {
     onEvent: SSEEventHandler,
     onError?: (error: Error) => void,
     eventId?: string,
+    onComplete?: () => void,
   ): (() => void) => {
     const controller = new AbortController();
     const url = `/knowledge-bases/${kbId}/ingest${eventId ? `?event_id=${encodeURIComponent(eventId)}` : ""}`;
@@ -84,6 +85,7 @@ export const knowledgeApi = {
           },
           onError,
         );
+        onComplete?.();
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           onError?.(err as Error);

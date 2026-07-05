@@ -46,6 +46,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [Model resilience](architecture/model-resilience.md) | Circuit breaking, fallback, SLO runbooks |
 | [Contract compatibility](architecture/contract-compatibility.md) | API/SSE compatibility window |
 | [Codebase reindex](architecture/codebase-reindex.md) | Vector degradation and recovery |
+| [Knowledge base ingestion](architecture/knowledge-base-ingestion.md) | Parse, OCR, GraphRAG, ingest failures |
 | [Architecture evolution](architecture/architecture-evolution.md) | Compose → K8s / external sandbox |
 
 ### Module guides
@@ -55,6 +56,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [API](../api/README.md) | Backend routes, SSE, local dev |
 | [UI](../ui/README.md) | Frontend stack and routes |
 | [Sandbox](../sandbox/README.md) | Isolated runtime |
+| [Nginx gateway](../nginx/README.md) | Edge proxy, SSE/WS, upload limits |
 | [OpsConsole demo](../demo/ops-console/README.md) | Web Operator ticket backend demo |
 
 ### Open-source governance
@@ -72,4 +74,4 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 - **Bilingual pairs** — update both language files when changing a topic.
 - **Link convention** — English docs link to `*.md`; Chinese docs link to `*.zh-CN.md`.
 - **Index sync** — when adding a tutorial or architecture doc, update this index, the root [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) doc map, and add top-of-file language switch links in both language files.
-- **PR checklist** — [Documentation maintenance checklist](MAINTENANCE_CHECKLIST.md); [Documentation inventory](DOCUMENTATION_INVENTORY.md); run `./scripts/check-docs.sh` before submitting doc changes.
+- **PR checklist** — [Documentation maintenance checklist](MAINTENANCE_CHECKLIST.md); [Documentation inventory](DOCUMENTATION_INVENTORY.md); [Audit report](DOCUMENTATION_AUDIT_REPORT.md); run `./scripts/check-docs.sh` before submitting doc changes.

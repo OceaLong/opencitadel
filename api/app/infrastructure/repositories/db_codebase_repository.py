@@ -300,6 +300,9 @@ class DBCodebaseRepository(CodebaseRepository):
         result = await self.db_session.execute(stmt)
         return [r.to_domain() for r in result.scalars().all()]
 
+    async def flush(self) -> None:
+        await self.db_session.flush()
+
     async def clear_analysis_data(self, codebase_id: str) -> None:
         await self.db_session.execute(
             delete(CodebaseArtifactModel).where(CodebaseArtifactModel.codebase_id == codebase_id)

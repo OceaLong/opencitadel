@@ -28,7 +28,7 @@ API 与 Worker 为独立进程，共享 `BaseContainer` 中的基础设施与服
 | Migrate | `app.migrate` | 无 | `api`（一次性 job） |
 
 - **API**：HTTP/SSE、任务 dispatch、事件流读取、MCP/A2A 连接池回收
-- **Worker**：消费 `task:dispatch`、运行 Agent、沙箱预热门户与孤儿清理
+- **Worker**：消费 `task:dispatch`、运行 Agent、Codebase/KB 摄取、沙箱预热门户与孤儿清理
 - **Migrate**：独立 job（`python -m app.migrate`），API 启动时仅校验 schema 版本
 
 完整架构说明见 [`../docs/architecture/overview.zh-CN.md`](../docs/architecture/overview.zh-CN.md)。

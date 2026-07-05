@@ -14,6 +14,8 @@ This document is the authoritative reference for the **Codebase module**: import
 | Agent mode | Session with `codebase_id` + AGENT | `PlannerReActFlow` with codebase tools |
 | Reindex | `POST /api/codebases/{id}/reanalyze` | Re-run ingestion after embedding recovery |
 
+**Upload limit:** codebase ZIP max **200 MB** (UI + nginx). Use Git import for larger repos.
+
 Import paths:
 
 - **ZIP upload** — archive extracted in sandbox workspace
@@ -41,7 +43,7 @@ flowchart TD
 
 | Stage | Implementation | Description |
 |-------|----------------|-------------|
-| Materialize | sandbox clone / unzip / upload | Place source code in sandbox workspace |
+| Materialize | sandbox clone / unzip / upload | Place source code in sandbox workspace; uses `sandbox_result.py` for command output |
 | Analyze | `StaticAnalyzer.analyze_tree()` | Extract files, symbols, dependency edges |
 | Index | `CodebaseIndexer.build_chunks()` | Chunk by symbol and embed vectors |
 | Artifacts | `ArtifactGenerator.generate_all()` | Generate architecture diagrams and docs |
@@ -82,4 +84,5 @@ flowchart TD
 - [Model Resilience Design](model-resilience.md)
 - [Configuration Source Governance](config-source-governance.md)
 - [Architecture Overview](overview.md)
+- [Knowledge base ingestion](knowledge-base-ingestion.md)
 - [Security Model](security-model.md)

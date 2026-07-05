@@ -81,7 +81,20 @@ flowchart TD
 - Write events to the `task:output` stream.
 - Append persistable events to the `session_events` table.
 - Run sandbox reconcile, idle reclamation, and low-memory reclamation, coordinated by a single active leader via `try_become_reclaim_leader()`.
+- Reconcile orphaned agent tasks and stuck KB ingests via `_task_reconcile_loop()` (see [Knowledge base ingestion](knowledge-base-ingestion.md)).
 - Release stale MCP / A2A connections after task completion.
+
+## Ingestion Task Types
+
+Worker routes by `task_type` in task metadata (`worker/main.py`):
+
+| `task_type` | Session id pattern | Runner | Description |
+|-------------|-------------------|--------|-------------|
+| `agent` (default) | user session id | `AgentTaskRunner` | Chat, HITL, tools |
+| `codebase_ingest` | `codebase-ingest:{id}` | `CodebaseIngestionTaskRunner` | ZIP/Git import, static analysis, artifacts |
+| `kb_ingest` | `kb-ingest:{id}` | `KBIngestionTaskRunner` | Document parse, OCR, chunk, embed, GraphRAG |
+
+Ingestion tasks emit SSE `step` events on synthetic session ids; they do not use Agent flow routing. See [Codebase reindex](codebase-reindex.md) and [Knowledge base ingestion](knowledge-base-ingestion.md).
 
 ## Agent Flow Routing (SessionMode)
 
@@ -245,7 +258,7 @@ Production must use `USE_DB_APP_CONFIG=true`; Docker Compose does not enforce th
 | Sandbox maintenance | Worker | `run_sandbox_maintenance()` + leader lease |
 | Sandbox warm pool | Worker | `SandboxPool`, default `pool_enabled=false` |
 | Automation scheduler | Worker | `run_scheduler_loop()` — cron/webhook leader election |
-| Task reconcile | Worker | `_task_reconcile_loop()` — stale task recovery |
+| Task reconcile | Worker | `_task_reconcile_loop()` — stale agent task recovery + stuck KB ingest cleanup |
 | DLQ replay | Worker | `_dlq_replay_loop()` when enabled |
 
 ## Memory Auto-Extraction
@@ -324,6 +337,8 @@ The Chart is located at `deploy/helm/opencitadel/` and provides full-stack one-c
 - [Event System](events.md)
 - [Configuration Source Governance](config-source-governance.md)
 - [Model Resilience Design](model-resilience.md)
+- [Knowledge base ingestion](knowledge-base-ingestion.md)
+- [Codebase reindex](codebase-reindex.md)
 - [Architecture Evolution Guide](architecture-evolution.md)
 - [Security Model](security-model.md)
 - [Production Deployment](../operations/deployment.md)

@@ -221,6 +221,19 @@ NGINX_PORT=8088
 
 行为类配置（CORS、限流、沙箱、记忆、Worker 并发、OTEL 开关等）统一在 `api/config.yaml` 维护，不要写入 `.env`。
 
+### 上传大小限制
+
+勿假设全局统一上传上限。修改时需对齐各层：
+
+| 层级 | 限制 | 配置 / 代码 |
+|------|------|-------------|
+| Nginx 网关 | 200 MB | `nginx/nginx.conf` → `client_max_body_size 200m` |
+| Codebase ZIP | 200 MB | `ui/src/lib/constants.ts` → `CODEBASE_ZIP_MAX_BYTES` |
+| 知识库文档 | 默认 50 MB | AppConfig `knowledge_base.document.max_bytes` |
+| 市场资源 | 默认 25 MB | AppConfig `server.marketplace_max_upload_bytes` |
+
+见 [Nginx 网关](../../nginx/README.zh-CN.md)、[配置来源治理](../architecture/config-source-governance.zh-CN.md)、[知识库摄取](../architecture/knowledge-base-ingestion.zh-CN.md)。
+
 ### 运行时配置 (api/config.yaml)
 
 Docker Compose 将 `./api/config.yaml` 挂载到 API/Worker 容器的 `/app/config.yaml`。

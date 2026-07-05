@@ -9,7 +9,30 @@ This document is the authoritative reference for OpenCitadel configuration sourc
 | Type | Source | Examples |
 |------|--------|----------|
 | Behavioral config | `AppConfig`, backed by DB; `config.yaml` / Helm `appConfig` are seed only | `model_resilience`, `feature_flags`, `worker`, `sandbox` |
-| Secrets / connections | `Settings` environment variables | `EMBEDDING_API_KEY`, Postgres, Redis, COS |
+| Secrets / connections | `Settings` environment variables | `EMBEDDING_API_KEY`, Postgres, Redis, COS, MinIO |
+
+## Object storage provider
+
+| Setting | Default | Compose local | Helm default |
+|---------|---------|---------------|--------------|
+| `STORAGE_PROVIDER` | `cos` (`.env.example`) | `minio` with `COMPOSE_PROFILES=local` | External COS/S3 — `minio.enabled: false` |
+
+Implementation: `api/app/infrastructure/external/file_storage/` — `CosFileStorage` and `MinioFileStorage`. Postgres stores object keys only.
+
+For local trials without cloud credentials, set `COMPOSE_PROFILES=local` and `STORAGE_PROVIDER=minio` before first start. See [Production deployment](../operations/deployment.md).
+
+## Upload size limits (cross-layer)
+
+These limits are **not** a single AppConfig field — sync docs when changing any layer:
+
+| Feature | Limit | Enforced by |
+|---------|-------|-------------|
+| Gateway POST body | 200 MB | `nginx/nginx.conf` `client_max_body_size 200m` |
+| Codebase ZIP | 200 MB | `ui/src/lib/constants.ts` `CODEBASE_ZIP_MAX_BYTES` |
+| KB document | 50 MB default | `knowledge_base.document.max_bytes` |
+| Marketplace asset | 25 MB default | `server.marketplace_max_upload_bytes` |
+
+See [Nginx gateway](../../nginx/README.md) and [Knowledge base ingestion](knowledge-base-ingestion.md).
 
 ## Configuration flow
 

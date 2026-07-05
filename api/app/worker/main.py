@@ -16,6 +16,7 @@ from app.domain.models.event import MessageEvent
 from app.domain.models.session import SessionStatus
 from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.services.codebase.ingestion_task_runner import CodebaseIngestionTaskRunner
+from app.domain.services.knowledge_base.ingest_errors import NonRecoverableIngestError
 from app.domain.services.knowledge_base.ingestion_task_runner import KBIngestionTaskRunner
 from app.domain.external.file_storage import FileStorage
 from app.infrastructure.external.runtime_settings import get_admission_runtime_settings
@@ -34,6 +35,7 @@ from app.application.services.recoverable_task_retry import (
     requeue_latest_user_message,
 )
 from app.domain.models.error_codes import MODEL_UNAVAILABLE
+from app.domain.models.knowledge_base import KBStatus
 from app.domain.utils.llm_retry import classify_llm_error_code
 from app.infrastructure.external.llm.circuit_breaker import get_llm_circuit_breaker
 from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError, create_resilient_llm
@@ -47,6 +49,36 @@ from core.config import get_settings
 set_role(ProcessRole.WORKER)
 
 logger = logging.getLogger(__name__)
+
+_KB_INGEST_SESSION_PREFIX = "kb-ingest:"
+
+
+async def _finalize_kb_ingest_failure(kb_id: str, error: str) -> None:
+    """Ensure KB reaches a terminal failed state and clear stale ingest_task_id."""
+    non_terminal = {
+        KBStatus.PENDING,
+        KBStatus.PARSING,
+        KBStatus.CHUNKING,
+        KBStatus.INDEXING,
+        KBStatus.GRAPH_BUILDING,
+    }
+    async with get_uow() as uow:
+        kb = await uow.knowledge_base.get_kb(kb_id)
+        if not kb:
+            return
+        if kb.status in non_terminal:
+            await uow.knowledge_base.update_status(kb_id, KBStatus.FAILED, error)
+        kb = await uow.knowledge_base.get_kb(kb_id)
+        if kb and kb.status == KBStatus.FAILED:
+            kb.ingest_task_id = None
+            await uow.knowledge_base.save_kb(kb)
+
+
+def _kb_id_from_ingest_session(session_id: str) -> str | None:
+    if not session_id.startswith(_KB_INGEST_SESSION_PREFIX):
+        return None
+    kb_id = session_id[len(_KB_INGEST_SESSION_PREFIX):]
+    return kb_id or None
 
 SHUTDOWN_GRACE_SECONDS = 30
 TASK_RECONCILE_INTERVAL_SECONDS = 30
@@ -106,6 +138,7 @@ class AgentWorker:
         await self._task_state.ensure_consumer_group()
         admission = get_admission_runtime_settings()
         await self._reconcile_orphaned_tasks("startup")
+        await self._reconcile_stuck_kb_ingests("startup")
         reconcile_task = asyncio.create_task(self._task_reconcile_loop())
         runtime = get_runtime_config()
         dlq_replay_task = None
@@ -177,6 +210,7 @@ class AgentWorker:
         while self._running:
             await asyncio.sleep(TASK_RECONCILE_INTERVAL_SECONDS)
             await self._reconcile_orphaned_tasks("periodic")
+            await self._reconcile_stuck_kb_ingests("periodic")
 
     async def _dlq_replay_loop(self) -> None:
         while self._running:
@@ -290,6 +324,52 @@ class AgentWorker:
                     exc,
                 )
 
+    async def _reconcile_stuck_kb_ingests(self, reason: str) -> None:
+        admission = get_admission_runtime_settings()
+        stale_after = max(120.0, admission.task_execution_lease_seconds * 2.0)
+        try:
+            async with get_uow() as uow:
+                kbs = await uow.knowledge_base.list_stuck_ingesting(limit=100)
+        except Exception as exc:
+            logger.warning("知识库摄取对账查询失败 reason=%s: %s", reason, exc)
+            return
+
+        for kb in kbs:
+            task_id = kb.ingest_task_id
+            if not task_id:
+                continue
+            try:
+                snapshot = await self._task_state.get_runtime_snapshot(task_id)
+                if snapshot.get("is_done"):
+                    await _finalize_kb_ingest_failure(
+                        kb.id,
+                        kb.error or "知识库索引任务已终止",
+                    )
+                    continue
+                if not self._task_state.heartbeat_is_stale(snapshot.get("meta"), stale_after):
+                    continue
+                lease_owner = await get_task_lease_owner(task_id)
+                if lease_owner:
+                    continue
+                await self._task_state.set_status(task_id, TaskStatus.FAILED)
+                await _finalize_kb_ingest_failure(
+                    kb.id,
+                    kb.error or "知识库索引任务超时或 worker 异常退出",
+                )
+                logger.warning(
+                    "孤儿知识库摄取任务已清理: kb_id=%s task_id=%s reason=%s",
+                    kb.id,
+                    task_id,
+                    reason,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "知识库摄取对账失败: kb_id=%s task_id=%s error=%s",
+                    kb.id,
+                    task_id,
+                    exc,
+                )
+
     async def _handle_claimed_job(
             self,
             message_id: str,
@@ -315,7 +395,6 @@ class AgentWorker:
                     task_id,
                     session_id,
                 )
-                await self._task_state.ack_dispatch(message_id)
                 return
             await self._task_state.record_heartbeat(task_id, get_worker_id())
             try:
@@ -335,6 +414,24 @@ class AgentWorker:
                 )
                 async with get_uow() as uow:
                     await uow.session.update_status(session_id, SessionStatus.FAILED)
+                await self._task_state.mark_dispatch_failure(
+                    message_id=message_id,
+                    task_id=task_id,
+                    session_id=session_id,
+                    error=str(exc),
+                    error_code=exc.error_code,
+                    fast_fail=True,
+                )
+            except NonRecoverableIngestError as exc:
+                logger.error(
+                    "Worker 知识库摄取不可恢复失败: task_id=%s session_id=%s error=%s",
+                    task_id,
+                    session_id,
+                    exc,
+                )
+                kb_id = _kb_id_from_ingest_session(session_id)
+                if kb_id:
+                    await _finalize_kb_ingest_failure(kb_id, str(exc))
                 await self._task_state.mark_dispatch_failure(
                     message_id=message_id,
                     task_id=task_id,
@@ -366,6 +463,11 @@ class AgentWorker:
                     error=str(exc),
                     error_code=error_code,
                 )
+                kb_id = _kb_id_from_ingest_session(session_id)
+                if kb_id:
+                    meta = await self._task_state.get_task_meta(task_id) or {}
+                    if meta.get("status") == TaskStatus.FAILED.value:
+                        await _finalize_kb_ingest_failure(kb_id, str(exc))
             finally:
                 await release_task_lease(task_id)
 
@@ -526,6 +628,7 @@ class AgentWorker:
             await self._task_state.set_status(task_id, TaskStatus.FAILED)
             raise RuntimeError("知识库摄取任务缺少 resource_id")
         llm = None
+        ocr_llm = None
         try:
             model = await self._runner_factory._llm_model_service.resolve_model(None)
             llm = create_resilient_llm(
@@ -535,12 +638,25 @@ class AgentWorker:
             )
         except Exception as exc:
             logger.warning("知识库摄取 GraphRAG LLM 不可用，将跳过建图: %s", exc)
+        try:
+            vision_model = await self._runner_factory._llm_model_service.resolve_vision_model()
+            if vision_model:
+                ocr_llm = create_resilient_llm(
+                    vision_model,
+                    thinking_enabled=False,
+                    llm_model_service=self._runner_factory._llm_model_service,
+                )
+            else:
+                logger.warning("无可用视觉模型，图片型 PDF OCR 将不可用")
+        except Exception as exc:
+            logger.warning("知识库摄取 OCR LLM 不可用: %s", exc)
         container = get_worker_container()
         runner = KBIngestionTaskRunner(
             uow_factory=get_uow,
             file_storage=self._file_storage,
             kb_id=kb_id,
             llm=llm,
+            ocr_llm=ocr_llm,
             json_parser=container.json_parser(),
         )
         task = self._task_cls(

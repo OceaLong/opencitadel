@@ -14,6 +14,8 @@
 | Agent 模式 | 带 `codebase_id` + AGENT 的会话 | 带代码库工具的 `PlannerReActFlow` |
 | 重新索引 | `POST /api/codebases/{id}/reanalyze` | embedding 恢复后重跑摄取 |
 
+**上传限制：** Codebase ZIP 最大 **200 MB**（UI + nginx）。更大仓库请用 Git 导入。
+
 导入方式：
 
 - **ZIP 上传** — 在沙箱工作区解压归档
@@ -41,7 +43,7 @@ flowchart TD
 
 | 阶段 | 实现 | 说明 |
 |------|------|------|
-| Materialize | sandbox clone / unzip / upload | 将源码放入沙箱工作区 |
+| Materialize | sandbox clone / unzip / upload | 将源码放入沙箱工作区；命令输出经 `sandbox_result.py` 解析 |
 | Analyze | `StaticAnalyzer.analyze_tree()` | 提取文件、符号、依赖边 |
 | Index | `CodebaseIndexer.build_chunks()` | 按符号分块并嵌入向量 |
 | Artifacts | `ArtifactGenerator.generate_all()` | 生成架构图与文档 |
@@ -82,4 +84,5 @@ flowchart TD
 - [模型韧性设计](model-resilience.zh-CN.md)
 - [配置来源治理](config-source-governance.zh-CN.md)
 - [系统架构](overview.zh-CN.md)
+- [知识库摄取](knowledge-base-ingestion.zh-CN.md)
 - [安全模型](security-model.zh-CN.md)

@@ -9,6 +9,7 @@ from app.domain.models.codebase import ArtifactKind
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.codebase.vector_service import CodebaseVectorService
 from app.domain.services.tools.base import BaseTool, tool
+from app.domain.utils.sandbox_result import file_content
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +199,7 @@ class CodebaseTool(BaseTool):
         if not result.success:
             return f"读取失败: {result.message or path}"
         loc = f"{path}:{start_line or 1}"
-        return f"```{path}\n# {loc}\n{result.data}\n```"
+        return f"```{path}\n# {loc}\n{file_content(result)}\n```"
 
     @tool(
         name="get_diagram",

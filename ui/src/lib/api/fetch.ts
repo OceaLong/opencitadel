@@ -130,6 +130,10 @@ async function parseResponse<T>(response: Response): Promise<ApiResponse<T>> {
  * 处理错误响应
  */
 async function handleErrorResponse(response: Response): Promise<never> {
+  if (response.status === 413) {
+    throw new ApiError(413, translate("errors.payloadTooLarge"));
+  }
+
   let errorData: ApiResponse;
 
   try {

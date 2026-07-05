@@ -76,6 +76,22 @@ sequenceDiagram
 | 用户取消 | `cancelled` |
 | 租约冲突（重复 claim） | ack dispatch，跳过 — 不改状态 |
 | 不可恢复的逻辑错误 | `failed` |
+| KB 摄取 — 全部文档解析失败 | `NonRecoverableIngestError` → `fast_fail`，KB `FAILED`，不自动重试 |
+| KB 摄取 — 卡住/孤儿任务 | `_reconcile_stuck_kb_ingests()` → `_finalize_kb_ingest_failure()` |
+
+## 摄取任务恢复（与 Agent 重试区分）
+
+KB 与 Codebase 摄取使用合成 session id（`kb-ingest:*`、`codebase-ingest:*`），**不**使用检查点恢复或用户消息重入队。
+
+| 任务类型 | 可恢复？ | 机制 |
+|----------|----------|------|
+| `kb_ingest` 全部解析失败 | 否 | `NonRecoverableIngestError`（`DOCUMENT_PARSE_FAILED`） |
+| `kb_ingest` 瞬态失败 | 部分 | 通用异常可能触发 Agent 式重试；任务终态 `failed` 时 `_finalize_kb_ingest_failure()` |
+| `kb_ingest` 卡住（无心跳、无租约） | N/A | 周期对账标记任务失败并 finalize KB |
+| `codebase_ingest` | 类似 | 沙箱/embedding 失败可降级向量；见 [Codebase 重新索引](codebase-reindex.zh-CN.md) |
+| `agent` 聊天 | 是 | `RecoverableTaskInputUnavailable`、`TASK_INFRA_FAILED` + 检查点 |
+
+见 [知识库摄取](knowledge-base-ingestion.zh-CN.md) 了解 OCR LLM 与流水线阶段。
 
 ## 测试
 
@@ -86,4 +102,5 @@ sequenceDiagram
 
 - [架构总览](overview.zh-CN.md)
 - [Events — 错误码](events.zh-CN.md)
+- [知识库摄取](knowledge-base-ingestion.zh-CN.md)
 - [模型韧性](model-resilience.zh-CN.md)

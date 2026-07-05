@@ -4,6 +4,7 @@ import logging
 import os.path
 import uuid
 from datetime import datetime
+from io import BytesIO
 from typing import Tuple, BinaryIO, Callable
 from starlette.concurrency import run_in_threadpool
 
@@ -80,15 +81,11 @@ class CosFileStorage(FileStorage):
             if not file:
                 raise ValueError(f"该文件不存在, 文件id: {file_id}")
 
-            # 2.使用线程池来下载文件
-            response = await run_in_threadpool(
-                self.cos.client.get_object,
-                Bucket=self.bucket,
-                Key=file.key,
-            )
+            # 2.全量读取 COS 对象（含 Content-Length 校验与重试）
+            data = await self.cos.get_bytes(file.key)
 
             # 3.返回文件流+文件信息
-            return response["Body"], file
+            return BytesIO(data), file
         except Exception as e:
             logger.error(f"下载文件[{file_id}]失败: {str(e)}")
             raise

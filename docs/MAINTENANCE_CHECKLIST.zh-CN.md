@@ -12,6 +12,8 @@
 - [ ] 新增环境变量 → `.env.example`、`docs/operations/deployment.md`（+ 中文）、`config-source-governance.md`（+ 中文）
 - [ ] 新增 `AppConfig` 字段 → `api/config.yaml`、Helm `appConfig`、`config-source-governance.md`（+ 中文）
 - [ ] 新增教程或架构文档 → 中英文文件、`docs/README.md`（+ 英文）、根 `README.md`（+ 中文）、文首语言链接
+- [ ] KB/Codebase 摄取变更 → `knowledge-base-ingestion.md`（+ 中文）、`codebase-reindex.md`（+ 中文）、教程 02（+ 中文）、`events.md`（+ 中文）
+- [ ] 上传限制变更 → `nginx/README.md`（+ 中文）、`ui/src/lib/constants.ts`、`config-source-governance.md`（+ 中文）、`deployment.md`（+ 中文）
 - [ ] Docker 镜像名/数量变更 → `deployment.md`（+ 中文）、Helm README（+ 中文），必要时 `release.yml` 注释
 
 ## 双语同步
@@ -33,6 +35,8 @@
 | 沙箱边界 | Chromium 在沙箱；Worker 内 Playwright 经 CDP |
 | 集成 UI | 设置弹窗 → 集成 Tab（非 `/settings/integrations`） |
 | 对象存储 | `.env.example` 默认；本地用 `COMPOSE_PROFILES=local` + `STORAGE_PROVIDER=minio` |
+| 上传限制 | `nginx/nginx.conf`、`ui/src/lib/constants.ts`、AppConfig `knowledge_base.document.max_bytes`、`server.marketplace_max_upload_bytes` |
+| KB 摄取 / OCR | `knowledge_base/ingestion_runner.py`、`worker/main.py`、`knowledge-base-ingestion.md`（+ 中文） |
 | 服务 API Key | `X-Api-Key`；入站仅 `/api/a2a` |
 | 分享链接 | 默认 TTL 168h；UI 路由 `/share/artifact/[token]` |
 

@@ -64,7 +64,22 @@ flowchart TD
 | `done` | 本轮流结束 | live + replay |
 | `error` | 错误事件 | live + replay |
 
-`error` 事件可选携带 `code` 字段（如 `MODEL_UNAVAILABLE`、`EMBEDDING_UNAVAILABLE`），用于前端与运维区分错误类型。完整错误码列表见 [模型韧性设计](model-resilience.zh-CN.md) 与 `api/app/domain/models/error_codes.py`。前端应容忍缺失 `code` 并按 `error` 文本降级展示。
+`error` 事件可选携带 `code` 字段（如 `MODEL_UNAVAILABLE`、`EMBEDDING_UNAVAILABLE`、`DOCUMENT_PARSE_FAILED`），用于前端与运维区分错误类型。完整错误码列表见 [模型韧性设计](model-resilience.zh-CN.md) 与 `api/app/domain/models/error_codes.py`。前端应容忍缺失 `code` 并按 `error` 文本降级展示。
+
+### 摄取 `step` 事件
+
+Codebase 与知识库摄取任务发出固定 step id 的 `step` 事件：
+
+| Step id | 阶段 | 典型描述 |
+|---------|------|----------|
+| `parse` | 文档/源码解析 | 解析文档或 materialize 工作区 |
+| `chunk` | KB 分块 | 父子块构建 |
+| `index` | 向量/BM25 索引 | 向量化与索引写入 |
+| `graph` | GraphRAG | 实体图构建（仅 KB，启用时） |
+| `analyze` | Codebase 静态分析 | 符号/依赖抽取 |
+| `artifacts` | Codebase 产物 | 架构 Mermaid 生成 |
+
+摄取 session 使用合成 id（`kb-ingest:{kb_id}`、`codebase-ingest:{codebase_id}`）。见 [知识库摄取](knowledge-base-ingestion.zh-CN.md) 与 [Codebase 重新索引](codebase-reindex.zh-CN.md)。
 
 默认 UI 受众只接收 `user` 可见事件和 `message_delta`。需要诊断信息时，请使用 `include_debug=true`。
 
@@ -132,4 +147,6 @@ flowchart TD
 
 - [系统架构](overview.zh-CN.md)
 - [API/SSE 协议兼容策略](contract-compatibility.zh-CN.md)
+- [知识库摄取](knowledge-base-ingestion.zh-CN.md)
+- [Codebase 重新索引](codebase-reindex.zh-CN.md)
 - [模型韧性设计](model-resilience.zh-CN.md)

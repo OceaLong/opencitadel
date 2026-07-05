@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { codebaseApi } from "@/lib/api/codebase";
 import { fileApi } from "@/lib/api/file";
+import { CODEBASE_ZIP_MAX_BYTES } from "@/lib/constants";
 import type { Codebase, CodebaseSourceType } from "@/lib/api/types";
 
 type CreateCodebaseDialogProps = {
@@ -49,6 +50,11 @@ export function CreateCodebaseDialog({
   const handleZipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > CODEBASE_ZIP_MAX_BYTES) {
+      toast.error(t("fileTooLarge200mb"));
+      e.target.value = "";
+      return;
+    }
     setUploading(true);
     try {
       const info = await fileApi.uploadFile({ file });

@@ -24,6 +24,9 @@ class KnowledgeBaseRepository(Protocol):
     async def list_kbs(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[KnowledgeBase]:
         ...
 
+    async def list_stuck_ingesting(self, limit: int = 100) -> List[KnowledgeBase]:
+        ...
+
     async def delete_kb(self, kb_id: str) -> None:
         ...
 

@@ -35,11 +35,13 @@ flowchart TD
   DocFailed --> Ready
 ```
 
-- **Parse**：上传、ZIP、网页、Confluence 或飞书来源 → 每文档生成 `PageBlock`
+- **Parse**：上传、ZIP、网页、Confluence 或飞书来源 → 每文档生成 `PageBlock`；`knowledge_base.ocr.mode=vision_llm` 时对图片型 PDF 做视觉 LLM OCR
 - **Chunk**：通过 `KBChunker` 生成父/子块；通过 `KBVectorService` 嵌入
 - **Index**：`replace_index_chunks()` 持久化可检索块
-- **Graph**（可选）：`graphrag.enabled=true` 时运行 `GraphBuilder`
+- **Graph**（可选）：`graphrag.enabled=true` 时运行 `GraphBuilder`（种子 `config.yaml` 中**默认启用**）
 - **降级路径**：嵌入失败时设置 `vector_degraded=true`；检索回退到 BM25/混合模式，不使用向量
+
+权威流水线说明见 [知识库摄取](../architecture/knowledge-base-ingestion.zh-CN.md)。
 
 ## 步骤
 
@@ -54,7 +56,7 @@ flowchart TD
 **上传文件：**
 
 1. 打开知识库
-2. 点击 **Add document** → 上传 PDF/MD/TXT
+2. 点击 **Add document** → 上传 PDF/MD/TXT（默认单文档最大 **50 MB** — 见 AppConfig `knowledge_base.document.max_bytes`；网关上限 200 MB）
 3. 等待索引完成（文档列表中显示状态）
 
 **可选连接器**（在 `.env` 中配置）：
@@ -93,5 +95,6 @@ Agent 会检索政策摘录，然后在沙箱中撰写清单。
 
 ## 下一步
 
+- [知识库摄取](../architecture/knowledge-base-ingestion.zh-CN.md)
 - [教程 3：MCP 集成](./03-mcp-integrations.zh-CN.md)
 - [安全模型](../architecture/security-model.zh-CN.md)

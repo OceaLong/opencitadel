@@ -81,7 +81,20 @@ flowchart TD
 - 写入事件到 `task:output` stream。
 - 将可持久化事件追加到 `session_events` 表。
 - 执行沙箱 reconcile、空闲回收、低内存回收，使用 `try_become_reclaim_leader()` 单活协调。
+- 通过 `_task_reconcile_loop()` 对账孤儿 Agent 任务与卡住的知识库摄取（见 [知识库摄取](knowledge-base-ingestion.zh-CN.md)）。
 - 任务结束后释放 MCP / A2A 陈旧连接。
+
+## 摄取任务类型
+
+Worker 按任务元数据中的 `task_type` 路由（`worker/main.py`）：
+
+| `task_type` | session id 模式 | Runner | 说明 |
+|-------------|----------------|--------|------|
+| `agent`（默认） | 用户会话 id | `AgentTaskRunner` | 聊天、HITL、工具 |
+| `codebase_ingest` | `codebase-ingest:{id}` | `CodebaseIngestionTaskRunner` | ZIP/Git 导入、静态分析、产物 |
+| `kb_ingest` | `kb-ingest:{id}` | `KBIngestionTaskRunner` | 文档解析、OCR、分块、向量化、GraphRAG |
+
+摄取任务在合成 session id 上发出 SSE `step` 事件，不走 Agent 流路由。详见 [Codebase 重新索引](codebase-reindex.zh-CN.md) 与 [知识库摄取](knowledge-base-ingestion.zh-CN.md)。
 
 ## Agent 流路由（SessionMode）
 
@@ -245,7 +258,7 @@ FastAPI 依赖注入通过 `ApiContainer` 解析；Worker 入口通过 `WorkerCo
 | 沙箱维护 | Worker | `run_sandbox_maintenance()` + leader lease |
 | 沙箱预热门户 | Worker | `SandboxPool`，默认 `pool_enabled=false` |
 | 自动化调度 | Worker | `run_scheduler_loop()` — Cron/Webhook Leader 选举 |
-| 任务对账 | Worker | `_task_reconcile_loop()` — 陈旧任务恢复 |
+| 任务对账 | Worker | `_task_reconcile_loop()` — 陈旧 Agent 任务恢复 + 卡住 KB 摄取清理 |
 | DLQ 回放 | Worker | 启用时 `_dlq_replay_loop()` |
 
 ## Memory 自动提取
@@ -324,6 +337,8 @@ Chart 位于 `deploy/helm/opencitadel/`，提供全栈一键部署：
 - [事件系统](events.zh-CN.md)
 - [配置来源治理](config-source-governance.zh-CN.md)
 - [模型韧性设计](model-resilience.zh-CN.md)
+- [知识库摄取](knowledge-base-ingestion.zh-CN.md)
+- [Codebase 重新索引](codebase-reindex.zh-CN.md)
 - [架构演进指南](architecture-evolution.zh-CN.md)
 - [安全模型](security-model.zh-CN.md)
 - [生产部署](../operations/deployment.zh-CN.md)

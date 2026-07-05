@@ -223,6 +223,19 @@ For local LLM: add an **endpoint** in Settings → Models with Provider=ollama, 
 
 Behavior settings (CORS, rate limits, sandbox, memory, worker concurrency, OTEL, etc.) belong in `api/config.yaml`, not `.env`.
 
+### Upload size limits
+
+Do not assume a single global upload cap. Align all layers when changing limits:
+
+| Layer | Limit | Config / code |
+|-------|-------|---------------|
+| Nginx gateway | 200 MB | `nginx/nginx.conf` → `client_max_body_size 200m` |
+| Codebase ZIP | 200 MB | `ui/src/lib/constants.ts` → `CODEBASE_ZIP_MAX_BYTES` |
+| Knowledge base document | 50 MB default | AppConfig `knowledge_base.document.max_bytes` |
+| Marketplace asset | 25 MB default | AppConfig `server.marketplace_max_upload_bytes` |
+
+See [Nginx gateway](../../nginx/README.md), [Config source governance](../architecture/config-source-governance.md), and [Knowledge base ingestion](../architecture/knowledge-base-ingestion.md).
+
 ### Runtime configuration (api/config.yaml)
 
 Docker Compose mounts `./api/config.yaml` into API/Worker containers at `/app/config.yaml`.

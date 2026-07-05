@@ -73,6 +73,24 @@ class DBKnowledgeBaseRepository(KnowledgeBaseRepository):
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
 
+    async def list_stuck_ingesting(self, limit: int = 100) -> List[KnowledgeBase]:
+        non_terminal = {
+            KBStatus.PENDING.value,
+            KBStatus.PARSING.value,
+            KBStatus.CHUNKING.value,
+            KBStatus.INDEXING.value,
+            KBStatus.GRAPH_BUILDING.value,
+        }
+        stmt = (
+            select(KnowledgeBaseModel)
+            .where(KnowledgeBaseModel.status.in_(non_terminal))
+            .where(KnowledgeBaseModel.ingest_task_id.is_not(None))
+            .order_by(KnowledgeBaseModel.updated_at.asc())
+            .limit(max(1, min(limit, 500)))
+        )
+        result = await self.db_session.execute(stmt)
+        return [record.to_domain() for record in result.scalars().all()]
+
     async def delete_kb(self, kb_id: str) -> None:
         await self.db_session.execute(delete(KnowledgeBaseModel).where(KnowledgeBaseModel.id == kb_id))
 

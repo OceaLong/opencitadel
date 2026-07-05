@@ -97,6 +97,8 @@ Core fetch layer: `src/lib/api/fetch.ts` — cookie auth, CSRF, `X-Workspace-Id`
 | `skills.ts`, `memory.ts` | Skills and memory |
 | `admin.ts`, `team.ts` | Admin and teams |
 | `knowledge.ts`, `codebase.ts` | Knowledge bases |
+| `file.ts` | File upload/download |
+| `constants.ts` | Shared limits (`CODEBASE_ZIP_MAX_BYTES` = 200 MB, must match nginx) |
 | `artifacts.ts` | Artifacts and share |
 | `types.ts` | Shared TypeScript types |
 

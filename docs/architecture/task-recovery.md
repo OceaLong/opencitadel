@@ -76,6 +76,22 @@ See [Checkpoints & HITL](checkpoints-and-hitl.md).
 | User cancel | `cancelled` |
 | Lease conflict (duplicate Worker claim) | Ack dispatch, skip — no status change |
 | Non-recoverable agent logic error | `failed` |
+| KB ingest — all documents fail parse | `NonRecoverableIngestError` → `fast_fail`, KB `FAILED`, no auto retry |
+| KB ingest — stuck/orphan task | `_reconcile_stuck_kb_ingests()` → `_finalize_kb_ingest_failure()` |
+
+## Ingestion task recovery (distinct from agent retry)
+
+KB and codebase ingest tasks use synthetic session ids (`kb-ingest:*`, `codebase-ingest:*`). They do **not** use checkpoint restore or user message requeue.
+
+| Task type | Recoverable? | Mechanism |
+|-----------|--------------|-----------|
+| `kb_ingest` parse-all-failed | No | `NonRecoverableIngestError` (`DOCUMENT_PARSE_FAILED`) |
+| `kb_ingest` transient failure | Partial | Generic exception may trigger agent-style retry; if task ends `failed`, `_finalize_kb_ingest_failure()` |
+| `kb_ingest` stuck (no heartbeat, no lease) | N/A | Periodic reconcile marks task failed and finalizes KB |
+| `codebase_ingest` | Similar | Sandbox/embedding failures may degrade vectors; see [Codebase reindex](codebase-reindex.md) |
+| `agent` chat | Yes | `RecoverableTaskInputUnavailable`, `TASK_INFRA_FAILED` + checkpoint |
+
+See [Knowledge base ingestion](knowledge-base-ingestion.md) for OCR LLM resolution and pipeline stages.
 
 ## Tests
 
@@ -86,4 +102,5 @@ See [Checkpoints & HITL](checkpoints-and-hitl.md).
 
 - [Architecture overview](overview.md)
 - [Events — error codes](events.md)
+- [Knowledge base ingestion](knowledge-base-ingestion.md)
 - [Model resilience](model-resilience.md)

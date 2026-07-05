@@ -1,4 +1,5 @@
 import { API_CONFIG, authenticatedFetch, get, post } from "./fetch";
+import { FILE_UPLOAD_TIMEOUT_MS } from "@/lib/constants";
 import type { FileInfo, FileUploadParams } from "./types";
 
 /**
@@ -18,7 +19,7 @@ export const fileApi = {
       formData.append("session_id", params.session_id);
     }
 
-    return post<FileInfo>("/files", formData);
+    return post<FileInfo>("/files", formData, { timeout: FILE_UPLOAD_TIMEOUT_MS });
   },
 
   /**

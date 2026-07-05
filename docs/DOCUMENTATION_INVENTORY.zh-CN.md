@@ -21,6 +21,7 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [docs/README.md](README.zh-CN.md) | 文档导航中枢 | index | paired | none | — | low |
 | [docs/MAINTENANCE_CHECKLIST.md](MAINTENANCE_CHECKLIST.zh-CN.md) | PR 清单、同步规则 | governance | paired | none | `scripts/check-docs.sh` | low |
 | [docs/DOCUMENTATION_INVENTORY.md](DOCUMENTATION_INVENTORY.zh-CN.md) | 本清单 | governance | paired | none | — | low |
+| [docs/DOCUMENTATION_AUDIT_REPORT.md](DOCUMENTATION_AUDIT_REPORT.zh-CN.md) | 最新文档审计摘要 | governance | paired | none | — | low |
 
 ## 架构（`docs/architecture/`）
 
@@ -40,12 +41,13 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [config-source-governance.md](architecture/config-source-governance.zh-CN.md) | AppConfig 与 env 边界 | primary | paired | mermaid | `core/config.py` | medium |
 | [model-resilience.md](architecture/model-resilience.zh-CN.md) | 熔断、回退 | primary | paired | mermaid | `resilient_llm.py` | low |
 | [contract-compatibility.md](architecture/contract-compatibility.zh-CN.md) | API/SSE 兼容窗口 | primary | paired | none | `event_upgrader.py` | low |
-| [codebase-reindex.md](architecture/codebase-reindex.zh-CN.md) | Codebase 向量恢复 | primary | paired | mermaid | `codebase_routes.py` | low |
+| [codebase-reindex.md](architecture/codebase-reindex.zh-CN.md) | Codebase 摄取、向量恢复 | primary | paired | mermaid | `codebase/ingestion_runner.py` | medium |
+| [knowledge-base-ingestion.md](architecture/knowledge-base-ingestion.zh-CN.md) | KB 解析、OCR、GraphRAG、摄取失败 | primary | paired | mermaid | `knowledge_base/ingestion_runner.py` | medium |
 | [architecture-evolution.md](architecture/architecture-evolution.zh-CN.md) | Compose → K8s 演进 | primary | paired | mermaid | `deploy/helm/` | low |
 | [llm-endpoints-and-models.md](architecture/llm-endpoints-and-models.zh-CN.md) | LLM 端点/模型拆分 | primary | paired | mermaid | `llm_endpoint_routes.py` | low |
 | [frontend-ui.md](architecture/frontend-ui.zh-CN.md) | Next.js 前端架构 | primary | paired | mermaid | `ui/src/` | low |
 | [task-recovery.md](architecture/task-recovery.zh-CN.md) | 可恢复任务重试 | primary | paired | mermaid | `recoverable_task_retry.py` | low |
-| [technical-decisions.md](architecture/technical-decisions.zh-CN.md) | 技术选型与对比 | primary | paired | none | — | low |
+| [technical-decisions.md](architecture/technical-decisions.zh-CN.md) | 技术选型与对比 | primary | paired | mermaid | — | low |
 
 ## 运维与教程
 
@@ -54,7 +56,7 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [operations/deployment.md](operations/deployment.zh-CN.md) | 生产部署 | primary | paired | mermaid | `docker-compose.yml` | low |
 | [operations/https-domain-setup.md](operations/https-domain-setup.zh-CN.md) | HTTPS 与域名 | primary | paired | none | `.env.example` | low |
 | [tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.zh-CN.md) | 10 分钟自托管 | tutorial | paired | none | UI Settings | medium |
-| [tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.zh-CN.md) | 知识库 RAG | tutorial | paired | mermaid | `knowledge_base_routes.py` | medium |
+| [tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.zh-CN.md) | 知识库 RAG | tutorial | paired | mermaid | `knowledge-base-ingestion.md` | low |
 | [tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.md) | MCP 集成 | tutorial | paired | none | `app_config_routes.py` | low |
 | [tutorials/04-governed-web-operator.md](tutorials/04-governed-web-operator.zh-CN.md) | Web Operator 教程 | tutorial | paired | none | `operator-scope-dialog.tsx` | low |
 | [tutorials/05-refund-reconciliation-compliance.md](tutorials/05-refund-reconciliation-compliance.zh-CN.md) | 合规演示 | tutorial | paired | none | `compliance_routes.py` | low |
@@ -66,6 +68,7 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [api/README.md](../api/README.zh-CN.md) | 后端路由、SSE、开发 | module | paired | none | medium |
 | [ui/README.md](../ui/README.zh-CN.md) | 前端栈、路由 | module | paired | none | medium |
 | [sandbox/README.md](../sandbox/README.zh-CN.md) | 沙箱服务 | module | paired | none | low |
+| [nginx/README.md](../nginx/README.zh-CN.md) | 网关、SSE/WS、上传限制 | module | paired | mermaid | low |
 | [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.zh-CN.md) | Helm 安装 | module | paired | none | low |
 | [demo/ops-console/README.md](../demo/ops-console/README.zh-CN.md) | Web Operator 演示后端 | module | paired | none | low |
 
@@ -78,14 +81,15 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.zh-CN.md) | 行为准则 | governance | paired | low |
 | [pull_request_template.md](../.github/pull_request_template.zh-CN.md) | PR 模板 | governance | paired | low |
 
-## 废弃候选（未经确认勿整篇删除）
+## 废弃候选（已处理 — 保留供 grep 回归）
 
 | 位置 | 问题 | 处理 |
 |------|------|------|
-| `ui/README.md` | “Settings 待接入语言切换” | 已删除 — 使用 Header `LanguageToggle` |
-| `admin-auditor-compliance.md` | `/admin/usage` UI 路由 | 已删除 — 用量图表在 `/admin` 概览 |
-| 教程 | “Knowledge 在侧边栏” | 已更新 — Header 工作区菜单 |
+| `ui/README.md` | “Settings 待接入语言切换” | 已修复 — Header `LanguageToggle` |
+| `admin-auditor-compliance.md` | `/admin/usage` UI 路由 | 已修复 — 用量图表在 `/admin` 概览 |
+| 教程 | “Knowledge 在侧边栏” | 已修复 — Header 工作区菜单 |
 | 多文档 | 重复的仅模型配置步骤 | 去重 — 链接到 `deployment.md` |
+| `DOCUMENTATION_INVENTORY` | `technical-decisions` 图示误标为 none | 已修复 — 含 Mermaid |
 
 ## 维护
 

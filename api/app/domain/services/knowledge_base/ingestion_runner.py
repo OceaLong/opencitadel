@@ -14,6 +14,7 @@ from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
 from app.domain.models.error_codes import DOCUMENT_PARSE_FAILED, EMBEDDING_UNAVAILABLE
 from app.domain.models.event import BaseEvent, DoneEvent, ErrorEvent, MessageEvent, StepEvent, StepEventStatus
+from app.domain.models.plan import Step
 from app.domain.models.knowledge_base import DocStatus, KBSourceType, KBStatus, KnowledgeChunk
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.knowledge_base.chunker import ChunkSettings, KBChunker
@@ -29,17 +30,23 @@ from app.domain.services.knowledge_base.web_connector import (
 logger = logging.getLogger(__name__)
 
 
+def _step_event(step_id: str, description: str, status: StepEventStatus) -> StepEvent:
+    return StepEvent(step=Step(id=step_id, description=description), status=status)
+
+
 class KBIngestionRunner:
     def __init__(
             self,
             uow_factory: Callable[[], IUnitOfWork],
             file_storage: FileStorage,
             llm: Optional[LLM] = None,
+            ocr_llm: Optional[LLM] = None,
             json_parser: Optional[JSONParser] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._file_storage = file_storage
         self._llm = llm
+        self._ocr_llm = ocr_llm if ocr_llm is not None else llm
         self._json_parser = json_parser
 
     async def run(self, kb_id: str) -> AsyncGenerator[BaseEvent, None]:
@@ -58,7 +65,7 @@ class KBIngestionRunner:
                 overlap=cfg.chunk.overlap,
             ))
 
-            yield StepEvent(status=StepEventStatus.STARTED, name="parse", description="正在解析文档...")
+            yield _step_event("parse", "正在解析文档...", StepEventStatus.STARTED)
             await self._set_status(kb_id, KBStatus.PARSING)
             async with self._uow_factory() as uow:
                 documents = await uow.knowledge_base.list_documents(kb_id)
@@ -68,6 +75,7 @@ class KBIngestionRunner:
                 return
 
             parsed: list[tuple[str, list[PageBlock]]] = []
+            parse_errors: list[str] = []
             for doc in documents:
                 try:
                     await self._update_document(doc.id, DocStatus.PARSING)
@@ -76,19 +84,26 @@ class KBIngestionRunner:
                     await self._update_document(doc.id, DocStatus.READY, warning=warning, page_count=page_count)
                 except Exception as exc:
                     logger.exception("文档解析失败 doc=%s: %s", doc.id, exc)
+                    parse_errors.append(str(exc))
                     await self._update_document(doc.id, DocStatus.FAILED, error=str(exc))
             parsed_count = len(parsed)
-            yield StepEvent(
-                status=StepEventStatus.COMPLETED,
-                name="parse",
-                description=f"文档解析完成: {parsed_count}/{len(documents)}",
+            yield _step_event(
+                "parse",
+                f"文档解析完成: {parsed_count}/{len(documents)}",
+                StepEventStatus.COMPLETED,
             )
             if not parsed:
-                await self._set_status(kb_id, KBStatus.FAILED, "全部文档解析失败")
-                yield ErrorEvent(error="全部文档解析失败", code=DOCUMENT_PARSE_FAILED)
+                detail = (
+                    parse_errors[0]
+                    if len(parse_errors) == 1
+                    else "；".join(parse_errors[:3])
+                )
+                error_msg = f"全部文档解析失败: {detail}" if detail else "全部文档解析失败"
+                await self._set_status(kb_id, KBStatus.FAILED, error_msg)
+                yield ErrorEvent(error=error_msg, code=DOCUMENT_PARSE_FAILED)
                 return
 
-            yield StepEvent(status=StepEventStatus.STARTED, name="chunk", description="正在父子分块...")
+            yield _step_event("chunk", "正在父子分块...", StepEventStatus.STARTED)
             await self._set_status(kb_id, KBStatus.CHUNKING)
 
             all_parents: list[KnowledgeChunk] = []
@@ -113,13 +128,13 @@ class KBIngestionRunner:
                 await self._set_status(kb_id, KBStatus.FAILED, "全部文档分块失败，未生成检索索引")
                 yield ErrorEvent(error="全部文档分块失败", code=DOCUMENT_PARSE_FAILED)
                 return
-            yield StepEvent(
-                status=StepEventStatus.COMPLETED,
-                name="chunk",
-                description=f"分块完成: 父块 {len(all_parents)}，子块 {len(all_children)}",
+            yield _step_event(
+                "chunk",
+                f"分块完成: 父块 {len(all_parents)}，子块 {len(all_children)}",
+                StepEventStatus.COMPLETED,
             )
 
-            yield StepEvent(status=StepEventStatus.STARTED, name="index", description="正在写入检索索引...")
+            yield _step_event("index", "正在写入检索索引...", StepEventStatus.STARTED)
             await self._set_status(kb_id, KBStatus.INDEXING)
             try:
                 async with self._uow_factory() as uow:
@@ -132,11 +147,11 @@ class KBIngestionRunner:
             index_desc = f"索引完成: {len(all_children)} 子块"
             if vector_degraded:
                 index_desc += "（语义向量不可用，已降级为 BM25）"
-            yield StepEvent(status=StepEventStatus.COMPLETED, name="index", description=index_desc)
+            yield _step_event("index", index_desc, StepEventStatus.COMPLETED)
 
             graph_warning = None
             if cfg.graphrag.enabled:
-                yield StepEvent(status=StepEventStatus.STARTED, name="graph", description="正在构建知识图谱...")
+                yield _step_event("graph", "正在构建知识图谱...", StepEventStatus.STARTED)
                 await self._set_status(kb_id, KBStatus.GRAPH_BUILDING)
                 if self._json_parser:
                     try:
@@ -155,7 +170,7 @@ class KBIngestionRunner:
                         graph_desc = f"知识图谱构建失败，已跳过: {exc}"
                 else:
                     graph_desc = "知识图谱跳过：JSON 解析器不可用"
-                yield StepEvent(status=StepEventStatus.COMPLETED, name="graph", description=graph_desc)
+                yield _step_event("graph", graph_desc, StepEventStatus.COMPLETED)
 
             failed_doc_count = len(documents) - parsed_count + len(chunk_failed_docs)
             kb_error = None
@@ -249,6 +264,7 @@ class KBIngestionRunner:
             max_pages=cfg.document.max_pages,
             ocr_mode=cfg.ocr.mode,
             ocr_max_pages=cfg.ocr.max_pages,
+            expected_size=file_info.size,
         )
         blocks = result.blocks
         warning = result.warning
@@ -259,13 +275,16 @@ class KBIngestionRunner:
         ):
             ocr_blocks, ocr_warning = await ocr_pdf_to_blocks(
                 data,
-                self._llm,
+                self._ocr_llm,
                 max_pages=cfg.ocr.max_pages,
             )
             if ocr_blocks:
                 blocks = ocr_blocks
             if ocr_warning:
                 warning = f"{warning}；{ocr_warning}" if warning else ocr_warning
+        text_len = sum(len(b.text or "") for b in blocks)
+        if text_len == 0:
+            raise ValueError(warning or "文档未提取到可索引文本")
         return blocks, result.page_count, warning
 
     async def _parse_zip_document(self, data: bytes, filename: str) -> tuple[list[PageBlock], int, Optional[str]]:

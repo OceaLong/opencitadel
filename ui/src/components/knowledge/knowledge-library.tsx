@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { AddDocumentDialog } from "@/components/knowledge/add-document-dialog";
 import { CreateKBDialog } from "@/components/knowledge/create-kb-dialog";
+import { formatIngestStreamError } from "@/components/knowledge/knowledge-utils";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,15 @@ import { sessionApi } from "@/lib/api/session";
 import type { KnowledgeBase, SessionMode } from "@/lib/api/types";
 import { IconAdd, IconKnowledge, IconLoading, IconRefresh } from "@/lib/icons";
 import { cn } from "@/lib/utils";
+
+const TERMINAL_KB_STATUSES = new Set<KnowledgeBase["status"]>(["ready", "failed"]);
+
+function isKbIngesting(kb: KnowledgeBase, ingestingIds: Set<string>): boolean {
+  return (
+    ingestingIds.has(kb.id) ||
+    (!TERMINAL_KB_STATUSES.has(kb.status) && Boolean(kb.ingest_task_id))
+  );
+}
 
 export function KnowledgeLibrary() {
   const router = useRouter();
@@ -42,7 +52,7 @@ export function KnowledgeLibrary() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("loadListFailed"));
     }
-  }, [user]);
+  }, [user, t]);
 
   useEffect(() => {
     void loadList();
@@ -56,23 +66,30 @@ export function KnowledgeLibrary() {
   }, []);
 
   const watchIngest = useCallback(
-    (id: string) => {
-      if (ingestCleanupRef.current.has(id)) return;
+    (id: string, ingestTaskId?: string | null) => {
+      if (!ingestTaskId || ingestCleanupRef.current.has(id)) return;
       setIngestingIds((prev) => new Set(prev).add(id));
+      const finish = () => {
+        setIngestingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        ingestCleanupRef.current.delete(id);
+        void loadList();
+      };
       const cleanup = knowledgeApi.ingestStream(
         id,
         (ev) => {
-          if (ev.type === "done" || ev.type === "error") {
-            setIngestingIds((prev) => {
-              const next = new Set(prev);
-              next.delete(id);
-              return next;
-            });
-            ingestCleanupRef.current.delete(id);
-            void loadList();
+          if (ev.type === "error") {
+            toast.error(formatIngestStreamError(ev));
+            finish();
+          } else if (ev.type === "done") {
+            finish();
           }
         },
         () => {
+          toast.error(t("ingestStreamFailed"));
           setIngestingIds((prev) => {
             const next = new Set(prev);
             next.delete(id);
@@ -80,11 +97,30 @@ export function KnowledgeLibrary() {
           });
           ingestCleanupRef.current.delete(id);
         },
+        undefined,
+        finish,
       );
       ingestCleanupRef.current.set(id, cleanup);
     },
-    [loadList],
+    [loadList, t],
   );
+
+  useEffect(() => {
+    for (const kb of items) {
+      if (kb.ingest_task_id && !TERMINAL_KB_STATUSES.has(kb.status)) {
+        watchIngest(kb.id, kb.ingest_task_id);
+      }
+    }
+  }, [items, watchIngest]);
+
+  useEffect(() => {
+    const hasIngesting = items.some((kb) => isKbIngesting(kb, ingestingIds));
+    if (!hasIngesting) return;
+    const timer = setInterval(() => {
+      void loadList();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [items, ingestingIds, loadList]);
 
   const startTask = async (kbId: string, mode: SessionMode = "ask") => {
     setStartingId(kbId);
@@ -121,9 +157,7 @@ export function KnowledgeLibrary() {
       <ScrollArea className="flex-1">
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((kb) => {
-            const ingesting =
-              ingestingIds.has(kb.id) ||
-              (kb.status !== "ready" && kb.status !== "failed" && Boolean(kb.ingest_task_id));
+            const ingesting = isKbIngesting(kb, ingestingIds);
             return (
               <Card key={kb.id} className={cn(ingesting && "border-primary/30")}>
                 <CardHeader className="pb-2">
@@ -134,6 +168,11 @@ export function KnowledgeLibrary() {
                       <span className="ml-2 inline-flex items-center gap-1">
                         <IconLoading className="size-3 animate-spin" />
                         {t("indexingShort")}
+                      </span>
+                    )}
+                    {kb.status === "failed" && kb.error && (
+                      <span className="mt-1 block text-destructive">
+                        {t("indexFailedDetail", { error: kb.error })}
                       </span>
                     )}
                   </CardDescription>
@@ -162,8 +201,8 @@ export function KnowledgeLibrary() {
                     variant="ghost"
                     onClick={async () => {
                       try {
-                        await knowledgeApi.reindex(kb.id);
-                        watchIngest(kb.id);
+                        const updated = await knowledgeApi.reindex(kb.id);
+                        watchIngest(kb.id, updated.ingest_task_id);
                         toast.success(t("reindexStarted"));
                       } catch (err) {
                         toast.error(err instanceof Error ? err.message : t("reindexFailed"));
@@ -186,7 +225,6 @@ export function KnowledgeLibrary() {
         onOpenChange={setCreateOpen}
         onCreated={(kb) => {
           setItems((prev) => [kb, ...prev]);
-          watchIngest(kb.id);
         }}
       />
       {addOpenFor && (
@@ -194,8 +232,8 @@ export function KnowledgeLibrary() {
           kbId={addOpenFor}
           open={Boolean(addOpenFor)}
           onOpenChange={(open) => !open && setAddOpenFor(null)}
-          onAdded={() => {
-            watchIngest(addOpenFor);
+          onAdded={(kb) => {
+            watchIngest(kb.id, kb.ingest_task_id);
             void loadList();
           }}
         />

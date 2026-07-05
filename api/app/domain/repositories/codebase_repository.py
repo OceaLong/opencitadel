@@ -92,3 +92,6 @@ class CodebaseRepository(Protocol):
 
     async def clear_analysis_data(self, codebase_id: str) -> None:
         ...
+
+    async def flush(self) -> None:
+        ...

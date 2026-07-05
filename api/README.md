@@ -28,7 +28,7 @@ API and Worker are separate processes sharing infrastructure and service provide
 | Migrate | `app.migrate` | — | `api` (one-off job) |
 
 - **API**: HTTP/SSE, task dispatch, event stream reads, MCP/A2A connection pool recycling
-- **Worker**: consumes `task:dispatch`, runs Agents, sandbox warm gateway and orphan cleanup
+- **Worker**: consumes `task:dispatch`, runs Agents, codebase/kb ingestion, sandbox warm gateway and orphan cleanup
 - **Migrate**: standalone job (`python -m app.migrate`); API startup only validates schema version
 
 See [`../docs/architecture/overview.md`](../docs/architecture/overview.md) for full architecture details.

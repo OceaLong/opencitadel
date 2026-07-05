@@ -80,6 +80,24 @@ class LLMModelService:
         self._ensure_invokable(model)
         return model
 
+    async def resolve_vision_model(self) -> Optional[LLMModel]:
+        async with self._uow_factory() as uow:
+            default = await uow.llm_model.get_default()
+            models = await uow.llm_model.get_all()
+        candidates: list[LLMModel] = []
+        if default:
+            candidates.append(default)
+        candidates.extend(model for model in models if model.id != (default.id if default else None))
+        for model in candidates:
+            if not (model.capabilities.vision or model.supports_multimodal):
+                continue
+            try:
+                self._ensure_invokable(model)
+                return model
+            except BadRequestError:
+                continue
+        return None
+
     async def create_model(self, model: LLMModel, scope: Optional[OwnerScope] = None) -> LLMModel:
         visibility = model.visibility.value if hasattr(model.visibility, "value") else model.visibility
         if scope is not None and visibility != "global":

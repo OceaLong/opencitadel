@@ -12,6 +12,8 @@ Use this checklist when changing features, routes, configuration, deployment, or
 - [ ] New env var → `.env.example`, `docs/operations/deployment.md` (+ zh), `config-source-governance.md` (+ zh)
 - [ ] New `AppConfig` field → `api/config.yaml`, Helm `appConfig`, `config-source-governance.md` (+ zh)
 - [ ] New tutorial or architecture doc → both language files, `docs/README.md` (+ zh), root `README.md` (+ zh), top language links
+- [ ] KB/Codebase ingestion change → `knowledge-base-ingestion.md` (+ zh), `codebase-reindex.md` (+ zh), tutorial 02 (+ zh), `events.md` (+ zh)
+- [ ] Upload limit change → `nginx/README.md` (+ zh), `ui/src/lib/constants.ts`, `config-source-governance.md` (+ zh), `deployment.md` (+ zh)
 - [ ] Docker image name/count change → `deployment.md` (+ zh), Helm README (+ zh), `release.yml` comment if needed
 
 ## Bilingual sync
@@ -33,6 +35,8 @@ Use this checklist when changing features, routes, configuration, deployment, or
 | Sandbox boundary | Chromium in sandbox; Playwright in Worker via CDP |
 | Integrations UI | Settings modal → Integrations tab (not `/settings/integrations`) |
 | Object storage | `.env.example` defaults; `COMPOSE_PROFILES=local` + `STORAGE_PROVIDER=minio` for local |
+| Upload limits | `nginx/nginx.conf`, `ui/src/lib/constants.ts`, AppConfig `knowledge_base.document.max_bytes`, `server.marketplace_max_upload_bytes` |
+| KB ingest / OCR | `knowledge_base/ingestion_runner.py`, `worker/main.py`, `knowledge-base-ingestion.md` (+ zh) |
 | Service API Key | `X-Api-Key` header; inbound `/api/a2a` only |
 | Share links | Default TTL 168h; `/share/artifact/[token]` UI route |
 

@@ -25,6 +25,7 @@ from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.session import Session
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.codebase.ingestion_task_runner import CodebaseIngestionTaskRunner
+from app.domain.utils.sandbox_result import file_content
 from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
 from app.infrastructure.external.task.task_state import get_task_state
@@ -233,7 +234,7 @@ class CodebaseService:
         result = await sandbox.read_file(full_path, start_line=start_line, end_line=end_line)
         if not result.success:
             raise NotFoundError(result.message or f"无法读取 {path}")
-        return result.data or ""
+        return file_content(result)
 
     async def package_download(
             self,

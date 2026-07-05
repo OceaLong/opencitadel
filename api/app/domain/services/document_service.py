@@ -5,12 +5,13 @@ import asyncio
 import base64
 import io
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
 _MAX_PAGES = 20
 _MAX_TEXT_CHARS = 12000
+_RENDER_DPI = 150
 
 
 async def parse_document_bytes(
@@ -43,9 +44,49 @@ def _decode_text(data: bytes) -> str:
 
 
 def _parse_pdf(data: bytes, max_pages: int) -> Tuple[str, List[Dict[str, Any]]]:
+    pages, text_parts = _parse_pdf_with_fitz(data, max_pages)
+    if pages:
+        combined = "\n\n".join(text_parts)[:_MAX_TEXT_CHARS]
+        return combined, pages
+
+    pages, text_parts = _parse_pdf_with_pypdf(data, max_pages)
+    _attach_pdf2image_pages(data, pages, max_pages)
+    combined = "\n\n".join(text_parts)[:_MAX_TEXT_CHARS]
+    return combined, pages
+
+
+def _parse_pdf_with_fitz(data: bytes, max_pages: int) -> Tuple[List[Dict[str, Any]], List[str]]:
+    try:
+        import fitz
+    except ImportError:
+        logger.debug("PyMuPDF 不可用，回退到 pypdf")
+        return [], []
+
     pages: List[Dict[str, Any]] = []
     text_parts: List[str] = []
+    matrix = fitz.Matrix(_RENDER_DPI / 72, _RENDER_DPI / 72)
+    try:
+        with fitz.open(stream=data, filetype="pdf") as doc:
+            limit = min(len(doc), max_pages)
+            for idx in range(limit):
+                page = doc[idx]
+                page_text = (page.get_text("text") or "").strip()
+                entry: Dict[str, Any] = {"page": idx + 1, "text": page_text}
+                pix = page.get_pixmap(matrix=matrix, alpha=False)
+                entry["image_base64"] = base64.b64encode(pix.tobytes("jpeg")).decode("ascii")
+                entry["mime_type"] = "image/jpeg"
+                pages.append(entry)
+                if page_text:
+                    text_parts.append(f"--- Page {idx + 1} ---\n{page_text}")
+    except Exception as exc:
+        logger.warning("PyMuPDF PDF 解析失败: %s", exc)
+        return [], []
+    return pages, text_parts
 
+
+def _parse_pdf_with_pypdf(data: bytes, max_pages: int) -> Tuple[List[Dict[str, Any]], List[str]]:
+    pages: List[Dict[str, Any]] = []
+    text_parts: List[str] = []
     try:
         from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(data))
@@ -59,11 +100,15 @@ def _parse_pdf(data: bytes, max_pages: int) -> Tuple[str, List[Dict[str, Any]]]:
         logger.warning("pypdf 未安装，PDF 文本抽取不可用")
     except Exception as exc:
         logger.warning("PDF 解析失败: %s", exc)
+    return pages, text_parts
 
-    # 尝试将 PDF 页渲染为图像（需 pdf2image + poppler，可选）
+
+def _attach_pdf2image_pages(data: bytes, pages: List[Dict[str, Any]], max_pages: int) -> None:
+    if pages and all(page.get("image_base64") for page in pages):
+        return
     try:
         from pdf2image import convert_from_bytes
-        images = convert_from_bytes(data, first_page=1, last_page=min(max_pages, 5), dpi=150)
+        images = convert_from_bytes(data, first_page=1, last_page=min(max_pages, 5), dpi=_RENDER_DPI)
         for idx, image in enumerate(images):
             buffer = io.BytesIO()
             image.save(buffer, format="JPEG", quality=85)
@@ -74,13 +119,9 @@ def _parse_pdf(data: bytes, max_pages: int) -> Tuple[str, List[Dict[str, Any]]]:
             else:
                 pages.append({"page": idx + 1, "text": "", "image_base64": img_b64, "mime_type": "image/jpeg"})
     except ImportError:
-        # pdf2image 为可选依赖；未安装时仅返回文本抽取结果
         logger.debug("pdf2image 未安装，跳过 PDF 页渲染")
     except Exception as exc:
         logger.debug("PDF 页渲染跳过: %s", exc)
-
-    combined = "\n\n".join(text_parts)[:_MAX_TEXT_CHARS]
-    return combined, pages
 
 
 async def document_to_vision_attachments(

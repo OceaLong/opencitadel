@@ -9,7 +9,30 @@
 | 类型 | 来源 | 示例 |
 |------|------|------|
 | 行为配置 | `AppConfig`，由 DB 承载，`config.yaml` / Helm `appConfig` 只做种子 | `model_resilience`, `feature_flags`, `worker`, `sandbox` |
-| 密钥/连接 | `Settings` 环境变量 | `EMBEDDING_API_KEY`, Postgres, Redis, COS |
+| 密钥/连接 | `Settings` 环境变量 | `EMBEDDING_API_KEY`, Postgres, Redis, COS, MinIO |
+
+## 对象存储 Provider
+
+| 配置 | 默认 | Compose 本地 | Helm 默认 |
+|------|------|--------------|-----------|
+| `STORAGE_PROVIDER` | `cos`（`.env.example`） | `COMPOSE_PROFILES=local` 时用 `minio` | 外接 COS/S3 — `minio.enabled: false` |
+
+实现：`api/app/infrastructure/external/file_storage/` — `CosFileStorage` 与 `MinioFileStorage`。Postgres 仅存 object key。
+
+无云凭证的本地试用请在首次启动前设置 `COMPOSE_PROFILES=local` 与 `STORAGE_PROVIDER=minio`。见[生产部署](../operations/deployment.zh-CN.md)。
+
+## 上传大小限制（跨层）
+
+**不是**单一 AppConfig 字段 — 修改任一层时需同步文档：
+
+| 功能 | 限制 | 执行方 |
+|------|------|--------|
+| 网关 POST body | 200 MB | `nginx/nginx.conf` `client_max_body_size 200m` |
+| Codebase ZIP | 200 MB | `ui/src/lib/constants.ts` `CODEBASE_ZIP_MAX_BYTES` |
+| KB 文档 | 默认 50 MB | `knowledge_base.document.max_bytes` |
+| 市场资源 | 默认 25 MB | `server.marketplace_max_upload_bytes` |
+
+见 [Nginx 网关](../../nginx/README.zh-CN.md) 与 [知识库摄取](knowledge-base-ingestion.zh-CN.md)。
 
 ## 配置流转
 

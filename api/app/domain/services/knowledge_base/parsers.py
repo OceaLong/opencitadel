@@ -24,6 +24,16 @@ class ParseResult:
     warning: Optional[str] = None
 
 
+def validate_pdf_integrity(data: bytes, expected_size: int | None = None) -> None:
+    """Raise ValueError when PDF bytes look truncated or invalid."""
+    if not data.startswith(b"%PDF-"):
+        raise ValueError("PDF 文件不完整或已损坏：缺少 PDF 文件头")
+    if expected_size and expected_size > 0 and len(data) < expected_size:
+        raise ValueError(
+            f"PDF 文件不完整或已损坏：下载大小 {len(data)} 字节，期望 {expected_size} 字节"
+        )
+
+
 def decode_text(data: bytes) -> str:
     for encoding in ("utf-8", "gb18030", "latin-1"):
         try:
@@ -42,12 +52,16 @@ async def parse_document(
         max_pages: int,
         ocr_mode: str = "off",
         ocr_max_pages: int = 0,
+        expected_size: int | None = None,
 ) -> ParseResult:
     data = file_bytes
     warning_parts: list[str] = []
     if len(data) > max_bytes:
         data = data[:max_bytes]
         warning_parts.append(f"文件超过 {max_bytes} 字节，已截断解析")
+    lower_name = (filename or "").lower()
+    if mime == "application/pdf" or lower_name.endswith(".pdf"):
+        validate_pdf_integrity(data, expected_size)
     result = await asyncio.to_thread(
         _parse_document_sync,
         data,

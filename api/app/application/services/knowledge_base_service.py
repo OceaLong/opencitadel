@@ -25,9 +25,12 @@ from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.knowledge_base.url_guard import validate_public_url
 from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
-from app.infrastructure.external.task.task_state import get_task_state
+from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
 
 logger = logging.getLogger(__name__)
+
+_TERMINAL_KB_STATUSES = {KBStatus.READY, KBStatus.FAILED}
+_INGEST_STALE_AFTER_SECONDS = 120.0
 
 
 class KnowledgeBaseService:
@@ -43,7 +46,22 @@ class KnowledgeBaseService:
     async def _ingest_in_progress(self, kb: KnowledgeBase) -> bool:
         if not kb.ingest_task_id:
             return False
-        return not await self._task_state.is_done(kb.ingest_task_id)
+        if kb.status in _TERMINAL_KB_STATUSES:
+            return False
+        meta = await self._task_state.get_task_meta(kb.ingest_task_id)
+        if not meta:
+            return False
+        if await self._task_state.is_done(kb.ingest_task_id):
+            return False
+        if self._task_state.heartbeat_is_stale(meta, _INGEST_STALE_AFTER_SECONDS):
+            return False
+        return True
+
+    async def _retire_ingest_task(self, task_id: str) -> None:
+        try:
+            await self._task_state.set_status(task_id, TaskStatus.FAILED)
+        except Exception as exc:
+            logger.warning("标记旧知识库摄取任务失败 task_id=%s: %s", task_id, exc)
 
     @staticmethod
     def _infer_file_source_type(filename: str, mime: str, fallback: KBSourceType) -> KBSourceType:
@@ -146,6 +164,10 @@ class KnowledgeBaseService:
         if await self._ingest_in_progress(kb):
             logger.info("知识库 reindex 幂等返回: kb_id=%s task_id=%s", kb_id, kb.ingest_task_id)
             return kb
+
+        old_task_id = kb.ingest_task_id
+        if old_task_id:
+            await self._retire_ingest_task(old_task_id)
 
         task_id = str(uuid.uuid4())
         await self._task_state.register_task(

@@ -35,11 +35,13 @@ flowchart TD
   DocFailed --> Ready
 ```
 
-- **Parse**: upload, ZIP, web, Confluence, or Feishu sources → `PageBlock` per document
+- **Parse**: upload, ZIP, web, Confluence, or Feishu sources → `PageBlock` per document; image PDFs use vision LLM OCR when `knowledge_base.ocr.mode=vision_llm`
 - **Chunk**: parent/child chunks via `KBChunker`; embeddings via `KBVectorService`
 - **Index**: `replace_index_chunks()` persists searchable chunks
-- **Graph** (optional): `GraphBuilder` when `graphrag.enabled=true`
+- **Graph** (optional): `GraphBuilder` when `graphrag.enabled=true` (default **enabled** in seed `config.yaml`)
 - **Degraded path**: embedding failure sets `vector_degraded=true`; retrieval falls back to BM25/hybrid without vectors
+
+Authoritative pipeline details: [Knowledge base ingestion](../architecture/knowledge-base-ingestion.md).
 
 ## Steps
 
@@ -54,7 +56,7 @@ flowchart TD
 **Upload files:**
 
 1. Open the knowledge base
-2. Click **Add document** → upload PDF/MD/TXT
+2. Click **Add document** → upload PDF/MD/TXT (max **50 MB** per document by default — see AppConfig `knowledge_base.document.max_bytes`; gateway allows up to 200 MB)
 3. Wait for indexing (status shows in document list)
 
 **Optional connectors** (configure in `.env`):
@@ -93,5 +95,6 @@ Create 10–20 question/answer pairs from your docs and spot-check retrieval qua
 
 ## Next
 
+- [Knowledge base ingestion](../architecture/knowledge-base-ingestion.md)
 - [Tutorial 3: MCP integrations](./03-mcp-integrations.md)
 - [Security model](../architecture/security-model.md)

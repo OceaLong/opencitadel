@@ -64,7 +64,22 @@ Current `EVENT_SCHEMA_VERSION=3`. Legacy payloads are upgraded via `event_upgrad
 | `done` | End of current stream round | live + replay |
 | `error` | Error event | live + replay |
 
-The `error` event may optionally carry a `code` field (e.g. `MODEL_UNAVAILABLE`, `EMBEDDING_UNAVAILABLE`) for frontend and ops to distinguish error types. See [Model Resilience Design](model-resilience.md) and `api/app/domain/models/error_codes.py` for the full error code list. Frontends should tolerate missing `code` and fall back to displaying the `error` text.
+The `error` event may optionally carry a `code` field (e.g. `MODEL_UNAVAILABLE`, `EMBEDDING_UNAVAILABLE`, `DOCUMENT_PARSE_FAILED`) for frontend and ops to distinguish error types. See [Model Resilience Design](model-resilience.md) and `api/app/domain/models/error_codes.py` for the full error code list. Frontends should tolerate missing `code` and fall back to displaying the `error` text.
+
+### Ingestion `step` events
+
+Codebase and knowledge-base ingest tasks emit `step` events with stable step ids:
+
+| Step id | Stage | Typical description |
+|---------|-------|---------------------|
+| `parse` | Document/source parse | Parsing documents or materializing workspace |
+| `chunk` | KB chunking | Parent/child chunk build |
+| `index` | Vector/BM25 index | Embedding and index write |
+| `graph` | GraphRAG | Entity graph build (KB only, when enabled) |
+| `analyze` | Codebase static analysis | Symbol/dependency extraction |
+| `artifacts` | Codebase artifacts | Architecture Mermaid generation |
+
+Ingest sessions use synthetic ids (`kb-ingest:{kb_id}`, `codebase-ingest:{codebase_id}`). See [Knowledge base ingestion](knowledge-base-ingestion.md) and [Codebase reindex](codebase-reindex.md).
 
 Default UI audience receives only `user`-visible events and `message_delta`. Use `include_debug=true` when diagnostic information is needed.
 
@@ -132,4 +147,6 @@ Frontend type definitions are in `ui/src/lib/api/types.ts`:
 
 - [Architecture Overview](overview.md)
 - [API/SSE Protocol Compatibility](contract-compatibility.md)
+- [Knowledge base ingestion](knowledge-base-ingestion.md)
+- [Codebase reindex](codebase-reindex.md)
 - [Model Resilience Design](model-resilience.md)

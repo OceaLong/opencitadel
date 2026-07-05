@@ -22,7 +22,7 @@ async def ocr_pdf_to_blocks(
         max_pages: int,
 ) -> tuple[List[PageBlock], Optional[str]]:
     if not llm or max_pages <= 0:
-        return [], "OCR 未执行：LLM 不可用或 max_pages 为 0"
+        return [], "OCR 未执行：无可用视觉模型或 max_pages 为 0"
     try:
         _text, page_images = await document_to_vision_attachments(data, "application/pdf")
     except Exception as exc:

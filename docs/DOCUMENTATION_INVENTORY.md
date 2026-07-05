@@ -21,6 +21,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [docs/README.md](README.md) | Documentation navigation hub | index | paired | none | — | low |
 | [docs/MAINTENANCE_CHECKLIST.md](MAINTENANCE_CHECKLIST.md) | PR checklist, sync rules | governance | paired | none | `scripts/check-docs.sh` | low |
 | [docs/DOCUMENTATION_INVENTORY.md](DOCUMENTATION_INVENTORY.md) | This inventory | governance | paired | none | — | low |
+| [docs/DOCUMENTATION_AUDIT_REPORT.md](DOCUMENTATION_AUDIT_REPORT.md) | Latest doc audit summary | governance | paired | none | — | low |
 
 ## Architecture (`docs/architecture/`)
 
@@ -40,12 +41,13 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [config-source-governance.md](architecture/config-source-governance.md) | AppConfig vs env boundaries | primary | paired | mermaid | `core/config.py`, `app_config_routes.py` | medium |
 | [model-resilience.md](architecture/model-resilience.md) | Circuit breaker, fallback | primary | paired | mermaid | `resilient_llm.py` | low |
 | [contract-compatibility.md](architecture/contract-compatibility.md) | API/SSE compatibility window | primary | paired | none | `event_upgrader.py` | low |
-| [codebase-reindex.md](architecture/codebase-reindex.md) | Codebase vector recovery | primary | paired | mermaid | `codebase_routes.py` | low |
+| [codebase-reindex.md](architecture/codebase-reindex.md) | Codebase ingest, vector recovery | primary | paired | mermaid | `codebase/ingestion_runner.py` | medium |
+| [knowledge-base-ingestion.md](architecture/knowledge-base-ingestion.md) | KB parse, OCR, GraphRAG, ingest failures | primary | paired | mermaid | `knowledge_base/ingestion_runner.py` | medium |
 | [architecture-evolution.md](architecture/architecture-evolution.md) | Compose → K8s evolution | primary | paired | mermaid | `deploy/helm/` | low |
 | [llm-endpoints-and-models.md](architecture/llm-endpoints-and-models.md) | LLM endpoint/model split | primary | paired | mermaid | `llm_endpoint_routes.py`, `llm_model_routes.py` | low |
 | [frontend-ui.md](architecture/frontend-ui.md) | Next.js UI architecture | primary | paired | mermaid | `ui/src/` | low |
 | [task-recovery.md](architecture/task-recovery.md) | Recoverable task retry | primary | paired | mermaid | `recoverable_task_retry.py` | low |
-| [technical-decisions.md](architecture/technical-decisions.md) | Technology choices & alternatives | primary | paired | none | — | low |
+| [technical-decisions.md](architecture/technical-decisions.md) | Technology choices & alternatives | primary | paired | mermaid | — | low |
 
 ## Operations & tutorials
 
@@ -54,7 +56,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [operations/deployment.md](operations/deployment.md) | Production deployment | primary | paired | mermaid | `docker-compose.yml` | low |
 | [operations/https-domain-setup.md](operations/https-domain-setup.md) | HTTPS & domain | primary | paired | none | `.env.example` | low |
 | [tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.md) | Quick BYO key onboarding | tutorial | paired | none | UI Settings | medium |
-| [tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.md) | Knowledge base RAG | tutorial | paired | mermaid | `knowledge_base_routes.py` | medium |
+| [tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.md) | Knowledge base RAG | tutorial | paired | mermaid | `knowledge-base-ingestion.md` | low |
 | [tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.md) | MCP setup | tutorial | paired | none | `app_config_routes.py` | low |
 | [tutorials/04-governed-web-operator.md](tutorials/04-governed-web-operator.md) | Web Operator runbook | tutorial | paired | none | `operator-scope-dialog.tsx` | low |
 | [tutorials/05-refund-reconciliation-compliance.md](tutorials/05-refund-reconciliation-compliance.md) | Compliance demo | tutorial | paired | none | `compliance_routes.py` | low |
@@ -66,6 +68,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [api/README.md](../api/README.md) | Backend routes, SSE, dev | module | paired | none | `interfaces/endpoints/` | medium |
 | [ui/README.md](../ui/README.md) | Frontend stack, routes | module | paired | none | `ui/src/app/` | medium |
 | [sandbox/README.md](../sandbox/README.md) | Sandbox service | module | paired | none | `sandbox/` | low |
+| [nginx/README.md](../nginx/README.md) | Gateway, SSE/WS, upload limits | module | paired | mermaid | `nginx/nginx.conf` | low |
 | [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.md) | Helm install | module | paired | none | `deploy/helm/` | low |
 | [demo/ops-console/README.md](../demo/ops-console/README.md) | Web Operator demo backend | module | paired | none | `demo/ops-console/` | low |
 
@@ -78,14 +81,15 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.md) | Community standards | governance | paired | none | low |
 | [pull_request_template.md](../.github/pull_request_template.md) | PR template | governance | paired | none | low |
 
-## Deprecation candidates (do not delete without review)
+## Deprecation candidates (resolved — kept for grep regression)
 
 | Location | Issue | Action |
 |----------|-------|--------|
-| `ui/README.md` | “Language switch planned in Settings” | Removed — use Header `LanguageToggle` |
-| `admin-auditor-compliance.md` | `/admin/usage` UI route | Removed — usage charts on `/admin` overview |
-| Tutorials | “Knowledge in sidebar” | Updated — Header workspace menu |
+| `ui/README.md` | “Language switch planned in Settings” | Fixed — Header `LanguageToggle` |
+| `admin-auditor-compliance.md` | `/admin/usage` UI route | Fixed — usage charts on `/admin` overview |
+| Tutorials | “Knowledge in sidebar” | Fixed — Header workspace menu |
 | Multiple docs | Duplicate LLM model-only setup steps | Dedupe — link to `deployment.md` |
+| `DOCUMENTATION_INVENTORY` | `technical-decisions` marked `none` for diagrams | Fixed — includes Mermaid |
 
 ## Maintenance
 

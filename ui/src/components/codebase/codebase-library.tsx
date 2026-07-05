@@ -15,7 +15,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuth } from "@/providers/auth-provider";
 import { codebaseApi } from "@/lib/api/codebase";
 import { sessionApi } from "@/lib/api/session";
-import type { Codebase, SessionMode } from "@/lib/api/types";
+import type { Codebase, CodebaseStatus, SessionMode } from "@/lib/api/types";
 import {
   IconAdd,
   IconCodebase,
@@ -24,6 +24,29 @@ import {
   IconRefresh,
 } from "@/lib/icons";
 import { cn } from "@/lib/utils";
+
+const TERMINAL_CODEBASE_STATUSES: CodebaseStatus[] = ["ready", "failed"];
+const INGEST_POLL_INTERVAL_MS = 3000;
+
+const CODEBASE_STATUS_LABEL_KEYS: Record<CodebaseStatus, `status.${CodebaseStatus}`> = {
+  pending: "status.pending",
+  materializing: "status.materializing",
+  analyzing: "status.analyzing",
+  indexing: "status.indexing",
+  generating: "status.generating",
+  ready: "status.ready",
+  failed: "status.failed",
+};
+
+function isIngestingStatus(status: CodebaseStatus): boolean {
+  return !TERMINAL_CODEBASE_STATUSES.includes(status);
+}
+
+function truncateError(error: string, maxLength = 120): string {
+  const text = error.trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
 
 export function CodebaseLibrary() {
   const router = useRouter();
@@ -53,6 +76,19 @@ export function CodebaseLibrary() {
   }, [loadCodebases]);
 
   useEffect(() => {
+    const hasActiveIngest = codebases.some(
+      (cb) => isIngestingStatus(cb.status) && Boolean(cb.ingest_task_id),
+    );
+    if (!hasActiveIngest) return;
+
+    const timer = window.setInterval(() => {
+      void loadCodebases();
+    }, INGEST_POLL_INTERVAL_MS);
+
+    return () => window.clearInterval(timer);
+  }, [codebases, loadCodebases]);
+
+  useEffect(() => {
     return () => {
       ingestCleanupRef.current.forEach((cleanup) => cleanup());
       ingestCleanupRef.current.clear();
@@ -63,17 +99,29 @@ export function CodebaseLibrary() {
     (id: string) => {
       if (ingestCleanupRef.current.has(id)) return;
       setIngestingIds((prev) => new Set(prev).add(id));
+      const finish = () => {
+        setIngestingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        ingestCleanupRef.current.delete(id);
+        void loadCodebases();
+      };
       const cleanup = codebaseApi.ingestStream(
         id,
         (ev) => {
-          if (ev.type === "done" || ev.type === "error") {
-            setIngestingIds((prev) => {
-              const next = new Set(prev);
-              next.delete(id);
-              return next;
-            });
-            ingestCleanupRef.current.delete(id);
-            void loadCodebases();
+          if (ev.type === "error") {
+            const message =
+              typeof ev.data?.error === "string" && ev.data.error.trim()
+                ? ev.data.error
+                : t("indexFailed");
+            toast.error(t("indexFailedDetail", { error: message }));
+            finish();
+            return;
+          }
+          if (ev.type === "done") {
+            finish();
           }
         },
         () => {
@@ -84,10 +132,12 @@ export function CodebaseLibrary() {
           });
           ingestCleanupRef.current.delete(id);
         },
+        undefined,
+        finish,
       );
       ingestCleanupRef.current.set(id, cleanup);
     },
-    [loadCodebases],
+    [loadCodebases, t],
   );
 
   const startTask = async (codebaseId: string, mode: SessionMode = "ask") => {
@@ -125,17 +175,28 @@ export function CodebaseLibrary() {
       <ScrollArea className="flex-1">
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
           {codebases.map((cb) => {
-            const ingesting = ingestingIds.has(cb.id) || (cb.status !== "ready" && cb.status !== "failed");
+            const ingesting =
+              ingestingIds.has(cb.id) ||
+              (isIngestingStatus(cb.status) && Boolean(cb.ingest_task_id));
+            const statusLabel = t(CODEBASE_STATUS_LABEL_KEYS[cb.status]);
             return (
               <Card key={cb.id} className={cn(ingesting && "border-primary/30")}>
                 <CardHeader className="pb-2">
                   <CardTitle className="truncate text-base">{cb.name}</CardTitle>
                   <CardDescription className="text-xs">
-                    {t("statusFileCount", { status: cb.status, count: cb.file_count ?? 0 })}
+                    {t("statusFileCount", { status: statusLabel, count: cb.file_count ?? 0 })}
                     {ingesting && (
                       <span className="ml-2 inline-flex items-center gap-1">
                         <IconLoading className="size-3 animate-spin" />
                         {t("indexingShort")}
+                      </span>
+                    )}
+                    {cb.status === "failed" && cb.error && (
+                      <span
+                        className="mt-1 block text-destructive"
+                        title={cb.error}
+                      >
+                        {truncateError(cb.error)}
                       </span>
                     )}
                   </CardDescription>
