@@ -65,9 +65,7 @@ async def list_codebases(
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[ListCodebasesResponse]:
     items = await service.list_codebases(limit=limit, offset=offset, scope=ctx.scope)
-    return Response.success(
-        data=ListCodebasesResponse(codebases=[_to_codebase_response(c) for c in items])
-    )
+    return Response.success(data=ListCodebasesResponse(codebases=[_to_codebase_response(c) for c in items]))
 
 
 @router.get("/{codebase_id}", response_model=Response[CodebaseResponse])
@@ -98,8 +96,7 @@ async def list_symbols(
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[ListSymbolsResponse]:
     symbols = await service.list_symbols_with_paths(codebase_id, name=name, scope=ctx.scope)
-    return Response.success(
-        data=ListSymbolsResponse(
+    return Response.success(data=ListSymbolsResponse(
             symbols=[
                 SymbolResponse(**{**s.model_dump(mode="json"), "path": path})
                 for s, path in symbols
@@ -116,8 +113,7 @@ async def list_artifacts(
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[ListArtifactsResponse]:
     artifacts = await service.list_artifacts(codebase_id, kind=kind, scope=ctx.scope)
-    return Response.success(
-        data=ListArtifactsResponse(
+    return Response.success(data=ListArtifactsResponse(
             artifacts=[ArtifactResponse(**a.model_dump(mode="json")) for a in artifacts]
         )
     )
@@ -137,8 +133,7 @@ async def read_source(
         end_line=request.end_line,
         scope=ctx.scope,
     )
-    return Response.success(
-        data=ReadSourceResponse(
+    return Response.success(data=ReadSourceResponse(
             path=request.path,
             content=content,
             start_line=request.start_line,
@@ -199,8 +194,7 @@ async def create_codebase_session(
         skill_id=request.skill_id,
         scope=ctx.scope,
     )
-    return Response.success(
-        data=CreateCodebaseSessionResponse(
+    return Response.success(data=CreateCodebaseSessionResponse(
             session_id=session.id,
             codebase_id=codebase_id,
             mode=session.mode,
@@ -216,4 +210,4 @@ async def delete_codebase(
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[Optional[Dict]]:
     await service.delete_codebase(codebase_id, scope=ctx.scope)
-    return Response.success(msg="删除代码库成功")
+    return Response.success()

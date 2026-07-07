@@ -21,6 +21,7 @@ import type {
   SubAgentEvent,
   ToolEvent,
 } from "@/lib/api/types";
+import type { Locale } from "@/i18n/routing";
 import { translate } from "@/i18n/translate";
 import { modelErrorMessage } from "@/lib/api/llm-status";
 
@@ -302,7 +303,10 @@ export function formatDuration(ms: number | undefined | null): string | undefine
 }
 
 /** 将时间戳格式化为相对时间，如 2天前、刚刚 */
-function formatTimeLabel(ts: number | string | undefined): string | undefined {
+function formatTimeLabel(
+  ts: number | string | undefined,
+  locale?: Locale,
+): string | undefined {
   if (ts === undefined || ts === null) return undefined;
   let t = typeof ts === "string" ? parseInt(ts, 10) : ts;
   if (Number.isNaN(t)) return undefined;
@@ -314,44 +318,52 @@ function formatTimeLabel(ts: number | string | undefined): string | undefined {
 
   const now = Date.now();
   const diff = now - t;
-  if (diff < 0) return translate("common.justNow");
-  if (diff < 60 * 1000) return translate("common.justNow");
+  if (diff < 0) return translate("common.justNow", undefined, locale);
+  if (diff < 60 * 1000) return translate("common.justNow", undefined, locale);
   if (diff < 60 * 60 * 1000) {
-    return translate("common.relativeTime.minutesAgo", {
-      count: Math.floor(diff / (60 * 1000)),
-    });
+    return translate(
+      "common.relativeTime.minutesAgo",
+      { count: Math.floor(diff / (60 * 1000)) },
+      locale,
+    );
   }
   if (diff < 24 * 60 * 60 * 1000) {
-    return translate("common.relativeTime.hoursAgo", {
-      count: Math.floor(diff / (60 * 60 * 1000)),
-    });
+    return translate(
+      "common.relativeTime.hoursAgo",
+      { count: Math.floor(diff / (60 * 60 * 1000)) },
+      locale,
+    );
   }
-  if (diff < 2 * 24 * 60 * 60 * 1000) return translate("common.dates.yesterday");
+  if (diff < 2 * 24 * 60 * 60 * 1000) return translate("common.dates.yesterday", undefined, locale);
   if (diff < 7 * 24 * 60 * 60 * 1000) {
-    return translate("common.relativeTime.daysAgo", {
-      count: Math.floor(diff / (24 * 60 * 60 * 1000)),
-    });
+    return translate(
+      "common.relativeTime.daysAgo",
+      { count: Math.floor(diff / (24 * 60 * 60 * 1000)) },
+      locale,
+    );
   }
   if (diff < 30 * 24 * 60 * 60 * 1000) {
-    return translate("common.relativeTime.weeksAgo", {
-      count: Math.floor(diff / (7 * 24 * 60 * 60 * 1000)),
-    });
+    return translate(
+      "common.relativeTime.weeksAgo",
+      { count: Math.floor(diff / (7 * 24 * 60 * 60 * 1000)) },
+      locale,
+    );
   }
   return undefined;
 }
 
-export function getToolTimeLabel(tool: ToolEvent): string | undefined {
+export function getToolTimeLabel(tool: ToolEvent, locale?: Locale): string | undefined {
   const ts =
     (tool as { timestamp?: number; created_at?: number; ts?: number }).timestamp ??
     (tool as { created_at?: number }).created_at ??
     (tool as { ts?: number }).ts;
-  return formatTimeLabel(ts);
+  return formatTimeLabel(ts, locale);
 }
 
 /**
  * 将 SSE 事件列表归并为时间线展示项（顺序与设计一致）
  */
-export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
+export function eventsToTimeline(events: SSEEventData[], locale?: Locale): TimelineItem[] {
   const list: TimelineItem[] = [];
   let lastStepId: string | null = null;
   let messageIndex = 0;
@@ -411,9 +423,13 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
           i18n_key?: string | null;
           i18n_params?: Record<string, string> | null;
         };
-        const displayMessage = notice.i18n_key
-          ? translate(notice.i18n_key, notice.i18n_params ?? undefined)
-          : notice.message;
+        let displayMessage = notice.message ?? "";
+        if (notice.i18n_key) {
+          const translated = translate(notice.i18n_key, notice.i18n_params ?? undefined, locale);
+          if (translated !== notice.i18n_key) {
+            displayMessage = translated;
+          }
+        }
         if (!displayMessage) break;
         list.push({
           kind: "assistant",
@@ -432,7 +448,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
             id: stableId("system", messageIndex++, `cancelled-${list.length}`),
             data: {
               role: "assistant",
-              message: translate("sessionDetail.taskCancelledNotice"),
+              message: translate("sessionDetail.taskCancelledNotice", undefined, locale),
             },
           });
         } else if (status === "failed") {
@@ -441,7 +457,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
             id: stableId("system", messageIndex++, `failed-${list.length}`),
             data: {
               role: "assistant",
-              message: translate("sessionDetail.taskFailedNotice"),
+              message: translate("sessionDetail.taskFailedNotice", undefined, locale),
             },
           });
         }
@@ -525,7 +541,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
       case "step": {
         const step = ev.data as StepEvent;
         const stepAnchorEventId = (step as { event_id?: string }).event_id;
-        lastContextLabel = translate("common.contextStep", { description: step.description });
+        lastContextLabel = translate("common.contextStep", { description: step.description }, locale);
 
         // 判断是更新现有 step 还是创建新 step
         // 关键：只有当 lastStepId === step.id 时才是同一个 step 的状态更新
@@ -599,15 +615,17 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
             anchorEventId: anchor,
           });
         }
-        lastContextLabel = translate("common.contextSubtask", { goal: sub.goal });
+        lastContextLabel = translate("common.contextSubtask", { goal: sub.goal }, locale);
         break;
       }
       case "tool": {
         const tool = ev.data as ToolEvent;
         const toolCallId = (tool as { tool_call_id?: string }).tool_call_id;
-        lastContextLabel = translate("common.contextTool", {
-          name: tool.name || tool.function || "",
-        });
+        lastContextLabel = translate(
+          "common.contextTool",
+          { name: tool.name || tool.function || "" },
+          locale,
+        );
 
         if (lastStepId !== null) {
           // 工具属于当前 step，添加到 step 的 tools 中
@@ -659,7 +677,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
             kind: "tool",
             id: stableId("tool", toolIndex++, (tool.name || "") + (tool.function || "")),
             data: tool,
-            timeLabel: getToolTimeLabel(tool),
+            timeLabel: getToolTimeLabel(tool, locale),
           });
         }
         break;
@@ -673,7 +691,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
         list.push({
           kind: "wait",
           id: stableId("wait", errorIndex++, String(list.length)),
-          message: data.message || data.prompt || data.reason || translate("sessionDetail.waitForInput"),
+          message: data.message || data.prompt || data.reason || translate("sessionDetail.waitForInput", undefined, locale),
           timestamp: data.created_at,
         });
         break;
@@ -687,7 +705,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
           event_id?: string;
           [key: string]: unknown;
         };
-        const displayError = modelErrorMessage(errorData.code) ?? errorData.error;
+        const displayError = modelErrorMessage(errorData.code, locale) ?? errorData.error;
         if (displayError) {
           const last = list[list.length - 1];
           if (last?.kind === "error" && last.error === displayError) {

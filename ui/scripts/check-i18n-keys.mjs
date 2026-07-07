@@ -71,6 +71,56 @@ const RUNTIME_CONFIG_FIELDS = {
     "sessions_stream_interval_seconds",
     "marketplace_max_upload_bytes",
   ],
+  sandbox: [
+    "driver",
+    "address",
+    "image",
+    "name_prefix",
+    "ttl_minutes",
+    "network",
+    "chrome_args",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+    "cleanup_interval_seconds",
+    "memory_limit",
+    "cpu_limit",
+    "pids_limit",
+    "pool_enabled",
+    "pool_size",
+    "idle_timeout_minutes",
+    "warmup_retry_interval_seconds",
+    "k8s_namespace",
+    "k8s_pod_label",
+  ],
+  worker: [
+    "max_concurrent_tasks",
+    "task_dispatch_max_retries",
+    "tool_timeout_seconds",
+    "mcp_connect_timeout_seconds",
+    "max_sandboxes_per_node",
+    "max_dynamic_sandboxes_global",
+    "admission_min_host_available_mb",
+    "admission_reclaim_target_mb",
+    "admission_poll_interval_seconds",
+    "admission_settle_seconds",
+    "admission_reclaim_enabled",
+    "task_execution_lease_seconds",
+    "reclaim_leader_lease_seconds",
+    "memory_probe_source",
+  ],
+  streams: [
+    "dispatch_maxlen",
+    "task_input_maxlen",
+    "task_output_maxlen",
+    "stream_maxlen",
+  ],
+  observability: [
+    "otel_enabled",
+    "otel_service_name",
+    "otel_exporter_endpoint",
+    "langfuse_enabled",
+  ],
 };
 
 const RUNTIME_FIELD_EXPANSIONS = Object.entries(RUNTIME_CONFIG_FIELDS).flatMap(
@@ -84,6 +134,7 @@ const DYNAMIC_EXPANSIONS = [
   { prefix: "sessionList.filter.", values: ["all", "general", "codebase", "knowledge", "hybrid"] },
   { prefix: "operatorScope.gateProfile.", suffix: ".title", values: ["loose", "standard", "strict"] },
   { prefix: "operatorScope.gateProfile.", suffix: ".description", values: ["loose", "standard", "strict"] },
+  { prefix: "settingsHitl.gateProfile.", values: ["loose", "standard", "strict"] },
   { prefix: "codebase.artifacts.", values: ["architecture", "dataFlow", "moduleDir", "callChain", "flowchart", "overview"] },
   { prefix: "marketplaceApps.promptLab.styleHints.", values: ["agent", "analysis", "writing"] },
   { prefix: "sessionMemory.roles.", values: ["system", "user", "assistant", "tool", "unknown"] },
@@ -97,7 +148,7 @@ const DYNAMIC_EXPANSIONS = [
   ...RUNTIME_FIELD_EXPANSIONS,
   {
     prefix: "settings.",
-    values: ["common", "models", "skills", "memory", "integrations", "runtime"],
+    values: ["common", "agent", "interfaceTheme", "models", "skills", "memory", "integrations", "hitl", "runtime"],
   },
   {
     prefix: "adminNav.",
@@ -217,6 +268,7 @@ const knownDynamicPatterns = new Set([
   "settingsRuntime :: sections.${section}",
   "settingsRuntime :: fields.${section}.${key}",
   "settingsRuntime :: descriptions.${section}.${key}",
+  "settingsHitl :: gateProfile.${profile}",
 ]);
 
 const unknownDynamic = [...unresolvedDynamic].filter((p) => !knownDynamicPatterns.has(p)).sort();

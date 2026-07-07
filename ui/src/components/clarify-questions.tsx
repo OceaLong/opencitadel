@@ -1,13 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckCircle2, ChevronLeft, ChevronRight, Circle, HelpCircle } from "lucide-react";
+import { HelpCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { ApprovalBar } from "@/components/approval-bar";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 
 import type { ClarifyAnswer, ClarifyQuestion } from "@/lib/api/types";
@@ -43,16 +41,44 @@ function isQuestionAnswered(
   return presetSelected.length > 0 || (customSelected && custom.length > 0);
 }
 
-function applyCustomSelection(
-  question: ClarifyQuestion,
-  current: string[],
-): string[] {
+function applyCustomSelection(question: ClarifyQuestion, current: string[]): string[] {
   if (question.allow_multiple) {
-    return current.includes(CUSTOM_OPTION_ID)
-      ? current
-      : [...current, CUSTOM_OPTION_ID];
+    return current.includes(CUSTOM_OPTION_ID) ? current : [...current, CUSTOM_OPTION_ID];
   }
   return [CUSTOM_OPTION_ID];
+}
+
+function getAnswerParts(
+  question: ClarifyQuestion,
+  selectedIds: string[],
+  customAnswers: Record<string, string>,
+  customPrefix: string,
+): string[] {
+  const presetIds = getPresetSelectionIds(selectedIds);
+  const selectedLabels = question.options
+    .filter((option) => presetIds.includes(option.id))
+    .map((option) => option.label);
+  const customSelected = isCustomSelected(selectedIds);
+  const custom = customSelected ? (customAnswers[question.id] ?? "").trim() : "";
+  const parts = [...selectedLabels];
+  if (custom) parts.push(`${customPrefix}: ${custom}`);
+  return parts;
+}
+
+function AnswerPills({ labels, className }: { labels: string[]; className?: string }) {
+  if (labels.length === 0) return null;
+  return (
+    <div className={cn("flex flex-wrap gap-1.5", className)}>
+      {labels.map((label) => (
+        <span
+          key={label}
+          className="border-border/70 bg-muted/50 text-foreground inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs"
+        >
+          {label}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 export function ClarifyQuestions({
@@ -63,18 +89,10 @@ export function ClarifyQuestions({
   className,
 }: ClarifyQuestionsProps) {
   const t = useTranslations("clarify");
-  const [step, setStep] = useState(0);
   const [selections, setSelections] = useState<Record<string, string[]>>({});
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
+  const [customExpanded, setCustomExpanded] = useState<Record<string, boolean>>({});
   const [submitting, setSubmitting] = useState(false);
-
-  const currentQuestion = questions[step];
-  const progress = questions.length > 0 ? ((step + 1) / questions.length) * 100 : 0;
-
-  const canAdvance = useMemo(() => {
-    if (!interactive || !currentQuestion) return false;
-    return isQuestionAnswered(currentQuestion, selections, customAnswers);
-  }, [currentQuestion, customAnswers, interactive, selections]);
 
   const canSubmit = useMemo(() => {
     if (!interactive || questions.length === 0) return false;
@@ -105,38 +123,38 @@ export function ClarifyQuestions({
       }
       return { ...prev, [question.id]: applyCustomSelection(question, current) };
     });
+    if (trimmed) {
+      setCustomExpanded((prev) => ({ ...prev, [question.id]: true }));
+    }
   };
 
-  const selectCustom = (question: ClarifyQuestion) => {
+  const toggleCustom = (question: ClarifyQuestion) => {
     if (!interactive) return;
-    const trimmed = (customAnswers[question.id] ?? "").trim();
-    if (!trimmed) return;
-    setSelections((prev) => {
-      const current = prev[question.id] ?? [];
-      return { ...prev, [question.id]: applyCustomSelection(question, current) };
+    setCustomExpanded((prev) => {
+      const nextExpanded = !prev[question.id];
+      if (nextExpanded) {
+        const trimmed = (customAnswers[question.id] ?? "").trim();
+        if (trimmed) {
+          setSelections((current) => ({
+            ...current,
+            [question.id]: applyCustomSelection(question, current[question.id] ?? []),
+          }));
+        }
+      } else {
+        setSelections((current) => ({
+          ...current,
+          [question.id]: (current[question.id] ?? []).filter((id) => id !== CUSTOM_OPTION_ID),
+        }));
+      }
+      return { ...prev, [question.id]: nextExpanded };
     });
-  };
-
-  const deselectCustom = (question: ClarifyQuestion) => {
-    if (!interactive) return;
-    setSelections((prev) => ({
-      ...prev,
-      [question.id]: (prev[question.id] ?? []).filter((id) => id !== CUSTOM_OPTION_ID),
-    }));
   };
 
   const buildAnswer = () => {
     const lines = [t("header")];
     for (const question of questions) {
       const selectedIds = selections[question.id] ?? [];
-      const presetIds = getPresetSelectionIds(selectedIds);
-      const selectedLabels = question.options
-        .filter((option) => presetIds.includes(option.id))
-        .map((option) => option.label);
-      const customSelected = isCustomSelected(selectedIds);
-      const custom = customSelected ? (customAnswers[question.id] ?? "").trim() : "";
-      const parts = [...selectedLabels];
-      if (custom) parts.push(`${t("customPrefix")}: ${custom}`);
+      const parts = getAnswerParts(question, selectedIds, customAnswers, t("customPrefix"));
       lines.push(`- ${question.prompt}: ${parts.join("；")}`);
     }
     return lines.join("\n");
@@ -171,147 +189,101 @@ export function ClarifyQuestions({
     }
   };
 
-  const handleNext = () => {
-    if (!canAdvance) return;
-    if (step < questions.length - 1) {
-      setStep((prev) => prev + 1);
-    } else {
-      void handleSubmit();
-    }
-  };
-
   if (questions.length === 0) {
     return null;
   }
 
-  const currentSelected = currentQuestion ? (selections[currentQuestion.id] ?? []) : [];
-  const currentCustomSelected = isCustomSelected(currentSelected);
+  const pillClass = (selected: boolean) =>
+    cn(
+      "inline-flex items-center rounded-full border px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+      selected
+        ? "border-primary/60 bg-primary/10 text-primary"
+        : "border-border/70 bg-muted/30 text-foreground hover:bg-muted/60",
+    );
 
   return (
-    <Card className={cn("gap-4 py-4", className)}>
-      <CardHeader className="gap-2 px-4">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <HelpCircle className="text-primary size-4" />
-          <span>{title || t("defaultTitle")}</span>
-        </CardTitle>
-        {interactive && questions.length > 1 && (
-          <div className="space-y-2">
-            <div className="text-muted-foreground flex items-center justify-between text-xs">
-              <span>
-                {t("questionProgress", { current: step + 1, total: questions.length })}
-              </span>
-            </div>
-            <Progress value={progress} className="h-1.5" />
-          </div>
-        )}
-      </CardHeader>
-      <CardContent className="min-h-[220px] space-y-4 px-4">
-        {currentQuestion && (
-          <div key={currentQuestion.id} className="animate-in fade-in-0 space-y-2 duration-200">
-            <div className="text-foreground text-sm font-medium">{currentQuestion.prompt}</div>
-            <div className="flex flex-col gap-2">
-              {currentQuestion.options.map((option) => {
-                const selected = currentSelected.includes(option.id);
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    disabled={!interactive || submitting}
-                    className={cn(
-                      "border-border/70 hover:bg-muted/60 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-                      selected && "border-primary/60 bg-primary/5",
-                    )}
-                    onClick={() => selectOption(currentQuestion, option.id)}
-                  >
-                    {currentQuestion.allow_multiple ? (
-                      <Checkbox
-                        checked={selected}
-                        disabled={!interactive || submitting}
-                        onCheckedChange={() => selectOption(currentQuestion, option.id)}
-                        onClick={(event) => event.stopPropagation()}
-                      />
-                    ) : selected ? (
-                      <CheckCircle2 className="text-primary size-4 shrink-0" />
-                    ) : (
-                      <Circle className="text-muted-foreground size-4 shrink-0" />
-                    )}
-                    <span>{option.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {(currentQuestion.allow_custom ?? true) && (
-              <div
-                className={cn(
-                  "border-border/70 hover:bg-muted/60 flex w-full items-start gap-2 rounded-lg border px-3 py-2 transition-colors",
-                  currentCustomSelected && "border-primary/60 bg-primary/5",
-                  (!interactive || submitting) && "opacity-60",
-                )}
-                onClick={() => selectCustom(currentQuestion)}
-              >
-                {currentQuestion.allow_multiple ? (
-                  <Checkbox
-                    checked={currentCustomSelected}
-                    disabled={!interactive || submitting}
-                    onCheckedChange={(checked) =>
-                      checked ? selectCustom(currentQuestion) : deselectCustom(currentQuestion)
-                    }
-                    onClick={(event) => event.stopPropagation()}
-                    className="mt-0.5"
-                  />
-                ) : currentCustomSelected ? (
-                  <CheckCircle2 className="text-primary mt-0.5 size-4 shrink-0" />
-                ) : (
-                  <Circle className="text-muted-foreground mt-0.5 size-4 shrink-0" />
-                )}
-                <Textarea
-                  value={customAnswers[currentQuestion.id] ?? ""}
-                  disabled={!interactive || submitting}
-                  placeholder={t("customPlaceholder")}
-                  className="min-h-16 flex-1 border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
-                  onChange={(event) => handleCustomChange(currentQuestion, event.target.value)}
-                  onFocus={() => selectCustom(currentQuestion)}
-                  onClick={(event) => event.stopPropagation()}
-                />
-              </div>
-            )}
-          </div>
-        )}
+    <ApprovalBar tone="blue" className={cn("gap-4 py-3", className)}>
+      <div className="flex items-center gap-2">
+        <HelpCircle className="text-primary size-4 shrink-0" />
+        <p className="text-foreground text-sm font-medium">{title || t("defaultTitle")}</p>
+      </div>
 
-        {interactive ? (
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={step === 0 || submitting}
-              onClick={() => setStep((prev) => Math.max(0, prev - 1))}
-            >
-              <ChevronLeft className="size-4" />
-              {t("prev")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={(!canAdvance && step < questions.length - 1) || (!canSubmit && step === questions.length - 1) || submitting}
-              onClick={handleNext}
-            >
-              {step < questions.length - 1 ? (
+      <div className="space-y-4">
+        {questions.map((question) => {
+          const selectedIds = selections[question.id] ?? [];
+          const customSelected = isCustomSelected(selectedIds);
+          const showCustomInput = interactive
+            ? (customExpanded[question.id] ?? customSelected)
+            : customSelected;
+          const answerParts = getAnswerParts(
+            question,
+            selectedIds,
+            customAnswers,
+            t("customPrefix"),
+          );
+
+          return (
+            <div key={question.id} className="space-y-2">
+              <div className="text-foreground text-sm font-medium">{question.prompt}</div>
+
+              {interactive ? (
                 <>
-                  {t("next")}
-                  <ChevronRight className="size-4" />
+                  <div className="flex flex-wrap gap-1.5">
+                    {question.options.map((option) => {
+                      const selected = selectedIds.includes(option.id);
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          disabled={submitting}
+                          className={pillClass(selected)}
+                          onClick={() => selectOption(question, option.id)}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                    {(question.allow_custom ?? true) && (
+                      <button
+                        type="button"
+                        disabled={submitting}
+                        className={pillClass(customSelected || showCustomInput)}
+                        onClick={() => toggleCustom(question)}
+                      >
+                        {t("otherOption")}
+                      </button>
+                    )}
+                  </div>
+                  {(question.allow_custom ?? true) && showCustomInput && (
+                    <Textarea
+                      value={customAnswers[question.id] ?? ""}
+                      disabled={submitting}
+                      placeholder={t("customPlaceholder")}
+                      className="min-h-8 resize-none text-sm"
+                      onChange={(event) => handleCustomChange(question, event.target.value)}
+                      onFocus={() =>
+                        setCustomExpanded((prev) => ({ ...prev, [question.id]: true }))
+                      }
+                    />
+                  )}
                 </>
-              ) : submitting ? (
-                t("submitting")
               ) : (
-                t("submit")
+                <AnswerPills labels={answerParts} />
               )}
-            </Button>
-          </div>
-        ) : (
-          <div className="text-muted-foreground text-xs">{t("submitted")}</div>
-        )}
-      </CardContent>
-    </Card>
+            </div>
+          );
+        })}
+      </div>
+
+      {interactive ? (
+        <div className="flex justify-end pt-1">
+          <Button type="button" size="sm" disabled={!canSubmit || submitting} onClick={() => void handleSubmit()}>
+            {submitting ? t("submitting") : t("continue")}
+          </Button>
+        </div>
+      ) : (
+        <p className="text-muted-foreground text-xs">{t("submitted")}</p>
+      )}
+    </ApprovalBar>
   );
 }

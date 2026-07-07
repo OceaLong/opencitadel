@@ -434,10 +434,13 @@ class AgentTaskRunner(TaskRunner):
                 parts.append(err)
             else:
                 parts.append(f"{name}（{err}）")
+        details = "；".join(parts)
         await self._put_and_add_event(
             task,
             AssistantNoticeEvent(
-                message=f"{label}：" + "；".join(parts),
+                message="",
+                i18n_key="sessionDetail.integrationInitFailed",
+                i18n_params={"label": label, "details": details},
             ),
         )
 

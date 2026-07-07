@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
 from ...domain.models.notification import Notification
+from ...domain.utils.notification_message import decode_notification_message, encode_notification_message
 
 
 class NotificationModel(Base):
@@ -25,6 +26,7 @@ class NotificationModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP(0)"))
 
     def to_domain(self) -> Notification:
+        message, i18n_key, i18n_params = decode_notification_message(self.message)
         return Notification.model_validate({
             "id": self.id,
             "user_id": self.user_id,
@@ -32,7 +34,9 @@ class NotificationModel(Base):
             "session_id": self.session_id,
             "artifact_id": self.artifact_id,
             "job_id": self.job_id,
-            "message": self.message,
+            "message": message,
+            "i18n_key": i18n_key,
+            "i18n_params": i18n_params,
             "read": self.read,
             "created_at": self.created_at,
         })

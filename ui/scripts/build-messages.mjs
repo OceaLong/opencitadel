@@ -100,6 +100,47 @@ const messages = {
     deleteFailedRetry: { en: "Delete failed. Please try again.", zh: "删除失败，请重试" },
     jsonInvalid: { en: "Invalid JSON. Check your configuration.", zh: "JSON 格式错误，请检查配置" },
     probeFailed: { en: "Probe failed", zh: "探测失败" },
+    payloadTooLarge: { en: "Payload too large", zh: "请求体过大" },
+    sseStreamEnded: { en: "SSE stream ended", zh: "SSE 流已结束" },
+    sseConnectionFailed: { en: "SSE connection failed", zh: "SSE 连接失败" },
+    chatStreamStartFailed: { en: "Failed to start chat stream", zh: "启动聊天流失败" },
+    ingestStreamConnectionFailed: {
+      en: "Ingest stream connection failed: {status}",
+      zh: "摄取流连接失败: {status}",
+    },
+    downloadFailedWithStatus: {
+      en: "Download failed: {status}",
+      zh: "下载失败: {status}",
+    },
+    sseParseFailed: {
+      en: "Failed to parse SSE data: {eventData}",
+      zh: "解析 SSE 数据失败: {eventData}",
+    },
+    appError: { en: "Something went wrong. Please try again later.", zh: "应用发生错误请稍后尝试" },
+    unauthorized: { en: "Not signed in or session expired. Please sign in again.", zh: "未登录或登录已过期，请重新登录" },
+    forbidden: { en: "You do not have permission to perform this action.", zh: "无权执行该操作" },
+    notFound: { en: "Resource not found. Please verify and try again.", zh: "资源未找到，请核实后重试" },
+    conflict: { en: "Operation conflict. Please try again later.", zh: "操作冲突，请稍后重试" },
+    serverError: { en: "Server error. Please try again later.", zh: "服务器出现异常请稍后重试" },
+    badRequest: { en: "Invalid request. Please check and try again.", zh: "客户端请求错误，请检查后重试" },
+    sessionNotFound: { en: "Session not found. Please verify and try again.", zh: "该会话不存在，请核实后重试" },
+    taskSessionNotFound: { en: "Task session not found.", zh: "任务会话不存在" },
+    invalidCredentials: { en: "Invalid username or password.", zh: "账号或密码错误" },
+    emailAlreadyRegistered: { en: "Email is already registered.", zh: "邮箱已注册" },
+    inviteExpired: { en: "Invitation link has expired.", zh: "邀请链接已过期" },
+    teamNameRequired: { en: "Team name is required.", zh: "团队名称不能为空" },
+    teamAccessDenied: { en: "You do not have access to this team.", zh: "无权访问该团队" },
+    teamOwnerOnly: { en: "Only the team owner can perform this action.", zh: "只有团队所有者可执行此操作" },
+    adminRequired: { en: "Administrator access required.", zh: "需要管理员权限" },
+    workspaceAccessDenied: { en: "You do not have access to this workspace.", zh: "无权访问该工作区" },
+    modelNotFound: { en: "The specified model does not exist or is not accessible.", zh: "指定模型不存在或无权访问" },
+    kbIndexingInProgress: {
+      en: "Knowledge base is indexing. Wait for the current task to finish before deleting.",
+      zh: "知识库正在索引中，请等待当前任务完成后再删除",
+    },
+    mcpNotEnabled: { en: "MCP service is not enabled.", zh: "MCP 服务未启用" },
+    urlNotAllowed: { en: "Internal or local addresses are not allowed.", zh: "不允许访问内网或本地地址" },
+    urlHostNotAllowed: { en: "URL host is not in the allow list.", zh: "URL 主机不在允许列表中" },
   },
   language: {
     localeEn: { en: "English", zh: "English" },
@@ -266,6 +307,22 @@ const messages = {
       en: "Task cancelled.",
       zh: "任务已取消。",
     },
+    modelFallbackNotice: {
+      en: "Current model quota is exhausted. Switched to {modelName}; the task will continue.",
+      zh: "当前模型配额已耗尽，已自动切换至 {modelName}，任务继续执行。",
+    },
+    planStarted: {
+      en: "Plan created. Starting execution.",
+      zh: "我已制定计划，开始执行。",
+    },
+    integrationInitFailed: {
+      en: "{label}: {details}",
+      zh: "{label}：{details}",
+    },
+    modelQuotaExhausted: {
+      en: "All configured model API quotas are exhausted.",
+      zh: "所有已配置模型 API 配额已耗尽",
+    },
     streamStale: {
       en: "Background task is recovering; the event stream is temporarily interrupted.",
       zh: "后台任务正在恢复，事件流暂时中断。",
@@ -385,9 +442,12 @@ const messages = {
     defaultTitle: { en: "A few key points need confirmation", zh: "需要确认几个关键点" },
     questionProgress: { en: "Question {current} / {total}", zh: "问题 {current} / {total}" },
     customPlaceholder: { en: "Other / custom answer...", zh: "其它 / 自定义回答..." },
+    otherOption: { en: "Other", zh: "其它" },
     submitted: { en: "Answers submitted, processing continues.", zh: "已提交回答，继续处理中。" },
     submitting: { en: "Submitting...", zh: "提交中..." },
     submit: { en: "Submit answers", zh: "提交回答" },
+    continue: { en: "Continue", zh: "继续" },
+    replyTitle: { en: "Clarification reply", zh: "澄清回复" },
     prev: { en: "Previous", zh: "上一题" },
     next: { en: "Next", zh: "下一题" },
     header: { en: "【Clarification reply】", zh: "【澄清回复】" },
@@ -415,6 +475,9 @@ const messages = {
     a2a: { en: "A2A Agent", zh: "A2A Agent 配置" },
     mcp: { en: "MCP servers", zh: "MCP 服务器" },
     language: { en: "Language", zh: "语言" },
+    agent: { en: "Agent", zh: "Agent" },
+    hitl: { en: "Human in the loop", zh: "人机协同" },
+    interfaceTheme: { en: "Interface theme", zh: "界面主题" },
     maxIterations: { en: "Max plan iterations", zh: "最大计划迭代次数" },
     maxIterationsPlaceholder: { en: "Max agent iterations", zh: "Agent最大迭代次数" },
     maxIterationsDesc: {
@@ -515,14 +578,104 @@ const messages = {
     recentRevisions: { en: "Recent revisions", zh: "最近版本" },
     rollback: { en: "Rollback", zh: "回滚" },
     revisionUpdateDefault: { en: "update", zh: "更新" },
+    resetUserOverride: { en: "Clear my override", zh: "清除我的覆盖配置" },
+    resetOverrideSuccess: { en: "User override cleared", zh: "已清除用户级配置覆盖" },
+    resetOverrideFailed: { en: "Failed to clear user override", zh: "清除覆盖配置失败" },
     corsOriginsReadonlyHint: {
       en: "CORS origins require an API restart to take effect. Other server fields hot-reload.",
       zh: "CORS 来源修改后需重启 API 进程才能生效，其余 server 字段可热更新。",
+    },
+    invalidJson: {
+      en: "Invalid JSON in one or more fields. Fix before saving.",
+      zh: "存在无效的 JSON 字段，请修正后再保存",
+    },
+    invalidJsonField: { en: "Invalid JSON syntax", zh: "JSON 格式无效" },
+    knowledgeBaseSectionDesc: {
+      en: "Runtime parameters for knowledge base indexing, retrieval, and document ingestion.",
+      zh: "知识库索引、检索与文档摄取的运行时参数。",
+    },
+    memorySectionDesc: {
+      en: "Runtime parameters for memory recall, context compaction, and vector embeddings.",
+      zh: "记忆召回、上下文压缩与向量嵌入的运行时参数。",
+    },
+    workerSectionDesc: {
+      en: "Worker concurrency, task dispatch, tool timeouts, and sandbox admission controls.",
+      zh: "Worker 并发、任务分发、工具超时与沙箱准入控制。",
+    },
+    streamsSectionDesc: {
+      en: "Redis Stream length limits for task queues and session event streams.",
+      zh: "任务队列与会话事件流的 Redis Stream 长度限制。",
+    },
+    observabilitySectionDesc: {
+      en: "OpenTelemetry and Langfuse tracing switches (secrets are provided via environment variables).",
+      zh: "OpenTelemetry 与 Langfuse 追踪开关（密钥由环境变量提供）。",
+    },
+    sandboxSectionDesc: {
+      en: "Sandbox container driver, resource limits, connection pool, and proxy settings.",
+      zh: "沙箱容器驱动、资源限制、连接池与代理配置。",
     },
     sections: {
       feature_flags: { en: "Feature flags", zh: "功能开关" },
       scheduler: { en: "Scheduler", zh: "定时任务" },
       server: { en: "Server", zh: "服务" },
+      memory: { en: "Memory", zh: "记忆" },
+      knowledge_base: { en: "Knowledge base", zh: "知识库" },
+      sandbox: { en: "Sandbox", zh: "沙箱" },
+      worker: { en: "Worker", zh: "Worker" },
+      streams: { en: "Streams", zh: "流" },
+      observability: { en: "Observability", zh: "可观测性" },
+    },
+    groups: {
+      knowledge_base: {
+        chunk: { en: "Chunking", zh: "分块" },
+        retrieval: { en: "Retrieval", zh: "检索" },
+        rerank: { en: "Rerank", zh: "重排序" },
+        graphrag: { en: "GraphRAG", zh: "GraphRAG" },
+        ocr: { en: "OCR", zh: "OCR" },
+        document: { en: "Document limits", zh: "文档限制" },
+        connectors: { en: "Connectors", zh: "连接器" },
+      },
+      memory: {
+        embedding: { en: "Embeddings", zh: "向量嵌入" },
+      },
+    },
+    groupDescriptions: {
+      knowledge_base: {
+        chunk: {
+          en: "Parent/child chunk sizes and overlap when splitting documents.",
+          zh: "文档切分为父块与子块的尺寸与重叠策略。",
+        },
+        retrieval: {
+          en: "Hybrid retrieval (vector + BM25) and RRF fusion parameters.",
+          zh: "混合检索（向量 + BM25）与 RRF 融合参数。",
+        },
+        rerank: {
+          en: "Second-stage ranking for retrieved chunks.",
+          zh: "检索结果二次排序配置。",
+        },
+        graphrag: {
+          en: "Graph-based context expansion across related chunks.",
+          zh: "基于文档关系图的上下文扩展。",
+        },
+        ocr: {
+          en: "Text extraction mode for PDF/image documents.",
+          zh: "PDF/图片文档的文字识别方式。",
+        },
+        document: {
+          en: "Per-document size and page limits.",
+          zh: "单文档大小与页数上限。",
+        },
+        connectors: {
+          en: "URL rules for Confluence, Feishu, and other document sources.",
+          zh: "Confluence、飞书等外部文档源 URL 规则。",
+        },
+      },
+      memory: {
+        embedding: {
+          en: "Embedding model and endpoint for vector memory recall (API key via env).",
+          zh: "记忆向量召回使用的嵌入模型与端点（API Key 由环境变量提供）。",
+        },
+      },
     },
     fields: {
       feature_flags: {
@@ -548,6 +701,103 @@ const messages = {
         rate_limit_per_minute: { en: "Rate limit per minute", zh: "每分钟请求上限" },
         sessions_stream_interval_seconds: { en: "Session stream interval (seconds)", zh: "会话流推送间隔（秒）" },
         marketplace_max_upload_bytes: { en: "Marketplace max upload (bytes)", zh: "市场上传大小上限（字节）" },
+      },
+      memory: {
+        recall_limit: { en: "Recall limit", zh: "召回条数上限" },
+        auto_extract_enabled: { en: "Auto-extract memories", zh: "自动提取记忆" },
+        vector_enabled: { en: "Vector memory", zh: "向量记忆" },
+        compact_strategy: { en: "Compaction strategy", zh: "压缩策略" },
+        compact_token_threshold: { en: "Compaction token threshold", zh: "压缩 Token 阈值" },
+        compact_keep_recent: { en: "Keep recent messages", zh: "保留最近消息数" },
+        compact_tool_content_max_chars: { en: "Tool content max chars", zh: "工具内容压缩上限（字符）" },
+        compact_always_on_step_boundary: { en: "Compact on step boundary", zh: "步骤边界强制压缩" },
+        compact_rule_trigger_threshold: { en: "Rule compaction trigger threshold", zh: "规则压缩触发阈值" },
+        tool_output_offload_enabled: { en: "Tool output offload", zh: "工具输出卸载" },
+        tool_output_offload_threshold_chars: {
+          en: "Tool output offload threshold (chars)",
+          zh: "工具输出卸载阈值（字符）",
+        },
+        embedding: {
+          provider: { en: "Embedding provider", zh: "嵌入提供商" },
+          model: { en: "Embedding model", zh: "嵌入模型" },
+          base_url: { en: "Embedding API base URL", zh: "嵌入 API 地址" },
+          timeout_seconds: { en: "Embedding timeout (seconds)", zh: "嵌入请求超时（秒）" },
+        },
+      },
+      knowledge_base: {
+        vector_enabled: { en: "Vector indexing", zh: "向量索引" },
+        parent_max_chars: { en: "Parent max chars", zh: "父块最大字符数" },
+        child_max_chars: { en: "Child max chars", zh: "子块最大字符数" },
+        overlap: { en: "Chunk overlap (chars)", zh: "块重叠字符数" },
+        vector_top_k: { en: "Vector top-K", zh: "向量检索 Top-K" },
+        bm25_top_k: { en: "BM25 top-K", zh: "BM25 检索 Top-K" },
+        rrf_k: { en: "RRF constant K", zh: "RRF 融合常数 K" },
+        final_top_k: { en: "Final top-K", zh: "最终返回 Top-K" },
+        enabled: { en: "Enabled", zh: "启用" },
+        provider: { en: "Provider", zh: "提供商" },
+        base_url: { en: "API base URL", zh: "API 地址" },
+        api_key_env: { en: "API key env var", zh: "API Key 环境变量" },
+        model: { en: "Model", zh: "模型" },
+        timeout_seconds: { en: "Timeout (seconds)", zh: "超时（秒）" },
+        max_parent_chunks_per_doc: { en: "Max parent chunks per doc", zh: "每文档最大父块数" },
+        concurrency: { en: "Concurrency", zh: "并发数" },
+        mode: { en: "Mode", zh: "模式" },
+        max_pages: { en: "Max pages", zh: "最大页数" },
+        max_bytes: { en: "Max bytes", zh: "最大字节数" },
+        confluence_base_url: { en: "Confluence base URL", zh: "Confluence 基础 URL" },
+        feishu_base_url: { en: "Feishu base URL", zh: "飞书基础 URL" },
+        url_allowlist: { en: "URL allowlist", zh: "URL 白名单" },
+        url_denylist: { en: "URL denylist", zh: "URL 黑名单" },
+      },
+      sandbox: {
+        driver: { en: "Driver", zh: "驱动" },
+        address: { en: "Service address", zh: "服务地址" },
+        image: { en: "Container image", zh: "容器镜像" },
+        name_prefix: { en: "Name prefix", zh: "名称前缀" },
+        ttl_minutes: { en: "TTL (minutes)", zh: "存活时间（分钟）" },
+        network: { en: "Docker network", zh: "Docker 网络" },
+        chrome_args: { en: "Chrome arguments", zh: "Chrome 启动参数" },
+        https_proxy: { en: "HTTPS proxy", zh: "HTTPS 代理" },
+        http_proxy: { en: "HTTP proxy", zh: "HTTP 代理" },
+        no_proxy: { en: "No-proxy list", zh: "代理排除列表" },
+        cleanup_interval_seconds: { en: "Cleanup interval (seconds)", zh: "清理间隔（秒）" },
+        memory_limit: { en: "Memory limit", zh: "内存限制" },
+        cpu_limit: { en: "CPU limit", zh: "CPU 限制" },
+        pids_limit: { en: "PIDs limit", zh: "进程数限制" },
+        pool_enabled: { en: "Warm pool enabled", zh: "启用预热连接池" },
+        pool_size: { en: "Pool size", zh: "连接池大小" },
+        idle_timeout_minutes: { en: "Idle timeout (minutes)", zh: "空闲超时（分钟）" },
+        warmup_retry_interval_seconds: { en: "Warmup retry interval (seconds)", zh: "预热重试间隔（秒）" },
+        k8s_namespace: { en: "K8s namespace", zh: "K8s 命名空间" },
+        k8s_pod_label: { en: "K8s pod label", zh: "K8s Pod 标签" },
+      },
+      worker: {
+        max_concurrent_tasks: { en: "Max concurrent tasks", zh: "最大并发任务数" },
+        task_dispatch_max_retries: { en: "Task dispatch max retries", zh: "任务分发最大重试次数" },
+        tool_timeout_seconds: { en: "Tool timeout (seconds)", zh: "工具超时（秒）" },
+        mcp_connect_timeout_seconds: { en: "MCP connect timeout (seconds)", zh: "MCP 连接超时（秒）" },
+        max_sandboxes_per_node: { en: "Max sandboxes per node", zh: "单节点最大沙箱数" },
+        max_dynamic_sandboxes_global: { en: "Max dynamic sandboxes (global)", zh: "全局最大动态沙箱数" },
+        admission_min_host_available_mb: { en: "Min host available memory (MB)", zh: "主机最小可用内存（MB）" },
+        admission_reclaim_target_mb: { en: "Admission reclaim target (MB)", zh: "准入回收目标内存（MB）" },
+        admission_poll_interval_seconds: { en: "Admission poll interval (seconds)", zh: "准入轮询间隔（秒）" },
+        admission_settle_seconds: { en: "Admission settle time (seconds)", zh: "准入稳定等待时间（秒）" },
+        admission_reclaim_enabled: { en: "Admission reclaim enabled", zh: "启用准入内存回收" },
+        task_execution_lease_seconds: { en: "Task execution lease (seconds)", zh: "任务执行租约（秒）" },
+        reclaim_leader_lease_seconds: { en: "Reclaim leader lease (seconds)", zh: "回收 Leader 租约（秒）" },
+        memory_probe_source: { en: "Memory probe source", zh: "内存探测来源" },
+      },
+      streams: {
+        dispatch_maxlen: { en: "Dispatch stream max length", zh: "分发流最大长度" },
+        task_input_maxlen: { en: "Task input stream max length", zh: "任务输入流最大长度" },
+        task_output_maxlen: { en: "Task output stream max length", zh: "任务输出流最大长度" },
+        stream_maxlen: { en: "Session stream max length", zh: "会话流最大长度" },
+      },
+      observability: {
+        otel_enabled: { en: "OpenTelemetry enabled", zh: "启用 OpenTelemetry" },
+        otel_service_name: { en: "OTel service name", zh: "OTel 服务名" },
+        otel_exporter_endpoint: { en: "OTel exporter endpoint", zh: "OTel 导出端点" },
+        langfuse_enabled: { en: "Langfuse enabled", zh: "启用 Langfuse" },
       },
     },
     descriptions: {
@@ -627,6 +877,328 @@ const messages = {
         marketplace_max_upload_bytes: {
           en: "Maximum file upload size for marketplace assets (bytes).",
           zh: "市场资源上传大小上限（字节）。",
+        },
+      },
+      memory: {
+        recall_limit: {
+          en: "Maximum memory entries returned per recall.",
+          zh: "单次记忆召回的最大条目数。",
+        },
+        auto_extract_enabled: {
+          en: "Automatically extract memories after tasks complete.",
+          zh: "任务结束后自动从对话中提取记忆。",
+        },
+        vector_enabled: {
+          en: "Enable pgvector hybrid recall (requires global enable_embeddings).",
+          zh: "启用 pgvector 混合召回（需全局 enable_embeddings）。",
+        },
+        compact_strategy: {
+          en: "Context compaction mode: rule, llm, or hybrid.",
+          zh: "上下文压缩方式：规则、LLM 或混合。",
+        },
+        compact_token_threshold: {
+          en: "Token count threshold to trigger LLM compaction.",
+          zh: "触发 LLM 压缩的 Token 数阈值。",
+        },
+        compact_keep_recent: {
+          en: "Number of recent messages to preserve during compaction.",
+          zh: "压缩时保留的最近消息条数。",
+        },
+        compact_tool_content_max_chars: {
+          en: "Max tool output chars before compaction truncates.",
+          zh: "压缩前工具输出内容的最大字符数。",
+        },
+        compact_always_on_step_boundary: {
+          en: "Attempt compaction after each planner step.",
+          zh: "每个 Planner 步骤结束时强制尝试压缩。",
+        },
+        compact_rule_trigger_threshold: {
+          en: "Token threshold to trigger rule-based compaction.",
+          zh: "触发规则压缩的 Token 数阈值。",
+        },
+        tool_output_offload_enabled: {
+          en: "Write oversized tool output to files instead of inline context.",
+          zh: "超长工具输出写入文件而非直接回填上下文。",
+        },
+        tool_output_offload_threshold_chars: {
+          en: "Character threshold to offload tool output.",
+          zh: "触发工具输出卸载的字符数阈值。",
+        },
+        embedding: {
+          provider: {
+            en: "Embedding API provider identifier.",
+            zh: "嵌入 API 提供商标识。",
+          },
+          model: { en: "Embedding model name.", zh: "嵌入模型名称。" },
+          base_url: { en: "Base URL for the embedding API.", zh: "嵌入 API 的 Base URL。" },
+          timeout_seconds: {
+            en: "Timeout for embedding API requests.",
+            zh: "嵌入 API 请求超时时间。",
+          },
+        },
+      },
+      knowledge_base: {
+        vector_enabled: {
+          en: "Enable vector indexing and hybrid retrieval (requires global enable_embeddings).",
+          zh: "启用知识库向量索引与混合检索（需全局 enable_embeddings）。",
+        },
+        parent_max_chars: {
+          en: "Max characters per parent chunk (used for context expansion).",
+          zh: "文档父块（用于上下文扩展）的最大字符数。",
+        },
+        child_max_chars: {
+          en: "Max characters per child chunk (used for retrieval).",
+          zh: "检索用子块的最大字符数。",
+        },
+        overlap: {
+          en: "Character overlap between adjacent chunks.",
+          zh: "相邻块之间的重叠字符数。",
+        },
+        vector_top_k: {
+          en: "Number of vector search candidates.",
+          zh: "向量检索返回的候选数量。",
+        },
+        bm25_top_k: {
+          en: "Number of BM25 keyword search candidates.",
+          zh: "BM25 关键词检索返回的候选数量。",
+        },
+        rrf_k: {
+          en: "Smoothing constant for Reciprocal Rank Fusion.",
+          zh: "Reciprocal Rank Fusion 的平滑常数。",
+        },
+        final_top_k: {
+          en: "Final number of chunks returned after fusion and rerank.",
+          zh: "融合与重排后最终返回的块数量。",
+        },
+        enabled: { en: "Whether this sub-feature is enabled.", zh: "是否启用该子功能。" },
+        provider: {
+          en: "Rerank provider: llm (built-in) or api (external).",
+          zh: "重排序提供商：llm（内置 LLM）或 api（外部 API）。",
+        },
+        base_url: {
+          en: "External rerank API URL (when provider=api).",
+          zh: "外部重排序 API 地址（provider=api 时使用）。",
+        },
+        api_key_env: {
+          en: "Environment variable name holding the API key.",
+          zh: "存放 API Key 的环境变量名。",
+        },
+        model: { en: "Rerank model name.", zh: "重排序模型名称。" },
+        timeout_seconds: {
+          en: "Timeout for rerank API requests.",
+          zh: "重排序 API 请求超时时间。",
+        },
+        max_parent_chunks_per_doc: {
+          en: "Max parent chunks per document for GraphRAG build.",
+          zh: "GraphRAG 构建时每文档参与的最大父块数。",
+        },
+        concurrency: {
+          en: "Concurrent GraphRAG build tasks.",
+          zh: "GraphRAG 构建的并发任务数。",
+        },
+        mode: {
+          en: "OCR mode: vision_llm, rapidocr, or off.",
+          zh: "OCR 模式：vision_llm、rapidocr 或 off。",
+        },
+        max_pages: {
+          en: "Maximum pages for OCR/document processing.",
+          zh: "OCR/文档处理的最大页数。",
+        },
+        max_bytes: {
+          en: "Maximum bytes allowed per document.",
+          zh: "单文档允许的最大字节数。",
+        },
+        confluence_base_url: {
+          en: "Base URL for Confluence instance.",
+          zh: "Confluence 实例的基础 URL。",
+        },
+        feishu_base_url: {
+          en: "Base URL for Feishu Open Platform.",
+          zh: "飞书开放平台的基础 URL。",
+        },
+        url_allowlist: {
+          en: "Allowed URL prefixes for fetching, one per line.",
+          zh: "允许抓取的 URL 前缀，每行一条。",
+        },
+        url_denylist: {
+          en: "Denied URL prefixes for fetching, one per line.",
+          zh: "禁止抓取的 URL 前缀，每行一条。",
+        },
+      },
+      sandbox: {
+        driver: {
+          en: "Sandbox backend: auto (detect), docker, or kubernetes.",
+          zh: "沙箱后端：auto（自动检测）、docker 或 kubernetes。",
+        },
+        address: {
+          en: "Remote sandbox service address. Leave empty for local driver.",
+          zh: "远程沙箱服务地址。本地驱动时留空。",
+        },
+        image: {
+          en: "Container image for browser/tool sandbox instances.",
+          zh: "浏览器/工具沙箱实例使用的容器镜像。",
+        },
+        name_prefix: {
+          en: "Prefix for sandbox container or pod names.",
+          zh: "沙箱容器或 Pod 名称的前缀。",
+        },
+        ttl_minutes: {
+          en: "Maximum lifetime of a sandbox before automatic cleanup.",
+          zh: "沙箱自动清理前的最大存活时间。",
+        },
+        network: {
+          en: "Docker network mode for sandbox containers.",
+          zh: "沙箱容器使用的 Docker 网络模式。",
+        },
+        chrome_args: {
+          en: "Extra command-line arguments passed to Chrome in the sandbox.",
+          zh: "传入沙箱内 Chrome 的额外启动参数。",
+        },
+        https_proxy: {
+          en: "HTTPS proxy URL for sandbox outbound traffic.",
+          zh: "沙箱出站 HTTPS 流量的代理地址。",
+        },
+        http_proxy: {
+          en: "HTTP proxy URL for sandbox outbound traffic.",
+          zh: "沙箱出站 HTTP 流量的代理地址。",
+        },
+        no_proxy: {
+          en: "Comma-separated hosts that bypass the proxy.",
+          zh: "不走代理的主机列表，逗号分隔。",
+        },
+        cleanup_interval_seconds: {
+          en: "How often expired sandboxes are scanned and removed.",
+          zh: "扫描并清理过期沙箱的间隔。",
+        },
+        memory_limit: {
+          en: "Per-sandbox memory cap (e.g. 2g).",
+          zh: "单个沙箱的内存上限（如 2g）。",
+        },
+        cpu_limit: {
+          en: "Per-sandbox CPU cores limit.",
+          zh: "单个沙箱的 CPU 核心数上限。",
+        },
+        pids_limit: {
+          en: "Maximum number of processes per sandbox container.",
+          zh: "单个沙箱容器允许的最大进程数。",
+        },
+        pool_enabled: {
+          en: "Pre-warm a pool of sandboxes to reduce first-tool-call latency.",
+          zh: "预热沙箱连接池以降低首次工具调用延迟。",
+        },
+        pool_size: {
+          en: "Number of sandboxes kept warm when pool is enabled.",
+          zh: "启用连接池时保持预热的沙箱数量。",
+        },
+        idle_timeout_minutes: {
+          en: "Idle sandboxes are reclaimed after this duration.",
+          zh: "空闲沙箱超过此时长后将被回收。",
+        },
+        warmup_retry_interval_seconds: {
+          en: "Delay between retries when warming a sandbox fails.",
+          zh: "沙箱预热失败后的重试间隔。",
+        },
+        k8s_namespace: {
+          en: "Kubernetes namespace for sandbox pods.",
+          zh: "沙箱 Pod 所在的 Kubernetes 命名空间。",
+        },
+        k8s_pod_label: {
+          en: "Label selector used to identify sandbox pods.",
+          zh: "用于识别沙箱 Pod 的标签选择器。",
+        },
+      },
+      worker: {
+        max_concurrent_tasks: {
+          en: "Maximum agent tasks running concurrently on this worker node.",
+          zh: "本 Worker 节点同时执行的最大 Agent 任务数。",
+        },
+        task_dispatch_max_retries: {
+          en: "Retries when dispatching a task to the queue fails.",
+          zh: "任务入队分发失败时的最大重试次数。",
+        },
+        tool_timeout_seconds: {
+          en: "Maximum wait time for MCP and other tool calls.",
+          zh: "MCP 及其他工具调用的最大等待时间。",
+        },
+        mcp_connect_timeout_seconds: {
+          en: "Timeout for establishing an MCP server connection.",
+          zh: "建立 MCP 服务器连接的超时时间。",
+        },
+        max_sandboxes_per_node: {
+          en: "Maximum sandbox containers allowed on a single node.",
+          zh: "单节点允许运行的最大沙箱容器数。",
+        },
+        max_dynamic_sandboxes_global: {
+          en: "Global cap on dynamically created sandboxes. 0 means unlimited.",
+          zh: "全局动态创建沙箱的上限。0 表示不限制。",
+        },
+        admission_min_host_available_mb: {
+          en: "Minimum host free memory (MB) required before admitting new tasks.",
+          zh: "准入新任务前主机所需的最小可用内存（MB）。",
+        },
+        admission_reclaim_target_mb: {
+          en: "Target free memory (MB) after admission-driven sandbox reclaim.",
+          zh: "准入触发沙箱回收后的目标可用内存（MB）。",
+        },
+        admission_poll_interval_seconds: {
+          en: "How often the admission controller checks host memory.",
+          zh: "准入控制器检查主机内存的间隔。",
+        },
+        admission_settle_seconds: {
+          en: "Wait time for memory readings to stabilize before admission decisions.",
+          zh: "准入判定前等待内存读数稳定的时间。",
+        },
+        admission_reclaim_enabled: {
+          en: "Allow reclaiming idle sandboxes when host memory is low.",
+          zh: "主机内存不足时是否回收空闲沙箱。",
+        },
+        task_execution_lease_seconds: {
+          en: "Lease duration for in-flight tasks; expired leases allow recovery.",
+          zh: "执行中任务的租约时长；过期后可被回收恢复。",
+        },
+        reclaim_leader_lease_seconds: {
+          en: "Leader lease for sandbox reclaim in multi-instance deployments.",
+          zh: "多实例部署下沙箱回收 Leader 的租约时长。",
+        },
+        memory_probe_source: {
+          en: "Host memory probe source: auto or host.",
+          zh: "主机内存探测来源：auto 或 host。",
+        },
+      },
+      streams: {
+        dispatch_maxlen: {
+          en: "Maximum entries in the task dispatch Redis Stream.",
+          zh: "任务分发 Redis Stream 的最大条目数。",
+        },
+        task_input_maxlen: {
+          en: "Maximum entries in per-task input queues.",
+          zh: "单任务输入队列的最大条目数。",
+        },
+        task_output_maxlen: {
+          en: "Maximum entries in per-task output queues.",
+          zh: "单任务输出队列的最大条目数。",
+        },
+        stream_maxlen: {
+          en: "Maximum entries in session and event streams.",
+          zh: "会话与事件流的最大条目数。",
+        },
+      },
+      observability: {
+        otel_enabled: {
+          en: "Enable OpenTelemetry tracing for API and worker processes.",
+          zh: "为 API 与 Worker 进程启用 OpenTelemetry 追踪。",
+        },
+        otel_service_name: {
+          en: "Service name tag reported to the OTLP collector.",
+          zh: "上报至 OTLP 采集器的服务名标识。",
+        },
+        otel_exporter_endpoint: {
+          en: "OTLP exporter endpoint URL. Empty uses the default exporter.",
+          zh: "OTLP 导出端点 URL。留空则使用默认导出器。",
+        },
+        langfuse_enabled: {
+          en: "Debug-only placeholder; no Langfuse SDK integration yet.",
+          zh: "调试占位开关；当前尚未集成 Langfuse SDK。",
         },
       },
     },
@@ -736,6 +1308,93 @@ const messages = {
     globallyEnabled: { en: "Globally enabled", zh: "全局启用" },
     skillUpdated: { en: "Skill updated", zh: "Skill 已更新" },
     skillCreated: { en: "Skill created", zh: "Skill 已创建" },
+    autoRecommend: { en: "Auto-recommend this skill", zh: "自动推荐此 Skill" },
+    importSkill: { en: "Import Skill", zh: "导入 Skill" },
+    importFile: { en: "Import from file", zh: "从文件导入" },
+    importSlug: { en: "Slug override (optional)", zh: "Slug 覆盖（可选）" },
+    importMarkdown: { en: "Markdown content", zh: "Markdown 内容" },
+    importMarkdownPlaceholder: {
+      en: "Paste SKILL.md content or upload a file",
+      zh: "粘贴 SKILL.md 内容或上传文件",
+    },
+    importContentRequired: { en: "Import content is required", zh: "请提供导入内容" },
+    importSuccess: { en: "Skill imported", zh: "Skill 导入成功" },
+    importFailed: { en: "Failed to import Skill", zh: "导入 Skill 失败" },
+  },
+  settingsHitl: {
+    title: { en: "Human-in-the-loop gates", zh: "人机协同门控" },
+    description: {
+      en: "Configure plan approval, tool gates, and gate profiles for Web Operator sessions.",
+      zh: "配置计划审批、工具门控及 Web Operator 会话的门控配置。",
+    },
+    planGateEnabled: { en: "Plan gate", zh: "计划门控" },
+    planGateEnabledDesc: {
+      en: "Require human approval before executing a generated plan.",
+      zh: "执行生成的计划前需人工审批。",
+    },
+    toolGateTaskLevel: { en: "Task-level tool gate", zh: "任务级工具门控" },
+    toolGateTaskLevelDesc: {
+      en: "Require approval once per risky tool category per task.",
+      zh: "每个任务对高风险工具类别仅需审批一次。",
+    },
+    toolGateCallLevel: { en: "Call-level tool gate", zh: "调用级工具门控" },
+    toolGateCallLevelDesc: {
+      en: "Require approval for every risky tool invocation.",
+      zh: "每次高风险工具调用均需审批。",
+    },
+    toolGateRiskList: { en: "Risky tool list", zh: "风险工具列表" },
+    toolGateRiskListDesc: {
+      en: "One tool name or pattern per line (supports wildcards).",
+      zh: "每行一个工具名或模式（支持通配符）。",
+    },
+    criticalActionPatterns: { en: "Critical action patterns", zh: "关键操作模式" },
+    criticalActionPatternsDesc: {
+      en: "Regex patterns (one per line) that always require confirmation.",
+      zh: "每行一个正则，匹配的操作始终需要确认。",
+    },
+    takeoverTimeout: { en: "Takeover timeout (minutes)", zh: "接管超时（分钟）" },
+    gateProfilesTitle: { en: "Gate profiles", zh: "门控配置" },
+    gateProfile: {
+      loose: { en: "Loose", zh: "宽松" },
+      standard: { en: "Standard", zh: "标准" },
+      strict: { en: "Strict", zh: "严格" },
+    },
+    firstVisitDomainGate: { en: "First-visit domain gate", zh: "首次访问域名门控" },
+    profileToolGateCallLevel: { en: "Call-level tool gate", zh: "调用级工具门控" },
+    selectiveCriticalOnly: { en: "Selective critical only", zh: "仅关键操作" },
+    resetUserOverride: { en: "Reset my overrides", zh: "重置我的覆盖" },
+    loadFailed: { en: "Failed to load HITL settings", zh: "加载门控设置失败" },
+    saveSuccess: { en: "HITL settings saved", zh: "门控设置已保存" },
+    saveFailed: { en: "Failed to save HITL settings", zh: "保存门控设置失败" },
+    resetOverrideSuccess: { en: "Overrides reset", zh: "覆盖已重置" },
+    resetOverrideFailed: { en: "Failed to reset overrides", zh: "重置覆盖失败" },
+  },
+  settingsServiceKeys: {
+    title: { en: "Service API keys", zh: "服务 API Key" },
+    description: {
+      en: "Long-lived keys for automation and integrations. Keys are shown only once at creation.",
+      zh: "用于自动化与集成的长期密钥。创建时仅显示一次完整密钥。",
+    },
+    createKey: { en: "Create key", zh: "创建密钥" },
+    createDesc: {
+      en: "Give the key a name so you can identify it later.",
+      zh: "为密钥命名，便于日后识别。",
+    },
+    keyName: { en: "Key name", zh: "密钥名称" },
+    keyNamePlaceholder: { en: "e.g. CI pipeline", zh: "例如：CI 流水线" },
+    nameRequired: { en: "Key name is required", zh: "请输入密钥名称" },
+    noKeys: { en: "No service keys yet", zh: "暂无服务密钥" },
+    createdAt: { en: "Created {time}", zh: "创建于 {time}" },
+    lastUsedAt: { en: "Last used {time}", zh: "最后使用 {time}" },
+    revoked: { en: "Key revoked", zh: "密钥已吊销" },
+    keyCreatedTitle: { en: "Key created", zh: "密钥已创建" },
+    keyCreatedDesc: {
+      en: "Copy this key now. You will not be able to see it again.",
+      zh: "请立即复制此密钥，之后将无法再次查看。",
+    },
+    copyKey: { en: "Copy key", zh: "复制密钥" },
+    copied: { en: "Copied", zh: "已复制" },
+    copyFailed: { en: "Copy failed", zh: "复制失败" },
   },
   settingsMemory: {
     description: {
@@ -872,6 +1531,20 @@ const messages = {
     inviteAccepted: { en: "Accepted", zh: "已接受" },
     invitePending: { en: "Pending", zh: "待处理" },
     inviteExpired: { en: "Expired", zh: "已过期" },
+    teamUsageTitle: { en: "Team usage", zh: "团队用量" },
+    teamUsageDesc: { en: "Top teams by token usage", zh: "按 Token 用量排序的团队" },
+    deleteUser: { en: "Delete user", zh: "删除用户" },
+    deleteUserTitle: { en: "Delete user?", zh: "删除用户？" },
+    deleteUserDesc: {
+      en: "Permanently delete {name}? Choose how to handle their resources.",
+      zh: "确定永久删除 {name}？请选择资源处理方式。",
+    },
+    deleteUserFailed: { en: "Failed to delete user", zh: "删除用户失败" },
+    userDeleted: { en: "User deleted", zh: "用户已删除" },
+    deleteStrategy: { en: "Deletion strategy", zh: "删除策略" },
+    deleteStrategyAnonymize: { en: "Anonymize (keep resources)", zh: "匿名化（保留资源）" },
+    deleteStrategyCascade: { en: "Cascade delete resources", zh: "级联删除资源" },
+    deleteStrategyTransfer: { en: "Transfer to team", zh: "转移到团队" },
   },
   adminNav: {
     subtitle: { en: "Users, audit, and platform settings", zh: "用户、审计与平台设置" },
@@ -1015,6 +1688,10 @@ const messages = {
     gapCount: { en: "Gap", zh: "差距" },
     naCount: { en: "N/A", zh: "不适用" },
     reportHint: { en: "Select a time range and generate a report", zh: "选择时间范围并生成报告" },
+    sessionChainOk: { en: "Session evidence chain intact", zh: "会话证据链完整" },
+    sessionChainBroken: { en: "Session evidence chain broken", zh: "会话证据链异常" },
+    verifySessionChain: { en: "Verify chain", zh: "验证链" },
+    verifySessionFailed: { en: "Failed to verify session chain", zh: "验证会话链失败" },
   },
   marketplace: {
     selectApp: { en: "Select an app to get started", zh: "请选择一个应用开始使用" },
@@ -1452,7 +2129,11 @@ const messages = {
     deleteFailed: { en: "Failed to delete codebase", zh: "删除代码库失败" },
     deleteBlockedIngesting: { en: "Cannot delete while indexing is in progress", zh: "索引进行中，无法删除" },
     tabSource: { en: "Source", zh: "源码" },
+    tabSymbols: { en: "Symbols", zh: "符号" },
     tabDiagrams: { en: "Diagrams", zh: "图表" },
+    symbolSearchPlaceholder: { en: "Search symbols...", zh: "搜索符号..." },
+    symbolSearchHint: { en: "Enter a query to search indexed symbols", zh: "输入关键词搜索已索引符号" },
+    noSymbolsFound: { en: "No symbols found", zh: "未找到符号" },
     sourceHint: { en: "Click a file or path in an answer to view source", zh: "点击文件或回答中的路径定位源码" },
     artifacts: {
       architecture: { en: "Architecture", zh: "架构" },
@@ -1500,10 +2181,23 @@ const messages = {
   mermaid: {
     renderFailed: { en: "Mermaid render failed", zh: "Mermaid 渲染失败" },
   },
+  notifications: {
+    empty: { en: "No notifications", zh: "暂无通知" },
+    refreshing: { en: "Refreshing...", zh: "刷新中..." },
+    title: { en: "Notifications", zh: "通知" },
+    scheduledJobCompleted: {
+      en: 'Scheduled job "{jobName}" completed',
+      zh: "定时任务「{jobName}」已完成",
+    },
+    scheduledJobStarted: {
+      en: 'Scheduled job "{jobName}" started',
+      zh: "定时任务「{jobName}」已开始执行",
+    },
+  },
   toolUse: {
-    statusRunning: { en: "running", zh: "running" },
-    statusCalled: { en: "called", zh: "called" },
-    statusError: { en: "error", zh: "error" },
+    statusRunning: { en: "running", zh: "执行中" },
+    statusCalled: { en: "called", zh: "已完成" },
+    statusError: { en: "error", zh: "失败" },
     shellFallback: { en: "shell", zh: "shell" },
     readingFile: { en: "Reading file", zh: "正在读取文件" },
     readingFileWithPath: { en: "Reading file {path}", zh: "正在读取文件 {path}" },

@@ -55,7 +55,7 @@ export function PlanPanel({ className, steps: stepsProp = [] }: PlanPanelProps) 
           type="button"
           variant="ghost"
           onClick={togglePanel}
-          className="hover:bg-muted/40 h-auto w-full justify-between gap-3 rounded-xl px-4 py-2.5"
+          className="hover:bg-muted/40 h-auto w-full justify-between gap-3 rounded-xl px-4 py-2.5 whitespace-normal"
         >
           <div className="flex min-w-0 flex-1 items-start gap-2.5">
             {activeStep && (

@@ -31,9 +31,7 @@ async def upload_file(
 ) -> Response[FileInfo]:
     """文件上传接口，传递文件返回文件的File信息"""
     fileinfo = await file_service.upload_file(upload_file=file, scope=ctx.scope)
-    return Response.success(
-        msg="上传文件成功",
-        data=fileinfo,
+    return Response.success(data=fileinfo,
     )
 
 
@@ -50,9 +48,7 @@ async def get_file_info(
 ) -> Response[FileInfo]:
     """获取指定会话中对应文件的基础信息"""
     fileinfo = await file_service.get_file_info(file_id, scope=ctx.scope)
-    return Response.success(
-        msg="获取文件信息成功",
-        data=fileinfo,
+    return Response.success(data=fileinfo,
     )
 
 

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from app.domain.models.error_codes import MODEL_QUOTA_EXCEEDED
 from app.domain.models.event import (
     AssistantNoticeEvent,
+    ClarifyAnswer,
     ClarifyEvent,
     ClarifyOption,
     ClarifyQuestion,
@@ -102,6 +103,27 @@ def test_error_sse_mapping_preserves_code():
     assert sse.event == "error"
     assert sse.data.error == "quota exhausted"
     assert sse.data.code == MODEL_QUOTA_EXCEEDED
+
+
+def test_message_sse_mapping_projects_clarify_answers():
+    event = MessageEvent(
+        role="user",
+        message="【澄清回复】\n- 出行人员: 情侣",
+        clarify_answers=[
+            ClarifyAnswer(
+                question_id="travelers",
+                prompt="出行人员构成是？",
+                option_ids=["couple"],
+                option_labels=["情侣/夫妻双人"],
+            )
+        ],
+    )
+
+    sse = EventMapper.event_to_sse_event(event)
+
+    assert sse.event == "message"
+    assert sse.data.clarify_answers[0].question_id == "travelers"
+    assert sse.data.clarify_answers[0].option_labels == ["情侣/夫妻双人"]
 
 
 def test_clarify_sse_mapping_projects_questions():

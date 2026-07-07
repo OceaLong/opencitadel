@@ -1,4 +1,5 @@
 import { createSSEStream, get, parseSSEStream, patch, post } from "./fetch";
+import { translate } from "@/i18n/translate";
 import type {
   ChatParams,
   CreateSessionParams,
@@ -112,11 +113,11 @@ export const sessionApi = {
 
         // 流正常结束（服务端关闭连接），通知上层以便重连
         if (!controller.signal.aborted && onError) {
-          onError(new Error("SSE 流已结束"));
+          onError(new Error(translate("errors.sseStreamEnded")));
         }
       } catch (error) {
         if (!controller.signal.aborted && onError) {
-          onError(error instanceof Error ? error : new Error("SSE 连接失败"));
+          onError(error instanceof Error ? error : new Error(translate("errors.sseConnectionFailed")));
         }
       }
     };
@@ -234,7 +235,7 @@ export const sessionApi = {
           return;
         }
         if (!controller.signal.aborted && onError) {
-          onError(error instanceof Error ? error : new Error("启动聊天流失败"));
+          onError(error instanceof Error ? error : new Error(translate("errors.chatStreamStartFailed")));
         }
       }
     };

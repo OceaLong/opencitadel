@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Dict, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -23,5 +23,7 @@ class Notification(BaseModel):
     artifact_id: Optional[str] = None
     job_id: Optional[str] = None
     message: str = ""
+    i18n_key: Optional[str] = None
+    i18n_params: Optional[Dict[str, str]] = None
     read: bool = False
     created_at: datetime = Field(default_factory=datetime.now)

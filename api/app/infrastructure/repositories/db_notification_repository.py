@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.notification import Notification
 from app.domain.repositories.notification_repository import NotificationRepository
+from app.domain.utils.notification_message import encode_notification_message
 from app.infrastructure.models.notification import NotificationModel
 
 
@@ -22,7 +23,11 @@ class DBNotificationRepository(NotificationRepository):
             session_id=notification.session_id,
             artifact_id=notification.artifact_id,
             job_id=notification.job_id,
-            message=notification.message,
+            message=encode_notification_message(
+                notification.message,
+                i18n_key=notification.i18n_key,
+                i18n_params=notification.i18n_params,
+            ),
             read=notification.read,
             created_at=notification.created_at,
         ))

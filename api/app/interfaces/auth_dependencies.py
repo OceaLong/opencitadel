@@ -20,7 +20,7 @@ async def get_current_principal() -> Principal:
 async def require_admin() -> Principal:
     principal = await get_current_principal()
     if not principal.is_admin:
-        raise ForbiddenError("需要管理员权限")
+        raise ForbiddenError("需要管理员权限", error_key="errors.adminRequired")
     return principal
 
 
@@ -46,7 +46,7 @@ async def get_workspace_context(
     if not workspace_id:
         return WorkspaceContext(principal=principal, scope=OwnerScope.personal(principal.user_id))
     if workspace_id not in principal.team_roles:
-        raise ForbiddenError("无权访问该工作区")
+        raise ForbiddenError("无权访问该工作区", error_key="errors.workspaceAccessDenied")
     return WorkspaceContext(principal=principal, scope=OwnerScope.team(principal.user_id, workspace_id))
 
 

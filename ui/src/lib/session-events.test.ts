@@ -89,4 +89,97 @@ describe("eventsToTimeline error i18n", () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]?.repeatCount).toBe(2);
   });
+
+  it("localizes assistant_notice via i18n_key", () => {
+    const events: SSEEventData[] = [
+      {
+        type: "assistant_notice",
+        data: {
+          message: "",
+          i18n_key: "sessionDetail.modelFallbackNotice",
+          i18n_params: { modelName: "qwen3.6-35b-a3b" },
+          created_at: 1,
+        },
+      },
+    ];
+
+    const timeline = eventsToTimeline(events);
+    const assistantItem = timeline.find((item) => item.kind === "assistant");
+
+    expect(assistantItem?.kind).toBe("assistant");
+    if (assistantItem?.kind === "assistant") {
+      expect(assistantItem.data.message).toContain("qwen3.6-35b-a3b");
+      expect(assistantItem.data.message).not.toBe("sessionDetail.modelFallbackNotice");
+    }
+  });
+
+  it("localizes model fallback notice in Chinese when locale is zh", () => {
+    const events: SSEEventData[] = [
+      {
+        type: "assistant_notice",
+        data: {
+          message: "Current model quota is exhausted. Switched to qwen3.7-max; the task will continue.",
+          i18n_key: "sessionDetail.modelFallbackNotice",
+          i18n_params: { modelName: "qwen3.7-max" },
+          created_at: 1,
+        },
+      },
+    ];
+
+    const timeline = eventsToTimeline(events, "zh");
+    const assistantItem = timeline.find((item) => item.kind === "assistant");
+
+    expect(assistantItem?.kind).toBe("assistant");
+    if (assistantItem?.kind === "assistant") {
+      expect(assistantItem.data.message).toContain("qwen3.7-max");
+      expect(assistantItem.data.message).toContain("配额");
+      expect(assistantItem.data.message).not.toContain("quota is exhausted");
+    }
+  });
+
+  it("localizes model fallback notice in English when locale is en", () => {
+    const events: SSEEventData[] = [
+      {
+        type: "assistant_notice",
+        data: {
+          message: "当前模型配额已耗尽，已自动切换至 qwen3.7-max，任务继续执行。",
+          i18n_key: "sessionDetail.modelFallbackNotice",
+          i18n_params: { modelName: "qwen3.7-max" },
+          created_at: 1,
+        },
+      },
+    ];
+
+    const timeline = eventsToTimeline(events, "en");
+    const assistantItem = timeline.find((item) => item.kind === "assistant");
+
+    expect(assistantItem?.kind).toBe("assistant");
+    if (assistantItem?.kind === "assistant") {
+      expect(assistantItem.data.message).toContain("qwen3.7-max");
+      expect(assistantItem.data.message).toContain("quota is exhausted");
+      expect(assistantItem.data.message).not.toContain("配额");
+    }
+  });
+
+  it("falls back to message when i18n_key is missing from bundle", () => {
+    const events: SSEEventData[] = [
+      {
+        type: "assistant_notice",
+        data: {
+          message: "Fallback notice for qwen3.6-35b-a3b",
+          i18n_key: "sessionDetail.unknownMissingKey",
+          i18n_params: { modelName: "qwen3.6-35b-a3b" },
+          created_at: 1,
+        },
+      },
+    ];
+
+    const timeline = eventsToTimeline(events);
+    const assistantItem = timeline.find((item) => item.kind === "assistant");
+
+    expect(assistantItem?.kind).toBe("assistant");
+    if (assistantItem?.kind === "assistant") {
+      expect(assistantItem.data.message).toBe("Fallback notice for qwen3.6-35b-a3b");
+    }
+  });
 });

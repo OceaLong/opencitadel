@@ -100,7 +100,6 @@ class Cos:
             Bucket=self.bucket,
             Body=data,
             Key=key,
-            ContentLength=len(data),
         )
 
     async def _fetch_object_bytes(self, key: str) -> tuple[bytes, Optional[int]]:

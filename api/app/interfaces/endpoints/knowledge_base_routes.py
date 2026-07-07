@@ -54,9 +54,7 @@ async def list_knowledge_bases(
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[ListKnowledgeBasesResponse]:
     items = await service.list_kbs(limit=limit, offset=offset, scope=ctx.scope)
-    return Response.success(
-        data=ListKnowledgeBasesResponse(knowledge_bases=[_to_kb_response(item) for item in items])
-    )
+    return Response.success(data=ListKnowledgeBasesResponse(knowledge_bases=[_to_kb_response(item) for item in items]))
 
 
 @router.get("/{kb_id}", response_model=Response[KnowledgeBaseResponse])
@@ -76,7 +74,7 @@ async def delete_knowledge_base(
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[Optional[Dict]]:
     await service.delete_kb(kb_id, scope=ctx.scope)
-    return Response.success(msg="删除知识库成功")
+    return Response.success()
 
 
 @router.post("/{kb_id}/documents", response_model=Response[KnowledgeBaseResponse])
@@ -103,9 +101,7 @@ async def list_documents(
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[ListKnowledgeDocumentsResponse]:
     docs = await service.list_documents(kb_id, scope=ctx.scope)
-    return Response.success(
-        data=ListKnowledgeDocumentsResponse(documents=[_to_doc_response(doc) for doc in docs])
-    )
+    return Response.success(data=ListKnowledgeDocumentsResponse(documents=[_to_doc_response(doc) for doc in docs]))
 
 
 @router.delete("/{kb_id}/documents/{doc_id}", response_model=Response[KnowledgeBaseResponse])
@@ -117,7 +113,7 @@ async def delete_document(
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[KnowledgeBaseResponse]:
     kb = await service.delete_document(kb_id, doc_id, scope=ctx.scope)
-    return Response.success(data=_to_kb_response(kb), msg="删除文档成功")
+    return Response.success(data=_to_kb_response(kb))
 
 
 @router.get("/{kb_id}/ingest")
@@ -160,8 +156,7 @@ async def create_kb_session(
         skill_id=request.skill_id,
         scope=ctx.scope,
     )
-    return Response.success(
-        data=CreateKnowledgeBaseSessionResponse(
+    return Response.success(data=CreateKnowledgeBaseSessionResponse(
             session_id=session.id,
             knowledge_base_id=kb_id,
             mode=session.mode,
@@ -178,9 +173,7 @@ async def read_document_in_kb(
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[ReadKnowledgeDocumentResponse]:
     doc, content = await service.read_document(doc_id, page=page, kb_id=kb_id, scope=ctx.scope)
-    return Response.success(
-        data=ReadKnowledgeDocumentResponse(document=_to_doc_response(doc), content=content)
-    )
+    return Response.success(data=ReadKnowledgeDocumentResponse(document=_to_doc_response(doc), content=content))
 
 
 @router.get("/documents/{doc_id}", response_model=Response[ReadKnowledgeDocumentResponse])
@@ -192,6 +185,4 @@ async def read_document(
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[ReadKnowledgeDocumentResponse]:
     doc, content = await service.read_document(doc_id, page=page, kb_id=kb_id, scope=ctx.scope)
-    return Response.success(
-        data=ReadKnowledgeDocumentResponse(document=_to_doc_response(doc), content=content)
-    )
+    return Response.success(data=ReadKnowledgeDocumentResponse(document=_to_doc_response(doc), content=content))

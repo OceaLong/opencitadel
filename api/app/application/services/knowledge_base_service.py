@@ -277,7 +277,10 @@ class KnowledgeBaseService:
     async def delete_kb(self, kb_id: str, scope: Optional[OwnerScope] = None) -> None:
         kb = await self.get_kb(kb_id, scope=scope)
         if await self._ingest_in_progress(kb):
-            raise ConflictError("知识库正在索引中，请等待当前任务完成后再删除")
+            raise ConflictError(
+                "知识库正在索引中，请等待当前任务完成后再删除",
+                error_key="errors.kbIndexingInProgress",
+            )
         if kb.ingest_task_id:
             await self._task_state.request_cancel(kb.ingest_task_id)
             await self._wait_for_task_drain(kb.ingest_task_id)

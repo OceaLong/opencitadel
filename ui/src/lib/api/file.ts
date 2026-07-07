@@ -1,4 +1,5 @@
 import { API_CONFIG, authenticatedFetch, get, post } from "./fetch";
+import { translate } from "@/i18n/translate";
 import { FILE_UPLOAD_TIMEOUT_MS } from "@/lib/constants";
 import type { FileInfo, FileUploadParams } from "./types";
 
@@ -40,7 +41,7 @@ export const fileApi = {
     const response = await authenticatedFetch(`/files/${fileId}/download`);
 
     if (!response.ok) {
-      throw new Error(`下载失败: ${response.statusText}`);
+      throw new Error(translate("errors.downloadFailedWithStatus", { status: response.statusText }));
     }
 
     return response.blob();

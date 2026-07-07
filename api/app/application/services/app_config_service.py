@@ -211,7 +211,7 @@ class AppConfigService:
 
     async def get_mcp_servers(self, scope: Optional[OwnerScope] = None) -> List[ListMCPServerItem]:
         if self._mcp_server_service is None:
-            raise BadRequestError("MCP 服务未启用")
+            raise BadRequestError("MCP 服务未启用", error_key="errors.mcpNotEnabled")
         records = await self._mcp_server_service.list_servers(scope=scope)
         mcp_config = await self._mcp_server_service.resolve_mcp_config(scope)
         manager = MCPConnectionPool.try_get_cached(mcp_config)
@@ -278,7 +278,7 @@ class AppConfigService:
         is_admin: bool = False,
     ) -> MCPConfig:
         if self._mcp_server_service is None:
-            raise BadRequestError("MCP 服务未启用")
+            raise BadRequestError("MCP 服务未启用", error_key="errors.mcpNotEnabled")
         cfg = mcp_config.mcpServers.get(server_name)
         if cfg is None:
             raise BadRequestError(f"MCP 配置中缺少服务[{server_name}]")
@@ -322,7 +322,7 @@ class AppConfigService:
         is_admin: bool = False,
     ) -> MCPConfig:
         if self._mcp_server_service is None:
-            raise BadRequestError("MCP 服务未启用")
+            raise BadRequestError("MCP 服务未启用", error_key="errors.mcpNotEnabled")
         for name, cfg in mcp_config.mcpServers.items():
             if not is_admin and cfg.transport == MCPTransport.STDIO:
                 raise ForbiddenError("仅管理员可配置 stdio 类型的 MCP 服务")
@@ -359,7 +359,7 @@ class AppConfigService:
         actor_user_id: Optional[str] = None,
     ) -> None:
         if self._mcp_server_service is None:
-            raise BadRequestError("MCP 服务未启用")
+            raise BadRequestError("MCP 服务未启用", error_key="errors.mcpNotEnabled")
         records = await self._mcp_server_service.list_servers(mask=False, scope=scope)
         target = next((r for r in records if r.name == server_name), None)
         if target is None:
@@ -377,7 +377,7 @@ class AppConfigService:
         actor_user_id: Optional[str] = None,
     ) -> None:
         if self._mcp_server_service is None:
-            raise BadRequestError("MCP 服务未启用")
+            raise BadRequestError("MCP 服务未启用", error_key="errors.mcpNotEnabled")
         records = await self._mcp_server_service.list_servers(mask=False, scope=scope)
         target = next((r for r in records if r.name == server_name), None)
         if target is None:

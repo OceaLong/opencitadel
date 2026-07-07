@@ -49,9 +49,7 @@ async def list_memories(
         tags=tag_list,
         owner_scope=ctx.scope,
     )
-    return Response.success(
-        data=MemoryEntryListResponse(entries=[_entry_response(e) for e in entries])
-    )
+    return Response.success(data=MemoryEntryListResponse(entries=[_entry_response(e) for e in entries]))
 
 
 @memory_router.post("", response_model=Response[MemoryEntryResponse])
@@ -63,7 +61,7 @@ async def create_memory(
 ) -> Response[MemoryEntryResponse]:
     entry = MemoryEntry(**request.model_dump())
     created = await memory_service.create_entry(entry, owner_scope=ctx.scope)
-    return Response.success(msg="创建记忆成功", data=_entry_response(created))
+    return Response.success( data=_entry_response(created))
 
 
 @memory_router.get("/{entry_id}", response_model=Response[MemoryEntryResponse])
@@ -90,7 +88,7 @@ async def update_memory(
             data[k] = v
     updated = MemoryEntry(**data)
     result = await memory_service.update_entry(entry_id, updated, owner_scope=ctx.scope)
-    return Response.success(msg="更新记忆成功", data=_entry_response(result))
+    return Response.success( data=_entry_response(result))
 
 
 @memory_router.delete("/{entry_id}", response_model=Response[Optional[Dict]])
@@ -100,4 +98,4 @@ async def delete_memory(
         memory_service: MemoryService = Depends(get_memory_service),
 ) -> Response[Optional[Dict]]:
     await memory_service.delete_entry(entry_id, owner_scope=ctx.scope)
-    return Response.success(msg="删除记忆成功")
+    return Response.success()

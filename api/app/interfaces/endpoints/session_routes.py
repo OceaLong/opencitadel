@@ -342,10 +342,7 @@ async def create_session(
                 "gate_profile": request.gate_profile or "standard",
             },
         ))
-    return Response.success(
-        msg="创建任务会话成功",
-        data=CreateSessionResponse(session_id=session.id)
-    )
+    return Response.success(data=CreateSessionResponse(session_id=session.id))
 
 
 @router.post(
@@ -416,10 +413,7 @@ async def get_all_sessions(
         _session_to_list_item(session)
         for session in sessions
     ]
-    return Response.success(
-        msg="获取任务会话列表成功",
-        data=ListSessionResponse(sessions=session_items)
-    )
+    return Response.success(data=ListSessionResponse(sessions=session_items))
 
 
 @router.post(
@@ -437,7 +431,7 @@ async def clear_unread_message_count(
     if not await session_service.get_session(session_id, scope=ctx.scope):
         raise NotFoundError("该会话不存在，请核实后重试")
     await session_service.clear_unread_message_count(session_id)
-    return Response.success(msg="清除未读消息数成功")
+    return Response.success()
 
 
 @router.post(
@@ -453,7 +447,7 @@ async def delete_session(
 ) -> Response[Optional[Dict]]:
     """根据传递的会话id删除指定任务会话"""
     await session_service.delete_session(session_id, scope=ctx.scope)
-    return Response.success(msg="删除任务会话成功")
+    return Response.success()
 
 
 @router.post(
@@ -492,6 +486,7 @@ async def chat(
                 session_id=session_id,
                 message=message,
                 attachments=request.attachments,
+                clarify_answers=request.clarify_answers,
                 latest_event_id=request.event_id,
                 timestamp=datetime.fromtimestamp(request.timestamp) if request.timestamp else None,
                 model_id=request.model_id,
@@ -545,9 +540,7 @@ async def get_session_events(
     has_earlier = False
     if prev_cursor is not None:
         has_earlier = await session_service.has_events_before(session_id, prev_cursor)
-    return Response.success(
-        msg="分页获取会话事件成功",
-        data=GetSessionEventsResponse(
+    return Response.success(data=GetSessionEventsResponse(
             events=EventMapper.events_to_sse_events(projected, include_debug=include_debug),
             next_cursor=records[-1][0] if len(records) == limit and not latest and before is None else None,
             prev_cursor=prev_cursor,
@@ -577,9 +570,7 @@ async def get_session(
     if not session:
         raise NotFoundError("该会话不存在，请核实后重试")
     event_records = await session_service.get_session_events(session_id, limit=events_limit, scope=ctx.scope)
-    return Response.success(
-        msg="获取会话详情成功",
-        data=await build_get_session_response(
+    return Response.success(data=await build_get_session_response(
             session,
             llm_model_service,
             skill_service,
@@ -616,9 +607,7 @@ async def get_session_token_usage(
             pass
     summary = await token_usage_service.get_session_summary(session_id, model_prices=model_prices or None)
     records = await token_usage_service.list_by_session(session_id)
-    return Response.success(
-        msg="获取 Token 用量成功",
-        data=GetSessionTokenUsageResponse(
+    return Response.success(data=GetSessionTokenUsageResponse(
             summary=TokenUsageSummaryResponse(
                 prompt_tokens=summary.prompt_tokens,
                 completion_tokens=summary.completion_tokens,
@@ -675,9 +664,7 @@ async def patch_session(
     if not session:
         raise NotFoundError("该会话不存在，请核实后重试")
     event_records = await session_service.get_session_events(session_id, limit=events_limit, scope=ctx.scope)
-    return Response.success(
-        msg="更新会话配置成功",
-        data=await build_get_session_response(
+    return Response.success(data=await build_get_session_response(
             session,
             llm_model_service,
             skill_service,
@@ -703,8 +690,7 @@ async def get_session_memory(
     if not await session_service.get_session(session_id, scope=ctx.scope):
         raise NotFoundError("该会话不存在，请核实后重试")
     memories = await memory_service.get_session_memories(session_id)
-    return Response.success(
-        data=SessionMemoryResponse(
+    return Response.success(data=SessionMemoryResponse(
             planner=memories.get("planner", []),
             react=memories.get("react", []),
         )
@@ -726,7 +712,7 @@ async def compact_session_memory(
     if not await session_service.get_session(session_id, scope=ctx.scope):
         raise NotFoundError("该会话不存在，请核实后重试")
     await memory_service.compact_session_memory(session_id, request.agent_name)
-    return Response.success(msg="压缩记忆成功")
+    return Response.success()
 
 
 @router.post(
@@ -744,7 +730,7 @@ async def clear_session_memory(
     if not await session_service.get_session(session_id, scope=ctx.scope):
         raise NotFoundError("该会话不存在，请核实后重试")
     await memory_service.clear_session_memory(session_id, request.agent_name)
-    return Response.success(msg="清空记忆成功")
+    return Response.success()
 
 
 @router.delete(
@@ -763,7 +749,7 @@ async def delete_session_memory_message(
     if not await session_service.get_session(session_id, scope=ctx.scope):
         raise NotFoundError("该会话不存在，请核实后重试")
     await memory_service.delete_session_memory_message(session_id, agent_name, index)
-    return Response.success(msg="删除消息成功")
+    return Response.success()
 
 
 @router.get(
@@ -780,9 +766,7 @@ async def list_session_checkpoints(
     if not await session_service.get_session(session_id, scope=ctx.scope):
         raise NotFoundError("该会话不存在，请核实后重试")
     checkpoints = await agent_service.list_checkpoints(session_id)
-    return Response.success(
-        msg="获取还原点列表成功",
-        data=ListCheckpointsResponse(
+    return Response.success(data=ListCheckpointsResponse(
             checkpoints=[
                 CheckpointItemResponse(
                     id=item.id,
@@ -825,9 +809,7 @@ async def restore_session_checkpoint(
         team_id=ctx.scope.team_id if ctx.scope.type == OwnerScopeType.TEAM else None,
         metadata={"checkpoint_id": checkpoint_id, "operator_scope": session.operator_scope},
     ))
-    return Response.success(
-        msg="回退成功",
-        data=RestoreCheckpointResponse(),
+    return Response.success(data=RestoreCheckpointResponse(),
     )
 
 
@@ -848,7 +830,7 @@ async def stop_session(
     if not await session_service.get_session(session_id, scope=ctx.scope):
         raise NotFoundError("该会话不存在，请核实后重试")
     await agent_service.stop_session(session_id)
-    return Response.success(msg="停止任务会话成功")
+    return Response.success()
 
 
 @router.get(
@@ -864,10 +846,7 @@ async def get_session_files(
 ) -> Response[GetSessionFilesResponse]:
     """获取指定任务会话文件列表信息"""
     files = await session_service.get_session_files(session_id, scope=ctx.scope)
-    return Response.success(
-        msg="获取会话文件列表成功",
-        data=GetSessionFilesResponse(files=files)
-    )
+    return Response.success(data=GetSessionFilesResponse(files=files))
 
 
 @router.post(
@@ -884,9 +863,7 @@ async def read_file(
 ) -> Response[FileReadResponse]:
     """根据传递的会话id+文件路径查看沙箱中文件的内容信息"""
     result = await session_service.read_file(session_id, request.filepath, scope=ctx.scope)
-    return Response.success(
-        msg="获取会话文件内容成功",
-        data=result
+    return Response.success(data=result
     )
 
 
@@ -904,9 +881,7 @@ async def read_shell_output(
 ) -> Response[ShellReadResponse]:
     """查看会话的shell内容输出"""
     result = await session_service.read_shell_output(session_id, request.session_id, scope=ctx.scope)
-    return Response.success(
-        msg="获取Shell内容输出结果成功",
-        data=result,
+    return Response.success(data=result,
     )
 
 

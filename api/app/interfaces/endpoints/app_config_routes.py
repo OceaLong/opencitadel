@@ -71,7 +71,7 @@ async def update_section(
         scope=ctx.scope,
         is_admin=is_admin,
     )
-    return Response.success(msg="更新配置成功", data=updated.model_dump(mode="json"))
+    return Response.success( data=updated.model_dump(mode="json"))
 
 
 @router.delete(
@@ -84,7 +84,7 @@ async def delete_user_override(
         app_config_service: AppConfigService = Depends(get_app_config_service),
 ) -> Response[Optional[Dict]]:
     await app_config_service.delete_user_override(ctx.principal.user_id, changed_by=ctx.principal.user_id)
-    return Response.success(msg="已清除用户配置覆盖")
+    return Response.success()
 
 
 @router.get(
@@ -135,7 +135,7 @@ async def rollback_revision(
         revision_id,
         changed_by=ctx.principal.user_id,
     )
-    return Response.success(msg="配置回滚成功", data=restored.model_dump(mode="json"))
+    return Response.success( data=restored.model_dump(mode="json"))
 
 
 @router.get(
@@ -167,7 +167,7 @@ async def update_agent_config(
         scope=ctx.scope,
         is_admin=ctx.principal.is_admin,
     )
-    return Response.success(msg="更新Agent信息配置成功", data=updated.model_dump())
+    return Response.success( data=updated.model_dump())
 
 
 @router.get(
@@ -180,7 +180,7 @@ async def get_mcp_servers(
         app_config_service: AppConfigService = Depends(get_app_config_service),
 ) -> Response[ListMCPServerResponse]:
     mcp_servers = await app_config_service.get_mcp_servers(scope=ctx.scope)
-    return Response.success(msg="获取mcp服务器列表成功", data=ListMCPServerResponse(mcp_servers=mcp_servers))
+    return Response.success( data=ListMCPServerResponse(mcp_servers=mcp_servers))
 
 
 @router.post(
@@ -204,7 +204,7 @@ async def create_mcp_servers(
         actor_user_id=ctx.principal.user_id,
         is_admin=ctx.principal.is_admin,
     )
-    return Response.success(msg="新增MCP服务配置成功")
+    return Response.success()
 
 
 @router.post(
@@ -230,7 +230,7 @@ async def update_mcp_server(
         actor_user_id=ctx.principal.user_id,
         is_admin=ctx.principal.is_admin,
     )
-    return Response.success(msg="更新MCP服务配置成功")
+    return Response.success()
 
 
 @router.post(
@@ -248,7 +248,7 @@ async def delete_mcp_server(
         scope=ctx.scope,
         actor_user_id=ctx.principal.user_id,
     )
-    return Response.success(msg="删除MCP服务配置成功")
+    return Response.success()
 
 
 @router.post(
@@ -268,7 +268,7 @@ async def set_mcp_server_enabled(
         scope=ctx.scope,
         actor_user_id=ctx.principal.user_id,
     )
-    return Response.success(msg="更新MCP服务启用状态成功")
+    return Response.success()
 
 
 @router.get(
@@ -281,7 +281,7 @@ async def get_a2a_servers(
         app_config_service: AppConfigService = Depends(get_app_config_service),
 ) -> Response[ListA2AServerResponse]:
     a2a_servers = await app_config_service.get_a2a_servers(scope=ctx.scope)
-    return Response.success(msg="获取a2a服务列表成功", data=ListA2AServerResponse(a2a_servers=a2a_servers))
+    return Response.success( data=ListA2AServerResponse(a2a_servers=a2a_servers))
 
 
 @router.post(
@@ -300,7 +300,7 @@ async def create_a2a_server(
         actor_user_id=ctx.principal.user_id,
         is_admin=ctx.principal.is_admin,
     )
-    return Response.success(msg="新增A2A服务配置成功")
+    return Response.success()
 
 
 @router.post(
@@ -318,7 +318,7 @@ async def delete_a2a_server(
         scope=ctx.scope,
         actor_user_id=ctx.principal.user_id,
     )
-    return Response.success(msg="删除a2a服务器成功")
+    return Response.success()
 
 
 @router.post(
@@ -338,4 +338,4 @@ async def set_a2a_server_enabled(
         scope=ctx.scope,
         actor_user_id=ctx.principal.user_id,
     )
-    return Response.success(msg="更新a2a服务器启用状态成功")
+    return Response.success()

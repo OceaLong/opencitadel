@@ -92,3 +92,22 @@ async def test_requeue_latest_user_message_returns_true_when_stream_has_input():
 
     ok = await requeue_latest_user_message(task, "sess-1", MagicMock())
     assert ok is True
+
+
+@pytest.mark.asyncio
+async def test_requeue_latest_user_message_uses_persisted_event():
+    user_event = MessageEvent(role="user", message="resume this")
+    uow = MagicMock()
+    uow.__aenter__ = AsyncMock(return_value=uow)
+    uow.__aexit__ = AsyncMock(return_value=None)
+    uow.session.list_events = AsyncMock(return_value=[(1, user_event)])
+    uow_factory = MagicMock(return_value=uow)
+
+    task = RedisStreamTask(task_id="task-1", session_id="sess-1")
+    task._input_stream = MagicMock()
+    task._input_stream.size = AsyncMock(return_value=0)
+    task._input_stream.put = AsyncMock()
+
+    ok = await requeue_latest_user_message(task, "sess-1", uow_factory)
+    assert ok is True
+    task._input_stream.put.assert_awaited_once()

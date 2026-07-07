@@ -56,7 +56,7 @@ def _resolve_and_check(hostname: str) -> None:
     for info in infos:
         ip = info[4][0]
         if _is_blocked_ip(ip):
-            raise BadRequestError(f"不允许访问内网或本地地址: {hostname} ({ip})")
+            raise BadRequestError(f"不允许访问内网或本地地址: {hostname} ({ip})", error_key="errors.urlNotAllowed")
 
 
 def validate_public_url(url: str, *, allowlist: Optional[list[str]] = None) -> str:
@@ -77,7 +77,7 @@ def validate_public_url(url: str, *, allowlist: Optional[list[str]] = None) -> s
         raise BadRequestError(f"URL 主机在禁止列表中: {hostname}")
 
     if effective_allowlist and not _host_allowed(hostname, effective_allowlist):
-        raise BadRequestError(f"URL 主机不在允许列表中: {hostname}")
+        raise BadRequestError(f"URL 主机不在允许列表中: {hostname}", error_key="errors.urlHostNotAllowed")
 
     _resolve_and_check(hostname)
     return url.strip()

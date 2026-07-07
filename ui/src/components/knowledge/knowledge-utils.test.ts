@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { translate } from "@/i18n/translate";
+
 import {
   formatIngestStreamError,
   groupFileIdsBySourceType,
@@ -61,6 +63,8 @@ describe("formatIngestStreamError", () => {
   });
 
   it("falls back to default message", () => {
-    expect(formatIngestStreamError({})).toBe("知识库索引失败");
+    expect(formatIngestStreamError({})).toBe(
+      translate("knowledge.indexFailed", undefined, "en"),
+    );
   });
 });

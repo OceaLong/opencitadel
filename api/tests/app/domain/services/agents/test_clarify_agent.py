@@ -10,6 +10,7 @@ from app.domain.models.event import ClarifyEvent, MessageEvent
 from app.domain.models.message import Message
 from app.domain.schemas.clarify_output import ClarifyOutputSchema, MIN_CLARIFY_BRIEF_LENGTH
 from app.domain.services.agents.clarify import ClarifyAgent
+from app.domain.services.agents.retry_budget import LLMRetryBudget
 from app.domain.services.prompts.loader import compose_clarify_system_prompt, load_prompts
 
 
@@ -25,7 +26,7 @@ def test_clarify_agent_yields_clarify_event_when_questions_needed():
     agent._skill_prompt = ""
     agent._long_term_memory_block = ""
     agent._system_prompt = ""
-    agent._retry_budget = None
+    agent._retry_budget = LLMRetryBudget.create(max_calls=5, max_seconds=120.0)
 
     async def fake_invoke(*args, **kwargs):
         yield MessageEvent(
@@ -66,7 +67,7 @@ def test_clarify_agent_records_brief_when_no_questions_needed():
     agent._skill_prompt = ""
     agent._long_term_memory_block = ""
     agent._system_prompt = ""
-    agent._retry_budget = None
+    agent._retry_budget = LLMRetryBudget.create(max_calls=5, max_seconds=120.0)
     brief = "用户希望实现用户登录功能，包含邮箱注册、密码重置与会话保持，交付为后端 API 与基础集成测试。"
 
     async def fake_invoke(*args, **kwargs):

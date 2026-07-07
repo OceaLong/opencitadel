@@ -93,12 +93,22 @@ class CommonSSEEvent(BaseSSEEvent):
     data: CommonEventData
 
 
+class ClarifyAnswerData(BaseModel):
+    """结构化澄清回答数据"""
+    question_id: str
+    prompt: Optional[str] = None
+    option_ids: List[str] = Field(default_factory=list)
+    option_labels: List[str] = Field(default_factory=list)
+    custom_text: Optional[str] = None
+
+
 class MessageEventData(BaseEventData):
     """消息事件数据"""
     role: Literal["user", "assistant"] = "assistant"
     message: str = ""
     attachments: List[File] = Field(default_factory=list)
     stream_id: Optional[str] = None
+    clarify_answers: List[ClarifyAnswerData] = Field(default_factory=list)
 
 
 class MessageSSEEvent(BaseSSEEvent):

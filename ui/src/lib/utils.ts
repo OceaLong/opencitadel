@@ -1,6 +1,7 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
+import type { Locale } from "@/i18n/routing";
 import { translate } from "@/i18n/translate";
 
 export function cn(...inputs: ClassValue[]) {
@@ -20,23 +21,27 @@ const WEEKDAY_KEYS = [
 /**
  * 将日期字符串格式化为相对日期标签
  */
-export function formatRelativeDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return translate("common.dates.today");
+export function formatRelativeDate(
+  dateStr: string | null | undefined,
+  locale: Locale,
+): string {
+  if (!dateStr) return translate("common.dates.today", undefined, locale);
   const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return translate("common.dates.today");
+  if (isNaN(date.getTime())) return translate("common.dates.today", undefined, locale);
   const now = new Date();
 
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const diffDays = Math.floor((today.getTime() - target.getTime()) / (1000 * 60 * 60 * 24));
 
-  if (diffDays === 0) return translate("common.dates.today");
-  if (diffDays === 1) return translate("common.dates.yesterday");
-  if (diffDays < 7) return translate(WEEKDAY_KEYS[date.getDay()]);
+  if (diffDays === 0) return translate("common.dates.today", undefined, locale);
+  if (diffDays === 1) return translate("common.dates.yesterday", undefined, locale);
+  if (diffDays < 7) return translate(WEEKDAY_KEYS[date.getDay()], undefined, locale);
 
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${month}/${day}`;
+  return date.toLocaleDateString(locale === "zh" ? "zh-CN" : "en-US", {
+    month: "numeric",
+    day: "numeric",
+  });
 }
 
 /**

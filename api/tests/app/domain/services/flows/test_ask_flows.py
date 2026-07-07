@@ -101,3 +101,38 @@ def test_ask_flows_use_build_ask_tools(flow_cls, module_name):
             runtime_settings=MagicMock(),
         )
         mock_build.assert_called_once()
+
+
+def test_doc_qa_flow_re_raises_model_unavailable():
+    from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError
+
+    flow = _make_flow(DocQAFlow)
+
+    async def _failing_invoke(*_args, **_kwargs):
+        if False:
+            yield
+        raise ModelUnavailableError("quota exhausted", error_code="MODEL_QUOTA_EXCEEDED")
+
+    flow._agent.invoke = _failing_invoke
+
+    with pytest.raises(ModelUnavailableError):
+        asyncio.run(_collect_invoke(flow, Message(message="test")))
+
+
+def test_doc_qa_flow_ignores_token_integrity_error():
+    from app.domain.models.event import ErrorEvent
+    from sqlalchemy.exc import IntegrityError
+
+    flow = _make_flow(DocQAFlow)
+
+    async def _failing_invoke(*_args, **_kwargs):
+        if False:
+            yield
+        raise IntegrityError("fk", {}, Exception())
+
+    flow._agent.invoke = _failing_invoke
+
+    events = asyncio.run(_collect_invoke(flow, Message(message="test")))
+
+    assert any(isinstance(event, DoneEvent) for event in events)
+    assert not any(isinstance(event, ErrorEvent) for event in events)

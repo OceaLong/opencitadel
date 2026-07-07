@@ -215,6 +215,7 @@ export const supplement = {
     knowledge: { en: "Knowledge base", zh: "知识库" },
     knowledgeMeta: { en: "{count} documents", zh: "{count} 篇文档" },
     knowledgeSection: { en: "Document knowledge base", zh: "文档知识库" },
+    loading: { en: "Loading…", zh: "加载中…" },
     noCodebase: { en: "No ready codebases", zh: "暂无可用代码库" },
     noKnowledge: { en: "No ready knowledge bases", zh: "暂无可用知识库" },
     noSearchResults: { en: "No matching results", zh: "无匹配结果" },

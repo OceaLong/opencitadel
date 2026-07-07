@@ -1,11 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import logging
 from typing import Callable, Dict, List, Optional
+
+from sqlalchemy.exc import IntegrityError
 
 from app.domain.external.observability import ObservabilityPort
 from app.domain.models.event import UsageEvent
 from app.domain.models.llm_token_usage import LLMTokenUsage
 from app.domain.repositories.uow import IUnitOfWork
+
+logger = logging.getLogger(__name__)
 
 
 class TokenAccountant:
@@ -36,18 +41,40 @@ class TokenAccountant:
             raise ValueError("TokenAccountant requires observability_port")
         self._observability = observability_port
 
+    def sync_model(self, model_id: Optional[str], model_name: str) -> None:
+        """Update the active model used for subsequent token records (e.g. after fallback)."""
+        if model_id != self._model_id or model_name != self._model_name:
+            self._model_id = model_id
+            self._model_name = model_name
+            self._model_price_per_million = None
+
+    async def _resolve_model_id(self, model_id: Optional[str]) -> Optional[str]:
+        if not model_id:
+            return None
+        async with self._uow_factory() as uow:
+            model = await uow.llm_model.get_by_id(model_id)
+        if model is None:
+            logger.warning("Token usage model_id=%s not found in llm_models; recording without model_id", model_id)
+            return None
+        return model_id
+
     async def flush(self) -> None:
         if not self._pending_records:
             return
         records = self._pending_records
         self._pending_records = []
-        async with self._uow_factory() as uow:
-            session = await uow.session.get_metadata(self._session_id)
-            if session:
+        try:
+            async with self._uow_factory() as uow:
+                session = await uow.session.get_metadata(self._session_id)
+                if session:
+                    for record in records:
+                        record.owner_user_id = session.owner_user_id
+                        record.team_id = session.team_id
                 for record in records:
-                    record.owner_user_id = session.owner_user_id
-                    record.team_id = session.team_id
-            await uow.llm_token_usage.save_many(records)
+                    record.model_id = await self._resolve_model_id(record.model_id)
+                await uow.llm_token_usage.save_many(records)
+        except IntegrityError as exc:
+            logger.warning("写入 token 用量失败（已忽略，不影响任务）: %s", exc)
 
     async def record(self, usage: Dict[str, int], step: str) -> Optional[UsageEvent]:
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
@@ -63,11 +90,12 @@ class TokenAccountant:
             completion_tokens=completion_tokens,
             cached_tokens=cached_tokens,
         )
+        model_id = await self._resolve_model_id(self._model_id)
         record = LLMTokenUsage(
             session_id=self._session_id,
             agent=self._agent_name,
             step=step,
-            model_id=self._model_id,
+            model_id=model_id,
             model_name=self._model_name,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,

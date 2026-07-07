@@ -5,7 +5,7 @@ import {
   AlertCircle,
   MoreHorizontal,
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { Avatar, AvatarGroupCount } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia } from "@/components/ui/item";
 
+import type { Locale } from "@/i18n/routing";
 import type { Session } from "@/lib/api";
 import {
   getSessionContextIcon,
@@ -40,6 +41,7 @@ export const SessionItem = memo(function SessionItem({
   onClick,
   onDelete,
 }: SessionItemProps) {
+  const locale = useLocale() as Locale;
   const t = useTranslations("sessionList");
   const tCommon = useTranslations("common");
   const handleClick = useCallback(() => {
@@ -55,7 +57,7 @@ export const SessionItem = memo(function SessionItem({
   );
 
   const description = session.latest_message || tCommon("noMessages");
-  const dateLabel = formatRelativeDate(session.latest_message_at);
+  const dateLabel = formatRelativeDate(session.latest_message_at, locale);
   const isRunning = session.status === "running" || session.status === "waiting";
   const isFailed = session.status === "failed";
   const contextKind = getSessionContextKind(session);

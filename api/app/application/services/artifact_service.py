@@ -58,6 +58,13 @@ def _normalize_match_token(value: str) -> str:
     return re.sub(r"[\s_\-]+", "", stem.lower())
 
 
+def _artifact_not_found_message(artifact_id: str) -> str:
+    return (
+        f"交付物[{artifact_id}]不存在。"
+        f"若为新交付物请将 artifact_id 留空；若为更新请使用 artifact_write 返回的 id。"
+    )
+
+
 def _rank_session_files_for_artifact(artifact: Artifact, files: List[File]) -> List[File]:
     allowed_ext = _artifact_file_extensions(artifact.kind)
     title_token = _normalize_match_token(artifact.title)
@@ -119,7 +126,7 @@ class ArtifactService:
             if artifact_id:
                 artifact = await uow.artifact.get_by_id(artifact_id)
                 if not artifact or artifact.session_id != session_id:
-                    raise ValueError(f"交付物[{artifact_id}]不存在")
+                    raise ValueError(_artifact_not_found_message(artifact_id))
                 version = len(artifact.version_refs) + 1
                 status: ArtifactStatus = "updated"
             else:
@@ -187,7 +194,7 @@ class ArtifactService:
         async with self._uow_factory() as uow:
             artifact = await uow.artifact.get_by_id(artifact_id)
             if not artifact or artifact.session_id != session_id:
-                raise ValueError(f"交付物[{artifact_id}]不存在")
+                raise ValueError(_artifact_not_found_message(artifact_id))
             artifact.status = "final"
             artifact.updated_at = datetime.now()
             await uow.artifact.save(artifact)
@@ -267,7 +274,7 @@ class ArtifactService:
         async with self._uow_factory() as uow:
             artifact = await uow.artifact.get_by_id(artifact_id)
             if not artifact:
-                raise ValueError(f"交付物[{artifact_id}]不存在")
+                raise ValueError(_artifact_not_found_message(artifact_id))
             if scope is not None:
                 session = await uow.session.get_metadata(artifact.session_id, scope=scope)
                 if not session:
@@ -356,7 +363,7 @@ class ArtifactService:
         async with self._uow_factory() as uow:
             artifact = await uow.artifact.get_by_id(artifact_id)
             if not artifact:
-                raise ValueError(f"交付物[{artifact_id}]不存在")
+                raise ValueError(_artifact_not_found_message(artifact_id))
             if scope is not None:
                 session = await uow.session.get_metadata(artifact.session_id, scope=scope)
                 if not session:

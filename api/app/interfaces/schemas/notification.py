@@ -14,6 +14,8 @@ class NotificationResponse(BaseModel):
     artifact_id: Optional[str] = None
     job_id: Optional[str] = None
     message: str
+    i18n_key: Optional[str] = None
+    i18n_params: Optional[dict] = None
     read: bool
     created_at: datetime
 

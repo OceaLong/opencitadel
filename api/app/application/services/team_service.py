@@ -38,7 +38,7 @@ class TeamService:
         name = name.strip()
         description = description.strip()
         if not name:
-            raise BadRequestError("团队名称不能为空")
+            raise BadRequestError("团队名称不能为空", error_key="errors.teamNameRequired")
         team = Team(name=name, description=description, created_by=actor_user_id)
         async with self._uow_factory() as uow:
             await uow.team.save(team)
@@ -195,7 +195,7 @@ class TeamService:
         async with self._uow_factory() as uow:
             actor = await self._load_actor_member(uow, team_id, actor_user_id, allow_member=False)
             if actor.role != TeamRole.OWNER:
-                raise ForbiddenError("只有团队所有者可解散团队")
+                raise ForbiddenError("只有团队所有者可解散团队", error_key="errors.teamOwnerOnly")
             await uow.team.delete_by_id(team_id)
 
     async def remove_member(self, *, team_id: str, actor_user_id: str, target_user_id: str) -> None:
@@ -218,7 +218,7 @@ class TeamService:
         async with self._uow_factory() as uow:
             actor = await self._load_actor_member(uow, team_id, actor_user_id, allow_member=False)
             if actor.role != TeamRole.OWNER:
-                raise ForbiddenError("只有团队所有者可修改成员角色")
+                raise ForbiddenError("只有团队所有者可修改成员角色", error_key="errors.teamOwnerOnly")
             target = await uow.team.get_member(team_id, target_user_id)
             if not target:
                 raise NotFoundError("成员不存在")
@@ -334,7 +334,7 @@ class TeamService:
             raise NotFoundError("团队不存在")
         member = await uow.team.get_member(team_id, user_id)
         if not member:
-            raise ForbiddenError("无权访问该团队")
+            raise ForbiddenError("无权访问该团队", error_key="errors.teamAccessDenied")
         if allow_member:
             return member
         if member.role not in {TeamRole.OWNER, TeamRole.ADMIN}:

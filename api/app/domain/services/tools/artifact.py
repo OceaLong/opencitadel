@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import uuid
 from typing import Awaitable, Callable, List, Optional
 
 from app.domain.models.event import BaseEvent
@@ -8,6 +9,22 @@ from app.domain.services.tools.base import BaseTool, tool
 
 WriteArtifactFn = Callable[..., Awaitable[tuple[dict, BaseEvent]]]
 FinalizeArtifactFn = Callable[[str], Awaitable[tuple[dict, BaseEvent]]]
+
+
+def _normalize_artifact_id(artifact_id: Optional[str], *, required: bool = False) -> Optional[str]:
+    if artifact_id is None or not str(artifact_id).strip():
+        if required:
+            raise ValueError("artifact_id 不能为空")
+        return None
+    normalized = str(artifact_id).strip()
+    try:
+        uuid.UUID(normalized)
+    except ValueError as exc:
+        raise ValueError(
+            f"无效的 artifact_id[{normalized}]；创建新交付物请留空 artifact_id，"
+            f"更新已有交付物请使用 artifact_write 返回的 id"
+        ) from exc
+    return normalized
 
 
 class ArtifactTool(BaseTool):
@@ -37,7 +54,10 @@ class ArtifactTool(BaseTool):
         parameters={
             "artifact_id": {
                 "type": "string",
-                "description": "已有交付物 ID；留空则创建新交付物",
+                "description": (
+                    "已有交付物 ID；留空则创建新交付物。"
+                    "更新时必须使用上次 artifact_write 成功返回的 id，不可自行编造"
+                ),
             },
             "kind": {
                 "type": "string",
@@ -70,19 +90,22 @@ class ArtifactTool(BaseTool):
                 message="artifact_write 需要 content 或 source_path 至少其一",
             )
         try:
+            normalized_id = _normalize_artifact_id(artifact_id)
             data, event = await self._write_fn(
-                artifact_id=artifact_id,
+                artifact_id=normalized_id,
                 kind=kind,
                 title=title,
                 content=content or "",
                 source_path=source_path,
             )
-        except ValueError as exc:
+        except Exception as exc:
             return ToolResult(success=False, message=str(exc))
         self._pending_events.append(event)
+        saved_id = data.get("id", "")
+        saved_title = data.get("title", title)
         return ToolResult(
             success=True,
-            message=f"交付物已保存: {data.get('title', title)}",
+            message=f"交付物已保存 (id={saved_id}): {saved_title}",
             data=data,
         )
 
@@ -90,11 +113,18 @@ class ArtifactTool(BaseTool):
         name="artifact_finalize",
         description="将交付物标记为定稿，不再自动更新",
         parameters={
-            "artifact_id": {"type": "string", "description": "交付物 ID"},
+            "artifact_id": {
+                "type": "string",
+                "description": "交付物 ID（必须使用 artifact_write 返回的 id）",
+            },
         },
         required=["artifact_id"],
     )
     async def artifact_finalize(self, artifact_id: str) -> ToolResult:
-        data, event = await self._finalize_fn(artifact_id)
+        try:
+            normalized_id = _normalize_artifact_id(artifact_id, required=True)
+            data, event = await self._finalize_fn(normalized_id)
+        except Exception as exc:
+            return ToolResult(success=False, message=str(exc))
         self._pending_events.append(event)
         return ToolResult(success=True, message="交付物已定稿", data=data)

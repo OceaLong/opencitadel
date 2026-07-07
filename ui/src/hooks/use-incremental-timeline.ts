@@ -3,13 +3,14 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import type { Locale } from "@/i18n/routing";
 import type { SSEEventData } from "@/lib/api/types";
 import type { TimelineItem } from "@/lib/session-events";
 import { eventsToTimeline, patchTimelineForDeltaEvent } from "@/lib/session-events";
 
 const TRANSIENT_EVENT_TYPES = new Set(["message_delta", "reasoning_delta", "tool_args_delta"]);
 
-export function useIncrementalTimeline(events: SSEEventData[]): TimelineItem[] {
+export function useIncrementalTimeline(events: SSEEventData[], locale?: Locale): TimelineItem[] {
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const prevEventsRef = useRef<SSEEventData[]>([]);
   const timelineRef = useRef<TimelineItem[]>([]);
@@ -24,7 +25,7 @@ export function useIncrementalTimeline(events: SSEEventData[]): TimelineItem[] {
     }
 
     const rebuild = (nextEvents: SSEEventData[]) => {
-      const nextTimeline = eventsToTimeline(nextEvents);
+      const nextTimeline = eventsToTimeline(nextEvents, locale);
       timelineRef.current = nextTimeline;
       setTimeline(nextTimeline);
       prevEventsRef.current = nextEvents;
@@ -75,7 +76,7 @@ export function useIncrementalTimeline(events: SSEEventData[]): TimelineItem[] {
     }
 
     rebuild(events);
-  }, [events]);
+  }, [events, locale]);
 
   return timeline;
 }

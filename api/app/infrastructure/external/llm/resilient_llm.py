@@ -116,10 +116,11 @@ class ResilientLLMClient:
         if active.id == self._notified_active_model_id:
             return None
         self._notified_active_model_id = active.id
+        model_name = active.display_name
         return AssistantNoticeEvent(
             message="",
             i18n_key="sessionDetail.modelFallbackNotice",
-            i18n_params={"modelName": active.display_name},
+            i18n_params={"modelName": model_name},
         )
 
     def _config(self) -> ModelResilienceConfig:

@@ -37,7 +37,7 @@ async def create_team(
         description=request.description,
         actor_user_id=principal.user_id,
     )
-    return Response.success(data=TeamResponse.from_domain(team), msg="创建团队成功")
+    return Response.success(data=TeamResponse.from_domain(team))
 
 
 @router.get("", response_model=Response[ListTeamsResponse])
@@ -76,7 +76,7 @@ async def leave_team(
         service: TeamService = Depends(get_team_service),
 ) -> Response[None]:
     await service.leave_team(team_id=team_id, user_id=principal.user_id)
-    return Response.success(msg="已退出团队")
+    return Response.success()
 
 
 @router.post("/{team_id}/invitations", response_model=Response[InvitationLinkResponse])
@@ -92,7 +92,7 @@ async def create_team_invitation(
         role=request.role,
         email=request.email,
     )
-    return Response.success(data=InvitationLinkResponse(url=url), msg="邀请链接已生成")
+    return Response.success(data=InvitationLinkResponse(url=url))
 
 
 @public_invitation_router.get("/{token}", response_model=Response[TeamInvitationPreviewResponse])
@@ -129,9 +129,7 @@ async def register_and_accept_invitation(
         ip_address=_client_ip(http_request),
     )
     cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
-    return Response.success(
-        data=TeamMemberResponse.from_domain(result.member),
-        msg="注册成功并已加入团队",
+    return Response.success(data=TeamMemberResponse.from_domain(result.member),
     )
 
 
@@ -142,7 +140,7 @@ async def accept_invitation(
         service: TeamService = Depends(get_team_service),
 ) -> Response[TeamMemberResponse]:
     member = await service.accept_invitation(token=token, user_id=principal.user_id)
-    return Response.success(data=TeamMemberResponse.from_domain(member), msg="已加入团队")
+    return Response.success(data=TeamMemberResponse.from_domain(member))
 
 
 @router.delete("/{team_id}", response_model=Response[None])
@@ -152,7 +150,7 @@ async def delete_team(
         service: TeamService = Depends(get_team_service),
 ) -> Response[None]:
     await service.delete_team(team_id=team_id, actor_user_id=principal.user_id)
-    return Response.success(msg="团队已解散")
+    return Response.success()
 
 
 @router.delete("/{team_id}/members/{user_id}", response_model=Response[None])
@@ -163,7 +161,7 @@ async def remove_member(
         service: TeamService = Depends(get_team_service),
 ) -> Response[None]:
     await service.remove_member(team_id=team_id, actor_user_id=principal.user_id, target_user_id=user_id)
-    return Response.success(msg="成员已移除")
+    return Response.success()
 
 
 @router.patch("/{team_id}/members/{user_id}", response_model=Response[TeamMemberResponse])
@@ -180,4 +178,4 @@ async def update_member_role(
         target_user_id=user_id,
         role=request.role,
     )
-    return Response.success(data=TeamMemberResponse.from_domain(member), msg="成员角色已更新")
+    return Response.success(data=TeamMemberResponse.from_domain(member))

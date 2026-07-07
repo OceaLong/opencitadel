@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 
 import { AttachmentsMessage } from "@/components/attachments-message";
 import { ClarifyQuestions } from "@/components/clarify-questions";
+import { ClarifyReplySummary } from "@/components/clarify-reply-summary";
 import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { PlanStepStatusIcon } from "@/components/plan-step-status-icon";
 import { MarkdownContent } from "@/components/markdown-content";
@@ -102,6 +103,9 @@ function ChatMessageComponent({
   const tPlan = useTranslations("planApproval");
   if (item.kind === "user") {
     const displayMessage = formatGateActionMessage(item.data.message, tGate, tPlan);
+    const clarifyAnswers = item.data.clarify_answers;
+    const hasClarifyReply = Array.isArray(clarifyAnswers) && clarifyAnswers.length > 0;
+
     return (
       <div className={cn("group mt-3 flex w-full flex-col items-end justify-end gap-1", className)}>
         <div className="relative flex max-w-[90%] flex-col items-end gap-2">
@@ -112,9 +116,13 @@ function ChatMessageComponent({
               disabled={restoringCheckpoint || sessionStatus === "running"}
             />
           )}
-          <div className="border-border/70 bg-card text-foreground relative flex items-center overflow-hidden rounded-2xl border px-3.5 py-2.5 text-sm leading-relaxed shadow-[var(--shadow-card)]">
-            {displayMessage}
-          </div>
+          {hasClarifyReply ? (
+            <ClarifyReplySummary answers={clarifyAnswers} />
+          ) : (
+            <div className="border-border/70 bg-card text-foreground relative flex items-center overflow-hidden rounded-2xl border px-3.5 py-2.5 text-sm leading-relaxed shadow-[var(--shadow-card)]">
+              {displayMessage}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -264,7 +272,7 @@ function toolSignature(tool: ToolEvent): string {
 function itemSignature(item: TimelineItem): string {
   switch (item.kind) {
     case "user":
-      return `${item.kind}:${item.id}:${item.data.message ?? ""}`;
+      return `${item.kind}:${item.id}:${item.data.message ?? ""}:${(item.data.clarify_answers ?? []).length}`;
     case "assistant":
       return `${item.kind}:${item.id}:${item.data.message ?? ""}`;
     case "clarify":

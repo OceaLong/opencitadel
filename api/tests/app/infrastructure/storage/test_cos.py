@@ -91,7 +91,7 @@ async def test_get_bytes_raises_when_truncation_persists():
 
 
 @pytest.mark.asyncio
-async def test_put_bytes_passes_content_length():
+async def test_put_bytes_does_not_pass_content_length():
     cos = _make_cos_with_client()
     captured: dict = {}
 
@@ -111,5 +111,7 @@ async def test_put_bytes_passes_content_length():
     ):
         await cos.put_bytes("artifacts/s1/a1/v1.md", data)
 
-    assert captured["ContentLength"] == len(data)
+    assert "ContentLength" not in captured
     assert captured["Body"] == data
+    assert captured["Bucket"] == "test-bucket"
+    assert captured["Key"] == "artifacts/s1/a1/v1.md"

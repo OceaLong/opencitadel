@@ -25,4 +25,4 @@ async def get_llm_status(
 ) -> ApiResponse:
     data = await llm_status_service.get_status()
     response.headers["Cache-Control"] = "max-age=30"
-    return ApiResponse.success(msg="模型状态查询成功", data=data)
+    return ApiResponse.success( data=data)

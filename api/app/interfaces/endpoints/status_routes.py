@@ -29,4 +29,4 @@ async def get_status(
     if any(item.status == "error" for item in statues):
         return Response.fail(503, "系统存在服务异常", statues)
 
-    return Response.success(msg="系统健康检查成功", data=statues)
+    return Response.success( data=statues)

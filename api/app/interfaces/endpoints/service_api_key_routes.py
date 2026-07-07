@@ -38,7 +38,7 @@ async def create_service_key(
         **ServiceApiKeyResponse.from_domain(created.key).model_dump(),
         plaintext=created.plaintext,
     )
-    return Response.success(data=response, msg="服务 API Key 已创建，请立即保存明文")
+    return Response.success(data=response)
 
 
 @router.delete("/{key_id}", response_model=Response[Optional[dict]])
@@ -48,4 +48,4 @@ async def revoke_service_key(
         service: ServiceApiKeyService = Depends(get_service_api_key_service),
 ) -> Response[Optional[dict]]:
     await service.revoke_key(user_id=principal.user_id, key_id=key_id)
-    return Response.success(msg="服务 API Key 已吊销")
+    return Response.success()

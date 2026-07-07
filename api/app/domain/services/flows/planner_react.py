@@ -447,7 +447,8 @@ class PlannerReActFlow(BaseFlow):
                             # 13.同步会话标题与安全提示，不展示 planner 结构化 JSON
                             yield TitleEvent(title=event.plan.title)
                             yield AssistantNoticeEvent(
-                                message="我已制定计划，开始执行。",
+                                message="",
+                                i18n_key="sessionDetail.planStarted",
                             )
                             yield DebugItemEvent(
                                 item_type="planner_output",

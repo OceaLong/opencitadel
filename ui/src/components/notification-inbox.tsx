@@ -19,6 +19,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { notificationsApi } from "@/lib/api/notifications";
 import type { Notification } from "@/lib/api/types";
+import { translate } from "@/i18n/translate";
 import { cn } from "@/lib/utils";
 
 function formatTime(value: string, locale: string): string {
@@ -30,6 +31,13 @@ function formatTime(value: string, locale: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function notificationMessage(item: Notification): string {
+  if (item.i18n_key) {
+    return translate(item.i18n_key, item.i18n_params ?? undefined);
+  }
+  return item.message;
 }
 
 function notificationHref(item: Notification): string | null {
@@ -130,7 +138,9 @@ export function NotificationInbox({ className }: { className?: string }) {
               const href = notificationHref(item);
               const content = (
                 <div className="flex flex-col gap-0.5">
-                  <span className={cn("text-sm", !item.read && "font-medium")}>{item.message}</span>
+                  <span className={cn("text-sm", !item.read && "font-medium")}>
+                    {notificationMessage(item)}
+                  </span>
                   <span className="text-muted-foreground text-xs">
                     {formatTime(item.created_at, locale)}
                   </span>

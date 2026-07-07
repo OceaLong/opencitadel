@@ -1,37 +1,20 @@
 import { cookies, headers } from "next/headers";
 import { getRequestConfig } from "next-intl/server";
 
-import { routing, type Locale } from "./routing";
-
-function detectLocaleFromAcceptLanguage(acceptLanguage: string | null): Locale {
-  if (!acceptLanguage) return routing.defaultLocale;
-
-  const preferred = acceptLanguage
-    .split(",")
-    .map((part) => part.trim().split(";")[0]?.toLowerCase())
-    .find(Boolean);
-
-  if (preferred?.startsWith("zh")) {
-    return "zh";
-  }
-
-  return routing.defaultLocale;
-}
+import { detectLocaleFromLanguageTag } from "./detect-locale";
+import { LOCALE_COOKIE_NAME, routing, type Locale } from "./routing";
 
 export default getRequestConfig(async () => {
   const store = await cookies();
-  const cookieLocale = store.get("NEXT_LOCALE")?.value;
+  const cookieLocale = store.get(LOCALE_COOKIE_NAME)?.value;
 
   let locale: Locale = routing.defaultLocale;
 
-  if (
-    cookieLocale &&
-    routing.locales.includes(cookieLocale as Locale)
-  ) {
+  if (cookieLocale && routing.locales.includes(cookieLocale as Locale)) {
     locale = cookieLocale as Locale;
   } else {
     const headerStore = await headers();
-    locale = detectLocaleFromAcceptLanguage(headerStore.get("accept-language"));
+    locale = detectLocaleFromLanguageTag(headerStore.get("accept-language"));
   }
 
   return {

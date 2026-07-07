@@ -507,6 +507,14 @@ class BaseAgent(ABC):
     def _fallback_notice_if_needed(self) -> Optional[AssistantNoticeEvent]:
         return self._fallback_notice_if_needed_for(self._llm)
 
+    def _sync_token_accountant_model_if_needed(self) -> None:
+        from app.infrastructure.external.llm.resilient_llm import ResilientLLMClient
+
+        if not isinstance(self._llm, ResilientLLMClient):
+            return
+        active = self._llm.active_model
+        self._token_accountant.sync_model(active.id, active.model_name)
+
     async def _maybe_inject_fallback_structured_hint(self) -> None:
         from app.domain.services.agents.react import ReActAgent
 
@@ -529,6 +537,7 @@ class BaseAgent(ABC):
             return
         self._last_prompt_tokens = prompt_tokens
         try:
+            self._sync_token_accountant_model_if_needed()
             self._pending_usage_event = await self._token_accountant.record(usage, self._current_step)
         except Exception as exc:
             logger.warning("记录 token 用量失败: %s", exc)
@@ -925,7 +934,11 @@ class BaseAgent(ABC):
             ):
                 yield event
         finally:
-            await self._token_accountant.flush()
+            try:
+                self._sync_token_accountant_model_if_needed()
+                await self._token_accountant.flush()
+            except Exception as exc:
+                logger.warning("刷新 token 用量失败: %s", exc)
 
     async def _invoke_inner(
             self,

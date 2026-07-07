@@ -90,8 +90,7 @@ async def get_endpoint(
         llm_model_service: LLMModelService = Depends(get_llm_model_service),
 ) -> Response[LLMEndpointResponse]:
     endpoint = await llm_endpoint_service.get_endpoint(endpoint_id, scope=ctx.scope)
-    return Response.success(
-        data=await _to_response(
+    return Response.success(data=await _to_response(
             endpoint,
             llm_endpoint_service,
             llm_model_service,
@@ -113,9 +112,7 @@ async def create_endpoint(
         endpoint.visibility = ResourceVisibility.PRIVATE
         endpoint.owner_user_id = ctx.principal.user_id
     created = await llm_endpoint_service.create_endpoint(endpoint, scope=ctx.scope)
-    return Response.success(
-        msg="创建端点成功",
-        data=await _to_response(
+    return Response.success(data=await _to_response(
             created,
             llm_endpoint_service,
             llm_model_service,
@@ -141,9 +138,7 @@ async def update_endpoint(
             data[key] = value
     updated = LLMEndpoint(**data)
     result = await llm_endpoint_service.update_endpoint(endpoint_id, updated, scope=ctx.scope)
-    return Response.success(
-        msg="更新端点成功",
-        data=await _to_response(
+    return Response.success(data=await _to_response(
             result,
             llm_endpoint_service,
             llm_model_service,
@@ -162,4 +157,4 @@ async def delete_endpoint(
     if existing.visibility == ResourceVisibility.GLOBAL and not ctx.principal.is_admin:
         raise ForbiddenError("全局端点仅管理员可删除")
     await llm_endpoint_service.delete_endpoint(endpoint_id, scope=ctx.scope)
-    return Response.success(msg="删除端点成功")
+    return Response.success()

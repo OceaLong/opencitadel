@@ -90,7 +90,7 @@ class SessionService:
         )
         async with self._uow_factory() as uow:
             if model_id and await uow.llm_model.get_by_id(model_id, scope=scope) is None:
-                raise NotFoundError("指定模型不存在或无权访问")
+                raise NotFoundError("指定模型不存在或无权访问", error_key="errors.modelNotFound")
             if skill_id and await uow.skill.get_by_id(skill_id, scope=scope) is None:
                 raise NotFoundError("指定 Skill 不存在或无权访问")
             await uow.session.save(session)
@@ -110,9 +110,9 @@ class SessionService:
     ) -> Session:
         async with self._uow_factory() as uow:
             if scope is not None and await uow.session.get_metadata(session_id, scope=scope) is None:
-                raise NotFoundError("该会话不存在，请核实后重试")
+                raise NotFoundError("该会话不存在，请核实后重试", error_key="errors.sessionNotFound")
             if model_id and model_id != "" and await uow.llm_model.get_by_id(model_id, scope=scope) is None:
-                raise NotFoundError("指定模型不存在或无权访问")
+                raise NotFoundError("指定模型不存在或无权访问", error_key="errors.modelNotFound")
             if skill_id and skill_id != "" and await uow.skill.get_by_id(skill_id, scope=scope) is None:
                 raise NotFoundError("指定 Skill 不存在或无权访问")
             await uow.session.update_session_config(
@@ -183,7 +183,7 @@ class SessionService:
         """分页获取会话事件"""
         async with self._uow_factory() as uow:
             if await uow.session.get_metadata(session_id, scope=scope) is None:
-                raise NotFoundError("该会话不存在，请核实后重试")
+                raise NotFoundError("该会话不存在，请核实后重试", error_key="errors.sessionNotFound")
             return await uow.session.list_events(
                 session_id,
                 after=after,

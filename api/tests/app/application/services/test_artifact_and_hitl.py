@@ -332,6 +332,62 @@ def test_artifact_tool_requires_content_or_source_path():
     asyncio.run(_run())
 
 
+def test_artifact_tool_rejects_invalid_artifact_id():
+    from app.domain.services.tools.artifact import ArtifactTool
+
+    tool = ArtifactTool(write_fn=AsyncMock(), finalize_fn=AsyncMock())
+
+    async def _run():
+        result = await tool.artifact_write(
+            kind="doc",
+            title="Report",
+            content="# Hello",
+            artifact_id="temp",
+        )
+        assert result.success is False
+        assert "无效的 artifact_id[temp]" in (result.message or "")
+        assert "留空 artifact_id" in (result.message or "")
+
+    asyncio.run(_run())
+
+
+def test_artifact_tool_catches_storage_errors():
+    from app.domain.services.tools.artifact import ArtifactTool
+
+    async def failing_write(**_kwargs):
+        raise TypeError(
+            "Header part (1626) from ('Content-Length', 1626) must be of type str or bytes, not <class 'int'>"
+        )
+
+    tool = ArtifactTool(write_fn=failing_write, finalize_fn=AsyncMock())
+
+    async def _run():
+        result = await tool.artifact_write(kind="doc", title="Report", content="# Hello")
+        assert result.success is False
+        assert "Content-Length" in (result.message or "")
+
+    asyncio.run(_run())
+
+
+def test_artifact_finalize_not_found_returns_failure():
+    from app.domain.services.tools.artifact import ArtifactTool
+
+    async def failing_finalize(_artifact_id: str):
+        raise ValueError(
+            "交付物[00000000-0000-0000-0000-000000000099]不存在。"
+            "若为新交付物请将 artifact_id 留空；若为更新请使用 artifact_write 返回的 id。"
+        )
+
+    tool = ArtifactTool(write_fn=AsyncMock(), finalize_fn=failing_finalize)
+
+    async def _run():
+        result = await tool.artifact_finalize("00000000-0000-0000-0000-000000000099")
+        assert result.success is False
+        assert "不存在" in (result.message or "")
+
+    asyncio.run(_run())
+
+
 def test_scheduler_leader_only_renews_own_lease():
     redis = MagicMock()
     redis.client.set = AsyncMock(return_value=False)

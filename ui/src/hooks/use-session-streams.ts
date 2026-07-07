@@ -9,16 +9,13 @@ import { sessionApi } from "@/lib/api/session";
 import type { ClarifyAnswer, SessionDetail, SSEEventData, TokenUsageSummary } from "@/lib/api/types";
 
 function isSessionMissingError(err: unknown): boolean {
-  if (err instanceof ApiError && err.code === 404) {
-    return true;
+  if (err instanceof ApiError) {
+    if (err.code === 404) return true;
+    return (
+      err.errorKey === "errors.sessionNotFound" || err.errorKey === "errors.taskSessionNotFound"
+    );
   }
-  const msg = err instanceof Error ? err.message : String(err);
-  return (
-    msg.includes("会话不存在") ||
-    msg.includes("任务会话不存在") ||
-    msg.includes("Session not found") ||
-    msg.includes("Task not found")
-  );
+  return false;
 }
 
 function getSessionMissingErrorFromEvent(ev: SSEEventData): boolean {

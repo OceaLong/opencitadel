@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 import { codebaseApi } from "@/lib/api/codebase";
@@ -107,13 +108,20 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
   const { isMobile } = useIsMobile();
   const [codebases, setCodebases] = useState<Codebase[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setCodebases([]);
+      setKnowledgeBases([]);
+      setLoading(false);
+      return;
+    }
 
     let cancelled = false;
+    setLoading(true);
 
     void (async () => {
       try {
@@ -125,6 +133,10 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
         if (!cancelled) {
           setCodebases([]);
           setKnowledgeBases([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
         }
       }
     })();
@@ -138,7 +150,7 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
   const readyKnowledgeBases = useMemo(() => (user ? knowledgeBases : []), [user, knowledgeBases]);
 
   const getCodebaseDescription = useCallback(
-    (cb: Codebase) => cb.source_ref ?? t("codebaseMeta", { count: cb.file_count ?? 0 }),
+    (cb: Codebase) => t("codebaseMeta", { count: cb.file_count ?? 0 }),
     [t],
   );
 
@@ -202,33 +214,44 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
     });
   };
 
+  const triggerButton = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      disabled={disabled}
+      className={cn(
+        "h-8 max-w-[160px] gap-1 px-2 text-xs font-normal sm:max-w-[160px]",
+        hasSelection
+          ? "text-foreground bg-accent/60 hover:bg-accent hover:text-foreground"
+          : "text-muted-foreground hover:text-foreground",
+        className,
+      )}
+    >
+      <SessionContextTriggerIcon
+        kind={contextKind}
+        className={cn(
+          "size-4 shrink-0",
+          hasSelection ? "text-primary" : "text-muted-foreground",
+        )}
+      />
+      <span className="truncate">{label}</span>
+      <ChevronDown className="size-3 shrink-0 opacity-60" />
+    </Button>
+  );
+
   return (
     <DropdownMenu open={open} onOpenChange={handleOpenChange}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={disabled}
-          className={cn(
-            "h-8 max-w-[160px] gap-1 px-2 text-xs font-normal sm:max-w-[160px]",
-            hasSelection
-              ? "text-foreground bg-accent/60 hover:bg-accent hover:text-foreground"
-              : "text-muted-foreground hover:text-foreground",
-            className,
-          )}
-        >
-          <SessionContextTriggerIcon
-            kind={contextKind}
-            className={cn(
-              "size-4 shrink-0",
-              hasSelection ? "text-primary" : "text-muted-foreground",
-            )}
-          />
-          <span className="truncate">{label}</span>
-          <ChevronDown className="size-3 shrink-0 opacity-60" />
-        </Button>
-      </DropdownMenuTrigger>
+      {hasSelection ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="top">{label}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
+      )}
       <DropdownMenuContent align="end" className="w-[min(100vw-2rem,280px)] p-1.5 sm:w-[280px]">
         <DropdownMenuLabel className="px-2 py-1.5">{t("title")}</DropdownMenuLabel>
         <div className="px-2 pb-2">
@@ -245,47 +268,53 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
           </div>
         </div>
 
-        <div className="px-2 pb-1">
-          <p className="text-muted-foreground mb-1 text-xs font-medium">{t("codebaseSection")}</p>
-          {readyCodebases.length === 0 ? (
-            <p className="text-muted-foreground px-3 py-2 text-xs">{t("noCodebase")}</p>
-          ) : filteredCodebases.length === 0 ? (
-            <p className="text-muted-foreground px-3 py-2 text-xs">{t("noSearchResults")}</p>
-          ) : (
-            filteredCodebases.map((cb) => (
-              <ContextOptionRow
-                key={cb.id}
-                icon={<IconCodebase className="size-3.5 shrink-0" />}
-                title={cb.name}
-                description={getCodebaseDescription(cb)}
-                selected={value.codebaseId === cb.id}
-                onSelect={() => toggleCodebase(cb.id)}
-              />
-            ))
-          )}
-        </div>
+        {loading ? (
+          <p className="text-muted-foreground px-3 py-4 text-center text-xs">{t("loading")}</p>
+        ) : (
+          <>
+            <div className="px-2 pb-1">
+              <p className="text-muted-foreground mb-1 text-xs font-medium">{t("codebaseSection")}</p>
+              {readyCodebases.length === 0 ? (
+                <p className="text-muted-foreground px-3 py-2 text-xs">{t("noCodebase")}</p>
+              ) : filteredCodebases.length === 0 ? (
+                <p className="text-muted-foreground px-3 py-2 text-xs">{t("noSearchResults")}</p>
+              ) : (
+                filteredCodebases.map((cb) => (
+                  <ContextOptionRow
+                    key={cb.id}
+                    icon={<IconCodebase className="size-3.5 shrink-0" />}
+                    title={cb.name}
+                    description={getCodebaseDescription(cb)}
+                    selected={value.codebaseId === cb.id}
+                    onSelect={() => toggleCodebase(cb.id)}
+                  />
+                ))
+              )}
+            </div>
 
-        <DropdownMenuSeparator />
+            <DropdownMenuSeparator />
 
-        <div className="px-2 pb-1">
-          <p className="text-muted-foreground mb-1 text-xs font-medium">{t("knowledgeSection")}</p>
-          {readyKnowledgeBases.length === 0 ? (
-            <p className="text-muted-foreground px-3 py-2 text-xs">{t("noKnowledge")}</p>
-          ) : filteredKnowledgeBases.length === 0 ? (
-            <p className="text-muted-foreground px-3 py-2 text-xs">{t("noSearchResults")}</p>
-          ) : (
-            filteredKnowledgeBases.map((kb) => (
-              <ContextOptionRow
-                key={kb.id}
-                icon={<IconKnowledge className="size-3.5 shrink-0" />}
-                title={kb.name}
-                description={getKnowledgeDescription(kb)}
-                selected={value.knowledgeBaseId === kb.id}
-                onSelect={() => toggleKnowledgeBase(kb.id)}
-              />
-            ))
-          )}
-        </div>
+            <div className="px-2 pb-1">
+              <p className="text-muted-foreground mb-1 text-xs font-medium">{t("knowledgeSection")}</p>
+              {readyKnowledgeBases.length === 0 ? (
+                <p className="text-muted-foreground px-3 py-2 text-xs">{t("noKnowledge")}</p>
+              ) : filteredKnowledgeBases.length === 0 ? (
+                <p className="text-muted-foreground px-3 py-2 text-xs">{t("noSearchResults")}</p>
+              ) : (
+                filteredKnowledgeBases.map((kb) => (
+                  <ContextOptionRow
+                    key={kb.id}
+                    icon={<IconKnowledge className="size-3.5 shrink-0" />}
+                    title={kb.name}
+                    description={getKnowledgeDescription(kb)}
+                    selected={value.knowledgeBaseId === kb.id}
+                    onSelect={() => toggleKnowledgeBase(kb.id)}
+                  />
+                ))
+              )}
+            </div>
+          </>
+        )}
 
         {hasSelection && (
           <>

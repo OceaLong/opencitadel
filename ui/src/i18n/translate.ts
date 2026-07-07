@@ -1,6 +1,7 @@
 import en from "../../messages/en.json";
 import zh from "../../messages/zh.json";
 
+import { getClientLocale } from "./detect-locale";
 import type { Locale } from "./routing";
 
 type MessageTree = Record<string, unknown>;
@@ -9,15 +10,6 @@ const messagesByLocale: Record<Locale, MessageTree> = {
   en: en as MessageTree,
   zh: zh as MessageTree,
 };
-
-function getLocaleFromDocument(): Locale {
-  if (typeof document === "undefined") return "en";
-  const match = document.cookie
-    .split("; ")
-    .find((part) => part.startsWith(`${encodeURIComponent("NEXT_LOCALE")}=`));
-  const value = match ? decodeURIComponent(match.split("=").slice(1).join("=")) : "";
-  return value === "zh" ? "zh" : "en";
-}
 
 function resolveKey(tree: MessageTree, key: string): string | undefined {
   const parts = key.split(".");
@@ -31,16 +23,14 @@ function resolveKey(tree: MessageTree, key: string): string | undefined {
   return typeof current === "string" ? current : undefined;
 }
 
-export function getClientLocale(): Locale {
-  return getLocaleFromDocument();
-}
+export { getClientLocale };
 
 export function translate(
   key: string,
   values?: Record<string, string | number | boolean>,
   locale?: Locale,
 ): string {
-  const resolvedLocale = locale ?? getLocaleFromDocument();
+  const resolvedLocale = locale ?? getClientLocale();
   const template = resolveKey(messagesByLocale[resolvedLocale], key) ?? key;
   if (!values) return template;
 

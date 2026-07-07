@@ -30,8 +30,10 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=Response(
                 code=e.status_code,
                 msg=e.msg,
-                data={}
-            ).model_dump(),
+                data={},
+                error_key=e.error_key,
+                error_params=e.error_params,
+            ).model_dump(exclude_none=True),
         )
 
     @app.exception_handler(HTTPException)
@@ -43,8 +45,8 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=Response(
                 code=e.status_code,
                 msg=e.detail,
-                data={}
-            ).model_dump(),
+                data={},
+            ).model_dump(exclude_none=True),
         )
 
     @app.exception_handler(Exception)
@@ -57,5 +59,6 @@ def register_exception_handlers(app: FastAPI) -> None:
                 code=500,
                 msg="服务器出现异常请稍后重试",
                 data={},
-            ).model_dump()
+                error_key="errors.serverError",
+            ).model_dump(exclude_none=True),
         )

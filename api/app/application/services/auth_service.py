@@ -47,7 +47,7 @@ class AuthService:
             if invitation.accepted_at is not None:
                 raise BadRequestError("邀请链接已被使用")
             if invitation.expires_at < datetime.now():
-                raise BadRequestError("邀请链接已过期")
+                raise BadRequestError("邀请链接已过期", error_key="errors.inviteExpired")
             normalized_email = email.strip().lower()
             if invitation.email and invitation.email.strip().lower() != normalized_email:
                 raise BadRequestError("注册邮箱与邀请不匹配")
@@ -82,7 +82,7 @@ class AuthService:
             else:
                 user = await uow.user.get_by_username(identifier)
             if not user or not self._password_hasher.verify(password, user.password_hash):
-                raise UnauthorizedError("账号或密码错误")
+                raise UnauthorizedError("账号或密码错误", error_key="errors.invalidCredentials")
             if user.status != UserStatus.ACTIVE:
                 raise UnauthorizedError("账号已被禁用")
             user.last_login_at = datetime.now()

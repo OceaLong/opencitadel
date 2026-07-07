@@ -4,7 +4,6 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.domain.models.event import MessageEvent
 from app.domain.models.session import Session, SessionStatus
 from app.infrastructure.external.task.task_state import TaskStatus
 from app.worker.main import AgentWorker
@@ -40,29 +39,3 @@ async def _test_reconcile_skips_fresh_heartbeat():
 
 def test_reconcile_skips_fresh_heartbeat():
     asyncio.run(_test_reconcile_skips_fresh_heartbeat())
-
-
-async def _test_requeue_latest_user_message_uses_persisted_event():
-    user_event = MessageEvent(role="user", message="resume this")
-    uow = MagicMock()
-    uow.__aenter__ = AsyncMock(return_value=uow)
-    uow.__aexit__ = AsyncMock(return_value=None)
-    uow.session.list_events = AsyncMock(return_value=[(1, user_event)])
-
-    input_stream = MagicMock()
-    input_stream.size = AsyncMock(return_value=0)
-    input_stream.put = AsyncMock()
-    task = MagicMock()
-    task.id = "task-1"
-    task.input_stream = input_stream
-
-    worker = object.__new__(AgentWorker)
-
-    with patch("app.worker.main.get_uow", return_value=uow):
-        assert await AgentWorker._requeue_latest_user_message(worker, task, "sess-1") is True
-
-    input_stream.put.assert_awaited_once()
-
-
-def test_requeue_latest_user_message_uses_persisted_event():
-    asyncio.run(_test_requeue_latest_user_message_uses_persisted_event())

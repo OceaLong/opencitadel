@@ -51,7 +51,7 @@ async def register(
         ip_address=_client_ip(request),
     )
     cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
-    return ApiResponse.success(UserResponse.from_domain(user), msg="注册成功")
+    return ApiResponse.success(UserResponse.from_domain(user))
 
 
 @router.post("/login", response_model=ApiResponse[UserResponse])
@@ -69,7 +69,7 @@ async def login(
         ip_address=_client_ip(request),
     )
     cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
-    return ApiResponse.success(UserResponse.from_domain(user), msg="登录成功")
+    return ApiResponse.success(UserResponse.from_domain(user))
 
 
 @router.post("/refresh", response_model=ApiResponse[UserResponse])
@@ -88,7 +88,7 @@ async def refresh(
         ip_address=_client_ip(request),
     )
     cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
-    return ApiResponse.success(UserResponse.from_domain(user), msg="刷新成功")
+    return ApiResponse.success(UserResponse.from_domain(user))
 
 
 @router.post("/logout", response_model=ApiResponse[dict], dependencies=[Depends(verify_csrf)])
@@ -100,7 +100,7 @@ async def logout(
 ) -> ApiResponse[dict]:
     await auth_service.logout(request.cookies.get(REFRESH_COOKIE))
     cookie_manager.clear_auth_cookies(response)
-    return ApiResponse.success(msg="退出登录成功")
+    return ApiResponse.success()
 
 
 @router.get("/me", response_model=ApiResponse[UserResponse])

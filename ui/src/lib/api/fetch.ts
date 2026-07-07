@@ -20,10 +20,23 @@ export class ApiError extends Error {
     public code: number,
     public msg: string,
     public data: unknown = null,
+    public errorKey?: string | null,
+    public errorParams?: Record<string, string> | null,
   ) {
     super(msg);
     this.name = "ApiError";
   }
+}
+
+export function resolveApiMessage(body: {
+  msg?: string;
+  error_key?: string | null;
+  error_params?: Record<string, string> | null;
+}): string {
+  if (body.error_key) {
+    return translate(body.error_key, body.error_params ?? undefined);
+  }
+  return body.msg || translate("errors.unknown");
 }
 
 /**
@@ -146,11 +159,17 @@ async function handleErrorResponse(response: Response): Promise<never> {
     };
   }
 
-  throw new ApiError(errorData.code, errorData.msg, errorData.data);
+  throw new ApiError(
+    errorData.code,
+    resolveApiMessage(errorData),
+    errorData.data,
+    errorData.error_key,
+    errorData.error_params,
+  );
 }
 
-function isRateLimitError(code: number, msg: string): boolean {
-  return code === 429 || msg.includes("请求过于频繁") || msg.includes("Too many requests");
+function isRateLimitError(code: number, errorKey?: string | null): boolean {
+  return code === 429 || errorKey === "errors.rateLimit";
 }
 
 /**
@@ -261,13 +280,19 @@ export async function request<T = unknown>(
       if (skipErrorHandler) {
         return result.data as T;
       }
-      throw new ApiError(result.code, result.msg, result.data);
+      throw new ApiError(
+        result.code,
+        resolveApiMessage(result),
+        result.data,
+        result.error_key,
+        result.error_params,
+      );
     }
 
     return result.data as T;
   } catch (error) {
     if (error instanceof ApiError) {
-      if (isRateLimitError(error.code, error.msg) && typeof window !== "undefined") {
+      if (isRateLimitError(error.code, error.errorKey) && typeof window !== "undefined") {
         const { toast } = await import("sonner");
         toast.error(translate("errors.rateLimit"));
       }
@@ -586,7 +611,7 @@ function processSSEEvent(
       );
     } catch (error) {
       if (onError) {
-        onError(error instanceof Error ? error : new Error(`解析 SSE 数据失败: ${eventData}`));
+        onError(error instanceof Error ? error : new Error(translate("errors.sseParseFailed", { eventData })));
       }
     }
   }

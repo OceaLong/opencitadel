@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 
-import { type Locale, locales, routing } from "./routing";
+import { LOCALE_COOKIE_NAME, type Locale, locales } from "./routing";
 
 export async function setLocale(locale: Locale) {
   if (!locales.includes(locale)) {
@@ -10,7 +10,7 @@ export async function setLocale(locale: Locale) {
   }
 
   const cookieStore = await cookies();
-  cookieStore.set("NEXT_LOCALE", locale, {
+  cookieStore.set(LOCALE_COOKIE_NAME, locale, {
     path: "/",
     sameSite: "lax",
   });

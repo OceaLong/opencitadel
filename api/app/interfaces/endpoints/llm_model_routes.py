@@ -78,7 +78,7 @@ async def create_model(
         model.visibility = ResourceVisibility.PRIVATE
         model.owner_user_id = ctx.principal.user_id
     created = await llm_model_service.create_model(model, scope=ctx.scope)
-    return Response.success(msg="创建模型成功", data=_to_response(created))
+    return Response.success( data=_to_response(created))
 
 
 @router.put("/{model_id}", response_model=Response[LLMModelResponse])
@@ -97,7 +97,7 @@ async def update_model(
             data[k] = v
     updated = LLMModel(**data)
     result = await llm_model_service.update_model(model_id, updated, scope=ctx.scope)
-    return Response.success(msg="更新模型成功", data=_to_response(result))
+    return Response.success( data=_to_response(result))
 
 
 @router.delete("/{model_id}", response_model=Response[Optional[Dict]])
@@ -110,7 +110,7 @@ async def delete_model(
     if existing.visibility == ResourceVisibility.GLOBAL and not ctx.principal.is_admin:
         raise ForbiddenError("全局模型仅管理员可删除")
     await llm_model_service.delete_model(model_id, scope=ctx.scope)
-    return Response.success(msg="删除模型成功")
+    return Response.success()
 
 
 @router.post("/{model_id}/set-default", response_model=Response[LLMModelResponse])
@@ -123,7 +123,7 @@ async def set_default_model(
     if model.visibility != ResourceVisibility.GLOBAL:
         raise BadRequestError("只有全局模型可设为系统默认")
     model = await llm_model_service.set_default(model.id)
-    return Response.success(msg="已设为默认模型", data=_to_response(model))
+    return Response.success( data=_to_response(model))
 
 
 @router.post("/{model_id}/probe-multimodal", response_model=Response[MultimodalProbeResponse])
@@ -134,7 +134,5 @@ async def probe_multimodal(
 ) -> Response[MultimodalProbeResponse]:
     await llm_model_service.get_model(model_id, scope=ctx.scope)
     result = await llm_model_service.probe_multimodal(model_id)
-    return Response.success(
-        msg="多模态探测完成",
-        data=MultimodalProbeResponse(**result),
+    return Response.success(data=MultimodalProbeResponse(**result),
     )

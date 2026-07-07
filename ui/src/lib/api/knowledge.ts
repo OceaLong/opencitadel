@@ -1,4 +1,5 @@
 import { authenticatedFetch, del, get, parseSSEStream, post } from "./fetch";
+import { translate } from "@/i18n/translate";
 import type {
   AddKnowledgeDocumentsParams,
   CreateKnowledgeBaseParams,
@@ -77,7 +78,9 @@ export const knowledgeApi = {
           signal: controller.signal,
         });
         if (!response.ok || !response.body) {
-          throw new Error(`摄取流连接失败: ${response.status}`);
+          throw new Error(
+            translate("errors.ingestStreamConnectionFailed", { status: String(response.status) }),
+          );
         }
         await parseSSEStream(
           response.body,

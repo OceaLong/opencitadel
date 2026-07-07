@@ -810,6 +810,7 @@ def test_consume_fallback_notice_emits_once_per_target():
     assert first is not None
     assert first.i18n_key == "sessionDetail.modelFallbackNotice"
     assert first.i18n_params == {"modelName": "m2"}
+    assert first.message == ""
 
     assert client.consume_fallback_notice_event() is None
 

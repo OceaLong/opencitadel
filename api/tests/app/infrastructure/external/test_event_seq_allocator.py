@@ -1,7 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import asyncio
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
+from sqlalchemy.exc import ProgrammingError
 
 from app.infrastructure.external import event_seq_allocator
 
@@ -119,4 +123,50 @@ async def _test_regression_old_block_prefetch_inverts_replay_order():
 
 def test_regression_old_block_prefetch_inverts_replay_order():
     asyncio.run(_test_regression_old_block_prefetch_inverts_replay_order())
+
+
+async def _test_sync_global_event_seq_seeds_zero_when_schema_missing_in_test():
+    db_error = ProgrammingError(
+        "SELECT max(session_events.seq)",
+        {},
+        Exception('relation "session_events" does not exist'),
+    )
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=db_error)
+
+    @asynccontextmanager
+    async def session_factory():
+        yield session
+
+    postgres = SimpleNamespace(session_factory=session_factory)
+    redis_client = AsyncMock()
+    redis_client.get = AsyncMock(return_value=None)
+    redis_client.set = AsyncMock()
+    redis = SimpleNamespace(client=redis_client)
+
+    with (
+        patch(
+            "app.infrastructure.external.event_seq_allocator.get_postgres",
+            return_value=postgres,
+        ),
+        patch(
+            "app.infrastructure.external.event_seq_allocator.get_redis",
+            return_value=redis,
+        ),
+        patch(
+            "app.infrastructure.external.event_seq_allocator.get_settings",
+            return_value=SimpleNamespace(env="test"),
+        ),
+    ):
+        await event_seq_allocator.sync_global_event_seq()
+
+    redis_client.set.assert_awaited_once_with(
+        event_seq_allocator.GLOBAL_EVENT_SEQ_KEY,
+        0,
+    )
+
+
+def test_sync_global_event_seq_seeds_zero_when_schema_missing_in_test():
+    asyncio.run(_test_sync_global_event_seq_seeds_zero_when_schema_missing_in_test())
 

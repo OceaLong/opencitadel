@@ -5,6 +5,10 @@ export type ApiResponse<T = unknown> = {
   code: number;
   msg: string;
   data: T | null;
+  error_key?: string | null;
+  error_params?: Record<string, string> | null;
+  i18n_key?: string | null;
+  i18n_params?: Record<string, string> | null;
 };
 
 /**
@@ -699,6 +703,17 @@ export type CreateSessionParams = {
 };
 
 /**
+ * 结构化澄清回答
+ */
+export type ClarifyAnswer = {
+  question_id: string;
+  prompt?: string;
+  option_ids: string[];
+  option_labels: string[];
+  custom_text?: string;
+};
+
+/**
  * 聊天消息
  */
 export type ChatMessage = {
@@ -709,15 +724,8 @@ export type ChatMessage = {
     filename: string;
     [key: string]: unknown;
   }>;
+  clarify_answers?: ClarifyAnswer[];
   [key: string]: unknown;
-};
-
-export type ClarifyAnswer = {
-  question_id: string;
-  prompt?: string;
-  option_ids: string[];
-  option_labels: string[];
-  custom_text?: string;
 };
 
 /**
@@ -1040,6 +1048,8 @@ export type Notification = {
   artifact_id?: string | null;
   job_id?: string | null;
   message: string;
+  i18n_key?: string | null;
+  i18n_params?: Record<string, string> | null;
   read: boolean;
   created_at: string;
 };

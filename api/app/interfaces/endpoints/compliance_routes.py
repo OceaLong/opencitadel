@@ -62,8 +62,7 @@ async def list_evidence_sessions(
     service: EvidenceService = Depends(get_evidence_service),
 ):
     items = await service.list_evidence_sessions(limit=limit, offset=offset)
-    return ApiResponse.success(
-        data=EvidenceSessionListResponse(
+    return ApiResponse.success(data=EvidenceSessionListResponse(
             sessions=[EvidenceSessionItem(**item) for item in items]
         )
     )

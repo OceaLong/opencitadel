@@ -117,8 +117,7 @@ async def list_users(
     async with get_uow() as uow:
         users = await uow.user.list(limit=limit, offset=offset)
         total = await uow.user.count()
-    return Response.success(
-        data=ListAdminUsersResponse(
+    return Response.success(data=ListAdminUsersResponse(
             users=[AdminUserResponse.from_domain(u) for u in users],
             total=total,
         ),
@@ -200,7 +199,7 @@ async def delete_user(
         request=request,
         metadata={"strategy": strategy, "target_team_id": target_team_id},
     )
-    return Response.success(msg="用户删除策略已执行", data={"strategy": strategy})
+    return Response.success( data={"strategy": strategy})
 
 
 @router.post("/invitations", response_model=Response[InvitationLinkResponse], dependencies=[Depends(require_admin)])
@@ -230,7 +229,7 @@ async def create_platform_invitation(
         request=request,
         metadata={"email": invitation.email},
     )
-    return Response.success(data=InvitationLinkResponse(url=url), msg="平台邀请链接已生成")
+    return Response.success(data=InvitationLinkResponse(url=url))
 
 
 @router.get(
@@ -250,8 +249,7 @@ async def list_platform_invitations(
             offset=offset,
         )
         total = await uow.invitation.count(invitation_type=InvitationType.PLATFORM)
-    return Response.success(
-        data=ListPlatformInvitationsResponse(
+    return Response.success(data=ListPlatformInvitationsResponse(
             invitations=[PlatformInvitationResponse.from_domain(item, now=now) for item in invitations],
             total=total,
         ),
@@ -285,7 +283,7 @@ async def put_quota(
         request=request,
         metadata=request_body.model_dump(exclude_none=True),
     )
-    return Response.success(data=request_body, msg="配额已更新")
+    return Response.success(data=request_body)
 
 
 @router.get("/audit", response_model=Response[ListAuditLogsResponse], dependencies=[Depends(require_auditor_or_admin)])
@@ -319,8 +317,7 @@ async def list_audit_logs(
             start_at=start_at,
             end_at=end_at,
         )
-    return Response.success(
-        data=ListAuditLogsResponse(
+    return Response.success(data=ListAuditLogsResponse(
             logs=[AuditLogResponse.from_domain(log) for log in logs],
             total=total,
         ),
@@ -464,8 +461,7 @@ async def overview() -> Response[AdminOverviewResponse]:
             accepted += 1
         else:
             expired += 1
-    return Response.success(
-        data=AdminOverviewResponse(
+    return Response.success(data=AdminOverviewResponse(
             total_users=total_users,
             active_users=int(active_users_result.scalar_one() or 0),
             disabled_users=int(disabled_users_result.scalar_one() or 0),
@@ -488,8 +484,7 @@ async def list_teams(
     teams, total = await team_service.admin_list_all(limit=limit, offset=offset)
     async with get_uow() as uow:
         member_counts = await uow.team.count_members_by_teams([team.id for team in teams])
-    return Response.success(
-        data=ListAdminTeamsResponse(
+    return Response.success(data=ListAdminTeamsResponse(
             teams=[
                 AdminTeamResponse(
                     id=team.id,
@@ -536,7 +531,7 @@ async def delete_team_admin(
         resource_id=team_id,
         request=request,
     )
-    return Response.success(msg="团队已解散")
+    return Response.success()
 
 
 @router.delete(
@@ -562,7 +557,7 @@ async def remove_team_member_admin(
         request=request,
         metadata={"team_id": team_id, "user_id": user_id},
     )
-    return Response.success(msg="成员已移除")
+    return Response.success()
 
 
 @router.patch(
@@ -589,4 +584,4 @@ async def update_team_member_role_admin(
         request=request,
         metadata={"team_id": team_id, "user_id": user_id, "role": request_body.role.value},
     )
-    return Response.success(data=TeamMemberResponse.from_domain(member), msg="成员角色已更新")
+    return Response.success(data=TeamMemberResponse.from_domain(member))

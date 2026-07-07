@@ -95,6 +95,17 @@ class DocQAFlow(BaseFlow):
             self.status = FlowStatus.COMPLETED
             yield DoneEvent()
         except Exception as exc:
+            from sqlalchemy.exc import IntegrityError
+
+            from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError
+
+            if isinstance(exc, ModelUnavailableError):
+                raise
+            if isinstance(exc, IntegrityError):
+                logger.warning("DocQAFlow token 记录失败（已忽略）: %s", exc)
+                self.status = FlowStatus.COMPLETED
+                yield DoneEvent()
+                return
             logger.exception("DocQAFlow 失败: %s", exc)
             yield ErrorEvent(error=str(exc))
             self.status = FlowStatus.COMPLETED

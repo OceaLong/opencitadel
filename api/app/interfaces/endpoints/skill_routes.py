@@ -75,7 +75,7 @@ async def import_skill(
         slug=request.slug,
         scope=ctx.scope,
     )
-    return Response.success(msg="导入Skill成功", data=_to_response(created))
+    return Response.success( data=_to_response(created))
 
 
 @router.get("/{skill_id}", response_model=Response[SkillResponse])
@@ -99,7 +99,7 @@ async def create_skill(
         skill.visibility = ResourceVisibility.PRIVATE
         skill.owner_user_id = ctx.principal.user_id
     created = await skill_service.create_skill(skill, scope=ctx.scope)
-    return Response.success(msg="创建Skill成功", data=_to_response(created))
+    return Response.success( data=_to_response(created))
 
 
 @router.put("/{skill_id}", response_model=Response[SkillResponse])
@@ -118,7 +118,7 @@ async def update_skill(
             data[k] = v
     updated = Skill(**data)
     result = await skill_service.update_skill(skill_id, updated, scope=ctx.scope)
-    return Response.success(msg="更新Skill成功", data=_to_response(result))
+    return Response.success( data=_to_response(result))
 
 
 @router.delete("/{skill_id}", response_model=Response[Optional[Dict]])
@@ -131,4 +131,4 @@ async def delete_skill(
     if existing.visibility == ResourceVisibility.GLOBAL and not ctx.principal.is_admin:
         raise ForbiddenError("全局 Skill 仅管理员可删除")
     await skill_service.delete_skill(skill_id, scope=ctx.scope)
-    return Response.success(msg="删除Skill成功")
+    return Response.success()

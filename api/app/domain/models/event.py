@@ -74,6 +74,15 @@ class ClarifyQuestion(BaseModel):
     allow_custom: bool = True
 
 
+class ClarifyAnswer(BaseModel):
+    """结构化澄清回答"""
+    question_id: str
+    prompt: Optional[str] = None
+    option_ids: List[str] = Field(default_factory=list)
+    option_labels: List[str] = Field(default_factory=list)
+    custom_text: Optional[str] = None
+
+
 class ClarifyEvent(BaseEvent):
     """澄清事件，展示交互式问题并等待用户回答"""
     type: Literal["clarify"] = "clarify"
@@ -130,6 +139,7 @@ class MessageEvent(BaseEvent):
     message: str = ""  # 消息本身
     attachments: List[File] = Field(default_factory=list)  # 附件列表信息
     stream_id: Optional[str] = None  # 流式消息合并 id
+    clarify_answers: List[ClarifyAnswer] = Field(default_factory=list)
 
 
 class MessageDeltaEvent(BaseEvent):

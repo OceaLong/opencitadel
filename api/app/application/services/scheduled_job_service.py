@@ -223,11 +223,13 @@ class ScheduledJobService:
             await uow.commit()
 
         if notification_service and normalized == "completed":
-            message = f"定时任务「{job.name}」已完成"
+            fallback_message = f'Scheduled job "{job.name}" completed'
             await notification_service.send(
                 job.owner_user_id,
                 "job_complete",
-                message,
+                fallback_message,
+                i18n_key="notifications.scheduledJobCompleted",
+                i18n_params={"jobName": job.name},
                 session_id=session_id,
                 job_id=job.id,
             )
@@ -235,7 +237,7 @@ class ScheduledJobService:
                 await notification_service.send_im_via_mcp(
                     job.owner_user_id,
                     job.notify_channels_dict(),
-                    message,
+                    fallback_message,
                     mcp_pool,
                     app_config,
                 )
@@ -297,10 +299,13 @@ class ScheduledJobService:
             await uow.commit()
 
         if notification_service:
+            fallback_message = f'Scheduled job "{job.name}" started'
             await notification_service.send(
                 job.owner_user_id,
                 "job_started",
-                f"定时任务「{job.name}」已开始执行",
+                fallback_message,
+                i18n_key="notifications.scheduledJobStarted",
+                i18n_params={"jobName": job.name},
                 session_id=session.id,
                 job_id=job.id,
             )
@@ -308,7 +313,7 @@ class ScheduledJobService:
                 await notification_service.send_im_via_mcp(
                     job.owner_user_id,
                     job.notify_channels_dict(),
-                    f"定时任务「{job.name}」已开始执行",
+                    fallback_message,
                     mcp_pool,
                     app_config,
                 )

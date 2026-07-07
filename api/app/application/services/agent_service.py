@@ -17,6 +17,7 @@ from app.domain.models.codebase import SessionMode
 from app.domain.models.event import (
     BaseEvent,
     AssistantNoticeEvent,
+    ClarifyAnswer,
     ErrorEvent,
     MessageEvent,
     Event,
@@ -234,7 +235,8 @@ class AgentService:
                     if is_terminal_status_event(persisted_event):
                         return
                 yield AssistantNoticeEvent(
-                    message="任务连接暂时中断，正在等待后台恢复并重新连接。",
+                    message="",
+                    i18n_key="sessionDetail.streamStale",
                 )
                 return
 
@@ -243,6 +245,7 @@ class AgentService:
             session_id: str,
             message: Optional[str] = None,
             attachments: Optional[List[str]] = None,
+            clarify_answers: Optional[List[ClarifyAnswer]] = None,
             latest_event_id: Optional[str] = None,
             timestamp: Optional[datetime] = None,
             model_id: Optional[str] = None,
@@ -306,6 +309,10 @@ class AgentService:
                     message_event = MessageEvent(
                         role="user",
                         message=message,
+                        clarify_answers=[
+                            ClarifyAnswer.model_validate(answer.model_dump())
+                            for answer in (clarify_answers or [])
+                        ],
                     )
                     seq = await self._event_sequence.allocate()
                     message_event.id = str(seq)

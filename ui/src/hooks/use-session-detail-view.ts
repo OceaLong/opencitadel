@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import type { ChatInputRef } from "@/components/chat-input";
@@ -11,6 +11,7 @@ import { getToolKind } from "@/components/tool-use/utils";
 import { useIncrementalTimeline } from "@/hooks/use-incremental-timeline";
 import { useSessionDetail } from "@/hooks/use-session-detail";
 import { useRequireAuth } from "@/hooks/use-require-auth";
+import type { Locale } from "@/i18n/routing";
 import { sessionApi } from "@/lib/api/session";
 import type {
   ApprovalEventData,
@@ -91,6 +92,7 @@ export function useSessionDetailView({
   mode,
 }: UseSessionDetailViewOptions) {
   const router = useRouter();
+  const locale = useLocale() as Locale;
   const t = useTranslations("sessionDetail");
   const tAuth = useTranslations("auth");
   const { requireAuth } = useRequireAuth();
@@ -132,7 +134,7 @@ export function useSessionDetailView({
   const prevToolCountRef = useRef(0);
 
   const configEditable = session?.status === "pending" || session?.status === "completed" || session?.status === "failed";
-  const timeline = useIncrementalTimeline(events);
+  const timeline = useIncrementalTimeline(events, locale);
   const checkpointByAnchor = useMemo(() => {
     const map = new Map<string, SessionCheckpoint>();
     for (const checkpoint of checkpoints) {

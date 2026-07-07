@@ -26,11 +26,15 @@ class NotificationService:
             session_id: Optional[str] = None,
             artifact_id: Optional[str] = None,
             job_id: Optional[str] = None,
+            i18n_key: Optional[str] = None,
+            i18n_params: Optional[dict] = None,
     ) -> Notification:
         notification = Notification(
             user_id=user_id,
             type=type,  # type: ignore[arg-type]
             message=message,
+            i18n_key=i18n_key,
+            i18n_params=i18n_params,
             session_id=session_id,
             artifact_id=artifact_id,
             job_id=job_id,
