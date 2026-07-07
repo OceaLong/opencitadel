@@ -7,11 +7,14 @@ import { CodebaseContextPanel } from "@/components/workspace/codebase-context-pa
 import { KnowledgeContextPanel } from "@/components/workspace/knowledge-context-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+import { cn } from "@/lib/utils";
+
 type SessionContextPanelProps = {
   codebaseId?: string | null;
   knowledgeBaseId?: string | null;
   codeSourceRef?: React.MutableRefObject<((path: string, line?: number) => void) | null>;
   kbSourceRef?: React.MutableRefObject<((value: string) => void) | null>;
+  className?: string;
 };
 
 export function SessionContextPanel({
@@ -19,6 +22,7 @@ export function SessionContextPanel({
   knowledgeBaseId,
   codeSourceRef,
   kbSourceRef,
+  className,
 }: SessionContextPanelProps) {
   const t = useTranslations("workspaceContext");
   const hasCode = Boolean(codebaseId);
@@ -46,7 +50,7 @@ export function SessionContextPanel({
   );
 
   return (
-    <div className="border-border flex h-full w-96 shrink-0 flex-col border-l">
+    <div className={cn("border-border flex h-full w-96 shrink-0 flex-col border-l", className)}>
       {panel}
     </div>
   );

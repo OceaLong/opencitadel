@@ -66,7 +66,11 @@ ui/
 | `/invitations/[token]` | 接受邀请 | 无 Shell |
 | `/share/artifact/[token]` | 公开交付物 | 无 Shell |
 
-**导航**：左侧为会话列表；Codebase、Knowledge、Marketplace、Automation 在 **顶栏工作区下拉菜单**（`app-header.tsx`）。
+**导航**：
+
+- **桌面**：左侧为会话列表；Codebase、Knowledge、Marketplace、Automation 在 **顶栏工作区下拉**（`app-header.tsx`）。
+- **移动**：`MobileBottomNav` 提供对话、代码库、知识库、应用市场；Automation、Teams、Settings、Admin 在 **更多** Sheet。
+- `/codebase/[id]`、`/knowledge/[id]` 会跳转到新建的 Ask 会话，**不是**独立详情页。
 
 ## 功能
 
@@ -75,11 +79,13 @@ ui/
 - **端点与模型**：设置 → 模型 — 按端点分组（Provider、Base URL、API Key 在端点上）。
 - **Skill 模板**：设置 → Skill。
 - **长期记忆**：设置 → 记忆；会话页可压缩/清空会话记忆。
-- **设置弹窗**（六 Tab）：通用、模型、Skill、记忆、集成（MCP/A2A）、运行时（仅 admin）。
-- **语言切换**：顶栏 `LanguageToggle`（`NEXT_LOCALE` Cookie；URL 无 locale 前缀）。
-- **HITL UI**：澄清问题、计划/工具审批条、VNC 接管、检查点恢复。
+- **设置弹窗**（八 Tab）：通用（主题+语言）、Agent、模型、Skill、记忆、集成（MCP/A2A/服务 Key）、HITL、运行时（仅 admin）。
+- **主题与语言**：设置 → 通用（`GeneralSettings`）；locale 存于 `NEXT_LOCALE` Cookie（URL 无 locale 前缀）。
+- **HITL UI**：澄清问题、计划/工具审批条、VNC 接管、检查点恢复；全局默认在设置 → HITL。
 - **Web Operator**：Skill 为 `web-operator` 时弹出 `operator-scope-dialog.tsx`。
 - **模型状态 Badge**：顶栏轮询 `/api/llm/status`。
+- **通知收件箱**：顶栏 `NotificationInbox`（REST + SSE）。
+- **移动端会话工具栏**：模型/Skill/上下文选项在 `ChatOptionsSheet`。
 
 详见 [`../docs/architecture/frontend-ui.zh-CN.md`](../docs/architecture/frontend-ui.zh-CN.md)。
 
@@ -114,6 +120,7 @@ ui/
 | `skills.ts`、`memory.ts` | Skill 与记忆 |
 | `admin.ts`、`team.ts` | 管理与团队 |
 | `knowledge.ts`、`codebase.ts`、`file.ts` | 知识库、代码库、文件 |
+| `service-keys.ts`、`notifications.ts`、`compliance.ts` | 服务 API Key、通知、合规 |
 | `constants.ts` | 共享限制（`CODEBASE_ZIP_MAX_BYTES` = 200 MB，须与 nginx 一致） |
 | `artifacts.ts` | 交付物与分享 |
 | `types.ts` | 共享 TypeScript 类型 |
@@ -158,10 +165,18 @@ npm run start
 
 构建时使用 `NEXT_PUBLIC_API_BASE_URL=/api`，由 Nginx 反代 API。
 
+## 测试
+
+- **单元测试**（Vitest）：`ui/src/**/*.test.ts` 覆盖逻辑层 — 安全重定向、会话事件、LLM 状态、知识库工具函数。无组件级 UI 回归套件。
+- **E2E**（Playwright）：`e2e/` 冒烟测试 — 仅首页加载与 OpsConsole 演示登录。见 [`../e2e/README.zh-CN.md`](../e2e/README.zh-CN.md)。
+
+请勿将 `npm run test` 理解为已覆盖完整 UI 流程。
+
 ## 国际化（i18n）
 
 - 框架：`next-intl`，locale `en` / `zh`（默认 `en`）
-- 消息源：`scripts/build-messages.mjs` → `npm run i18n:build` → `messages/en.json`、`zh.json`
+- **键源（权威）**：`scripts/build-messages.mjs`（+ `i18n-supplement.mjs` 回填漂移）→ `npm run i18n:build` → `messages/en.json`、`zh.json`
+- **禁止**只手改 `messages/*.json` 而不同步构建脚本并重新执行 `i18n:build`
 - 运行时 locale 为 `zh`；文档文件名用 `*.zh-CN.md` — 同一语言，不同标识
 - URL 无 locale 前缀（`localePrefix: "never"`）；locale 存于 `NEXT_LOCALE` Cookie
-- 语言切换：**AppHeader** → `LanguageToggle` 组件
+- 主题与语言：**设置 → 通用**（`GeneralSettings`）

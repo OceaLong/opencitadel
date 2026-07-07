@@ -16,11 +16,11 @@ export type MermaidDiagramProps = {
 
 export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
   const t = useTranslations("mermaid");
-  const { theme } = useTheme();
+  const { resolvedTheme } = useTheme();
   const id = useId().replace(/:/g, "");
   const [svg, setSvg] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
-  const mermaidThemeName = theme === "dark" ? "dark" : "neutral";
+  const mermaidThemeName = resolvedTheme === "dark" ? "dark" : "neutral";
 
   useEffect(() => {
     let cancelled = false;

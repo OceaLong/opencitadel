@@ -54,6 +54,7 @@ class SymbolResponse(BaseModel):
     name: str
     kind: SymbolKind
     file_id: str
+    path: str = ""
     signature: str = ""
     start_line: int = 0
     end_line: int = 0

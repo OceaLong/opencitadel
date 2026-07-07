@@ -279,7 +279,14 @@ class AgentService:
                         if mode is not None:
                             session = await uow.session.get_by_id(session_id)
                             if session:
-                                session.mode = mode
+                                effective_mode = mode
+                                if (
+                                    session.knowledge_base_id
+                                    and not session.codebase_id
+                                    and mode == SessionMode.AGENT
+                                ):
+                                    effective_mode = SessionMode.ASK
+                                session.mode = effective_mode
                                 await uow.session.save(session)
                         session = await uow.session.get_by_id(session_id)
 

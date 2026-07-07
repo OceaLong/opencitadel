@@ -322,7 +322,7 @@ class BaseContainer(containers.DeclarativeContainer):
         cipher=cipher,
     )
     skill_service = providers.Singleton(SkillService, uow_factory=uow_factory)
-    team_service = providers.Singleton(TeamService, uow_factory=uow_factory)
+    team_service = providers.Singleton(TeamService, uow_factory=uow_factory, password_hasher=password_hasher)
     service_api_key_service = providers.Singleton(
         ServiceApiKeyService,
         uow_factory=uow_factory,

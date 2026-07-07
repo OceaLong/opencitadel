@@ -16,6 +16,12 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Item,
   ItemActions,
   ItemContent,
@@ -33,6 +39,7 @@ import {
   IconDownload,
   IconFilePreview,
   IconFileSearch,
+  IconMore,
 } from "@/lib/icons";
 import type { AttachmentFile, TaskObservationSummary } from "@/lib/session-events";
 import { formatDuration, sessionFileToAttachment } from "@/lib/session-events";
@@ -63,6 +70,8 @@ export type SessionHeaderProps = {
   onDebugOpen?: () => void;
   /** 单任务观测摘要 */
   observationSummary?: TaskObservationSummary;
+  /** 左侧操作区（如移动端上下文入口） */
+  leadingActions?: React.ReactNode;
 };
 
 export const SessionHeader = memo(function SessionHeader({
@@ -78,6 +87,7 @@ export const SessionHeader = memo(function SessionHeader({
   includeDebug = false,
   onDebugOpen,
   observationSummary,
+  leadingActions,
 }: SessionHeaderProps) {
   const t = useTranslations("sessionHeader");
   const tCommon = useTranslations("common");
@@ -172,47 +182,86 @@ export const SessionHeader = memo(function SessionHeader({
     setMounted(true);
   }, []);
 
+  const showObservationPill =
+    observationSummary &&
+    (observationSummary.toolCount > 0 || observationSummary.durationMs !== undefined);
+  const showTokenPill = Boolean(tokenUsage && tokenUsage.total_tokens > 0);
+
+  const observationPill = showObservationPill ? (
+    <div
+      className="border-border/70 bg-card text-muted-foreground hidden items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)] sm:flex"
+      title={t("observationTitle", {
+        tools: observationSummary!.toolCount,
+        waits: observationSummary!.waitCount,
+      })}
+    >
+      <IconActivity className="size-3.5 shrink-0" />
+      <span>{observationSummary!.toolCount} tools</span>
+      {observationSummary!.durationMs !== undefined && (
+        <span className="text-muted-foreground/70">
+          · {formatDuration(observationSummary!.durationMs)}
+        </span>
+      )}
+    </div>
+  ) : null;
+
+  const tokenPill = showTokenPill ? (
+    <button
+      type="button"
+      onClick={handleOpenTokenDetail}
+      className="border-border/70 bg-card text-muted-foreground hover:bg-muted/70 hidden cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)] transition-colors sm:flex"
+      title={t("tokenUsageTitle", {
+        prompt: tokenUsage!.prompt_tokens.toLocaleString(),
+        completion: tokenUsage!.completion_tokens.toLocaleString(),
+        calls: tokenUsage!.call_count,
+      })}
+    >
+      <IconCoins className="size-3.5 shrink-0 text-amber-600" />
+      <span>{tokenUsage!.total_tokens.toLocaleString()} tok</span>
+      {tokenUsage!.estimated_cost_usd > 0 && (
+        <span className="text-muted-foreground/70">
+          · ${tokenUsage!.estimated_cost_usd.toFixed(4)}
+        </span>
+      )}
+    </button>
+  ) : null;
+
   return (
-    <header className="bg-background/95 sticky top-0 z-10 flex flex-shrink-0 flex-row items-center justify-end gap-2 px-4 pt-2 pb-2">
-      <div className="flex shrink-0 items-center gap-0.5">
-        {observationSummary &&
-          (observationSummary.toolCount > 0 || observationSummary.durationMs !== undefined) && (
-            <div
-              className="border-border/70 bg-card text-muted-foreground flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)]"
-              title={t("observationTitle", {
-                tools: observationSummary.toolCount,
-                waits: observationSummary.waitCount,
-              })}
-            >
-              <IconActivity className="size-3.5 shrink-0" />
-              <span>{observationSummary.toolCount} tools</span>
-              {observationSummary.durationMs !== undefined && (
-                <span className="text-muted-foreground/70">
-                  · {formatDuration(observationSummary.durationMs)}
-                </span>
+    <header className="bg-background/95 sticky top-0 z-10 flex flex-shrink-0 flex-row flex-wrap items-center justify-between gap-2 px-4 pt-2 pb-2">
+      {leadingActions ? <div className="flex shrink-0 items-center gap-1">{leadingActions}</div> : <div />}
+      <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-0.5">
+        {(showObservationPill || showTokenPill) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-sm" className="sm:hidden" aria-label={t("moreStats")}>
+                <IconMore className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {showObservationPill && (
+                <DropdownMenuItem className="flex flex-col items-start gap-0.5">
+                  <span className="text-xs font-medium">{t("observationTitle", {
+                    tools: observationSummary!.toolCount,
+                    waits: observationSummary!.waitCount,
+                  })}</span>
+                  <span className="text-muted-foreground text-xs">
+                    {observationSummary!.toolCount} tools
+                    {observationSummary!.durationMs !== undefined
+                      ? ` · ${formatDuration(observationSummary!.durationMs)}`
+                      : ""}
+                  </span>
+                </DropdownMenuItem>
               )}
-            </div>
-          )}
-        {tokenUsage && tokenUsage.total_tokens > 0 && (
-          <button
-            type="button"
-            onClick={handleOpenTokenDetail}
-            className="border-border/70 bg-card text-muted-foreground hover:bg-muted/70 flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)] transition-colors"
-            title={t("tokenUsageTitle", {
-              prompt: tokenUsage.prompt_tokens.toLocaleString(),
-              completion: tokenUsage.completion_tokens.toLocaleString(),
-              calls: tokenUsage.call_count,
-            })}
-          >
-            <IconCoins className="size-3.5 shrink-0 text-amber-600" />
-            <span>{tokenUsage.total_tokens.toLocaleString()} tok</span>
-            {tokenUsage.estimated_cost_usd > 0 && (
-              <span className="text-muted-foreground/70">
-                · ${tokenUsage.estimated_cost_usd.toFixed(4)}
-              </span>
-            )}
-          </button>
+              {showTokenPill && (
+                <DropdownMenuItem onClick={handleOpenTokenDetail}>
+                  {tokenUsage!.total_tokens.toLocaleString()} tok
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
+        {observationPill}
+        {tokenPill}
         {sessionId && (
           <SessionMemorySheet sessionId={sessionId} editable={memoryEditable} compact />
         )}

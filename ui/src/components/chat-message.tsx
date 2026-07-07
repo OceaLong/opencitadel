@@ -1,19 +1,13 @@
 "use client";
 
 import { memo, useState } from "react";
-import {
-  AlertCircle,
-  CheckIcon,
-  ChevronDown,
-  Clock,
-  History,
-  Loader2,
-} from "lucide-react";
+import { AlertCircle, ChevronDown, Clock, History } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { AttachmentsMessage } from "@/components/attachments-message";
 import { ClarifyQuestions } from "@/components/clarify-questions";
 import { OpenCitadelIcon } from "@/components/open-citadel-icon";
+import { PlanStepStatusIcon } from "@/components/plan-step-status-icon";
 import { MarkdownContent } from "@/components/markdown-content";
 import { ToolUse } from "@/components/tool-use";
 
@@ -324,9 +318,6 @@ function StepBlock({
 }) {
   const [expanded, setExpanded] = useState(true);
   const { data, tools } = stepItem;
-  const isCompleted = data.status === "completed";
-  const isFailed = data.status === "failed";
-  const isRunning = data.status === "running";
 
   return (
     <div className={cn("mt-3 flex flex-col", className)}>
@@ -349,25 +340,13 @@ function StepBlock({
             setExpanded((prev) => !prev);
           }
         }}
-        className="group/header text-foreground hover:bg-muted/60 focus-visible:ring-ring/40 flex w-full cursor-pointer justify-between gap-2 truncate rounded-lg px-1.5 py-1 text-sm transition-colors outline-none focus-visible:ring-2"
+        className="group/header text-foreground hover:bg-muted/60 focus-visible:ring-ring/40 flex w-full cursor-pointer justify-between gap-2 rounded-lg px-1.5 py-1 text-sm transition-colors outline-none focus-visible:ring-2"
       >
-        <div className="flex min-w-0 flex-1 flex-row items-center justify-start gap-2 truncate">
-          <div
-            className={cn(
-              "border-primary/20 bg-primary/75 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border shadow-[var(--shadow-card)]",
-              !isCompleted && "bg-muted border-border",
-              isFailed && "border-red-500/30 bg-red-500",
-            )}
-          >
-            {isRunning ? (
-              <Loader2 className="text-muted-foreground size-2.5 animate-spin" />
-            ) : isFailed ? (
-              <AlertCircle className="text-white" size={10} />
-            ) : (
-              <CheckIcon className="text-white" size={10} />
-            )}
+        <div className="flex min-w-0 flex-1 flex-row items-start justify-start gap-2">
+          <PlanStepStatusIcon status={data.status} className="relative top-0.5" />
+          <div className="markdown-content min-w-0 flex-1 break-words font-medium leading-relaxed">
+            {data.description}
           </div>
-          <div className="markdown-content min-w-0 truncate font-medium">{data.description}</div>
           <ChevronDown
             className={cn(
               "text-muted-foreground flex-shrink-0 transition-transform",

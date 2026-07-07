@@ -2,14 +2,16 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request, Response as StarletteResponse
+from fastapi import APIRouter, Depends, Query, Request, Response as StarletteResponse
 from starlette.responses import RedirectResponse
 
 from app.application.errors.exceptions import BadRequestError, UnauthorizedError
 from app.application.services.auth_service import AuthService
 from app.domain.models.invitation import InvitationType
 from app.domain.models.oauth_identity import OAuthIdentity
+from app.domain.models.team import TeamMember, TeamRole
 from app.domain.models.user import User
+from app.domain.utils.safe_redirect import resolve_safe_redirect_path
 from app.infrastructure.security.cookie import AuthCookieManager, REFRESH_COOKIE
 from app.interfaces.auth_dependencies import get_current_principal, verify_csrf
 from app.interfaces.schemas import Response as ApiResponse
@@ -111,12 +113,19 @@ async def me(principal=Depends(get_current_principal)) -> ApiResponse[UserRespon
 
 
 @router.get("/oauth/{provider}/login")
-async def oauth_login(provider: str, request: Request):
+async def oauth_login(
+        provider: str,
+        request: Request,
+        redirect: str = Query(default=""),
+        team_invite_token: str = Query(default=""),
+):
     from app.container import get_api_container
 
     client = get_api_container().oauth_clients().get(provider)
     if client is None:
         raise BadRequestError("OAuth 提供商未启用")
+    request.session["oauth_redirect"] = resolve_safe_redirect_path(redirect)
+    request.session["oauth_team_invite_token"] = (team_invite_token or "").strip()
     redirect_uri = f"{get_settings().oauth_redirect_base}/{provider}/callback"
     return await client.authorize_redirect(request, redirect_uri)
 
@@ -145,14 +154,14 @@ async def oauth_callback(
     async with get_uow() as uow:
         identity = await uow.oauth_identity.get_by_provider_identity(provider, provider_user_id)
         user = await uow.user.get_by_id(identity.user_id) if identity else await uow.user.get_by_email(email)
+        team_invite_token = (request.session.pop("oauth_team_invite_token", "") or "").strip()
+        oauth_redirect = resolve_safe_redirect_path(request.session.pop("oauth_redirect", ""))
+
         if not user:
-            invitations = await uow.invitation.list(invitation_type=InvitationType.PLATFORM, limit=500)
-            invitation = next(
-                (
-                    item for item in invitations
-                    if item.email and item.email.strip().lower() == email and not item.accepted
-                ),
-                None,
+            invitation = await _resolve_oauth_registration_invitation(
+                uow,
+                email=email,
+                team_invite_token=team_invite_token,
             )
             if not invitation:
                 raise BadRequestError("该邮箱尚未收到平台邀请")
@@ -169,6 +178,39 @@ async def oauth_callback(
             invitation.accepted_at = datetime.now()
             invitation.accepted_user_id = user.id
             await uow.invitation.save(invitation)
+            if invitation.type == InvitationType.TEAM and invitation.team_id:
+                existing_member = await uow.team.get_member(invitation.team_id, user.id)
+                if not existing_member:
+                    await uow.team.add_member(
+                        TeamMember(
+                            team_id=invitation.team_id,
+                            user_id=user.id,
+                            role=invitation.team_role or TeamRole.MEMBER,
+                        )
+                    )
+        elif team_invite_token:
+            team_invitation = await uow.invitation.get_by_token(team_invite_token)
+            if (
+                    team_invitation
+                    and team_invitation.type == InvitationType.TEAM
+                    and team_invitation.team_id
+                    and not team_invitation.accepted
+                    and team_invitation.expires_at >= datetime.now()
+            ):
+                if team_invitation.email and team_invitation.email.strip().lower() != email:
+                    raise BadRequestError("邀请邮箱与 OAuth 账号不匹配")
+                existing_member = await uow.team.get_member(team_invitation.team_id, user.id)
+                if not existing_member:
+                    await uow.team.add_member(
+                        TeamMember(
+                            team_id=team_invitation.team_id,
+                            user_id=user.id,
+                            role=team_invitation.team_role or TeamRole.MEMBER,
+                        )
+                    )
+                team_invitation.accepted_at = datetime.now()
+                team_invitation.accepted_user_id = user.id
+                await uow.invitation.save(team_invitation)
         if not identity:
             await uow.oauth_identity.save(
                 OAuthIdentity(
@@ -185,9 +227,32 @@ async def oauth_callback(
         user_agent=request.headers.get("user-agent", ""),
         ip_address=_client_ip(request),
     )
-    response = RedirectResponse(get_settings().frontend_base_url.rstrip("/"))
+    response = RedirectResponse(f"{get_settings().frontend_base_url.rstrip('/')}{oauth_redirect}")
     cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
     return response
+
+
+async def _resolve_oauth_registration_invitation(uow, *, email: str, team_invite_token: str):
+    if team_invite_token:
+        invitation = await uow.invitation.get_by_token(team_invite_token)
+        if (
+                invitation
+                and invitation.type == InvitationType.TEAM
+                and invitation.team_id
+                and not invitation.accepted
+                and invitation.expires_at >= datetime.now()
+                and invitation.email
+                and invitation.email.strip().lower() == email
+        ):
+            return invitation
+    invitations = await uow.invitation.list(invitation_type=InvitationType.PLATFORM, limit=500)
+    return next(
+        (
+            item for item in invitations
+            if item.email and item.email.strip().lower() == email and not item.accepted
+        ),
+        None,
+    )
 
 
 async def _load_oauth_profile(provider: str, client, token: dict) -> dict:

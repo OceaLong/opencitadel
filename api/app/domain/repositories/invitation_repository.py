@@ -12,6 +12,10 @@ class InvitationRepository(ABC):
         ...
 
     @abstractmethod
+    async def get_pending_team_invitation(self, team_id: str, email: str) -> Optional[Invitation]:
+        ...
+
+    @abstractmethod
     async def list(self, invitation_type: InvitationType | None = None, limit: int = 100, offset: int = 0) -> List[Invitation]:
         ...
 

@@ -74,6 +74,39 @@ knowledge_base:
 
 `graphrag.enabled=true` 时在索引写入后运行 `GraphBuilder`。GraphRAG LLM 不可用会记录日志并跳过 — 摄取仍可能达到 `READY`。
 
+## 检索栈（KB vs Codebase）
+
+知识库检索有意设计得比代码库语义搜索更复杂：
+
+```mermaid
+flowchart TB
+  subgraph kb ["知识库 HybridRetriever"]
+    Q1["用户查询"] --> V1["向量 top-k"]
+    Q1 --> B1["BM25 top-k"]
+    V1 --> RRF["RRF 融合"]
+    B1 --> RRF
+    RRF --> Graph["GraphRAG 扩展"]
+    Graph --> Parent["父块扩展"]
+    Parent --> Rerank["LLM rerank"]
+    Rerank --> Out1["kb_search 引用"]
+  end
+  subgraph cb ["代码库语义检索"]
+    Q2["用户查询"] --> Embed2["查询 embedding"]
+    Embed2 --> Vec2["pgvector chunk 检索"]
+    Vec2 --> Out2["semantic_search / read_code"]
+  end
+```
+
+| 维度 | 知识库 | 代码库 |
+|------|--------|--------|
+| 向量索引 | `knowledge_base.vector_enabled`（默认 true） | 可用时建向量；失败时 `vector_degraded` |
+| 全文 | BM25 + `zh_tokenizer` | 符号索引 + 静态分析 |
+| 图 | 可选 GraphRAG | 静态分析依赖边 |
+| Rerank | LLM rerank（`knowledge_base.rerank`） | 无 |
+| Agent 工具 | `KnowledgeBaseTool.kb_search` | `CodebaseTool.semantic_search` |
+
+见 [Codebase 重新索引](codebase-reindex.zh-CN.md) 了解更轻量的代码库检索路径。
+
 ## 失败与恢复
 
 | 失败类型 | 错误码 | Worker 行为 |

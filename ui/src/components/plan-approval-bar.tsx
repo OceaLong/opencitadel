@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { ApprovalBar } from "@/components/approval-bar";
+import { PlanStepRow } from "@/components/plan-step-row";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -193,11 +194,18 @@ export function PlanApprovalBar({
           </div>
         </div>
       ) : (
-        <ol className="text-muted-foreground list-decimal space-y-1 pl-5 text-sm">
-          {steps.map((step) => (
-            <li key={step.id}>{step.description}</li>
+        <div className="bg-muted/40 mt-2 rounded-xl py-1">
+          {steps.map((step, index) => (
+            <PlanStepRow
+              key={step.id || index}
+              description={step.description}
+              status="pending"
+              index={index + 1}
+              variant="timeline"
+              isLast={index === steps.length - 1}
+            />
           ))}
-        </ol>
+        </div>
       )}
 
       {rejectOpen && (

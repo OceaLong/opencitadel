@@ -1,20 +1,38 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import re
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Callable, List
+from typing import Callable, List, Optional
 
-from app.application.errors.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.application.errors.exceptions import BadRequestError, ConflictError, ForbiddenError, NotFoundError
 from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.team import Team, TeamMember, TeamRole
+from app.domain.models.user import User
 from app.domain.repositories.uow import IUnitOfWork
-from app.interfaces.schemas.team import TeamMemberDetailResponse
+from app.infrastructure.security.password_hasher import PasswordHasher
+from app.interfaces.schemas.admin import InvitationStatus
+from app.interfaces.schemas.team import TeamInvitationPreviewResponse, TeamMemberDetailResponse
 from core.config import get_settings
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@dataclass(frozen=True)
+class TeamInvitationRegisterResult:
+    user: User
+    member: TeamMember
 
 
 class TeamService:
-    def __init__(self, uow_factory: Callable[[], IUnitOfWork]) -> None:
+    def __init__(
+            self,
+            uow_factory: Callable[[], IUnitOfWork],
+            password_hasher: Optional[PasswordHasher] = None,
+    ) -> None:
         self._uow_factory = uow_factory
+        self._password_hasher = password_hasher or PasswordHasher()
 
     async def create_team(self, *, name: str, description: str, actor_user_id: str) -> Team:
         name = name.strip()
@@ -50,11 +68,20 @@ class TeamService:
             members = await uow.team.list_members(team_id)
             return await self._enrich_members(uow, members)
 
-    async def create_team_invitation(self, *, team_id: str, actor_user_id: str, role: TeamRole) -> str:
+    async def create_team_invitation(
+            self,
+            *,
+            team_id: str,
+            actor_user_id: str,
+            role: TeamRole,
+            email: str | None = None,
+    ) -> str:
         await self._require_team_admin(team_id, actor_user_id)
+        normalized_email = self._normalize_invite_email(email)
         token = secrets.token_urlsafe(32)
         invitation = Invitation(
             type=InvitationType.TEAM,
+            email=normalized_email,
             team_id=team_id,
             team_role=role,
             token=token,
@@ -62,20 +89,91 @@ class TeamService:
             expires_at=datetime.now() + timedelta(days=7),
         )
         async with self._uow_factory() as uow:
+            if normalized_email:
+                existing = await uow.invitation.get_pending_team_invitation(team_id, normalized_email)
+                if existing:
+                    raise ConflictError("该邮箱已有待处理的团队邀请")
             await uow.invitation.save(invitation)
         return f"{get_settings().frontend_base_url.rstrip('/')}/invitations/{token}"
 
+    async def preview_invitation(self, *, token: str) -> TeamInvitationPreviewResponse:
+        async with self._uow_factory() as uow:
+            invitation = await self._load_team_invitation(uow, token)
+            team = await uow.team.get_by_id(invitation.team_id or "")
+            if not team:
+                raise NotFoundError("团队不存在")
+            now = datetime.now()
+            status = self._invitation_status(invitation, now=now)
+            requires_registration = False
+            email_hint = None
+            if invitation.email and status == InvitationStatus.PENDING:
+                email_hint = self._mask_email(invitation.email)
+                existing_user = await uow.user.get_by_email(invitation.email)
+                requires_registration = existing_user is None
+            return TeamInvitationPreviewResponse(
+                team_id=team.id,
+                team_name=team.name,
+                role=invitation.team_role or TeamRole.MEMBER,
+                status=status,
+                expires_at=invitation.expires_at,
+                requires_registration=requires_registration,
+                email_hint=email_hint,
+            )
+
+    async def register_and_accept_invitation(
+            self,
+            *,
+            token: str,
+            email: str,
+            username: str,
+            password: str,
+    ) -> TeamInvitationRegisterResult:
+        normalized_email = email.strip().lower()
+        if not _EMAIL_RE.match(normalized_email):
+            raise BadRequestError("邮箱格式无效")
+        async with self._uow_factory() as uow:
+            invitation = await self._load_team_invitation(uow, token)
+            if not invitation.email:
+                raise BadRequestError("此邀请不支持注册，请登录已有账号")
+            if invitation.email.strip().lower() != normalized_email:
+                raise BadRequestError("注册邮箱与邀请不匹配")
+            if await uow.user.get_by_email(normalized_email):
+                raise ConflictError("邮箱已注册，请直接登录")
+            if await uow.user.get_by_username(username):
+                raise ConflictError("用户名已存在")
+
+            user = User(
+                email=normalized_email,
+                username=username,
+                password_hash=self._password_hasher.hash(password),
+            )
+            await uow.user.save(user)
+            member = TeamMember(
+                team_id=invitation.team_id or "",
+                user_id=user.id,
+                role=invitation.team_role or TeamRole.MEMBER,
+            )
+            await uow.team.add_member(member)
+            invitation.accepted_at = datetime.now()
+            invitation.accepted_user_id = user.id
+            await uow.invitation.save(invitation)
+            return TeamInvitationRegisterResult(user=user, member=member)
+
     async def accept_invitation(self, *, token: str, user_id: str) -> TeamMember:
         async with self._uow_factory() as uow:
-            invitation = await uow.invitation.get_by_token(token)
-            if not invitation or invitation.type != InvitationType.TEAM or not invitation.team_id:
-                raise BadRequestError("邀请链接无效")
+            invitation = await self._load_team_invitation(uow, token)
             if invitation.accepted:
                 raise BadRequestError("邀请链接已被使用")
             if invitation.expires_at < datetime.now():
                 raise BadRequestError("邀请链接已过期")
 
-            existing = await uow.team.get_member(invitation.team_id, user_id)
+            user = await uow.user.get_by_id(user_id)
+            if not user:
+                raise BadRequestError("用户不存在")
+            if invitation.email and invitation.email.strip().lower() != user.email.strip().lower():
+                raise BadRequestError("邀请邮箱与当前账号不匹配")
+
+            existing = await uow.team.get_member(invitation.team_id or "", user_id)
             if existing:
                 invitation.accepted_at = datetime.now()
                 invitation.accepted_user_id = user_id
@@ -83,7 +181,7 @@ class TeamService:
                 return existing
 
             member = TeamMember(
-                team_id=invitation.team_id,
+                team_id=invitation.team_id or "",
                 user_id=user_id,
                 role=invitation.team_role or TeamRole.MEMBER,
             )
@@ -246,3 +344,34 @@ class TeamService:
     async def _require_team_admin(self, team_id: str, user_id: str, *, allow_member: bool = False) -> TeamMember:
         async with self._uow_factory() as uow:
             return await self._load_actor_member(uow, team_id, user_id, allow_member=allow_member)
+
+    async def _load_team_invitation(self, uow, token: str) -> Invitation:
+        invitation = await uow.invitation.get_by_token(token)
+        if not invitation or invitation.type != InvitationType.TEAM or not invitation.team_id:
+            raise BadRequestError("邀请链接无效")
+        return invitation
+
+    @staticmethod
+    def _invitation_status(invitation: Invitation, *, now: datetime) -> InvitationStatus:
+        if invitation.accepted_at is not None:
+            return InvitationStatus.ACCEPTED
+        if invitation.expires_at < now:
+            return InvitationStatus.EXPIRED
+        return InvitationStatus.PENDING
+
+    @staticmethod
+    def _normalize_invite_email(email: str | None) -> str | None:
+        normalized = (email or "").strip().lower()
+        if not normalized:
+            return None
+        if not _EMAIL_RE.match(normalized):
+            raise BadRequestError("邮箱格式无效")
+        return normalized
+
+    @staticmethod
+    def _mask_email(email: str) -> str:
+        local, _, domain = email.partition("@")
+        if not domain:
+            return "***"
+        masked_local = f"{local[0]}***" if local else "***"
+        return f"{masked_local}@{domain}"

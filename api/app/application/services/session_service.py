@@ -66,6 +66,14 @@ class SessionService:
     ) -> Session:
         """创建一个空白的新任务会话"""
         logger.info(f"创建一个空白新任务会话")
+        default_mode = (
+            SessionMode.ASK
+            if knowledge_base_id and not codebase_id
+            else SessionMode.AGENT
+        )
+        resolved_mode = mode or default_mode
+        if knowledge_base_id and not codebase_id and resolved_mode == SessionMode.AGENT:
+            resolved_mode = SessionMode.ASK
         session = Session(
             title=title,
             model_id=model_id,
@@ -78,7 +86,7 @@ class SessionService:
             gate_profile=gate_profile or ("standard" if operator_scope else None),
             owner_user_id=scope.user_id if scope else None,
             team_id=scope.team_id if scope and scope.type == OwnerScopeType.TEAM else None,
-            mode=mode or SessionMode.AGENT,
+            mode=resolved_mode,
         )
         async with self._uow_factory() as uow:
             if model_id and await uow.llm_model.get_by_id(model_id, scope=scope) is None:

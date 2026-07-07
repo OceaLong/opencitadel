@@ -39,7 +39,7 @@ export function LeftPanel() {
         >
           <IconAdd />
           {t("newTask")}
-          <KbdGroup>
+          <KbdGroup className="hidden md:inline-flex">
             <Kbd>⌘</Kbd>
             <Kbd>K</Kbd>
           </KbdGroup>

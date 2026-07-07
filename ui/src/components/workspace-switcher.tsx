@@ -1,12 +1,19 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
+import { Check, ChevronDown, User, Users } from "lucide-react";
 
-import { teamApi, type Team } from "@/lib/api/team";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+import { type Team, teamApi } from "@/lib/api/team";
 import { ACTIVE_WORKSPACE_KEY, LEGACY_ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
 import { readLocalStorageKey, writeLocalStorageKey } from "@/lib/storage-migration";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
 export function WorkspaceSwitcher() {
@@ -35,6 +42,13 @@ export function WorkspaceSwitcher() {
       });
   }, [user]);
 
+  const activeTeam = useMemo(
+    () => teams.find((team) => team.id === active),
+    [active, teams],
+  );
+  const displayLabel = activeTeam?.name ?? t("personal");
+  const TriggerIcon = activeTeam ? Users : User;
+
   if (!user) {
     return null;
   }
@@ -45,27 +59,45 @@ export function WorkspaceSwitcher() {
     window.location.reload();
   }
 
+  const options = [
+    { id: "", label: t("personal"), icon: User },
+    ...teams.map((team) => ({ id: team.id, label: team.name, icon: Users })),
+  ];
+
   return (
-    <div className="mb-3 space-y-2">
-      <select
-        className="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
-        value={active}
-        onChange={(event) => change(event.target.value)}
-        aria-label={t("label")}
-      >
-        <option value="">{t("personal")}</option>
-        {teams.map((team) => (
-          <option key={team.id} value={team.id}>
-            {team.name}
-          </option>
-        ))}
-      </select>
-      <Link
-        href="/teams"
-        className="text-muted-foreground hover:text-foreground block text-xs underline-offset-4 hover:underline"
-      >
-        {t("manageTeams")}
-      </Link>
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="mb-3 flex w-full items-center gap-2.5 rounded-xl bg-muted/50 px-2.5 py-2 transition-colors hover:bg-muted/80"
+          aria-label={t("label")}
+        >
+          <TriggerIcon className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">{displayLabel}</span>
+          <ChevronDown className="size-4 shrink-0 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-[min(100vw-2rem,280px)] p-1.5">
+        {options.map((option) => {
+          const isSelected = active === option.id;
+          const OptionIcon = option.icon;
+          return (
+            <button
+              key={option.id || "personal"}
+              type="button"
+              className={cn(
+                "hover:bg-muted flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
+                isSelected && "bg-muted/60",
+              )}
+              onClick={() => change(option.id)}
+            >
+              <OptionIcon className="size-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">{option.label}</span>
+              {isSelected ? <Check className="text-primary size-4 shrink-0" /> : null}
+            </button>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

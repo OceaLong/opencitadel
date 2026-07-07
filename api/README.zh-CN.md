@@ -33,6 +33,44 @@ API 与 Worker 为独立进程，共享 `BaseContainer` 中的基础设施与服
 
 完整架构说明见 [`../docs/architecture/overview.zh-CN.md`](../docs/architecture/overview.zh-CN.md)。
 
+## Worker 与 Migrate 角色
+
+### Worker（`app.worker.main`）
+
+Worker 是 Redis `task:dispatch` 的**长驻消费者**。任何 Agent、代码库摄取、知识库摄取任务都必须有 Worker 才能执行。
+
+| `task_type` | 合成 session id | Runner |
+|-------------|-----------------|--------|
+| `agent`（默认） | 用户 session id | `TaskRunnerFactory` → `AgentTaskRunner` |
+| `codebase_ingest` | `codebase-ingest:{id}` | `CodebaseIngestionTaskRunner` |
+| `kb_ingest` | `kb-ingest:{id}` | `KBIngestionTaskRunner` |
+
+除任务执行外，Worker 还负责：
+
+- 任务租约获取/续期/释放（`task_lease.py`），崩溃后幂等
+- 沙箱准入、预热池与孤儿回收（`sandbox_maintenance.py`）
+- 启动与周期 reconcile 卡住的 KB 摄取
+- 可选 DLQ 回放（`model_resilience.dlq_replay_enabled=true`）
+- 关闭时释放 MCP/A2A 出站连接池
+
+Worker 可水平扩展；各副本加入同一 Redis 消费组。见 [任务恢复](../docs/architecture/task-recovery.zh-CN.md)。
+
+### Migrate（`app.migrate`）
+
+Migrate 是**每次部署的一次性 job**，非长驻服务：
+
+1. **Alembic** schema 升级到 `head`
+2. **数据迁移**：LLM API Key 加密、AppConfig YAML 种子、MCP/A2A blob 迁移、MCP URL/secret 迁移
+
+```bash
+./migrate.sh
+# 或: python -m app.migrate
+```
+
+API 启动时校验 schema 是否为 Alembic head，**未迁移则拒绝启动**（test 环境跳过）。Docker Compose 在 API/Worker 前运行 `opencitadel-migrate`；Helm 使用 migrate initContainer。
+
+勿在 migrate 进程中运行 Agent 任务 — 其未装配 `WorkerContainer`。
+
 ## 项目结构
 
 ```
@@ -78,17 +116,38 @@ api/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/auth/register`、`/auth/login`、`/auth/refresh`、`/auth/logout` | Cookie 会话认证 |
-| GET | `/auth/me` | 当前用户 |
 | GET | `/auth/oauth/{provider}/login`、`/auth/oauth/{provider}/callback` | OAuth（Google/GitHub） |
 | GET | `/status` | 健康检查 |
 | GET | `/llm/status` | LLM 可用性摘要 |
 | GET | `/metrics` | Prometheus 指标 |
 | GET | `/marketplace/apps` | 应用市场目录 |
 | POST | `/marketplace/*` | 应用市场 mini-app 接口 |
-| POST | `/webhooks/{job_token}` | 自动化 Webhook 入口 |
-| GET | `/share/artifact/{token}` | 公开交付物分享 |
+| POST | `/webhooks/{job_token}` | 自动化 Webhook 入口（路径含 token） |
+| GET | `/share/artifact/{token}` | 公开交付物分享（路径含 token） |
+| GET | `/invitations/{token}` | 团队邀请预览 |
+| POST | `/invitations/{token}/register` | 通过团队邀请注册并入队 |
 | GET | `/.well-known/agent-card.json` | A2A agent card（功能开关启用时） |
-| POST | `/a2a` | 入站 A2A（功能开关控制） |
+
+### 需登录（会话 JWT）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/auth/me` | 当前用户资料 |
+| POST | `/invitations/{token}/accept` | 接受团队邀请（已登录用户） |
+| GET/POST/DELETE | `/service-keys` | 服务 API Key CRUD |
+| GET/POST/PATCH/DELETE | `/teams`、`/teams/{id}/*` | 团队工作区 API |
+| GET/POST/PATCH | `/sessions`、`/sessions/{id}/*` | 会话 CRUD、chat SSE、检查点、VNC |
+| GET/POST/PUT/DELETE | `/skills`、`/memories`、`/files` | Skill、长期记忆、文件 |
+| GET/POST | `/codebases`、`/knowledge-bases`、`/scheduled-jobs`、`/notifications` | 代码库、知识库、自动化、通知 |
+| GET/PUT/DELETE | `/app-config/*`、`/llm-endpoints`、`/llm-models` | AppConfig、LLM 端点与模型 |
+
+### 服务 API Key（`X-Api-Key`）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/a2a` | 入站 A2A（功能开关控制；需有效服务 API Key） |
+
+> 服务 API Key 仅认证调用方，**不携带**团队工作区 scope。团队作用域操作请使用会话 JWT + `X-Workspace-Id`。
 
 ### 管理与合规（审计员或管理员）
 
@@ -111,8 +170,10 @@ api/
 |------|------|------|
 | GET/POST | `/teams` | 列表/创建团队 |
 | GET/DELETE | `/teams/{id}` | 团队详情/删除 |
-| GET/POST/DELETE/PATCH | `/teams/{id}/members`、`/teams/{id}/invitations` | 成员与邀请 |
+| GET/POST/DELETE/PATCH | `/teams/{id}/members`、`/teams/{id}/invitations` | 成员与邀请（邀请可选 `email`） |
 | POST | `/teams/{id}/leave` | 退出团队 |
+| GET | `/invitations/{token}` | 预览邀请（公开） |
+| POST | `/invitations/{token}/register` | 注册并入队（公开） |
 | POST | `/invitations/{token}/accept` | 接受邀请 |
 
 ### 应用配置与集成
@@ -153,7 +214,6 @@ api/
 | GET/POST/PUT/DELETE | `/skills`、`/skills/recommend`、`/skills/import` | Skill 模板 |
 | GET/POST/PUT/DELETE | `/memories` | 长期记忆 |
 | POST/GET | `/files`、`/files/{id}/download` | 文件上传/下载 |
-| GET/POST/DELETE | `/service-keys` | 服务 API Key |
 
 ### 代码库、知识库、自动化
 
@@ -197,7 +257,7 @@ api/
 - **Token 流式**：`LLM.stream_invoke()` 逐 delta 推送至 SSE
 - **并行工具**：单轮多 `tool_calls` 并发；browser/shell 自动加锁
 - **结构化 Planner 输出**：`PlannerPlanSchema` Pydantic 严格校验
-- **向量记忆**：`api/config.yaml` 中 `memory.vector_enabled: true` 时启用 pgvector 混合召回
+- **向量记忆**：`api/config.yaml` 中 `memory.vector_enabled: true` 时启用 pgvector 混合召回（默认 **false**）。知识库索引使用独立的 `knowledge_base.vector_enabled` 开关（默认 **true**）。
 - **多 Provider**：OpenAI 兼容 / Anthropic / Gemini 原生适配
 
 ## 本地开发

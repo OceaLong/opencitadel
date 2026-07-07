@@ -53,6 +53,23 @@ class ToolRegistry:
         return tools
 
     @staticmethod
+    def build_ask_tools(
+            *,
+            mcp_tool: MCPTool,
+            a2a_tool: A2ATool,
+            extra_tools: Optional[List[BaseTool]] = None,
+    ) -> List[BaseTool]:
+        """Assemble read-only tool packs for Ask-mode flows (no shell/file/browser)."""
+        tools: List[BaseTool] = [
+            MessageTool(),
+            mcp_tool,
+            a2a_tool,
+        ]
+        if extra_tools:
+            tools.extend(extra_tools)
+        return tools
+
+    @staticmethod
     def collect_schemas(tools: List[BaseTool]) -> List[Dict]:
         schemas: List[Dict] = []
         for tool in tools:

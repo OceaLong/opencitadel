@@ -21,7 +21,6 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [docs/README.md](README.md) | Documentation navigation hub | index | paired | none | — | low |
 | [docs/MAINTENANCE_CHECKLIST.md](MAINTENANCE_CHECKLIST.md) | PR checklist, sync rules | governance | paired | none | `scripts/check-docs.sh` | low |
 | [docs/DOCUMENTATION_INVENTORY.md](DOCUMENTATION_INVENTORY.md) | This inventory | governance | paired | none | — | low |
-| [docs/DOCUMENTATION_AUDIT_REPORT.md](DOCUMENTATION_AUDIT_REPORT.md) | Dated audit snapshot (historical) | governance | paired | none | — | low |
 
 ## Architecture (`docs/architecture/`)
 
@@ -35,6 +34,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [teams-and-workspaces.md](architecture/teams-and-workspaces.md) | Teams, `X-Workspace-Id` | primary | paired | mermaid | `team_routes.py` | low |
 | [admin-auditor-compliance.md](architecture/admin-auditor-compliance.md) | Admin, auditor, compliance | primary | paired | mermaid | `admin_routes.py`, `ui/src/app/admin/` | medium |
 | [integrations-a2a-service-keys.md](architecture/integrations-a2a-service-keys.md) | A2A, service API keys | primary | paired | mermaid | `a2a_routes.py`, `service_api_key_routes.py` | low |
+| [skills.md](architecture/skills.md) | Skill templates, runtime | primary | paired | mermaid | `skill_service.py`, `task_runner_factory.py` | low |
 | [artifacts-sharing.md](architecture/artifacts-sharing.md) | Artifacts, public share | primary | paired | mermaid | `artifact_routes.py` | low |
 | [automation-scheduler.md](architecture/automation-scheduler.md) | Cron, webhooks, leader election | primary | paired | mermaid | `scheduling_routes.py`, `worker/main.py` | low |
 | [marketplace.md](architecture/marketplace.md) | Marketplace apps | primary | paired | mermaid | `marketplace_routes.py` | low |
@@ -65,8 +65,8 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 
 | Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
 |------|-------|-----------|-----------|----------|-------------|------------|
-| [api/README.md](../api/README.md) | Backend routes, SSE, dev | module | paired | none | `interfaces/endpoints/` | medium |
-| [ui/README.md](../ui/README.md) | Frontend stack, routes | module | paired | none | `ui/src/app/` | medium |
+| [api/README.md](../api/README.md) | Backend routes, SSE, dev | module | paired | none | `interfaces/endpoints/` | low |
+| [ui/README.md](../ui/README.md) | Frontend stack, routes | module | paired | none | `ui/src/app/` | low |
 | [sandbox/README.md](../sandbox/README.md) | Sandbox service | module | paired | none | `sandbox/` | low |
 | [nginx/README.md](../nginx/README.md) | Gateway, SSE/WS, upload limits | module | paired | mermaid | `nginx/nginx.conf` | low |
 | [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.md) | Helm install | module | paired | none | `deploy/helm/` | low |
@@ -88,7 +88,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 
 | Location | Issue | Action |
 |----------|-------|--------|
-| `ui/README.md` | “Language switch planned in Settings” | Fixed — Header `LanguageToggle` |
+| `ui/README.md` | “Language switch planned in Settings” | Fixed — Settings → General (`GeneralSettings`) |
 | `admin-auditor-compliance.md` | `/admin/usage` UI route | Fixed — usage charts on `/admin` overview |
 | Tutorials | “Knowledge in sidebar” | Fixed — Header workspace menu |
 | Multiple docs | Duplicate LLM model-only setup steps | Dedupe — link to `deployment.md` |

@@ -1,16 +1,18 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Copy, Loader2, LogOut, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { Copy, Loader2, LogOut, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { PageHeader } from "@/components/page-header";
 import { ScrollablePageContent } from "@/components/scrollable-page-content";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -19,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { teamApi, memberDisplayName, type Team, type TeamMember, type TeamMemberDetail } from "@/lib/api/team";
+import { memberDisplayName, type Team, teamApi, type TeamMember, type TeamMemberDetail } from "@/lib/api/team";
 import { resetWorkspaceIfMatches } from "@/lib/workspace-utils";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -33,6 +35,7 @@ export default function TeamDetailPage() {
   const [members, setMembers] = useState<TeamMemberDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [inviteRole, setInviteRole] = useState<TeamMember["role"]>("member");
+  const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
   const [inviteUrl, setInviteUrl] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -76,7 +79,7 @@ export default function TeamDetailPage() {
   async function handleInvite() {
     setInviting(true);
     try {
-      const data = await teamApi.invite(teamId, inviteRole);
+      const data = await teamApi.invite(teamId, inviteRole, inviteEmail);
       setInviteUrl(data.url);
       toast.success(t("inviteGenerated"));
     } catch (error) {
@@ -163,36 +166,36 @@ export default function TeamDetailPage() {
 
   return (
     <ScrollablePageContent>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <Button variant="ghost" size="sm" asChild className="mb-2 px-0">
-            <Link href="/teams">{t("backToTeams")}</Link>
-          </Button>
-          <h1 className="text-2xl font-semibold tracking-tight">{team.name}</h1>
-          {team.description ? (
-            <p className="text-muted-foreground mt-1 text-sm">{team.description}</p>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {myRole ? (
-            <Button
-              variant="outline"
-              onClick={() => void handleLeaveTeam()}
-              disabled={leaving || isSoleOwner}
-              title={isSoleOwner ? t("soleOwnerCannotLeave") : undefined}
-            >
-              {leaving ? <Loader2 className="animate-spin" /> : <LogOut className="mr-1 size-4" />}
-              {t("leaveTeam")}
+      <PageHeader
+        bordered={false}
+        title={team.name}
+        description={team.description || undefined}
+        actions={
+          <>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/teams">{t("backToTeams")}</Link>
             </Button>
-          ) : null}
-          {isOwner ? (
-            <Button variant="destructive" onClick={() => void handleDeleteTeam()} disabled={deleting}>
-              {deleting ? <Loader2 className="animate-spin" /> : <Trash2 className="mr-1 size-4" />}
-              {t("deleteTeam")}
-            </Button>
-          ) : null}
-        </div>
-      </div>
+            {myRole ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleLeaveTeam()}
+                disabled={leaving || isSoleOwner}
+                title={isSoleOwner ? t("soleOwnerCannotLeave") : undefined}
+              >
+                {leaving ? <Loader2 className="animate-spin" /> : <LogOut className="mr-1 size-4" />}
+                {t("leaveTeam")}
+              </Button>
+            ) : null}
+            {isOwner ? (
+              <Button variant="destructive" size="sm" onClick={() => void handleDeleteTeam()} disabled={deleting}>
+                {deleting ? <Loader2 className="animate-spin" /> : <Trash2 className="mr-1 size-4" />}
+                {t("deleteTeam")}
+              </Button>
+            ) : null}
+          </>
+        }
+      />
 
       {canManageMembers ? (
         <Card>
@@ -212,11 +215,19 @@ export default function TeamDetailPage() {
                   <SelectItem value="owner">{t("roleOwner")}</SelectItem>
                 </SelectContent>
               </Select>
+              <Input
+                className="min-w-[220px] flex-1"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder={t("inviteEmailPlaceholder")}
+                type="email"
+              />
               <Button onClick={() => void handleInvite()} disabled={inviting}>
                 {inviting ? <Loader2 className="animate-spin" /> : null}
                 {t("generateInviteLink")}
               </Button>
             </div>
+            <p className="text-muted-foreground text-xs">{t("inviteEmailHint")}</p>
             {inviteUrl ? (
               <div className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
                 <span className="min-w-0 flex-1 truncate">{inviteUrl}</span>

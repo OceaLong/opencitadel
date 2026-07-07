@@ -39,6 +39,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [Teams & workspaces](architecture/teams-and-workspaces.md) | Team roles, `X-Workspace-Id`, invitations |
 | [Admin, auditor & compliance](architecture/admin-auditor-compliance.md) | Platform admin, evidence chain, compliance reports |
 | [A2A & service API keys](architecture/integrations-a2a-service-keys.md) | Inbound/outbound A2A, `X-Api-Key` |
+| [Skills](architecture/skills.md) | Skill templates, runtime overrides, MCP/A2A filtering |
 | [Artifacts & sharing](architecture/artifacts-sharing.md) | Session artifacts, public share links |
 | [Automation & scheduler](architecture/automation-scheduler.md) | Cron/webhook jobs, leader election, notifications |
 | [Marketplace](architecture/marketplace.md) | LLM mini-app catalog and contracts |
@@ -77,4 +78,4 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 - **Bilingual pairs** — update both language files when changing a topic.
 - **Link convention** — English docs link to `*.md`; Chinese docs link to `*.zh-CN.md`.
 - **Index sync** — when adding a tutorial or architecture doc, update this index, the root [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) doc map, and add top-of-file language switch links in both language files.
-- **PR checklist** — [Documentation maintenance checklist](MAINTENANCE_CHECKLIST.md) (actionable steps); [Documentation inventory](DOCUMENTATION_INVENTORY.md) (live authoritative list); [Audit report](DOCUMENTATION_AUDIT_REPORT.md) (dated snapshot only); run `./scripts/check-docs.sh` before submitting doc changes.
+- **PR checklist** — [Documentation maintenance checklist](MAINTENANCE_CHECKLIST.md) (actionable steps); [Documentation inventory](DOCUMENTATION_INVENTORY.md) (live authoritative list); run `./scripts/check-docs.sh` before submitting doc changes.

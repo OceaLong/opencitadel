@@ -13,6 +13,8 @@
 
 测试配合 [教程 4：受治理 Web Operator](../docs/tutorials/04-governed-web-operator.zh-CN.md) — 在演示栈启动后运行。
 
+**未覆盖范围**：设置弹窗、HITL 门控、团队邀请、知识库摄取、代码库流程、管理后台、移动导航。UI 单元测试位于 `ui/src/**/*.test.ts`（仅逻辑层，无组件回归）。请勿将 `ui/` 或 `e2e/` 的 `npm test` 视为完整 UI 覆盖。
+
 ## 前置条件
 
 - Node.js >= 22

@@ -17,6 +17,8 @@ import {
 } from "@/components/ui/item";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
+import { ChatOptionsSheet } from "@/components/chat-options-sheet";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { fileApi } from "@/lib/api/file";
 import type { FileInfo } from "@/lib/api/types";
 import { cn, formatFileSize } from "@/lib/utils";
@@ -58,6 +60,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
   ) => {
     const t = useTranslations("chatInput");
     const tCommon = useTranslations("common");
+    const { isMobile } = useIsMobile();
     const [files, setFiles] = useState<FileInfo[]>([]);
     const [uploading, setUploading] = useState(false);
     const [sending, setSending] = useState(false);
@@ -160,11 +163,40 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // 支持 Ctrl/Cmd + Enter 发送
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        handleSend();
+      if (e.key !== "Enter" || e.nativeEvent.isComposing) {
+        return;
       }
+
+      // Ctrl/Cmd + Enter 插入换行
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const textarea = textareaRef.current;
+        if (!textarea || sending || disabled) {
+          return;
+        }
+
+        const { selectionStart, selectionEnd } = textarea;
+        const next = inputValue.slice(0, selectionStart) + "\n" + inputValue.slice(selectionEnd);
+        setInputValue(next);
+        onInputValueChange?.(next);
+
+        requestAnimationFrame(() => {
+          textarea.selectionStart = textarea.selectionEnd = selectionStart + 1;
+        });
+        return;
+      }
+
+      // Shift + Enter 使用浏览器默认换行
+      if (e.shiftKey) {
+        return;
+      }
+
+      // Enter 直接发送
+      e.preventDefault();
+      if (sending || disabled || isRunning) {
+        return;
+      }
+      handleSend();
     };
 
     return (
@@ -227,7 +259,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
           />
         </div>
         {/* 底部：左侧附件，右侧模型/Skill + 发送 */}
-        <footer className="flex w-full flex-row items-center justify-between gap-2 px-3">
+        <footer className="pb-safe flex w-full flex-row items-center justify-between gap-2 px-3">
           <div className="flex shrink-0 items-center">
             <input
               ref={fileInputRef}
@@ -239,7 +271,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
             />
             <Button
               variant="outline"
-              className="h-8 w-8 shrink-0 cursor-pointer rounded-full"
+              className="size-11 shrink-0 cursor-pointer rounded-full md:size-8"
               onClick={handleUploadClick}
               disabled={uploading}
             >
@@ -247,15 +279,16 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
             </Button>
           </div>
           <div className="flex min-w-0 shrink-0 items-center gap-1">
-            {toolbarRight && (
-              <div className="flex min-w-0 items-center gap-0.5 overflow-hidden">
-                {toolbarRight}
-              </div>
-            )}
+            {toolbarRight &&
+              (isMobile ? (
+                <ChatOptionsSheet>{toolbarRight}</ChatOptionsSheet>
+              ) : (
+                <div className="hidden min-w-0 items-center gap-0.5 md:flex">{toolbarRight}</div>
+              ))}
             {isRunning ? (
               <Button
                 variant="outline"
-                className="h-8 w-8 shrink-0 cursor-pointer rounded-full"
+                className="size-11 shrink-0 cursor-pointer rounded-full md:size-8"
                 onClick={onStop}
                 disabled={!onStop}
               >
@@ -264,7 +297,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
             ) : (
               <Button
                 variant="outline"
-                className="h-8 w-8 shrink-0 cursor-pointer rounded-full"
+                className="size-11 shrink-0 cursor-pointer rounded-full md:size-8"
                 onClick={handleSend}
                 disabled={sending || disabled || !inputValue.trim()}
               >

@@ -10,8 +10,8 @@
     "save": "Save",
     "add": "Add",
     "delete": "Delete",
+    "deleting": "Deleting...",
     "retry": "Retry",
-    "download": "Download",
     "close": "Close",
     "copy": "Copy",
     "back": "Back",
@@ -34,12 +34,9 @@
     "featured": "Featured",
     "vision": "Vision",
     "all": "All",
-    "custom": "Custom",
     "here": "here",
-    "new": "New",
     "create": "Create",
     "name": "Name",
-    "thinking": "Thinking...",
     "dates": {
       "today": "Today",
       "yesterday": "Yesterday",
@@ -64,7 +61,6 @@
     "disabledState": "disabled",
     "deleteFailed": "Delete failed",
     "deleted": "Deleted",
-    "deleting": "Deleting...",
     "edit": "Edit",
     "global": "Global",
     "nextPage": "Next",
@@ -77,7 +73,6 @@
   "errors": {
     "requestFailed": "Request failed",
     "requestTimeout": "Request timed out",
-    "payloadTooLarge": "File too large (max 200 MB). Compress the archive or use Git import instead.",
     "rateLimit": "Too many requests. Please try again later.",
     "networkFailed": "Network error. Check your connection.",
     "unknown": "Unknown error",
@@ -85,7 +80,6 @@
     "streamReadFailed": "Failed to read stream",
     "modelUnavailable": "Model or embedding service is unavailable. Check model settings or try again later.",
     "modelQuotaExceeded": "This model's API quota is exhausted. Complete billing in the provider console or switch to another model.",
-    "modelInvalidRequest": "The model request was rejected due to invalid parameters, often caused by thinking mode or conversation history. Disable thinking mode or switch models and retry.",
     "infraFailed": "Task execution timed out or retry limit was reached. Simplify the task or try again later.",
     "saveFailed": "Save failed",
     "updateFailed": "Update failed",
@@ -99,12 +93,8 @@
     "unknownError": "An unknown error occurred. Please retry or return home."
   },
   "language": {
-    "title": "Language",
-    "description": "Choose your preferred interface language.",
     "localeEn": "English",
-    "localeZh": "中文",
-    "localeShortEn": "EN",
-    "localeShortZh": "中"
+    "localeZh": "中文"
   },
   "auth": {
     "loginTitle": "Sign in to OpenCitadel",
@@ -128,12 +118,9 @@
     "registering": "Registering...",
     "registerAndLogin": "Register & sign in",
     "registerFailed": "Registration failed",
-    "loginToCreateTask": "Sign in to create a new task",
-    "loginToChat": "Sign in to start AI chat",
     "loginToSelectModel": "Sign in to select a model",
     "selectModelAfterLogin": "Select model after sign in",
     "loginToMarketplace": "Sign in to use AI smart launch",
-    "loginToDocQa": "Sign in to use AI document Q&A",
     "loginToTranslate": "Sign in to use AI translation",
     "loginToUseAi": "Sign in to use AI features",
     "loginToSendMessage": "Sign in to send messages",
@@ -141,12 +128,7 @@
     "loginToNutrition": "Sign in to use nutrition analysis"
   },
   "home": {
-    "greeting": "Hello there",
     "subtitle": "What can I do for you?",
-    "addModelFirst": "Please add a model in Settings first",
-    "createSessionFailed": "Failed to create session",
-    "codebaseTitle": "Code knowledge base",
-    "codebaseDescription": "Upload a codebase, generate architecture diagrams and call chains, Ask Q&A / Agent code edits",
     "suggestedQuestions": {
       "q1": "Analyze the latest AI Agent trends in 2026",
       "q2": "Build a RAG-based knowledge base system in Python",
@@ -166,10 +148,6 @@
   },
   "chatHeader": {
     "backHome": "Back to home",
-    "model": "Model",
-    "statusUnknown": "status unknown",
-    "unavailable": "unavailable",
-    "normal": "normal",
     "codebase": "Code knowledge base",
     "knowledge": "Document knowledge base",
     "marketplace": "App marketplace",
@@ -183,16 +161,15 @@
   },
   "workspace": {
     "label": "Workspace",
-    "personal": "Personal workspace",
-    "manageTeams": "Manage teams"
+    "personal": "Personal workspace"
   },
   "account": {
     "settings": "System settings",
-    "adminPanel": "Admin panel"
+    "adminPanel": "Admin panel",
+    "teams": "Teams"
   },
   "theme": {
-    "switchToLight": "Switch to light mode",
-    "switchToDark": "Switch to dark mode",
+    "system": "Follow system",
     "light": "Light mode",
     "dark": "Dark mode"
   },
@@ -216,12 +193,14 @@
     "failed": "Failed",
     "running": "Running",
     "errorAfter": "May have occurred after {context}",
-    "errorRepeated": "Same error repeated {count} times"
+    "errorRepeated": "repeated {count} times"
+  },
+  "chatOptions": {
+    "title": "Chat options"
   },
   "sessionList": {
     "deleteSuccess": "Deleted task \"{title}\"",
     "deleteFailed": "Failed to delete task \"{title}\", please retry",
-    "noTasks": "No tasks yet",
     "empty": "No tasks yet",
     "filter": {
       "all": "All",
@@ -240,7 +219,6 @@
     "hookError": "useSessions must be used within SessionsProvider"
   },
   "sessionHeader": {
-    "untitledTask": "Untitled task",
     "observationTitle": "Tools: {tools} · Errors: {errors} · Waits: {waits}",
     "tokenUsageTitle": "Prompt: {prompt} · Completion: {completion} · Calls: {calls} · Click for details",
     "allFilesTitle": "All files in this task",
@@ -251,7 +229,8 @@
     "loadTokenDetailFailed": "Failed to load token details",
     "downloadSuccess": "Downloaded \"{filename}\"",
     "downloadFailed": "Download failed",
-    "downloadFailedWithName": "Failed to download \"{filename}\": {error}"
+    "downloadFailedWithName": "Failed to download \"{filename}\": {error}",
+    "moreStats": "More stats"
   },
   "sessionDetail": {
     "thinking": "Thinking...",
@@ -264,6 +243,7 @@
     "streamReconnecting": "Reconnecting session stream...",
     "resync": "Resync",
     "loadEarlier": "Load earlier messages",
+    "contextPanel": "Context",
     "emptyTimeline": "No conversation yet. Enter a task or question below.",
     "sendMessageFailed": "Failed to send message",
     "sendFailedRetry": "Send failed. Please try again.",
@@ -275,7 +255,6 @@
     "refreshFilesFailed": "Failed to refresh file list",
     "streamResponseError": "Streaming response error",
     "waitForInput": "Waiting for your input or confirmation.",
-    "modelFallbackNotice": "Primary model quota exhausted. Switched to {modelName} and continuing.",
     "operator": {
       "awaitingHuman": "Awaiting human",
       "domainsLabel": "Domains: {domains}",
@@ -332,7 +311,8 @@
   },
   "planPanel": {
     "noSteps": "No steps yet",
-    "taskProgress": "Task progress"
+    "taskProgress": "Task progress",
+    "stepsCompleted": "Completion progress"
   },
   "filePreview": {
     "loadContentFailed": "Failed to load file content",
@@ -378,17 +358,10 @@
   "skillPicker": {
     "none": "No Skill"
   },
-  "errorPage": {
-    "title": "Page failed to load",
-    "unknown": "An unknown error occurred. Please retry or return home."
-  },
   "settings": {
     "title": "OpenCitadel Settings",
     "description": "Manage your OpenCitadel settings here.",
-    "openLabel": "Open OpenCitadel settings",
     "openModelsLabel": "Open model settings",
-    "settingsTitle": "Settings",
-    "center": "Settings",
     "common": "General",
     "models": "Models",
     "skills": "Skill templates",
@@ -433,7 +406,28 @@
     "editMcpServerDesc": "Update the JSON configuration for this MCP server. Secrets are masked; leave **** unchanged to keep existing values.",
     "mcpStatusConnected": "Connected",
     "mcpStatusError": "Unreachable",
-    "mcpStatusPending": "Checking"
+    "mcpStatusPending": "Checking",
+    "mcpStatusRefreshHint": "Connection status is checked when this panel opens.",
+    "mcpTransport": "Transport",
+    "mcpCommand": "Command",
+    "mcpArgs": "Arguments",
+    "mcpArgsPlaceholder": "One argument per line",
+    "mcpDescription": "Description",
+    "mcpDescriptionPlaceholder": "Optional server description",
+    "mcpServiceUrl": "Service URL",
+    "mcpUrlParams": "URL parameters",
+    "mcpNoParams": "No parameters yet",
+    "mcpParamKey": "Key",
+    "mcpParamValueLeaveBlank": "Leave blank to keep existing value",
+    "mcpParamValueRequiredWhenUndecryptable": "Re-enter value (URL could not be decrypted)",
+    "mcpHeaderKey": "Header",
+    "mcpHeaderValueLeaveBlank": "Leave blank to keep existing value",
+    "mcpEnvKey": "Environment variable",
+    "mcpEnvValueLeaveBlank": "Leave blank to keep existing value",
+    "mcpUrlUndecryptable": "The stored URL could not be decrypted. Re-enter the service URL and any sensitive parameters.",
+    "addParam": "Add parameter",
+    "addHeader": "Add header",
+    "addEnv": "Add env var"
   },
   "settingsRuntime": {
     "loadFailed": "Failed to load configuration",
@@ -524,7 +518,6 @@
     "notImplemented": "Not implemented",
     "probing": "Probing...",
     "testMultimodal": "Test multimodal",
-    "noModels": "No models yet. Add one to get started.",
     "displayName": "Display name",
     "provider": "Provider",
     "baseUrl": "Base URL",
@@ -532,7 +525,6 @@
     "modelName": "Model Name",
     "temperature": "Temperature",
     "maxTokens": "Max Tokens",
-    "fillRequiredFields": "Please fill in display name, model name, and Base URL",
     "apiKeyRequired": "API Key is required when creating an endpoint",
     "modelUpdated": "Model updated",
     "modelCreated": "Model created",
@@ -546,7 +538,12 @@
     "supportsMultimodalDesc": "When enabled, user images and browser screenshots can be sent directly to the model",
     "maxImageBytes": "Max bytes per image",
     "maxImagesPerRequest": "Max images per request",
-    "visionWithTools": "Send images even when tools are attached"
+    "visionWithTools": "Send images even when tools are attached",
+    "quotaFallbackLabel": "Auto-switch on quota exhaustion",
+    "quotaFallbackDesc": "When a model returns insufficient quota, try other configured models (siblings on the same endpoint first).",
+    "quotaFallbackLoadFailed": "Failed to load quota fallback settings",
+    "quotaFallbackSaved": "Quota fallback settings saved",
+    "quotaFallbackSaveFailed": "Failed to save quota fallback settings"
   },
   "settingsSkills": {
     "description": "Create skill templates; sessions can opt in (disabled by default)",
@@ -641,11 +638,8 @@
     "connectionFailedNotStarted": "Could not connect; the sandbox may not be running"
   },
   "admin": {
-    "adminRequired": "Administrator access required.",
-    "dashboardTitle": "Admin dashboard",
     "platformInvite": "Platform invite",
     "generateInviteLink": "Generate invite link",
-    "users": "Users",
     "auditLog": "Audit log",
     "auditSubtitle": "Platform audit events and activity",
     "exportCsv": "Export CSV",
@@ -762,7 +756,6 @@
     "timeRangeAll": "All time"
   },
   "adminNav": {
-    "title": "Administration",
     "subtitle": "Users, audit, and platform settings",
     "auditorSubtitle": "Read-only compliance and audit portal",
     "back": "Back to app",
@@ -773,7 +766,8 @@
     "invitations": "Invitations",
     "audit": "Audit log",
     "evidence": "Evidence center",
-    "complianceReport": "Compliance report"
+    "complianceReport": "Compliance report",
+    "menu": "Menu"
   },
   "teams": {
     "title": "Teams",
@@ -783,6 +777,7 @@
     "manageMembers": "Manage members",
     "nameRequired": "Please enter a team name",
     "createSuccess": "Team created",
+    "switchToTeam": "Switch to team",
     "createFailed": "Failed to create team",
     "namePlaceholder": "e.g. Product team",
     "descriptionLabel": "Description",
@@ -810,7 +805,6 @@
     "roleUpdated": "Role updated",
     "roleUpdateFailed": "Failed to update role",
     "acceptInviteTitle": "Join team",
-    "acceptInviteLoginRequired": "Sign in to accept this team invitation",
     "acceptInviteProcessing": "Joining team...",
     "acceptSuccess": "Joined team successfully",
     "acceptFailed": "Failed to join team",
@@ -818,6 +812,15 @@
     "leaveConfirm": "Leave this team? You will lose access to its workspace.",
     "leaveSuccess": "Left team",
     "leaveFailed": "Failed to leave team",
+    "inviteEmailPlaceholder": "Optional: restrict invite to this email",
+    "inviteEmailHint": "Leave empty for an open invite link, or enter an email to restrict who can join.",
+    "invitePreviewFailed": "Failed to load invitation",
+    "inviteAlreadyAccepted": "This invitation has already been accepted.",
+    "inviteExpired": "This invitation has expired.",
+    "inviteRegisterDescription": "Create an account to join {teamName} as {role}.",
+    "inviteLoginDescription": "Sign in to join {teamName} as {role}.",
+    "inviteNeedsPlatformAccess": "You need a platform account before you can accept this invitation.",
+    "registerAndJoin": "Register and join",
     "soleOwnerCannotLeave": "Transfer ownership or delete the team before leaving",
     "you": "you"
   },
@@ -881,12 +884,6 @@
     "localMatch": "Opened app based on local match",
     "switchedToSearch": "Switched to app search",
     "backToMarket": "Back to marketplace",
-    "backHome": "Back to home",
-    "modelStatus": "Model status:",
-    "statusUnknown": "Unknown",
-    "unavailable": "Unavailable",
-    "degraded": "Degraded",
-    "normal": "Normal",
     "badge": "AI Native Marketplace",
     "heroTitle": "Describe your goal, launch the right AI app",
     "heroDescription": "Search, vision analysis, document Q&A, translation, and prompt optimization in one lightweight marketplace.",
@@ -937,20 +934,6 @@
         "examples": [
           "How many servings in this package?",
           "Calculate consumption for 50g per serving"
-        ]
-      },
-      "documentQa": {
-        "name": "Document/Image Q&A",
-        "description": "Upload materials or screenshots, AI extracts key points and answers questions",
-        "tags": [
-          "Document",
-          "Image understanding",
-          "Q&A",
-          "Summary"
-        ],
-        "examples": [
-          "Summarize this document",
-          "Tell me what's wrong in this screenshot"
         ]
       },
       "smartTranslation": {
@@ -1077,21 +1060,6 @@
       "uploadImage": "Upload image",
       "selectFile": "Select file",
       "takePhoto": "Take photo"
-    },
-    "documentQa": {
-      "title": "Document/Image Q&A",
-      "subtitle": "Upload text materials or screenshots and let AI extract key points and answer your questions",
-      "uploadedToast": "Material uploaded, you can start asking questions",
-      "uploadAndQuestionRequired": "Please upload material and enter a question first",
-      "askFailed": "Q&A failed",
-      "uploadPlaceholder": "Upload material or screenshot",
-      "supportedFormats": "Supports images, txt, md, csv, json, log — max 8MB",
-      "questionLabel": "What would you like to ask?",
-      "questionPlaceholder": "e.g. summarize key points, find risks, explain errors in a screenshot",
-      "askButton": "Ask",
-      "aiAnswer": "AI answer",
-      "emptyTitle": "Upload material to start Q&A",
-      "emptyHint": "Great for meeting notes, logs, screenshot errors, and structured text"
     },
     "smartTranslation": {
       "title": "Smart translation",
@@ -1330,33 +1298,27 @@
   },
   "knowledge": {
     "loadListFailed": "Failed to load knowledge bases",
-    "loadDetailFailed": "Failed to load details",
     "indexFailed": "Indexing failed",
     "ingestStreamFailed": "Indexing stream connection failed",
     "noSourceSnippet": "No source snippet available",
     "readFailed": "Read failed",
     "reindexStarted": "Re-indexing started",
     "reindexFailed": "Re-indexing failed",
-    "sidebarTitle": "Document knowledge base",
-    "selectKbHint": "Select a knowledge base to start Q&A",
-    "kbLabel": "Knowledge bases",
-    "docCount": "{count} documents",
-    "noKb": "No knowledge bases yet",
     "documentsLabel": "Documents",
     "noDocuments": "No documents yet",
     "noDocumentsGraph": "No documents",
-    "pageTitle": "Enterprise document knowledge base",
     "addDocument": "Add document",
     "reindex": "Re-index",
-    "vectorDegraded": "Semantic search is disabled or vectors are unavailable; BM25 search is used instead.",
-    "emptyTitle": "Select or create a knowledge base to start Q&A",
-    "createKb": "New knowledge base",
-    "indexing": "Indexing knowledge base...",
-    "loadingSession": "Loading session...",
-    "sessionPreparing": "Session is preparing, please wait before asking",
-    "tabSource": "Source",
+    "deleteKbTitle": "Delete knowledge base?",
+    "deleteKbDescription": "This will permanently delete the knowledge base and all documents. This cannot be undone.",
+    "deleteKbSuccess": "Deleted \"{name}\"",
+    "deleteDocumentTitle": "Delete document?",
+    "deleteDocumentDescription": "This will permanently delete the document from the knowledge base.",
+    "deleteDocumentSuccess": "Deleted \"{title}\"",
+    "deleteFailed": "Delete failed",
+    "deleteBlockedIngesting": "Cannot delete while indexing is in progress",
+    "indexFailedDetail": "Indexing failed: {error}",
     "tabGraph": "Graph",
-    "sourceHint": "Click a document citation in an answer to view the source",
     "addDialog": {
       "title": "Add knowledge documents",
       "description": "Upload PDF, Office, Markdown, or text files, or add a web page URL",
@@ -1379,47 +1341,26 @@
     "create": "New knowledge base",
     "empty": "No knowledge bases yet",
     "indexingShort": "Indexing...",
-    "indexFailedDetail": "Indexing failed: {error}",
     "librarySubtitle": "Manage document knowledge bases and start tasks",
     "startAgent": "Agent",
     "startAsk": "Ask",
     "startTaskFailed": "Failed to start task",
-    "deleteKbTitle": "Delete document knowledge base?",
-    "deleteKbDescription": "This permanently removes all documents, indexes, and session context links for this knowledge base.",
-    "deleteDocumentTitle": "Delete document?",
-    "deleteDocumentDescription": "This permanently removes the document and its indexed content.",
-    "deleteKbSuccess": "Deleted knowledge base \"{name}\"",
-    "deleteDocumentSuccess": "Deleted document \"{title}\"",
-    "deleteFailed": "Delete failed",
-    "deleteBlockedIngesting": "Indexing in progress. Try again after it finishes.",
     "statusDocCount": "{status} · {count} documents",
     "title": "Document knowledge base"
   },
   "codebase": {
-    "loadListFailed": "Failed to load codebases",
-    "loadDetailFailed": "Failed to load details",
     "readFailed": "Read failed",
     "downloadSuccess": "Packaged: {key}",
     "downloadFailed": "Download failed",
-    "sidebarTitle": "Codebase & directory",
-    "selectHint": "Select a codebase to start analysis",
-    "codebaseLabel": "Codebases",
-    "noCodebase": "No codebases yet",
-    "fileTreeLabel": "File tree",
-    "noFileTree": "No file tree yet",
-    "pageTitle": "Code knowledge base",
     "reanalyze": "Re-analyze",
-    "vectorDegraded": "Semantic search unavailable (vector index degraded).",
-    "rebuildIndex": "Rebuild index here",
-    "emptyTitle": "Select or create a codebase to start analysis",
-    "createCodebase": "New codebase",
-    "analyzing": "Analyzing codebase...",
+    "deleteTitle": "Delete codebase?",
+    "deleteDescription": "This will permanently delete the codebase and its index. This cannot be undone.",
+    "deleteSuccess": "Deleted \"{name}\"",
+    "deleteFailed": "Failed to delete codebase",
+    "deleteBlockedIngesting": "Cannot delete while indexing is in progress",
     "tabSource": "Source",
     "tabDiagrams": "Diagrams",
     "sourceHint": "Click a file or path in an answer to view source",
-    "sessionFiles": "Session files",
-    "closeFileList": "Close file list",
-    "noFiles": "No files yet",
     "artifacts": {
       "architecture": "Architecture",
       "dataFlow": "Data flow",
@@ -1438,7 +1379,6 @@
       "zipUploaded": "Uploaded — click to replace",
       "selectZip": "Select zip archive",
       "zipUploadSuccess": "Archive uploaded successfully",
-      "fileTooLarge200mb": "Archive must not exceed 200 MB. Use Git import instead.",
       "selectFiles": "Select files ({count} selected)",
       "gitUrlRequired": "Please enter a Git repository URL",
       "zipRequired": "Please upload a zip archive first",
@@ -1447,7 +1387,8 @@
       "defaultZipName": "Zip codebase",
       "defaultFilesName": "Files codebase",
       "createFailed": "Failed to create codebase",
-      "createAndAnalyze": "Create & analyze"
+      "createAndAnalyze": "Create & analyze",
+      "fileTooLarge200mb": "File must not exceed 200MB"
     },
     "create": "New codebase",
     "download": "Download",
@@ -1460,11 +1401,6 @@
     "startAgent": "Agent",
     "startAsk": "Ask",
     "startTaskFailed": "Failed to start task",
-    "deleteTitle": "Delete code knowledge base?",
-    "deleteDescription": "This permanently removes analysis results, indexes, and session context links for this codebase.",
-    "deleteSuccess": "Deleted codebase \"{name}\"",
-    "deleteFailed": "Failed to delete codebase",
-    "deleteBlockedIngesting": "Indexing in progress. Try again after it finishes.",
     "status": {
       "pending": "Pending",
       "materializing": "Materializing",
@@ -1476,6 +1412,16 @@
     },
     "statusFileCount": "{status} · {count} files",
     "title": "Code knowledge base"
+  },
+  "mobileNav": {
+    "label": "Main navigation",
+    "chat": "Chat",
+    "codebase": "Codebase",
+    "knowledge": "Knowledge",
+    "marketplace": "Apps",
+    "more": "More",
+    "automation": "Automation",
+    "teams": "Teams"
   },
   "mermaid": {
     "renderFailed": "Mermaid render failed"
@@ -1623,12 +1569,16 @@
   "contextSelector": {
     "clear": "Clear context",
     "codebase": "Codebase",
+    "codebaseMeta": "{count} files",
     "codebaseSection": "Code knowledge base",
     "knowledge": "Knowledge base",
+    "knowledgeMeta": "{count} documents",
     "knowledgeSection": "Document knowledge base",
     "noCodebase": "No ready codebases",
     "noKnowledge": "No ready knowledge bases",
+    "noSearchResults": "No matching results",
     "none": "No context",
+    "searchPlaceholder": "Search knowledge bases…",
     "title": "Session context"
   },
   "gateActions": {
@@ -1715,7 +1665,7 @@
     "artifactTitle": "Shared artifact",
     "home": "Home",
     "title": "Shared artifact",
-    "incompleteContentWarning": "Artifact content may be incomplete. Contact the sharer to regenerate."
+    "incompleteContentWarning": "Artifact content may be incomplete (truncated during storage or generation). Regenerate or compare with the sandbox attachment."
   },
   "workspaceContext": {
     "codebasePanelTitle": "Codebase context",

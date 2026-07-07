@@ -186,7 +186,7 @@ class AgentTaskRunner(TaskRunner):
                 observability_port=self._observability,
                 runtime_settings=self._runtime_settings,
             )
-        elif knowledge_base_id and mode == SessionMode.ASK:
+        elif knowledge_base_id and not codebase_id:
             self._flow = DocQAFlow(
                 uow_factory=uow_factory,
                 llm=llm,

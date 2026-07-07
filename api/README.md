@@ -31,7 +31,45 @@ API and Worker are separate processes sharing infrastructure and service provide
 - **Worker**: consumes `task:dispatch`, runs Agents, codebase/kb ingestion, sandbox warm gateway and orphan cleanup
 - **Migrate**: standalone job (`python -m app.migrate`); API startup only validates schema version
 
-See [`../docs/architecture/overview.md`](../docs/architecture/overview.md) for full architecture details.
+完整架构说明见 [`../docs/architecture/overview.md`](../docs/architecture/overview.md)。
+
+## Worker & Migrate roles
+
+### Worker (`app.worker.main`)
+
+The Worker is a **long-running consumer** of Redis `task:dispatch`. It must run alongside the API for any Agent, codebase ingest, or knowledge-base ingest work to execute.
+
+| `task_type` | Synthetic session id | Runner |
+|-------------|---------------------|--------|
+| `agent` (default) | User session id | `AgentTaskRunner` via `TaskRunnerFactory` |
+| `codebase_ingest` | `codebase-ingest:{id}` | `CodebaseIngestionTaskRunner` |
+| `kb_ingest` | `kb-ingest:{id}` | `KBIngestionTaskRunner` |
+
+Worker responsibilities beyond task execution:
+
+- Task lease acquire/renew/release (`task_lease.py`) for crash-safe idempotency
+- Sandbox admission, warm pool, and orphan cleanup (`sandbox_maintenance.py`)
+- Stuck KB ingest reconciliation on startup and periodic loops
+- Optional DLQ replay when `model_resilience.dlq_replay_enabled=true`
+- MCP/A2A outbound connection pool release on shutdown
+
+Scale Workers horizontally; each replica joins the same Redis consumer group. See [Task recovery](../docs/architecture/task-recovery.md).
+
+### Migrate (`app.migrate`)
+
+Migrate is a **one-off job** per deploy — not a long-running service:
+
+1. **Alembic** schema upgrade to `head`
+2. **Data migrations**: LLM API key encryption, AppConfig YAML seed, MCP/A2A blob migration, MCP URL/secret migration
+
+```bash
+./migrate.sh
+# or: python -m app.migrate
+```
+
+API startup validates schema is at Alembic head and **refuses to start** if not migrated (skipped in test env). Docker Compose runs `opencitadel-migrate` before API/Worker; Helm uses a migrate initContainer.
+
+Do not run Agent tasks in the migrate process — it has no `WorkerContainer` wiring.
 
 ## Project Structure
 
@@ -78,17 +116,38 @@ All routes below are prefixed with `/api` unless noted. Authenticated routes req
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout` | Cookie session auth |
-| GET | `/auth/me` | Current user |
 | GET | `/auth/oauth/{provider}/login`, `/auth/oauth/{provider}/callback` | OAuth (Google/GitHub) |
 | GET | `/status` | Health check |
 | GET | `/llm/status` | LLM provider availability summary |
 | GET | `/metrics` | Prometheus metrics |
 | GET | `/marketplace/apps` | Marketplace catalog |
 | POST | `/marketplace/*` | Marketplace mini-app endpoints |
-| POST | `/webhooks/{job_token}` | Automation webhook ingress |
-| GET | `/share/artifact/{token}` | Public artifact share (no auth) |
-| GET | `/.well-known/agent-card.json` | A2A agent card (when enabled) |
-| POST | `/a2a` | Inbound A2A (feature-flagged) |
+| POST | `/webhooks/{job_token}` | Automation webhook ingress (token in path) |
+| GET | `/share/artifact/{token}` | Public artifact share (token in path) |
+| GET | `/invitations/{token}` | Team invitation preview |
+| POST | `/invitations/{token}/register` | Register and join via team invitation |
+| GET | `/.well-known/agent-card.json` | A2A agent card (when feature flag enabled) |
+
+### Authenticated (session JWT)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/auth/me` | Current user profile |
+| POST | `/invitations/{token}/accept` | Accept team invitation (logged-in user) |
+| GET/POST/DELETE | `/service-keys` | Service API key CRUD |
+| GET/POST/PATCH/DELETE | `/teams`, `/teams/{id}/*` | Team workspace APIs |
+| GET/POST/PATCH | `/sessions`, `/sessions/{id}/*` | Session CRUD, chat SSE, checkpoints, VNC |
+| GET/POST/PUT/DELETE | `/skills`, `/memories`, `/files` | Skills, long-term memory, files |
+| GET/POST | `/codebases`, `/knowledge-bases`, `/scheduled-jobs`, `/notifications` | Codebase, KB, automation, notifications |
+| GET/PUT/DELETE | `/app-config/*`, `/llm-endpoints`, `/llm-models` | AppConfig, LLM endpoints and models |
+
+### Service API key (`X-Api-Key`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/a2a` | Inbound A2A (feature-flagged; requires valid service API key) |
+
+> Service API keys authenticate the caller but do **not** carry team workspace scope. Use session JWT + `X-Workspace-Id` for team-scoped operations.
 
 ### Admin & compliance (auditor or admin)
 
@@ -111,8 +170,10 @@ All routes below are prefixed with `/api` unless noted. Authenticated routes req
 |--------|------|-------------|
 | GET/POST | `/teams` | List/create teams |
 | GET/DELETE | `/teams/{id}` | Team details/delete |
-| GET/POST/DELETE/PATCH | `/teams/{id}/members`, `/teams/{id}/invitations` | Members and invitations |
+| GET/POST/DELETE/PATCH | `/teams/{id}/members`, `/teams/{id}/invitations` | Members and invitations (optional `email`) |
 | POST | `/teams/{id}/leave` | Leave team |
+| GET | `/invitations/{token}` | Preview invitation (public) |
+| POST | `/invitations/{token}/register` | Register and join (public) |
 | POST | `/invitations/{token}/accept` | Accept invitation |
 
 ### App configuration & integrations
@@ -153,7 +214,6 @@ See [`../docs/architecture/llm-endpoints-and-models.md`](../docs/architecture/ll
 | GET/POST/PUT/DELETE | `/skills`, `/skills/recommend`, `/skills/import` | Skill templates |
 | GET/POST/PUT/DELETE | `/memories` | Long-term memory |
 | POST/GET | `/files`, `/files/{id}/download` | File upload/download |
-| GET/POST/DELETE | `/service-keys` | Service API keys |
 
 ### Codebase, knowledge base, automation
 
@@ -197,7 +257,7 @@ See [`../docs/architecture/events.md`](../docs/architecture/events.md) for desig
 - **Token streaming**: `LLM.stream_invoke()` pushes deltas to SSE
 - **Parallel tools**: multiple `tool_calls` per turn; browser/shell auto-locked
 - **Structured Planner output**: `PlannerPlanSchema` Pydantic strict validation
-- **Vector memory**: pgvector hybrid recall when `memory.vector_enabled: true` in `api/config.yaml`
+- **Vector memory**: pgvector hybrid recall when `memory.vector_enabled: true` in `api/config.yaml` (default **false**). Knowledge base indexing uses a separate `knowledge_base.vector_enabled` flag (default **true**).
 - **Multi-provider**: OpenAI-compatible / Anthropic / Gemini native adapters
 
 ## Local Development

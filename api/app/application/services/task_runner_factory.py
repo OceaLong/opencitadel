@@ -62,6 +62,12 @@ CODE_AGENT_SKILL_PROMPT = """
 工作目录为代码库沙箱路径，请在该目录下进行所有改码操作。
 """
 
+CODE_ASK_SKILL_PROMPT = """
+当前会话已绑定代码库「{name}」，源码索引路径为 {workspace_path}。
+请仅通过 codebase 工具的 semantic_search / read_code / find_symbol 等接口检索源码。
+禁止通过 shell 或文件工具探索容器文件系统；/sandbox 是平台运行时目录，不是用户代码库。
+"""
+
 DOC_AGENT_SKILL_PROMPT = """
 你是企业文档知识库 Agent。用户已上传并索引了企业文档知识库，你可以：
 1. 使用 knowledge_base 工具检索、理解文档内容
@@ -342,11 +348,21 @@ class TaskRunnerFactory:
             if codebase:
                 if session.mode == SessionMode.AGENT:
                     codebase_prompt = CODE_AGENT_SKILL_PROMPT
+                elif session.mode == SessionMode.ASK:
+                    codebase_prompt = CODE_ASK_SKILL_PROMPT.format(
+                        name=codebase.name,
+                        workspace_path=codebase.workspace_path,
+                    )
+                read_sandbox = sandbox
+                if session.mode == SessionMode.ASK and codebase.sandbox_id:
+                    ingestion_sandbox = await self._sandbox_cls.get(codebase.sandbox_id)
+                    if ingestion_sandbox:
+                        read_sandbox = ingestion_sandbox
                 extra_tools.append(
                     CodebaseTool(
                         uow_factory=self._uow_factory,
                         codebase_id=codebase.id,
-                        sandbox=sandbox,
+                        sandbox=read_sandbox,
                         workspace_path=codebase.workspace_path,
                     )
                 )
@@ -357,7 +373,7 @@ class TaskRunnerFactory:
             async with self._uow_factory() as uow:
                 kb = await uow.knowledge_base.get_kb(session.knowledge_base_id)
             if kb:
-                if session.mode == SessionMode.AGENT:
+                if session.mode == SessionMode.AGENT and session.codebase_id:
                     knowledge_base_prompt = DOC_AGENT_SKILL_PROMPT
                 extra_tools.append(
                     KnowledgeBaseTool(

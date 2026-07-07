@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Settings2 } from "lucide-react";
+import { Loader2, Settings2, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -48,9 +48,10 @@ export function SessionDetailView({
 }: SessionDetailViewProps) {
   const t = useTranslations("sessionDetail");
   const tCommon = useTranslations("common");
-  const isMobile = useIsMobile();
-  const [mode, setMode] = useState<SessionMode>("agent");
+  const { isMobile, isReady } = useIsMobile();
+  const [mode, setMode] = useState<SessionMode>("ask");
   const [gateSettingsOpen, setGateSettingsOpen] = useState(false);
+  const [contextSheetOpen, setContextSheetOpen] = useState(false);
   const [savingGateSettings, setSavingGateSettings] = useState(false);
   const { codeSourceRef, kbSourceRef, handleTimelineSourceClick } = useSessionContextRefs();
   const {
@@ -121,6 +122,7 @@ export function SessionDetailView({
   }, [session?.mode]);
 
   const hasContext = Boolean(session?.codebase_id || session?.knowledge_base_id);
+  const showModeToggle = Boolean(session?.codebase_id);
 
   const handleGateSettingsSave = async (config: {
     operatorDomains: string[];
@@ -196,12 +198,14 @@ export function SessionDetailView({
     );
   }
 
+  const showMobilePanels = !isReady || isMobile;
+
   return (
     <>
       <div className="flex h-full w-full flex-row overflow-hidden">
         <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
           <div
-            className={`mx-auto flex h-full w-full min-w-0 flex-col px-4 ${hasPreview && !isMobile ? "" : hasContext ? "" : "max-w-content"}`}
+            className={`mx-auto flex h-full w-full min-w-0 flex-col px-4 ${hasPreview && !showMobilePanels ? "" : hasContext ? "" : "max-w-content"}`}
           >
             <div className="flex-shrink-0">
               <SessionHeader
@@ -217,6 +221,20 @@ export function SessionDetailView({
                 includeDebug={includeDebug}
                 observationSummary={observationSummary}
                 onDebugOpen={handleDebugOpen}
+                leadingActions={
+                  hasContext && showMobilePanels ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1.5 rounded-full px-2.5 md:hidden"
+                      onClick={() => setContextSheetOpen(true)}
+                    >
+                      <Layers className="size-3.5" />
+                      {t("contextPanel")}
+                    </Button>
+                  ) : undefined
+                }
               />
             </div>
 
@@ -329,7 +347,7 @@ export function SessionDetailView({
                   </div>
                 )}
 
-                <div className="h-[140px]" />
+                <div className="min-h-[140px] pb-mobile-nav md:min-h-[140px] md:pb-0" />
               </div>
             </div>
 
@@ -377,7 +395,7 @@ export function SessionDetailView({
                 onStop={handleStop}
                 toolbarRight={
                   <>
-                    {hasContext && (
+                    {showModeToggle && (
                       <SessionModeToggle mode={mode} onChange={setMode} />
                     )}
                     <ThinkingToggle
@@ -403,13 +421,13 @@ export function SessionDetailView({
           </div>
         </div>
 
-        {hasPreview && !isMobile && (
+        {hasPreview && !showMobilePanels && (
           <div className="animate-in slide-in-from-right h-full min-h-0 w-full max-w-[600px] flex-shrink-0 overflow-hidden duration-300">
             {previewPanel}
           </div>
         )}
 
-        {hasContext && !isMobile && (
+        {hasContext && !showMobilePanels && (
           <div className={hasPreview ? "hidden" : undefined}>
             <SessionContextPanel
               codebaseId={session.codebase_id}
@@ -421,10 +439,24 @@ export function SessionDetailView({
         )}
       </div>
 
-      {isMobile && (
+      {showMobilePanels && (
         <Sheet open={hasPreview} onOpenChange={(open) => !open && handleClosePreview()}>
           <SheetContent side="right" className="w-full max-w-full overflow-hidden p-2 sm:max-w-[600px]">
             {previewPanel}
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {showMobilePanels && hasContext && (
+        <Sheet open={contextSheetOpen} onOpenChange={setContextSheetOpen}>
+          <SheetContent side="right" className="w-full max-w-full overflow-hidden p-0 sm:max-w-md">
+            <SessionContextPanel
+              codebaseId={session.codebase_id}
+              knowledgeBaseId={session.knowledge_base_id}
+              codeSourceRef={codeSourceRef}
+              kbSourceRef={kbSourceRef}
+              className="h-full w-full max-w-none border-0"
+            />
           </SheetContent>
         </Sheet>
       )}

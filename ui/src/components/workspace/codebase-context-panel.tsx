@@ -1,15 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronRight, FileCode2 } from "lucide-react";
+import { ChevronRight, FileCode2, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { MermaidDiagram } from "@/components/mermaid-diagram";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { codebaseApi } from "@/lib/api/codebase";
-import type { CodebaseArtifact, FileTreeNode } from "@/lib/api/types";
+import type { CodebaseArtifact, CodebaseSymbol, FileTreeNode } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 const ARTIFACT_KINDS: CodebaseArtifact["kind"][] = [
@@ -20,6 +21,13 @@ const ARTIFACT_KINDS: CodebaseArtifact["kind"][] = [
   "flowchart",
   "overview",
 ];
+
+type CallChainLocation = {
+  symbol: string;
+  path?: string;
+  line: number;
+  symbol_id?: string;
+};
 
 function FileTreeItem({
   node,
@@ -87,12 +95,18 @@ export function CodebaseContextPanel({
   onSourceClickRef,
 }: CodebaseContextPanelProps) {
   const t = useTranslations("codebase");
+  const tCommon = useTranslations("common");
   const tWorkspace = useTranslations("workspaceContext");
   const [tree, setTree] = useState<FileTreeNode[]>([]);
   const [artifacts, setArtifacts] = useState<CodebaseArtifact[]>([]);
+  const [activeTab, setActiveTab] = useState("source");
   const [sourcePath, setSourcePath] = useState<string | null>(null);
   const [sourceContent, setSourceContent] = useState("");
   const [sourceLine, setSourceLine] = useState<number | undefined>();
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [symbolQuery, setSymbolQuery] = useState("");
+  const [symbols, setSymbols] = useState<CodebaseSymbol[]>([]);
+  const [symbolsLoading, setSymbolsLoading] = useState(false);
 
   useEffect(() => {
     if (!codebaseId) return;
@@ -111,11 +125,31 @@ export function CodebaseContextPanel({
     })();
   }, [codebaseId]);
 
+  useEffect(() => {
+    if (!codebaseId) return;
+    const query = symbolQuery.trim();
+    if (query.length < 2) {
+      setSymbols([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setSymbolsLoading(true);
+      void codebaseApi
+        .listSymbols(codebaseId, query)
+        .then((data) => setSymbols(data.symbols))
+        .catch(() => setSymbols([]))
+        .finally(() => setSymbolsLoading(false));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [codebaseId, symbolQuery]);
+
   const loadSource = useCallback(
     async (path: string, line?: number) => {
       if (!codebaseId || !path) return;
+      setActiveTab("source");
       setSourcePath(path);
       setSourceLine(line);
+      setSourceLoading(true);
       onSourceNavigate?.(path, line);
       try {
         const data = await codebaseApi.readSource(codebaseId, {
@@ -126,6 +160,8 @@ export function CodebaseContextPanel({
         setSourceContent(data.content);
       } catch (err) {
         setSourceContent(err instanceof Error ? err.message : t("readFailed"));
+      } finally {
+        setSourceLoading(false);
       }
     },
     [codebaseId, onSourceNavigate, t],
@@ -145,8 +181,15 @@ export function CodebaseContextPanel({
   const callChainLocations = useMemo(() => {
     const art = artifacts.find((a) => a.kind === "call_chain");
     const locs = art?.meta?.node_locations;
-    return Array.isArray(locs) ? (locs as { symbol: string; line: number }[]) : [];
+    return Array.isArray(locs) ? (locs as CallChainLocation[]) : [];
   }, [artifacts]);
+
+  const formatCallChainLabel = (loc: CallChainLocation) => {
+    if (loc.path) {
+      return `${loc.symbol} · ${loc.path}:${loc.line}`;
+    }
+    return `${loc.symbol}:${loc.line}`;
+  };
 
   const artifactLabel = (kind: CodebaseArtifact["kind"]) => {
     const key = {
@@ -179,9 +222,10 @@ export function CodebaseContextPanel({
           </div>
         </ScrollArea>
       )}
-      <Tabs defaultValue="source" className="flex min-h-0 flex-1 flex-col">
-        <TabsList className="mx-2 mt-2 grid w-auto grid-cols-2">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
+        <TabsList className="mx-2 mt-2 grid w-auto grid-cols-3">
           <TabsTrigger value="source">{t("tabSource")}</TabsTrigger>
+          <TabsTrigger value="symbols">{t("tabSymbols")}</TabsTrigger>
           <TabsTrigger value="diagrams">{t("tabDiagrams")}</TabsTrigger>
         </TabsList>
         <TabsContent value="source" className="min-h-0 flex-1 px-2 pb-2">
@@ -193,10 +237,56 @@ export function CodebaseContextPanel({
                     {sourcePath}:{sourceLine}
                   </span>
                 )}
-                {sourceContent}
+                {sourceLoading ? tCommon("loading") : sourceContent}
               </pre>
             ) : (
               <p className="text-muted-foreground p-4 text-sm">{t("sourceHint")}</p>
+            )}
+          </ScrollArea>
+        </TabsContent>
+        <TabsContent value="symbols" className="min-h-0 flex-1 px-2 pb-2">
+          <div className="relative mb-2">
+            <Search className="text-muted-foreground absolute top-2.5 left-2 size-3.5" />
+            <Input
+              value={symbolQuery}
+              onChange={(e) => setSymbolQuery(e.target.value)}
+              placeholder={t("symbolSearchPlaceholder")}
+              className="h-8 pl-8 text-xs"
+            />
+          </div>
+          <ScrollArea className="h-full">
+            {symbolQuery.trim().length < 2 ? (
+              <p className="text-muted-foreground p-4 text-sm">{t("symbolSearchHint")}</p>
+            ) : symbolsLoading ? (
+              <p className="text-muted-foreground p-4 text-sm">{tCommon("loading")}</p>
+            ) : symbols.length === 0 ? (
+              <p className="text-muted-foreground p-4 text-sm">{t("noSymbolsFound")}</p>
+            ) : (
+              <ul className="space-y-1 p-1">
+                {symbols.map((symbol) => (
+                  <li key={symbol.id}>
+                    <button
+                      type="button"
+                      className="hover:bg-muted w-full rounded px-2 py-1.5 text-left text-xs"
+                      onClick={() => {
+                        if (symbol.path) {
+                          void loadSource(symbol.path, symbol.start_line);
+                        }
+                      }}
+                      disabled={!symbol.path}
+                    >
+                      <span className="font-medium">{symbol.name}</span>
+                      <span className="text-muted-foreground ml-2">{symbol.kind}</span>
+                      {symbol.path ? (
+                        <span className="text-muted-foreground ml-1 block truncate">
+                          {symbol.path}
+                          {symbol.start_line ? `:${symbol.start_line}` : ""}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </ScrollArea>
         </TabsContent>
@@ -216,17 +306,32 @@ export function CodebaseContextPanel({
                   )}
                   {kind === "call_chain" && callChainLocations.length > 0 && (
                     <ul className="mt-2 space-y-1 text-xs">
-                      {callChainLocations.map((loc, i) => (
-                        <li key={i}>
-                          <button
-                            type="button"
-                            className="text-blue-600 hover:underline"
-                            onClick={() => void loadSource(loc.symbol, loc.line)}
-                          >
-                            {loc.symbol}:{loc.line}
-                          </button>
-                        </li>
-                      ))}
+                      {callChainLocations.map((loc) => {
+                        const locKey = loc.path
+                          ? `${loc.path}:${loc.line}`
+                          : `${loc.symbol}:${loc.line}`;
+                        const canNavigate = Boolean(loc.path);
+                        return (
+                          <li key={locKey}>
+                            <button
+                              type="button"
+                              disabled={!canNavigate}
+                              className={cn(
+                                canNavigate
+                                  ? "text-blue-600 hover:underline"
+                                  : "text-muted-foreground cursor-not-allowed",
+                              )}
+                              onClick={() => {
+                                if (loc.path) {
+                                  void loadSource(loc.path, loc.line);
+                                }
+                              }}
+                            >
+                              {formatCallChainLabel(loc)}
+                            </button>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>

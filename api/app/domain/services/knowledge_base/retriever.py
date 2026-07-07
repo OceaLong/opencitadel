@@ -55,7 +55,11 @@ class HybridRetriever:
     async def retrieve(self, kb_id: str, query: str, top_k: Optional[int] = None) -> List[RetrievedChunk]:
         started = time.perf_counter()
         final_top_k = top_k or self._settings.final_top_k
-        embedding = await self._vector.embed(query)
+        try:
+            embedding = await self._vector.embed(query)
+        except Exception:
+            logger.warning("KB embedding 失败，降级为 BM25-only kb=%s", kb_id, exc_info=True)
+            embedding = []
         segmented_query = segment_for_bm25(query)
         async with self._uow_factory() as uow:
             vector_hits = await uow.knowledge_base.vector_search_chunks(

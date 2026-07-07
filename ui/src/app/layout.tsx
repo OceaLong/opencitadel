@@ -1,5 +1,5 @@
 import React from "react";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages, getTranslations } from "next-intl/server";
 
@@ -11,7 +11,13 @@ import { AuthProvider } from "@/providers/auth-provider";
 
 import "./globals.css";
 
-const themeInitScript = `(function(){try{var t=localStorage.getItem("opencitadel-theme")||localStorage.getItem("my-manus-theme");if(t==="dark")document.documentElement.classList.add("dark");}catch(e){}})();`;
+const themeInitScript = `(function(){try{var t=localStorage.getItem("opencitadel-theme")||localStorage.getItem("my-manus-theme");var dark=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(dark)document.documentElement.classList.add("dark");}catch(e){}})();`;
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("metadata");

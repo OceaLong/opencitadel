@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request, Response as StarletteResponse
 
+from app.application.services.auth_service import AuthService
 from app.application.services.team_service import TeamService
 from app.interfaces.auth_dependencies import get_current_principal
 from app.interfaces.schemas import Response
@@ -11,14 +12,18 @@ from app.interfaces.schemas.team import (
     InvitationLinkResponse,
     ListTeamMemberDetailsResponse,
     ListTeamsResponse,
+    TeamInvitationPreviewResponse,
+    TeamInvitationRegisterRequest,
     TeamMemberResponse,
     TeamResponse,
     UpdateTeamMemberRoleRequest,
 )
-from app.interfaces.service_dependencies import get_team_service
+from app.interfaces.service_dependencies import get_auth_service, get_cookie_manager, get_team_service
+from app.infrastructure.security.cookie import AuthCookieManager
 
 router = APIRouter(prefix="/teams", tags=["团队模块"])
 invitation_router = APIRouter(prefix="/invitations", tags=["邀请模块"])
+public_invitation_router = APIRouter(prefix="/invitations", tags=["邀请模块"])
 
 
 @router.post("", response_model=Response[TeamResponse])
@@ -85,8 +90,49 @@ async def create_team_invitation(
         team_id=team_id,
         actor_user_id=principal.user_id,
         role=request.role,
+        email=request.email,
     )
     return Response.success(data=InvitationLinkResponse(url=url), msg="邀请链接已生成")
+
+
+@public_invitation_router.get("/{token}", response_model=Response[TeamInvitationPreviewResponse])
+async def preview_invitation(
+        token: str,
+        service: TeamService = Depends(get_team_service),
+) -> Response[TeamInvitationPreviewResponse]:
+    preview = await service.preview_invitation(token=token)
+    return Response.success(data=preview)
+
+
+@public_invitation_router.post("/{token}/register", response_model=Response[TeamMemberResponse])
+async def register_and_accept_invitation(
+        token: str,
+        request: TeamInvitationRegisterRequest,
+        response: StarletteResponse,
+        http_request: Request,
+        service: TeamService = Depends(get_team_service),
+        auth_service: AuthService = Depends(get_auth_service),
+        cookie_manager: AuthCookieManager = Depends(get_cookie_manager),
+) -> Response[TeamMemberResponse]:
+    from app.interfaces.endpoints.auth_routes import _client_ip
+
+    result = await service.register_and_accept_invitation(
+        token=token,
+        email=request.email,
+        username=request.username,
+        password=request.password,
+    )
+    user, tokens = await auth_service.login(
+        email_or_username=result.user.email,
+        password=request.password,
+        user_agent=http_request.headers.get("user-agent", ""),
+        ip_address=_client_ip(http_request),
+    )
+    cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
+    return Response.success(
+        data=TeamMemberResponse.from_domain(result.member),
+        msg="注册成功并已加入团队",
+    )
 
 
 @invitation_router.post("/{token}/accept", response_model=Response[TeamMemberResponse])

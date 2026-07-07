@@ -97,10 +97,13 @@ async def list_symbols(
         ctx: WorkspaceContext = Depends(get_workspace_context),
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[ListSymbolsResponse]:
-    symbols = await service.list_symbols(codebase_id, name=name, scope=ctx.scope)
+    symbols = await service.list_symbols_with_paths(codebase_id, name=name, scope=ctx.scope)
     return Response.success(
         data=ListSymbolsResponse(
-            symbols=[SymbolResponse(**s.model_dump(mode="json")) for s in symbols]
+            symbols=[
+                SymbolResponse(**{**s.model_dump(mode="json"), "path": path})
+                for s, path in symbols
+            ]
         )
     )
 

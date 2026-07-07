@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import delete, func, select
@@ -16,6 +17,21 @@ class DBInvitationRepository(InvitationRepository):
 
     async def get_by_token(self, token: str) -> Optional[Invitation]:
         result = await self.db_session.execute(select(InvitationORM).where(InvitationORM.token == token))
+        record = result.scalar_one_or_none()
+        return record.to_domain() if record else None
+
+    async def get_pending_team_invitation(self, team_id: str, email: str) -> Optional[Invitation]:
+        normalized_email = email.strip().lower()
+        now = datetime.now()
+        result = await self.db_session.execute(
+            select(InvitationORM).where(
+                InvitationORM.type == InvitationType.TEAM.value,
+                InvitationORM.team_id == team_id,
+                InvitationORM.email == normalized_email,
+                InvitationORM.accepted_at.is_(None),
+                InvitationORM.expires_at > now,
+            )
+        )
         record = result.scalar_one_or_none()
         return record.to_domain() if record else None
 

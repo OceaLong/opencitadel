@@ -57,11 +57,7 @@ class CodeAskFlow(BaseFlow):
         self._uow_factory = uow_factory
         self._session_id = session_id
         self.status = FlowStatus.EXECUTING
-        tools = ToolRegistry.build_default_tools(
-            sandbox=sandbox,
-            browser=browser,
-            search_engine=search_engine,
-            llm=llm,
+        tools = ToolRegistry.build_ask_tools(
             mcp_tool=mcp_tool,
             a2a_tool=a2a_tool,
             extra_tools=extra_tools or [],

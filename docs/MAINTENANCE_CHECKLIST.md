@@ -9,7 +9,6 @@ Use this checklist when changing features, routes, configuration, deployment, or
 | Document | Role |
 |----------|------|
 | [Documentation inventory](DOCUMENTATION_INVENTORY.md) | Authoritative list of all docs, authority level, stale risk |
-| [Documentation audit report](DOCUMENTATION_AUDIT_REPORT.md) | Dated snapshot of a past audit — do not treat as live status |
 | This checklist | Actionable PR steps for contributors |
 
 ## When to update docs

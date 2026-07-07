@@ -74,6 +74,39 @@ knowledge_base:
 
 When `graphrag.enabled=true`, `GraphBuilder` runs after index write. GraphRAG LLM unavailability is logged and skipped — ingestion can still reach `READY`.
 
+## Retrieval stack (KB vs Codebase)
+
+Knowledge base retrieval is intentionally richer than codebase semantic search:
+
+```mermaid
+flowchart TB
+  subgraph kb ["Knowledge base HybridRetriever"]
+    Q1["User query"] --> V1["Vector top-k"]
+    Q1 --> B1["BM25 top-k"]
+    V1 --> RRF["RRF fusion"]
+    B1 --> RRF
+    RRF --> Graph["GraphRAG expand"]
+    Graph --> Parent["Parent chunk expand"]
+    Parent --> Rerank["LLM rerank"]
+    Rerank --> Out1["kb_search citations"]
+  end
+  subgraph cb ["Codebase semantic search"]
+    Q2["User query"] --> Embed2["Query embedding"]
+    Embed2 --> Vec2["pgvector chunk search"]
+    Vec2 --> Out2["semantic_search / read_code"]
+  end
+```
+
+| Dimension | Knowledge base | Codebase |
+|-----------|----------------|----------|
+| Vector index | `knowledge_base.vector_enabled` (default true) | Uses embedding when available; `vector_degraded` on failure |
+| Full-text | BM25 + `zh_tokenizer` | Symbol index + static analysis |
+| Graph | Optional GraphRAG | Dependency edges from static analysis |
+| Rerank | LLM rerank (`knowledge_base.rerank`) | None |
+| Agent tool | `KnowledgeBaseTool.kb_search` | `CodebaseTool.semantic_search` |
+
+See [Codebase reindex](codebase-reindex.md) for the lighter codebase retrieval path.
+
 ## Failure and recovery
 
 | Failure type | Error code | Worker behavior |

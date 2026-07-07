@@ -65,7 +65,7 @@ export default function AdminComplianceReportPage() {
         <CardContent className="flex flex-wrap items-center gap-3 pt-6">
           <AdminTimeRangePicker value={range} onChange={setRange} />
           <Select value={framework} onValueChange={setFramework}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-full sm:w-[180px]">
               <SelectValue placeholder={t("frameworkAll")} />
             </SelectTrigger>
             <SelectContent>

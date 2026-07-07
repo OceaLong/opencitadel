@@ -144,6 +144,7 @@ export type Skill = {
   examples: string[];
   is_builtin: boolean;
   enabled: boolean;
+  auto_recommend?: boolean;
   visibility?: "global" | "private";
   owner_user_id?: string | null;
   created_at?: string;
@@ -175,6 +176,7 @@ export type CreateSkillParams = {
   agent_params?: SkillAgentParams;
   examples?: string[];
   enabled?: boolean;
+  auto_recommend?: boolean;
 };
 
 // ==================== 记忆管理 ====================
@@ -1207,6 +1209,7 @@ export type CodebaseSymbol = {
   name: string;
   kind: string;
   file_id: string;
+  path?: string;
   signature?: string;
   start_line?: number;
   end_line?: number;

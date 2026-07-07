@@ -118,6 +118,25 @@ flowchart TD
 | `knowledge_base_id` + `SessionMode.ASK` | `DocQAFlow` | 知识库 Doc QA |
 | 其他（含 `SessionMode.AGENT`） | `PlannerReActFlow` | Planner → Clarify → ReAct 通用 Agent |
 
+### Ask 模式代码库访问
+
+Ask 模式（`CodeAskFlow` / `HybridAskFlow` / `DocQAFlow`）是只读 RAG 问答，与 Agent 模式在代码库访问路径上不同：
+
+| 维度 | Ask 模式 | Agent 模式 |
+|------|----------|------------|
+| 代码库物化 | 不将 tarball 恢复到会话沙箱 | `attach_to_session_sandbox` 恢复快照到 `/home/ubuntu` |
+| `read_code` 沙箱 | 索引沙箱 `codebase.sandbox_id`（与 UI `readSource` 一致） | 会话沙箱 `session.sandbox_id`（支持改码后读取） |
+| 工具白名单 | `build_ask_tools`：codebase / knowledge_base / memory / MCP / A2A / Message | `build_default_tools`：含 shell / file / browser 等 |
+| 工作区路径 | 默认 `/home/ubuntu/codebase`（`codebase.workspace_path`） | 同上，经 attach 后存在于会话沙箱 |
+
+容器内路径语义：
+
+- `/home/ubuntu/codebase` — 用户导入并索引的代码库工作区
+- `/home/ubuntu` — Agent 默认 home，Shell 空 `exec_dir` 时的 cwd
+- `/sandbox` — 沙箱微服务自身代码（FastAPI / supervisord），**不是**用户代码库；Ask 模式已禁用 shell/file 工具以防误读
+
+实现位置：`api/app/application/services/task_runner_factory.py`（索引沙箱注入）、`api/app/domain/services/tools/tool_registry.py`（`build_ask_tools`）。
+
 ## 任务执行状态
 
 Redis 中持久化的任务状态由 `TaskStatus` 枚举定义（`api/app/infrastructure/external/task/task_state.py`），共 5 个值：
@@ -330,6 +349,20 @@ Chart 位于 `deploy/helm/opencitadel/`，提供全栈一键部署：
 - namespace ResourceQuota 限制沙箱 Pod 总量。
 - migrate initContainer 使用 API 镜像。
 - 默认 K8s 沙箱模式为 `sandbox.driver=kubernetes` 且 `sandbox.address` 为空；如接入远程沙箱网关，则改用 `sandbox.address`。
+
+## 代码锚点
+
+权威实现文件快速索引：
+
+| 主题 | 主要文件 |
+|------|----------|
+| DI / 进程角色 | `api/app/container.py`、`api/app/runtime_role.py` |
+| Worker 分发 | `api/app/worker/main.py`、`api/app/infrastructure/external/task/redis_stream_task.py` |
+| Agent Flow 路由 | `api/app/domain/services/agent_task_runner.py`、`api/app/domain/services/flows/` |
+| 任务装配 | `api/app/application/services/task_runner_factory.py` |
+| 工具注册表 | `api/app/domain/services/tools/tool_registry.py` |
+| UI Shell | `ui/src/components/app-shell.tsx`、`ui/src/lib/api/fetch.ts` |
+| 工作区 scope | `ui/src/components/workspace-switcher.tsx`、`api/app/interfaces/auth_dependencies.py` |
 
 ## 相关文档
 

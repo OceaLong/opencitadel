@@ -95,7 +95,7 @@ export function VNCOverlay({ sessionId, onClose }: VNCOverlayProps) {
               <Button
                 variant="secondary"
                 onClick={onClose}
-                className="mt-2 cursor-pointer gap-2 rounded-full border border-gray-600 bg-white/10 px-6 text-white hover:bg-white/20"
+                className="mt-2 min-h-11 cursor-pointer gap-2 rounded-full border border-gray-600 bg-white/10 px-6 text-white hover:bg-white/20"
               >
                 <X size={14} />
                 {t("exitRemoteDesktop")}
@@ -106,11 +106,11 @@ export function VNCOverlay({ sessionId, onClose }: VNCOverlayProps) {
       </div>
 
       {status === "connected" && (
-        <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
+        <div className="pb-safe absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-white/10 bg-black/60 px-5 py-2 text-sm text-white/90 shadow-xl backdrop-blur transition-colors hover:bg-black/80"
+            className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-white/10 bg-black/60 px-5 py-2.5 text-sm text-white/90 shadow-xl backdrop-blur transition-colors hover:bg-black/80"
           >
             <X size={14} />
             {t("exitRemoteDesktop")}

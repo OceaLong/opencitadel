@@ -103,6 +103,10 @@ const DYNAMIC_EXPANSIONS = [
     prefix: "adminNav.",
     values: ["overview", "users", "teams", "invitations", "audit", "evidence", "complianceReport"],
   },
+  {
+    prefix: "mobileNav.",
+    values: ["chat", "codebase", "knowledge", "marketplace"],
+  },
 ];
 
 function collectUsedKeys() {

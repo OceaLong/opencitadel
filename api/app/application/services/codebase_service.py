@@ -165,6 +165,18 @@ class CodebaseService:
         async with self._uow_factory() as uow:
             return await uow.codebase.list_symbols(codebase_id, name=name)
 
+    async def list_symbols_with_paths(
+            self,
+            codebase_id: str,
+            name: Optional[str] = None,
+            scope: Optional[OwnerScope] = None,
+    ) -> List[tuple[CodebaseSymbol, str]]:
+        await self.get_codebase(codebase_id, scope=scope)
+        async with self._uow_factory() as uow:
+            symbols = await uow.codebase.list_symbols(codebase_id, name=name)
+            files = {f.id: f.path for f in await uow.codebase.list_files(codebase_id)}
+        return [(symbol, files.get(symbol.file_id, "")) for symbol in symbols]
+
     async def list_artifacts(
             self,
             codebase_id: str,

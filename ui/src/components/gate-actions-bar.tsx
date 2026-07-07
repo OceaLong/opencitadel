@@ -103,7 +103,7 @@ export function GateActionsBar({
             </p>
             <p className="text-muted-foreground mt-1 text-xs">{t("takeoverDescription")}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {options.map((option) => (
               <Button
                 key={option}
@@ -214,7 +214,7 @@ export function GateActionsBar({
             placeholder={t("rejectPlaceholder")}
             rows={2}
           />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="destructive" disabled={submitting} onClick={() => void handleReject()}>
               {t("confirmReject")}
             </Button>

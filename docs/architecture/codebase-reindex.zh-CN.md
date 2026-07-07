@@ -9,7 +9,7 @@
 | 能力 | 路由 / API | 说明 |
 |------|------------|------|
 | 列表 / 创建 | `/codebase`、`POST /api/codebases` | ZIP 上传或 Git URL 导入 |
-| 详情 | `/codebase/[id]` | 文件、符号、架构视图 |
+| 打开资源 | `/codebase/[id]` | 跳转到新建 Ask 会话（无独立详情页） |
 | Ask 模式 | 带 `codebase_id` + ASK 的会话 | `CodeAskFlow` — 基于符号的 RAG |
 | Agent 模式 | 带 `codebase_id` + AGENT 的会话 | 带代码库工具的 `PlannerReActFlow` |
 | 重新索引 | `POST /api/codebases/{id}/reanalyze` | embedding 恢复后重跑摄取 |
@@ -78,6 +78,25 @@ flowchart TD
 
 - 静态分析与 artifacts 在降级时仍正常完成
 - 当前语义检索工具未读取 `vector_degraded` 状态；向量不可用或无命中时返回「未找到相关代码」
+
+## 检索栈（Codebase vs 知识库）
+
+代码库检索以**向量优先**，辅以静态分析产物；知识库检索额外包含 BM25、GraphRAG 与 LLM rerank。完整 KB 流水线见 [知识库摄取](knowledge-base-ingestion.zh-CN.md#检索栈kb-vs-codebase)。
+
+```mermaid
+flowchart LR
+  Query["用户查询"] --> Embed["查询 embedding"]
+  Embed --> PGV["pgvector chunk 检索"]
+  PGV --> Tools["CodebaseTool.semantic_search"]
+  Static["StaticAnalyzer 符号"] --> Tools
+```
+
+| 阶段 | 代码库 | 知识库（对比） |
+|------|--------|----------------|
+| 分块 | 符号感知 chunk | 父/子块 |
+| 全文 | 符号/名称查找 | BM25 + RRF |
+| 图 | 仅依赖边 | GraphRAG 实体扩展 |
+| Rerank | 无 | LLM rerank |
 
 ## 相关文档
 

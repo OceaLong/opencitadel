@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2, Plus, Trash2, Upload } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -57,6 +57,7 @@ const emptyForm: CreateSkillParams = {
   agent_params: { ...defaultAgentParams },
   examples: [],
   enabled: true,
+  auto_recommend: true,
 };
 
 type Props = {
@@ -94,6 +95,11 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
   const [selectedMcpRefs, setSelectedMcpRefs] = useState<string[]>([]);
   const [selectedA2aRefs, setSelectedA2aRefs] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importContent, setImportContent] = useState("");
+  const [importSlug, setImportSlug] = useState("");
+  const [importing, setImporting] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -165,6 +171,7 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
       },
       examples: s.examples,
       enabled: s.enabled,
+      auto_recommend: s.auto_recommend ?? true,
     });
     resetToolGroupState(s.allowed_tools);
     setSelectedMcpRefs(s.mcp_server_refs ?? []);
@@ -253,6 +260,34 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
     }
   };
 
+  const handleImportFile = async (file: File) => {
+    const text = await file.text();
+    setImportContent(text);
+    if (!importSlug && file.name.endsWith(".md")) {
+      setImportSlug(file.name.replace(/\.md$/i, ""));
+    }
+  };
+
+  const handleImport = async () => {
+    if (!importContent.trim()) {
+      toast.error(t("importContentRequired"));
+      return;
+    }
+    setImporting(true);
+    try {
+      await skillsApi.import(importContent, importSlug.trim() || undefined);
+      toast.success(t("importSuccess"));
+      setImportOpen(false);
+      setImportContent("");
+      setImportSlug("");
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("importFailed"));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <div className={embedded ? "w-full px-1" : "max-w-5xl"}>
       <div className={`flex items-center justify-between ${embedded ? "mb-4" : "mb-6"}`}>
@@ -268,10 +303,16 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
           </h2>
           <p className="text-muted-foreground mt-1 text-sm">{t("description")}</p>
         </div>
-        <Button size={embedded ? "xs" : "default"} onClick={openCreate}>
-          <Plus className="mr-1 size-4" />
-          {t("createSkill")}
-        </Button>
+        <div className="flex gap-2">
+          <Button size={embedded ? "xs" : "default"} variant="outline" onClick={() => setImportOpen(true)}>
+            <Upload className="mr-1 size-4" />
+            {t("importSkill")}
+          </Button>
+          <Button size={embedded ? "xs" : "default"} onClick={openCreate}>
+            <Plus className="mr-1 size-4" />
+            {t("createSkill")}
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -532,6 +573,13 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
             </div>
             <div className="border-border/70 bg-muted/20 flex items-center justify-between rounded-xl border p-3">
               <Switch
+                checked={form.auto_recommend ?? true}
+                onCheckedChange={(v) => setForm({ ...form, auto_recommend: v })}
+              />
+              <Label>{t("autoRecommend")}</Label>
+            </div>
+            <div className="border-border/70 bg-muted/20 flex items-center justify-between rounded-xl border p-3">
+              <Switch
                 checked={form.enabled}
                 onCheckedChange={(v) => setForm({ ...form, enabled: v })}
               />
@@ -545,6 +593,57 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
             <Button onClick={handleSave} disabled={saving}>
               {saving && <Loader2 className="mr-1 size-4 animate-spin" />}
               {tCommon("save")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t("importSkill")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>{t("importFile")}</Label>
+              <Input
+                ref={importFileRef}
+                type="file"
+                accept=".md,text/markdown,text/plain"
+                className="mt-1"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleImportFile(file);
+                }}
+              />
+            </div>
+            <div>
+              <Label>{t("importSlug")}</Label>
+              <Input
+                value={importSlug}
+                onChange={(e) => setImportSlug(e.target.value)}
+                placeholder={t("slug")}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>{t("importMarkdown")}</Label>
+              <Textarea
+                rows={10}
+                value={importContent}
+                onChange={(e) => setImportContent(e.target.value)}
+                placeholder={t("importMarkdownPlaceholder")}
+                className="mt-1 font-mono text-xs"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportOpen(false)}>
+              {tCommon("cancel")}
+            </Button>
+            <Button onClick={() => void handleImport()} disabled={importing}>
+              {importing && <Loader2 className="mr-1 size-4 animate-spin" />}
+              {t("importSkill")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -62,7 +62,7 @@ export function InlineOptionPicker({
           size="sm"
           disabled={disabled}
           className={cn(
-            "text-muted-foreground hover:text-foreground h-8 max-w-[160px] gap-1 px-2 text-xs font-normal",
+            "text-muted-foreground hover:text-foreground h-8 max-w-[160px] gap-1 px-2 text-xs font-normal sm:max-w-[160px]",
             className,
           )}
         >
@@ -71,7 +71,7 @@ export function InlineOptionPicker({
           <ChevronDown className="size-3 shrink-0 opacity-60" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-[280px] p-1.5">
+      <DropdownMenuContent align="start" className="w-[min(100vw-2rem,280px)] p-1.5 sm:w-[280px]">
         {allowClear && (
           <button
             type="button"

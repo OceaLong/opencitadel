@@ -16,7 +16,17 @@ type RuntimeSettingsProps = {
   isAdmin: boolean;
 };
 
-const RUNTIME_SECTIONS: AppConfigSection[] = ["feature_flags", "scheduler", "server"];
+const RUNTIME_SECTIONS: AppConfigSection[] = [
+  "feature_flags",
+  "scheduler",
+  "server",
+  "memory",
+  "knowledge_base",
+  "sandbox",
+  "worker",
+  "streams",
+  "observability",
+];
 
 const SERVER_VISIBLE_KEYS = new Set([
   "cors_origins",
@@ -99,6 +109,16 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
       await loadSection(activeSection);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("rollbackFailed"));
+    }
+  };
+
+  const handleResetUserOverride = async () => {
+    try {
+      await configApi.deleteUserOverride();
+      toast.success(t("resetOverrideSuccess"));
+      await loadSection(activeSection);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("resetOverrideFailed"));
     }
   };
 
@@ -202,14 +222,17 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
         </FieldGroup>
       )}
 
-      {isAdmin && (
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {isAdmin ? (
           <Button type="button" onClick={handleSave} disabled={saving || loading}>
             {saving && <Loader2 className="animate-spin" />}
             {tCommon("save")}
           </Button>
-        </div>
-      )}
+        ) : null}
+        <Button type="button" variant="outline" onClick={() => void handleResetUserOverride()}>
+          {t("resetUserOverride")}
+        </Button>
+      </div>
 
       {isAdmin && revisions.length > 0 && (
         <FieldSet>

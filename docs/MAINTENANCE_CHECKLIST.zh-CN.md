@@ -9,7 +9,6 @@
 | 文档 | 职责 |
 |------|------|
 | [文档清单](DOCUMENTATION_INVENTORY.zh-CN.md) | 全部文档的权威列表、权威级别、过期风险 |
-| [文档审计报告](DOCUMENTATION_AUDIT_REPORT.zh-CN.md) | 某次审计的日期快照 — 勿当作实时状态 |
 | 本清单 | 贡献者可执行的 PR 步骤 |
 
 ## 何时更新文档

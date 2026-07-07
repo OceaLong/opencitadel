@@ -13,4 +13,7 @@ export const skillsApi = {
     put<Skill>(`/skills/${id}`, params),
 
   delete: (id: string): Promise<void> => del<void>(`/skills/${id}`),
+
+  import: (content: string, slug?: string): Promise<Skill> =>
+    post<Skill>("/skills/import", { content, slug: slug ?? "" }),
 };

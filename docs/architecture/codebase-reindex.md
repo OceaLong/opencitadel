@@ -9,7 +9,7 @@ This document is the authoritative reference for the **Codebase module**: import
 | Capability | Route / API | Description |
 |------------|-------------|-------------|
 | List / create | `/codebase`, `POST /api/codebases` | ZIP upload or Git URL import |
-| Detail | `/codebase/[id]` | Files, symbols, architecture view |
+| Open resource | `/codebase/[id]` | Redirects to a new Ask session (no standalone detail page) |
 | Ask mode | Session with `codebase_id` + ASK | `CodeAskFlow` — RAG over symbols |
 | Agent mode | Session with `codebase_id` + AGENT | `PlannerReActFlow` with codebase tools |
 | Reindex | `POST /api/codebases/{id}/reanalyze` | Re-run ingestion after embedding recovery |
@@ -78,6 +78,25 @@ flowchart TD
 
 - Static analysis and artifacts complete normally during degradation
 - Current semantic search tools do not read `vector_degraded` state; when vectors are unavailable or there are no hits, returns "No relevant code found"
+
+## Retrieval stack (Codebase vs Knowledge base)
+
+Codebase retrieval is **vector-first** with static-analysis artifacts; knowledge base retrieval adds BM25, GraphRAG, and LLM rerank. See [Knowledge base ingestion](knowledge-base-ingestion.md#retrieval-stack-kb-vs-codebase) for the full KB pipeline.
+
+```mermaid
+flowchart LR
+  Query["User query"] --> Embed["Query embedding"]
+  Embed --> PGV["pgvector chunk search"]
+  PGV --> Tools["CodebaseTool.semantic_search"]
+  Static["StaticAnalyzer symbols"] --> Tools
+```
+
+| Stage | Codebase | Knowledge base (contrast) |
+|-------|----------|---------------------------|
+| Chunking | Symbol-aware chunks | Parent/child chunks |
+| Full-text | Symbol/name lookup | BM25 + RRF |
+| Graph | Dependency edges only | GraphRAG entity expansion |
+| Rerank | None | LLM rerank |
 
 ## Related Documentation
 

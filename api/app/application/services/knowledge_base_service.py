@@ -238,6 +238,8 @@ class KnowledgeBaseService:
         kb = await self.get_kb(kb_id, scope=scope)
         if kb.status != KBStatus.READY:
             raise BadRequestError("知识库尚未就绪，请等待索引完成后再开始问答")
+        if mode == SessionMode.AGENT:
+            mode = SessionMode.ASK
         session = Session(
             title=f"文档知识库对话 · {kb.name}",
             knowledge_base_id=kb_id,

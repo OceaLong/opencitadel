@@ -6,7 +6,7 @@
 
 ## 出站 A2A（Agent 调用远程 Agent）
 
-在 `api/config.yaml` → `a2a_config.a2a_servers` 配置，或通过 **设置 → 集成**（弹窗 Tab）管理。
+在 `api/config.yaml` → `a2a_config.a2a_servers` 配置，或通过 **设置 → 集成**（MCP/A2A/服务 Key Tab）管理。
 
 | 字段 | 说明 |
 |------|------|
@@ -48,7 +48,7 @@ flowchart TB
 
 ## 服务 API Key
 
-用于自动化与入站 A2A 的长期 Key，按用户管理：
+用于自动化与入站 A2A 的长期 Key，按用户管理（需会话 JWT）：
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -56,15 +56,17 @@ flowchart TB
 | POST | `/api/service-keys` | 创建 Key — **明文仅返回一次** |
 | DELETE | `/api/service-keys/{id}` | 吊销 Key |
 
+**UI 入口**：设置 → 集成 → **服务 API Key** 面板（`ServiceKeysSettings`，`ui/src/components/settings/service-keys-settings.tsx`）。
+
 使用方式：
 
 ```http
 X-Api-Key: <plaintext-key>
 ```
 
-Key 以 SHA-256 哈希存储。吊销后立即失效。
+Key 以 SHA-256 哈希存储（`service_api_keys` 表）。明文仅在创建时展示；列表与吊销接口永不返回密钥。吊销后立即失效。
 
-**作用域说明**：服务 API Key 的 Principal 不含 `team_roles`；访问团队作用域资源需使用 JWT 会话鉴权并携带 `X-Workspace-Id`。
+**作用域说明**：服务 API Key 的 Principal 不含 `team_roles`；访问团队作用域资源需使用 JWT 会话鉴权并携带 `X-Workspace-Id`。入站 A2A（`POST /api/a2a`）使用 `require_service_api_key` — Principal 继承 Key 所属用户的 `global_role` 与用户 ID，不含团队成员身份。
 
 ## MCP 与 A2A 对比
 

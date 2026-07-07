@@ -185,7 +185,7 @@ export default function AdminAuditPage() {
       />
 
       <div className="flex flex-wrap items-end gap-3">
-        <div className="w-48">
+        <div className="w-full sm:w-48">
           <Select value={actionFilter} onValueChange={setActionFilter}>
             <SelectTrigger>
               <SelectValue placeholder={t("filterAction")} />

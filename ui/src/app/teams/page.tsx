@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -22,8 +22,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 import { formatDateTime } from "@/lib/admin-utils";
-import { teamApi, type Team } from "@/lib/api/team";
+import { type Team, teamApi } from "@/lib/api/team";
 import { IconAdd, IconLoading, IconUsers } from "@/lib/icons";
+import { ACTIVE_WORKSPACE_KEY, LEGACY_ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
+import { writeLocalStorageKey } from "@/lib/storage-migration";
 
 export default function TeamsPage() {
   const t = useTranslations("teams");
@@ -58,8 +60,16 @@ export default function TeamsPage() {
     }
     setCreating(true);
     try {
-      await teamApi.create(name.trim(), description.trim());
-      toast.success(t("createSuccess"));
+      const team = await teamApi.create(name.trim(), description.trim());
+      toast.success(t("createSuccess"), {
+        action: {
+          label: t("switchToTeam"),
+          onClick: () => {
+            writeLocalStorageKey(LEGACY_ACTIVE_WORKSPACE_KEY, ACTIVE_WORKSPACE_KEY, team.id);
+            window.location.reload();
+          },
+        },
+      });
       setDialogOpen(false);
       setName("");
       setDescription("");
@@ -91,8 +101,14 @@ export default function TeamsPage() {
         </div>
       ) : teams.length === 0 ? (
         <Card>
-          <CardContent className="text-muted-foreground py-16 text-center text-sm">
-            {t("emptyTeams")}
+          <CardContent className="flex flex-col items-center py-16 text-center">
+            <IconUsers className="text-muted-foreground mb-4 size-10" />
+            <p className="text-base font-medium">{t("title")}</p>
+            <p className="text-muted-foreground mt-1 max-w-sm text-sm">{t("emptyTeams")}</p>
+            <Button className="mt-6" onClick={() => setDialogOpen(true)}>
+              <IconAdd className="mr-1 size-4" />
+              {t("createTeam")}
+            </Button>
           </CardContent>
         </Card>
       ) : (

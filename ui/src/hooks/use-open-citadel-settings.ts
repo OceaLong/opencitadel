@@ -9,10 +9,12 @@ import { configApi } from "@/lib/api";
 
 export type SettingTab =
   | "common-setting"
+  | "agent-setting"
   | "models-setting"
   | "skills-setting"
   | "memory-setting"
   | "integrations-setting"
+  | "hitl-setting"
   | "runtime-setting";
 
 export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab) {
@@ -90,7 +92,7 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
   const handleSave = async () => {
     setSaving(true);
     try {
-      if (activeSetting === "common-setting") {
+      if (activeSetting === "agent-setting") {
         await configApi.updateAgentConfig(agentConfig);
         toast.success(t("toastAgentConfigSaved"));
       }

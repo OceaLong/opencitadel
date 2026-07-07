@@ -67,7 +67,11 @@ ui/
 | `/invitations/[token]` | Accept invitation | No shell |
 | `/share/artifact/[token]` | Public artifact view | No shell |
 
-**Navigation**: Left panel holds session list; Codebase, Knowledge, Marketplace, and Automation are in the **header workspace dropdown** (`app-header.tsx`).
+**Navigation**:
+
+- **Desktop**: Left panel holds session list; Codebase, Knowledge, Marketplace, and Automation are in the **header workspace dropdown** (`app-header.tsx`).
+- **Mobile**: `MobileBottomNav` exposes chat, codebase, knowledge, and marketplace; Automation, Teams, Settings, and Admin are in the **More** sheet.
+- `/codebase/[id]` and `/knowledge/[id]` redirect to a new Ask session — they are not standalone detail pages.
 
 ## Features
 
@@ -76,11 +80,13 @@ ui/
 - **Endpoint & model management**: Settings → Models — group models by endpoint (provider, base URL, API key on endpoint).
 - **Skill templates**: Settings → Skills.
 - **Long-term memory**: Settings → Memory; compact/clear session memory on session page.
-- **Settings modal** (six tabs): Common, Models, Skills, Memory, Integrations (MCP/A2A), Runtime (admin only).
-- **Language toggle**: Header `LanguageToggle` (`NEXT_LOCALE` cookie; no URL prefix).
-- **HITL UI**: clarify questions, plan/tool approval bars, VNC takeover, checkpoint restore.
+- **Settings modal** (eight tabs): General (theme + language), Agent, Models, Skills, Memory, Integrations (MCP/A2A/Service Keys), HITL, Runtime (admin only).
+- **Theme and language**: Settings → General (`GeneralSettings`); locale in `NEXT_LOCALE` cookie (no URL prefix).
+- **HITL UI**: clarify questions, plan/tool approval bars, VNC takeover, checkpoint restore; global defaults in Settings → HITL.
 - **Web Operator**: `operator-scope-dialog.tsx` when Skill is `web-operator`.
 - **LLM status badge**: Header polls `/api/llm/status`.
+- **Notifications**: `NotificationInbox` in header (REST + SSE).
+- **Mobile session toolbar**: model/Skill/context options in `ChatOptionsSheet`.
 
 See [`../docs/architecture/frontend-ui.md`](../docs/architecture/frontend-ui.md).
 
@@ -114,8 +120,8 @@ Core fetch layer: `src/lib/api/fetch.ts` — cookie auth, CSRF, `X-Workspace-Id`
 | `config.ts` | AppConfig sections |
 | `skills.ts`, `memory.ts` | Skills and memory |
 | `admin.ts`, `team.ts` | Admin and teams |
-| `knowledge.ts`, `codebase.ts` | Knowledge bases |
-| `file.ts` | File upload/download |
+| `knowledge.ts`, `codebase.ts`, `file.ts` | Knowledge bases, codebases, files |
+| `service-keys.ts`, `notifications.ts`, `compliance.ts` | Service API keys, notifications, compliance |
 | `constants.ts` | Shared limits (`CODEBASE_ZIP_MAX_BYTES` = 200 MB, must match nginx) |
 | `artifacts.ts` | Artifacts and share |
 | `types.ts` | Shared TypeScript types |
@@ -164,10 +170,18 @@ UI deploys via root `docker-compose.yml`. Multi-stage Dockerfile:
 
 Build with `NEXT_PUBLIC_API_BASE_URL=/api` so Nginx proxies API requests.
 
+## Testing
+
+- **Unit tests** (Vitest): logic-layer tests under `ui/src/**/*.test.ts` — safe redirect, session events, LLM status, knowledge utils. No component-level UI regression suite.
+- **E2E** (Playwright): smoke tests in `e2e/` — home page load and OpsConsole demo login only. See [`../e2e/README.md`](../e2e/README.md).
+
+Do not assume `npm run test` covers full UI flows.
+
 ## Internationalization (i18n)
 
 - Framework: `next-intl` with locales `en` and `zh` (default `en`)
-- Message source: `scripts/build-messages.mjs` → `npm run i18n:build` → `messages/en.json` and `messages/zh.json`
+- **Source of truth**: `scripts/build-messages.mjs` (+ `i18n-supplement.mjs` for drift backfill) → `npm run i18n:build` → `messages/en.json` and `messages/zh.json`
+- **Do not hand-edit** `messages/*.json` without updating the build scripts and re-running `i18n:build`
 - Runtime locale code is `zh`; documentation filenames use `*.zh-CN.md` for Chinese — same language, different identifiers
 - URL has no locale prefix (`localePrefix: "never"`); locale persisted in `NEXT_LOCALE` cookie
-- Language switch: **AppHeader** → `LanguageToggle` component
+- Theme and language: **Settings → General** (`GeneralSettings`)

@@ -43,6 +43,7 @@ export default function AdminOverviewPage() {
   const [timeseries, setTimeseries] = useState<UsageTimeseriesPoint[]>([]);
   const [modelBreakdown, setModelBreakdown] = useState<Array<{ key: string; total_tokens: number; call_count: number }>>([]);
   const [userBreakdown, setUserBreakdown] = useState<Array<{ key: string; total_tokens: number; call_count: number }>>([]);
+  const [teamBreakdown, setTeamBreakdown] = useState<Array<{ key: string; total_tokens: number; call_count: number }>>([]);
   const [recentAudit, setRecentAudit] = useState<AuditLog[]>([]);
   const [auditByDay, setAuditByDay] = useState<Array<{ date: string; count: number }>>([]);
   const [recentInvitations, setRecentInvitations] = useState<PlatformInvitation[]>([]);
@@ -59,6 +60,7 @@ export default function AdminOverviewPage() {
           timeseriesData,
           modelData,
           userData,
+          teamData,
           auditData,
           auditSummary,
           invitationData,
@@ -68,6 +70,7 @@ export default function AdminOverviewPage() {
           adminApi.usageTimeseries(dateParams),
           adminApi.usageBreakdown("model", { ...dateParams, limit: 8 }),
           adminApi.usageBreakdown("user", { ...dateParams, limit: 8 }),
+          adminApi.usageBreakdown("team", { ...dateParams, limit: 8 }),
           adminApi.audit({ limit: 8 }),
           adminApi.auditSummary(dateParams),
           adminApi.invitations({ limit: 6 }),
@@ -78,6 +81,7 @@ export default function AdminOverviewPage() {
         setTimeseries(timeseriesData.points);
         setModelBreakdown(modelData.items);
         setUserBreakdown(userData.items);
+        setTeamBreakdown(teamData.items);
         setRecentAudit(auditData.logs);
         setAuditByDay(auditSummary.by_day);
         setRecentInvitations(invitationData.invitations);
@@ -131,9 +135,10 @@ export default function AdminOverviewPage() {
         <UsageCallsChart points={timeseries} />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-3">
         <UsageBreakdownChart title={t("modelUsageTitle")} description={t("modelUsageDesc")} items={modelBreakdown} />
         <UsageBreakdownChart title={t("userUsageTitle")} description={t("userUsageDesc")} items={userBreakdown} />
+        <UsageBreakdownChart title={t("teamUsageTitle")} description={t("teamUsageDesc")} items={teamBreakdown} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">

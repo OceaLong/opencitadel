@@ -49,6 +49,9 @@ export default function AdminUsersPage() {
   const [quotaUser, setQuotaUser] = useState<AdminUser | null>(null);
   const [quota, setQuota] = useState<Quota>({});
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
+  const [deleteStrategy, setDeleteStrategy] = useState<"anonymize" | "cascade" | "transfer_to_team">("anonymize");
+  const [deleting, setDeleting] = useState(false);
 
   const loadUsers = useCallback(async (nextOffset: number) => {
     setLoading(true);
@@ -134,6 +137,21 @@ export default function AdminUsersPage() {
     }
   }
 
+  async function deleteUser() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await adminApi.deleteUser(deleteTarget.id, deleteStrategy);
+      toast.success(t("userDeleted"));
+      setDeleteTarget(null);
+      await loadUsers(offset);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("deleteUserFailed"));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
 
@@ -192,6 +210,9 @@ export default function AdminUsersPage() {
                           {t("disableUser")}
                         </DropdownMenuItem>
                       ) : null}
+                      <DropdownMenuItem variant="destructive" onClick={() => setDeleteTarget(user)}>
+                        {t("deleteUser")}
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -295,6 +316,47 @@ export default function AdminUsersPage() {
             </Button>
             <Button disabled={saving} onClick={() => void saveQuota()}>
               {tCommon("save")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("deleteUserTitle")}</DialogTitle>
+          </DialogHeader>
+          {deleteTarget ? (
+            <div className="space-y-4">
+              <p className="text-muted-foreground text-sm">
+                {t("deleteUserDesc", { name: deleteTarget.display_name || deleteTarget.username })}
+              </p>
+              <div className="space-y-2">
+                <Label>{t("deleteStrategy")}</Label>
+                <Select
+                  value={deleteStrategy}
+                  onValueChange={(value: "anonymize" | "cascade" | "transfer_to_team") =>
+                    setDeleteStrategy(value)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="anonymize">{t("deleteStrategyAnonymize")}</SelectItem>
+                    <SelectItem value="cascade">{t("deleteStrategyCascade")}</SelectItem>
+                    <SelectItem value="transfer_to_team">{t("deleteStrategyTransfer")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              {tCommon("cancel")}
+            </Button>
+            <Button variant="destructive" disabled={deleting} onClick={() => void deleteUser()}>
+              {deleting ? tCommon("deleting") : t("deleteUser")}
             </Button>
           </DialogFooter>
         </DialogContent>

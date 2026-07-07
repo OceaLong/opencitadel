@@ -8,17 +8,13 @@ import { useTranslations } from "next-intl";
 
 import { AppHeader } from "@/components/app-header";
 import { LeftPanel } from "@/components/left-panel";
+import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SidebarProvider } from "@/components/ui/sidebar";
 
 import { useAuth } from "@/providers/auth-provider";
 import { LoginPromptProvider } from "@/providers/login-prompt-provider";
 import { SettingsDialogProvider } from "@/providers/settings-dialog-provider";
 import { SessionsProvider } from "@/providers/sessions-provider";
-
-type SidebarLayoutStyle = React.CSSProperties & {
-  "--sidebar-width": string;
-  "--sidebar-width-icon": string;
-};
 
 const AUTH_PREFIXES = ["/login", "/register"];
 const SHELLLESS_PREFIXES = ["/share/artifact", "/admin", "/invitations"];
@@ -65,20 +61,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     return null;
   }
 
-  const sidebarStyle: SidebarLayoutStyle = {
-    "--sidebar-width": "300px",
-    "--sidebar-width-icon": "300px",
-  };
-
   const content = shelllessRoute ? (
     <div className="bg-background min-h-screen">{children}</div>
   ) : (
     <SessionsProvider>
-      <SidebarProvider style={sidebarStyle}>
+      <SidebarProvider className="[--sidebar-width:18rem] md:[--sidebar-width:300px] md:[--sidebar-width-icon:300px]">
         <LeftPanel />
         <div className="bg-background flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
           <AppHeader />
-          <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+          <div className="min-h-0 flex-1 overflow-hidden pb-mobile-nav md:pb-0">{children}</div>
+          <MobileBottomNav />
         </div>
       </SidebarProvider>
     </SessionsProvider>

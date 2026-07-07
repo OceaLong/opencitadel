@@ -11,6 +11,7 @@ import type {
   FileTreeData,
   ReadSourceData,
   ReadSourceParams,
+  CodebaseSymbolsData,
   SSEEventData,
   SSEEventHandler,
 } from "./types";
@@ -30,6 +31,13 @@ export const codebaseApi = {
 
   getTree: (codebaseId: string): Promise<FileTreeData> => {
     return get<FileTreeData>(`/codebases/${codebaseId}/tree`);
+  },
+
+  listSymbols: (codebaseId: string, name?: string): Promise<CodebaseSymbolsData> => {
+    return get<CodebaseSymbolsData>(
+      `/codebases/${codebaseId}/symbols`,
+      name ? { name } : undefined,
+    );
   },
 
   getArtifacts: (codebaseId: string, kind?: string): Promise<CodebaseArtifactsData> => {

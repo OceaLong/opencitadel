@@ -29,6 +29,10 @@ Each section follows the same structure:
 | Object storage | COS / MinIO abstraction | Cloud production + offline Compose demos |
 | Frontend | Next.js 16 App Router | Standalone Docker image, React 19, admin UI |
 | UI i18n | next-intl + build scripts | Bilingual CI enforcement |
+| Agent flows | 4-flow routing (Ask vs Agent) | Safety + cost; avoids single ReAct for all modes |
+| KB retrieval | Hybrid RRF + GraphRAG + rerank | Enterprise doc recall; codebase uses lighter vector path |
+| Auth (browser) | HttpOnly JWT + CSRF | XSS-resistant vs localStorage bearer |
+| Service keys | Per-user SHA-256, no team scope | Long-lived automation without stale team membership |
 | Sandbox | Docker / K8s Pod / remote gateway | Progressive hardening from dev to enterprise |
 
 ```mermaid
@@ -560,6 +564,223 @@ Requiring microVMs on day one would block the **10-minute tutorial**. Container 
 
 - Multi-tenant public cloud offering demands kernel-level isolation
 - Compliance mandates gVisor/seccomp profiles by default in Helm chart
+
+---
+
+## 12. Flow routing vs single ReAct loop
+
+### Problem
+
+Sessions bind different resources (`codebase_id`, `knowledge_base_id`) and modes (`ASK` vs `AGENT`). A single ReAct loop with all tools enabled would blur read-only Q&A boundaries and inflate prompts for simple Doc QA.
+
+### Decision
+
+`AgentTaskRunner` routes to four flows: `HybridAskFlow`, `CodeAskFlow`, `DocQAFlow`, `PlannerReActFlow`. Ask flows use `build_ask_tools` (no shell/file/browser); Agent mode uses `PlannerReActFlow` with full tool registry.
+
+### Pros
+
+- **Safety**: Ask mode cannot mutate session sandbox or run shell commands
+- **Latency/cost**: Doc QA skips Planner when only KB is bound
+- **Clear UX**: codebase + KB hybrid gets dedicated retrieval prompts
+
+### Cons
+
+- Four code paths to maintain and test (`test_agent_task_runner_flow_routing.py`)
+- Contributors must know routing matrix before adding session types
+
+### Alternatives
+
+| Alternative | Pros | Cons |
+|-------------|------|------|
+| **Single ReAct + dynamic tool filter** | One flow implementation | Easy to leak write tools in Ask; prompt bloat |
+| **Separate microservices per mode** | Independent scaling | Ops overhead; breaks shared session/event model |
+
+### Why not the alternative
+
+OpenCitadel sessions share one SSE event schema and checkpoint model. Flow split keeps one Worker pipeline while enforcing mode-specific tool policies in-process.
+
+### Revisit when
+
+- New session types (e.g. voice-only, batch ETL) need a fifth flow — extract shared `BaseFlow` first
+- Ask/Agent distinction removed at product level
+
+---
+
+## 13. KB hybrid retrieval vs codebase vector search
+
+### Problem
+
+Knowledge bases need high-recall RAG over heterogeneous documents (PDF, Confluence, URLs). Codebases need fast symbol-aware search over structured source trees — not the same retrieval economics.
+
+### Decision
+
+- **KB**: vector + BM25 → RRF → optional GraphRAG → parent expand → LLM rerank (`HybridRetriever`)
+- **Codebase**: symbol static analysis + pgvector chunk search; no BM25 rerank stack
+
+Separate config flags: `knowledge_base.vector_enabled` (default true) vs `memory.vector_enabled` (default false) for long-term memory — do not conflate.
+
+### Pros
+
+- KB pipeline optimizes recall/precision for enterprise docs
+- Codebase ingest stays lighter; degrades gracefully with `vector_degraded`
+- Shared pgvector infrastructure — no second vector DB
+
+### Cons
+
+- Two mental models for contributors ("why is KB harder than codebase?")
+- KB rerank adds LLM cost per query
+
+### Alternatives
+
+| Alternative | Pros | Cons |
+|-------------|------|------|
+| **Same retriever for both** | One implementation | Wrong tradeoffs — codebase does not need GraphRAG |
+| **Dedicated vector DB for KB** | Better ANN at scale | Second backup path; cross-DB ingest consistency |
+
+### Revisit when
+
+- KB chunk count exceeds single-node pgvector SLO
+- Codebase semantic search needs BM25 over file paths at scale
+
+---
+
+## 14. Service API Key without team scope
+
+### Problem
+
+Automation callers (inbound A2A, scripts) need long-lived credentials without interactive login, but team workspace membership is a session-time choice.
+
+### Decision
+
+Service API Keys hash (SHA-256) per user; `require_service_api_key` principals carry `user_id` + `global_role` only — **empty `team_roles`**. Team-scoped APIs require cookie JWT + `X-Workspace-Id`.
+
+### Pros
+
+- Keys are portable for CI and external agents
+- No stale team membership baked into long-lived secrets
+- Clear security boundary documented in API README
+
+### Cons
+
+- Callers cannot use `X-Api-Key` alone for team-owned codebases/KB
+- Two auth modes to explain to integrators
+
+### Alternatives
+
+| Alternative | Pros | Cons |
+|-------------|------|------|
+| **Team-scoped API keys** | Direct team automation | Key rotation complexity; role drift |
+| **OAuth client credentials per team** | Standard enterprise pattern | Heavier setup for self-hosted small teams |
+
+### Revisit when
+
+- Enterprise customers require team-bound machine identities
+- Fine-grained scoped keys (read-only KB, single Skill) become a product requirement
+
+---
+
+## 15. Cookie JWT + CSRF vs localStorage bearer tokens
+
+### Problem
+
+Browser UI needs session persistence without exposing tokens to XSS exfiltration via `localStorage`.
+
+### Decision
+
+HttpOnly cookies for access/refresh JWT; CSRF double-submit on mutating requests; `X-Workspace-Id` header for workspace scope. UI `fetch.ts` centralizes refresh queue.
+
+### Pros
+
+- Tokens not readable from JavaScript
+- Works with same-site Nginx reverse proxy (`/api`)
+- Refresh rotation without SPA token plumbing in every component
+
+### Cons
+
+- Cross-origin SPA hosting requires careful `cors_origins` + cookie settings
+- Non-browser API clients must implement cookie jar or use Service API Keys
+
+### Alternatives
+
+| Alternative | Pros | Cons |
+|-------------|------|------|
+| **localStorage Bearer** | Simple mobile/SPA tutorials | XSS → full account compromise |
+| **Short-lived access only in memory** | Smaller XSS window | Poor UX on refresh; no persistent tabs |
+
+### Revisit when
+
+- Native mobile apps need first-class OAuth device flow
+- Third-party SPA embed on unrelated origin becomes a supported deployment
+
+---
+
+## 16. AppConfig YAML seed + PostgreSQL hot config
+
+### Problem
+
+Operators need versioned defaults in git (`config.yaml`) but runtime tuning without redeploying API/Worker images.
+
+### Decision
+
+`config.yaml` seeds empty `app_configs` on migrate; production uses `USE_DB_APP_CONFIG=true`. `OwnerConfigResolver` applies user/team overrides; API and Worker listen for config invalidation.
+
+### Pros
+
+- Fresh install works offline with seed file
+- Admin UI (`RuntimeSettings`, HITL) edits persist in DB with revision history
+- Same container image across environments — config differs by DB
+
+### Cons
+
+- Drift risk if `config.yaml` and DB diverge without migration
+- Contributors must know which source wins (env > DB > yaml seed)
+
+### Alternatives
+
+| Alternative | Pros | Cons |
+|-------------|------|------|
+| **Env-only twelve-factor** | Simple ops | No revision rollback; no UI editing |
+| **etcd/Consul live config** | Real-time cluster config | Extra service; overkill for Compose installs |
+
+### Revisit when
+
+- Multi-region config replication needed
+- GitOps-only customers forbid UI mutation of runtime flags
+
+---
+
+## 17. Sandbox pool vs on-demand create
+
+### Problem
+
+Cold-start latency for browser/shell tools hurts interactive Agent UX; unbounded dynamic creates exhaust host memory.
+
+### Decision
+
+Optional `sandbox.pool_enabled` + `pool_size` warm idle sandboxes in Worker; `SandboxQuota` admission + leader-coordinated reclamation cap live instances. Default seed in `config.yaml` is pool off (`pool_enabled: false`) for minimal dev installs.
+
+### Pros
+
+- Pool hits reduce first-tool-call latency
+- Admission prevents Worker OOM on shared hosts
+- Same code path for Docker and K8s drivers
+
+### Cons
+
+- Warm sandboxes consume memory even when idle
+- Pool sizing is environment-specific — not one-size-fits-all
+
+### Alternatives
+
+| Alternative | Pros | Cons |
+|-------------|------|------|
+| **Always on-demand** | Minimal idle cost | Slow first browser action |
+| **Fixed sandbox compose service only** | Predictable dev | Does not scale to multi-tenant Worker pool |
+
+### Revisit when
+
+- p99 first-tool latency exceeds product SLO with pool disabled
+- Kubernetes HPA scales Workers — pool size must become dynamic per node
 
 ---
 

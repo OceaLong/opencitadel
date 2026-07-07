@@ -29,6 +29,10 @@
 | 对象存储 | COS / MinIO 抽象 | 云端生产 + 离线 Compose 演示 |
 | 前端 | Next.js 16 App Router | Standalone Docker、React 19、管理后台 |
 | UI i18n | next-intl + 构建脚本 | 双语 CI 强制校验 |
+| Agent Flow | 四 Flow 路由（Ask vs Agent） | 安全与成本；避免单一 ReAct 覆盖全部模式 |
+| KB 检索 | 混合 RRF + GraphRAG + rerank | 企业文档召回；代码库用更轻量向量路径 |
+| 鉴权（浏览器） | HttpOnly JWT + CSRF | 相对 localStorage Bearer 更抗 XSS |
+| 服务 Key | 按用户 SHA-256，无团队 scope | 长期自动化且不固化过期团队成员关系 |
 | 沙箱 | Docker / K8s Pod / 远程网关 | 从开发到企业可渐进加固 |
 
 ```mermaid
@@ -560,6 +564,223 @@ Agent 工具（shell、browser、文件）不能在 API 宿主机运行。部署
 
 - 多租户公有云需内核级隔离
 - 合规强制 Helm 默认 gVisor/seccomp
+
+---
+
+## 12. Flow 路由 vs 单一 ReAct 循环
+
+### 要解决的问题
+
+会话绑定不同资源（`codebase_id`、`knowledge_base_id`）与模式（`ASK` vs `AGENT`）。若单一 ReAct 循环启用全部工具，会模糊只读问答边界，并为简单 Doc QA 膨胀提示词。
+
+### 当前选择
+
+`AgentTaskRunner` 路由到四种 Flow：`HybridAskFlow`、`CodeAskFlow`、`DocQAFlow`、`PlannerReActFlow`。Ask 流程使用 `build_ask_tools`（无 shell/file/browser）；Agent 模式使用完整工具注册表的 `PlannerReActFlow`。
+
+### 优点
+
+- **安全**：Ask 模式不能修改会话沙箱或执行 shell
+- **延迟/成本**：仅绑定 KB 时跳过 Planner
+- **体验清晰**：代码库 + KB 混合问答有专用检索提示词
+
+### 缺点
+
+- 四条代码路径需维护与测试（`test_agent_task_runner_flow_routing.py`）
+- 贡献者新增会话类型前需理解路由矩阵
+
+### 替代方案
+
+| 替代 | 优点 | 缺点 |
+|------|------|------|
+| **单一 ReAct + 动态工具过滤** | 一种 Flow 实现 | Ask 易泄漏写工具；提示词膨胀 |
+| **按模式拆微服务** | 独立扩缩 | 运维成本高；破坏共享会话/事件模型 |
+
+### 为何不选替代方案
+
+OpenCitadel 会话共享一套 SSE 事件 schema 与检查点模型。Flow 拆分在单 Worker 管道内按模式强制工具策略。
+
+### 何时重估
+
+- 新会话类型（如纯语音、批处理 ETL）需要第五条 Flow — 先抽取共享 `BaseFlow`
+- 产品层取消 Ask/Agent 区分
+
+---
+
+## 13. KB 混合检索 vs 代码库向量检索
+
+### 要解决的问题
+
+知识库需对异构文档（PDF、Confluence、URL）高召回 RAG；代码库需对结构化源码树做符号感知快速检索 — 检索经济性不同。
+
+### 当前选择
+
+- **KB**：向量 + BM25 → RRF → 可选 GraphRAG → 父块扩展 → LLM rerank（`HybridRetriever`）
+- **Codebase**：符号静态分析 + pgvector chunk 检索；无 BM25/rerank 栈
+
+独立配置开关：`knowledge_base.vector_enabled`（默认 true）与长期记忆的 `memory.vector_enabled`（默认 false）—— 勿混淆。
+
+### 优点
+
+- KB 流水线为企业文档优化召回/精度
+- 代码库摄取更轻；`vector_degraded` 优雅降级
+- 共享 pgvector 基础设施 — 无需第二套向量库
+
+### 缺点
+
+- 贡献者需理解两套模型（「为何 KB 比 codebase 复杂？」）
+- KB rerank 增加每次查询 LLM 成本
+
+### 替代方案
+
+| 替代 | 优点 | 缺点 |
+|------|------|------|
+| **统一检索器** | 一种实现 | 权衡错误 — 代码库不需要 GraphRAG |
+| **KB 专用向量库** | 大规模 ANN 更优 | 第二套备份；跨库摄取一致性难 |
+
+### 何时重估
+
+- KB chunk 数超过单节点 pgvector SLO
+- 代码库语义检索需在规模上对文件路径做 BM25
+
+---
+
+## 14. 服务 API Key 不含团队 scope
+
+### 要解决的问题
+
+自动化调用方（入站 A2A、脚本）需长期凭证且无需交互登录，但团队成员身份是会话时的选择。
+
+### 当前选择
+
+服务 API Key 按用户 SHA-256 存储；`require_service_api_key` 的 Principal 仅含 `user_id` + `global_role` — **`team_roles` 为空**。团队作用域 API 需 Cookie JWT + `X-Workspace-Id`。
+
+### 优点
+
+- Key 便于 CI 与外部 Agent 携带
+- 长期密钥不固化过期团队成员关系
+- 安全边界在 API README 中明确
+
+### 缺点
+
+- 调用方不能仅用 `X-Api-Key` 访问团队拥有的代码库/KB
+- 集成方需理解两种鉴权模式
+
+### 替代方案
+
+| 替代 | 优点 | 缺点 |
+|------|------|------|
+| **团队级 API Key** | 团队自动化直接可用 | 轮换复杂；角色漂移 |
+| **每团队 OAuth client credentials** | 企业标准模式 | 自托管小团队配置过重 |
+
+### 何时重估
+
+- 企业客户要求团队绑定的机器身份
+- 细粒度 scoped key（只读 KB、单 Skill）成为产品需求
+
+---
+
+## 15. Cookie JWT + CSRF vs localStorage Bearer
+
+### 要解决的问题
+
+浏览器 UI 需持久会话，同时避免 XSS 通过 `localStorage` 窃取令牌。
+
+### 当前选择
+
+HttpOnly Cookie 存 access/refresh JWT；变更类请求 CSRF 双提交；`X-Workspace-Id` 传递工作区 scope。UI `fetch.ts` 集中 401 刷新队列。
+
+### 优点
+
+- JavaScript 无法读取令牌
+- 与同域 Nginx 反代（`/api`）配合良好
+- 刷新轮换无需每个组件处理 SPA token
+
+### 缺点
+
+- 跨源 SPA 托管需仔细配置 `cors_origins` 与 Cookie
+- 非浏览器客户端需 Cookie jar 或服务 API Key
+
+### 替代方案
+
+| 替代 | 优点 | 缺点 |
+|------|------|------|
+| **localStorage Bearer** | 移动端/SPA 教程简单 | XSS → 账户完全沦陷 |
+| **仅内存短效 access** | 缩小 XSS 窗口 | 刷新体验差；多标签不持久 |
+
+### 何时重估
+
+- 原生移动 App 需要一等 OAuth 设备流
+- 支持在不相关域名嵌入第三方 SPA
+
+---
+
+## 16. AppConfig YAML 种子 + PostgreSQL 热配置
+
+### 要解决的问题
+
+运维需要 git 中版本化默认（`config.yaml`），又要在不重新部署 API/Worker 镜像的情况下调运行时参数。
+
+### 当前选择
+
+`config.yaml` 在 migrate 时种子化空 `app_configs`；生产 `USE_DB_APP_CONFIG=true`。`OwnerConfigResolver` 应用用户/团队覆盖；API 与 Worker 监听配置失效。
+
+### 优点
+
+- 全新安装可离线靠种子文件工作
+- 管理 UI（`RuntimeSettings`、HITL）编辑持久化到 DB 并带修订历史
+- 同一镜像跨环境 — 配置由 DB 区分
+
+### 缺点
+
+- `config.yaml` 与 DB 无迁移时可能漂移
+- 贡献者需知优先级（env > DB > yaml 种子）
+
+### 替代方案
+
+| 替代 | 优点 | 缺点 |
+|------|------|------|
+| **仅环境变量十二要素** | 运维简单 | 无修订回滚；无 UI 编辑 |
+| **etcd/Consul 实时配置** | 集群实时同步 | 多一套服务；Compose 过重 |
+
+### 何时重估
+
+- 需要多 region 配置复制
+- 仅 GitOps 客户禁止 UI 修改运行时开关
+
+---
+
+## 17. 沙箱池化 vs 按需创建
+
+### 要解决的问题
+
+浏览器/shell 工具冷启动影响交互 Agent 体验；无界动态创建耗尽主机内存。
+
+### 当前选择
+
+Worker 可选 `sandbox.pool_enabled` + `pool_size` 预热空闲沙箱；`SandboxQuota` 准入 + Leader 协调回收限制存活实例。`config.yaml` 种子默认关闭池（`pool_enabled: false`）以利最小开发安装。
+
+### 优点
+
+- 池化降低首次工具调用延迟
+- 准入防止共享主机 Worker OOM
+- Docker 与 K8s 驱动共用代码路径
+
+### 缺点
+
+- 预热沙箱空闲时仍占内存
+- 池大小因环境而异 — 非一刀切
+
+### 替代方案
+
+| 替代 | 优点 | 缺点 |
+|------|------|------|
+| **始终按需创建** | 空闲成本最低 | 首次浏览器操作慢 |
+| **仅固定 compose 沙箱服务** | 开发可预测 | 无法扩展至多 Worker 池 |
+
+### 何时重估
+
+- 关闭池时 p99 首次工具延迟超过产品 SLO
+- K8s HPA 扩展 Worker — 池大小需按节点动态调整
 
 ---
 

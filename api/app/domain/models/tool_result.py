@@ -1,10 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import Optional, TypeVar, Generic
+from typing import Any, Optional, TypeVar, Generic
 
 from pydantic import BaseModel
 
 T = TypeVar("T")
+
+
+def normalize_tool_result(result: Any) -> "ToolResult":
+    """Wrap raw tool outputs (e.g. str) into ToolResult for agent processing."""
+    if isinstance(result, ToolResult):
+        return result
+    return ToolResult(success=True, data=result)
 
 
 class ToolResult(BaseModel, Generic[T]):

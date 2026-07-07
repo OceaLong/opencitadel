@@ -13,6 +13,8 @@ Playwright end-to-end smoke tests for the OpenCitadel UI and the **Web Operator 
 
 These tests support [Tutorial 4: Governed Web Operator](../docs/tutorials/04-governed-web-operator.md) — run them after standing up the demo stack.
 
+**What is not covered**: settings modal, HITL gates, team invitations, knowledge-base ingest, codebase flows, admin console, or mobile navigation. UI unit tests live in `ui/src/**/*.test.ts` (logic only, no component regression). Do not treat `npm test` in `ui/` or `e2e/` as full UI coverage.
+
 ## Prerequisites
 
 - Node.js >= 22

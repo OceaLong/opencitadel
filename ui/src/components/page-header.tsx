@@ -28,19 +28,23 @@ export function PageHeader({
   return (
     <div
       className={cn(
-        "flex items-start justify-between gap-4",
-        bordered && "border-border/70 border-b px-6 py-4",
+        "flex flex-col items-start gap-3 sm:flex-row sm:items-start sm:justify-between",
+        bordered && "border-border/70 border-b px-4 py-4 sm:px-6",
         !bordered && "px-0 py-0",
         className,
       )}
     >
-      <div>
+      <div className="min-w-0 flex-1">
         <h1 className={titleSizes[size]}>{title}</h1>
         {description ? (
           <p className="text-muted-foreground mt-1 text-sm">{description}</p>
         ) : null}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          {actions}
+        </div>
+      ) : null}
     </div>
   );
 }

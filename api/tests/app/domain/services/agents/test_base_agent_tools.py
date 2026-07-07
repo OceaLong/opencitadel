@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 import asyncio
 
+import pytest
+
 from app.domain.models.tool_result import ToolResult
 from app.domain.services.agents.base import BaseAgent
 from app.domain.services.tools.tool_names import normalize_allowed_tool_names
@@ -125,6 +127,30 @@ def test_truncate_tool_result():
     assert "结果已截断" in (truncated.message or "")
     assert truncated.data is not None
     assert len(large.model_dump_json()) > 50
+
+
+@pytest.mark.anyio
+async def test_invoke_tool_normalizes_string_tool_output():
+    from app.domain.services.tools.base import BaseTool, tool
+
+    class _TreeTool(BaseTool):
+        name = "codebase"
+
+        @tool(
+            name="get_file_tree",
+            description="Get file tree",
+            parameters={},
+            required=[],
+        )
+        async def get_file_tree(self) -> str:
+            return '{"src": {}}'
+
+    tree_tool = _TreeTool()
+    agent = _make_agent(tools=[tree_tool])
+    agent._ensure_tool_cache()
+    result = await agent._invoke_tool(tree_tool, "get_file_tree", {})
+    assert result.success is True
+    assert result.data == '{"src": {}}'
 
 
 class _WriteFileTool:

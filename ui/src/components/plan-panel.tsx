@@ -1,10 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { Check, ChevronDown, ChevronUp, Clock } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { PlanProgressHeader } from "@/components/plan-progress-header";
+import { PlanStepRow } from "@/components/plan-step-row";
+import { PlanStepStatusIcon } from "@/components/plan-step-status-icon";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 
 import type { PlanStep } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
@@ -15,16 +19,29 @@ export type PlanPanelProps = {
   steps?: PlanStep[];
 };
 
+function getActiveStep(steps: PlanStep[]): PlanStep | undefined {
+  return (
+    steps.find((step) => step.status === "running") ??
+    steps.find((step) => step.status !== "completed") ??
+    steps[steps.length - 1]
+  );
+}
+
 export function PlanPanel({ className, steps: stepsProp = [] }: PlanPanelProps) {
   const t = useTranslations("planPanel");
   const [isExpanded, setIsExpanded] = useState(false);
   const togglePanel = () => setIsExpanded(!isExpanded);
   const steps = stepsProp;
 
-  if (steps.length === 0) return null;
-
-  const completedCount = steps.filter((s) => s.status === "completed").length;
+  const completedCount = useMemo(
+    () => steps.filter((step) => step.status === "completed").length,
+    [steps],
+  );
   const totalCount = steps.length;
+  const activeStep = useMemo(() => getActiveStep(steps), [steps]);
+  const progressPercent = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+
+  if (steps.length === 0) return null;
 
   return (
     <div
@@ -33,76 +50,63 @@ export function PlanPanel({ className, steps: stepsProp = [] }: PlanPanelProps) 
         className,
       )}
     >
-      {/* 折叠状态 */}
-      {!isExpanded && (
-        <div
-          className="clickable relative flex cursor-pointer flex-row items-start justify-between rounded-xl pr-3"
+      {!isExpanded ? (
+        <Button
+          type="button"
+          variant="ghost"
           onClick={togglePanel}
+          className="hover:bg-muted/40 h-auto w-full justify-between gap-3 rounded-xl px-4 py-2.5"
         >
-          {/* 左侧的最新计划 */}
-          <div className="relative min-w-0 flex-1 overflow-hidden">
-            <div className="h-9 w-full">
-              <div className="text-muted-foreground flex w-full items-center justify-center gap-2.5 truncate px-4 py-2">
-                <Clock size={16} />
-                <div className="flex w-full flex-col gap-0.5 truncate">
-                  <div className="truncate text-sm">{steps[0]?.description ?? t("noSteps")}</div>
-                </div>
-              </div>
+          <div className="flex min-w-0 flex-1 items-start gap-2.5">
+            {activeStep && (
+              <PlanStepStatusIcon status={activeStep.status} className="relative top-0.5" />
+            )}
+            <div className="min-w-0 flex-1 space-y-1.5 text-left">
+              <p className="text-foreground break-words text-sm leading-relaxed">
+                {activeStep?.description ?? t("noSteps")}
+              </p>
+              <Progress value={progressPercent} className="h-1" />
             </div>
           </div>
-          {/* 右侧操作按钮&步骤信息 */}
-          <div className="flex h-full flex-shrink-0 items-center justify-center gap-2 py-2.5">
-            <span className="text-muted-foreground text-xs">
+          <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
+            <span className="text-muted-foreground text-xs tabular-nums">
               {completedCount} / {totalCount}
             </span>
-            <ChevronUp className="text-foreground" size={16} />
+            <ChevronUp className="text-muted-foreground size-4" />
           </div>
-        </div>
-      )}
-      {/* 展开状态 */}
-      {isExpanded && (
-        <div className="flex flex-col rounded-xl py-4">
-          <div className="mb-4 flex w-full px-4">
-            <div className="ml-auto flex items-start">
-              <div className="flex items-center justify-center gap-2">
-                <Button
-                  onClick={togglePanel}
-                  variant="ghost"
-                  size="icon-xs"
-                  className="cursor-pointer"
-                >
-                  <ChevronDown className="text-muted-foreground" size={16} />
-                </Button>
-              </div>
-            </div>
+        </Button>
+      ) : (
+        <div className="flex flex-col gap-3 px-4 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-foreground font-semibold">{t("taskProgress")}</span>
+            <Button
+              type="button"
+              onClick={togglePanel}
+              variant="ghost"
+              size="icon-xs"
+              className="cursor-pointer"
+            >
+              <ChevronDown className="text-muted-foreground size-4" />
+            </Button>
           </div>
-          <div className="px-4">
-            <div className="bg-muted/40 rounded-xl px-2 py-3">
-              <div className="flex w-full justify-between px-4">
-                <span className="text-foreground font-semibold">{t("taskProgress")}</span>
-                <div className="flex items-center gap-3">
-                  <span className="text-muted-foreground text-xs">
-                    {completedCount} / {totalCount}
-                  </span>
-                </div>
-              </div>
-              <div className="max-h-[min(calc(100vh-360px),400px)] overflow-y-auto">
-                {steps.map((step) => (
-                  <div
-                    key={step.id}
-                    className="text-muted-foreground flex w-full items-center gap-2.5 truncate px-4 py-2 text-sm"
-                  >
-                    {step.status === "completed" ? (
-                      <Check size={16} className="relative top-0.5 flex-shrink-0" />
-                    ) : (
-                      <Clock size={16} className="relative top-0.5 flex-shrink-0" />
-                    )}
-                    <div className="flex w-full flex-col truncate">
-                      <div className="truncate text-sm">{step.description}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+          <div className="bg-muted/40 rounded-xl py-3">
+            <PlanProgressHeader
+              title={t("stepsCompleted")}
+              completedCount={completedCount}
+              totalCount={totalCount}
+              className="mb-2"
+            />
+            <div className="max-h-[min(calc(100vh-360px),400px)] overflow-y-auto">
+              {steps.map((step, index) => (
+                <PlanStepRow
+                  key={step.id}
+                  description={step.description}
+                  status={step.status}
+                  highlight={step.status === "running"}
+                  variant="timeline"
+                  isLast={index === steps.length - 1}
+                />
+              ))}
             </div>
           </div>
         </div>

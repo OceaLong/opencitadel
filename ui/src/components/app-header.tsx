@@ -5,10 +5,8 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import type { CSSProperties } from "react";
 
-import { LanguageToggle } from "@/components/language-toggle";
 import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { NotificationInbox } from "@/components/notification-inbox";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +30,7 @@ import {
   IconWorkspace,
 } from "@/lib/icons";
 import { useSettingsDialog } from "@/providers/settings-dialog-provider";
+import { cn } from "@/lib/utils";
 
 function AppHeaderSidebarTrigger() {
   const { open, isMobile } = useSidebar();
@@ -94,6 +93,15 @@ export function AppHeader() {
         >
           {t("modelStatus", { status: modelStatusKey })}
         </Badge>
+        <span
+          className={cn(
+            "inline-flex size-2.5 shrink-0 rounded-full sm:hidden",
+            isModelUnavailableStatus(llmStatus) ? "bg-destructive" : "bg-success",
+            llmStatus === "unknown" && "bg-muted-foreground",
+          )}
+          title={t("modelStatus", { status: modelStatusKey })}
+          aria-label={t("modelStatus", { status: modelStatusKey })}
+        />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -101,6 +109,7 @@ export function AppHeader() {
               size="icon-sm"
               aria-label={t("workspaceMenu")}
               title={t("workspaceMenu")}
+              className="hidden md:inline-flex"
             >
               <IconWorkspace className="size-4" />
             </Button>
@@ -135,8 +144,6 @@ export function AppHeader() {
           </DropdownMenuContent>
         </DropdownMenu>
         <NotificationInbox />
-        <LanguageToggle />
-        <ThemeToggle />
         <Button
           variant="outline"
           size="icon-sm"

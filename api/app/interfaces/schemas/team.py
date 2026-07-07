@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from datetime import datetime
+from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.domain.models.team import Team, TeamMember, TeamRole
+from app.interfaces.schemas.admin import InvitationStatus
 
 
 class CreateTeamRequest(BaseModel):
@@ -58,6 +60,23 @@ class ListTeamMemberDetailsResponse(BaseModel):
 
 class CreateTeamInvitationRequest(BaseModel):
     role: TeamRole = TeamRole.MEMBER
+    email: str | None = None
+
+
+class TeamInvitationRegisterRequest(BaseModel):
+    email: str
+    username: str = Field(min_length=2, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class TeamInvitationPreviewResponse(BaseModel):
+    team_id: str
+    team_name: str
+    role: TeamRole
+    status: InvitationStatus
+    expires_at: datetime
+    requires_registration: bool
+    email_hint: str | None = None
 
 
 class UpdateTeamMemberRoleRequest(BaseModel):

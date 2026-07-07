@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Download, ShieldCheck, ShieldX } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
 import { LoadingSpinner } from "@/components/loading-spinner";
@@ -20,6 +21,7 @@ export default function AdminCompliancePage() {
   const [sessions, setSessions] = useState<EvidenceSessionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [chainOk, setChainOk] = useState<boolean | null>(null);
+  const [verifyingSessionId, setVerifyingSessionId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,6 +40,23 @@ export default function AdminCompliancePage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const verifySessionChain = async (sessionId: string) => {
+    setVerifyingSessionId(sessionId);
+    try {
+      const result = await complianceApi.verifySessionChain(sessionId);
+      setSessions((prev) =>
+        prev.map((item) =>
+          item.session_id === sessionId ? { ...item, chain_ok: result.ok } : item,
+        ),
+      );
+      toast.success(result.ok ? t("sessionChainOk") : t("sessionChainBroken"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("verifySessionFailed"));
+    } finally {
+      setVerifyingSessionId(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -113,12 +132,22 @@ export default function AdminCompliancePage() {
                         </StatusBadge>
                       </td>
                       <td className="py-3">
-                        <Button variant="outline" size="sm" asChild>
-                          <a href={complianceApi.evidencePackageUrl(s.session_id)}>
-                            <Download className="mr-1 size-3.5" />
-                            {t("downloadPackage")}
-                          </a>
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={verifyingSessionId === s.session_id}
+                            onClick={() => void verifySessionChain(s.session_id)}
+                          >
+                            {verifyingSessionId === s.session_id ? <LoadingSpinner /> : t("verifySessionChain")}
+                          </Button>
+                          <Button variant="outline" size="sm" asChild>
+                            <a href={complianceApi.evidencePackageUrl(s.session_id)}>
+                              <Download className="mr-1 size-3.5" />
+                              {t("downloadPackage")}
+                            </a>
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}

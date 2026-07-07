@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 from typing import AsyncGenerator
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -73,3 +74,30 @@ def test_ask_flow_passes_vision_attachments():
 
     assert flow._agent.query == "describe image"
     assert flow._agent.kwargs.get("vision_attachments") == [attachment]
+
+
+@pytest.mark.parametrize(
+    "flow_cls,module_name",
+    [
+        (CodeAskFlow, "code_ask_flow"),
+        (HybridAskFlow, "hybrid_ask_flow"),
+        (DocQAFlow, "doc_qa_flow"),
+    ],
+)
+def test_ask_flows_use_build_ask_tools(flow_cls, module_name):
+    with patch(f"app.domain.services.flows.{module_name}.ToolRegistry.build_ask_tools", return_value=[]) as mock_build:
+        flow_cls(
+            uow_factory=MagicMock(),
+            llm=MagicMock(),
+            agent_config=MagicMock(),
+            session_id="sess-1",
+            json_parser=MagicMock(),
+            browser=MagicMock(),
+            sandbox=MagicMock(),
+            search_engine=MagicMock(),
+            mcp_tool=MagicMock(),
+            a2a_tool=MagicMock(),
+            observability_port=MagicMock(),
+            runtime_settings=MagicMock(),
+        )
+        mock_build.assert_called_once()

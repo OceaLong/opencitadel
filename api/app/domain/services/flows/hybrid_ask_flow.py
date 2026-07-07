@@ -55,11 +55,7 @@ class HybridAskFlow(BaseFlow):
             model_id: Optional[str] = None,
     ) -> None:
         self.status = FlowStatus.EXECUTING
-        tools = ToolRegistry.build_default_tools(
-            sandbox=sandbox,
-            browser=browser,
-            search_engine=search_engine,
-            llm=llm,
+        tools = ToolRegistry.build_ask_tools(
             mcp_tool=mcp_tool,
             a2a_tool=a2a_tool,
             extra_tools=extra_tools or [],

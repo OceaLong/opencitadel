@@ -3,7 +3,7 @@
 import inspect
 from typing import Dict, Any, List, Callable
 
-from app.domain.models.tool_result import ToolResult
+from app.domain.models.tool_result import ToolResult, normalize_tool_result
 
 """
 OpenCitadel 工具设计思路:
@@ -110,7 +110,8 @@ class BaseTool:
         if method is not None:
             # 2.筛选传递的kwargs参数保留method对应的参数，多余的剔除
             filtered_kwargs = self._filter_parameters(method, kwargs)
-            return await method(**filtered_kwargs)
+            raw = await method(**filtered_kwargs)
+            return normalize_tool_result(raw)
 
         # 3.如果没有找到工具则抛出错误
         raise ValueError(f"工具[{tool_name}]未找到")

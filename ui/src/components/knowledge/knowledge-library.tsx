@@ -251,14 +251,6 @@ export function KnowledgeLibrary() {
                         t("startAsk")
                       )}
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={startingId === kb.id || kb.status !== "ready"}
-                      onClick={() => void startTask(kb.id, "agent")}
-                    >
-                      {t("startAgent")}
-                    </Button>
                     <Button size="sm" variant="outline" onClick={() => setAddOpenFor(kb.id)}>
                       {t("addDocument")}
                     </Button>

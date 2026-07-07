@@ -210,12 +210,16 @@ export const supplement = {
   contextSelector: {
     clear: { en: "Clear context", zh: "清除上下文" },
     codebase: { en: "Codebase", zh: "代码库" },
+    codebaseMeta: { en: "{count} files", zh: "{count} 个文件" },
     codebaseSection: { en: "Code knowledge base", zh: "代码知识库" },
     knowledge: { en: "Knowledge base", zh: "知识库" },
+    knowledgeMeta: { en: "{count} documents", zh: "{count} 篇文档" },
     knowledgeSection: { en: "Document knowledge base", zh: "文档知识库" },
     noCodebase: { en: "No ready codebases", zh: "暂无可用代码库" },
     noKnowledge: { en: "No ready knowledge bases", zh: "暂无可用知识库" },
+    noSearchResults: { en: "No matching results", zh: "无匹配结果" },
     none: { en: "No context", zh: "无上下文" },
+    searchPlaceholder: { en: "Search knowledge bases…", zh: "搜索知识库…" },
     title: { en: "Session context", zh: "会话上下文" },
   },
   errors: {
@@ -437,6 +441,10 @@ export const supplement = {
     artifactTitle: { en: "Shared artifact", zh: "分享的交付物" },
     home: { en: "Home", zh: "首页" },
     title: { en: "Shared artifact", zh: "分享的交付物" },
+    incompleteContentWarning: {
+      en: "Artifact content may be incomplete (truncated during storage or generation). Regenerate or compare with the sandbox attachment.",
+      zh: "交付物内容可能不完整（存储或生成时被截断），建议重新生成或下载沙箱附件核对。",
+    },
   },
   toolPreview: {
     artifacts: { en: "Artifacts", zh: "交付物" },

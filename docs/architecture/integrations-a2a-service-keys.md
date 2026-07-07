@@ -6,7 +6,7 @@ Outbound A2A (call remote agents) and inbound A2A (OpenCitadel as a remote agent
 
 ## Outbound A2A (Agent calls remote agents)
 
-Configure remote A2A servers in `api/config.yaml` → `a2a_config.a2a_servers` or via **Settings → Integrations** (modal tab).
+Configure remote A2A servers in `api/config.yaml` → `a2a_config.a2a_servers` or via **Settings → Integrations** (MCP/A2A/Service Keys tab).
 
 | Field | Description |
 |-------|-------------|
@@ -48,7 +48,7 @@ Inbound calls authenticate via **Service API Key** (`require_service_api_key`). 
 
 ## Service API Keys
 
-Long-lived keys for automation and inbound A2A. Managed per user:
+Long-lived keys for automation and inbound A2A. Managed per user via session JWT:
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -56,15 +56,17 @@ Long-lived keys for automation and inbound A2A. Managed per user:
 | POST | `/api/service-keys` | Create key — **plaintext returned once** |
 | DELETE | `/api/service-keys/{id}` | Revoke key |
 
+**UI entry**: Settings → Integrations → **Service API Keys** panel (`ServiceKeysSettings` in `ui/src/components/settings/service-keys-settings.tsx`).
+
 Usage:
 
 ```http
 X-Api-Key: <plaintext-key>
 ```
 
-Keys are stored as SHA-256 hashes. Revoked keys fail authentication immediately.
+Keys are stored as SHA-256 hashes (`service_api_keys` table). Plaintext is shown only at creation; list/revoke operations never return the secret. Revoked keys fail authentication immediately.
 
-**Scope note**: Service API Key principals have empty `team_roles`; team-scoped resources require JWT session auth with `X-Workspace-Id`.
+**Scope note**: Service API Key principals have empty `team_roles`; team-scoped resources require JWT session auth with `X-Workspace-Id`. Inbound A2A (`POST /api/a2a`) uses `require_service_api_key` — the principal inherits the key owner's `global_role` and user id, not team membership.
 
 ## MCP vs A2A
 

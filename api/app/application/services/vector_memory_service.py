@@ -32,10 +32,12 @@ class VectorMemoryService:
         self.embedding_model = memory.embedding.model
         self._openai_api_key = settings.embedding_api_key or ""
         self._openai_base_url = memory.embedding.base_url or "https://api.openai.com/v1"
+        self._embedding_timeout = memory.embedding.timeout_seconds
         self._embedding_cache: OrderedDict[str, List[float]] = OrderedDict()
         self._client = AsyncOpenAI(
             api_key=self._openai_api_key or "sk-placeholder",
             base_url=self._openai_base_url,
+            timeout=self._embedding_timeout,
         )
 
     def _cache_get(self, content: str) -> Optional[List[float]]:

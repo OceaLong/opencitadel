@@ -32,7 +32,7 @@ class ArtifactGenerator:
         artifacts.append(self._module_dir(codebase_id, files))
         artifacts.append(self._architecture(codebase_id, files, symbols, language_stats))
         artifacts.append(self._data_flow(codebase_id, files, symbols))
-        artifacts.append(self._call_chain(codebase_id, symbols, edges))
+        artifacts.append(self._call_chain(codebase_id, files, symbols, edges))
         artifacts.append(self._flowchart(codebase_id, symbols))
         return artifacts
 
@@ -160,10 +160,12 @@ class ArtifactGenerator:
     def _call_chain(
             self,
             codebase_id: str,
+            files: List[CodebaseFile],
             symbols: List[CodebaseSymbol],
             edges: List[CodebaseEdge],
     ) -> CodebaseArtifact:
         sym_by_id = {s.id: s for s in symbols}
+        path_by_file_id = {f.id: f.path for f in files}
         lines = ["graph LR"]
         seen_nodes: set[str] = set()
         seen_edges: set[str] = set()
@@ -199,14 +201,24 @@ class ArtifactGenerator:
         if len(lines) == 1:
             lines.append('    Empty["暂无调用关系"]')
 
-        node_locations = []
+        node_locations: List[Dict[str, object]] = []
+        seen_symbol_ids: set[str] = set()
         for edge in edges[:40]:
-            src = sym_by_id.get(edge.src_symbol_id)
-            if src:
+            for sym_id in (edge.src_symbol_id, edge.dst_symbol_id):
+                if not sym_id or sym_id in seen_symbol_ids:
+                    continue
+                sym = sym_by_id.get(sym_id)
+                if not sym:
+                    continue
+                path = path_by_file_id.get(sym.file_id, "")
+                if not path:
+                    continue
+                seen_symbol_ids.add(sym_id)
                 node_locations.append({
-                    "symbol": src.name,
-                    "symbol_id": src.id,
-                    "line": src.start_line,
+                    "symbol": sym.name,
+                    "symbol_id": sym.id,
+                    "path": path,
+                    "line": sym.start_line,
                 })
 
         return CodebaseArtifact(

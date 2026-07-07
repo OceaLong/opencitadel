@@ -39,6 +39,7 @@
 | [团队与工作区](architecture/teams-and-workspaces.zh-CN.md) | 团队角色、`X-Workspace-Id`、邀请 |
 | [管理、审计与合规](architecture/admin-auditor-compliance.zh-CN.md) | 平台管理、证据链、合规报告 |
 | [A2A 与服务 API Key](architecture/integrations-a2a-service-keys.zh-CN.md) | 入站/出站 A2A、`X-Api-Key` |
+| [Skills](architecture/skills.zh-CN.md) | Skill 模板、运行时覆盖、MCP/A2A 过滤 |
 | [交付物与分享](architecture/artifacts-sharing.zh-CN.md) | 会话交付物、公开分享链接 |
 | [自动化与调度](architecture/automation-scheduler.zh-CN.md) | Cron/Webhook 任务、Leader 选举、通知 |
 | [应用市场](architecture/marketplace.zh-CN.md) | LLM 小应用目录与契约 |
@@ -77,4 +78,4 @@
 - **双语成对**：新增或修改文档时，同步更新对应语言的配对文件。
 - **链接约定**：中文文档优先链接 `*.zh-CN.md`；英文文档优先链接 `*.md`。
 - **索引同步**：新增教程或架构文档时，同步更新本索引、根目录 [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) 文档地图，并在中英文文件文首添加语言切换链接。
-- **PR 清单** — [文档维护检查清单](MAINTENANCE_CHECKLIST.zh-CN.md)（可执行步骤）；[文档清单](DOCUMENTATION_INVENTORY.zh-CN.md)（实时权威列表）；[审计报告](DOCUMENTATION_AUDIT_REPORT.zh-CN.md)（仅日期快照）；提交文档变更前运行 `./scripts/check-docs.sh`。
+- **PR 清单** — [文档维护检查清单](MAINTENANCE_CHECKLIST.zh-CN.md)（可执行步骤）；[文档清单](DOCUMENTATION_INVENTORY.zh-CN.md)（实时权威列表）；提交文档变更前运行 `./scripts/check-docs.sh`。

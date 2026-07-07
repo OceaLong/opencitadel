@@ -118,6 +118,25 @@ flowchart TD
 | `knowledge_base_id` + `SessionMode.ASK` | `DocQAFlow` | Knowledge base Doc QA |
 | Other (including `SessionMode.AGENT`) | `PlannerReActFlow` | Planner → Clarify → ReAct general Agent |
 
+### Ask mode codebase access
+
+Ask flows (`CodeAskFlow` / `HybridAskFlow` / `DocQAFlow`) are read-only RAG Q&A and differ from Agent mode in how codebases are accessed:
+
+| Dimension | Ask mode | Agent mode |
+|-----------|----------|------------|
+| Codebase materialization | Does not restore tarball into session sandbox | `attach_to_session_sandbox` restores snapshot under `/home/ubuntu` |
+| `read_code` sandbox | Ingestion sandbox `codebase.sandbox_id` (same as UI `readSource`) | Session sandbox `session.sandbox_id` (reads post-edit state) |
+| Tool allowlist | `build_ask_tools`: codebase / knowledge_base / memory / MCP / A2A / Message | `build_default_tools`: includes shell / file / browser, etc. |
+| Workspace path | Default `/home/ubuntu/codebase` (`codebase.workspace_path`) | Same, present in session sandbox after attach |
+
+Container path semantics:
+
+- `/home/ubuntu/codebase` — user-imported, indexed codebase workspace
+- `/home/ubuntu` — agent home; shell default cwd when `exec_dir` is empty
+- `/sandbox` — sandbox microservice code (FastAPI / supervisord), **not** the user codebase; Ask mode disables shell/file tools to prevent accidental reads
+
+Implementation: `api/app/application/services/task_runner_factory.py` (ingestion sandbox injection), `api/app/domain/services/tools/tool_registry.py` (`build_ask_tools`).
+
 ## Task Execution Status
 
 Task status persisted in Redis is defined by the `TaskStatus` enum (`api/app/infrastructure/external/task/task_state.py`), with 5 values:
@@ -330,6 +349,20 @@ The Chart is located at `deploy/helm/opencitadel/` and provides full-stack one-c
 - Namespace ResourceQuota limiting total sandbox Pods.
 - Migrate initContainer using the API image.
 - Default K8s sandbox mode is `sandbox.driver=kubernetes` with `sandbox.address` empty; use `sandbox.address` when connecting to a remote sandbox gateway.
+
+## Code anchors
+
+Quick links to authoritative implementation files:
+
+| Topic | Primary files |
+|-------|---------------|
+| DI / process roles | `api/app/container.py`, `api/app/runtime_role.py` |
+| Worker dispatch | `api/app/worker/main.py`, `api/app/infrastructure/external/task/redis_stream_task.py` |
+| Agent flow routing | `api/app/domain/services/agent_task_runner.py`, `api/app/domain/services/flows/` |
+| Task assembly | `api/app/application/services/task_runner_factory.py` |
+| Tool registry | `api/app/domain/services/tools/tool_registry.py` |
+| UI shell | `ui/src/components/app-shell.tsx`, `ui/src/lib/api/fetch.ts` |
+| Workspace scope | `ui/src/components/workspace-switcher.tsx`, `api/app/interfaces/auth_dependencies.py` |
 
 ## Related Documentation
 

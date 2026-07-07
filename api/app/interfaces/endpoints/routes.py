@@ -40,6 +40,7 @@ def create_api_routes() -> APIRouter:
     api_router.include_router(llm_status_routes.router)
     api_router.include_router(metrics_routes.router)
     api_router.include_router(marketplace_routes.router)
+    api_router.include_router(team_routes.public_invitation_router)
 
     # 3.默认鉴权模块：新增业务接口若无明确公开需求，应放在这里。
     authenticated_router.include_router(admin_routes.router)

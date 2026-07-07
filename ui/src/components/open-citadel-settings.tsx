@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  Bot,
   LayoutGrid,
   LayoutList,
   Loader2,
   Pencil,
   Settings,
+  Shield,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -20,10 +22,14 @@ import {
   IconTool,
 } from "@/lib/icons";
 
+import { AgentSettings } from "@/components/settings/agent-settings";
+import { GeneralSettings } from "@/components/settings/general-settings";
+import { HitlSettings } from "@/components/settings/hitl-settings";
 import { McpServerForm, type McpServerFormHandle } from "@/components/settings/mcp-server-form";
 import { MemorySettings } from "@/components/settings/memory-settings";
 import { ModelsSettings } from "@/components/settings/models-settings";
 import { RuntimeSettings } from "@/components/settings/runtime-settings";
+import { ServiceKeysSettings } from "@/components/settings/service-keys-settings";
 import { SkillsSettings } from "@/components/settings/skills-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,86 +54,15 @@ import {
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 import { type SettingTab, useOpenCitadelSettings } from "@/hooks/use-open-citadel-settings";
-import type { AgentConfig, ListA2AServerItem, ListMCPServerItem, MCPServerConfig } from "@/lib/api";
+import { useIsMobile } from "@/hooks/use-mobile";
+import type { ListA2AServerItem, ListMCPServerItem, MCPServerConfig } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
-
-// ==================== 通用配置 ====================
-
-type CommonSettingProps = {
-  config: AgentConfig;
-  onChange: (config: AgentConfig) => void;
-  readOnly?: boolean;
-};
-
-function CommonSetting({ config, onChange, readOnly = false }: CommonSettingProps) {
-  const t = useTranslations("settings");
-  const handleChange = (field: keyof AgentConfig, value: string) => {
-    const numValue = value === "" ? undefined : Number(value);
-    onChange({ ...config, [field]: numValue });
-  };
-
-  return (
-    <form className="w-full px-1" onSubmit={(e) => e.preventDefault()}>
-      <FieldGroup>
-        <FieldSet>
-          <FieldLegend className="text-foreground text-lg font-semibold">{t("common")}</FieldLegend>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="max_iterations">{t("maxIterations")}</FieldLabel>
-              <Input
-                id="max_iterations"
-                type="number"
-                placeholder={t("maxIterationsPlaceholder")}
-                value={config.max_iterations ?? 100}
-                onChange={(e) => handleChange("max_iterations", e.target.value)}
-                min={0}
-                max={200}
-                readOnly={readOnly}
-                disabled={readOnly}
-              />
-              <FieldDescription className="text-xs">{t("maxIterationsDesc")}</FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="max_retries">{t("maxRetries")}</FieldLabel>
-              <Input
-                id="max_retries"
-                type="number"
-                placeholder={t("maxRetriesPlaceholder")}
-                value={config.max_retries ?? 3}
-                onChange={(e) => handleChange("max_retries", e.target.value)}
-                min={0}
-                max={10}
-                readOnly={readOnly}
-                disabled={readOnly}
-              />
-              <FieldDescription className="text-xs">{t("maxRetriesDesc")}</FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="max_search_results">{t("maxSearchResults")}</FieldLabel>
-              <Input
-                id="max_search_results"
-                type="number"
-                placeholder={t("maxSearchResultsPlaceholder")}
-                value={config.max_search_results ?? 10}
-                onChange={(e) => handleChange("max_search_results", e.target.value)}
-                min={0}
-                max={30}
-                readOnly={readOnly}
-                disabled={readOnly}
-              />
-              <FieldDescription className="text-xs">{t("maxSearchResultsDesc")}</FieldDescription>
-            </Field>
-          </FieldGroup>
-        </FieldSet>
-      </FieldGroup>
-    </form>
-  );
-}
 
 // ==================== A2A Agent 配置 ====================
 
@@ -644,16 +579,47 @@ export function MCPSetting({
 const SETTING_MENUS: Array<{
   key: SettingTab;
   icon: typeof Settings;
-  labelKey: "common" | "models" | "skills" | "memory" | "integrations" | "runtime";
+  labelKey: "common" | "agent" | "models" | "skills" | "memory" | "integrations" | "hitl" | "runtime";
   adminOnly?: boolean;
 }> = [
   { key: "common-setting", icon: Settings, labelKey: "common" },
+  { key: "agent-setting", icon: Bot, labelKey: "agent" },
   { key: "models-setting", icon: IconModel, labelKey: "models" },
   { key: "skills-setting", icon: IconSkill, labelKey: "skills" },
   { key: "memory-setting", icon: IconMemory, labelKey: "memory" },
   { key: "integrations-setting", icon: IconIntegration, labelKey: "integrations" },
+  { key: "hitl-setting", icon: Shield, labelKey: "hitl" },
   { key: "runtime-setting", icon: LayoutGrid, labelKey: "runtime", adminOnly: true },
 ];
+
+function SettingsMenuButtons({
+  menus,
+  activeSetting,
+  onSelect,
+  layout,
+}: {
+  menus: typeof SETTING_MENUS;
+  activeSetting: SettingTab;
+  onSelect: (tab: SettingTab) => void;
+  layout: "sidebar" | "tabs";
+}) {
+  const t = useTranslations("settings");
+
+  return menus.map((menu) => (
+    <Button
+      key={menu.key}
+      variant={activeSetting === menu.key ? "default" : "ghost"}
+      className={cn(
+        "cursor-pointer text-sm",
+        layout === "sidebar" ? "justify-start px-2" : "h-9 shrink-0 rounded-full px-3",
+      )}
+      onClick={() => onSelect(menu.key)}
+    >
+      <menu.icon className="size-4" />
+      <span className="truncate">{t(menu.labelKey)}</span>
+    </Button>
+  ));
+}
 
 export type SettingsDialogProps = {
   open: boolean;
@@ -678,7 +644,7 @@ export function SettingsDialog({
     }
   }, [open, initialTab]);
 
-  const showFooterSave = activeSetting === "common-setting";
+  const showFooterSave = activeSetting === "agent-setting";
   const {
     agentConfig,
     setAgentConfig,
@@ -697,10 +663,65 @@ export function SettingsDialog({
     handleA2ADelete,
     handleA2AAdd,
   } = useOpenCitadelSettings(open, activeSetting);
+  const { isMobile } = useIsMobile();
+  const visibleMenus = SETTING_MENUS.filter((menu) => !menu.adminOnly || isAdmin);
+
+  const settingsContent = (
+    <>
+      {loadingConfig && activeSetting === "agent-setting" ? (
+        <div className="flex h-full items-center justify-center">
+          <Loader2 className="text-muted-foreground size-6 animate-spin" />
+        </div>
+      ) : (
+        <>
+          {activeSetting === "common-setting" && <GeneralSettings />}
+          {activeSetting === "agent-setting" && (
+            <AgentSettings config={agentConfig} onChange={setAgentConfig} readOnly={false} />
+          )}
+          {activeSetting === "runtime-setting" && isAdmin && (
+            <RuntimeSettings isAdmin={isAdmin} />
+          )}
+        </>
+      )}
+      {activeSetting === "models-setting" && <ModelsSettings embedded isAdmin={isAdmin} userId={user?.id} />}
+      {activeSetting === "skills-setting" && <SkillsSettings embedded isAdmin={isAdmin} userId={user?.id} />}
+      {activeSetting === "memory-setting" && <MemorySettings embedded />}
+      {activeSetting === "hitl-setting" && <HitlSettings isAdmin={isAdmin} />}
+      {activeSetting === "integrations-setting" && (
+        <div className="space-y-6 px-1">
+          <MCPSetting
+            servers={mcpServers}
+            loading={loadingMCP}
+            onToggleEnabled={handleMCPToggle}
+            onDelete={handleMCPDelete}
+            onAdd={handleMCPAdd}
+            onEdit={handleMCPEdit}
+            readOnly={false}
+            isAdmin={isAdmin}
+          />
+          <A2ASetting
+            servers={a2aServers}
+            loading={loadingA2A}
+            onToggleEnabled={handleA2AToggle}
+            onDelete={handleA2ADelete}
+            onAdd={handleA2AAdd}
+            readOnly={false}
+          />
+          <ServiceKeysSettings />
+        </div>
+      )}
+    </>
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="!max-w-[920px] flex h-[640px] flex-col overflow-hidden shadow-[var(--shadow-panel)]">
+      <DialogContent
+        className={cn(
+          "flex flex-col overflow-hidden shadow-[var(--shadow-panel)]",
+          "h-[100dvh] max-h-[100dvh] w-full max-w-full rounded-none",
+          "md:h-[640px] md:max-h-[90vh] md:!max-w-[920px] md:rounded-lg",
+        )}
+      >
         <DialogHeader className="border-border/70 shrink-0 border-b pb-4">
           <DialogTitle className="text-foreground">{t("title")}</DialogTitle>
           <DialogDescription className="text-muted-foreground">
@@ -708,67 +729,38 @@ export function SettingsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-row gap-4">
-          <div className="w-[168px] shrink-0">
-            <div className="flex flex-col gap-0">
-              {SETTING_MENUS.filter((menu) => !menu.adminOnly || isAdmin).map((menu) => (
-                <Button
-                  key={menu.key}
-                  variant={activeSetting === menu.key ? "default" : "ghost"}
-                  className="cursor-pointer justify-start px-2 text-sm"
-                  onClick={() => setActiveSetting(menu.key)}
-                >
-                  <menu.icon className="size-4" />
-                  <span className="truncate">{t(menu.labelKey)}</span>
-                </Button>
-              ))}
+        {isMobile ? (
+          <div className="flex min-h-0 flex-1 flex-col gap-3">
+            <ScrollArea className="w-full shrink-0 whitespace-nowrap">
+              <div className="flex w-max gap-2 pb-1">
+                <SettingsMenuButtons
+                  menus={visibleMenus}
+                  activeSetting={activeSetting}
+                  onSelect={setActiveSetting}
+                  layout="tabs"
+                />
+              </div>
+            </ScrollArea>
+            <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto">{settingsContent}</div>
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-row gap-4">
+            <div className="w-[168px] shrink-0">
+              <div className="flex flex-col gap-0">
+                <SettingsMenuButtons
+                  menus={visibleMenus}
+                  activeSetting={activeSetting}
+                  onSelect={setActiveSetting}
+                  layout="sidebar"
+                />
+              </div>
             </div>
-          </div>
 
-          <Separator orientation="vertical" />
+            <Separator orientation="vertical" />
 
-          <div className="scrollbar-hide h-full min-h-0 flex-1 overflow-y-auto">
-            {loadingConfig && activeSetting === "common-setting" ? (
-              <div className="flex h-full items-center justify-center">
-                <Loader2 className="text-muted-foreground size-6 animate-spin" />
-              </div>
-            ) : (
-              <>
-                {activeSetting === "common-setting" && (
-                  <CommonSetting config={agentConfig} onChange={setAgentConfig} readOnly={false} />
-                )}
-                {activeSetting === "runtime-setting" && isAdmin && (
-                  <RuntimeSettings isAdmin={isAdmin} />
-                )}
-              </>
-            )}
-            {activeSetting === "models-setting" && <ModelsSettings embedded isAdmin={isAdmin} userId={user?.id} />}
-            {activeSetting === "skills-setting" && <SkillsSettings embedded isAdmin={isAdmin} userId={user?.id} />}
-            {activeSetting === "memory-setting" && <MemorySettings embedded />}
-            {activeSetting === "integrations-setting" && (
-              <div className="space-y-6 px-1">
-                <MCPSetting
-                  servers={mcpServers}
-                  loading={loadingMCP}
-                  onToggleEnabled={handleMCPToggle}
-                  onDelete={handleMCPDelete}
-                  onAdd={handleMCPAdd}
-                  onEdit={handleMCPEdit}
-                  readOnly={false}
-                  isAdmin={isAdmin}
-                />
-                <A2ASetting
-                  servers={a2aServers}
-                  loading={loadingA2A}
-                  onToggleEnabled={handleA2AToggle}
-                  onDelete={handleA2ADelete}
-                  onAdd={handleA2AAdd}
-                  readOnly={false}
-                />
-              </div>
-            )}
+            <div className="scrollbar-hide h-full min-h-0 flex-1 overflow-y-auto">{settingsContent}</div>
           </div>
-        </div>
+        )}
 
         <DialogFooter
           className={cn(

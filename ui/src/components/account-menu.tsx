@@ -1,9 +1,9 @@
 "use client";
 
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { LayoutDashboard, LogIn, LogOut, Settings } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { LayoutDashboard, LogIn, LogOut, Settings, Users } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { SidebarFooter } from "@/components/ui/sidebar";
@@ -109,6 +109,10 @@ export function AccountMenu() {
               {tAccount("adminPanel")}
             </AccountMenuItem>
           ) : null}
+          <AccountMenuItem href="/teams" onClick={closeMenu}>
+            <Users />
+            {tAccount("teams")}
+          </AccountMenuItem>
           <AccountMenuItem
             onClick={() => {
               closeMenu();

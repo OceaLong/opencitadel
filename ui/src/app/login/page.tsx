@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import { OpenCitadelIcon } from "@/components/open-citadel-icon";
@@ -10,16 +10,28 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 
 import { authApi } from "@/lib/api/auth";
+import { resolveSafeRedirectPath } from "@/lib/safe-redirect";
 import { useAuth } from "@/providers/auth-provider";
 
 export default function LoginPage() {
   const router = useRouter();
+  const params = useSearchParams();
+  const redirectPath = useMemo(() => resolveSafeRedirectPath(params.get("redirect")), [params]);
   const { refresh } = useAuth();
   const t = useTranslations("auth");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  function oauthHref(provider: "google" | "github") {
+    const query = new URLSearchParams();
+    if (redirectPath !== "/") {
+      query.set("redirect", redirectPath);
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return `/api/auth/oauth/${provider}/login${suffix}`;
+  }
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -28,7 +40,7 @@ export default function LoginPage() {
     try {
       await authApi.login(identifier, password);
       await refresh();
-      router.replace("/");
+      router.replace(redirectPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("loginFailed"));
     } finally {
@@ -62,18 +74,10 @@ export default function LoginPage() {
               {loading ? t("loggingIn") : t("login")}
             </Button>
             <div className="grid grid-cols-2 gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => (window.location.href = "/api/auth/oauth/google/login")}
-              >
+              <Button type="button" variant="outline" onClick={() => (window.location.href = oauthHref("google"))}>
                 Google
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => (window.location.href = "/api/auth/oauth/github/login")}
-              >
+              <Button type="button" variant="outline" onClick={() => (window.location.href = oauthHref("github"))}>
                 GitHub
               </Button>
             </div>

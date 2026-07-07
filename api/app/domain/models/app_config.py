@@ -22,6 +22,7 @@ class EmbeddingConfig(BaseModel):
     provider: str = "openai"
     model: str = "text-embedding-3-small"
     base_url: str = "https://api.openai.com/v1"
+    timeout_seconds: float = Field(default=60.0, gt=0, le=300)
 
 
 class MemoryConfig(BaseModel):
