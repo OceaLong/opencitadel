@@ -27,6 +27,14 @@ OpenCitadel is an open-source, **self-hosted AI agent platform** (not a browser-
 
 > Web Operator targets **enterprise-owned/self-hosted systems**; third-party SaaS requires an ownership declaration and audit trail—not a waiver of legal risk.
 
+## Demo video
+
+Due to the large size of the video file, please click on the image or link below to watch the complete demonstration:
+
+[![Demo Video Cover](docs/assets/images/img.png)](https://www.bilibili.com/video/BV1QGNi6BERh/?vd_source=4ce3545913066879813a27e759a60c52)
+
+> Video link: [Click here to watch the complete demonstration](https://www.bilibili.com/video/BV1QGNi6BERh/?vd_source=4ce3545913066879813a27e759a60c52)
+
 ## Core modules
 
 | Module | Route | Description |
@@ -63,7 +71,7 @@ Open **http://localhost:8088**, sign in, add an LLM **endpoint** and **model** i
 flowchart LR
   UI["Next.js UI"] -->|"HTTP / SSE"| API["FastAPI API"]
   API --> Redis["Redis Streams"]
-  API --> PG["PostgreSQL + pgvector"]
+  API --> PG["PostgresSQL + pgvector"]
   Redis --> Worker["Agent Worker"]
   Worker --> Sandbox["Sandbox Runtime"]
   Worker --> LLM["LLM Providers"]
