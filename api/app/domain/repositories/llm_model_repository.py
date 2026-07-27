@@ -13,6 +13,10 @@ class LLMModelRepository(ABC):
         ...
 
     @abstractmethod
+    async def get_all_global(self) -> List[LLMModel]:
+        ...
+
+    @abstractmethod
     async def get_by_id(self, model_id: str, scope: Optional[OwnerScope] = None) -> Optional[LLMModel]:
         ...
 
@@ -38,6 +42,10 @@ class LLMModelRepository(ABC):
 
     @abstractmethod
     async def count(self) -> int:
+        ...
+
+    @abstractmethod
+    async def count_global(self) -> int:
         ...
 
     @abstractmethod

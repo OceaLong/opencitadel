@@ -17,6 +17,7 @@ from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.user import UserStatus
 from app.domain.models.user_quota import UserQuota
 from app.interfaces.auth_dependencies import get_current_principal, require_admin, require_auditor_or_admin
+from app.interfaces.client_ip import get_client_ip
 from app.interfaces.schemas import Response
 from app.interfaces.schemas.admin import (
     AdminOverviewResponse,
@@ -52,6 +53,12 @@ from core.config import get_settings
 router = APIRouter(prefix="/admin", tags=["管理员"])
 
 _OWNED_RESOURCE_TABLES = (
+    "scheduled_jobs",
+    "skills",
+    "mcp_servers",
+    "a2a_servers",
+    "llm_models",
+    "llm_endpoints",
     "sessions",
     "memory_entries",
     "knowledge_bases",
@@ -74,7 +81,7 @@ async def _record_admin_audit(
     await audit_service.record(
         AuditLog(
             actor_user_id=actor_user_id,
-            actor_ip=request.client.host if request.client else "",
+            actor_ip=get_client_ip(request),
             action=action,
             resource_type=resource_type,
             resource_id=resource_id,

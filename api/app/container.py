@@ -135,7 +135,11 @@ async def _sync_event_seq(_storage_client) -> None:
 
 
 async def _warm_app_config(_postgres: Postgres, config_provider: AppConfigProvider) -> AppConfigProvider:
-    await config_provider.get()
+    from app.application.security.authorization_context import authorization_scope
+    from app.domain.models.authorization import AuthorizationContext
+
+    with authorization_scope(AuthorizationContext.system("config-warmup")):
+        await config_provider.get()
     return config_provider
 
 
@@ -219,7 +223,12 @@ class BaseContainer(containers.DeclarativeContainer):
     sandbox_cls = providers.Callable(get_sandbox_class)
     task_cls = providers.Object(RedisStreamTask)
 
-    cipher = providers.Factory(ApiKeyCipher, secret=config.provided.api_key_secret)
+    cipher = providers.Factory(
+        ApiKeyCipher,
+        secret=config.provided.api_key_secret,
+        key_id=config.provided.api_key_secret_id,
+        previous_secrets=config.provided.api_key_previous_secrets,
+    )
     password_hasher = providers.Singleton(PasswordHasher)
     jwt_service = providers.Singleton(
         JwtService,
@@ -500,4 +509,3 @@ async def shutdown_worker_container(container: WorkerContainer | None = None) ->
         logger.warning("Sandbox pool shutdown failed: %s", exc)
     await c.shutdown_resources()
     logger.info("WorkerContainer resources shut down")
-

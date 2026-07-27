@@ -9,6 +9,7 @@ from .session_file_attachment import SessionFileAttachmentModel
 from .invitation import InvitationORM
 from .llm_endpoint import LLMEndpointORM
 from .llm_model import LLMModelORM
+from .llm_model_preference import LLMModelPreferenceORM
 from .oauth_identity import OAuthIdentityORM
 from .refresh_token import RefreshTokenORM
 from .service_api_key import ServiceApiKeyORM
@@ -50,6 +51,7 @@ __all__ = [
     "InvitationORM",
     "LLMEndpointORM",
     "LLMModelORM",
+    "LLMModelPreferenceORM",
     "OAuthIdentityORM",
     "RefreshTokenORM",
     "ServiceApiKeyORM",

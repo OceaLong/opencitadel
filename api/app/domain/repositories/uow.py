@@ -9,6 +9,7 @@ from .file_repository import FileRepository
 from .knowledge_base_repository import KnowledgeBaseRepository
 from .llm_endpoint_repository import LLMEndpointRepository
 from .llm_model_repository import LLMModelRepository
+from .llm_model_preference_repository import LLMModelPreferenceRepository
 from .llm_token_usage_repository import LLMTokenUsageRepository
 from .memory_entry_repository import MemoryEntryRepository
 from .audit_repository import AuditRepository
@@ -39,6 +40,7 @@ class IUnitOfWork(ABC):
     session: SessionRepository
     llm_endpoint: LLMEndpointRepository
     llm_model: LLMModelRepository
+    llm_model_preference: LLMModelPreferenceRepository
     skill: SkillRepository
     memory_entry: MemoryEntryRepository
     llm_token_usage: LLMTokenUsageRepository

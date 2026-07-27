@@ -314,7 +314,12 @@ Worker 不是 FastAPI 应用。只覆盖 HTTP 请求范围的 DI，必然在 `wo
 
 ### 当前选择
 
-Key 存于 `llm_endpoints.api_key`；用 **Fernet**（`API_KEY_SECRET` 派生）加密；迁移将 `legacy_plaintext` 升级为 `fernet_v1`。
+Key 存于 `llm_endpoints.api_key`，使用 `API_KEY_SECRET` 派生的
+**Fernet** 加密。新密文为 `fernet_v2`，并携带经校验的 key id
+（`v2.<key-id>.<token>`）。`API_KEY_SECRET_ID` 选择当前写入 Key，
+`API_KEY_PREVIOUS_SECRETS` 在轮换期提供带明确 id 的只读旧 Key。幂等迁移
+会把 `legacy_plaintext`、`fernet_v1` 与旧 `fernet_v2` 记录统一改写到
+当前 key id。
 
 ### 优点
 
@@ -322,12 +327,14 @@ Key 存于 `llm_endpoints.api_key`；用 **Fernet**（`API_KEY_SECRET` 派生）
 - 端点/模型拆分：一个 Key 供多个模型名（[llm-endpoints-and-models](llm-endpoints-and-models.zh-CN.md)）
 - 离线/air-gapped Compose 可用 — 无外部密钥服务
 - migrate job 原地加密 legacy 行
+- 保留 previous-key ring 时可自动轮换并安全回滚，无需逐个编辑端点
 
 ### 缺点
 
-- **单密钥风险**：`API_KEY_SECRET` 泄露则所有端点 Key 暴露
+- **对称密钥风险**：当前或保留密钥环泄露，会暴露由这些 Key 加密的所有
+  凭证
 - Fernet 对称 — 无 HSM 不可导出密钥
-- 轮换 secret 需在 UI 重新保存端点（见 [security-model](security-model.zh-CN.md)）
+- 运维必须盘点 key id，并只在有限的验证/回滚窗口内保留旧 Secret
 - 不能替代备份加密、`.env` 权限等网络层措施
 
 ### 替代方案
@@ -538,13 +545,13 @@ Agent 工具（shell、browser、文件）不能在 API 宿主机运行。部署
 
 ### 优点
 
-- **渐进加固**：开发用 docker.sock；生产 Helm 用 Pod + RBAC — Agent 代码相同
+- **渐进加固**：Compose 使用窄接口 Docker broker；Helm 使用 Pod + RBAC — Agent 代码相同
 - 远程网关支持控制面与执行面 air-gapped 分离
 - 配额 + 内存探测防止共享主机 OOM（[overview](overview.zh-CN.md)）
 
 ### 缺点
 
-- Docker 模式需 `docker.sock` — 共享主机有安全顾虑
+- Docker 模式的隔离 broker 仍持有宿主级 Docker 权限；高保障部署应使用专用宿主机
 - K8s 模式需维护 ServiceAccount RBAC
 - 默认非 microVM — 依赖容器边界
 

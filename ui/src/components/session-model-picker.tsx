@@ -64,10 +64,7 @@ export function SessionModelPicker({
   }, []);
 
   useEffect(() => {
-    if (!user) {
-      setModels([]);
-      return;
-    }
+    if (!user) return;
 
     let cancelled = false;
 
@@ -90,11 +87,14 @@ export function SessionModelPicker({
     };
   }, [user]);
 
-  const supportedModels = useMemo(() => filterSupportedModels(models), [models]);
+  const supportedModels = useMemo(
+    () => filterSupportedModels(user ? models : []),
+    [models, user],
+  );
 
   const defaultModelId = useMemo(
-    () => resolveDefaultModelId(models),
-    [models],
+    () => resolveDefaultModelId(user ? models : []),
+    [models, user],
   );
 
   useEffect(() => {
@@ -114,7 +114,7 @@ export function SessionModelPicker({
         icon: <Cpu className="text-muted-foreground size-4 shrink-0" />,
         badge: m.is_default ? tCommon("default") : undefined,
       })),
-    [supportedModels],
+    [supportedModels, tCommon],
   );
 
   const pickerValue = value ?? defaultModelId;

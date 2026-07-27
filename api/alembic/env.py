@@ -5,6 +5,9 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from app.infrastructure.models import Base
+from app.infrastructure.security.db_authorization import (
+    configure_sync_system_authorization,
+)
 from core.config import sqlalchemy_sync_database_uri
 
 # this is the Alembic Config object, which provides
@@ -74,6 +77,10 @@ def run_migrations_online() -> None:
         )
 
         with context.begin_transaction():
+            configure_sync_system_authorization(
+                connection,
+                actor="alembic-migration",
+            )
             context.run_migrations()
 
 

@@ -300,6 +300,7 @@ class AppConfigService:
             url=cfg.url,
             headers=cfg.headers,
             owner_user_id=target.owner_user_id,
+            team_id=target.team_id,
             visibility=target.visibility,
         )
         await self._mcp_server_service.update_server(
@@ -357,6 +358,7 @@ class AppConfigService:
         *,
         scope: Optional[OwnerScope] = None,
         actor_user_id: Optional[str] = None,
+        is_admin: bool = False,
     ) -> None:
         if self._mcp_server_service is None:
             raise BadRequestError("MCP 服务未启用", error_key="errors.mcpNotEnabled")
@@ -364,7 +366,12 @@ class AppConfigService:
         target = next((r for r in records if r.name == server_name), None)
         if target is None:
             raise NotFoundError(f"该MCP服务[{server_name}]不存在，请核实后重试")
-        await self._mcp_server_service.delete_server(target.id, scope=scope, actor_user_id=actor_user_id)
+        await self._mcp_server_service.delete_server(
+            target.id,
+            scope=scope,
+            actor_user_id=actor_user_id,
+            is_admin=is_admin,
+        )
         self._invalidate_runtime_pools()
         self._notify_config_invalidate()
 
@@ -375,6 +382,7 @@ class AppConfigService:
         *,
         scope: Optional[OwnerScope] = None,
         actor_user_id: Optional[str] = None,
+        is_admin: bool = False,
     ) -> None:
         if self._mcp_server_service is None:
             raise BadRequestError("MCP 服务未启用", error_key="errors.mcpNotEnabled")
@@ -382,7 +390,13 @@ class AppConfigService:
         target = next((r for r in records if r.name == server_name), None)
         if target is None:
             raise NotFoundError(f"该MCP服务[{server_name}]不存在，请核实后重试")
-        await self._mcp_server_service.set_enabled(target.id, enabled, scope=scope, actor_user_id=actor_user_id)
+        await self._mcp_server_service.set_enabled(
+            target.id,
+            enabled,
+            scope=scope,
+            actor_user_id=actor_user_id,
+            is_admin=is_admin,
+        )
         self._invalidate_runtime_pools()
         self._notify_config_invalidate()
 
@@ -403,6 +417,7 @@ class AppConfigService:
             scope=scope,
             actor_user_id=actor_user_id,
             visibility=visibility,
+            is_admin=is_admin,
         )
         self._invalidate_runtime_pools()
         self._notify_config_invalidate()
@@ -435,10 +450,17 @@ class AppConfigService:
         *,
         scope: Optional[OwnerScope] = None,
         actor_user_id: Optional[str] = None,
+        is_admin: bool = False,
     ) -> None:
         if self._a2a_server_service is None:
             raise BadRequestError("A2A 服务未启用")
-        await self._a2a_server_service.set_enabled(a2a_id, enabled, scope=scope, actor_user_id=actor_user_id)
+        await self._a2a_server_service.set_enabled(
+            a2a_id,
+            enabled,
+            scope=scope,
+            actor_user_id=actor_user_id,
+            is_admin=is_admin,
+        )
         self._invalidate_runtime_pools()
         self._notify_config_invalidate()
 
@@ -448,9 +470,15 @@ class AppConfigService:
         *,
         scope: Optional[OwnerScope] = None,
         actor_user_id: Optional[str] = None,
+        is_admin: bool = False,
     ) -> None:
         if self._a2a_server_service is None:
             raise BadRequestError("A2A 服务未启用")
-        await self._a2a_server_service.delete_server(a2a_id, scope=scope, actor_user_id=actor_user_id)
+        await self._a2a_server_service.delete_server(
+            a2a_id,
+            scope=scope,
+            actor_user_id=actor_user_id,
+            is_admin=is_admin,
+        )
         self._invalidate_runtime_pools()
         self._notify_config_invalidate()

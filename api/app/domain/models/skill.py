@@ -53,6 +53,7 @@ class Skill(BaseModel):
     is_builtin: bool = False
     enabled: bool = True
     owner_user_id: Optional[str] = None
+    team_id: Optional[str] = None
     visibility: str = ResourceVisibility.GLOBAL
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

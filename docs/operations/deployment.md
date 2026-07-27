@@ -81,9 +81,15 @@ docker compose ps
 docker compose logs -f
 ```
 
-> **Dynamic sandbox mode**: When `sandbox.address: null` in `api/config.yaml`, the Worker creates `opencitadel-sandbox-*` containers via `docker.sock`. The compose `opencitadel-sandbox` service is under the `fixed-sandbox` profile and is not started by default.
+> **Dynamic sandbox mode**: When `sandbox.address: null`, API/Worker call
+> `opencitadel-sandbox-broker`; only that narrow, token-authenticated service
+> mounts `docker.sock`. Sandboxes join the externally isolated
+> `opencitadel-sandbox-network`, not the PostgreSQL/Redis network. Their sole
+> Internet path is `opencitadel-sandbox-egress` (Squid), whose destination ACLs
+> deny private, link-local, reserved, and metadata ranges.
 
-> **Startup order**: `opencitadel-postgres` + `opencitadel-redis` → `opencitadel-migrate` (Alembic + LLM key migration) → `opencitadel-api` + `opencitadel-worker` → `opencitadel-ui` → `opencitadel-nginx`
+> **Startup order**: PostgreSQL + Redis + sandbox egress → migrate (Alembic +
+> LLM key migration) → API + worker → UI → Nginx.
 
 > **Agent Worker is required**: If `opencitadel-worker` is not running, chat requests are queued but agents will not execute. Use `docker compose logs -f opencitadel-worker` to troubleshoot.
 
@@ -113,7 +119,16 @@ docker compose up -d
 
 Built application images are named: `opencitadel-api`, `opencitadel-worker`, `opencitadel-migrate`, `opencitadel-ui`, `opencitadel-sandbox`.
 
-> **CI/CD note**: GitHub Actions runs API tests (pytest + Postgres/Redis), UI tests/build (Node 22), and Docker image builds on every PR and push to `main` (see [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)). Tagged releases (`v*`) publish multi-arch images to `ghcr.io/ocealong/opencitadel-*` via [`.github/workflows/release.yml`](../../.github/workflows/release.yml). Production release flow: use release images or `docker compose build` locally → push to your registry → `docker compose up` or Helm deploy.
+> **CI/CD note**: [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
+> runs API, UI, and sandbox tests; builds and Trivy-scans all five images; and
+> validates Compose, Helm, Squid, and documentation on every PR and `main`
+> push. [`.github/workflows/security.yml`](../../.github/workflows/security.yml)
+> adds Gitleaks history scanning, dependency review/audits, CodeQL, and Trivy
+> filesystem/IaC scanning. Dependabot covers GitHub Actions, uv, npm, and
+> Docker. Tagged releases use full-SHA-pinned Actions to publish
+> `linux/amd64` + `linux/arm64` images with digest scans, SBOM, maximum
+> provenance, and registry attestations. See [CI and release security
+> gates](#ci-and-release-security-gates).
 
 ---
 
@@ -133,8 +148,9 @@ flowchart TD
   Cos --> CosCreds["Set COS_* credentials"]
   Minio --> MinioUp["MinIO via local profile"]
   Start --> SandboxDriver{"sandbox.driver"}
-  SandboxDriver -->|"auto/docker"| DockerSock["Worker mounts docker.sock"]
+  SandboxDriver -->|"auto/docker"| Broker["API/Worker call authenticated broker"]
   SandboxDriver -->|"kubernetes"| K8sRBAC["Worker SA creates Pods"]
+  Broker --> DockerSock["Broker-only docker.sock"]
   DockerSock --> BuildImg["Build opencitadel-sandbox image"]
 ```
 
@@ -145,32 +161,60 @@ flowchart TD
 
 ### cloud mode
 
+Generate each secret independently in a protected operator shell:
+
+```bash
+for name in API_KEY_SECRET AUDIT_SIGNING_KEY JWT_SECRET SESSION_SECRET \
+  SANDBOX_BROKER_TOKEN; do
+  printf '%s=%s\n' "$name" "$(openssl rand -hex 32)"
+done
+```
+
+Paste those outputs into `.env`; command substitution is not evaluated inside
+an env file. The template below intentionally uses placeholders, which
+production startup rejects until replaced:
+
 ```bash
 COMPOSE_PROFILES=
 STORAGE_PROVIDER=cos
 
 ENV=production
 LOG_LEVEL=INFO
-API_KEY_SECRET=<openssl rand -hex 32>
-JWT_SECRET=<openssl rand -hex 32>
-SESSION_SECRET=<openssl rand -hex 32>
+API_KEY_SECRET=<UNIQUE_64_HEX_VALUE>
+API_KEY_SECRET_ID=primary
+API_KEY_PREVIOUS_SECRETS={}
+AUDIT_SIGNING_KEY=<DIFFERENT_UNIQUE_64_HEX_VALUE>
+AUDIT_SIGNING_KEY_ID=primary
+AUDIT_PREVIOUS_SIGNING_KEYS={}
+JWT_SECRET=<DIFFERENT_UNIQUE_64_HEX_VALUE>
+SESSION_SECRET=<DIFFERENT_UNIQUE_64_HEX_VALUE>
+SANDBOX_BROKER_TOKEN=<DIFFERENT_UNIQUE_64_HEX_VALUE>
 BOOTSTRAP_ADMIN_EMAIL=admin@example.com
-BOOTSTRAP_ADMIN_PASSWORD=<STRONG_PASSWORD>
+BOOTSTRAP_ADMIN_PASSWORD=<STRONG_12_PLUS_CHARACTER_PASSWORD>
 COOKIE_DOMAIN=
 COOKIE_SECURE=true
 FRONTEND_BASE_URL=https://your-domain.com
 OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
 USE_DB_APP_CONFIG=true
+TRUSTED_PROXY_CIDRS=<EXACT_INGRESS_PROXY_CIDRS>
+OUTBOUND_ALLOWED_PORTS=80,443,8080,8443,11434
+OUTBOUND_PRIVATE_HOST_ALLOWLIST=
 
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=<STRONG_PASSWORD>
+POSTGRES_ADMIN_USER=postgres
+POSTGRES_ADMIN_PASSWORD=<DISTINCT_16_PLUS_CHARACTER_ADMIN_PASSWORD>
+POSTGRES_USER=opencitadel_app
+POSTGRES_PASSWORD=<DIFFERENT_16_PLUS_CHARACTER_APP_PASSWORD>
 POSTGRES_DB=opencitadel
 POSTGRES_HOST=opencitadel-postgres
 
 REDIS_HOST=opencitadel-redis
 REDIS_PORT=6379
 REDIS_DB=0
-REDIS_PASSWORD=
+REDIS_PASSWORD=<STRONG_16_PLUS_CHARACTER_REDIS_PASSWORD>
 
 COS_SECRET_ID=<YOUR_COS_SECRET_ID>
 COS_SECRET_KEY=<YOUR_COS_SECRET_KEY>
@@ -192,24 +236,39 @@ STORAGE_PROVIDER=minio
 
 ENV=production
 LOG_LEVEL=INFO
-API_KEY_SECRET=<openssl rand -hex 32>
-JWT_SECRET=<openssl rand -hex 32>
-SESSION_SECRET=<openssl rand -hex 32>
+API_KEY_SECRET=<UNIQUE_64_HEX_VALUE>
+API_KEY_SECRET_ID=primary
+API_KEY_PREVIOUS_SECRETS={}
+AUDIT_SIGNING_KEY=<DIFFERENT_UNIQUE_64_HEX_VALUE>
+AUDIT_SIGNING_KEY_ID=primary
+AUDIT_PREVIOUS_SIGNING_KEYS={}
+JWT_SECRET=<DIFFERENT_UNIQUE_64_HEX_VALUE>
+SESSION_SECRET=<DIFFERENT_UNIQUE_64_HEX_VALUE>
+SANDBOX_BROKER_TOKEN=<DIFFERENT_UNIQUE_64_HEX_VALUE>
 BOOTSTRAP_ADMIN_EMAIL=admin@example.com
-BOOTSTRAP_ADMIN_PASSWORD=<STRONG_PASSWORD>
+BOOTSTRAP_ADMIN_PASSWORD=<STRONG_12_PLUS_CHARACTER_PASSWORD>
 COOKIE_DOMAIN=
 COOKIE_SECURE=true
 FRONTEND_BASE_URL=https://your-domain.com
 OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
 USE_DB_APP_CONFIG=true
+TRUSTED_PROXY_CIDRS=<EXACT_INGRESS_PROXY_CIDRS>
+OUTBOUND_ALLOWED_PORTS=80,443,8080,8443,11434
 
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=<STRONG_PASSWORD>
+POSTGRES_ADMIN_USER=postgres
+POSTGRES_ADMIN_PASSWORD=<DISTINCT_16_PLUS_CHARACTER_ADMIN_PASSWORD>
+POSTGRES_USER=opencitadel_app
+POSTGRES_PASSWORD=<DIFFERENT_16_PLUS_CHARACTER_APP_PASSWORD>
 POSTGRES_DB=opencitadel
 POSTGRES_HOST=opencitadel-postgres
 
 REDIS_HOST=opencitadel-redis
 REDIS_PORT=6379
+REDIS_DB=0
+REDIS_PASSWORD=<STRONG_16_PLUS_CHARACTER_REDIS_PASSWORD>
+
+# Required only when using the host Ollama endpoint below.
+OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal
 
 # MinIO defaults work out of the box
 MINIO_ENDPOINT=opencitadel-minio:9000
@@ -221,7 +280,17 @@ MINIO_SECURE=false
 NGINX_PORT=8088
 ```
 
-For local LLM: add an **endpoint** in Settings → Models with Provider=ollama, `base_url=http://host.docker.internal:11434/v1`, then add a **model** under that endpoint.
+`API_KEY_SECRET`, `AUDIT_SIGNING_KEY`, `JWT_SECRET`, and `SESSION_SECRET` must
+be four distinct values of at least 32 characters. The sandbox broker token
+must also be at least 32 characters; both PostgreSQL credentials must be
+distinct, and Redis authentication is mandatory. `COOKIE_SECURE=false` is only
+for local evaluation with `ENV=development`, never this production template.
+Set `TRUSTED_PROXY_CIDRS` only to the actual ingress/reverse-proxy peers, and
+add private egress hosts by exact hostname rather than wildcard.
+
+For local LLM, keep the exact `OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal`
+entry above, then add an **endpoint** in Settings → Models with Provider=ollama,
+`base_url=http://host.docker.internal:11434/v1`, and add a **model** under it.
 
 Behavior settings (CORS, rate limits, sandbox, memory, worker concurrency, OTEL, etc.) belong in `api/config.yaml`, not `.env`.
 
@@ -292,7 +361,12 @@ See [MCP integrations](../tutorials/03-mcp-integrations.md) for configuring MCP 
 ### Models, Skills, and memory
 
 - **Default models are not imported on first boot.** In Settings → Model Management, add an **endpoint** (Provider / Base URL / API Key) first, then add multiple **models** under the same endpoint (differing only by model name), and set a default before starting a chat. Connection settings live in PostgreSQL `llm_endpoints`; models live in `llm_models`. API keys are encrypted with `API_KEY_SECRET`.
-- The `llm_endpoints.api_key_encryption` field indicates storage format: `legacy_plaintext` (historical plaintext) or `fernet_v1` (encrypted). `opencitadel-migrate` encrypts legacy plaintext automatically after Alembic—no extra command needed. Updating an endpoint URL or API key applies to all models under that endpoint.
+- The `llm_endpoints.api_key_encryption` field indicates storage format:
+  `legacy_plaintext` (historical plaintext), `fernet_v1` (legacy unversioned
+  Fernet), or `fernet_v2` (current key-id-prefixed Fernet).
+  `opencitadel-migrate` encrypts plaintext automatically after Alembic.
+  Updating an endpoint URL or API key applies to all models under that
+  endpoint.
 - Built-in Skill templates (coding assistant, research, data analysis, content writing) are created automatically; customize them in Settings → Skill Templates.
 - Long-term memory is managed in Settings → Long-term Memory (global and session scopes). Relevant memories are recalled at task start (time decay + optional pgvector hybrid search).
 - Enable vector memory with `memory.vector_enabled: true` in `config.yaml` and `EMBEDDING_API_KEY` in `.env`. PostgreSQL uses the `pgvector/pgvector:pg16` image.
@@ -317,6 +391,64 @@ cd api && ./migrate.sh
 
 Recent migrations include `memory_entries.embedding vector(1536)` (pgvector extension).
 
+#### New Compose database volume
+
+On the first PostgreSQL start,
+`/docker-entrypoint-initdb.d/10-opencitadel-app-role.sh` creates the distinct
+`NOSUPERUSER NOBYPASSRLS` application role and transfers the database/schema to
+it before `opencitadel-migrate` runs:
+
+```bash
+docker compose up -d opencitadel-postgres opencitadel-redis
+docker compose run --rm opencitadel-migrate
+docker compose up -d
+```
+
+#### Existing Compose database volume
+
+Initialization scripts do not rerun for an existing data directory. Use this
+ordered, in-place procedure; never delete the production volume.
+`POSTGRES_ADMIN_PASSWORD` must still match the existing database admin role
+during this migration—rotate that database password separately:
+
+```bash
+# 1. Stop application writers and take an admin-role backup.
+docker compose stop opencitadel-api opencitadel-worker
+mkdir -p backups
+docker compose exec -T opencitadel-postgres sh -ceu \
+  'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+  > "backups/opencitadel-before-app-role-$(date +%Y%m%d%H%M%S).sql"
+
+# 2. After .env contains distinct POSTGRES_ADMIN_* and POSTGRES_* values,
+# recreate only PostgreSQL so the checked-in script and new env are mounted.
+docker compose up -d --force-recreate opencitadel-postgres
+
+# 3. Run the idempotent role and relation-ownership migration.
+docker compose exec -T opencitadel-postgres \
+  /docker-entrypoint-initdb.d/10-opencitadel-app-role.sh
+
+# 4. Both booleans must be false; wrong_owner must be 0.
+docker compose exec -T opencitadel-postgres sh -ceu '
+  psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -v app_user="$OPENCITADEL_APP_USER"
+' <<'SQL'
+SELECT rolname, rolsuper, rolbypassrls
+FROM pg_roles
+WHERE rolname = :'app_user';
+SELECT count(*) AS wrong_owner
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
+  AND pg_get_userbyid(c.relowner) <> :'app_user';
+SQL
+
+# 5. Only now run schema/data migrations and restart writers.
+docker compose run --rm opencitadel-migrate
+docker compose up -d opencitadel-api opencitadel-worker opencitadel-ui nginx
+curl --fail http://127.0.0.1:8088/api/status
+```
+
 ### Storage backend switch and migration
 
 When switching COS ↔ MinIO in the same environment, migrate object data first (the database stores keys only, not backend type). A built-in CLI supports full-bucket copy and verification:
@@ -338,6 +470,23 @@ docker compose up -d opencitadel-api opencitadel-worker
 Recommended flow: low-traffic / read-only window → migrate → verify → change `STORAGE_PROVIDER` → restart → spot-check historical attachments, screenshots, checkpoints. Keep source objects for rollback.
 
 Optional flags: `--dry-run` (list differences only), `--prefix logs/` (limit prefix), `--concurrency 8`.
+
+### CI and release security gates
+
+Local validation is fast feedback, not a replacement for the repository's
+Docker/PostgreSQL/Helm-backed CI:
+
+| Workflow | Required controls |
+|----------|-------------------|
+| `ci.yml` | Full API pytest against PostgreSQL/Redis, UI i18n/typecheck/lint/test/build, sandbox tests, five image builds with Trivy `HIGH,CRITICAL` blocking, Compose render, Squid parse, Helm lint/template, documentation checks |
+| `security.yml` | Gitleaks full-history scan; PR dependency review blocks `high` severity and GPL-3.0/AGPL-3.0; Python and production npm audits; CodeQL `security-extended` for Python and JavaScript/TypeScript; Trivy vulnerability/secret/IaC scan blocks `HIGH,CRITICAL` |
+| `dependabot.yml` | Weekly GitHub Actions, uv, npm, and Docker update groups |
+| `release.yml` | Full-SHA-pinned Actions; five `linux/amd64` + `linux/arm64` images; built-digest Trivy scan; SBOM; `provenance: mode=max`; registry attestations |
+
+Run `./scripts/check-docs.sh`, Compose rendering, and shell/YAML parsing locally.
+Require the hosted checks before release because they also exercise clean
+dependency installs, image builds, PostgreSQL migration, Helm rendering, and
+security scanners.
 
 ---
 
@@ -512,23 +661,117 @@ docker compose run --rm opencitadel-migrate
 docker exec -i opencitadel-postgres psql -U postgres opencitadel < backup.sql
 ```
 
-### LLM API key migration
+### Credential encryption and audit signing-key rotation
 
-Normal deploy/upgrade only requires `docker compose up -d --build`; `opencitadel-migrate` encrypts legacy plaintext automatically. Migration logs print statistics and `model_id` only—never real API keys.
+Normal deployment runs `python -m app.migrate`, which converts historical
+`legacy_plaintext` endpoint credentials without logging secret material.
+`python -m app.migrate_llm_api_keys` remains a legacy-repair command; use the
+versioned rotation below when changing the encryption key.
 
-If the migrate container was not recreated after upgrade:
+#### Rotate `API_KEY_SECRET`
+
+1. Enter a maintenance window, back up the database and `.env` through the
+   approved secret store, then stop credential writers:
+
+   ```bash
+   docker compose stop opencitadel-api opencitadel-worker
+   ```
+
+2. Preserve the old id/secret in JSON and set a new active id/secret:
+
+   ```bash
+   API_KEY_SECRET=<NEW_UNIQUE_64_HEX_VALUE>
+   API_KEY_SECRET_ID=2026-07-primary
+   API_KEY_PREVIOUS_SECRETS={"primary":"<OLD_API_KEY_SECRET>"}
+   ```
+
+3. Rotate all non-empty endpoint records before removing the old key:
+
+   ```bash
+   docker compose run --rm opencitadel-migrate \
+     python -m app.migrate_llm_api_key_rotation
+   ```
+
+4. Verify `fernet_v2` and the active id, then restart API and Worker:
+
+   ```bash
+   docker compose exec -T opencitadel-postgres sh -ceu '
+     psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+   ' <<'SQL'
+   SELECT api_key_encryption,
+          split_part(api_key, '.', 2) AS key_id,
+          count(*) AS endpoints
+   FROM llm_endpoints
+   WHERE coalesce(api_key, '') <> ''
+   GROUP BY api_key_encryption, split_part(api_key, '.', 2)
+   ORDER BY api_key_encryption, key_id;
+   SQL
+   docker compose up -d --force-recreate \
+     opencitadel-api opencitadel-worker
+   ```
+
+   Every non-empty row must report `fernet_v2` and `2026-07-primary`. Keep the
+   previous key through the rollback/backup verification window. Immediately
+   before removing it, rerun the rotation and query; a removed key cannot
+   decrypt any record or backup that still references its id.
+
+#### Rotate `AUDIT_SIGNING_KEY`
+
+Audit rows are append-only and retain their `signing_key_id`; they are not
+rewritten during rotation. Preserve every old signing key required by retained
+rows:
 
 ```bash
-docker compose up -d --build --force-recreate opencitadel-migrate opencitadel-api opencitadel-worker
+AUDIT_SIGNING_KEY=<NEW_DISTINCT_64_HEX_VALUE>
+AUDIT_SIGNING_KEY_ID=2026-07-audit
+AUDIT_PREVIOUS_SIGNING_KEYS={"primary":"<OLD_AUDIT_SIGNING_KEY>"}
 ```
 
-Manual repair if needed:
+As an `ADMIN` or `AUDITOR`, verify the global chain before the change, restart
+all writers, then verify again:
 
 ```bash
-docker compose run --rm opencitadel-api python -m app.migrate_llm_api_keys
+curl --fail --cookie "access_token=${ADMIN_OR_AUDITOR_ACCESS_TOKEN}" \
+  https://your-domain.com/api/admin/audit/verify-chain
+docker compose up -d --force-recreate \
+  opencitadel-api opencitadel-worker opencitadel-migrate
+curl --fail --cookie "access_token=${ADMIN_OR_AUDITOR_ACCESS_TOKEN}" \
+  https://your-domain.com/api/admin/audit/verify-chain
 ```
 
-After rotating `API_KEY_SECRET`, re-save encrypted endpoint keys in Settings → Model Management → Edit endpoint.
+The response must contain `"ok": true`. Remove an old audit verification key
+only after no retained row or evidence package uses its id; append-only
+historical rows otherwise become unverifiable. Alert on
+`AUDIT_CHAIN_INTEGRITY_FAILURE`. The chain and database trigger are tamper
+evidence, so export regulated audit data to external immutable/WORM storage.
+
+### Production security verification
+
+After a new deployment, role migration, or key rotation, record these checks
+with the change ticket:
+
+```bash
+# PostgreSQL role flags and wrong_owner=0: use the queries in
+# "Existing Compose database volume" above.
+
+# Schema is at Alembic head.
+docker compose run --rm opencitadel-migrate alembic current
+
+# Redis authentication is enabled and succeeds.
+docker compose exec -T opencitadel-redis sh -ceu \
+  'test -n "$REDIS_PASSWORD"; redis-cli --no-auth-warning -a "$REDIS_PASSWORD" ping'
+
+# Narrow sandbox broker and Squid egress proxy are healthy.
+docker compose exec -T opencitadel-api \
+  curl --fail http://opencitadel-sandbox-broker:8090/healthz
+docker inspect --format '{{.State.Health.Status}}' \
+  opencitadel-sandbox-egress
+
+# Public health and authenticated audit-chain integrity.
+curl --fail https://your-domain.com/api/status
+curl --fail --cookie "access_token=${ADMIN_OR_AUDITOR_ACCESS_TOKEN}" \
+  https://your-domain.com/api/admin/audit/verify-chain
+```
 
 ---
 
@@ -571,26 +814,24 @@ docker network inspect opencitadel-network
 
 #### 3. Database connection failure
 
-If `opencitadel-migrate` reports `password authentication failed for user "postgres"`:
+If `opencitadel-migrate` reports `password authentication failed`:
 
-- Both `opencitadel-postgres` and `opencitadel-migrate` derive the connection string from `POSTGRES_*`; do not change only `POSTGRES_PASSWORD` while keeping an old `SQLALCHEMY_DATABASE_URI`.
-- PostgreSQL volume password is set only on **first initialization**; changing `.env` later does not update the volume password.
-- Align DB password with `.env`: `ALTER USER postgres WITH PASSWORD '<POSTGRES_PASSWORD>';`
-- Fresh environment: `docker compose down -v` then rebuild (destroys database data).
+- The database container uses `POSTGRES_ADMIN_*` only for bootstrap/administration. API, worker, and migrations use the distinct `POSTGRES_*` application role.
+- The application role must be `NOSUPERUSER NOBYPASSRLS`; production startup rejects a role that can bypass RLS.
+- PostgreSQL initialization scripts run only for a **new data directory**. Existing volumes must be migrated in place before switching `POSTGRES_USER`; do not delete a production volume.
+- Do not keep a stale `SQLALCHEMY_DATABASE_URI`, because it overrides the URI derived from `POSTGRES_*`.
 
 ```bash
 # Database status
 docker compose logs opencitadel-postgres
 
-# Connection test
-docker exec opencitadel-postgres pg_isready -U postgres -d opencitadel
-
 # URI derived from POSTGRES_* (migrate container)
 docker compose run --rm opencitadel-migrate python -c "from core.config import get_settings; print(get_settings().sqlalchemy_database_uri)"
-
-# Reset password (match POSTGRES_PASSWORD in .env)
-docker exec -it opencitadel-postgres psql -U postgres -c "ALTER USER postgres WITH PASSWORD 'new_password';"
 ```
+
+For an existing data volume, follow [Existing Compose database
+volume](#existing-compose-database-volume) from backup through `wrong_owner=0`;
+do not skip directly to the migrate job.
 
 #### 4. Memory pressure / swap thrashing
 
@@ -763,10 +1004,14 @@ docker build --target api -t your-registry/opencitadel-migrate ./api
 docker build -t your-registry/opencitadel-ui ./ui
 docker build -t your-registry/opencitadel-sandbox ./sandbox
 docker push your-registry/opencitadel-api your-registry/opencitadel-worker your-registry/opencitadel-migrate your-registry/opencitadel-ui your-registry/opencitadel-sandbox
+```
 
 > **Helm note**: the migrate initContainer reuses `image.api` (same Dockerfile target). The separate `opencitadel-migrate` tag is used by Docker Compose one-off jobs and release publishing.
 
+```bash
 helm upgrade --install opencitadel ./deploy/helm/opencitadel \
+  --namespace opencitadel --create-namespace \
+  --values production-values.yaml \
   --set image.api.repository=your-registry/opencitadel-api \
   --set image.worker.repository=your-registry/opencitadel-worker \
   --set image.ui.repository=your-registry/opencitadel-ui \
@@ -775,6 +1020,91 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --set ingress.enabled=true \
   --set replicaCount.worker=2
 ```
+
+`production-values.yaml` must override every required secret with a secret
+manager or protected values mechanism, keep the four application secrets
+distinct, use separate PostgreSQL admin/application passwords, enable Redis
+authentication, set `networkPolicy.enabled=true`, and narrow
+`env.TRUSTED_PROXY_CIDRS` to the ingress controller.
+
+### Existing chart-managed PostgreSQL PVC
+
+`/docker-entrypoint-initdb.d` only runs for a new PVC. Before an upgrade that
+introduces the non-bypass application role, use a maintenance window and this
+ordered procedure. `production-values.yaml` must retain the existing admin
+password while supplying the new application password.
+
+```bash
+NS=opencitadel
+RELEASE=opencitadel
+VALUES=production-values.yaml
+APP_USER=opencitadel_app
+PG_POD="$(kubectl -n "$NS" get pod \
+  -l app.kubernetes.io/component=postgres \
+  -o jsonpath='{.items[0].metadata.name}')"
+
+# 1. Stop writers and back up the existing PVC.
+kubectl -n "$NS" scale deployment \
+  "${RELEASE}-api" "${RELEASE}-worker" --replicas=0
+kubectl -n "$NS" exec "$PG_POD" -- sh -ceu \
+  'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+  > "${RELEASE}-before-app-role-$(date +%Y%m%d%H%M%S).sql"
+
+# 2. Apply only the new Secret and checked-in init-script ConfigMap.
+# Do not run the API migrate initContainer yet.
+helm template "$RELEASE" ./deploy/helm/opencitadel \
+  --namespace "$NS" --values "$VALUES" \
+  --show-only templates/secret.yaml \
+  --show-only templates/configmap-postgres-init.yaml \
+  | kubectl -n "$NS" apply -f -
+
+# 3. Copy the reviewed repository script and read the app password from Secret.
+kubectl -n "$NS" cp \
+  deploy/helm/opencitadel/files/postgres/init-app-role.sh \
+  "$PG_POD:/tmp/init-app-role.sh"
+APP_PASSWORD="$(kubectl -n "$NS" get secret "${RELEASE}-secret" \
+  -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 --decode)"
+
+# 4. Create/alter the app role and transfer existing relation ownership.
+kubectl -n "$NS" exec "$PG_POD" -- chmod 0500 /tmp/init-app-role.sh
+kubectl -n "$NS" exec "$PG_POD" -- env \
+  OPENCITADEL_APP_USER="$APP_USER" \
+  OPENCITADEL_APP_PASSWORD="$APP_PASSWORD" \
+  /tmp/init-app-role.sh
+
+# 5. rolsuper/rolbypassrls must be false; wrong_owner must be 0.
+kubectl -n "$NS" exec -i "$PG_POD" -- env \
+  OPENCITADEL_APP_USER="$APP_USER" sh -ceu '
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+      -v app_user="$OPENCITADEL_APP_USER"
+  ' <<'SQL'
+SELECT rolname, rolsuper, rolbypassrls
+FROM pg_roles
+WHERE rolname = :'app_user';
+SELECT count(*) AS wrong_owner
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
+  AND pg_get_userbyid(c.relowner) <> :'app_user';
+SQL
+unset APP_PASSWORD
+
+# 6. Only after verification may Helm start the migration initContainer.
+helm upgrade "$RELEASE" ./deploy/helm/opencitadel \
+  --namespace "$NS" --values "$VALUES"
+kubectl -n "$NS" rollout status deployment/"${RELEASE}-api"
+kubectl -n "$NS" rollout status deployment/"${RELEASE}-worker"
+kubectl -n "$NS" get networkpolicy "${RELEASE}-sandbox"
+kubectl -n "$NS" exec deployment/"${RELEASE}-api" -- \
+  curl --fail http://127.0.0.1:8000/api/status
+```
+
+This applies only to chart-managed PostgreSQL. For an external database or
+PostgreSQL operator, run
+`deploy/helm/opencitadel/files/postgres/init-app-role.sh` through that
+platform's approved admin channel before Helm starts its migration
+initContainer.
 
 Chart features:
 - In-cluster **PostgreSQL (pgvector) / Redis** (StatefulSet + PVC)

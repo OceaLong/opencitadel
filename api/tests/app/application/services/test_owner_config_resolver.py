@@ -4,6 +4,7 @@ import pytest
 
 from app.application.errors.exceptions import BadRequestError, ForbiddenError
 from app.application.services.integration_server_service import (
+    A2AServerConfigService,
     MCPServerService,
     _apply_masked_secret_updates,
     _ensure_stdio_allowed,
@@ -110,6 +111,25 @@ class _FakeUoW:
         return False
 
 
+class _FakeA2ARepo:
+    def __init__(self) -> None:
+        self.saved = None
+
+    async def save(self, record):
+        self.saved = record
+
+
+class _FakeA2AUoW:
+    def __init__(self, repo: _FakeA2ARepo) -> None:
+        self.a2a_server = repo
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+
 class _FakeCipher:
     pass
 
@@ -128,3 +148,78 @@ async def test_create_server_rejects_private_name_colliding_with_global():
     scope = OwnerScope.personal("user-1")
     with pytest.raises(BadRequestError, match="全局 MCP 服务占用"):
         await service.create_server(record, scope=scope, is_admin=False)
+
+
+@pytest.mark.asyncio
+async def test_create_private_mcp_server_binds_team_scope():
+    repo = _FakeMCPRepo()
+    service = MCPServerService(lambda: _FakeUoW(repo), _FakeCipher())
+    record = MCPServerRecord(
+        id="1",
+        name="team-server",
+        transport=MCPTransport.STREAMABLE_HTTP,
+        url="https://example.com/mcp",
+        visibility=ResourceVisibility.PRIVATE,
+    )
+
+    await service.create_server(
+        record,
+        scope=OwnerScope.team("creator-1", "team-1"),
+        is_admin=False,
+    )
+
+    assert repo.saved.owner_user_id == "creator-1"
+    assert repo.saved.team_id == "team-1"
+
+
+@pytest.mark.asyncio
+async def test_create_global_mcp_server_requires_admin_capability():
+    repo = _FakeMCPRepo()
+    service = MCPServerService(lambda: _FakeUoW(repo), _FakeCipher())
+    record = MCPServerRecord(
+        id="1",
+        name="global-server",
+        transport=MCPTransport.STREAMABLE_HTTP,
+        url="https://example.com/mcp",
+        visibility=ResourceVisibility.GLOBAL,
+    )
+
+    with pytest.raises(ForbiddenError):
+        await service.create_server(
+            record,
+            scope=OwnerScope.personal("user-1"),
+            is_admin=False,
+        )
+
+    assert repo.saved is None
+
+
+@pytest.mark.asyncio
+async def test_create_private_a2a_server_binds_team_scope():
+    repo = _FakeA2ARepo()
+    service = A2AServerConfigService(lambda: _FakeA2AUoW(repo))
+
+    await service.create_server(
+        "https://example.com/a2a",
+        scope=OwnerScope.team("creator-1", "team-1"),
+        visibility=ResourceVisibility.PRIVATE,
+    )
+
+    assert repo.saved.owner_user_id == "creator-1"
+    assert repo.saved.team_id == "team-1"
+
+
+@pytest.mark.asyncio
+async def test_create_global_a2a_server_requires_admin_capability():
+    repo = _FakeA2ARepo()
+    service = A2AServerConfigService(lambda: _FakeA2AUoW(repo))
+
+    with pytest.raises(ForbiddenError):
+        await service.create_server(
+            "https://example.com/a2a",
+            scope=OwnerScope.personal("user-1"),
+            visibility=ResourceVisibility.GLOBAL,
+            is_admin=False,
+        )
+
+    assert repo.saved is None

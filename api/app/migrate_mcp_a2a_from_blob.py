@@ -8,12 +8,14 @@ import uuid
 
 from sqlalchemy import select
 
+from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.app_config import AppConfig
 from app.domain.models.llm_model import ResourceVisibility
 from app.infrastructure.models.app_config import AppConfigModel
 from app.infrastructure.models.integration_server import A2AServerORM, MCPServerORM
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.security.secret_dict_cipher import encrypt_secret_dict, encrypt_url
+from app.infrastructure.security.db_authorization import configure_session_authorization
 from app.infrastructure.storage.postgres import get_postgres
 from core.config import get_settings
 
@@ -29,6 +31,10 @@ async def migrate_mcp_a2a_from_blob() -> dict:
     migrated_a2a = 0
     try:
         async with postgres.session_factory() as session:
+            await configure_session_authorization(
+                session,
+                AuthorizationContext.system("migrate-mcp-a2a-blob"),
+            )
             result = await session.execute(select(AppConfigModel).where(AppConfigModel.id == "global"))
             record = result.scalar_one_or_none()
             if record is None or not record.payload:

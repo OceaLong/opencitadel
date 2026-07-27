@@ -247,6 +247,7 @@ async def delete_mcp_server(
         server_name,
         scope=ctx.scope,
         actor_user_id=ctx.principal.user_id,
+        is_admin=ctx.principal.is_admin,
     )
     return Response.success()
 
@@ -267,6 +268,7 @@ async def set_mcp_server_enabled(
         enabled,
         scope=ctx.scope,
         actor_user_id=ctx.principal.user_id,
+        is_admin=ctx.principal.is_admin,
     )
     return Response.success()
 
@@ -317,6 +319,7 @@ async def delete_a2a_server(
         a2a_id,
         scope=ctx.scope,
         actor_user_id=ctx.principal.user_id,
+        is_admin=ctx.principal.is_admin,
     )
     return Response.success()
 
@@ -337,5 +340,6 @@ async def set_a2a_server_enabled(
         enabled,
         scope=ctx.scope,
         actor_user_id=ctx.principal.user_id,
+        is_admin=ctx.principal.is_admin,
     )
     return Response.success()

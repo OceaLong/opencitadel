@@ -71,14 +71,20 @@ class MarketplaceService:
     def list_apps(self) -> list[dict]:
         return list_marketplace_apps()
 
-    async def route_request(self, query: str, *, model_id: Optional[str] = None) -> dict:
+    async def route_request(
+            self,
+            query: str,
+            *,
+            model_id: Optional[str] = None,
+            scope: OwnerScope,
+    ) -> dict:
         query = (query or "").strip()
         if not query:
             raise ValueError("请输入想完成的任务")
 
         heuristic = self._route_by_rules(query)
         try:
-            llm = await self._resolve_text_llm(model_id)
+            llm = await self._resolve_text_llm(model_id, scope=scope)
             apps = json.dumps(MARKETPLACE_APPS, ensure_ascii=False)
             content = await self._invoke_text(
                 llm,
@@ -98,9 +104,10 @@ class MarketplaceService:
             model_id: Optional[str] = None,
             weight_kg: Optional[float] = None,
             goal: Optional[str] = None,
+            scope: OwnerScope,
     ) -> dict:
-        image_bytes, file_info = await self._load_image(file_id)
-        llm = await self._resolve_vision_llm(model_id)
+        image_bytes, file_info = await self._load_image(file_id, scope=scope)
+        llm = await self._resolve_vision_llm(model_id, scope=scope)
         return await self._nutrition.analyze(
             llm,
             image_bytes,
@@ -115,8 +122,9 @@ class MarketplaceService:
             question: str,
             *,
             model_id: Optional[str] = None,
+            scope: OwnerScope,
     ) -> dict:
-        llm = await self._resolve_text_llm(model_id)
+        llm = await self._resolve_text_llm(model_id, scope=scope)
         prompt = NUTRITION_FOLLOWUP_PROMPT.format(
             analysis=json.dumps(analysis, ensure_ascii=False),
             question=question.strip(),
@@ -130,9 +138,10 @@ class MarketplaceService:
             serving_grams: float,
             *,
             model_id: Optional[str] = None,
+            scope: OwnerScope,
     ) -> dict:
-        image_bytes, file_info = await self._load_image(file_id)
-        llm = await self._resolve_vision_llm(model_id)
+        image_bytes, file_info = await self._load_image(file_id, scope=scope)
+        llm = await self._resolve_vision_llm(model_id, scope=scope)
         return await self._consumption.analyze_from_image(
             llm, image_bytes, file_info.mime_type, serving_grams,
         )
@@ -154,17 +163,18 @@ class MarketplaceService:
             target_language: str,
             style: str,
             model_id: Optional[str] = None,
+            scope: OwnerScope,
     ) -> dict:
         if not text and not file_id:
             raise ValueError("请输入文本或上传图片/文本文件")
 
         source_text = (text or "").strip()
-        llm = await self._resolve_text_llm(model_id)
+        llm = await self._resolve_text_llm(model_id, scope=scope)
         if file_id:
-            file_bytes, file_info = await self._load_file_bytes(file_id)
+            file_bytes, file_info = await self._load_file_bytes(file_id, scope=scope)
             mime_type = file_info.mime_type or "application/octet-stream"
             if is_image_mime(mime_type):
-                llm = await self._resolve_vision_llm(model_id)
+                llm = await self._resolve_vision_llm(model_id, scope=scope)
                 messages = [{
                     "role": "user",
                     "content": [
@@ -206,9 +216,10 @@ class MarketplaceService:
             self,
             file_id: str,
             target_format: str,
-            scope: Optional[OwnerScope] = None,
+            *,
+            scope: OwnerScope,
     ) -> dict:
-        file_bytes, file_info = await self._load_file_bytes(file_id)
+        file_bytes, file_info = await self._load_file_bytes(file_id, scope=scope)
         source_ext = self._resolve_extension(file_info.filename or "", file_info.mime_type or "")
         out_bytes, out_mime, out_filename = await asyncio.to_thread(
             self._conversion.convert,
@@ -236,9 +247,9 @@ class MarketplaceService:
             opacity: float = 0.3,
             rotation: float = 45.0,
             tile: bool = True,
-            scope: Optional[OwnerScope] = None,
+            scope: OwnerScope,
     ) -> dict:
-        file_bytes, file_info = await self._load_file_bytes(file_id)
+        file_bytes, file_info = await self._load_file_bytes(file_id, scope=scope)
         mime_type = file_info.mime_type or "application/octet-stream"
         filename = file_info.filename or "file"
 
@@ -273,7 +284,7 @@ class MarketplaceService:
             elif watermark_type == "image":
                 if not watermark_file_id:
                     raise ValueError("请上传水印图片")
-                wm_bytes, _ = await self._load_file_bytes(watermark_file_id)
+                wm_bytes, _ = await self._load_file_bytes(watermark_file_id, scope=scope)
                 out_bytes = await asyncio.to_thread(
                     self._watermark.add_pdf_image_watermark,
                     file_bytes,
@@ -302,9 +313,9 @@ class MarketplaceService:
             watermark_text: Optional[str] = None,
             mode: str = "auto",
             model_id: Optional[str] = None,
-            scope: Optional[OwnerScope] = None,
+            scope: OwnerScope,
     ) -> dict:
-        file_bytes, file_info = await self._load_file_bytes(file_id)
+        file_bytes, file_info = await self._load_file_bytes(file_id, scope=scope)
         mime_type = file_info.mime_type or "application/octet-stream"
         filename = file_info.filename or "file"
         method = "fallback"
@@ -312,7 +323,7 @@ class MarketplaceService:
         if is_image_mime(mime_type):
             region: Optional[Dict[str, float]] = None
             try:
-                vision_llm = await self._resolve_vision_llm(model_id)
+                vision_llm = await self._resolve_vision_llm(model_id, scope=scope)
                 parsed = await analyze_image_with_llm(
                     vision_llm,
                     file_bytes,
@@ -326,7 +337,7 @@ class MarketplaceService:
 
             out_bytes: Optional[bytes] = None
             try:
-                model = await self._llm_model_service.resolve_model(model_id)
+                model = await self._llm_model_service.resolve_model(model_id, scope=scope)
                 mask_bytes = await asyncio.to_thread(
                     self._watermark.build_mask_from_region,
                     file_bytes,
@@ -383,7 +394,7 @@ class MarketplaceService:
             data: bytes,
             filename: str,
             mime_type: str,
-            scope: Optional[OwnerScope] = None,
+            scope: OwnerScope,
     ):
         stream = io.BytesIO(data)
         owner_user_id = scope.user_id if scope else None
@@ -411,12 +422,12 @@ class MarketplaceService:
         }
         return mime_map.get(mime_type, "")
 
-    async def _load_image(self, file_id: str):
-        file_bytes, file_info = await self._load_file_bytes(file_id)
+    async def _load_image(self, file_id: str, *, scope: OwnerScope):
+        file_bytes, file_info = await self._load_file_bytes(file_id, scope=scope)
         return file_bytes, file_info
 
-    async def _load_file_bytes(self, file_id: str):
-        file_data, file_info = await self._file_service.download_file(file_id)
+    async def _load_file_bytes(self, file_id: str, *, scope: OwnerScope):
+        file_data, file_info = await self._file_service.download_file(file_id, scope=scope)
         file_bytes = await asyncio.to_thread(file_data.read)
         from app.application.services.config_provider import get_runtime_config
         max_bytes = get_runtime_config().server.marketplace_max_upload_bytes
@@ -424,22 +435,32 @@ class MarketplaceService:
             raise ValueError(f"文件过大，请上传不超过 {max_bytes // (1024 * 1024)}MB 的文件")
         return file_bytes, file_info
 
-    async def _resolve_vision_llm(self, model_id: Optional[str]):
+    async def _resolve_vision_llm(
+            self,
+            model_id: Optional[str],
+            *,
+            scope: OwnerScope,
+    ):
         from app.application.services.config_provider import get_runtime_config
 
         if not get_runtime_config().feature_flags.enable_marketplace_llm_apps:
             raise ValueError("Marketplace AI 功能已关闭")
-        model = await self._llm_model_service.resolve_model(model_id)
+        model = await self._llm_model_service.resolve_model(model_id, scope=scope)
         if not model.capabilities.vision and not model.supports_multimodal:
             raise ValueError("请选择支持多模态能力的模型，或在模型设置中开启视觉能力")
         return create_resilient_llm(model, llm_model_service=self._llm_model_service)
 
-    async def _resolve_text_llm(self, model_id: Optional[str]):
+    async def _resolve_text_llm(
+            self,
+            model_id: Optional[str],
+            *,
+            scope: OwnerScope,
+    ):
         from app.application.services.config_provider import get_runtime_config
 
         if not get_runtime_config().feature_flags.enable_marketplace_llm_apps:
             raise ValueError("Marketplace AI 功能已关闭")
-        model = await self._llm_model_service.resolve_model(model_id)
+        model = await self._llm_model_service.resolve_model(model_id, scope=scope)
         return create_resilient_llm(model, llm_model_service=self._llm_model_service)
 
     async def _invoke_text(self, llm, prompt: str) -> str:

@@ -4,10 +4,11 @@ from datetime import datetime
 
 import pytest
 
-from app.application.errors.exceptions import BadRequestError
+from app.application.errors.exceptions import BadRequestError, ForbiddenError
 from app.application.services.llm_endpoint_service import LLMEndpointService
 from app.domain.models.llm_endpoint import LLMEndpoint
 from app.domain.models.llm_model import LLMProvider, ResourceVisibility
+from app.domain.models.scope import OwnerScope
 from app.infrastructure.migrations.llm_endpoint_backfill import endpoint_display_name, group_model_rows
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.security.api_key_encryption import ApiKeyEncryption
@@ -80,7 +81,10 @@ async def test_delete_endpoint_rejects_when_models_exist():
     service = LLMEndpointService(lambda: _FakeUow(repo), ApiKeyCipher("b" * 32))
 
     with pytest.raises(BadRequestError, match="请先删除或迁移"):
-        await service.delete_endpoint(endpoint.id)
+        await service.delete_endpoint(
+            endpoint.id,
+            allow_global_mutation=True,
+        )
 
 
 @pytest.mark.asyncio
@@ -95,7 +99,78 @@ async def test_create_endpoint_encrypts_api_key():
         visibility=ResourceVisibility.GLOBAL,
     )
 
-    created = await service.create_endpoint(endpoint)
+    created = await service.create_endpoint(
+        endpoint,
+        allow_global_mutation=True,
+    )
 
     assert created.id in repo.endpoints
     assert created.api_key.endswith("secret") or "****" in created.api_key
+
+
+@pytest.mark.asyncio
+async def test_create_private_endpoint_binds_team_scope():
+    repo = _FakeEndpointRepo()
+    service = LLMEndpointService(lambda: _FakeUow(repo), ApiKeyCipher("c" * 32))
+    endpoint = LLMEndpoint(
+        display_name="Team endpoint",
+        provider=LLMProvider.OPENAI,
+        base_url="https://api.openai.com/v1",
+        api_key="sk-secret",
+        visibility=ResourceVisibility.PRIVATE,
+    )
+
+    await service.create_endpoint(
+        endpoint,
+        scope=OwnerScope.team("creator-1", "team-1"),
+    )
+
+    saved = repo.endpoints[endpoint.id]
+    assert saved.owner_user_id == "creator-1"
+    assert saved.team_id == "team-1"
+
+
+@pytest.mark.asyncio
+async def test_create_global_endpoint_requires_explicit_admin_capability():
+    repo = _FakeEndpointRepo()
+    service = LLMEndpointService(lambda: _FakeUow(repo), ApiKeyCipher("c" * 32))
+    endpoint = LLMEndpoint(
+        display_name="Global endpoint",
+        provider=LLMProvider.OPENAI,
+        base_url="https://api.openai.com/v1",
+        api_key="sk-secret",
+        visibility=ResourceVisibility.GLOBAL,
+    )
+
+    with pytest.raises(ForbiddenError):
+        await service.create_endpoint(
+            endpoint,
+            scope=OwnerScope.personal("user-1"),
+        )
+
+    assert repo.endpoints == {}
+
+
+@pytest.mark.asyncio
+async def test_update_private_endpoint_cannot_escalate_to_global():
+    repo = _FakeEndpointRepo()
+    existing = LLMEndpoint(
+        id="endpoint-1",
+        display_name="Private endpoint",
+        provider=LLMProvider.OPENAI,
+        base_url="https://api.openai.com/v1",
+        api_key="sk-secret",
+        visibility=ResourceVisibility.PRIVATE,
+        owner_user_id="user-1",
+    )
+    repo.endpoints[existing.id] = existing
+    service = LLMEndpointService(lambda: _FakeUow(repo), ApiKeyCipher("c" * 32))
+
+    with pytest.raises(ForbiddenError):
+        await service.update_endpoint(
+            existing.id,
+            existing.model_copy(update={"visibility": ResourceVisibility.GLOBAL}),
+            scope=OwnerScope.personal("user-1"),
+        )
+
+    assert repo.endpoints[existing.id].visibility == ResourceVisibility.PRIVATE

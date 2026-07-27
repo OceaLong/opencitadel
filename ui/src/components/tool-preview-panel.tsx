@@ -1,7 +1,7 @@
 "use client";
 
 import { Bot, FileSearch, Globe, Maximize2, Monitor, Package, Search, Terminal, Wrench } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { ArtifactWorkbench } from "@/components/artifact-workbench";
@@ -170,20 +170,13 @@ export function ToolPreviewPanel({
   const defaultTab = hasArtifacts && !hasTool ? "artifacts" : hasTool ? "tool" : "artifacts";
 
   const [activeTab, setActiveTab] = useState<"artifacts" | "tool">(defaultTab);
-
-  useEffect(() => {
-    if (focusedArtifactId) {
-      setActiveTab("artifacts");
-    }
-  }, [focusedArtifactId]);
-
-  useEffect(() => {
-    if (!hasTool && hasArtifacts) {
-      setActiveTab("artifacts");
-    } else if (hasTool && !hasArtifacts) {
-      setActiveTab("tool");
-    }
-  }, [hasArtifacts, hasTool]);
+  const effectiveTab = focusedArtifactId
+    ? "artifacts"
+    : !hasTool && hasArtifacts
+      ? "artifacts"
+      : hasTool && !hasArtifacts
+        ? "tool"
+        : activeTab;
 
   const showTabs = hasArtifacts && hasTool;
 
@@ -197,7 +190,7 @@ export function ToolPreviewPanel({
     <div className="bg-card flex h-full flex-col overflow-hidden rounded-2xl shadow-[var(--shadow-panel)]">
       {showTabs ? (
         <Tabs
-          value={activeTab}
+          value={effectiveTab}
           onValueChange={(value) => setActiveTab(value as "artifacts" | "tool")}
           className="flex h-full flex-col gap-0"
         >

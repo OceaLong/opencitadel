@@ -21,19 +21,35 @@ spec:
             - containerPort: 5432
           env:
             - name: POSTGRES_USER
-              value: {{ .Values.postgresql.user | quote }}
+              value: {{ .Values.postgresql.adminUser | quote }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ printf "%s-secret" (include "opencitadel.fullname" .) }}
-                  key: postgresPassword
+                  key: POSTGRES_ADMIN_PASSWORD
             - name: POSTGRES_DB
               value: {{ .Values.postgresql.database | quote }}
+            - name: OPENCITADEL_APP_USER
+              value: {{ .Values.postgresql.user | quote }}
+            - name: OPENCITADEL_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%s-secret" (include "opencitadel.fullname" .) }}
+                  key: POSTGRES_PASSWORD
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: postgres-init
+              mountPath: /docker-entrypoint-initdb.d/10-opencitadel-app-role.sh
+              subPath: init-app-role.sh
+              readOnly: true
           resources:
             {{- toYaml .Values.postgresql.resources | nindent 12 }}
+      volumes:
+        - name: postgres-init
+          configMap:
+            name: {{ include "opencitadel.fullname" . }}-postgres-init
+            defaultMode: 0550
   volumeClaimTemplates:
     - metadata:
         name: data

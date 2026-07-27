@@ -20,6 +20,7 @@ from app.domain.models.app_config import MCPConfig, MCPServerConfig, MCPTranspor
 from app.domain.models.tool_result import ToolResult
 from app.domain.utils.app_config_filter import filter_enabled_mcp_config
 from app.domain.utils.mcp_url import validate_mcp_http_url
+from app.infrastructure.security.outbound_http import create_ssrf_safe_mcp_client
 from .base import BaseTool
 
 """
@@ -254,7 +255,11 @@ class MCPClientManager:
 
         try:
             sse_transport = await self._exit_stack.enter_async_context(
-                sse_client(url=url, headers=server_config.headers),
+                sse_client(
+                    url=url,
+                    headers=server_config.headers,
+                    httpx_client_factory=create_ssrf_safe_mcp_client,
+                ),
             )
             read_stream, write_stream = sse_transport
 
@@ -290,7 +295,11 @@ class MCPClientManager:
 
         try:
             streamable_http_transport = await self._exit_stack.enter_async_context(
-                streamablehttp_client(url=url, headers=server_config.headers),
+                streamablehttp_client(
+                    url=url,
+                    headers=server_config.headers,
+                    httpx_client_factory=create_ssrf_safe_mcp_client,
+                ),
             )
 
             # 3.streamable-http模型需要解包获取输入与输出流

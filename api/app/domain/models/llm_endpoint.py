@@ -18,6 +18,7 @@ class LLMEndpoint(BaseModel):
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
     owner_user_id: str | None = None
+    team_id: str | None = None
     visibility: ResourceVisibility = ResourceVisibility.GLOBAL
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

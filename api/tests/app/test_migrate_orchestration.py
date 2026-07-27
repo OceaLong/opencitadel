@@ -44,6 +44,10 @@ def test_run_data_migrations_runs_all_steps_in_one_event_loop(monkeypatch):
         calls.append("seed")
         return False
 
+    async def _rotate():
+        calls.append("rotate")
+        return {"rotated": 0, "unchanged": 0, "empty": 0}
+
     async def _mcp_a2a():
         calls.append("mcp_a2a")
         return {"mcp": 0, "a2a": 0}
@@ -53,6 +57,7 @@ def test_run_data_migrations_runs_all_steps_in_one_event_loop(monkeypatch):
         return {"urls": 0, "headers": 0, "env": 0}
 
     monkeypatch.setattr("app.migrate.migrate_legacy_plaintext_api_keys", _llm_keys)
+    monkeypatch.setattr("app.migrate.rotate_llm_endpoint_api_keys", _rotate)
     monkeypatch.setattr("app.migrate.seed_app_config_from_yaml_if_empty", _seed)
     monkeypatch.setattr("app.migrate.migrate_mcp_a2a_from_blob", _mcp_a2a)
     monkeypatch.setattr("app.migrate.migrate_mcp_url_and_secrets", _mcp_secrets)
@@ -61,7 +66,7 @@ def test_run_data_migrations_runs_all_steps_in_one_event_loop(monkeypatch):
 
     asyncio.run(run_data_migrations())
 
-    assert calls == ["llm_keys", "seed", "mcp_a2a", "mcp_secrets"]
+    assert calls == ["llm_keys", "rotate", "seed", "mcp_a2a", "mcp_secrets"]
 
 
 def test_seed_migration_shuts_down_postgres_on_early_return(monkeypatch):
@@ -159,6 +164,9 @@ def test_migrate_legacy_plaintext_skips_cipher_when_no_candidates(monkeypatch):
 
         async def __aexit__(self, *_args):
             return False
+
+        async def execute(self, *_args, **_kwargs):
+            return None
 
     class _FakePostgres:
         async def init(self):

@@ -19,5 +19,6 @@ class AuditLog(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.now)
     chain_seq: Optional[int] = None
+    signing_key_id: str = ""
     prev_hash: str = ""
     entry_hash: str = ""

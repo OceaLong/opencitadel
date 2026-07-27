@@ -39,10 +39,7 @@ export function SessionSkillPicker({ value, onChange, disabled, onSkillLoaded, c
   const [skills, setSkills] = useState<Skill[]>([]);
 
   useEffect(() => {
-    if (!user) {
-      setSkills([]);
-      return;
-    }
+    if (!user) return;
     let cancelled = false;
     loadSkills()
       .then((items) => {
@@ -69,14 +66,14 @@ export function SessionSkillPicker({ value, onChange, disabled, onSkillLoaded, c
 
   const options = useMemo(
     () =>
-      skills.map((s) => ({
+      (user ? skills : []).map((s) => ({
         id: s.id,
         title: s.name,
         description: s.description || s.category,
         icon: <span className="text-base leading-none">{s.icon}</span>,
         badge: s.is_builtin ? tCommon("builtin") : undefined,
       })),
-    [skills],
+    [skills, tCommon, user],
   );
 
   const handleChange = (skillId: string | undefined) => {

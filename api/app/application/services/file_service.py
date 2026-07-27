@@ -23,7 +23,7 @@ class FileService:
         self.file_storage = file_storage
         self._uow_factory = uow_factory
 
-    async def upload_file(self, upload_file: UploadFile, scope: OwnerScope | None = None) -> File:
+    async def upload_file(self, upload_file: UploadFile, scope: OwnerScope) -> File:
         """将传递的文件上传到对象存储并记录上传数据"""
         return await self.file_storage.upload_file(
             FileUploadPayload(
@@ -36,7 +36,7 @@ class FileService:
             ),
         )
 
-    async def get_file_info(self, file_id: str, scope: OwnerScope | None = None) -> File:
+    async def get_file_info(self, file_id: str, scope: OwnerScope) -> File:
         """根据传递的文件id获取文件信息"""
         async with self._uow_factory() as uow:
             file = await uow.file.get_by_id(file_id, scope=scope)
@@ -44,10 +44,8 @@ class FileService:
             raise NotFoundError(f"该文件[{file_id}]不存在")
         return file
 
-    async def download_file(self, file_id: str, scope: OwnerScope | None = None) -> Tuple[BinaryIO, File]:
+    async def download_file(self, file_id: str, scope: OwnerScope) -> Tuple[BinaryIO, File]:
         """根据传递的文件id下载文件"""
-        if scope is None:
-            return await self.file_storage.download_file(file_id)
         file = await self.get_file_info(file_id, scope=scope)
         file_data, _ = await self.file_storage.download_file(file_id)
         return file_data, file

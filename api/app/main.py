@@ -120,11 +120,15 @@ async def lifespan(app: FastAPI):
 
     container = await init_api_container()
 
+    from app.application.security.authorization_context import authorization_scope
+    from app.domain.models.authorization import AuthorizationContext
+
     skill_service = await get_skill_service()
-    await bootstrap_data(
-        uow_factory=get_uow,
-        skill_service=skill_service,
-    )
+    with authorization_scope(AuthorizationContext.system("api-bootstrap")):
+        await bootstrap_data(
+            uow_factory=get_uow,
+            skill_service=skill_service,
+        )
     pool_cleanup_task = asyncio.create_task(_connection_pool_cleanup_loop())
     logger.info("OpenCitadel初始化完成")
 

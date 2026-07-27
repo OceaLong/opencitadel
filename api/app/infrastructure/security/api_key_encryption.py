@@ -10,3 +10,4 @@ class ApiKeyEncryption(StrEnum):
 
     LEGACY_PLAINTEXT = "legacy_plaintext"
     FERNET_V1 = "fernet_v1"
+    FERNET_V2 = "fernet_v2"

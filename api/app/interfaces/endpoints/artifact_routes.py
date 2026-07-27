@@ -6,7 +6,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
+from app.application.security.authorization_context import authorization_scope
 from app.application.services.artifact_service import ArtifactService
+from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.artifact import Artifact
 from app.interfaces.auth_dependencies import get_workspace_context
 from app.interfaces.schemas import Response as ApiResponse
@@ -102,10 +104,11 @@ async def public_share_artifact(
         token: str,
         service: ArtifactService = Depends(get_artifact_service),
 ):
-    artifact = await service.get_by_share_token(token)
-    if not artifact:
-        raise HTTPException(status_code=404, detail="分享链接无效或已过期")
-    content, incomplete = await service.get_content_text(artifact.id, sanitize_html=True)
+    with authorization_scope(AuthorizationContext.system("public-artifact-share")):
+        artifact = await service.get_by_share_token(token)
+        if not artifact:
+            raise HTTPException(status_code=404, detail="分享链接无效或已过期")
+        content, incomplete = await service.get_content_text(artifact.id, sanitize_html=True)
     content_type = "text/markdown" if artifact.kind == "doc" else "text/html"
     return ApiResponse.success(ArtifactContentResponse(
         content=content, content_type=content_type, incomplete=incomplete,

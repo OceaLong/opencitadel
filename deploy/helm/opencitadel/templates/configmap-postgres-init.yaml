@@ -1,0 +1,9 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-postgres-init
+data:
+  init-app-role.sh: |-
+{{ .Files.Get "files/postgres/init-app-role.sh" | indent 4 }}
+{{- end }}

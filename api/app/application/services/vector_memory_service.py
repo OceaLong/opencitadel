@@ -118,8 +118,10 @@ class VectorMemoryService:
             await db_session.execute(stmt)
             return
         from app.infrastructure.storage.postgres import get_postgres
+        from app.infrastructure.security.db_authorization import configure_session_authorization
         postgres = get_postgres()
         async with postgres.session_factory() as session:
+            await configure_session_authorization(session)
             await session.execute(stmt)
             await session.commit()
 
@@ -173,8 +175,10 @@ class VectorMemoryService:
             rows = result.fetchall()
         else:
             from app.infrastructure.storage.postgres import get_postgres
+            from app.infrastructure.security.db_authorization import configure_session_authorization
             postgres = get_postgres()
             async with postgres.session_factory() as session:
+                await configure_session_authorization(session)
                 result = await session.execute(stmt, params)
                 rows = result.fetchall()
 

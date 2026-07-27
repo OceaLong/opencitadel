@@ -11,6 +11,12 @@ from markdownify import markdownify as md
 
 from app.application.errors.exceptions import BadRequestError
 from app.domain.services.knowledge_base.url_guard import validate_public_url
+from app.infrastructure.security.outbound_http import (
+    create_ssrf_safe_async_client,
+)
+
+_MAX_WEB_DOCUMENT_BYTES = 5 * 1024 * 1024
+_MAX_REDIRECTS = 5
 
 
 @dataclass
@@ -23,9 +29,13 @@ class WebDocument:
 async def fetch_web_document(url: str, *, timeout_seconds: float = 20.0) -> WebDocument:
     current = validate_public_url(url)
     headers = {"User-Agent": "OpenCitadel-KnowledgeBase/1.0"}
-    async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as client:
+    async with create_ssrf_safe_async_client(
+        timeout=timeout_seconds,
+        follow_redirects=False,
+        allowed_ports={80, 443},
+    ) as client:
         response = None
-        for _ in range(8):
+        for _ in range(_MAX_REDIRECTS + 1):
             validate_public_url(current)
             response = await client.get(current, headers=headers)
             if response.status_code in {301, 302, 303, 307, 308}:
@@ -35,6 +45,7 @@ async def fetch_web_document(url: str, *, timeout_seconds: float = 20.0) -> WebD
                 current = urljoin(current, location)
                 continue
             response.raise_for_status()
+            _ensure_bounded_response(response)
             break
         else:
             raise BadRequestError("URL 重定向次数过多")
@@ -52,9 +63,15 @@ async def fetch_web_document(url: str, *, timeout_seconds: float = 20.0) -> WebD
 async def fetch_confluence_document(url: str, token: Optional[str] = None) -> WebDocument:
     validate_public_url(url)
     headers = {"Authorization": f"Bearer {token}"} if token else None
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=False, headers=headers) as client:
+    async with create_ssrf_safe_async_client(
+        timeout=20.0,
+        follow_redirects=False,
+        headers=headers,
+        allowed_ports={80, 443},
+    ) as client:
         response = await client.get(url)
         response.raise_for_status()
+        _ensure_bounded_response(response)
     soup = BeautifulSoup(response.text, "html.parser")
     title = _pick_title(soup) or url
     content = md(str(soup.find("main") or soup.body or soup), heading_style="ATX").strip()
@@ -71,3 +88,16 @@ def _pick_title(soup: BeautifulSoup) -> str:
         return soup.title.string.strip()
     h1 = soup.find("h1")
     return h1.get_text(strip=True) if h1 else ""
+
+
+def _ensure_bounded_response(response: httpx.Response) -> None:
+    content_length = response.headers.get("content-length")
+    if content_length:
+        try:
+            declared_size = int(content_length)
+        except ValueError:
+            declared_size = 0
+        if declared_size > _MAX_WEB_DOCUMENT_BYTES:
+            raise BadRequestError("网页内容超过允许大小")
+    if len(response.content) > _MAX_WEB_DOCUMENT_BYTES:
+        raise BadRequestError("网页内容超过允许大小")

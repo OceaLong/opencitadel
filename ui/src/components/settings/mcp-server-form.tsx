@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { AlertTriangle, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -166,12 +166,6 @@ export const McpServerForm = forwardRef<McpServerFormHandle, McpServerFormProps>
   const [form, setForm] = useState<McpServerFormState>(() => mcpConfigToForm(server));
   const [validationError, setValidationError] = useState<string | null>(null);
   const validationErrorRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    setForm(mcpConfigToForm(server));
-    setValidationError(null);
-    validationErrorRef.current = null;
-  }, [server]);
 
   const runValidation = (): boolean => {
     if (HTTP_TRANSPORTS.includes(form.transport)) {

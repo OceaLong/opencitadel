@@ -93,6 +93,13 @@ class SessionService:
                 raise NotFoundError("指定模型不存在或无权访问", error_key="errors.modelNotFound")
             if skill_id and await uow.skill.get_by_id(skill_id, scope=scope) is None:
                 raise NotFoundError("指定 Skill 不存在或无权访问")
+            if codebase_id and await uow.codebase.get_by_id(codebase_id, scope=scope) is None:
+                raise NotFoundError("指定代码库不存在或无权访问")
+            if (
+                knowledge_base_id
+                and await uow.knowledge_base.get_kb(knowledge_base_id, scope=scope) is None
+            ):
+                raise NotFoundError("指定知识库不存在或无权访问")
             await uow.session.save(session)
         await self._session_list_notifier.notify_sessions_changed()
         logger.info(f"成功创建一个新任务会话: {session.id}")

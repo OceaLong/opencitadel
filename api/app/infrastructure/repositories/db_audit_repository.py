@@ -38,7 +38,8 @@ class DBAuditRepository(AuditRepository):
         next_seq = (last.chain_seq if last and last.chain_seq else 0) + 1
         prev_hash = (last.entry_hash if last and last.entry_hash else GENESIS)
 
-        secret = get_settings().api_key_secret
+        settings = get_settings()
+        secret = settings.audit_signing_key
         fields = entry_fields(
             chain_seq=next_seq,
             id=log.id,
@@ -54,6 +55,7 @@ class DBAuditRepository(AuditRepository):
         )
         entry_hash = compute_entry_hash(secret, fields, prev_hash)
         log.chain_seq = next_seq
+        log.signing_key_id = settings.audit_signing_key_id
         log.prev_hash = prev_hash
         log.entry_hash = entry_hash
         self.db_session.add(AuditLogORM.from_domain(log))

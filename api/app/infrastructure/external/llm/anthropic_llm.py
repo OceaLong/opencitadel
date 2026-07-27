@@ -13,6 +13,7 @@ from app.infrastructure.external.llm.base_llm import (
     normalize_usage,
     openai_content_to_anthropic_parts,
 )
+from app.infrastructure.security.outbound_http import create_ssrf_safe_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class AnthropicLLM(LLM):
         self._thinking_enabled = thinking_enabled
         self._base_url = model.base_url.rstrip("/") or "https://api.anthropic.com"
         self._api_key = model.api_key
-        self._client = httpx.AsyncClient(timeout=300)
+        self._client = create_ssrf_safe_async_client(timeout=300)
 
     @property
     def model_name(self) -> str:

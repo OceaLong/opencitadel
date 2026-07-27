@@ -22,6 +22,13 @@ make quickstart
 
 The script copies `.env.example` → `.env`, generates secrets, and prompts you to set `BOOTSTRAP_ADMIN_PASSWORD`.
 
+> **Local evaluation only:** quickstart deliberately sets
+> `ENV=development`, `COOKIE_SECURE=false`, bundled MinIO, and localhost URLs.
+> Do not expose or promote that `.env` to a public or multi-user deployment.
+> Before production, follow the complete secret, database-role, Redis,
+> trusted-proxy, egress, and verification procedure in the [production
+> deployment guide](../operations/deployment.md).
+
 ### 2. Start the stack
 
 `make quickstart` runs:
@@ -67,9 +74,10 @@ COMPOSE_PROFILES=local
 STORAGE_PROVIDER=minio
 COOKIE_SECURE=false
 FRONTEND_BASE_URL=http://localhost:8088
+OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal
 ```
 
-Install [Ollama](https://ollama.com) on the host, pull a capable model (e.g. `qwen2.5:14b`), then in Settings add an **endpoint** with base URL `http://host.docker.internal:11434/v1`, then add a **model** under it.
+Install [Ollama](https://ollama.com) on the host, pull a capable model (e.g. `qwen2.5:14b`), then in Settings add an **endpoint** with base URL `http://host.docker.internal:11434/v1`, then add a **model** under it. Keep the exact private-host allowlist above; do not use a wildcard.
 
 **Note:** Smaller local models may struggle with multi-step Agent tasks. BYO cloud API keys give the best first-run experience.
 

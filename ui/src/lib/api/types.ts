@@ -65,6 +65,7 @@ export type LLMModel = {
   is_default: boolean;
   visibility?: "global" | "private";
   owner_user_id?: string | null;
+  team_id?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -100,6 +101,7 @@ export type LLMEndpoint = {
   api_key?: string;
   visibility?: "global" | "private";
   owner_user_id?: string | null;
+  team_id?: string | null;
   model_count?: number;
   models?: LLMEndpointModelSummary[];
   created_at?: string;
@@ -151,6 +153,7 @@ export type Skill = {
   auto_recommend?: boolean;
   visibility?: "global" | "private";
   owner_user_id?: string | null;
+  team_id?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -935,7 +938,14 @@ export type SSEEventData =
         delta: string;
       } & EventMeta;
     }
-  | { type: "assistant_notice"; data: { message: string } & EventMeta }
+  | {
+      type: "assistant_notice";
+      data: {
+        message: string;
+        i18n_key?: string;
+        i18n_params?: Record<string, string | number>;
+      } & EventMeta;
+    }
   | { type: "session_status"; data: { status: SessionStatus } & EventMeta }
   | { type: "debug_item"; data: DebugItemEvent }
   | { type: "title"; data: { title: string } & EventMeta }

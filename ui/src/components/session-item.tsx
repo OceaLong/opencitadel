@@ -21,10 +21,13 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia } from "@/co
 import type { Locale } from "@/i18n/routing";
 import type { Session } from "@/lib/api";
 import {
-  getSessionContextIcon,
   getSessionContextKind,
+  IconAsk,
+  IconCodebase,
   IconDelete,
+  IconKnowledge,
   IconLoading,
+  IconTask,
 } from "@/lib/icons";
 import { cn, formatRelativeDate } from "@/lib/utils";
 
@@ -34,6 +37,25 @@ type SessionItemProps = {
   onClick: (sessionId: string) => void;
   onDelete: (session: Session) => void;
 };
+
+function SessionContextIcon({
+  kind,
+  className,
+}: {
+  kind: ReturnType<typeof getSessionContextKind>;
+  className?: string;
+}) {
+  switch (kind) {
+    case "codebase":
+      return <IconCodebase className={className} />;
+    case "knowledge":
+      return <IconKnowledge className={className} />;
+    case "hybrid":
+      return <IconAsk className={className} />;
+    default:
+      return <IconTask className={className} />;
+  }
+}
 
 export const SessionItem = memo(function SessionItem({
   session,
@@ -61,7 +83,6 @@ export const SessionItem = memo(function SessionItem({
   const isRunning = session.status === "running" || session.status === "waiting";
   const isFailed = session.status === "failed";
   const contextKind = getSessionContextKind(session);
-  const ContextIcon = getSessionContextIcon(contextKind);
   const contextLabel = contextKind !== "general" ? t(`filter.${contextKind}`) : null;
 
   return (
@@ -80,7 +101,7 @@ export const SessionItem = memo(function SessionItem({
             ) : isFailed ? (
               <AlertCircle className="text-destructive" />
             ) : (
-              <ContextIcon className="size-4" />
+              <SessionContextIcon kind={contextKind} className="size-4" />
             )}
           </AvatarGroupCount>
         </Avatar>

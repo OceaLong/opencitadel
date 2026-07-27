@@ -81,9 +81,15 @@ docker compose ps
 docker compose logs -f
 ```
 
-> **动态沙箱模式**：`api/config.yaml` 中 `sandbox.address: null` 时，Worker 通过 `docker.sock` 动态创建 `opencitadel-sandbox-*`；compose 中的 `opencitadel-sandbox` 服务已移至 `fixed-sandbox` profile，默认不启动。
+> **动态沙箱模式**：`sandbox.address: null` 时，API/Worker 调用
+> `opencitadel-sandbox-broker`；仅该窄接口、Token 认证服务挂载
+> `docker.sock`。沙箱加入无外部默认网关的
+> `opencitadel-sandbox-network`，不与 PostgreSQL/Redis 共网；唯一公网出口为
+> `opencitadel-sandbox-egress`（Squid），其目标 ACL 拒绝私网、链路本地、
+> 保留与元数据网段。
 
-> **服务启动顺序**：`opencitadel-postgres` + `opencitadel-redis` → `opencitadel-migrate`（Alembic + LLM Key 迁移）→ `opencitadel-api` + `opencitadel-worker` → `opencitadel-ui` → `opencitadel-nginx`
+> **服务启动顺序**：PostgreSQL + Redis + 沙箱出口 → migrate（Alembic +
+> LLM Key 迁移）→ API + Worker → UI → Nginx。
 
 > **Agent Worker 必须运行**：若 `opencitadel-worker` 未启动，对话请求会写入队列但 Agent 不会执行。可通过 `docker compose logs -f opencitadel-worker` 排查。
 
@@ -113,7 +119,15 @@ docker compose up -d
 
 Compose 构建后的应用镜像统一命名为：`opencitadel-api`、`opencitadel-worker`、`opencitadel-migrate`、`opencitadel-ui`、`opencitadel-sandbox`。
 
-> **CI/CD 说明**：GitHub Actions 在每次 PR 与 `main` 推送时运行 API 测试（pytest + Postgres/Redis）、UI 测试/构建（Node 22）与 Docker 镜像构建（见 [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)）。打 tag（`v*`）后通过 [`.github/workflows/release.yml`](../../.github/workflows/release.yml) 发布多架构镜像到 `ghcr.io/ocealong/opencitadel-*`。生产发布流程：使用 release 镜像或本地 `docker compose build` → 推送到镜像仓库 → `docker compose up` 或 Helm 部署。
+> **CI/CD 说明**：[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
+> 在每个 PR 与 `main` 推送中运行 API、UI、沙箱测试，构建并用 Trivy
+> 扫描五个镜像，同时校验 Compose、Helm、Squid 与文档。
+> [`.github/workflows/security.yml`](../../.github/workflows/security.yml)
+> 增加 Gitleaks 历史扫描、依赖评审/审计、CodeQL 与 Trivy 文件系统/IaC
+> 扫描。Dependabot 覆盖 GitHub Actions、uv、npm、Docker。Tag Release
+> 使用完整 SHA 固定的 Actions，发布 `linux/amd64` + `linux/arm64`
+> 镜像，并执行摘要扫描、生成 SBOM、最大级别 provenance 与 Registry
+> attestation。详见 [CI 与 Release 安全门禁](#ci-与-release-安全门禁)。
 
 ---
 
@@ -133,8 +147,9 @@ flowchart TD
   Cos --> CosCreds["配置 COS_* 凭证"]
   Minio --> MinioUp["local profile 启动 MinIO"]
   Start --> SandboxDriver{"sandbox.driver"}
-  SandboxDriver -->|"auto/docker"| DockerSock["Worker 挂载 docker.sock"]
+  SandboxDriver -->|"auto/docker"| Broker["API/Worker 调用认证 broker"]
   SandboxDriver -->|"kubernetes"| K8sRBAC["Worker SA 创建 Pod"]
+  Broker --> DockerSock["仅 broker 挂载 docker.sock"]
   DockerSock --> BuildImg["构建 opencitadel-sandbox 镜像"]
 ```
 
@@ -145,32 +160,59 @@ flowchart TD
 
 ### cloud 模式配置
 
+在受保护的运维 Shell 中分别生成每个 Secret：
+
+```bash
+for name in API_KEY_SECRET AUDIT_SIGNING_KEY JWT_SECRET SESSION_SECRET \
+  SANDBOX_BROKER_TOKEN; do
+  printf '%s=%s\n' "$name" "$(openssl rand -hex 32)"
+done
+```
+
+将输出粘贴到 `.env`；env 文件不会执行命令替换。下述模板故意使用
+Placeholder，未替换前生产启动会拒绝：
+
 ```bash
 COMPOSE_PROFILES=
 STORAGE_PROVIDER=cos
 
 ENV=production
 LOG_LEVEL=INFO
-API_KEY_SECRET=<openssl rand -hex 32>
-JWT_SECRET=<openssl rand -hex 32>
-SESSION_SECRET=<openssl rand -hex 32>
+API_KEY_SECRET=<唯一_64位_HEX>
+API_KEY_SECRET_ID=primary
+API_KEY_PREVIOUS_SECRETS={}
+AUDIT_SIGNING_KEY=<另一个唯一_64位_HEX>
+AUDIT_SIGNING_KEY_ID=primary
+AUDIT_PREVIOUS_SIGNING_KEYS={}
+JWT_SECRET=<另一个唯一_64位_HEX>
+SESSION_SECRET=<另一个唯一_64位_HEX>
+SANDBOX_BROKER_TOKEN=<另一个唯一_64位_HEX>
 BOOTSTRAP_ADMIN_EMAIL=admin@example.com
-BOOTSTRAP_ADMIN_PASSWORD=<STRONG_PASSWORD>
+BOOTSTRAP_ADMIN_PASSWORD=<至少12字符的强密码>
 COOKIE_DOMAIN=
 COOKIE_SECURE=true
 FRONTEND_BASE_URL=https://your-domain.com
 OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
 USE_DB_APP_CONFIG=true
+TRUSTED_PROXY_CIDRS=<精确的Ingress代理CIDR>
+OUTBOUND_ALLOWED_PORTS=80,443,8080,8443,11434
+OUTBOUND_PRIVATE_HOST_ALLOWLIST=
 
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=<STRONG_PASSWORD>
+POSTGRES_ADMIN_USER=postgres
+POSTGRES_ADMIN_PASSWORD=<独立且至少16字符的管理密码>
+POSTGRES_USER=opencitadel_app
+POSTGRES_PASSWORD=<另一个至少16字符的应用密码>
 POSTGRES_DB=opencitadel
 POSTGRES_HOST=opencitadel-postgres
 
 REDIS_HOST=opencitadel-redis
 REDIS_PORT=6379
 REDIS_DB=0
-REDIS_PASSWORD=
+REDIS_PASSWORD=<至少16字符的强Redis密码>
 
 COS_SECRET_ID=<YOUR_COS_SECRET_ID>
 COS_SECRET_KEY=<YOUR_COS_SECRET_KEY>
@@ -192,24 +234,39 @@ STORAGE_PROVIDER=minio
 
 ENV=production
 LOG_LEVEL=INFO
-API_KEY_SECRET=<openssl rand -hex 32>
-JWT_SECRET=<openssl rand -hex 32>
-SESSION_SECRET=<openssl rand -hex 32>
+API_KEY_SECRET=<唯一_64位_HEX>
+API_KEY_SECRET_ID=primary
+API_KEY_PREVIOUS_SECRETS={}
+AUDIT_SIGNING_KEY=<另一个唯一_64位_HEX>
+AUDIT_SIGNING_KEY_ID=primary
+AUDIT_PREVIOUS_SIGNING_KEYS={}
+JWT_SECRET=<另一个唯一_64位_HEX>
+SESSION_SECRET=<另一个唯一_64位_HEX>
+SANDBOX_BROKER_TOKEN=<另一个唯一_64位_HEX>
 BOOTSTRAP_ADMIN_EMAIL=admin@example.com
-BOOTSTRAP_ADMIN_PASSWORD=<STRONG_PASSWORD>
+BOOTSTRAP_ADMIN_PASSWORD=<至少12字符的强密码>
 COOKIE_DOMAIN=
 COOKIE_SECURE=true
 FRONTEND_BASE_URL=https://your-domain.com
 OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
 USE_DB_APP_CONFIG=true
+TRUSTED_PROXY_CIDRS=<精确的Ingress代理CIDR>
+OUTBOUND_ALLOWED_PORTS=80,443,8080,8443,11434
 
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=<STRONG_PASSWORD>
+POSTGRES_ADMIN_USER=postgres
+POSTGRES_ADMIN_PASSWORD=<独立且至少16字符的管理密码>
+POSTGRES_USER=opencitadel_app
+POSTGRES_PASSWORD=<另一个至少16字符的应用密码>
 POSTGRES_DB=opencitadel
 POSTGRES_HOST=opencitadel-postgres
 
 REDIS_HOST=opencitadel-redis
 REDIS_PORT=6379
+REDIS_DB=0
+REDIS_PASSWORD=<至少16字符的强Redis密码>
+
+# 仅在使用下述宿主机 Ollama 端点时需要。
+OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal
 
 # MinIO 默认值开箱可用
 MINIO_ENDPOINT=opencitadel-minio:9000
@@ -221,7 +278,16 @@ MINIO_SECURE=false
 NGINX_PORT=8088
 ```
 
-本地 LLM：在 UI「模型管理」新增端点，Provider=ollama，`base_url=http://host.docker.internal:11434/v1`，再在该端点下添加模型。
+`API_KEY_SECRET`、`AUDIT_SIGNING_KEY`、`JWT_SECRET`、`SESSION_SECRET`
+必须是四个互不相同且至少 32 字符的值。沙箱 Broker Token 也必须至少
+32 字符；两套 PostgreSQL 凭证必须不同，Redis 必须启用认证。
+`COOKIE_SECURE=false` 仅用于 `ENV=development` 的本地体验，不能用于
+此生产模板。`TRUSTED_PROXY_CIDRS` 只填写实际 Ingress/反向代理对端；
+私网出站仅按精确 Hostname 加入，不使用通配符。
+
+本地 LLM：保留上述精确白名单 `OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal`，
+再在 UI「模型管理」新增端点，Provider=ollama，
+`base_url=http://host.docker.internal:11434/v1`，并在该端点下添加模型。
 
 行为类配置（CORS、限流、沙箱、记忆、Worker 并发、OTEL 开关等）统一在 `api/config.yaml` 维护，不要写入 `.env`。
 
@@ -290,7 +356,11 @@ a2a_config:
 ### 模型、Skill 与记忆
 
 - **首次启动不会自动导入默认模型**，请在前端「设置中心 → 模型管理」先添加 **端点**（Provider / Base URL / API Key），再在同一端点下添加多个 **模型**（仅 model name 不同），并设置默认项后才能发起对话。连接信息存储在 PostgreSQL `llm_endpoints` 表，模型存储在 `llm_models` 表；API Key 由 `API_KEY_SECRET` 加密。
-- `llm_endpoints.api_key_encryption` 字段标识存储格式：`legacy_plaintext`（历史明文）或 `fernet_v1`（加密存储）。`opencitadel-migrate` 会在 Alembic 后自动加密历史明文，无需额外命令。修改端点 URL 或 API Key 后，同端点下所有模型会同步生效。
+- `llm_endpoints.api_key_encryption` 标识存储格式：
+  `legacy_plaintext`（历史明文）、`fernet_v1`（旧版无 key id Fernet）或
+  `fernet_v2`（当前带 key id 前缀的 Fernet）。`opencitadel-migrate`
+  会在 Alembic 后自动加密历史明文；修改端点 URL 或 API Key 后，同端点
+  下所有模型同步生效。
 - 系统会自动创建内置 Skill 模板（编程助手、研究分析、数据分析、内容写作），也可在「设置中心 → Skill 模板」维护自定义模板。
 - 长期记忆在「设置中心 → 长期记忆」维护，支持全局和会话两种作用域；任务开始时会自动召回相关记忆（时间衰减 + 可选 pgvector 向量混合检索）。
 - 开启向量记忆需在 `config.yaml` 设置 `memory.vector_enabled: true`，并在 `.env` 配置 `EMBEDDING_API_KEY`；PostgreSQL 使用 `pgvector/pgvector:pg16` 镜像。
@@ -315,6 +385,63 @@ cd api && ./migrate.sh
 
 新增迁移版本包括 `memory_entries.embedding vector(1536)`（pgvector 扩展）。
 
+#### 全新 Compose 数据卷
+
+PostgreSQL 首次启动时，
+`/docker-entrypoint-initdb.d/10-opencitadel-app-role.sh` 会先创建独立的
+`NOSUPERUSER NOBYPASSRLS` 应用角色，并把数据库/Schema 所有权转给它，
+随后才运行 `opencitadel-migrate`：
+
+```bash
+docker compose up -d opencitadel-postgres opencitadel-redis
+docker compose run --rm opencitadel-migrate
+docker compose up -d
+```
+
+#### 已有 Compose 数据卷
+
+已有数据目录不会再次运行初始化脚本。按下列顺序原地升级，切勿删除生产
+卷。迁移期间 `POSTGRES_ADMIN_PASSWORD` 必须仍与数据库当前管理角色一致；
+数据库管理密码应另行轮换：
+
+```bash
+# 1. 停止应用写入，并用管理角色备份。
+docker compose stop opencitadel-api opencitadel-worker
+mkdir -p backups
+docker compose exec -T opencitadel-postgres sh -ceu \
+  'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+  > "backups/opencitadel-before-app-role-$(date +%Y%m%d%H%M%S).sql"
+
+# 2. .env 设置互不相同的 POSTGRES_ADMIN_* 与 POSTGRES_* 后，
+# 只重建 PostgreSQL，使仓库脚本与新环境变量完成挂载。
+docker compose up -d --force-recreate opencitadel-postgres
+
+# 3. 执行可重复运行的角色/关系对象所有权迁移。
+docker compose exec -T opencitadel-postgres \
+  /docker-entrypoint-initdb.d/10-opencitadel-app-role.sh
+
+# 4. 两个布尔值都必须为 false，wrong_owner 必须为 0。
+docker compose exec -T opencitadel-postgres sh -ceu '
+  psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -v app_user="$OPENCITADEL_APP_USER"
+' <<'SQL'
+SELECT rolname, rolsuper, rolbypassrls
+FROM pg_roles
+WHERE rolname = :'app_user';
+SELECT count(*) AS wrong_owner
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
+  AND pg_get_userbyid(c.relowner) <> :'app_user';
+SQL
+
+# 5. 此时才能执行 Schema/Data 迁移并重启写入进程。
+docker compose run --rm opencitadel-migrate
+docker compose up -d opencitadel-api opencitadel-worker opencitadel-ui nginx
+curl --fail http://127.0.0.1:8088/api/status
+```
+
 ### 存储后端切换与迁移
 
 同一环境从 COS 切换到 MinIO（或反向）时，需先迁移对象数据（数据库只存 key，不记录后端类型）。内置 CLI 支持全桶复制与校验：
@@ -336,6 +463,21 @@ docker compose up -d opencitadel-api opencitadel-worker
 切换流程：低峰/只读窗口 → 迁移 → 校验 → 改 `STORAGE_PROVIDER` → 重启 → 抽查历史附件/截图/检查点。源端对象保留以便回滚。
 
 可选参数：`--dry-run`（只列差异）、`--prefix logs/`（限定前缀）、`--concurrency 8`（并发数）。
+
+### CI 与 Release 安全门禁
+
+本地校验用于快速反馈，不能替代仓库中依赖 Docker/PostgreSQL/Helm 的 CI：
+
+| Workflow | 必须通过的控制 |
+|----------|---------------|
+| `ci.yml` | PostgreSQL/Redis 上的完整 API pytest；UI i18n/typecheck/lint/test/build；沙箱测试；五个镜像构建及阻断 `HIGH,CRITICAL` 的 Trivy 扫描；Compose 渲染；Squid 解析；Helm lint/template；文档检查 |
+| `security.yml` | Gitleaks 全历史扫描；PR 依赖评审阻断 `high` 严重度与 GPL-3.0/AGPL-3.0；Python 与生产 npm 审计；Python、JavaScript/TypeScript 的 CodeQL `security-extended`；阻断 `HIGH,CRITICAL` 的 Trivy 漏洞/Secret/IaC 扫描 |
+| `dependabot.yml` | 每周更新 GitHub Actions、uv、npm、Docker |
+| `release.yml` | Actions 固定完整 SHA；五个 `linux/amd64` + `linux/arm64` 镜像；构建摘要 Trivy 扫描；SBOM；`provenance: mode=max`；Registry attestation |
+
+本地运行 `./scripts/check-docs.sh`、Compose 渲染、Shell/YAML 解析。Release
+前必须等待托管检查，因为它还覆盖干净依赖安装、镜像构建、PostgreSQL
+迁移、Helm 渲染及安全扫描器。
 
 ---
 
@@ -508,23 +650,113 @@ docker compose run --rm opencitadel-migrate
 docker exec -i opencitadel-postgres psql -U postgres opencitadel < backup.sql
 ```
 
-### LLM API Key 迁移
+### 凭证加密与审计签名 Key 轮换
 
-常规部署/升级只需 `docker compose up -d --build`，`opencitadel-migrate` 会自动完成历史明文加密。迁移日志只输出统计信息与 `model_id`，不会打印真实 API Key。
+常规部署运行 `python -m app.migrate`，自动转换历史
+`legacy_plaintext` 端点凭证且不会输出 Secret。`python -m
+app.migrate_llm_api_keys` 仅用于旧版修复；更换加密 Key 时使用下述带版本
+轮换流程。
 
-若升级后迁移容器未重建，可补救：
+#### 轮换 `API_KEY_SECRET`
+
+1. 进入维护窗口，通过批准的 Secret Store 备份数据库与 `.env`，然后
+   停止凭证写入进程：
+
+   ```bash
+   docker compose stop opencitadel-api opencitadel-worker
+   ```
+
+2. 用 JSON 保留旧 id/Secret，并设置新的当前 id/Secret：
+
+   ```bash
+   API_KEY_SECRET=<新的唯一64位HEX>
+   API_KEY_SECRET_ID=2026-07-primary
+   API_KEY_PREVIOUS_SECRETS={"primary":"<旧_API_KEY_SECRET>"}
+   ```
+
+3. 在移除旧 Key 前轮换所有非空端点记录：
+
+   ```bash
+   docker compose run --rm opencitadel-migrate \
+     python -m app.migrate_llm_api_key_rotation
+   ```
+
+4. 校验 `fernet_v2` 与当前 id，然后重启 API/Worker：
+
+   ```bash
+   docker compose exec -T opencitadel-postgres sh -ceu '
+     psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+   ' <<'SQL'
+   SELECT api_key_encryption,
+          split_part(api_key, '.', 2) AS key_id,
+          count(*) AS endpoints
+   FROM llm_endpoints
+   WHERE coalesce(api_key, '') <> ''
+   GROUP BY api_key_encryption, split_part(api_key, '.', 2)
+   ORDER BY api_key_encryption, key_id;
+   SQL
+   docker compose up -d --force-recreate \
+     opencitadel-api opencitadel-worker
+   ```
+
+   所有非空行必须显示 `fernet_v2` 与 `2026-07-primary`。在回滚/备份
+   验证窗口内保留旧 Key；移除前再次运行轮换与查询。已移除的 Key 无法
+   解密仍引用其 id 的记录或备份。
+
+#### 轮换 `AUDIT_SIGNING_KEY`
+
+审计行不可修改并保留自己的 `signing_key_id`，轮换不会重写历史行。因此
+必须保留所有仍被保留记录需要的旧签名 Key：
 
 ```bash
-docker compose up -d --build --force-recreate opencitadel-migrate opencitadel-api opencitadel-worker
+AUDIT_SIGNING_KEY=<新的且与其他密钥不同的64位HEX>
+AUDIT_SIGNING_KEY_ID=2026-07-audit
+AUDIT_PREVIOUS_SIGNING_KEYS={"primary":"<旧_AUDIT_SIGNING_KEY>"}
 ```
 
-极端情况下可单独修复：
+使用 `ADMIN` 或 `AUDITOR` 身份在变更前校验全局链，重启所有写入进程，
+然后再次校验：
 
 ```bash
-docker compose run --rm opencitadel-api python -m app.migrate_llm_api_keys
+curl --fail --cookie "access_token=${ADMIN_OR_AUDITOR_ACCESS_TOKEN}" \
+  https://your-domain.com/api/admin/audit/verify-chain
+docker compose up -d --force-recreate \
+  opencitadel-api opencitadel-worker opencitadel-migrate
+curl --fail --cookie "access_token=${ADMIN_OR_AUDITOR_ACCESS_TOKEN}" \
+  https://your-domain.com/api/admin/audit/verify-chain
 ```
 
-轮换 `API_KEY_SECRET` 后，已加密的端点密钥需在前端「模型管理 → 编辑端点」中重新保存。
+响应必须含 `"ok": true`。只有在没有保留的审计行或证据包使用旧 id 后
+才能移除旧验证 Key，否则追加式历史记录将无法验证。对
+`AUDIT_CHAIN_INTEGRITY_FAILURE` 告警。哈希链与数据库 Trigger 提供的是
+篡改证据；受监管审计数据还应导出到外部不可变/WORM 存储。
+
+### 生产安全验证
+
+全新部署、角色迁移或 Key 轮换后，将以下结果记录到变更单：
+
+```bash
+# PostgreSQL 角色标记与 wrong_owner=0：
+# 使用上文“已有 Compose 数据卷”的查询。
+
+# Schema 位于 Alembic head。
+docker compose run --rm opencitadel-migrate alembic current
+
+# Redis 已启用认证且可通过。
+docker compose exec -T opencitadel-redis sh -ceu \
+  'test -n "$REDIS_PASSWORD"; redis-cli --no-auth-warning -a "$REDIS_PASSWORD" ping'
+
+# 窄接口沙箱 Broker 与 Squid 出站代理均健康。
+docker compose exec -T opencitadel-api \
+  curl --fail http://opencitadel-sandbox-broker:8090/healthz
+docker inspect --format '{{.State.Health.Status}}' \
+  opencitadel-sandbox-egress
+
+# 公共健康检查与已认证审计链完整性。
+curl --fail https://your-domain.com/api/status
+curl --fail --cookie "access_token=${ADMIN_OR_AUDITOR_ACCESS_TOKEN}" \
+  https://your-domain.com/api/admin/audit/verify-chain
+```
 
 ---
 
@@ -567,26 +799,24 @@ docker network inspect opencitadel-network
 
 #### 3. 数据库连接失败
 
-若 `opencitadel-migrate` 报 `password authentication failed for user "postgres"`：
+若 `opencitadel-migrate` 报 `password authentication failed`：
 
-- `opencitadel-postgres` 与 `opencitadel-migrate` 现在都从 `POSTGRES_*` 派生连接串；不要只改 `POSTGRES_PASSWORD` 却保留旧的 `SQLALCHEMY_DATABASE_URI`。
-- PostgreSQL 数据卷只在**首次初始化**时写入密码；之后仅改 `.env` 不会自动更新卷内密码。
-- 让数据库密码与 `.env` 对齐：`ALTER USER postgres WITH PASSWORD '<POSTGRES_PASSWORD>';`
-- 全新环境可 `docker compose down -v` 后重建（会删除数据库数据）。
+- 数据库容器仅用 `POSTGRES_ADMIN_*` 做初始化/管理；API、Worker、迁移使用独立的 `POSTGRES_*` 应用角色。
+- 应用角色必须为 `NOSUPERUSER NOBYPASSRLS`；能绕过 RLS 的角色会导致生产启动直接失败。
+- PostgreSQL 初始化脚本只在**全新数据目录**执行。已有卷必须先原地迁移再切换 `POSTGRES_USER`，不要删除生产数据卷。
+- 不要保留过期的 `SQLALCHEMY_DATABASE_URI`，它会覆盖由 `POSTGRES_*` 派生的连接串。
 
 ```bash
 # 检查数据库状态
 docker compose logs opencitadel-postgres
 
-# 测试连接
-docker exec opencitadel-postgres pg_isready -U postgres -d opencitadel
-
 # 查看 migrate 实际使用的连接参数（URI 由 POSTGRES_* 派生）
 docker compose run --rm opencitadel-migrate python -c "from core.config import get_settings; print(get_settings().sqlalchemy_database_uri)"
-
-# 重置密码（与 .env 中 POSTGRES_PASSWORD 保持一致）
-docker exec -it opencitadel-postgres psql -U postgres -c "ALTER USER postgres WITH PASSWORD 'new_password';"
 ```
+
+已有数据卷必须从备份开始完整执行[已有 Compose
+数据卷](#已有-compose-数据卷)流程，直到 `wrong_owner=0`，不能直接跳到
+migrate job。
 
 #### 4. 内存不足 / Swap 抖动
 
@@ -759,10 +989,14 @@ docker build --target api -t your-registry/opencitadel-migrate ./api
 docker build -t your-registry/opencitadel-ui ./ui
 docker build -t your-registry/opencitadel-sandbox ./sandbox
 docker push your-registry/opencitadel-api your-registry/opencitadel-worker your-registry/opencitadel-migrate your-registry/opencitadel-ui your-registry/opencitadel-sandbox
+```
 
 > **Helm 说明**：migrate initContainer 复用 `image.api`（同一 Dockerfile target）。独立的 `opencitadel-migrate` 标签供 Docker Compose 一次性任务与 release 发布使用。
 
+```bash
 helm upgrade --install opencitadel ./deploy/helm/opencitadel \
+  --namespace opencitadel --create-namespace \
+  --values production-values.yaml \
   --set image.api.repository=your-registry/opencitadel-api \
   --set image.worker.repository=your-registry/opencitadel-worker \
   --set image.ui.repository=your-registry/opencitadel-ui \
@@ -771,6 +1005,88 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --set ingress.enabled=true \
   --set replicaCount.worker=2
 ```
+
+`production-values.yaml` 必须通过 Secret Manager 或受保护的 Values 机制
+覆盖所有必需 Secret，确保四个应用密钥互不相同、PostgreSQL 管理/应用
+密码不同、Redis 启用认证、`networkPolicy.enabled=true`，并把
+`env.TRUSTED_PROXY_CIDRS` 收窄到实际 Ingress Controller。
+
+### 已有 Chart 托管 PostgreSQL PVC
+
+`/docker-entrypoint-initdb.d` 只在全新 PVC 执行。引入不可绕过 RLS 的应用
+角色前，在维护窗口按以下顺序操作；`production-values.yaml` 必须保留
+当前管理密码，同时提供新的应用密码。
+
+```bash
+NS=opencitadel
+RELEASE=opencitadel
+VALUES=production-values.yaml
+APP_USER=opencitadel_app
+PG_POD="$(kubectl -n "$NS" get pod \
+  -l app.kubernetes.io/component=postgres \
+  -o jsonpath='{.items[0].metadata.name}')"
+
+# 1. 停止写入并备份当前 PVC。
+kubectl -n "$NS" scale deployment \
+  "${RELEASE}-api" "${RELEASE}-worker" --replicas=0
+kubectl -n "$NS" exec "$PG_POD" -- sh -ceu \
+  'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+  > "${RELEASE}-before-app-role-$(date +%Y%m%d%H%M%S).sql"
+
+# 2. 只应用新 Secret 与仓库内 Init Script ConfigMap，
+# 暂不启动 API migrate initContainer。
+helm template "$RELEASE" ./deploy/helm/opencitadel \
+  --namespace "$NS" --values "$VALUES" \
+  --show-only templates/secret.yaml \
+  --show-only templates/configmap-postgres-init.yaml \
+  | kubectl -n "$NS" apply -f -
+
+# 3. 复制已审查的仓库脚本，并从 Secret 读取应用密码。
+kubectl -n "$NS" cp \
+  deploy/helm/opencitadel/files/postgres/init-app-role.sh \
+  "$PG_POD:/tmp/init-app-role.sh"
+APP_PASSWORD="$(kubectl -n "$NS" get secret "${RELEASE}-secret" \
+  -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 --decode)"
+
+# 4. 创建/收敛应用角色，并转移已有关系对象所有权。
+kubectl -n "$NS" exec "$PG_POD" -- chmod 0500 /tmp/init-app-role.sh
+kubectl -n "$NS" exec "$PG_POD" -- env \
+  OPENCITADEL_APP_USER="$APP_USER" \
+  OPENCITADEL_APP_PASSWORD="$APP_PASSWORD" \
+  /tmp/init-app-role.sh
+
+# 5. rolsuper/rolbypassrls 必须为 false，wrong_owner 必须为 0。
+kubectl -n "$NS" exec -i "$PG_POD" -- env \
+  OPENCITADEL_APP_USER="$APP_USER" sh -ceu '
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+      -v app_user="$OPENCITADEL_APP_USER"
+  ' <<'SQL'
+SELECT rolname, rolsuper, rolbypassrls
+FROM pg_roles
+WHERE rolname = :'app_user';
+SELECT count(*) AS wrong_owner
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
+  AND pg_get_userbyid(c.relowner) <> :'app_user';
+SQL
+unset APP_PASSWORD
+
+# 6. 校验通过后才能让 Helm 启动迁移 initContainer。
+helm upgrade "$RELEASE" ./deploy/helm/opencitadel \
+  --namespace "$NS" --values "$VALUES"
+kubectl -n "$NS" rollout status deployment/"${RELEASE}-api"
+kubectl -n "$NS" rollout status deployment/"${RELEASE}-worker"
+kubectl -n "$NS" get networkpolicy "${RELEASE}-sandbox"
+kubectl -n "$NS" exec deployment/"${RELEASE}-api" -- \
+  curl --fail http://127.0.0.1:8000/api/status
+```
+
+该流程仅适用于 Chart 托管的 PostgreSQL。外部数据库或 PostgreSQL
+Operator 应通过其批准的管理通道运行
+`deploy/helm/opencitadel/files/postgres/init-app-role.sh`，再允许 Helm
+启动 migration initContainer。
 
 Chart 特性：
 - 进集群 **PostgreSQL(pgvector) / Redis**（StatefulSet + PVC）

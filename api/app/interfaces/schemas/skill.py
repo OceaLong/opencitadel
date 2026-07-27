@@ -73,6 +73,7 @@ class SkillResponse(BaseModel):
     enabled: bool
     visibility: str = "global"
     owner_user_id: Optional[str] = None
+    team_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

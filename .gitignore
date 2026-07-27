@@ -5,6 +5,7 @@
 .DS_Store
 .idea/
 .vscode/
+.worktrees/
 
 __pycache__/
 *.py[cod]

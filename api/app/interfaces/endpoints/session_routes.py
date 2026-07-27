@@ -16,6 +16,7 @@ from app.application.errors.exceptions import NotFoundError
 from app.application.services.config_provider import get_runtime_config
 from app.application.services.agent_service import AgentService
 from app.application.services.session_service import SessionService
+from app.interfaces.client_ip import get_client_ip
 from app.interfaces.schemas import Response
 from app.interfaces.schemas.event import EventMapper
 from app.interfaces.schemas.session import (
@@ -83,10 +84,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sessions", tags=["会话模块"])
 
 
-def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else ""
-
-
 async def _record_gate_audit_if_needed(
         *,
         session: Session,
@@ -122,7 +119,7 @@ async def _record_gate_audit_if_needed(
         return
     await audit_service.record(AuditLog(
         actor_user_id=ctx.principal.user_id,
-        actor_ip=_client_ip(request),
+        actor_ip=get_client_ip(request),
         action=audit_action,
         resource_type="session",
         resource_id=session.id,
@@ -218,6 +215,7 @@ async def build_get_session_response(
         session: Session,
         llm_model_service: LLMModelService,
         skill_service: SkillService,
+        scope: OwnerScope,
         token_usage_service: Optional[LLMTokenUsageService] = None,
         include_debug: bool = False,
         event_records: Optional[list[tuple[int, BaseEvent]]] = None,
@@ -228,11 +226,13 @@ async def build_get_session_response(
     skill_resp = None
     if session.model_id:
         try:
-            model_resp = llm_to_response(await llm_model_service.get_model(session.model_id))
+            model_resp = llm_to_response(
+                await llm_model_service.get_model(session.model_id, scope=scope)
+            )
         except Exception:
             pass
     if session.skill_id:
-        summary = await skill_service.get_summary(session.skill_id)
+        summary = await skill_service.get_summary(session.skill_id, scope=scope)
         if summary:
             skill_resp = SkillSummaryResponse(**summary.model_dump())
     token_usage_resp = None
@@ -241,7 +241,11 @@ async def build_get_session_response(
             model_prices = {}
             if session.model_id:
                 try:
-                    model = await llm_model_service.get_model(session.model_id, mask=False)
+                    model = await llm_model_service.get_model(
+                        session.model_id,
+                        mask=False,
+                        scope=scope,
+                    )
                     model_prices[model.id] = (
                         model.input_price_per_million,
                         model.output_price_per_million,
@@ -331,7 +335,7 @@ async def create_session(
     if request.operator_scope:
         await audit_service.record(AuditLog(
             actor_user_id=ctx.principal.user_id,
-            actor_ip=_client_ip(http_request) if http_request else "",
+            actor_ip=get_client_ip(http_request) if http_request else "",
             action="operator_scope_declared",
             resource_type="session",
             resource_id=session.id,
@@ -574,6 +578,7 @@ async def get_session(
             session,
             llm_model_service,
             skill_service,
+            ctx.scope,
             token_usage_service,
             include_debug=include_debug,
             event_records=event_records,
@@ -600,7 +605,11 @@ async def get_session_token_usage(
     model_prices = {}
     if session.model_id:
         try:
-            model = await llm_model_service.get_model(session.model_id, mask=False)
+            model = await llm_model_service.get_model(
+                session.model_id,
+                mask=False,
+                scope=ctx.scope,
+            )
             model_prices[model.id] = (model.input_price_per_million, model.output_price_per_million)
             model_prices[model.model_name] = (model.input_price_per_million, model.output_price_per_million)
         except Exception:
@@ -668,6 +677,7 @@ async def patch_session(
             session,
             llm_model_service,
             skill_service,
+            ctx.scope,
             token_usage_service,
             include_debug=include_debug,
             event_records=event_records,
@@ -802,7 +812,7 @@ async def restore_session_checkpoint(
     await agent_service.restore_checkpoint(session_id, checkpoint_id)
     await audit_service.record(AuditLog(
         actor_user_id=ctx.principal.user_id,
-        actor_ip=_client_ip(http_request),
+        actor_ip=get_client_ip(http_request),
         action="agent_rollback",
         resource_type="session",
         resource_id=session_id,
@@ -898,6 +908,15 @@ async def vnc_websocket(
     if ctx is None:
         await websocket.close(code=1008, reason="Unauthorized")
         return
+    from app.application.security.authorization_context import (
+        reset_authorization_context,
+        set_authorization_context,
+    )
+    from app.domain.models.authorization import AuthorizationContext
+
+    authorization_token = set_authorization_context(
+        AuthorizationContext.for_principal(ctx.principal, scope=ctx.scope)
+    )
 
     # 1.从客户端noVNC接收子协议
     protocols_str = websocket.headers.get("sec-websocket-protocol", "")
@@ -966,6 +985,8 @@ async def vnc_websocket(
         # 其他错误记录日志并关闭websocket
         logger.error(f"WebSocket异常: {str(e)}")
         await websocket.close(code=1011, reason=f"WebSocket异常: {str(e)}")
+    finally:
+        reset_authorization_context(authorization_token)
 
 
 @router.patch("/{session_id}/pending-plan", response_model=Response[dict])

@@ -111,6 +111,25 @@ All routes below are prefixed with `/api` unless noted. Authenticated routes req
 
 > **Maintenance**: This table is maintained manually. When adding routes, update this file and `README.zh-CN.md`, then verify against `app/interfaces/endpoints/routes.py` and live OpenAPI at `/openapi.json`. Run `./scripts/check-docs.sh` before docs PRs.
 
+### Authorization and tenant isolation
+
+Authenticated requests resolve
+`Principal → WorkspaceContext / OwnerScope → immutable AuthorizationContext`.
+The unit of work copies that context into transaction-local PostgreSQL GUCs
+before repository queries. Tenant tables use FORCE RLS (forced row-level
+security), providing defense in depth behind the application scope filters.
+Callers outside a resource scope normally receive 404 to avoid object-existence
+leaks.
+
+- `USER` can mutate owned personal resources and resources in validated team
+  workspaces.
+- `AUDITOR` is read-only: authenticated mutations are default-denied, and an
+  auditor-owned service API key cannot execute A2A.
+- `ADMIN` owns platform administration and mutation of global LLM
+  endpoints/models, Skills, MCP servers, and A2A servers.
+- Personal and team default-model choices are stored in
+  `llm_model_preferences`; they do not mutate global `llm_models`.
+
 ### Public / unauthenticated
 
 | Method | Path | Description |
@@ -147,7 +166,10 @@ All routes below are prefixed with `/api` unless noted. Authenticated routes req
 |--------|------|-------------|
 | POST | `/a2a` | Inbound A2A (feature-flagged; requires valid service API key) |
 
-> Service API keys authenticate the caller but do **not** carry team workspace scope. Use session JWT + `X-Workspace-Id` for team-scoped operations.
+> Service API keys authenticate the caller but do **not** carry team workspace
+> scope. Use session JWT + `X-Workspace-Id` for team-scoped operations.
+> `require_service_api_key` also rejects keys owned by an `AUDITOR`, so those
+> credentials cannot invoke A2A.
 
 ### Admin & compliance (auditor or admin)
 
@@ -197,6 +219,11 @@ All routes below are prefixed with `/api` unless noted. Authenticated routes req
 | GET/PUT/DELETE | `/llm-models/{id}` | Model CRUD |
 | POST | `/llm-models/{id}/set-default` | Set default model |
 | POST | `/llm-models/{id}/probe-multimodal` | Probe vision capability |
+
+Endpoint/model rows are global control-plane records and require `ADMIN` for
+mutation. `POST /llm-models/{id}/set-default` writes the caller's personal or
+team-scoped `llm_model_preferences` row; only an admin operating in global
+scope changes the global default.
 
 See [`../docs/architecture/llm-endpoints-and-models.md`](../docs/architecture/llm-endpoints-and-models.md).
 
@@ -275,13 +302,24 @@ playwright install
 See `.env.example` (bootstrap and secrets) and `api/config.yaml` (runtime behavior). Key `.env` settings:
 
 ```bash
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
+POSTGRES_ADMIN_USER=postgres       # Bootstrap/admin role; never used by the app
+POSTGRES_ADMIN_PASSWORD=<distinct-admin-password>
+POSTGRES_USER=opencitadel_app      # NOSUPERUSER NOBYPASSRLS application role
+POSTGRES_PASSWORD=<app-password>
 POSTGRES_DB=opencitadel
 POSTGRES_HOST=localhost
 REDIS_HOST=localhost
 REDIS_PORT=6379
-API_KEY_SECRET=            # Required: strong random value in production
+REDIS_PASSWORD=<16-plus-character-password>
+API_KEY_SECRET=<32-plus-character-random-secret>
+API_KEY_SECRET_ID=primary
+API_KEY_PREVIOUS_SECRETS={}
+AUDIT_SIGNING_KEY=<different-32-plus-character-random-secret>
+AUDIT_SIGNING_KEY_ID=primary
+AUDIT_PREVIOUS_SIGNING_KEYS={}
+JWT_SECRET=<different-32-plus-character-random-secret>
+SESSION_SECRET=<different-32-plus-character-random-secret>
+SANDBOX_BROKER_TOKEN=<32-plus-character-random-token>
 EMBEDDING_API_KEY=         # Required when vector memory is enabled
 ```
 
@@ -328,18 +366,35 @@ alembic revision --autogenerate -m "description"
 
 > **Note**: API startup validates DB schema is at Alembic head; startup fails if not migrated (skipped in test env).
 
-### LLM API Key Encryption Migration
+### Versioned credential and audit-key rotation
 
-Set a strong random `API_KEY_SECRET` in `.env` for production (`openssl rand -hex 32`). `llm_endpoints.api_key_encryption` indicates storage format:
+Set distinct strong values for `API_KEY_SECRET` and `AUDIT_SIGNING_KEY` in
+production (`openssl rand -hex 32`). `llm_endpoints.api_key_encryption`
+indicates storage format:
 
 | Value | Meaning |
 |-------|---------|
 | `legacy_plaintext` | Legacy plaintext (compatible read) |
-| `fernet_v1` | Encrypted with `API_KEY_SECRET` |
+| `fernet_v1` | Legacy unversioned Fernet |
+| `fernet_v2` | Current `v2.<key-id>.<token>` format |
 
-`python -m app.migrate` (or Docker Compose `opencitadel-migrate`) auto-encrypts legacy plaintext after Alembic. Standalone fix: `python -m app.migrate_llm_api_keys`.
+`python -m app.migrate` auto-encrypts legacy plaintext after Alembic.
+For encryption-key rotation:
 
-API and Worker reject weak secrets when `ENV=production`.
+1. retain the old id/secret in `API_KEY_PREVIOUS_SECRETS`;
+2. set a new `API_KEY_SECRET_ID` and `API_KEY_SECRET`;
+3. run `python -m app.migrate_llm_api_key_rotation`;
+4. verify every non-empty row is `fernet_v2` under the new id before removing
+   the old key.
+
+Audit rows use `AUDIT_SIGNING_KEY_ID` and verify historical signatures through
+`AUDIT_PREVIOUS_SIGNING_KEYS`. Because audit rows are append-only, keep an old
+signing key for as long as retained rows reference it and verify through
+`GET /api/admin/audit/verify-chain`.
+
+API, Worker, and migrate reject weak/placeholder secrets when
+`ENV=production`. The rollback-safe Compose and Helm sequences are in the
+[production deployment guide](../docs/operations/deployment.md#credential-encryption-and-audit-signing-key-rotation).
 
 ## Docker Deployment
 

@@ -233,12 +233,14 @@ class TeamService:
     async def leave_team(self, *, team_id: str, user_id: str) -> None:
         async with self._uow_factory() as uow:
             member = await self._load_actor_member(uow, team_id, user_id, allow_member=True)
-        if member.role == TeamRole.OWNER:
-            members = await uow.team.list_members(team_id)
-            owner_count = sum(1 for item in members if item.role == TeamRole.OWNER)
-            if owner_count <= 1:
-                raise BadRequestError("请先转移所有权或解散团队")
-        await uow.team.remove_member(team_id, user_id)
+            if member.role == TeamRole.OWNER:
+                members = await uow.team.list_members(team_id)
+                owner_count = sum(
+                    1 for item in members if item.role == TeamRole.OWNER
+                )
+                if owner_count <= 1:
+                    raise BadRequestError("请先转移所有权或解散团队")
+            await uow.team.remove_member(team_id, user_id)
 
     async def admin_list_all(self, *, limit: int, offset: int) -> tuple[List[Team], int]:
         async with self._uow_factory() as uow:

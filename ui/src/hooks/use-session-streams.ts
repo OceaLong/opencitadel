@@ -155,7 +155,7 @@ export function useSessionStreams({
         setStreamStatus("error");
       }
     },
-    [appendEvent, applySessionPatch],
+    [appendEvent, applySessionPatch, setError, t],
   );
 
   const startEmptyStream = useCallback(() => {
@@ -223,6 +223,7 @@ export function useSessionStreams({
     lastEventIdRef,
     lastPersistedSeqRef,
     onReconnect,
+    t,
   ]);
 
   useEffect(() => {
@@ -345,6 +346,7 @@ export function useSessionStreams({
       setError,
       applySessionPatch,
       onReconnect,
+      t,
     ],
   );
 
@@ -356,7 +358,11 @@ export function useSessionStreams({
       !isSendMessageRef.current &&
       !skipEmptyStream
     ) {
-      startEmptyStream();
+      const timer = window.setTimeout(startEmptyStream, 0);
+      return () => {
+        window.clearTimeout(timer);
+        stopEmptyStream();
+      };
     }
     return () => {
       stopEmptyStream();

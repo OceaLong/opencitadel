@@ -7,7 +7,7 @@ from sqlalchemy import or_, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.integration_server import A2AServerRecord, MCPServerRecord
-from app.domain.models.scope import OwnerScope
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.integration_server_repository import A2AServerRepository, MCPServerRepository
 from app.infrastructure.models.integration_server import A2AServerORM, MCPServerORM
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
@@ -23,7 +23,13 @@ class DBMCPServerRepository(MCPServerRepository):
         """scope=None means global-only (unlike llm_model repo where None means no filter)."""
         if scope is None:
             return stmt.where(MCPServerORM.visibility == "global")
-        owner_filter = MCPServerORM.owner_user_id == scope.user_id
+        if scope.type == OwnerScopeType.TEAM:
+            owner_filter = MCPServerORM.team_id == scope.team_id
+        else:
+            owner_filter = (
+                (MCPServerORM.owner_user_id == scope.user_id)
+                & MCPServerORM.team_id.is_(None)
+            )
         return stmt.where(or_(MCPServerORM.visibility == "global", owner_filter))
 
     def _to_domain(self, record: MCPServerORM) -> MCPServerRecord:
@@ -87,6 +93,7 @@ class DBMCPServerRepository(MCPServerRepository):
                 existing.env_encryption = env_encryption
             existing.extra = record.extra
             existing.owner_user_id = record.owner_user_id
+            existing.team_id = record.team_id
             existing.visibility = record.visibility.value if hasattr(record.visibility, "value") else record.visibility
             existing.updated_at = record.updated_at
         else:
@@ -107,6 +114,7 @@ class DBMCPServerRepository(MCPServerRepository):
                     env_encryption=env_encryption,
                     extra=record.extra,
                     owner_user_id=record.owner_user_id,
+                    team_id=record.team_id,
                     visibility=record.visibility.value if hasattr(record.visibility, "value") else record.visibility,
                 )
             )
@@ -123,7 +131,13 @@ class DBA2AServerRepository(A2AServerRepository):
         """scope=None means global-only (unlike llm_model repo where None means no filter)."""
         if scope is None:
             return stmt.where(A2AServerORM.visibility == "global")
-        owner_filter = A2AServerORM.owner_user_id == scope.user_id
+        if scope.type == OwnerScopeType.TEAM:
+            owner_filter = A2AServerORM.team_id == scope.team_id
+        else:
+            owner_filter = (
+                (A2AServerORM.owner_user_id == scope.user_id)
+                & A2AServerORM.team_id.is_(None)
+            )
         return stmt.where(or_(A2AServerORM.visibility == "global", owner_filter))
 
     async def list_all(self, scope: Optional[OwnerScope] = None) -> List[A2AServerRecord]:
@@ -145,6 +159,7 @@ class DBA2AServerRepository(A2AServerRepository):
             existing.base_url = record.base_url
             existing.enabled = record.enabled
             existing.owner_user_id = record.owner_user_id
+            existing.team_id = record.team_id
             existing.visibility = record.visibility.value if hasattr(record.visibility, "value") else record.visibility
             existing.updated_at = record.updated_at
         else:
@@ -154,6 +169,7 @@ class DBA2AServerRepository(A2AServerRepository):
                     base_url=record.base_url,
                     enabled=record.enabled,
                     owner_user_id=record.owner_user_id,
+                    team_id=record.team_id,
                     visibility=record.visibility.value if hasattr(record.visibility, "value") else record.visibility,
                 )
             )

@@ -18,6 +18,7 @@ from app.infrastructure.external.llm.base_llm import (
 from app.infrastructure.external.llm.base_llm import normalize_usage
 from app.infrastructure.observability.llm_metrics import record_multimodal_request
 from app.infrastructure.external.llm.structured_output import to_openai_strict
+from app.infrastructure.security.outbound_http import create_ssrf_safe_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -155,12 +156,21 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             logger.warning(
                 f"会话已开启思考模式，但模型[{model_name}]未配置 thinking 参数模板，将按普通模式请求"
             )
+        client_kwargs = {
+            k: v
+            for k, v in extra.items()
+            if k not in _CLIENT_EXTRA_KEYS
+        }
+        client_kwargs.update(kwargs)
+        client_kwargs.setdefault(
+            "http_client",
+            create_ssrf_safe_async_client(timeout=300),
+        )
         self._client = AsyncOpenAI(
             base_url=base_url,
             api_key=api_key or "sk-placeholder",
             max_retries=0,
-            **{k: v for k, v in extra.items() if k not in _CLIENT_EXTRA_KEYS},
-            **kwargs,
+            **client_kwargs,
         )
         self._model_name = model_name
         self._temperature = temperature

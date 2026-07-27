@@ -60,6 +60,7 @@ class LLMModel(BaseModel):
     supports_multimodal: bool = False
     is_default: bool = False
     owner_user_id: str | None = None
+    team_id: str | None = None
     visibility: ResourceVisibility = ResourceVisibility.GLOBAL
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
@@ -78,4 +79,3 @@ class LLMModel(BaseModel):
         if masked.api_key:
             masked.api_key = masked.api_key[:4] + "****" + masked.api_key[-4:] if len(masked.api_key) > 8 else "****"
         return masked
-

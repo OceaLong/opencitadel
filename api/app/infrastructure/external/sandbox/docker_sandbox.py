@@ -9,6 +9,7 @@ import time
 import uuid
 from datetime import datetime
 from typing import Optional, Self, BinaryIO
+from urllib.parse import quote
 
 import docker
 import httpx
@@ -26,6 +27,9 @@ from app.infrastructure.external.runtime_settings import (
     configure_sandbox_runtime as _configure_sandbox_runtime_settings,
     get_sandbox_runtime_settings,
 )
+from app.infrastructure.external.sandbox.sandbox_container_policy import (
+    build_docker_sandbox_config,
+)
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -35,12 +39,55 @@ _docker_client = None
 _docker_client_lock = threading.Lock()
 
 
+def _broker_url() -> str:
+    return (get_settings().sandbox_broker_url or "").strip().rstrip("/")
+
+
+def _broker_call(method: str, path: str, **kwargs) -> dict:
+    settings = get_settings()
+    url = _broker_url()
+    if not url:
+        raise RuntimeError("sandbox broker is not configured")
+    with httpx.Client(
+        headers={"Authorization": f"Bearer {settings.sandbox_broker_token}"},
+        timeout=30,
+        trust_env=False,
+    ) as client:
+        response = client.request(method, f"{url}{path}", **kwargs)
+    response.raise_for_status()
+    return response.json()
+
+
+def _broker_list() -> list[dict]:
+    return list(_broker_call("GET", "/v1/sandboxes").get("sandboxes") or [])
+
+
+def _broker_create(container_name: str) -> dict:
+    return _broker_call(
+        "POST",
+        "/v1/sandboxes",
+        json={"id": container_name},
+    )
+
+
+def _broker_sandbox_path(container_name: str) -> str:
+    """Encode an opaque sandbox id as exactly one broker path segment."""
+    if not container_name:
+        raise ValueError("sandbox id must not be empty")
+    return f"/v1/sandboxes/{quote(container_name, safe='')}"
+
+
 def configure_sandbox_runtime(settings: SandboxRuntimeSettings) -> None:
     _configure_sandbox_runtime_settings(settings)
 
 
 def _get_docker_client():
     global _docker_client
+    if get_settings().env.lower() == "production":
+        raise RuntimeError(
+            "direct Docker access is disabled in production; configure "
+            "SANDBOX_BROKER_URL or use the Kubernetes sandbox driver"
+        )
     with _docker_client_lock:
         if _docker_client is None:
             _docker_client = docker.from_env()
@@ -171,6 +218,12 @@ class DockerSandbox(Sandbox):
         settings = get_sandbox_runtime_settings()
         if settings.address or not settings.name_prefix:
             return set()
+        if _broker_url():
+            return {
+                item["id"]
+                for item in _broker_list()
+                if item.get("status") == "running"
+            }
         docker_client = _get_docker_client()
         containers = docker_client.containers.list(
             filters={"name": f"{settings.name_prefix}-", "status": "running"},
@@ -191,32 +244,19 @@ class DockerSandbox(Sandbox):
         container_name = f"{name_prefix}-{str(uuid.uuid4())[:8]}"
 
         try:
+            if _broker_url():
+                payload = _broker_create(container_name)
+                return DockerSandbox(
+                    ip=payload["ip"],
+                    container_name=payload["id"],
+                )
             docker_client = _get_docker_client()
 
             # 4.预配置容器信息
-            container_config = {
-                "image": image,
-                "name": container_name,
-                "detach": True,
-                "remove": True,
-                "environment": {
-                    "SERVER_TIMEOUT_MINUTES": str(settings.ttl_minutes or 60),
-                    "CHROME_ARGS": settings.chrome_args or "",
-                    "HTTPS_PROXY": settings.https_proxy or "",
-                    "HTTP_PROXY": settings.http_proxy or "",
-                    "NO_PROXY": settings.no_proxy or "",
-                }
-            }
-            if settings.memory_limit:
-                container_config["mem_limit"] = settings.memory_limit
-            if settings.cpu_limit and settings.cpu_limit > 0:
-                container_config["nano_cpus"] = int(settings.cpu_limit * 1_000_000_000)
-            if settings.pids_limit and settings.pids_limit > 0:
-                container_config["pids_limit"] = settings.pids_limit
-
-            # 5.判断是否传递了网络
-            if settings.network:
-                container_config["network"] = settings.network
+            container_config = build_docker_sandbox_config(
+                settings,
+                container_name,
+            )
 
             # 6.调用docker客户端容器运行参数创建沙箱
             container = docker_client.containers.run(**container_config)
@@ -268,28 +308,17 @@ class DockerSandbox(Sandbox):
         settings = get_sandbox_runtime_settings()
         image = settings.image
         try:
+            if _broker_url():
+                payload = _broker_create(container_name)
+                return DockerSandbox(
+                    ip=payload["ip"],
+                    container_name=payload["id"],
+                )
             docker_client = _get_docker_client()
-            container_config = {
-                "image": image,
-                "name": container_name,
-                "detach": True,
-                "remove": True,
-                "environment": {
-                    "SERVER_TIMEOUT_MINUTES": str(settings.ttl_minutes or 60),
-                    "CHROME_ARGS": settings.chrome_args or "",
-                    "HTTPS_PROXY": settings.https_proxy or "",
-                    "HTTP_PROXY": settings.http_proxy or "",
-                    "NO_PROXY": settings.no_proxy or "",
-                },
-            }
-            if settings.memory_limit:
-                container_config["mem_limit"] = settings.memory_limit
-            if settings.cpu_limit and settings.cpu_limit > 0:
-                container_config["nano_cpus"] = int(settings.cpu_limit * 1_000_000_000)
-            if settings.pids_limit and settings.pids_limit > 0:
-                container_config["pids_limit"] = settings.pids_limit
-            if settings.network:
-                container_config["network"] = settings.network
+            container_config = build_docker_sandbox_config(
+                settings,
+                container_name,
+            )
             container = docker_client.containers.run(**container_config)
             container.reload()
             ip = cls._require_container_ip(
@@ -355,11 +384,24 @@ class DockerSandbox(Sandbox):
 
     @classmethod
     def _remove_container(cls, container_name: str) -> None:
+        if _broker_url():
+            _broker_call("DELETE", _broker_sandbox_path(container_name))
+            return
         docker_client = _get_docker_client()
         docker_client.containers.get(container_name).remove(force=True)
 
     @classmethod
     def _get_running_container_ip(cls, id: str) -> Optional[str]:
+        if _broker_url():
+            try:
+                payload = _broker_call("GET", _broker_sandbox_path(id))
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    return None
+                raise
+            if payload.get("status") != "running":
+                return None
+            return payload.get("ip") or None
         docker_client = _get_docker_client()
         try:
             container = docker_client.containers.get(id)
@@ -381,6 +423,8 @@ class DockerSandbox(Sandbox):
         settings = get_sandbox_runtime_settings()
         if settings.address or not settings.name_prefix:
             return 0
+        if _broker_url():
+            return cls._cleanup_broker_sandboxes_sync(settings)
         docker_client = _get_docker_client()
         removed = 0
         idle_timeout_seconds = max(60, (settings.idle_timeout_minutes or 30) * 60)
@@ -436,6 +480,50 @@ class DockerSandbox(Sandbox):
             return removed
         finally:
             pass
+
+    @classmethod
+    def _cleanup_broker_sandboxes_sync(
+            cls,
+            settings: SandboxRuntimeSettings,
+    ) -> int:
+        removed = 0
+        idle_timeout_seconds = max(
+            60,
+            (settings.idle_timeout_minutes or 30) * 60,
+        )
+        now = time.time()
+        for item in _broker_list():
+            name = item.get("id") or ""
+            status = item.get("status") or ""
+            if status in {"exited", "dead", "created"}:
+                _broker_call("DELETE", _broker_sandbox_path(name))
+                removed += 1
+                continue
+            if status != "running":
+                continue
+            started_at = item.get("started_at") or ""
+            try:
+                started = datetime.fromisoformat(
+                    started_at.replace("Z", "+00:00")
+                ).timestamp()
+            except ValueError:
+                continue
+            if now - started < idle_timeout_seconds:
+                continue
+            try:
+                last_active_raw = _get_sync_redis_client().get(
+                    f"sandbox:last_active:{name}"
+                )
+                if (
+                    last_active_raw
+                    and now - int(last_active_raw) < idle_timeout_seconds
+                ):
+                    continue
+            except Exception:
+                continue
+            _broker_call("DELETE", _broker_sandbox_path(name))
+            removed += 1
+        return removed
 
     @classmethod
     async def cleanup_orphaned_containers(cls) -> int:
@@ -857,4 +945,3 @@ class DockerSandbox(Sandbox):
         if not result.success:
             raise RuntimeError(f"恢复浏览器快照失败: {result.message or result.data}")
         await self.start_chrome()
-

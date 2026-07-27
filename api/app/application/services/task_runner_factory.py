@@ -4,6 +4,7 @@
 import logging
 from typing import Callable, Optional, Type
 
+from app.application.errors.exceptions import NotFoundError
 from app.application.services.audit_service import AuditService
 from app.application.services.codebase_service import CodebaseService
 from app.application.services.artifact_service import ArtifactService
@@ -27,7 +28,8 @@ from app.domain.external.session_state import SessionStatePort
 from app.domain.external.task_state_port import TaskStatePort
 from app.domain.models.agent_runtime_settings import AgentMemoryRuntimeSettings, AgentRuntimeSettings
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig, ModelResilienceConfig
-from app.domain.models.codebase import SessionMode
+from app.domain.models.codebase import Codebase, SessionMode
+from app.domain.models.knowledge_base import KnowledgeBase
 from app.domain.models.session import Session, SessionStatus
 from app.domain.models.scope import OwnerScope
 from app.domain.models.skill import Skill
@@ -133,8 +135,37 @@ class TaskRunnerFactory:
         self._auto_extract_memory = True
         self._model_resilience = ModelResilienceConfig()
 
+    @staticmethod
+    def _scope_for_session(session: Session) -> OwnerScope:
+        if not session.owner_user_id:
+            raise NotFoundError("会话缺少所有者，拒绝加载关联资源")
+        if session.team_id:
+            return OwnerScope.team(session.owner_user_id, session.team_id)
+        return OwnerScope.personal(session.owner_user_id)
+
+    async def _authorize_session_resources(
+            self,
+            session: Session,
+            scope: OwnerScope,
+    ) -> tuple[Optional[Codebase], Optional[KnowledgeBase]]:
+        codebase = None
+        knowledge_base = None
+        async with self._uow_factory() as uow:
+            if session.codebase_id:
+                codebase = await uow.codebase.get_by_id(session.codebase_id, scope=scope)
+                if codebase is None:
+                    raise NotFoundError("会话关联代码库不存在或无权访问")
+            if session.knowledge_base_id:
+                knowledge_base = await uow.knowledge_base.get_kb(
+                    session.knowledge_base_id,
+                    scope=scope,
+                )
+                if knowledge_base is None:
+                    raise NotFoundError("会话关联知识库不存在或无权访问")
+        return codebase, knowledge_base
+
     async def _refresh_runtime_config(self, session: Optional[Session] = None) -> None:
-        scope = OwnerScope.personal(session.owner_user_id) if session and session.owner_user_id else None
+        scope = self._scope_for_session(session) if session else None
         app_config = await self._config_provider.resolve_for_owner(scope)
         self._agent_config = app_config.agent_config
         self._auto_extract_memory = app_config.memory.auto_extract_enabled
@@ -162,6 +193,7 @@ class TaskRunnerFactory:
         return agent_config.model_copy(update=overrides) if overrides else agent_config
 
     async def _resolve_llm_and_config(self, session: Session, latest_message: str = ""):
+        scope = self._scope_for_session(session)
         model_id = session.model_id
         skill = None
         skill_prompt = ""
@@ -173,7 +205,7 @@ class TaskRunnerFactory:
 
         if session.skill_id:
             try:
-                skill = await self._skill_service.get_skill(session.skill_id)
+                skill = await self._skill_service.get_skill(session.skill_id, scope=scope)
                 if skill.enabled:
                     skill_prompt = render_active(skill)
                     agent_config = self._apply_skill_agent_params(agent_config, skill)
@@ -186,7 +218,7 @@ class TaskRunnerFactory:
             except Exception:
                 skill = None
 
-        llm_model = await self._llm_model_service.resolve_model(model_id)
+        llm_model = await self._llm_model_service.resolve_model(model_id, scope=scope)
         if temperature_override is not None:
             llm_model = llm_model.model_copy(update={"temperature": temperature_override})
         llm = create_resilient_llm(
@@ -202,12 +234,12 @@ class TaskRunnerFactory:
         runtime = get_runtime_config()
         if not runtime.feature_flags.enable_skill_auto_recommend:
             return
-        scope = OwnerScope.personal(session.owner_user_id) if session.owner_user_id else None
+        scope = self._scope_for_session(session)
         message = latest_message
         if not message:
             return
         skills = await self._skill_service.list_skills(enabled_only=True, scope=scope)
-        llm_model = await self._llm_model_service.resolve_model(session.model_id)
+        llm_model = await self._llm_model_service.resolve_model(session.model_id, scope=scope)
         llm = create_resilient_llm(llm_model, llm_model_service=self._llm_model_service)
         recommender = SkillRecommenderService(llm, self._json_parser)
         result = await recommender.recommend(message, skills)
@@ -240,6 +272,11 @@ class TaskRunnerFactory:
             return ""
 
     async def create_runner(self, session: Session) -> AgentTaskRunner:
+        session_scope = self._scope_for_session(session)
+        authorized_codebase, authorized_knowledge_base = await self._authorize_session_resources(
+            session,
+            session_scope,
+        )
         await self._refresh_runtime_config(session)
 
         latest_message = await self._latest_user_message(session.id)
@@ -343,8 +380,7 @@ class TaskRunnerFactory:
 
         codebase_prompt = ""
         if session.codebase_id:
-            async with self._uow_factory() as uow:
-                codebase = await uow.codebase.get_by_id(session.codebase_id)
+            codebase = authorized_codebase
             if codebase:
                 if session.mode == SessionMode.AGENT:
                     codebase_prompt = CODE_AGENT_SKILL_PROMPT
@@ -370,8 +406,7 @@ class TaskRunnerFactory:
             skill_prompt = f"{skill_prompt}\n\n{codebase_prompt}".strip() if skill_prompt else codebase_prompt
         knowledge_base_prompt = ""
         if session.knowledge_base_id:
-            async with self._uow_factory() as uow:
-                kb = await uow.knowledge_base.get_kb(session.knowledge_base_id)
+            kb = authorized_knowledge_base
             if kb:
                 if session.mode == SessionMode.AGENT and session.codebase_id:
                     knowledge_base_prompt = DOC_AGENT_SKILL_PROMPT

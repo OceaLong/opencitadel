@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import logging
 from datetime import datetime, timezone
 from typing import AsyncGenerator, Callable, Optional, Any, Dict, List
 
@@ -14,14 +15,48 @@ from app.domain.services.audit_chain import GENESIS, compute_entry_hash, entry_f
 from app.infrastructure.models.audit_log import AuditLogORM
 from core.config import get_settings
 
+_AUDIT_SECRET_KEY_HINTS = (
+    "api_key",
+    "apikey",
+    "authorization",
+    "password",
+    "passwd",
+    "secret",
+    "credential",
+    "cookie",
+    "access_token",
+    "refresh_token",
+    "headers",
+)
+_AUDIT_REDACTED = "[REDACTED]"
+logger = logging.getLogger(__name__)
+
+
+def sanitize_audit_metadata(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized: Dict[str, Any] = {}
+        for key, item in value.items():
+            normalized = str(key).lower()
+            if any(hint in normalized for hint in _AUDIT_SECRET_KEY_HINTS):
+                sanitized[str(key)] = _AUDIT_REDACTED
+            else:
+                sanitized[str(key)] = sanitize_audit_metadata(item)
+        return sanitized
+    if isinstance(value, (list, tuple)):
+        return [sanitize_audit_metadata(item) for item in value]
+    return value
+
 
 class AuditService:
     def __init__(self, uow_factory: Callable[[], IUnitOfWork]) -> None:
         self._uow_factory = uow_factory
 
     async def record(self, log: AuditLog) -> None:
+        sanitized = log.model_copy(
+            update={"metadata": sanitize_audit_metadata(log.metadata)}
+        )
         async with self._uow_factory() as uow:
-            await uow.audit.add(log)
+            await uow.audit.add(sanitized)
 
     async def list_logs(
             self,
@@ -121,10 +156,17 @@ class AuditService:
         )
 
     async def verify_chain(self, *, limit: Optional[int] = None) -> dict:
-        secret = get_settings().api_key_secret
+        settings = get_settings()
         async with self._uow_factory() as uow:
             logs = await uow.audit.list_chained(limit=limit)
-        return self._verify_logs(logs, secret)
+        result = self._verify_logs(logs, self._verification_keys(settings))
+        if not result["ok"]:
+            logger.critical(
+                "AUDIT_CHAIN_INTEGRITY_FAILURE first_broken_seq=%s total=%s",
+                result["first_broken_seq"],
+                result["total"],
+            )
+        return result
 
     async def verify_session_chain(self, session_id: str) -> dict:
         global_result = await self.verify_chain()
@@ -137,18 +179,40 @@ class AuditService:
                 "session_entries": 0,
                 "session_ok": global_result.get("ok", False),
             }
-        secret = get_settings().api_key_secret
-        session_verify = self._verify_logs(session_logs, secret)
+        # The audit hash chain is global. A resource-filtered subset is not a
+        # standalone chain because its first entry normally does not follow
+        # GENESIS and unrelated entries may appear between session entries.
+        # Therefore session integrity inherits the result of the full chain.
         return {
             **global_result,
             "session_id": session_id,
             "session_entries": len(session_logs),
-            "session_ok": session_verify.get("ok", False),
-            "session_first_broken_seq": session_verify.get("first_broken_seq"),
+            "session_ok": global_result.get("ok", False),
+            "session_first_broken_seq": global_result.get("first_broken_seq"),
         }
 
     @staticmethod
-    def _verify_logs(logs: list[AuditLog], secret: str) -> dict:
+    def _verification_keys(settings) -> dict[str, tuple[str, ...]]:
+        keys: dict[str, tuple[str, ...]] = {
+            settings.audit_signing_key_id: (settings.audit_signing_key,),
+            "legacy": tuple(
+                dict.fromkeys(
+                    [
+                        settings.api_key_secret,
+                        *(settings.api_key_previous_secrets or {}).values(),
+                    ]
+                )
+            ),
+        }
+        for key_id, secret in (settings.audit_previous_signing_keys or {}).items():
+            keys[str(key_id)] = (str(secret),)
+        return keys
+
+    @staticmethod
+    def _verify_logs(
+        logs: list[AuditLog],
+        keys: dict[str, tuple[str, ...]],
+    ) -> dict:
         from datetime import datetime, timezone
 
         prev_hash = GENESIS
@@ -173,8 +237,19 @@ class AuditService:
                 metadata=log.metadata,
                 created_at=log.created_at,
             )
-            expected = compute_entry_hash(secret, fields, prev_hash)
-            if expected != log.entry_hash:
+            key_id = log.signing_key_id or next(
+                (
+                    candidate
+                    for candidate in keys
+                    if candidate != "legacy"
+                ),
+                "legacy",
+            )
+            candidates = keys.get(key_id, ())
+            if not candidates or not any(
+                compute_entry_hash(secret, fields, prev_hash) == log.entry_hash
+                for secret in candidates
+            ):
                 first_broken = log.chain_seq
                 break
             prev_hash = log.entry_hash

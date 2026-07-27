@@ -6,6 +6,9 @@ from typing import Optional
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
+from app.application.security.authorization_context import get_authorization_context
+from app.domain.models.authorization import AuthorizationContext
+from app.infrastructure.security.db_authorization import configure_session_authorization
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from core.config import get_settings
@@ -17,6 +20,7 @@ from .db_invitation_repository import DBInvitationRepository
 from .db_knowledge_base_repository import DBKnowledgeBaseRepository
 from .db_llm_endpoint_repository import DBLLMEndpointRepository
 from .db_llm_model_repository import DBLLMModelRepository
+from .db_llm_model_preference_repository import DBLLMModelPreferenceRepository
 from .db_llm_token_usage_repository import DBLLMTokenUsageRepository
 from .db_memory_entry_repository import DBMemoryEntryRepository
 from .db_oauth_identity_repository import DBOAuthIdentityRepository
@@ -38,28 +42,45 @@ logger = logging.getLogger(__name__)
 class DBUnitOfWork(IUnitOfWork):
     """基于Postgres数据库的UoW实例"""
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        authorization_context: Optional[AuthorizationContext] = None,
+    ):
         """构造函数，完成UoW类初始化"""
         self.session_factory = session_factory
+        self.authorization_context = authorization_context
+        self._active_authorization_context: Optional[AuthorizationContext] = None
         self.db_session: Optional[AsyncSession] = None
 
     async def commit(self):
         """提交数据库持久化"""
         await self.db_session.commit()
+        await self._configure_authorization_context()
 
     async def rollback(self):
         """数据库回退操作"""
         await self.db_session.rollback()
+        await self._configure_authorization_context()
 
     async def __aenter__(self) -> "DBUnitOfWork":
         """进入UoW操作上下文管理器的逻辑"""
         # 1.为每个上下文开启一个新的会话
         self.db_session = self.session_factory()
+        self._active_authorization_context = (
+            self.authorization_context or get_authorization_context()
+        )
+        await self._configure_authorization_context()
 
         # 2.初始化所有数据库仓库
         from app.infrastructure.adapters.domain_ports import default_session_list_notifier
 
-        cipher = ApiKeyCipher(get_settings().api_key_secret)
+        settings = get_settings()
+        cipher = ApiKeyCipher(
+            settings.api_key_secret,
+            key_id=settings.api_key_secret_id,
+            previous_secrets=settings.api_key_previous_secrets,
+        )
         self.audit = DBAuditRepository(db_session=self.db_session)
         self.checkpoint = DBCheckpointRepository(db_session=self.db_session)
         self.codebase = DBCodebaseRepository(db_session=self.db_session)
@@ -72,6 +93,9 @@ class DBUnitOfWork(IUnitOfWork):
         )
         self.llm_endpoint = DBLLMEndpointRepository(db_session=self.db_session, cipher=cipher)
         self.llm_model = DBLLMModelRepository(db_session=self.db_session, cipher=cipher)
+        self.llm_model_preference = DBLLMModelPreferenceRepository(
+            db_session=self.db_session
+        )
         self.skill = DBSkillRepository(db_session=self.db_session)
         self.memory_entry = DBMemoryEntryRepository(db_session=self.db_session)
         self.oauth_identity = DBOAuthIdentityRepository(db_session=self.db_session)
@@ -88,6 +112,14 @@ class DBUnitOfWork(IUnitOfWork):
         self.notification = DBNotificationRepository(db_session=self.db_session)
 
         return self
+
+    async def _configure_authorization_context(self) -> None:
+        context = (
+            self._active_authorization_context
+            or self.authorization_context
+            or get_authorization_context()
+        )
+        await configure_session_authorization(self.db_session, context)
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """退出上下文时执行的逻辑，如果出现异常则回滚，否则提交

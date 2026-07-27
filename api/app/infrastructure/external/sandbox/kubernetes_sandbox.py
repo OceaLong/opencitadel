@@ -129,10 +129,26 @@ class KubernetesSandbox(Sandbox):
                 labels={
                     _POD_LABEL_KEY: _POD_LABEL_VALUE,
                     "opencitadel.io/sandbox": "true",
+                    "app.kubernetes.io/component": "sandbox",
                 },
             ),
             spec=client.V1PodSpec(
                 restart_policy="Never",
+                active_deadline_seconds=max(
+                    60,
+                    int((settings.ttl_minutes or 60) * 60),
+                ),
+                automount_service_account_token=False,
+                enable_service_links=False,
+                security_context=client.V1PodSecurityContext(
+                    run_as_non_root=True,
+                    run_as_user=1000,
+                    run_as_group=1000,
+                    fs_group=1000,
+                    seccomp_profile=client.V1SeccompProfile(
+                        type="RuntimeDefault"
+                    ),
+                ),
                 containers=[
                     client.V1Container(
                         name="sandbox",
@@ -146,6 +162,32 @@ class KubernetesSandbox(Sandbox):
                             requests={"memory": mem, "cpu": cpu},
                             limits={"memory": mem, "cpu": cpu},
                         ),
+                        security_context=client.V1SecurityContext(
+                            allow_privilege_escalation=False,
+                            privileged=False,
+                            read_only_root_filesystem=True,
+                            run_as_non_root=True,
+                            run_as_user=1000,
+                            run_as_group=1000,
+                            capabilities=client.V1Capabilities(drop=["ALL"]),
+                            seccomp_profile=client.V1SeccompProfile(
+                                type="RuntimeDefault"
+                            ),
+                        ),
+                        volume_mounts=[
+                            client.V1VolumeMount(
+                                name="workspace",
+                                mount_path="/home/ubuntu",
+                            ),
+                            client.V1VolumeMount(
+                                name="tmp",
+                                mount_path="/tmp",
+                            ),
+                            client.V1VolumeMount(
+                                name="run",
+                                mount_path="/run",
+                            ),
+                        ],
                         env=[
                             client.V1EnvVar(
                                 name="SERVER_TIMEOUT_MINUTES",
@@ -153,6 +195,28 @@ class KubernetesSandbox(Sandbox):
                             ),
                         ],
                     )
+                ],
+                volumes=[
+                    client.V1Volume(
+                        name="workspace",
+                        empty_dir=client.V1EmptyDirVolumeSource(
+                            size_limit=mem,
+                        ),
+                    ),
+                    client.V1Volume(
+                        name="tmp",
+                        empty_dir=client.V1EmptyDirVolumeSource(
+                            medium="Memory",
+                            size_limit="256Mi",
+                        ),
+                    ),
+                    client.V1Volume(
+                        name="run",
+                        empty_dir=client.V1EmptyDirVolumeSource(
+                            medium="Memory",
+                            size_limit="32Mi",
+                        ),
+                    ),
                 ],
             ),
         )
@@ -424,4 +488,3 @@ class KubernetesSandbox(Sandbox):
         tool_result = ToolResult.from_sandbox(**response.json())
         if not tool_result.success:
             raise RuntimeError(f"重启 K8s 浏览器失败: {tool_result.message or tool_result.data}")
-

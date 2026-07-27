@@ -65,23 +65,23 @@ The Worker orchestrates sandboxes and drives browser automation via **Playwright
 | Layer | Mechanism | Description |
 |-------|-----------|-------------|
 | **Process** | Each sandbox is an independent container or K8s Pod | Not co-located with API/Worker |
-| **Network** | Internal Docker/K8s network; no public ports by default | VNC exposed only via controlled proxy path |
+| **Network** | Internal Docker network + dual-homed Squid egress / K8s NetworkPolicy | No direct PostgreSQL/Redis access; destination ACLs exclude private and metadata ranges |
 | **Resources** | `memory_limit`, CPU shares, TTL / idle timeout | Prevents runaway resource consumption |
 | **Admission** | `SandboxQuota` + host memory probe | Fail-closed when Redis unavailable; tasks queue rather than over-provision |
 | **Lifecycle** | Idle reclamation, low-memory reclamation, orphan cleanup | Single-active coordination via Redis lease |
-| **Permissions** | Non-root recommended; drop capabilities in hardened deployments | See hardening recommendations below |
+| **Permissions** | UID 1000, all capabilities dropped, read-only root, no-new-privileges | Enforced by the runtime policy |
 
 ### Sandbox Drivers
 
 | Driver | Isolation surface | Worker permissions |
 |--------|-------------------|-------------------|
-| **Docker** (Compose) | Host Docker containers | Requires `docker.sock` mount to create `opencitadel-sandbox-*` |
+| **Docker** (Compose) | Internal sandbox network + filtered forward proxy | API/Worker call a token-authenticated broker; only the broker mounts `docker.sock` |
 | **Kubernetes** (Helm) | Namespace Pods + ResourceQuota | ServiceAccount with pods create/delete/list — **no** `docker.sock` required |
 | **Remote gateway** | External execution service | Worker calls HTTP API only; no local container API |
 
 ### Hardening Recommendations
 
-Default images prioritize developer experience. For a stricter production posture:
+The default sandbox runtime already applies the baseline below:
 
 ```yaml
 # docker-compose.yml — sandbox service or template
@@ -89,15 +89,17 @@ security_opt:
   - no-new-privileges:true
 cap_drop:
   - ALL
-cap_add:
-  - NET_BIND_SERVICE
 mem_limit: 1g
+memswap_limit: 1g
+pids_limit: 512
+read_only: true
+user: "1000:1000"
 ```
 
 Additional enterprise controls:
 
 - Configure AppArmor / seccomp per organizational policy
-- Sandbox egress firewall (allowlist LLM, MCP, and required domains only)
+- Keep `networkPolicy.enabled=true`; use an egress proxy for domain-level allowlists
 - Disable VNC in untrusted multi-tenant deployments
 - Keep `sandbox.ttl_minutes` and `idle_timeout_minutes` short on shared hosts
 
@@ -184,28 +186,54 @@ flowchart TD
   Request["Inbound request"] --> AuthN["Resolve Principal"]
   AuthN -->|"missing/invalid"| Deny401["401 Unauthorized"]
   AuthN --> Principal["Principal"]
-  Principal --> AdminCheck{"Admin route?"}
-  AdminCheck -->|"yes and not admin"| Deny403["403 Forbidden"]
-  AdminCheck -->|"no or admin"| Scope["Resolve OwnerScope"]
-  Scope --> Personal["Personal scope — user_id"]
-  Scope --> Team["Team scope — X-Workspace-Id"]
-  Team --> TeamCheck{"User in team?"}
-  TeamCheck -->|"no"| Deny403
-  TeamCheck -->|"yes"| Resource["Access resource by owner scope"]
+  Principal --> Workspace["Resolve WorkspaceContext"]
+  Workspace -->|"missing team membership"| Deny403["403 Forbidden"]
+  Workspace --> Scope["Personal or team OwnerScope"]
+  Scope --> Authz["Immutable AuthorizationContext"]
+  Authz --> GUC["Transaction-local PostgreSQL GUCs"]
+  GUC --> RLS["FORCE ROW LEVEL SECURITY"]
+  RLS --> Resource["Repository query within authorized scope"]
+  Resource -->|"resource outside scope"| Deny404["404 Not Found"]
 ```
+
+Each authenticated request resolves a `Principal`, then a
+`WorkspaceContext` and `OwnerScope`. Those values are copied into an immutable
+`AuthorizationContext`. Every SQLAlchemy transaction binds the context with
+transaction-local `set_config(..., true)` values (`app.auth_mode`,
+`app.user_id`, `app.team_id`, `app.is_admin`, `app.request_id`, and
+`app.system_actor`) before repository work. Tenant tables enable and
+**FORCE ROW LEVEL SECURITY**, so repository predicates and PostgreSQL policies
+form independent authorization layers. Background and migration paths must use
+an explicitly named system actor; anonymous access is not an implicit bypass.
 
 **Global Roles**
 
 | Role | Capabilities |
 |------|--------------|
 | `USER` | Own sessions, personal resources, team resources as member |
-| `ADMIN` | Admin routes (`require_admin`), user management, system config |
+| `AUDITOR` | Read-only admin/compliance evidence; all authenticated mutations are default-denied |
+| `ADMIN` | Platform admin routes, user management, global configuration and global resource mutation |
+
+`AUDITOR` is enforced at both authenticated router and service-key boundaries:
+methods other than `GET`, `HEAD`, and `OPTIONS` are rejected, and a service API
+key owned by an auditor cannot execute A2A operations.
 
 **Workspace Scoping**
 
 - Default: personal scope (`OwnerScope.personal(user_id)`).
 - Team resources: client sends `X-Workspace-Id`; server validates `principal.team_roles` membership.
-- Repositories filter by `OwnerScope`—cross-tenant access returns 403.
+- Missing team membership returns 403. Resource lookups outside an authorized
+  scope normally return 404 so object existence is not disclosed.
+
+| Resource visibility | Read visibility | Mutation authority |
+|---------------------|-----------------|--------------------|
+| Personal | Owning user | Owning non-auditor user |
+| Team | Validated team members | Scope-aware non-auditor members; team administration still requires team `OWNER` / `ADMIN` |
+| Global LLM endpoints/models, Skills, MCP and A2A servers | Authenticated users where the route permits | Platform `ADMIN` only |
+
+Global model rows are catalog/control-plane objects. Selecting a default for a
+personal or team workspace writes a scoped row in
+`llm_model_preferences`; it never mutates the global `llm_models` row.
 
 ### Platform Admin vs Team Admin
 
@@ -261,15 +289,22 @@ server:
   rate_limit_per_minute: 120
 ```
 
-Public endpoints (registration, status) are also limited by the rate limiter when enabled.
+The limiter covers every business path under `/api/` except `/api/status`,
+`/api/metrics`, and `OPTIONS` preflight requests. Each request consumes an IP
+bucket plus one bucket for every presented access cookie, refresh cookie, or
+`X-Api-Key`; credentials are SHA-256 fingerprinted and raw tokens are never
+stored in Redis keys. Production fails closed with `503` and `Retry-After`
+when the Redis limiter is unavailable.
 
 ### Secret Management
 
 | Secret | Environment variable | Rotation notes |
 |--------|---------------------|----------------|
-| LLM Key encryption | `API_KEY_SECRET` | After rotation, re-save all endpoint keys in Settings → Models |
+| LLM Key encryption | `API_KEY_SECRET`, `API_KEY_SECRET_ID`, `API_KEY_PREVIOUS_SECRETS` | Versioned `fernet_v2` key ring with idempotent migration |
+| Audit HMAC signing | `AUDIT_SIGNING_KEY`, `AUDIT_SIGNING_KEY_ID`, `AUDIT_PREVIOUS_SIGNING_KEYS` | Keep prior verification keys until the retention/rollback window closes |
 | JWT signing | `JWT_SECRET` | Invalidates all sessions |
 | Session / Cookie | `SESSION_SECRET` | Invalidates cookie sessions |
+| Sandbox broker | `SANDBOX_BROKER_TOKEN` | Rotate API, Worker, and broker together |
 | DB / Redis / Storage | `POSTGRES_*`, `REDIS_*`, `COS_*`, `MINIO_*` | Update `.env` and restart services |
 
 Production checklist:
@@ -282,6 +317,47 @@ ENV=production
 ```
 
 Legacy plaintext LLM keys (`legacy_plaintext`) are automatically encrypted by `opencitadel-migrate` on deploy.
+
+**LLM credential-key rotation**
+
+1. Add the old id and secret to `API_KEY_PREVIOUS_SECRETS`.
+2. Set a new, unique `API_KEY_SECRET` and `API_KEY_SECRET_ID`.
+3. Restart the migrate environment and run
+   `python -m app.migrate_llm_api_key_rotation`.
+4. Verify all non-empty endpoint credentials use `fernet_v2` and the new key
+   id.
+5. Remove the old key only after the verification and rollback windows close.
+
+The migration reads `legacy_plaintext`, `fernet_v1`, and old `fernet_v2`
+records, then rewrites them under the active key id. It is idempotent and logs
+counts and key ids, never plaintext credentials.
+
+**Audit integrity and signing-key rotation**
+
+New audit rows use `AUDIT_SIGNING_KEY_ID`; verification resolves historical
+rows through `AUDIT_PREVIOUS_SIGNING_KEYS` (legacy rows also consult the API
+key ring). Rotate by retaining the old signing key, setting a new distinct
+`AUDIT_SIGNING_KEY` and id, restarting all writers, then calling
+`GET /api/admin/audit/verify-chain` before and after the change. Only remove
+the old verification key after every retained row that needs it has expired or
+been archived.
+
+Audit rows carry a monotonically chained HMAC, and a PostgreSQL trigger rejects
+`UPDATE` and `DELETE`. Verification emits the critical log marker
+`AUDIT_CHAIN_INTEGRITY_FAILURE` on the first broken sequence. This is tamper
+evidence, not protection from a privileged operator dropping the table or
+rewriting backups; regulated deployments still need external immutable/WORM
+export and alert routing.
+
+### Security verification in CI
+
+- `.github/workflows/ci.yml` runs API/UI/sandbox tests, five image builds and
+  Trivy scans, Compose/Helm/Squid rendering, and this documentation checker.
+- `.github/workflows/security.yml` runs Gitleaks history scanning, dependency
+  review and lockfile audits, CodeQL, and Trivy filesystem/IaC scanning.
+- `.github/workflows/release.yml` builds two architectures with SBOM,
+  provenance, digest scanning, and registry attestations; Actions are pinned to
+  full commit SHAs.
 
 ---
 

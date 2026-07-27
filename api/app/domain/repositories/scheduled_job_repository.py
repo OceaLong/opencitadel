@@ -4,16 +4,23 @@ from datetime import datetime
 from typing import Protocol, List, Optional
 
 from app.domain.models.scheduled_job import ScheduledJob
+from app.domain.models.scope import OwnerScope
 
 
 class ScheduledJobRepository(Protocol):
     async def save(self, job: ScheduledJob) -> None: ...
 
-    async def get_by_id(self, job_id: str) -> Optional[ScheduledJob]: ...
+    async def get_by_id(
+        self,
+        job_id: str,
+        scope: Optional[OwnerScope] = None,
+    ) -> Optional[ScheduledJob]: ...
 
     async def get_by_webhook_token(self, token: str) -> Optional[ScheduledJob]: ...
 
     async def list_by_owner(self, owner_user_id: str) -> List[ScheduledJob]: ...
+
+    async def list_for_scope(self, scope: OwnerScope) -> List[ScheduledJob]: ...
 
     async def list_due(self, now: datetime, limit: int = 20) -> List[ScheduledJob]: ...
 

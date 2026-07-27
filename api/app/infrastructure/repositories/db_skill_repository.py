@@ -7,7 +7,7 @@ from sqlalchemy import or_, select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.skill import Skill
-from app.domain.models.scope import OwnerScope
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.skill_repository import SkillRepository
 from app.infrastructure.models.skill import SkillORM
 
@@ -19,7 +19,13 @@ class DBSkillRepository(SkillRepository):
     def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
         if scope is None:
             return stmt
-        owner_filter = SkillORM.owner_user_id == scope.user_id
+        if scope.type == OwnerScopeType.TEAM:
+            owner_filter = SkillORM.team_id == scope.team_id
+        else:
+            owner_filter = (
+                (SkillORM.owner_user_id == scope.user_id)
+                & SkillORM.team_id.is_(None)
+            )
         return stmt.where(or_(SkillORM.visibility == "global", owner_filter))
 
     async def get_all(self, enabled_only: bool = False, scope: Optional[OwnerScope] = None) -> List[Skill]:
@@ -59,6 +65,7 @@ class DBSkillRepository(SkillRepository):
             record.examples = skill.examples
             record.enabled = skill.enabled
             record.owner_user_id = skill.owner_user_id
+            record.team_id = skill.team_id
             record.visibility = skill.visibility.value if hasattr(skill.visibility, "value") else skill.visibility
             record.updated_at = skill.updated_at
         else:

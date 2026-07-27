@@ -114,7 +114,7 @@ sandbox:
   pool_size: 0
 ```
 
-When `sandbox.address` is non-empty, Workers connect directly to remote sandboxes and no longer call local `docker.sock` (see `DockerSandbox.create()`).
+When `sandbox.address` is non-empty, Workers connect directly to remote sandboxes and bypass the local lifecycle broker (see `DockerSandbox.create()`).
 
 **Sandbox Execution Plane Options**
 

@@ -221,7 +221,7 @@ stateDiagram-v2
 
 | Mode | Typical scenario | Configuration | Description |
 |------|------------------|---------------|-------------|
-| Docker local dynamic sandbox | Single-node Docker Compose | `sandbox.driver=auto` or `docker`, `sandbox.address` empty | Worker mounts `docker.sock`, dynamically creates `opencitadel-sandbox-*` |
+| Docker local dynamic sandbox | Single-node Docker Compose | `sandbox.driver=auto` or `docker`, `sandbox.address` empty | API/Worker use the authenticated lifecycle broker; only the broker has `docker.sock` |
 | Kubernetes Pod sandbox | Helm cluster deployment | `sandbox.driver=kubernetes`, `sandbox.address` empty | Worker uses ServiceAccount + RBAC to create Pods; ResourceQuota limits total |
 | Remote sandbox gateway | External sandbox execution plane | `sandbox.address=http://sandbox-gateway.internal:8080` | Worker connects directly to remote service; no local Docker or K8s API calls |
 

@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import type { SSEEventData } from "@/lib/api/types";
+import type { EventMeta, SSEEventData } from "@/lib/api/types";
 
 import { eventsToTimeline, extractSessionErrors } from "./session-events";
+
+function eventMeta(createdAt: number, eventId?: string): EventMeta {
+  return {
+    event_id: eventId,
+    schema_version: 2,
+    visibility: "user",
+    channel: "ui",
+    persist: true,
+    created_at: createdAt,
+  };
+}
 
 describe("eventsToTimeline error i18n", () => {
   it("prefers localized quota message when error code is present", () => {
@@ -13,7 +24,7 @@ describe("eventsToTimeline error i18n", () => {
           error:
             "Error code: 403 - {'error': {'code': 'insufficient_quota', 'message': 'The free quota has been exhausted.'}}",
           code: "MODEL_QUOTA_EXCEEDED",
-          created_at: 1,
+          ...eventMeta(1),
         },
       },
     ];
@@ -34,7 +45,7 @@ describe("eventsToTimeline error i18n", () => {
         type: "error",
         data: {
           error: "plain backend error",
-          created_at: 1,
+          ...eventMeta(1),
         },
       },
     ];
@@ -52,15 +63,15 @@ describe("eventsToTimeline error i18n", () => {
     const events: SSEEventData[] = [
       {
         type: "error",
-        data: { error: "raw", code: "MODEL_UNAVAILABLE", created_at: 1 },
+        data: { error: "raw", code: "MODEL_UNAVAILABLE", ...eventMeta(1) },
       },
       {
         type: "error",
-        data: { error: "raw", code: "MODEL_UNAVAILABLE", created_at: 2 },
+        data: { error: "raw", code: "MODEL_UNAVAILABLE", ...eventMeta(2) },
       },
       {
         type: "error",
-        data: { error: "raw", code: "MODEL_UNAVAILABLE", created_at: 3 },
+        data: { error: "raw", code: "MODEL_UNAVAILABLE", ...eventMeta(3) },
       },
     ];
 
@@ -77,11 +88,11 @@ describe("eventsToTimeline error i18n", () => {
     const events: SSEEventData[] = [
       {
         type: "error",
-        data: { error: "raw", code: "MODEL_INVALID_REQUEST", created_at: 1, event_id: "1" },
+        data: { error: "raw", code: "MODEL_INVALID_REQUEST", ...eventMeta(1, "1") },
       },
       {
         type: "error",
-        data: { error: "raw", code: "MODEL_INVALID_REQUEST", created_at: 2, event_id: "2" },
+        data: { error: "raw", code: "MODEL_INVALID_REQUEST", ...eventMeta(2, "2") },
       },
     ];
 
@@ -98,7 +109,7 @@ describe("eventsToTimeline error i18n", () => {
           message: "",
           i18n_key: "sessionDetail.modelFallbackNotice",
           i18n_params: { modelName: "qwen3.6-35b-a3b" },
-          created_at: 1,
+          ...eventMeta(1),
         },
       },
     ];
@@ -121,7 +132,7 @@ describe("eventsToTimeline error i18n", () => {
           message: "Current model quota is exhausted. Switched to qwen3.7-max; the task will continue.",
           i18n_key: "sessionDetail.modelFallbackNotice",
           i18n_params: { modelName: "qwen3.7-max" },
-          created_at: 1,
+          ...eventMeta(1),
         },
       },
     ];
@@ -145,7 +156,7 @@ describe("eventsToTimeline error i18n", () => {
           message: "当前模型配额已耗尽，已自动切换至 qwen3.7-max，任务继续执行。",
           i18n_key: "sessionDetail.modelFallbackNotice",
           i18n_params: { modelName: "qwen3.7-max" },
-          created_at: 1,
+          ...eventMeta(1),
         },
       },
     ];
@@ -169,7 +180,7 @@ describe("eventsToTimeline error i18n", () => {
           message: "Fallback notice for qwen3.6-35b-a3b",
           i18n_key: "sessionDetail.unknownMissingKey",
           i18n_params: { modelName: "qwen3.6-35b-a3b" },
-          created_at: 1,
+          ...eventMeta(1),
         },
       },
     ];

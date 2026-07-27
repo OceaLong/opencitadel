@@ -265,3 +265,62 @@ async def test_create_team_invitation_rejects_duplicate_pending_email(monkeypatc
             role=TeamRole.MEMBER,
             email="member@example.com",
         )
+
+
+@pytest.mark.anyio
+async def test_leave_team_keeps_all_repository_calls_inside_unit_of_work():
+    team = Team(id="team-1", name="Product", description="", created_by="owner-1")
+    activity = {"open": False}
+
+    class GuardedTeamRepo(InMemoryTeamRepo):
+        def _require_open(self):
+            assert activity["open"], "repository used after unit of work closed"
+
+        async def get_member(self, team_id: str, user_id: str):
+            self._require_open()
+            return await super().get_member(team_id, user_id)
+
+        async def list_members(self, team_id: str):
+            self._require_open()
+            return await super().list_members(team_id)
+
+        async def remove_member(self, team_id: str, user_id: str) -> None:
+            self._require_open()
+            await super().remove_member(team_id, user_id)
+
+    team_repo = GuardedTeamRepo(
+        [team],
+        [
+            TeamMember(
+                team_id=team.id,
+                user_id="owner-1",
+                role=TeamRole.OWNER,
+            ),
+            TeamMember(
+                team_id=team.id,
+                user_id="owner-2",
+                role=TeamRole.OWNER,
+            ),
+        ],
+    )
+
+    class GuardedUow(FakeUow):
+        async def __aenter__(self):
+            activity["open"] = True
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            activity["open"] = False
+            return False
+
+    service = TeamService(
+        uow_factory=lambda: GuardedUow(
+            InMemoryInvitationRepo(),
+            team_repo,
+            InMemoryUserRepo(),
+        )
+    )
+
+    await service.leave_team(team_id=team.id, user_id="owner-1")
+
+    assert (team.id, "owner-1") not in team_repo.members

@@ -21,6 +21,7 @@ class ScheduledJob(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     owner_user_id: str
+    team_id: Optional[str] = None
     trigger_type: TriggerType = "interval"
     trigger_spec: str = ""
     prompt_template: str = ""

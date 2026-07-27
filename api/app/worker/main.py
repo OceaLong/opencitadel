@@ -671,6 +671,10 @@ class AgentWorker:
 
 
 async def main() -> None:
+    from app.application.security.authorization_context import set_authorization_context
+    from app.domain.models.authorization import AuthorizationContext
+
+    set_authorization_context(AuthorizationContext.system("worker"))
     setup_logging()
     configure_structured_logging()
     container = await init_worker_container()

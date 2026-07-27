@@ -65,23 +65,23 @@ Worker 编排沙箱，并通过 **Worker 进程内的 Playwright** 经 CDP 连�
 | 层级 | 机制 | 说明 |
 |------|------|------|
 | **进程** | 每个沙箱独立容器或 K8s Pod | 不与 API/Worker 同进程 |
-| **网络** | 内部 Docker/K8s 网络；默认无公网端口 | VNC 仅通过受控代理路径暴露 |
+| **网络** | Docker 内部网络 + 双网卡 Squid 出口 / K8s NetworkPolicy | 不可直连 PostgreSQL/Redis；目标 ACL 排除私网与元数据网段 |
 | **资源** | `memory_limit`、CPU 份额、TTL / 空闲超时 | 防止资源失控 |
 | **准入** | `SandboxQuota` + 宿主机内存探测 | Redis 不可用时 fail-closed；任务排队而非超配 |
 | **生命周期** | 空闲回收、低内存回收、孤儿清理 | 通过 Redis lease 单活协调 |
-| **权限** | 建议非 root；加固部署时 drop capabilities | 见下方加固建议 |
+| **权限** | UID 1000、drop 全部 capability、只读根文件系统、no-new-privileges | 由运行时策略强制执行 |
 
 ### 沙箱 Driver
 
 | Driver | 隔离面 | Worker 权限 |
 |--------|--------|-------------|
-| **Docker**（Compose） | 宿主机 Docker 容器 | 需挂载 `docker.sock` 以创建 `opencitadel-sandbox-*` |
+| **Docker**（Compose） | 内部沙箱网络 + 过滤正向代理 | API/Worker 调用 Token 认证 broker；仅 broker 挂载 `docker.sock` |
 | **Kubernetes**（Helm） | 命名空间内 Pod + ResourceQuota | ServiceAccount 具备 pods create/delete/list — **无需** `docker.sock` |
 | **远程网关** | 外部执行服务 | Worker 仅调用 HTTP API；不使用本地容器 API |
 
 ### 加固建议
 
-默认镜像优先开发体验。更严格的生产 posture：
+默认沙箱运行时已强制执行以下基线：
 
 ```yaml
 # docker-compose.yml — sandbox 服务或模板
@@ -89,15 +89,17 @@ security_opt:
   - no-new-privileges:true
 cap_drop:
   - ALL
-cap_add:
-  - NET_BIND_SERVICE
 mem_limit: 1g
+memswap_limit: 1g
+pids_limit: 512
+read_only: true
+user: "1000:1000"
 ```
 
 额外企业级控制：
 
 - 按组织策略配置 AppArmor / seccomp
-- 沙箱网络出站防火墙（仅 allowlist LLM、MCP 及必要域名）
+- 保持 `networkPolicy.enabled=true`；域名级 allowlist 应接入出站代理
 - 不可信多租户部署中禁用 VNC
 - 共享主机上保持较短的 `sandbox.ttl_minutes` 与 `idle_timeout_minutes`
 
@@ -184,28 +186,52 @@ flowchart TD
   Request["入站请求"] --> AuthN["解析 Principal"]
   AuthN -->|"缺失/无效"| Deny401["401 Unauthorized"]
   AuthN --> Principal["Principal"]
-  Principal --> AdminCheck{"Admin 路由?"}
-  AdminCheck -->|"是且非 admin"| Deny403["403 Forbidden"]
-  AdminCheck -->|"否或 admin"| Scope["解析 OwnerScope"]
-  Scope --> Personal["个人 scope — user_id"]
-  Scope --> Team["团队 scope — X-Workspace-Id"]
-  Team --> TeamCheck{"用户在团队中?"}
-  TeamCheck -->|"否"| Deny403
-  TeamCheck -->|"是"| Resource["按 owner scope 访问资源"]
+  Principal --> Workspace["解析 WorkspaceContext"]
+  Workspace -->|"不是团队成员"| Deny403["403 Forbidden"]
+  Workspace --> Scope["个人或团队 OwnerScope"]
+  Scope --> Authz["不可变 AuthorizationContext"]
+  Authz --> GUC["事务级 PostgreSQL GUC"]
+  GUC --> RLS["FORCE ROW LEVEL SECURITY"]
+  RLS --> Resource["Repository 仅查询授权 scope"]
+  Resource -->|"资源在 scope 外"| Deny404["404 Not Found"]
 ```
+
+每个已认证请求先解析 `Principal`，再得到 `WorkspaceContext` 与
+`OwnerScope`，并复制到不可变的 `AuthorizationContext`。每个 SQLAlchemy
+事务在访问 Repository 前，通过事务级 `set_config(..., true)` 绑定
+`app.auth_mode`、`app.user_id`、`app.team_id`、`app.is_admin`、
+`app.request_id` 与 `app.system_actor`。租户表启用并强制
+**FORCE ROW LEVEL SECURITY**，Repository 条件与 PostgreSQL 策略形成两道
+独立授权边界。后台任务和迁移必须声明具名 system actor；匿名上下文不会
+隐式绕过授权。
 
 **全局角色**
 
 | 角色 | 能力 |
 |------|------|
 | `USER` | 自有会话、个人资源、作为成员的团队资源 |
-| `ADMIN` | Admin 路由（`require_admin`）、用户管理、系统配置 |
+| `AUDITOR` | 只读访问管理/合规证据；默认拒绝所有已认证写操作 |
+| `ADMIN` | 平台管理路由、用户管理、全局配置与全局资源变更 |
+
+`AUDITOR` 同时在已认证 Router 与服务 Key 边界强制只读：除 `GET`、
+`HEAD`、`OPTIONS` 外的方法均被拒绝，审计员账号拥有的服务 API Key
+也不能执行 A2A 操作。
 
 **工作区作用域**
 
 - 默认：个人 scope（`OwnerScope.personal(user_id)`）。
 - 团队资源：客户端发送 `X-Workspace-Id`；服务端校验 `principal.team_roles` 成员关系。
-- Repository 按 `OwnerScope` 过滤——跨租户访问返回 403。
+- 非团队成员返回 403；已授权 scope 外的资源查询通常返回 404，避免泄露
+  对象是否存在。
+
+| 资源可见性 | 读取范围 | 变更权限 |
+|-----------|---------|---------|
+| 个人 | 所有者本人 | 非审计员的所有者本人 |
+| 团队 | 已验证团队成员 | scope 内非审计员成员；团队管理仍要求团队 `OWNER` / `ADMIN` |
+| 全局 LLM 端点/模型、Skill、MCP、A2A 服务 | 路由允许的已认证用户 | 仅平台 `ADMIN` |
+
+全局模型行属于目录/控制面对象。个人或团队工作区选择默认模型时写入
+`llm_model_preferences` 的作用域记录，不会修改全局 `llm_models` 行。
 
 ### 平台 Admin 与团队 Admin
 
@@ -261,15 +287,22 @@ server:
   rate_limit_per_minute: 120
 ```
 
-公开端点（注册、状态）在启用时同样受限于流器。
+限流覆盖 `/api/` 下所有业务路径，仅豁免 `/api/status`、
+`/api/metrics` 与 `OPTIONS` 预检请求。每个请求消耗一个 IP bucket，
+并为每个出现的 access cookie、refresh cookie、`X-Api-Key` 分别消耗
+credential bucket；凭证只保存 SHA-256 指纹，Redis key 中不存原始
+Token。生产环境的 Redis 限流器不可用时会 fail closed，返回 `503` 与
+`Retry-After`。
 
 ### 密钥管理
 
 | 密钥 | 环境变量 | 轮换说明 |
 |------|----------|----------|
-| LLM Key 加密 | `API_KEY_SECRET` | 轮换后需在 设置 → 模型 中重新保存所有**端点** Key |
+| LLM Key 加密 | `API_KEY_SECRET`、`API_KEY_SECRET_ID`、`API_KEY_PREVIOUS_SECRETS` | 带版本的 `fernet_v2` 密钥环与幂等迁移 |
+| 审计 HMAC 签名 | `AUDIT_SIGNING_KEY`、`AUDIT_SIGNING_KEY_ID`、`AUDIT_PREVIOUS_SIGNING_KEYS` | 在保留/回滚窗口关闭前保留历史验证 Key |
 | JWT 签名 | `JWT_SECRET` | 使所有会话失效 |
 | Session / Cookie | `SESSION_SECRET` | 使 Cookie 会话失效 |
+| 沙箱 Broker | `SANDBOX_BROKER_TOKEN` | API、Worker 与 Broker 同步轮换 |
 | DB / Redis / 存储 | `POSTGRES_*`、`REDIS_*`、`COS_*`、`MINIO_*` | 更新 `.env` 后重启服务 |
 
 生产检查清单：
@@ -282,6 +315,44 @@ ENV=production
 ```
 
 旧版明文 LLM Key（`legacy_plaintext`）在部署时由 `opencitadel-migrate` 自动加密。
+
+**LLM 凭证加密 Key 轮换**
+
+1. 将旧 id 与 Secret 加入 `API_KEY_PREVIOUS_SECRETS`。
+2. 设置新的、唯一的 `API_KEY_SECRET` 与 `API_KEY_SECRET_ID`。
+3. 重启迁移环境并运行
+   `python -m app.migrate_llm_api_key_rotation`。
+4. 确认所有非空端点凭证均为 `fernet_v2` 且使用新 key id。
+5. 仅在验证与回滚窗口关闭后移除旧 Key。
+
+迁移会读取 `legacy_plaintext`、`fernet_v1` 与旧 `fernet_v2` 记录，再
+使用当前 key id 重写；可安全重复执行，日志只输出数量与 key id，不输出
+明文凭证。
+
+**审计完整性与签名 Key 轮换**
+
+新审计行使用 `AUDIT_SIGNING_KEY_ID`；历史行通过
+`AUDIT_PREVIOUS_SIGNING_KEYS` 校验（legacy 行还会读取 API Key 密钥环）。
+轮换时保留旧签名 Key，设置新的且与其他密钥不同的
+`AUDIT_SIGNING_KEY` 与 id，重启所有写入进程，并在变更前后调用
+`GET /api/admin/audit/verify-chain`。只有在需要旧 Key 的保留记录均已
+过期或归档后，才能移除旧验证 Key。
+
+审计行使用单调序号的 HMAC 链，PostgreSQL Trigger 拒绝 `UPDATE` 与
+`DELETE`。校验发现首个断点时会输出 critical 日志标记
+`AUDIT_CHAIN_INTEGRITY_FAILURE`。这提供的是防篡改证据，不能阻止特权
+数据库管理员删除表或改写备份；受监管部署仍需外部不可变/WORM 导出与
+告警路由。
+
+### CI 安全验证
+
+- `.github/workflows/ci.yml` 运行 API/UI/沙箱测试、五个镜像构建与
+  Trivy 扫描、Compose/Helm/Squid 渲染及本文档检查。
+- `.github/workflows/security.yml` 运行 Gitleaks 历史扫描、依赖评审与
+  Lockfile 审计、CodeQL、Trivy 文件系统/IaC 扫描。
+- `.github/workflows/release.yml` 构建双架构镜像，并生成 SBOM、
+  provenance、摘要扫描与 Registry attestation；Actions 均固定到完整
+  Commit SHA。
 
 ---
 

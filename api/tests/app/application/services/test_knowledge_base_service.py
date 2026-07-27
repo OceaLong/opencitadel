@@ -7,6 +7,7 @@ import pytest
 from app.application.errors.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.domain.models.knowledge_base import KBStatus, KnowledgeBase
+from app.domain.models.scope import OwnerScope
 from app.infrastructure.external.task.task_state import TaskStatus
 
 
@@ -45,17 +46,22 @@ class _FakeTaskState:
 class _FakeKbSaveRepo:
     def __init__(self):
         self.saved: list[KnowledgeBase] = []
+        self.saved_documents: list = []
 
     async def save_kb(self, kb: KnowledgeBase) -> None:
         self.saved.append(kb)
+
+    async def save_document(self, document) -> None:
+        self.saved_documents.append(document)
 
 
 class _FakeUowWithKb:
     knowledge_base = None
     session = None
 
-    def __init__(self, kb_repo):
+    def __init__(self, kb_repo, file_repo=None):
         self.knowledge_base = kb_repo
+        self.file = file_repo
 
     async def __aenter__(self):
         return self
@@ -135,6 +141,57 @@ async def test_add_documents_rejects_when_ingest_running():
     service._task_state = _FakeTaskState(done=False)  # type: ignore[method-assign]
     with pytest.raises(ConflictError):
         await service.add_documents("kb1", file_ids=["file-1"])
+
+
+class _UnauthorizedFileRepo:
+    async def get_by_id(self, file_id: str, scope=None):
+        return None
+
+
+class _VictimFileStorage:
+    async def download_file(self, file_id: str):
+        from io import BytesIO
+        from app.domain.models.file import File
+
+        return (
+            BytesIO(b"victim tenant secret"),
+            File(
+                id=file_id,
+                filename="secret.txt",
+                mime_type="text/plain",
+                owner_user_id="victim-user",
+            ),
+        )
+
+
+@pytest.mark.anyio
+async def test_add_documents_rejects_file_outside_owner_scope(monkeypatch):
+    kb_repo = _FakeKbSaveRepo()
+    uow = _FakeUowWithKb(kb_repo, file_repo=_UnauthorizedFileRepo())
+    service = KnowledgeBaseService(
+        uow_factory=lambda: uow,
+        file_storage=_VictimFileStorage(),
+    )
+    kb = KnowledgeBase(id="kb1", name="test", status=KBStatus.READY)
+    monkeypatch.setattr(
+        service,
+        "get_kb",
+        lambda kb_id, scope=None: _async_kb_obj(kb),
+    )
+    monkeypatch.setattr(
+        service,
+        "reindex",
+        lambda kb_id, scope=None: _async_kb_obj(kb),
+    )
+
+    with pytest.raises(BadRequestError, match="不存在或无权访问"):
+        await service.add_documents(
+            "kb1",
+            file_ids=["victim-file"],
+            scope=OwnerScope.personal("attacker-user"),
+        )
+
+    assert kb_repo.saved_documents == []
 
 
 async def _async_kb(kb_id: str) -> KnowledgeBase:

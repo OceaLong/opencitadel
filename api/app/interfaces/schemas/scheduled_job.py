@@ -48,6 +48,7 @@ class ScheduledJobResponse(BaseModel):
     id: str
     name: str
     owner_user_id: str
+    team_id: Optional[str] = None
     trigger_type: str
     trigger_spec: str
     prompt_template: str

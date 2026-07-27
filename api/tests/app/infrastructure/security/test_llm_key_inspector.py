@@ -8,18 +8,21 @@ from app.infrastructure.security.llm_key_inspector import build_inspection_repor
 def test_build_inspection_report_without_leaking_values():
     cipher = ApiKeyCipher("c" * 32)
     encrypted = cipher.encrypt("sk-secret")
+    encrypted_v2 = cipher.encrypt_versioned("sk-secret-v2")
 
     report = build_inspection_report([
         ("", ApiKeyEncryption.LEGACY_PLAINTEXT),
         ("sk-plain", ApiKeyEncryption.LEGACY_PLAINTEXT),
         (encrypted, ApiKeyEncryption.FERNET_V1),
+        (encrypted_v2, ApiKeyEncryption.FERNET_V2),
         ("maybe-fernet", None),
     ])
 
-    assert report.total_endpoints == 4
+    assert report.total_endpoints == 5
     assert report.empty_key_count == 1
     assert report.legacy_plaintext_count == 1
     assert report.fernet_v1_count == 1
+    assert report.fernet_v2_count == 1
     assert report.unknown_encryption_count == 1
     assert report.suspected_plaintext_count == 1
     assert "sk-secret" not in "\n".join(report.as_log_lines())

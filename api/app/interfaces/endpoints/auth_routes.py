@@ -14,6 +14,7 @@ from app.domain.models.user import User
 from app.domain.utils.safe_redirect import resolve_safe_redirect_path
 from app.infrastructure.security.cookie import AuthCookieManager, REFRESH_COOKIE
 from app.interfaces.auth_dependencies import get_current_principal, verify_csrf
+from app.interfaces.client_ip import get_client_ip
 from app.interfaces.schemas import Response as ApiResponse
 from app.interfaces.schemas.auth import LoginRequest, RegisterRequest, UserResponse
 from app.interfaces.service_dependencies import get_auth_service, get_cookie_manager
@@ -21,13 +22,6 @@ from app.infrastructure.storage.postgres import get_uow
 from core.config import get_settings
 
 router = APIRouter(prefix="/auth", tags=["认证模块"])
-
-
-def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",", 1)[0].strip()
-    return request.client.host if request.client else ""
 
 
 @router.post("/register", response_model=ApiResponse[UserResponse])
@@ -48,7 +42,7 @@ async def register(
         email_or_username=user.email,
         password=body.password,
         user_agent=request.headers.get("user-agent", ""),
-        ip_address=_client_ip(request),
+        ip_address=get_client_ip(request),
     )
     cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
     return ApiResponse.success(UserResponse.from_domain(user))
@@ -66,7 +60,7 @@ async def login(
         email_or_username=body.email_or_username,
         password=body.password,
         user_agent=request.headers.get("user-agent", ""),
-        ip_address=_client_ip(request),
+        ip_address=get_client_ip(request),
     )
     cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
     return ApiResponse.success(UserResponse.from_domain(user))
@@ -85,7 +79,7 @@ async def refresh(
     user, tokens = await auth_service.refresh(
         refresh_token,
         user_agent=request.headers.get("user-agent", ""),
-        ip_address=_client_ip(request),
+        ip_address=get_client_ip(request),
     )
     cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
     return ApiResponse.success(UserResponse.from_domain(user))
@@ -225,7 +219,7 @@ async def oauth_callback(
     tokens = await auth_service.issue_tokens_for_user(
         user,
         user_agent=request.headers.get("user-agent", ""),
-        ip_address=_client_ip(request),
+        ip_address=get_client_ip(request),
     )
     response = RedirectResponse(f"{get_settings().frontend_base_url.rstrip('/')}{oauth_redirect}")
     cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)

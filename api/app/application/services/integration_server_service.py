@@ -13,9 +13,14 @@ from app.domain.models.app_config import A2AConfig, MCPConfig, MCPTransport
 from app.domain.models.audit_log import AuditLog
 from app.domain.models.integration_server import A2AServerRecord, MCPServerRecord
 from app.domain.models.llm_model import ResourceVisibility
-from app.domain.models.scope import OwnerScope
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.utils.integration_config_builder import a2a_records_to_config, mcp_records_to_config
+from app.domain.utils.mcp_url import validate_mcp_http_url
+from app.domain.utils.outbound_url import (
+    OutboundURLRejected,
+    resolve_outbound_url,
+)
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.security.secret_dict_cipher import encrypt_secret_dict, encrypt_url
 
@@ -33,6 +38,14 @@ def _ensure_valid_mcp_record(record: MCPServerRecord) -> None:
     except ValidationError as exc:
         message = exc.errors()[0].get("msg", str(exc)) if exc.errors() else str(exc)
         raise BadRequestError(message) from exc
+    if (
+        record.transport in (MCPTransport.SSE, MCPTransport.STREAMABLE_HTTP)
+        and record.url
+    ):
+        try:
+            validate_mcp_http_url(record.url, resolve_dns=False)
+        except ValueError as exc:
+            raise BadRequestError(str(exc)) from exc
 
 
 def _should_keep(new_val: Any) -> bool:
@@ -77,6 +90,17 @@ def _merge_url_secrets(updated_url: Optional[str], existing_url: Optional[str]) 
     )
 
 
+def _bind_ownership(record, scope: Optional[OwnerScope]) -> None:
+    if record.visibility == ResourceVisibility.GLOBAL:
+        record.owner_user_id = None
+        record.team_id = None
+        return
+    if scope is None:
+        raise BadRequestError("私有集成服务必须绑定访问作用域")
+    record.owner_user_id = scope.user_id
+    record.team_id = scope.team_id if scope.type == OwnerScopeType.TEAM else None
+
+
 class MCPServerService:
     def __init__(
         self,
@@ -107,9 +131,10 @@ class MCPServerService:
         is_admin: bool = False,
     ) -> MCPServerRecord:
         _ensure_stdio_allowed(record, is_admin=is_admin)
+        if record.visibility == ResourceVisibility.GLOBAL and not is_admin:
+            raise ForbiddenError("只有管理员可创建全局 MCP 服务")
         _ensure_valid_mcp_record(record)
-        if scope is not None and record.visibility != ResourceVisibility.GLOBAL:
-            record.owner_user_id = scope.user_id
+        _bind_ownership(record, scope)
         enc_headers, headers_enc = encrypt_secret_dict(record.headers, self._cipher)
         enc_env, env_enc = encrypt_secret_dict(record.env, self._cipher)
         enc_url, url_enc = encrypt_url(record.url, self._cipher)
@@ -143,12 +168,19 @@ class MCPServerService:
             existing = await uow.mcp_server.get_by_id(server_id, scope=scope)
             if not existing:
                 raise NotFoundError(f"MCP 服务[{server_id}]不存在")
+            if updates.visibility == ResourceVisibility.GLOBAL and not is_admin:
+                raise ForbiddenError("只有管理员可修改全局 MCP 服务")
+            if existing.visibility != updates.visibility:
+                raise BadRequestError("MCP 服务可见性不可通过更新修改")
+            if existing.visibility == ResourceVisibility.GLOBAL and not is_admin:
+                raise ForbiddenError("只有管理员可修改全局 MCP 服务")
             updates.id = server_id
             updates.url = _merge_url_secrets(updates.url, existing.url)
             if updates.headers is not None:
                 updates.headers = _apply_masked_secret_updates(updates.headers, existing.headers or {})
             if updates.env is not None:
                 updates.env = _apply_masked_secret_updates(updates.env, existing.env or {})
+            _bind_ownership(updates, scope)
             _ensure_valid_mcp_record(updates)
             enc_headers, headers_enc = encrypt_secret_dict(updates.headers, self._cipher)
             enc_env, env_enc = encrypt_secret_dict(updates.env, self._cipher)
@@ -167,11 +199,15 @@ class MCPServerService:
         server_id: str,
         scope: Optional[OwnerScope] = None,
         actor_user_id: Optional[str] = None,
+        *,
+        is_admin: bool = False,
     ) -> None:
         async with self._uow_factory() as uow:
             existing = await uow.mcp_server.get_by_id(server_id, scope=scope)
             if not existing:
                 raise NotFoundError(f"MCP 服务[{server_id}]不存在")
+            if existing.visibility == ResourceVisibility.GLOBAL and not is_admin:
+                raise ForbiddenError("只有管理员可删除全局 MCP 服务")
             await uow.mcp_server.delete_by_id(server_id)
         await self._audit(actor_user_id, "mcp_server.delete", server_id, {})
 
@@ -181,11 +217,15 @@ class MCPServerService:
         enabled: bool,
         scope: Optional[OwnerScope] = None,
         actor_user_id: Optional[str] = None,
+        *,
+        is_admin: bool = False,
     ) -> MCPServerRecord:
         async with self._uow_factory() as uow:
             existing = await uow.mcp_server.get_by_id(server_id, scope=scope)
             if not existing:
                 raise NotFoundError(f"MCP 服务[{server_id}]不存在")
+            if existing.visibility == ResourceVisibility.GLOBAL and not is_admin:
+                raise ForbiddenError("只有管理员可修改全局 MCP 服务")
             existing.enabled = enabled
             enc_headers, headers_enc = encrypt_secret_dict(existing.headers, self._cipher)
             enc_env, env_enc = encrypt_secret_dict(existing.env, self._cipher)
@@ -232,13 +272,26 @@ class A2AServerConfigService:
         scope: Optional[OwnerScope] = None,
         actor_user_id: Optional[str] = None,
         visibility: ResourceVisibility = ResourceVisibility.GLOBAL,
+        *,
+        is_admin: bool = False,
     ) -> A2AServerRecord:
+        if visibility == ResourceVisibility.GLOBAL and not is_admin:
+            raise ForbiddenError("只有管理员可创建全局 A2A 服务")
+        try:
+            resolve_outbound_url(base_url, resolve_dns=False)
+        except OutboundURLRejected as exc:
+            raise BadRequestError(str(exc)) from exc
         record = A2AServerRecord(
             id=str(uuid.uuid4()),
             base_url=base_url,
             enabled=True,
             visibility=visibility,
             owner_user_id=scope.user_id if scope and visibility != ResourceVisibility.GLOBAL else None,
+            team_id=(
+                scope.team_id
+                if scope and scope.type == OwnerScopeType.TEAM and visibility != ResourceVisibility.GLOBAL
+                else None
+            ),
         )
         async with self._uow_factory() as uow:
             await uow.a2a_server.save(record)
@@ -250,11 +303,15 @@ class A2AServerConfigService:
         server_id: str,
         scope: Optional[OwnerScope] = None,
         actor_user_id: Optional[str] = None,
+        *,
+        is_admin: bool = False,
     ) -> None:
         async with self._uow_factory() as uow:
             existing = await uow.a2a_server.get_by_id(server_id, scope=scope)
             if not existing:
                 raise NotFoundError(f"A2A 服务[{server_id}]不存在")
+            if existing.visibility == ResourceVisibility.GLOBAL and not is_admin:
+                raise ForbiddenError("只有管理员可删除全局 A2A 服务")
             await uow.a2a_server.delete_by_id(server_id)
         await self._audit(actor_user_id, "a2a_server.delete", server_id, {})
 
@@ -264,11 +321,15 @@ class A2AServerConfigService:
         enabled: bool,
         scope: Optional[OwnerScope] = None,
         actor_user_id: Optional[str] = None,
+        *,
+        is_admin: bool = False,
     ) -> A2AServerRecord:
         async with self._uow_factory() as uow:
             existing = await uow.a2a_server.get_by_id(server_id, scope=scope)
             if not existing:
                 raise NotFoundError(f"A2A 服务[{server_id}]不存在")
+            if existing.visibility == ResourceVisibility.GLOBAL and not is_admin:
+                raise ForbiddenError("只有管理员可修改全局 A2A 服务")
             existing.enabled = enabled
             await uow.a2a_server.save(existing)
         await self._audit(actor_user_id, "a2a_server.set_enabled", server_id, {"enabled": enabled})

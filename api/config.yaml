@@ -47,11 +47,11 @@ sandbox:
   image: opencitadel-sandbox
   name_prefix: opencitadel-sandbox
   ttl_minutes: 20
-  network: opencitadel-network
+  network: opencitadel-sandbox-network
   chrome_args: ''
   https_proxy: null
   http_proxy: null
-  no_proxy: localhost,127.0.0.1,opencitadel-api,opencitadel-ui,opencitadel-redis,opencitadel-postgres
+  no_proxy: localhost,127.0.0.1
   cleanup_interval_seconds: 60
   memory_limit: 1g
   cpu_limit: 2

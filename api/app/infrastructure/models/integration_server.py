@@ -40,6 +40,9 @@ class MCPServerORM(Base):
     owner_user_id: Mapped[Optional[str]] = mapped_column(
         String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    team_id: Mapped[Optional[str]] = mapped_column(
+        String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     visibility: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'global'"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
@@ -67,6 +70,7 @@ class MCPServerORM(Base):
             env=env,
             extra=self.extra or {},
             owner_user_id=self.owner_user_id,
+            team_id=self.team_id,
             visibility=ResourceVisibility(self.visibility),
             created_at=self.created_at,
             updated_at=self.updated_at,
@@ -82,6 +86,9 @@ class A2AServerORM(Base):
     owner_user_id: Mapped[Optional[str]] = mapped_column(
         String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    team_id: Mapped[Optional[str]] = mapped_column(
+        String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     visibility: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'global'"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
@@ -96,6 +103,7 @@ class A2AServerORM(Base):
             base_url=self.base_url,
             enabled=self.enabled,
             owner_user_id=self.owner_user_id,
+            team_id=self.team_id,
             visibility=ResourceVisibility(self.visibility),
             created_at=self.created_at,
             updated_at=self.updated_at,

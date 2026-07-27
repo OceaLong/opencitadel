@@ -111,6 +111,22 @@ api/
 
 > **维护说明**：本路由表为手工维护。新增路由时请同步更新本文件与 `README.md`，并对照 `app/interfaces/endpoints/routes.py` 与在线 OpenAPI `/openapi.json`。提交文档 PR 前运行 `./scripts/check-docs.sh`。
 
+### 授权与租户隔离
+
+已认证请求按
+`Principal → WorkspaceContext / OwnerScope → 不可变 AuthorizationContext`
+解析。Unit of Work 在 Repository 查询前，把该上下文写入事务级 PostgreSQL
+GUC。租户表启用 FORCE RLS（强制行级安全），在应用 Scope 条件之后形成
+Defense in Depth。Scope 外资源通常返回 404，避免泄露对象存在性。
+
+- `USER` 可变更自己的个人资源与已验证团队工作区内的资源。
+- `AUDITOR` 只读：默认拒绝已认证写操作，审计员账号拥有的服务 API Key
+  也不能执行 A2A。
+- `ADMIN` 负责平台管理，以及全局 LLM 端点/模型、Skill、MCP、A2A 服务
+  的变更。
+- 个人与团队默认模型写入 `llm_model_preferences`，不会修改全局
+  `llm_models`。
+
 ### 公开 / 无需登录
 
 | 方法 | 路径 | 说明 |
@@ -147,7 +163,9 @@ api/
 |------|------|------|
 | POST | `/a2a` | 入站 A2A（功能开关控制；需有效服务 API Key） |
 
-> 服务 API Key 仅认证调用方，**不携带**团队工作区 scope。团队作用域操作请使用会话 JWT + `X-Workspace-Id`。
+> 服务 API Key 仅认证调用方，**不携带**团队工作区 Scope。团队作用域
+> 操作请使用会话 JWT + `X-Workspace-Id`。`require_service_api_key`
+> 还会拒绝 `AUDITOR` 所有的 Key，因此这些凭证不能调用 A2A。
 
 ### 管理与合规（审计员或管理员）
 
@@ -197,6 +215,10 @@ api/
 | GET/PUT/DELETE | `/llm-models/{id}` | 模型 CRUD |
 | POST | `/llm-models/{id}/set-default` | 设置默认模型 |
 | POST | `/llm-models/{id}/probe-multimodal` | 探测多模态能力 |
+
+端点/模型行属于全局控制面记录，只有 `ADMIN` 可变更。
+`POST /llm-models/{id}/set-default` 写入调用方的个人或团队
+`llm_model_preferences`；只有管理员在全局 Scope 下才修改全局默认项。
 
 详见 [`../docs/architecture/llm-endpoints-and-models.zh-CN.md`](../docs/architecture/llm-endpoints-and-models.zh-CN.md)。
 
@@ -275,13 +297,24 @@ playwright install
 参考 `.env.example`（启动引导与密钥）和 `api/config.yaml`（运行时行为）。关键 `.env` 配置：
 
 ```bash
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
+POSTGRES_ADMIN_USER=postgres       # 仅初始化/管理使用，应用不得使用
+POSTGRES_ADMIN_PASSWORD=<独立管理密码>
+POSTGRES_USER=opencitadel_app      # NOSUPERUSER NOBYPASSRLS 应用角色
+POSTGRES_PASSWORD=<应用密码>
 POSTGRES_DB=opencitadel
 POSTGRES_HOST=localhost
 REDIS_HOST=localhost
 REDIS_PORT=6379
-API_KEY_SECRET=            # 生产环境必须设置强随机值
+REDIS_PASSWORD=<至少16字符的密码>
+API_KEY_SECRET=<至少32字符的随机Secret>
+API_KEY_SECRET_ID=primary
+API_KEY_PREVIOUS_SECRETS={}
+AUDIT_SIGNING_KEY=<另一个至少32字符的随机Secret>
+AUDIT_SIGNING_KEY_ID=primary
+AUDIT_PREVIOUS_SIGNING_KEYS={}
+JWT_SECRET=<另一个至少32字符的随机Secret>
+SESSION_SECRET=<另一个至少32字符的随机Secret>
+SANDBOX_BROKER_TOKEN=<至少32字符的随机Token>
 EMBEDDING_API_KEY=         # 向量记忆启用时填写
 ```
 
@@ -328,18 +361,31 @@ alembic revision --autogenerate -m "描述"
 
 > **注意**：API 启动时会校验 DB schema 是否为 Alembic head，未迁移将拒绝启动（test 环境跳过）。
 
-### LLM API Key 加密迁移
+### 带版本的凭证与审计 Key 轮换
 
-生产环境需在 `.env` 设置强随机 `API_KEY_SECRET`（`openssl rand -hex 32`）。`llm_endpoints.api_key_encryption` 标识存储格式：
+生产环境为 `API_KEY_SECRET` 与 `AUDIT_SIGNING_KEY` 分别设置不同的强随机
+值（`openssl rand -hex 32`）。`llm_endpoints.api_key_encryption` 标识：
 
 | 值 | 含义 |
 |----|------|
 | `legacy_plaintext` | 历史明文（兼容读取） |
-| `fernet_v1` | 使用 `API_KEY_SECRET` 加密 |
+| `fernet_v1` | 旧版无 key id Fernet |
+| `fernet_v2` | 当前 `v2.<key-id>.<token>` 格式 |
 
-`python -m app.migrate`（或 Docker Compose 的 `opencitadel-migrate`）会在 Alembic 后自动加密历史明文。单独修复时可运行 `python -m app.migrate_llm_api_keys`。
+`python -m app.migrate` 会在 Alembic 后自动加密历史明文。轮换加密 Key：
 
-API 与 Worker 在 `ENV=production` 时都会校验弱密钥并拒绝启动。
+1. 在 `API_KEY_PREVIOUS_SECRETS` 保留旧 id/Secret；
+2. 设置新的 `API_KEY_SECRET_ID` 与 `API_KEY_SECRET`；
+3. 运行 `python -m app.migrate_llm_api_key_rotation`；
+4. 确认所有非空记录均为新 id 的 `fernet_v2` 后，才能移除旧 Key。
+
+审计行使用 `AUDIT_SIGNING_KEY_ID`，并通过
+`AUDIT_PREVIOUS_SIGNING_KEYS` 校验历史签名。审计行不可修改，因此只要
+保留记录仍引用旧 id，就必须保留对应签名 Key，并通过
+`GET /api/admin/audit/verify-chain` 校验。
+
+API、Worker、Migrate 在 `ENV=production` 时会拒绝弱密钥与 Placeholder。
+可回滚的 Compose/Helm 顺序见[生产部署指南](../docs/operations/deployment.zh-CN.md#凭证加密与审计签名-key-轮换)。
 
 ## Docker 部署
 

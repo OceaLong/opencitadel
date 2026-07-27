@@ -24,6 +24,7 @@ class MCPServerRecord(BaseModel):
     env: Optional[Dict[str, Any]] = None
     extra: Dict[str, Any] = Field(default_factory=dict)
     owner_user_id: Optional[str] = None
+    team_id: Optional[str] = None
     visibility: ResourceVisibility = ResourceVisibility.GLOBAL
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
@@ -56,6 +57,7 @@ class A2AServerRecord(BaseModel):
     base_url: str
     enabled: bool = True
     owner_user_id: Optional[str] = None
+    team_id: Optional[str] = None
     visibility: ResourceVisibility = ResourceVisibility.GLOBAL
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

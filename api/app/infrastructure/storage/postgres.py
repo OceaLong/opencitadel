@@ -13,6 +13,23 @@ from core.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+def ensure_rls_capable_role(
+    *,
+    env: str,
+    role_name: str,
+    is_superuser: bool,
+    bypasses_rls: bool,
+) -> None:
+    """Fail closed when the production application role can bypass RLS."""
+    if env.lower() != "production":
+        return
+    if is_superuser or bypasses_rls:
+        raise RuntimeError(
+            f"PostgreSQL role[{role_name}] can bypass row-level security; "
+            "configure a NOSUPERUSER NOBYPASSRLS application role"
+        )
+
+
 class Postgres:
     """Postgres数据库基础类，用于完成数据库连接等配置操作"""
 
@@ -51,6 +68,22 @@ class Postgres:
 
             # 4.连接Postgres并执行预操作
             async with self._engine.begin() as async_conn:
+                role_result = await async_conn.execute(
+                    text(
+                        """
+                        SELECT current_user, rolsuper, rolbypassrls
+                        FROM pg_roles
+                        WHERE rolname = current_user
+                        """
+                    )
+                )
+                role = role_result.one()
+                ensure_rls_capable_role(
+                    env=self._settings.env,
+                    role_name=str(role[0]),
+                    is_superuser=bool(role[1]),
+                    bypasses_rls=bool(role[2]),
+                )
                 # 5.检查是否安装了uuid扩展，如果没有的话则安装
                 await async_conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'))
                 logger.info("成功连接Postgres并安装uuid-ossp扩展")
@@ -92,6 +125,10 @@ async def get_db_session() -> AsyncSession:
     # 2.创建会话上下文，在上下文内完成数据提交
     async with session_factory() as session:
         try:
+            from app.infrastructure.security.db_authorization import (
+                configure_session_authorization,
+            )
+            await configure_session_authorization(session)
             yield session
         except Exception as _:
             await session.rollback()

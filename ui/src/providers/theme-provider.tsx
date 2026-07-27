@@ -51,9 +51,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const stored = migrateLocalStorageKey(LEGACY_THEME_KEY, THEME_KEY);
     const initial = parseStoredTheme(stored);
     const resolved = resolveTheme(initial);
-    setThemeState(initial);
-    setResolvedTheme(resolved);
     applyTheme(resolved);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setThemeState(initial);
+      setResolvedTheme(resolved);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

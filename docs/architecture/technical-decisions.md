@@ -314,7 +314,12 @@ Users configure BYO API keys in Settings. Keys must not sit in plaintext in Post
 
 ### Decision
 
-Store keys in `llm_endpoints.api_key`; encrypt with **Fernet** derived from `API_KEY_SECRET`. Migration upgrades `legacy_plaintext` → `fernet_v1`.
+Store keys in `llm_endpoints.api_key`; encrypt with **Fernet** derived from
+`API_KEY_SECRET`. New ciphertext is `fernet_v2` and embeds a validated key id
+(`v2.<key-id>.<token>`). `API_KEY_SECRET_ID` selects the active writer and
+`API_KEY_PREVIOUS_SECRETS` supplies explicitly identified read-only keys during
+rotation. The idempotent migration upgrades `legacy_plaintext`, `fernet_v1`,
+and older `fernet_v2` records to the active key id.
 
 ### Pros
 
@@ -322,12 +327,16 @@ Store keys in `llm_endpoints.api_key`; encrypt with **Fernet** derived from `API
 - Endpoint/model split: one key serves multiple model names ([llm-endpoints-and-models](llm-endpoints-and-models.md))
 - Works offline in air-gapped Compose — no external secret service
 - Migrate job encrypts legacy rows in place
+- Rotation is automated and rollback-safe while the previous-key ring is
+  retained; operators do not edit every endpoint
 
 ### Cons
 
-- **Single key risk**: compromising `API_KEY_SECRET` exposes all endpoint keys
+- **Symmetric key risk**: compromising the active or retained key ring exposes
+  every credential encrypted by those keys
 - Fernet is symmetric — no HSM-backed non-exportable keys
-- Key rotation requires re-saving endpoints in UI (documented in [security-model](security-model.md))
+- Operators must inventory key ids and keep old secrets only for a bounded
+  verification/rollback window
 - Does not replace network-level secret hygiene (backup encryption, `.env` permissions)
 
 ### Alternatives
@@ -538,13 +547,13 @@ Pluggable drivers: `docker`, `kubernetes`, remote gateway via `sandbox.address`;
 
 ### Pros
 
-- **Progressive hardening**: dev uses Docker socket; prod Helm uses Pod + RBAC — same Agent code
+- **Progressive hardening**: Compose uses a narrow Docker broker; Helm uses Pod + RBAC — same Agent code
 - Remote gateway supports air-gapped execution plane separated from control plane
 - Quota + memory probe prevent OOM on shared hosts ([overview](overview.md))
 
 ### Cons
 
-- Docker mode requires `docker.sock` — security concern on shared hosts
+- Docker mode still gives the isolated broker host-level Docker authority; dedicate the host in high-assurance deployments
 - K8s mode needs ServiceAccount RBAC maintenance
 - Not microVM-isolated by default — relies on container boundaries
 

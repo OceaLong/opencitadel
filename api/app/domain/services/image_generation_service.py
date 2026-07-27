@@ -11,8 +11,25 @@ import httpx
 from app.domain.external.file_storage import FileStorage
 from app.domain.models.llm_model import LLMModel, LLMProvider
 from app.domain.services.vision_service import upload_image_bytes_to_storage
+from app.infrastructure.security.outbound_http import (
+    create_ssrf_safe_async_client,
+)
 
 logger = logging.getLogger(__name__)
+_MAX_PROVIDER_RESPONSE_BYTES = 25 * 1024 * 1024
+
+
+def _ensure_bounded_provider_response(response: httpx.Response) -> None:
+    declared = response.headers.get("content-length")
+    if declared:
+        try:
+            declared_size = int(declared)
+        except ValueError:
+            declared_size = 0
+        if declared_size > _MAX_PROVIDER_RESPONSE_BYTES:
+            raise ValueError("图像提供商响应超过允许大小")
+    if len(response.content) > _MAX_PROVIDER_RESPONSE_BYTES:
+        raise ValueError("图像提供商响应超过允许大小")
 
 
 async def generate_image(
@@ -62,9 +79,13 @@ async def _generate_openai_image(
         "response_format": "b64_json",
     }
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with create_ssrf_safe_async_client(
+            timeout=120.0,
+            follow_redirects=False,
+        ) as client:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
+            _ensure_bounded_provider_response(response)
             data = response.json()
             b64 = data["data"][0].get("b64_json", "")
             if not b64:
@@ -95,9 +116,13 @@ async def _generate_gemini_image(
     headers = {"x-goog-api-key": model.api_key, "Content-Type": "application/json"}
     payload = {"instances": [{"prompt": prompt}], "parameters": {"sampleCount": 1}}
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with create_ssrf_safe_async_client(
+            timeout=120.0,
+            follow_redirects=False,
+        ) as client:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
+            _ensure_bounded_provider_response(response)
             data = response.json()
             predictions = data.get("predictions") or []
             if not predictions:
@@ -162,7 +187,10 @@ async def _edit_openai_image(
         "response_format": "b64_json",
     }
     try:
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with create_ssrf_safe_async_client(
+            timeout=180.0,
+            follow_redirects=False,
+        ) as client:
             response = await client.post(
                 url,
                 headers=headers,
@@ -170,6 +198,7 @@ async def _edit_openai_image(
                 files={"image": image_file, "mask": mask_file},
             )
             response.raise_for_status()
+            _ensure_bounded_provider_response(response)
             payload = response.json()
             b64 = payload["data"][0].get("b64_json", "")
             if not b64:

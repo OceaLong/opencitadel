@@ -19,7 +19,34 @@ spec:
           image: {{ .Values.redis.image }}
           ports:
             - containerPort: 6379
-          command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%s-secret" (include "opencitadel.fullname" .) }}
+                  key: REDIS_PASSWORD
+          command:
+            - sh
+            - -c
+            - >-
+              exec redis-server --appendonly yes --maxmemory 256mb
+              --maxmemory-policy allkeys-lru --requirepass "$REDIS_PASSWORD"
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli --no-auth-warning -a "$REDIS_PASSWORD" ping
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli --no-auth-warning -a "$REDIS_PASSWORD" ping
+            initialDelaySeconds: 15
+            periodSeconds: 20
           volumeMounts:
             - name: data
               mountPath: /data

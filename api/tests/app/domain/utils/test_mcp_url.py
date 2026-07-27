@@ -8,7 +8,12 @@ from app.domain.utils.mcp_url import validate_mcp_http_url
 
 
 def test_validate_mcp_http_url_accepts_https():
-    validate_mcp_http_url("https://mcp.example.com/mcp")
+    validate_mcp_http_url(
+        "https://mcp.example.com/mcp",
+        resolver=lambda *args, **kwargs: [
+            (2, 1, 6, "", ("93.184.216.34", 443)),
+        ],
+    )
 
 
 def test_validate_mcp_http_url_rejects_missing_scheme():
@@ -33,4 +38,14 @@ def test_mcp_server_record_rejects_missing_scheme():
             transport=MCPTransport.SSE,
             url="example.com/sse",
             enabled=True,
+        )
+
+
+def test_validate_mcp_http_url_rejects_private_dns():
+    with pytest.raises(ValueError, match="内网"):
+        validate_mcp_http_url(
+            "https://mcp.example.com/mcp",
+            resolver=lambda *args, **kwargs: [
+                (2, 1, 6, "", ("10.0.0.8", 443)),
+            ],
         )

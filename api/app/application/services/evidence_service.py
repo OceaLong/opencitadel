@@ -181,11 +181,14 @@ class EvidenceService:
             manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
             _add("manifest.json", manifest_bytes)
 
-            secret = get_settings().api_key_secret
+            settings = get_settings()
+            secret = settings.audit_signing_key
             sig = hmac.new(secret.encode(), manifest_bytes, hashlib.sha256).hexdigest()
             sig_text = (
                 f"manifest HMAC-SHA256: {sig}\n"
-                f"Verify: HMAC-SHA256(API_KEY_SECRET, manifest.json bytes)\n"
+                "Verify: HMAC-SHA256("
+                f"AUDIT_SIGNING_KEY[{settings.audit_signing_key_id}], "
+                "manifest.json bytes)\n"
             ).encode("utf-8")
             _add("chain-signature.txt", sig_text)
 

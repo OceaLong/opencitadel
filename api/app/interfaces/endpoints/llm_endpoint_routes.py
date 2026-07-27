@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 
 from app.application.errors.exceptions import ForbiddenError
 from app.application.services.llm_endpoint_service import LLMEndpointService
+from app.application.services.audit_service import AuditService
 from app.domain.models.llm_endpoint import LLMEndpoint
 from app.domain.models.llm_model import ResourceVisibility
 from app.domain.models.scope import WorkspaceContext
@@ -19,7 +20,12 @@ from app.interfaces.schemas.llm_endpoint import (
     LLMEndpointListResponse,
     LLMEndpointModelSummary,
 )
-from app.interfaces.service_dependencies import get_llm_endpoint_service, get_llm_model_service
+from app.interfaces.service_dependencies import (
+    get_audit_service,
+    get_llm_endpoint_service,
+    get_llm_model_service,
+)
+from app.interfaces.workspace_audit import record_workspace_audit
 from app.application.services.llm_model_service import LLMModelService
 
 logger = logging.getLogger(__name__)
@@ -56,6 +62,7 @@ async def _to_response(
         api_key=endpoint.api_key,
         visibility=endpoint.visibility.value if hasattr(endpoint.visibility, "value") else endpoint.visibility,
         owner_user_id=endpoint.owner_user_id,
+        team_id=endpoint.team_id,
         model_count=model_count,
         models=models,
         created_at=endpoint.created_at,
@@ -106,12 +113,32 @@ async def create_endpoint(
         ctx: WorkspaceContext = Depends(get_workspace_context),
         llm_endpoint_service: LLMEndpointService = Depends(get_llm_endpoint_service),
         llm_model_service: LLMModelService = Depends(get_llm_model_service),
+        audit_service: AuditService = Depends(get_audit_service),
 ) -> Response[LLMEndpointResponse]:
     endpoint = LLMEndpoint(**request.model_dump())
     if not ctx.principal.is_admin:
         endpoint.visibility = ResourceVisibility.PRIVATE
         endpoint.owner_user_id = ctx.principal.user_id
-    created = await llm_endpoint_service.create_endpoint(endpoint, scope=ctx.scope)
+    created = await llm_endpoint_service.create_endpoint(
+        endpoint,
+        scope=ctx.scope,
+        allow_global_mutation=ctx.principal.is_admin,
+    )
+    await record_workspace_audit(
+        audit_service,
+        ctx,
+        action="llm_endpoint_create",
+        resource_type="llm_endpoint",
+        resource_id=created.id,
+        metadata={
+            "after": {
+                "provider": created.provider.value,
+                "visibility": created.visibility.value,
+                "team_id": created.team_id,
+            },
+            "credential_changed": bool(request.api_key),
+        },
+    )
     return Response.success(data=await _to_response(
             created,
             llm_endpoint_service,
@@ -128,6 +155,7 @@ async def update_endpoint(
         ctx: WorkspaceContext = Depends(get_workspace_context),
         llm_endpoint_service: LLMEndpointService = Depends(get_llm_endpoint_service),
         llm_model_service: LLMModelService = Depends(get_llm_model_service),
+        audit_service: AuditService = Depends(get_audit_service),
 ) -> Response[LLMEndpointResponse]:
     existing = await llm_endpoint_service.get_endpoint(endpoint_id, mask=False, scope=ctx.scope)
     if existing.visibility == ResourceVisibility.GLOBAL and not ctx.principal.is_admin:
@@ -137,7 +165,35 @@ async def update_endpoint(
         if value is not None:
             data[key] = value
     updated = LLMEndpoint(**data)
-    result = await llm_endpoint_service.update_endpoint(endpoint_id, updated, scope=ctx.scope)
+    result = await llm_endpoint_service.update_endpoint(
+        endpoint_id,
+        updated,
+        scope=ctx.scope,
+        allow_global_mutation=ctx.principal.is_admin,
+    )
+    await record_workspace_audit(
+        audit_service,
+        ctx,
+        action="llm_endpoint_update",
+        resource_type="llm_endpoint",
+        resource_id=result.id,
+        metadata={
+            "before": {
+                "provider": existing.provider.value,
+                "visibility": existing.visibility.value,
+                "team_id": existing.team_id,
+            },
+            "after": {
+                "provider": result.provider.value,
+                "visibility": result.visibility.value,
+                "team_id": result.team_id,
+            },
+            "credential_changed": bool(
+                request.api_key
+                and "****" not in request.api_key
+            ),
+        },
+    )
     return Response.success(data=await _to_response(
             result,
             llm_endpoint_service,
@@ -152,9 +208,28 @@ async def delete_endpoint(
         endpoint_id: str,
         ctx: WorkspaceContext = Depends(get_workspace_context),
         llm_endpoint_service: LLMEndpointService = Depends(get_llm_endpoint_service),
+        audit_service: AuditService = Depends(get_audit_service),
 ) -> Response[Optional[Dict]]:
     existing = await llm_endpoint_service.get_endpoint(endpoint_id, mask=False, scope=ctx.scope)
     if existing.visibility == ResourceVisibility.GLOBAL and not ctx.principal.is_admin:
         raise ForbiddenError("全局端点仅管理员可删除")
-    await llm_endpoint_service.delete_endpoint(endpoint_id, scope=ctx.scope)
+    await llm_endpoint_service.delete_endpoint(
+        endpoint_id,
+        scope=ctx.scope,
+        allow_global_mutation=ctx.principal.is_admin,
+    )
+    await record_workspace_audit(
+        audit_service,
+        ctx,
+        action="llm_endpoint_delete",
+        resource_type="llm_endpoint",
+        resource_id=endpoint_id,
+        metadata={
+            "before": {
+                "provider": existing.provider.value,
+                "visibility": existing.visibility.value,
+                "team_id": existing.team_id,
+            }
+        },
+    )
     return Response.success()

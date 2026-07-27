@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "secrets": {
+      "type": "object",
+      "required": [
+        "apiKeySecret",
+        "auditSigningKey",
+        "jwtSecret",
+        "sessionSecret",
+        "bootstrapAdminPassword",
+        "postgresAdminPassword",
+        "postgresPassword",
+        "redisPassword"
+      ],
+      "properties": {
+        "apiKeySecret": { "type": "string", "minLength": 32 },
+        "auditSigningKey": { "type": "string", "minLength": 32 },
+        "jwtSecret": { "type": "string", "minLength": 32 },
+        "sessionSecret": { "type": "string", "minLength": 32 },
+        "bootstrapAdminPassword": { "type": "string", "minLength": 12 },
+        "postgresAdminPassword": { "type": "string", "minLength": 16 },
+        "postgresPassword": { "type": "string", "minLength": 16 },
+        "redisPassword": { "type": "string", "minLength": 16 }
+      }
+    }
+  }
+}

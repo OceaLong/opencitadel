@@ -4,27 +4,57 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.application.errors.exceptions import NotFoundError
 from app.application.services.task_runner_factory import (
     CODE_ASK_SKILL_PROMPT,
     TaskRunnerFactory,
 )
 from app.domain.models.app_config import AgentConfig, AppConfig, MCPConfig, A2AConfig
 from app.domain.models.codebase import Codebase, SessionMode
+from app.domain.models.knowledge_base import KnowledgeBase
 from app.domain.models.llm_model import LLMModel
+from app.domain.models.scope import OwnerScope
 from app.domain.models.session import Session
+from app.domain.models.skill import Skill
 
 
 class _FakeCodebaseRepo:
     def __init__(self, codebase: Codebase | None):
         self._codebase = codebase
 
-    async def get_by_id(self, codebase_id: str):
+    async def get_by_id(self, codebase_id: str, scope=None):
         return self._codebase
+
+
+class _ScopeGuardedCodebaseRepo:
+    def __init__(self, unscoped_codebase: Codebase):
+        self._unscoped_codebase = unscoped_codebase
+
+    async def get_by_id(self, codebase_id: str, scope=None):
+        if scope is None:
+            return self._unscoped_codebase
+        return None
+
+
+class _EmptyKnowledgeBaseRepo:
+    async def get_kb(self, kb_id: str, scope=None):
+        return None
+
+
+class _ScopeGuardedKnowledgeBaseRepo:
+    def __init__(self, unscoped_kb: KnowledgeBase):
+        self._unscoped_kb = unscoped_kb
+
+    async def get_kb(self, kb_id: str, scope=None):
+        if scope is None:
+            return self._unscoped_kb
+        return None
 
 
 class _FakeUow:
     def __init__(self, codebase: Codebase | None):
         self.codebase = _FakeCodebaseRepo(codebase)
+        self.knowledge_base = _EmptyKnowledgeBaseRepo()
 
     async def __aenter__(self):
         return self
@@ -109,6 +139,7 @@ async def test_ask_mode_codebase_tool_uses_ingestion_sandbox():
         codebase_id="cb1",
         mode=SessionMode.ASK,
         model_id="model-1",
+        owner_user_id="user-1",
     )
 
     llm = MagicMock()
@@ -162,6 +193,7 @@ async def test_agent_mode_codebase_tool_uses_session_sandbox():
         codebase_id="cb1",
         mode=SessionMode.AGENT,
         model_id="model-1",
+        owner_user_id="user-1",
     )
 
     llm = MagicMock()
@@ -211,6 +243,7 @@ async def test_ask_mode_injects_codebase_skill_prompt():
         codebase_id="cb1",
         mode=SessionMode.ASK,
         model_id="model-1",
+        owner_user_id="user-1",
     )
 
     llm = MagicMock()
@@ -248,3 +281,160 @@ async def test_ask_mode_injects_codebase_skill_prompt():
         workspace_path="/home/ubuntu/codebase",
     )
     assert expected_prompt in captured["skill_prompt"]
+
+
+@pytest.mark.anyio
+async def test_create_runner_rejects_persisted_cross_scope_codebase():
+    victim_codebase = Codebase(
+        id="victim-cb",
+        name="victim-project",
+        owner_user_id="victim-user",
+    )
+    uow = _FakeUow(None)
+    uow.codebase = _ScopeGuardedCodebaseRepo(victim_codebase)
+    factory = _build_factory(MagicMock())
+    factory._uow_factory = lambda: uow
+    factory._memory_service.save_from_tool = AsyncMock(return_value=MagicMock(id="mem-1"))
+    session = Session(
+        id="sess-1",
+        codebase_id="victim-cb",
+        mode=SessionMode.ASK,
+        model_id="model-1",
+        owner_user_id="attacker-user",
+    )
+    llm = MagicMock(supports_multimodal=False)
+
+    with patch.object(
+            factory,
+            "_resolve_llm_and_config",
+            AsyncMock(return_value=(llm, AgentConfig(), None, "", "", _llm_model())),
+    ), patch(
+        "app.application.services.task_runner_factory.build_subagent_tool",
+        return_value=MagicMock(),
+    ), patch(
+        "app.application.services.task_runner_factory.CodebaseTool",
+        return_value=MagicMock(),
+    ), patch(
+        "app.application.services.task_runner_factory.LazySandbox",
+        return_value=MagicMock(),
+    ), patch(
+        "app.application.services.task_runner_factory.get_runtime_config",
+        return_value=_runtime_config(),
+    ):
+        with pytest.raises(NotFoundError, match="代码库"):
+            await factory.create_runner(session)
+
+
+@pytest.mark.anyio
+async def test_create_runner_rejects_persisted_cross_scope_knowledge_base():
+    victim_kb = KnowledgeBase(
+        id="victim-kb",
+        name="victim-knowledge-base",
+        owner_user_id="victim-user",
+    )
+    uow = _FakeUow(None)
+    uow.knowledge_base = _ScopeGuardedKnowledgeBaseRepo(victim_kb)
+    factory = _build_factory(MagicMock())
+    factory._uow_factory = lambda: uow
+    factory._memory_service.save_from_tool = AsyncMock(return_value=MagicMock(id="mem-1"))
+    session = Session(
+        id="sess-1",
+        knowledge_base_id="victim-kb",
+        mode=SessionMode.ASK,
+        model_id="model-1",
+        owner_user_id="attacker-user",
+    )
+    llm = MagicMock(supports_multimodal=False)
+
+    with patch.object(
+            factory,
+            "_resolve_llm_and_config",
+            AsyncMock(return_value=(llm, AgentConfig(), None, "", "", _llm_model())),
+    ), patch(
+        "app.application.services.task_runner_factory.build_subagent_tool",
+        return_value=MagicMock(),
+    ), patch(
+        "app.application.services.task_runner_factory.KnowledgeBaseTool",
+        return_value=MagicMock(),
+    ), patch(
+        "app.application.services.task_runner_factory.LazySandbox",
+        return_value=MagicMock(),
+    ), patch(
+        "app.application.services.task_runner_factory.get_runtime_config",
+        return_value=_runtime_config(),
+    ):
+        with pytest.raises(NotFoundError, match="知识库"):
+            await factory.create_runner(session)
+
+
+@pytest.mark.anyio
+async def test_runtime_config_preserves_team_scope():
+    factory = _build_factory(MagicMock())
+    session = Session(
+        id="sess-1",
+        owner_user_id="user-1",
+        team_id="team-1",
+    )
+
+    await factory._refresh_runtime_config(session)
+
+    factory._config_provider.resolve_for_owner.assert_awaited_once_with(
+        OwnerScope.team("user-1", "team-1"),
+    )
+
+
+@pytest.mark.anyio
+async def test_llm_resolution_preserves_team_scope():
+    factory = _build_factory(MagicMock())
+    model = _llm_model()
+    factory._llm_model_service.resolve_model = AsyncMock(return_value=model)
+    factory._memory_service.recall_for_session = AsyncMock(return_value="")
+    session = Session(
+        id="sess-1",
+        model_id=model.id,
+        owner_user_id="user-1",
+        team_id="team-1",
+    )
+
+    with patch.object(
+        factory,
+        "_maybe_auto_recommend_skill",
+        AsyncMock(),
+    ), patch(
+        "app.application.services.task_runner_factory.create_resilient_llm",
+        return_value=MagicMock(),
+    ):
+        await factory._resolve_llm_and_config(session)
+
+    factory._llm_model_service.resolve_model.assert_awaited_once_with(
+        model.id,
+        scope=OwnerScope.team("user-1", "team-1"),
+    )
+
+
+@pytest.mark.anyio
+async def test_skill_resolution_preserves_team_scope():
+    factory = _build_factory(MagicMock())
+    model = _llm_model()
+    skill = Skill(id="skill-1", name="Scoped Skill", slug="scoped-skill")
+    factory._skill_service.get_skill = AsyncMock(return_value=skill)
+    factory._llm_model_service.resolve_model = AsyncMock(return_value=model)
+    factory._memory_service.recall_for_session = AsyncMock(return_value="")
+    session = Session(
+        id="sess-1",
+        skill_id=skill.id,
+        model_id=model.id,
+        owner_user_id="user-1",
+        team_id="team-1",
+    )
+
+    with patch(
+        "app.application.services.task_runner_factory.create_resilient_llm",
+        return_value=MagicMock(),
+    ):
+        await factory._resolve_llm_and_config(session)
+
+    factory._skill_service.get_skill.assert_awaited_once_with(
+        skill.id,
+        scope=OwnerScope.team("user-1", "team-1"),
+    )

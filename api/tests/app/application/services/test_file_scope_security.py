@@ -47,3 +47,12 @@ async def test_file_download_validates_owner_scope_before_storage_read():
     assert file_data.read() == b"ok"
     assert file_info.owner_user_id == "user-1"
     assert repo.scope == scope
+
+
+@pytest.mark.asyncio
+async def test_file_download_requires_explicit_owner_scope():
+    repo = _FakeFileRepo()
+    service = FileService(lambda: _FakeUow(repo), _FakeStorage())
+
+    with pytest.raises(TypeError):
+        await service.download_file("file-1")

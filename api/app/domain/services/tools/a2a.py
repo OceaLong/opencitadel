@@ -14,9 +14,16 @@ from app.domain.external.connection_pool import A2AConnectionPoolPort
 from app.domain.models.app_config import A2AConfig
 from app.domain.models.tool_result import ToolResult
 from app.domain.utils.app_config_filter import filter_enabled_a2a_config
+from app.domain.utils.outbound_url import resolve_outbound_url
+from app.infrastructure.security.outbound_http import (
+    create_ssrf_safe_async_client,
+)
 from .base import BaseTool, tool
 
 logger = logging.getLogger(__name__)
+
+_MAX_AGENT_CARD_BYTES = 1024 * 1024
+_MAX_A2A_RESPONSE_BYTES = 5 * 1024 * 1024
 
 """
 A2A客户端管理器的开发思路:
@@ -63,7 +70,10 @@ class A2AClientManager:
         try:
             # 3.初始化httpx客户端
             self._httpx_client = await self._exit_stack.enter_async_context(
-                httpx.AsyncClient(timeout=600),
+                create_ssrf_safe_async_client(
+                    timeout=httpx.Timeout(60.0, connect=10.0),
+                    follow_redirects=False,
+                ),
             )
 
             # 4.记录日志并连接所有配置的a2a服务获取卡片信息
@@ -89,12 +99,21 @@ class A2AClientManager:
 
     async def _load_a2a_agent_card(self, a2a_server_config) -> None:
         try:
+            base_url = resolve_outbound_url(
+                a2a_server_config.base_url,
+            ).url.rstrip("/")
             # 2.调用httpx客户端发起请求
             agent_card_response = await self._httpx_client.get(
-                f"{a2a_server_config.base_url}/.well-known/agent-card.json"
+                f"{base_url}/.well-known/agent-card.json"
             )
             agent_card_response.raise_for_status()
+            self._ensure_response_size(
+                agent_card_response,
+                _MAX_AGENT_CARD_BYTES,
+            )
             agent_card = agent_card_response.json()
+            if agent_card.get("url"):
+                resolve_outbound_url(str(agent_card["url"]))
 
             # 3.存储到agent_cards
             agent_card["enabled"] = a2a_server_config.enabled
@@ -116,6 +135,13 @@ class A2AClientManager:
         # 3.判断端点是否存在
         if url == "":
             return ToolResult(success=False, message="该远程Agent调用端点不存在")
+        try:
+            url = resolve_outbound_url(str(url)).url
+        except ValueError as exc:
+            return ToolResult(
+                success=False,
+                message=f"远程Agent端点未通过出站安全策略: {exc}",
+            )
 
         payload = self._build_message_payload(query)
         try:
@@ -157,14 +183,19 @@ class A2AClientManager:
     async def _invoke_send(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         agent_response = await self._httpx_client.post(url, json=payload)
         agent_response.raise_for_status()
+        self._ensure_response_size(agent_response, _MAX_A2A_RESPONSE_BYTES)
         return agent_response.json()
 
     async def _invoke_stream(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         stream_payload = {**payload, "method": "message/stream"}
         events = []
+        total_bytes = 0
         async with self._httpx_client.stream("POST", url, json=stream_payload) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
+                total_bytes += len(line.encode("utf-8"))
+                if total_bytes > _MAX_A2A_RESPONSE_BYTES:
+                    raise ValueError("A2A 流式响应超过允许大小")
                 if not line:
                     continue
                 if line.startswith("data:"):
@@ -176,6 +207,19 @@ class A2AClientManager:
                 except Exception:
                     events.append({"text": line})
         return {"events": events}
+
+    @staticmethod
+    def _ensure_response_size(response: httpx.Response, limit: int) -> None:
+        declared = response.headers.get("content-length")
+        if declared:
+            try:
+                if int(declared) > limit:
+                    raise ValueError("A2A 响应超过允许大小")
+            except ValueError as exc:
+                if "超过允许大小" in str(exc):
+                    raise
+        if len(response.content) > limit:
+            raise ValueError("A2A 响应超过允许大小")
 
     @classmethod
     def _extract_text(cls, payload: Any) -> str:

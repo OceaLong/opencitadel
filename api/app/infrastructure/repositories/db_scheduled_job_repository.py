@@ -6,6 +6,7 @@ from typing import List, Optional
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.scheduled_job import ScheduledJob
 from app.domain.repositories.scheduled_job_repository import ScheduledJobRepository
 from app.infrastructure.models.scheduled_job import ScheduledJobModel
@@ -14,6 +15,16 @@ from app.infrastructure.models.scheduled_job import ScheduledJobModel
 class DBScheduledJobRepository(ScheduledJobRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
+
+    def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
+        if scope is None:
+            return stmt
+        if scope.type == OwnerScopeType.TEAM:
+            return stmt.where(ScheduledJobModel.team_id == scope.team_id)
+        return stmt.where(
+            ScheduledJobModel.owner_user_id == scope.user_id,
+            ScheduledJobModel.team_id.is_(None),
+        )
 
     async def save(self, job: ScheduledJob) -> None:
         existing = await self.db_session.get(ScheduledJobModel, job.id)
@@ -25,8 +36,17 @@ class DBScheduledJobRepository(ScheduledJobRepository):
             model.id = job.id
             self.db_session.add(model)
 
-    async def get_by_id(self, job_id: str) -> Optional[ScheduledJob]:
-        row = await self.db_session.get(ScheduledJobModel, job_id)
+    async def get_by_id(
+        self,
+        job_id: str,
+        scope: Optional[OwnerScope] = None,
+    ) -> Optional[ScheduledJob]:
+        stmt = self._apply_scope(
+            select(ScheduledJobModel).where(ScheduledJobModel.id == job_id),
+            scope,
+        )
+        result = await self.db_session.execute(stmt)
+        row = result.scalar_one_or_none()
         return row.to_domain() if row else None
 
     async def get_by_webhook_token(self, token: str) -> Optional[ScheduledJob]:
@@ -39,6 +59,14 @@ class DBScheduledJobRepository(ScheduledJobRepository):
         stmt = (
             select(ScheduledJobModel)
             .where(ScheduledJobModel.owner_user_id == owner_user_id)
+            .order_by(ScheduledJobModel.updated_at.desc())
+        )
+        result = await self.db_session.execute(stmt)
+        return [row.to_domain() for row in result.scalars().all()]
+
+    async def list_for_scope(self, scope: OwnerScope) -> List[ScheduledJob]:
+        stmt = (
+            self._apply_scope(select(ScheduledJobModel), scope)
             .order_by(ScheduledJobModel.updated_at.desc())
         )
         result = await self.db_session.execute(stmt)

@@ -67,13 +67,18 @@ type Props = {
 };
 
 function canManageSkill(
-  skill: { visibility?: string; owner_user_id?: string | null; is_builtin: boolean },
+  skill: {
+    visibility?: string;
+    owner_user_id?: string | null;
+    team_id?: string | null;
+    is_builtin: boolean;
+  },
   isAdmin: boolean,
   userId?: string,
 ) {
   if (isAdmin) return !skill.is_builtin;
   if (skill.is_builtin || skill.visibility === "global") return false;
-  return skill.owner_user_id === userId;
+  return Boolean(skill.team_id) || skill.owner_user_id === userId;
 }
 
 export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Props) {

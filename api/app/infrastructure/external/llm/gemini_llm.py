@@ -14,6 +14,7 @@ from app.infrastructure.external.llm.base_llm import (
     openai_content_to_gemini_parts,
 )
 from app.infrastructure.external.llm.structured_output import to_gemini_schema
+from app.infrastructure.security.outbound_http import create_ssrf_safe_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class GeminiLLM(LLM):
         self._capabilities = model.capabilities
         self._base_url = (model.base_url or "https://generativelanguage.googleapis.com").rstrip("/")
         self._api_key = model.api_key
-        self._client = httpx.AsyncClient(timeout=300)
+        self._client = create_ssrf_safe_async_client(timeout=300)
 
     @property
     def model_name(self) -> str:

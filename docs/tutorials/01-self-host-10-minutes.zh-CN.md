@@ -22,6 +22,12 @@ make quickstart
 
 脚本会将 `.env.example` 复制为 `.env`，生成密钥，并提示你设置 `BOOTSTRAP_ADMIN_PASSWORD`。
 
+> **仅用于本地体验：** quickstart 会主动设置 `ENV=development`、
+> `COOKIE_SECURE=false`、内置 MinIO 与 localhost URL。不要把该 `.env`
+> 暴露或直接提升到公网/多用户环境。生产部署前须完整执行[生产部署
+> 指南](../operations/deployment.zh-CN.md)中的 Secret、数据库角色、
+> Redis、可信代理、出站策略与验证流程。
+
 ### 2. 启动服务栈
 
 `make quickstart` 会依次执行：
@@ -42,7 +48,7 @@ make quickstart
 
 ### 4. 添加端点与模型
 
-LLM 配置分两步：**端点**（Provider + API Key）→ **模型**（该端点下的模型名）。完整说明见 [生产部署 — 模型](operations/deployment.zh-CN.md)。
+LLM 配置分两步：**端点**（Provider + API Key）→ **模型**（该端点下的模型名）。完整说明见[生产部署 — 模型](../operations/deployment.zh-CN.md#模型skill-与记忆)。
 
 1. 打开 **Settings → Models**
 2. 点击 **Add endpoint** — 选择 Provider、Base URL、粘贴 API Key
@@ -67,9 +73,10 @@ COMPOSE_PROFILES=local
 STORAGE_PROVIDER=minio
 COOKIE_SECURE=false
 FRONTEND_BASE_URL=http://localhost:8088
+OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal
 ```
 
-在宿主机安装 [Ollama](https://ollama.com)，拉取能力足够的模型（如 `qwen2.5:14b`），然后在 **设置 → 模型** 中添加 **端点**（Base URL `http://host.docker.internal:11434/v1`），再在该端点下添加 **模型**。
+在宿主机安装 [Ollama](https://ollama.com)，拉取能力足够的模型（如 `qwen2.5:14b`），然后在 **设置 → 模型** 中添加 **端点**（Base URL `http://host.docker.internal:11434/v1`），再在该端点下添加 **模型**。保留上述精确私网白名单，不要使用通配符。
 
 **注意：** 较小的本地模型可能难以完成多步 Agent 任务。自带云端 API Key 能获得最佳首次体验。
 

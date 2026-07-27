@@ -8,6 +8,7 @@ import logging
 
 from sqlalchemy import select
 
+from app.domain.models.authorization import AuthorizationContext
 from app.infrastructure.logging import setup_logging
 from app.infrastructure.models.llm_endpoint import LLMEndpointORM
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
@@ -16,6 +17,7 @@ from app.infrastructure.security.llm_key_inspector import (
     count_legacy_plaintext_endpoints,
     inspect_llm_api_keys,
 )
+from app.infrastructure.security.db_authorization import configure_session_authorization
 from app.infrastructure.storage.postgres import get_postgres
 from app.runtime_role import ProcessRole, set_role
 from core.config import get_settings
@@ -33,6 +35,10 @@ async def migrate_legacy_plaintext_api_keys() -> int:
     migrated = 0
     try:
         async with postgres.session_factory() as session:
+            await configure_session_authorization(
+                session,
+                AuthorizationContext.system("migrate-llm-api-keys"),
+            )
             report = await inspect_llm_api_keys(session)
             for line in report.as_log_lines():
                 logger.info("LLM API key inspection: %s", line)

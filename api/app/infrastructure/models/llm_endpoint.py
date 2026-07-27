@@ -31,6 +31,12 @@ class LLMEndpointORM(Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    team_id: Mapped[str | None] = mapped_column(
+        String(255),
+        ForeignKey("teams.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     visibility: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'global'"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
@@ -55,6 +61,7 @@ class LLMEndpointORM(Base):
             api_key=encrypted_api_key,
             api_key_encryption=api_key_encryption,
             owner_user_id=endpoint.owner_user_id,
+            team_id=endpoint.team_id,
             visibility=endpoint.visibility.value,
         )
 
@@ -66,6 +73,7 @@ class LLMEndpointORM(Base):
             base_url=self.base_url,
             api_key=decrypted_api_key,
             owner_user_id=self.owner_user_id,
+            team_id=self.team_id,
             visibility=ResourceVisibility(self.visibility),
             created_at=self.created_at,
             updated_at=self.updated_at,

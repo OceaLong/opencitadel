@@ -121,8 +121,12 @@ class KnowledgeBaseService:
 
         docs: list[KnowledgeDocument] = []
         for file_id in file_ids:
+            async with self._uow_factory() as uow:
+                file_info = await uow.file.get_by_id(file_id, scope=scope)
+            if file_info is None:
+                raise BadRequestError(f"文件[{file_id}]不存在或无权访问")
             try:
-                _stream, file_info = await self._file_storage.download_file(file_id)
+                await self._file_storage.download_file(file_id)
             except Exception as exc:
                 raise BadRequestError(f"文件[{file_id}]不存在或无法下载: {exc}") from exc
             inferred = self._infer_file_source_type(file_info.filename, file_info.mime_type, source_type)

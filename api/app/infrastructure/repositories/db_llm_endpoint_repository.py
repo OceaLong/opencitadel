@@ -27,16 +27,20 @@ class DBLLMEndpointRepository(LLMEndpointRepository):
             return stored
         if encryption == ApiKeyEncryption.FERNET_V1:
             return self.cipher.decrypt_or_raise(stored)
+        if encryption == ApiKeyEncryption.FERNET_V2:
+            return self.cipher.decrypt_versioned(stored)
         raise ApiKeyCipherError(f"未知的 api_key_encryption 格式: {encryption}")
 
     def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
         if scope is None:
             return stmt
-        owner_filter = (
-            LLMEndpointORM.owner_user_id == scope.user_id
-            if scope.type == OwnerScopeType.PERSONAL
-            else LLMEndpointORM.owner_user_id == scope.user_id
-        )
+        if scope.type == OwnerScopeType.TEAM:
+            owner_filter = LLMEndpointORM.team_id == scope.team_id
+        else:
+            owner_filter = (
+                (LLMEndpointORM.owner_user_id == scope.user_id)
+                & LLMEndpointORM.team_id.is_(None)
+            )
         return stmt.where(or_(LLMEndpointORM.visibility == "global", owner_filter))
 
     async def get_all(self, scope: Optional[OwnerScope] = None) -> List[LLMEndpoint]:
@@ -71,13 +75,14 @@ class DBLLMEndpointRepository(LLMEndpointRepository):
             record.base_url = endpoint.base_url
             if encrypted_api_key:
                 record.api_key = encrypted_api_key
-                record.api_key_encryption = ApiKeyEncryption.FERNET_V1
+                record.api_key_encryption = ApiKeyEncryption.FERNET_V2
             record.owner_user_id = endpoint.owner_user_id
+            record.team_id = endpoint.team_id
             record.visibility = endpoint.visibility.value if hasattr(endpoint.visibility, "value") else endpoint.visibility
             record.updated_at = endpoint.updated_at
         else:
             encryption = (
-                ApiKeyEncryption.FERNET_V1
+                ApiKeyEncryption.FERNET_V2
                 if encrypted_api_key
                 else ApiKeyEncryption.LEGACY_PLAINTEXT
             )

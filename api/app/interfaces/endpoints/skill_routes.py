@@ -55,7 +55,7 @@ async def recommend_skill(
         json_parser: JSONParser = Depends(Provide[ApiContainer.json_parser]),
 ) -> Response[SkillRecommendResponse]:
     skills = await skill_service.list_skills(enabled_only=True, scope=ctx.scope)
-    llm_model = await llm_model_service.get_default_model()
+    llm_model = await llm_model_service.get_default_model(scope=ctx.scope)
     if llm_model is None:
         return Response.success(data=SkillRecommendResponse())
     llm = create_resilient_llm(llm_model, llm_model_service=llm_model_service)
@@ -74,6 +74,7 @@ async def import_skill(
         request.content,
         slug=request.slug,
         scope=ctx.scope,
+        allow_global_mutation=ctx.principal.is_admin,
     )
     return Response.success( data=_to_response(created))
 
@@ -98,7 +99,11 @@ async def create_skill(
     if not ctx.principal.is_admin:
         skill.visibility = ResourceVisibility.PRIVATE
         skill.owner_user_id = ctx.principal.user_id
-    created = await skill_service.create_skill(skill, scope=ctx.scope)
+    created = await skill_service.create_skill(
+        skill,
+        scope=ctx.scope,
+        allow_global_mutation=ctx.principal.is_admin,
+    )
     return Response.success( data=_to_response(created))
 
 
@@ -117,7 +122,12 @@ async def update_skill(
         if v is not None:
             data[k] = v
     updated = Skill(**data)
-    result = await skill_service.update_skill(skill_id, updated, scope=ctx.scope)
+    result = await skill_service.update_skill(
+        skill_id,
+        updated,
+        scope=ctx.scope,
+        allow_global_mutation=ctx.principal.is_admin,
+    )
     return Response.success( data=_to_response(result))
 
 
@@ -130,5 +140,9 @@ async def delete_skill(
     existing = await skill_service.get_skill(skill_id, scope=ctx.scope)
     if existing.visibility == ResourceVisibility.GLOBAL and not ctx.principal.is_admin:
         raise ForbiddenError("全局 Skill 仅管理员可删除")
-    await skill_service.delete_skill(skill_id, scope=ctx.scope)
+    await skill_service.delete_skill(
+        skill_id,
+        scope=ctx.scope,
+        allow_global_mutation=ctx.principal.is_admin,
+    )
     return Response.success()

@@ -62,6 +62,12 @@ class SkillORM(Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    team_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        ForeignKey("teams.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     visibility: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'global'"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
@@ -94,6 +100,7 @@ class SkillORM(Base):
             is_builtin=skill.is_builtin,
             enabled=skill.enabled,
             owner_user_id=skill.owner_user_id,
+            team_id=skill.team_id,
             visibility=skill.visibility.value if hasattr(skill.visibility, "value") else skill.visibility,
         )
 
@@ -120,6 +127,7 @@ class SkillORM(Base):
             is_builtin=self.is_builtin,
             enabled=self.enabled,
             owner_user_id=self.owner_user_id,
+            team_id=self.team_id,
             visibility=self.visibility,
             created_at=self.created_at,
             updated_at=self.updated_at,

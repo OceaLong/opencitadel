@@ -8,6 +8,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 from app.infrastructure.models import SessionEventModel
+from app.infrastructure.security.db_authorization import configure_session_authorization
 from app.infrastructure.storage.postgres import get_postgres
 from app.infrastructure.storage.redis import get_redis
 from core.config import get_settings
@@ -35,6 +36,7 @@ def _is_missing_session_events_schema(exc: BaseException) -> bool:
 async def get_global_max_event_seq() -> int:
     try:
         async with get_postgres().session_factory() as session:
+            await configure_session_authorization(session)
             result = await session.execute(select(func.max(SessionEventModel.seq)))
             value = result.scalar_one_or_none()
             return int(value or 0)
@@ -53,6 +55,7 @@ async def _sync_postgres_seq_counter(value: int) -> None:
         return
     try:
         async with get_postgres().session_factory() as session:
+            await configure_session_authorization(session)
             await session.execute(
                 text("SELECT setval('session_events_seq_seq', :seq, true)"),
                 {"seq": value},

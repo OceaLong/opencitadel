@@ -23,7 +23,14 @@ def test_validate_public_url_rejects_metadata_ip():
 
 def test_validate_public_url_accepts_public_https(monkeypatch):
     monkeypatch.setattr(
-        "app.domain.services.knowledge_base.url_guard.socket.getaddrinfo",
+        "app.domain.utils.outbound_url.socket.getaddrinfo",
         lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 0))],
     )
     assert validate_public_url("https://example.com/docs") == "https://example.com/docs"
+
+
+def test_validate_public_url_rejects_credentials_and_docker_port():
+    with pytest.raises(BadRequestError):
+        validate_public_url("https://user:password@example.com/docs")
+    with pytest.raises(BadRequestError):
+        validate_public_url("http://example.com:2375/containers/json")

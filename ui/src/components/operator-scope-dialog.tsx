@@ -62,9 +62,16 @@ export function OperatorScopeDialog({
     const nextScope = initialConfig?.scope ?? DEFAULT_CONFIG.scope;
     const nextDomains = initialConfig?.operatorDomains ?? DEFAULT_CONFIG.operatorDomains;
     const nextProfile = initialConfig?.gateProfile ?? DEFAULT_CONFIG.gateProfile;
-    setScope(nextScope);
-    setDomainsText(nextDomains.join(", "));
-    setGateProfile(nextProfile);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setScope(nextScope);
+      setDomainsText(nextDomains.join(", "));
+      setGateProfile(nextProfile);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [open, initialConfig]);
 
   const parseDomains = (raw: string): string[] =>

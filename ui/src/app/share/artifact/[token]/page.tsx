@@ -25,7 +25,6 @@ function ShareArtifactContent() {
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
-    setLoading(true);
     void artifactsApi
       .getPublicContent(token)
       .then((data) => {

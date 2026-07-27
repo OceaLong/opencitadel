@@ -18,6 +18,7 @@ from app.domain.models.app_config_scope import (
 )
 from app.domain.repositories.app_config_repository import AppConfigRepository
 from app.infrastructure.models.app_config import AppConfigModel, AppConfigRevisionModel
+from app.infrastructure.security.db_authorization import configure_session_authorization
 from app.infrastructure.storage.postgres import get_postgres
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ class DbAppConfigRepository(AppConfigRepository):
     async def load_user_override_payload(self, user_id: str) -> Dict[str, Any]:
         try:
             async with get_postgres().session_factory() as session:
+                await configure_session_authorization(session)
                 result = await session.execute(
                     select(AppConfigModel).where(AppConfigModel.id == user_config_id(user_id))
                 )
@@ -111,6 +113,7 @@ class DbAppConfigRepository(AppConfigRepository):
     async def delete_user_override(self, user_id: str) -> None:
         try:
             async with get_postgres().session_factory() as session:
+                await configure_session_authorization(session)
                 await session.execute(
                     delete(AppConfigModel).where(AppConfigModel.id == user_config_id(user_id))
                 )
@@ -132,6 +135,7 @@ class DbAppConfigRepository(AppConfigRepository):
             raise ServerRequestsError("配置版本查询必须指定 config_id、scope 或 owner_user_id 之一")
         try:
             async with get_postgres().session_factory() as session:
+                await configure_session_authorization(session)
                 stmt = select(AppConfigRevisionModel).order_by(AppConfigRevisionModel.created_at.desc())
                 if config_id:
                     stmt = stmt.where(AppConfigRevisionModel.config_id == config_id)
@@ -149,6 +153,7 @@ class DbAppConfigRepository(AppConfigRepository):
     async def get_revision(self, revision_id: str) -> Optional[AppConfigRevision]:
         try:
             async with get_postgres().session_factory() as session:
+                await configure_session_authorization(session)
                 result = await session.execute(
                     select(AppConfigRevisionModel).where(AppConfigRevisionModel.id == revision_id)
                 )
@@ -181,6 +186,7 @@ class DbAppConfigRepository(AppConfigRepository):
     async def _load_by_id(self, config_id: str) -> Optional[AppConfig]:
         try:
             async with get_postgres().session_factory() as session:
+                await configure_session_authorization(session)
                 result = await session.execute(
                     select(AppConfigModel).where(AppConfigModel.id == config_id)
                 )
@@ -204,6 +210,7 @@ class DbAppConfigRepository(AppConfigRepository):
     ) -> None:
         try:
             async with get_postgres().session_factory() as session:
+                await configure_session_authorization(session)
                 result = await session.execute(
                     select(AppConfigModel).where(AppConfigModel.id == config_id)
                 )

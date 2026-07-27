@@ -37,6 +37,7 @@ class LLMEndpointResponse(BaseModel):
     api_key: str = ""
     visibility: str = "global"
     owner_user_id: Optional[str] = None
+    team_id: Optional[str] = None
     model_count: int = 0
     models: List[LLMEndpointModelSummary] = Field(default_factory=list)
     created_at: datetime

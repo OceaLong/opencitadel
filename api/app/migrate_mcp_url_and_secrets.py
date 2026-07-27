@@ -7,11 +7,13 @@ import logging
 
 from sqlalchemy import select
 
+from app.domain.models.authorization import AuthorizationContext
 from app.infrastructure.logging import setup_logging
 from app.infrastructure.models.integration_server import MCPServerORM
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.security.api_key_encryption import ApiKeyEncryption
 from app.infrastructure.security.secret_dict_cipher import encrypt_secret_dict, encrypt_url
+from app.infrastructure.security.db_authorization import configure_session_authorization
 from app.infrastructure.storage.postgres import get_postgres
 from app.runtime_role import ProcessRole, set_role
 from core.config import get_settings
@@ -32,6 +34,10 @@ async def migrate_mcp_url_and_secrets() -> dict:
     migrated_env = 0
     try:
         async with postgres.session_factory() as session:
+            await configure_session_authorization(
+                session,
+                AuthorizationContext.system("migrate-mcp-secrets"),
+            )
             result = await session.execute(select(MCPServerORM).order_by(MCPServerORM.created_at))
             records = list(result.scalars().all())
 

@@ -41,17 +41,18 @@ type Props = {
 };
 
 function canManageResource(
-  resource: { visibility?: string; owner_user_id?: string | null },
+  resource: { visibility?: string; owner_user_id?: string | null; team_id?: string | null },
   isAdmin: boolean,
   userId?: string,
 ) {
   if (isAdmin) return true;
-  return resource.visibility === "private" && resource.owner_user_id === userId;
+  return resource.visibility === "private"
+    && (Boolean(resource.team_id) || resource.owner_user_id === userId);
 }
 
 export function ModelsSettings({ embedded = false, isAdmin = false, userId }: Props) {
   const endpointsState = useEndpointsSettings();
-  const modelsState = useModelsSettings(endpointsState.reload);
+  const modelsState = useModelsSettings(endpointsState.reload, isAdmin);
   const tNav = useTranslations("settingsNav");
   const t = useTranslations("settingsModels");
   const tCommon = useTranslations("common");
@@ -433,7 +434,7 @@ type EndpointGroupProps = {
   onAddModel: (endpointId: string) => void;
   onEditModel: (model: LLMModel) => void;
   onDeleteModel: (id: string) => void;
-  onSetDefault: (id: string) => void;
+  onSetDefault: (model: LLMModel) => void;
   onProbe: (id: string) => void;
 };
 
@@ -515,8 +516,8 @@ function EndpointGroup({
                 <p className="text-muted-foreground mt-1 text-xs">{model.model_name}</p>
               </div>
               <div className="flex shrink-0 gap-1">
-                {isAdmin && !model.is_default && (
-                  <Button variant="ghost" size="icon" onClick={() => onSetDefault(model.id)}>
+                {!model.is_default && (
+                  <Button variant="ghost" size="icon" onClick={() => onSetDefault(model)}>
                     <Star className="size-4" />
                   </Button>
                 )}

@@ -11,7 +11,9 @@ from sqlalchemy import select
 
 from app.domain.models.app_config import AppConfig
 from app.domain.models.app_config_scope import GLOBAL_CONFIG_ID, LEGACY_DEFAULT_CONFIG_ID
+from app.domain.models.authorization import AuthorizationContext
 from app.infrastructure.models.app_config import AppConfigModel
+from app.infrastructure.security.db_authorization import configure_session_authorization
 from app.infrastructure.storage.postgres import get_postgres
 from core.config import get_settings
 
@@ -37,6 +39,10 @@ async def seed_app_config_from_yaml_if_empty() -> bool:
     await postgres.init()
     try:
         async with postgres.session_factory() as session:
+            await configure_session_authorization(
+                session,
+                AuthorizationContext.system("migrate-app-config-seed"),
+            )
             result = await session.execute(
                 select(AppConfigModel).where(
                     AppConfigModel.id.in_([GLOBAL_CONFIG_ID, LEGACY_DEFAULT_CONFIG_ID])

@@ -6,7 +6,7 @@ from typing import List, Optional
 from sqlalchemy import or_, select, delete, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models.llm_model import LLMModel, LLMProvider
+from app.domain.models.llm_model import LLMModel, LLMProvider, ResourceVisibility
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.llm_model_repository import LLMModelRepository
 from app.infrastructure.models.llm_endpoint import LLMEndpointORM
@@ -27,24 +27,40 @@ class DBLLMModelRepository(LLMModelRepository):
             return stored
         if encryption == ApiKeyEncryption.FERNET_V1:
             return self.cipher.decrypt_or_raise(stored)
+        if encryption == ApiKeyEncryption.FERNET_V2:
+            return self.cipher.decrypt_versioned(stored)
         raise ApiKeyCipherError(f"未知的 api_key_encryption 格式: {encryption}")
 
     def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
         if scope is None:
             return stmt
-        owner_filter = (
-            LLMModelORM.owner_user_id == scope.user_id
-            if scope.type == OwnerScopeType.PERSONAL
-            else LLMModelORM.owner_user_id == scope.user_id
-        )
+        if scope.type == OwnerScopeType.TEAM:
+            owner_filter = LLMModelORM.team_id == scope.team_id
+        else:
+            owner_filter = (
+                (LLMModelORM.owner_user_id == scope.user_id)
+                & LLMModelORM.team_id.is_(None)
+            )
         return stmt.where(or_(LLMModelORM.visibility == "global", owner_filter))
+
+    def _apply_endpoint_scope(self, stmt, scope: Optional[OwnerScope]):
+        if scope is None:
+            return stmt
+        if scope.type == OwnerScopeType.TEAM:
+            owner_filter = LLMEndpointORM.team_id == scope.team_id
+        else:
+            owner_filter = (
+                (LLMEndpointORM.owner_user_id == scope.user_id)
+                & LLMEndpointORM.team_id.is_(None)
+            )
+        return stmt.where(or_(LLMEndpointORM.visibility == "global", owner_filter))
 
     def _model_stmt(self, scope: Optional[OwnerScope] = None):
         stmt = select(LLMModelORM, LLMEndpointORM).join(
             LLMEndpointORM,
             LLMModelORM.endpoint_id == LLMEndpointORM.id,
         )
-        return self._apply_scope(stmt, scope)
+        return self._apply_endpoint_scope(self._apply_scope(stmt, scope), scope)
 
     def _to_domain(self, model_record: LLMModelORM, endpoint_record: LLMEndpointORM) -> LLMModel:
         api_key = self._resolve_api_key(endpoint_record.api_key, endpoint_record.api_key_encryption)
@@ -62,6 +78,18 @@ class DBLLMModelRepository(LLMModelRepository):
         result = await self.db_session.execute(stmt)
         return [self._to_domain(model, endpoint) for model, endpoint in result.all()]
 
+    async def get_all_global(self) -> List[LLMModel]:
+        stmt = (
+            self._model_stmt()
+            .where(LLMModelORM.visibility == ResourceVisibility.GLOBAL.value)
+            .order_by(
+                LLMModelORM.is_default.desc(),
+                LLMModelORM.created_at,
+            )
+        )
+        result = await self.db_session.execute(stmt)
+        return [self._to_domain(model, endpoint) for model, endpoint in result.all()]
+
     async def get_by_id(self, model_id: str, scope: Optional[OwnerScope] = None) -> Optional[LLMModel]:
         stmt = self._model_stmt(scope).where(LLMModelORM.id == model_id)
         result = await self.db_session.execute(stmt)
@@ -75,7 +103,10 @@ class DBLLMModelRepository(LLMModelRepository):
         stmt = (
             select(LLMModelORM, LLMEndpointORM)
             .join(LLMEndpointORM, LLMModelORM.endpoint_id == LLMEndpointORM.id)
-            .where(LLMModelORM.is_default.is_(True))
+            .where(
+                LLMModelORM.is_default.is_(True),
+                LLMModelORM.visibility == ResourceVisibility.GLOBAL.value,
+            )
             .limit(1)
         )
         result = await self.db_session.execute(stmt)
@@ -85,6 +116,7 @@ class DBLLMModelRepository(LLMModelRepository):
         stmt = (
             select(LLMModelORM, LLMEndpointORM)
             .join(LLMEndpointORM, LLMModelORM.endpoint_id == LLMEndpointORM.id)
+            .where(LLMModelORM.visibility == ResourceVisibility.GLOBAL.value)
             .order_by(LLMModelORM.created_at)
             .limit(1)
         )
@@ -119,6 +151,7 @@ class DBLLMModelRepository(LLMModelRepository):
             record.supports_multimodal = model.capabilities.vision
             record.is_default = model.is_default
             record.owner_user_id = model.owner_user_id
+            record.team_id = model.team_id
             record.visibility = model.visibility.value if hasattr(model.visibility, "value") else model.visibility
             record.updated_at = model.updated_at
         else:
@@ -128,10 +161,23 @@ class DBLLMModelRepository(LLMModelRepository):
         await self.db_session.execute(delete(LLMModelORM).where(LLMModelORM.id == model_id))
 
     async def clear_default(self) -> None:
-        await self.db_session.execute(update(LLMModelORM).values(is_default=False))
+        await self.db_session.execute(
+            update(LLMModelORM)
+            .where(LLMModelORM.visibility == ResourceVisibility.GLOBAL.value)
+            .values(is_default=False)
+        )
 
     async def count(self) -> int:
         result = await self.db_session.execute(select(func.count()).select_from(LLMModelORM))
+        return int(result.scalar() or 0)
+
+    async def count_global(self) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(LLMModelORM)
+            .where(LLMModelORM.visibility == ResourceVisibility.GLOBAL.value)
+        )
+        result = await self.db_session.execute(stmt)
         return int(result.scalar() or 0)
 
     async def count_by_endpoint_id(self, endpoint_id: str) -> int:

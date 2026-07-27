@@ -114,7 +114,7 @@ sandbox:
   pool_size: 0
 ```
 
-当 `sandbox.address` 非空时，Worker 直连远程沙箱，不再调用本地 `docker.sock`（见 `DockerSandbox.create()`）。
+当 `sandbox.address` 非空时，Worker 直连远程沙箱并绕过本地生命周期 broker（见 `DockerSandbox.create()`）。
 
 **沙箱执行面选型**
 

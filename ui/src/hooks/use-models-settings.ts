@@ -28,7 +28,7 @@ const emptyForm = (endpointId: string): CreateLLMModelParams => ({
   supports_multimodal: false,
 });
 
-export function useModelsSettings(onModelsChanged?: () => void) {
+export function useModelsSettings(onModelsChanged?: () => void, isAdmin = false) {
   const t = useTranslations("settingsModels");
   const tCommon = useTranslations("common");
   const tErrors = useTranslations("errors");
@@ -148,9 +148,13 @@ export function useModelsSettings(onModelsChanged?: () => void) {
     }
   };
 
-  const handleSetDefault = async (id: string) => {
+  const handleSetDefault = async (model: LLMModel) => {
     try {
-      await modelsApi.setDefault(id);
+      if (isAdmin && model.visibility === "global") {
+        await modelsApi.setDefault(model.id);
+      } else {
+        await modelsApi.setPreferred(model.id);
+      }
       toast.success(t("setDefaultSuccess"));
       invalidateModelsCache();
       await load();

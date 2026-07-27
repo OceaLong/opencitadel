@@ -24,6 +24,7 @@ class LLMApiKeyInspectionReport:
     unknown_encryption_count: int
     suspected_fernet_shape_count: int
     suspected_plaintext_count: int
+    fernet_v2_count: int = 0
 
     def as_log_lines(self) -> list[str]:
         return [
@@ -31,6 +32,7 @@ class LLMApiKeyInspectionReport:
             f"empty_api_key={self.empty_key_count}",
             f"legacy_plaintext={self.legacy_plaintext_count}",
             f"fernet_v1={self.fernet_v1_count}",
+            f"fernet_v2={self.fernet_v2_count}",
             f"unknown_encryption={self.unknown_encryption_count}",
             f"suspected_fernet_shape={self.suspected_fernet_shape_count}",
             f"suspected_plaintext={self.suspected_plaintext_count}",
@@ -42,6 +44,7 @@ def build_inspection_report(rows: Iterable[tuple[str, str | None]]) -> LLMApiKey
     empty_key = 0
     legacy_plaintext = 0
     fernet_v1 = 0
+    fernet_v2 = 0
     unknown_encryption = 0
     suspected_fernet_shape = 0
     suspected_plaintext = 0
@@ -58,6 +61,9 @@ def build_inspection_report(rows: Iterable[tuple[str, str | None]]) -> LLMApiKey
         if encryption == ApiKeyEncryption.FERNET_V1:
             fernet_v1 += 1
             continue
+        if encryption == ApiKeyEncryption.FERNET_V2:
+            fernet_v2 += 1
+            continue
 
         unknown_encryption += 1
         if ApiKeyCipher.looks_like_fernet_token(stored):
@@ -73,6 +79,7 @@ def build_inspection_report(rows: Iterable[tuple[str, str | None]]) -> LLMApiKey
         unknown_encryption_count=unknown_encryption,
         suspected_fernet_shape_count=suspected_fernet_shape,
         suspected_plaintext_count=suspected_plaintext,
+        fernet_v2_count=fernet_v2,
     )
 
 

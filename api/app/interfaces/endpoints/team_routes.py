@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request, Response as StarletteResponse
 from app.application.services.auth_service import AuthService
 from app.application.services.team_service import TeamService
 from app.interfaces.auth_dependencies import get_current_principal
+from app.interfaces.client_ip import get_client_ip
 from app.interfaces.schemas import Response
 from app.interfaces.schemas.team import (
     CreateTeamInvitationRequest,
@@ -114,8 +115,6 @@ async def register_and_accept_invitation(
         auth_service: AuthService = Depends(get_auth_service),
         cookie_manager: AuthCookieManager = Depends(get_cookie_manager),
 ) -> Response[TeamMemberResponse]:
-    from app.interfaces.endpoints.auth_routes import _client_ip
-
     result = await service.register_and_accept_invitation(
         token=token,
         email=request.email,
@@ -126,7 +125,7 @@ async def register_and_accept_invitation(
         email_or_username=result.user.email,
         password=request.password,
         user_agent=http_request.headers.get("user-agent", ""),
-        ip_address=_client_ip(http_request),
+        ip_address=get_client_ip(http_request),
     )
     cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
     return Response.success(data=TeamMemberResponse.from_domain(result.member),

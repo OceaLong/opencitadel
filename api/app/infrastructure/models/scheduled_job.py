@@ -19,6 +19,9 @@ class ScheduledJobModel(Base):
     id: Mapped[str] = mapped_column(String(255), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     owner_user_id: Mapped[str] = mapped_column(String(255), ForeignKey("users.id", ondelete="CASCADE"))
+    team_id: Mapped[Optional[str]] = mapped_column(
+        String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     trigger_type: Mapped[str] = mapped_column(String(32), nullable=False)
     trigger_spec: Mapped[str] = mapped_column(String(512), nullable=False, server_default="")
     prompt_template: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
@@ -49,6 +52,7 @@ class ScheduledJobModel(Base):
             "id": self.id,
             "name": self.name,
             "owner_user_id": self.owner_user_id,
+            "team_id": self.team_id,
             "trigger_type": self.trigger_type,
             "trigger_spec": self.trigger_spec,
             "prompt_template": self.prompt_template,

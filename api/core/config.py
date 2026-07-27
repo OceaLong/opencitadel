@@ -1,12 +1,24 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from functools import lru_cache
+import ipaddress
 from urllib.parse import quote_plus
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_LOCAL_URI = "postgresql+asyncpg://postgres:postgres@localhost:5432/opencitadel"
+_PLACEHOLDER_MARKERS = (
+    "change-in-production",
+    "change-me",
+    "replace-with",
+    "changeme",
+)
+
+
+def _looks_like_placeholder(value: str) -> bool:
+    normalized = value.strip().lower()
+    return any(marker in normalized for marker in _PLACEHOLDER_MARKERS)
 
 
 class Settings(BaseSettings):
@@ -18,8 +30,18 @@ class Settings(BaseSettings):
     log_format: str = "text"  # text | json
     app_config_filepath: str = "config.yaml"
     api_key_secret: str = "opencitadel-api-key-secret-change-in-production"
+    api_key_secret_id: str = "primary"
+    api_key_previous_secrets: dict[str, str] = Field(default_factory=dict)
+    audit_signing_key: str = "opencitadel-audit-signing-key-change-in-production"
+    audit_signing_key_id: str = "primary"
+    audit_previous_signing_keys: dict[str, str] = Field(default_factory=dict)
     jwt_secret: str = "opencitadel-jwt-secret-change-in-production"
     session_secret: str = "opencitadel-session-secret-change-in-production"
+    sandbox_broker_url: str = ""
+    sandbox_broker_token: str = ""
+    outbound_allowed_ports: str = "80,443,8080,8443,11434"
+    outbound_private_host_allowlist: str = ""
+    trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128"
     access_token_ttl_seconds: int = 900
     refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30
     cookie_domain: str = ""
@@ -103,10 +125,87 @@ class Settings(BaseSettings):
             for field, default in insecure_values.items():
                 if getattr(self, field) == default:
                     raise ValueError(f"{field} must be changed in production")
+            secret_fields = (
+                "api_key_secret",
+                "audit_signing_key",
+                "jwt_secret",
+                "session_secret",
+            )
+            for field in secret_fields:
+                value = getattr(self, field)
+                if len(value) < 32:
+                    raise ValueError(
+                        f"{field} must contain at least 32 characters in production"
+                    )
+                if _looks_like_placeholder(value):
+                    raise ValueError(
+                        f"{field} must not contain a placeholder value in production"
+                    )
+            secret_values = [getattr(self, field) for field in secret_fields]
+            if len(set(secret_values)) != len(secret_values):
+                raise ValueError(
+                    "audit_signing_key, api_key_secret, jwt_secret, and "
+                    "session_secret must be distinct in production"
+                )
+            if not self.api_key_secret_id.strip():
+                raise ValueError("api_key_secret_id must be set in production")
+            if not self.audit_signing_key_id.strip():
+                raise ValueError("audit_signing_key_id must be set in production")
+            if self.sandbox_broker_url and len(self.sandbox_broker_token) < 32:
+                raise ValueError(
+                    "sandbox_broker_token must contain at least 32 characters "
+                    "when sandbox_broker_url is configured"
+                )
+            if self.sandbox_broker_url and _looks_like_placeholder(
+                self.sandbox_broker_token
+            ):
+                raise ValueError(
+                    "sandbox_broker_token must not contain a placeholder value "
+                    "in production"
+                )
             if not self.cookie_secure:
                 raise ValueError("cookie_secure must be true in production")
-            if not self.bootstrap_admin_password:
-                raise ValueError("bootstrap_admin_password must be set in production")
+            if (
+                len(self.bootstrap_admin_password) < 12
+                or _looks_like_placeholder(self.bootstrap_admin_password)
+            ):
+                raise ValueError(
+                    "bootstrap_admin_password must contain at least 12 "
+                    "characters in production"
+                )
+            if (
+                self.postgres_password == "postgres"
+                or len(self.postgres_password) < 16
+                or _looks_like_placeholder(self.postgres_password)
+            ):
+                raise ValueError(
+                    "postgres_password must be changed and contain at least "
+                    "16 characters in production"
+                )
+            if (
+                not self.redis_password
+                or len(self.redis_password) < 16
+                or _looks_like_placeholder(self.redis_password)
+            ):
+                raise ValueError(
+                    "redis_password must contain at least 16 characters in production"
+                )
+        try:
+            for value in self.trusted_proxy_cidrs.split(","):
+                if value.strip():
+                    ipaddress.ip_network(value.strip(), strict=False)
+        except ValueError as exc:
+            raise ValueError("trusted_proxy_cidrs contains an invalid CIDR") from exc
+        try:
+            ports = {
+                int(value.strip())
+                for value in self.outbound_allowed_ports.split(",")
+                if value.strip()
+            }
+        except ValueError as exc:
+            raise ValueError("outbound_allowed_ports must contain integers") from exc
+        if not ports or any(port < 1 or port > 65535 for port in ports):
+            raise ValueError("outbound_allowed_ports contains an invalid port")
         return self
 
 

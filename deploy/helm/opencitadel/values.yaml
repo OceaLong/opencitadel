@@ -29,7 +29,8 @@ rbac:
 postgresql:
   enabled: true
   image: pgvector/pgvector:pg16
-  user: postgres
+  adminUser: postgres
+  user: opencitadel_app
   database: opencitadel
   storage: 20Gi
   resources:
@@ -68,6 +69,9 @@ resourceQuota:
   enabled: true
   maxSandboxPods: "20"
   requestsMemory: "20Gi"
+
+networkPolicy:
+  enabled: true
 
 service:
   type: ClusterIP
@@ -120,13 +124,17 @@ env:
   LOG_LEVEL: INFO
   APP_CONFIG_FILEPATH: config.yaml
   POSTGRES_HOST: opencitadel-postgres
-  POSTGRES_USER: postgres
+  POSTGRES_USER: opencitadel_app
   POSTGRES_DB: opencitadel
   REDIS_HOST: opencitadel-redis
   REDIS_PORT: "6379"
   REDIS_DB: "0"
   USE_DB_APP_CONFIG: "true"
   COOKIE_SECURE: "true"
+  OUTBOUND_ALLOWED_PORTS: "80,443,8080,8443,11434"
+  OUTBOUND_PRIVATE_HOST_ALLOWLIST: ""
+  # Set to the exact ingress-controller or service-mesh proxy CIDRs.
+  TRUSTED_PROXY_CIDRS: "10.0.0.0/8"
   FRONTEND_BASE_URL: https://opencitadel.local
   OAUTH_REDIRECT_BASE: https://opencitadel.local/api/auth/oauth
   STORAGE_PROVIDER: cos
@@ -141,12 +149,18 @@ env:
 # 敏感配置（渲染为 Secret，通过 envFrom 注入）
 secrets:
   apiKeySecret: replace-with-strong-random-secret
+  apiKeySecretId: primary
+  apiKeyPreviousSecrets: "{}"
+  auditSigningKey: replace-with-distinct-strong-audit-key
+  auditSigningKeyId: primary
+  auditPreviousSigningKeys: "{}"
   jwtSecret: replace-with-strong-random-secret
   sessionSecret: replace-with-strong-random-secret
   bootstrapAdminEmail: admin@example.com
   bootstrapAdminPassword: replace-with-strong-password
-  postgresPassword: postgres
-  redisPassword: ""
+  postgresAdminPassword: replace-with-distinct-admin-password
+  postgresPassword: replace-with-strong-postgres-password
+  redisPassword: replace-with-strong-redis-password
   cosSecretId: ""
   cosSecretKey: ""
   minioAccessKey: minioadmin

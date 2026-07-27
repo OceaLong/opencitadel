@@ -30,10 +30,11 @@ from app.interfaces.schemas.marketplace import (
 )
 from app.interfaces.service_dependencies import get_marketplace_service
 
+public_router = APIRouter(prefix="/marketplace", tags=["应用市场"])
 router = APIRouter(prefix="/marketplace", tags=["应用市场"])
 
 
-@router.get("/apps", response_model=Response[MarketplaceAppsResponse])
+@public_router.get("/apps", response_model=Response[MarketplaceAppsResponse])
 async def list_apps(
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[MarketplaceAppsResponse]:
@@ -44,13 +45,14 @@ async def list_apps(
 @router.post("/assistant/route", response_model=Response[MarketplaceRouteResponse])
 async def route_marketplace_request(
         request: MarketplaceRouteRequest,
-        _principal=Depends(get_current_principal),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[MarketplaceRouteResponse]:
     try:
         data = await marketplace_service.route_request(
             request.query,
             model_id=request.model_id,
+            scope=ctx.scope,
         )
         return Response.success(data=MarketplaceRouteResponse(**data))
     except ValueError as exc:
@@ -60,7 +62,7 @@ async def route_marketplace_request(
 @router.post("/nutrition/analyze", response_model=Response[NutritionAnalysisResponse])
 async def analyze_nutrition(
         request: NutritionAnalysisRequest,
-        _principal=Depends(get_current_principal),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[NutritionAnalysisResponse]:
     try:
@@ -69,6 +71,7 @@ async def analyze_nutrition(
             model_id=request.model_id,
             weight_kg=request.weight_kg,
             goal=request.goal,
+            scope=ctx.scope,
         )
         return Response.success(data=NutritionAnalysisResponse(**data))
     except ValueError as exc:
@@ -78,7 +81,7 @@ async def analyze_nutrition(
 @router.post("/nutrition/followup", response_model=Response[NutritionFollowupResponse])
 async def answer_nutrition_followup(
         request: NutritionFollowupRequest,
-        _principal=Depends(get_current_principal),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[NutritionFollowupResponse]:
     try:
@@ -86,6 +89,7 @@ async def answer_nutrition_followup(
             request.analysis.model_dump(),
             request.question,
             model_id=request.model_id,
+            scope=ctx.scope,
         )
         return Response.success(data=NutritionFollowupResponse(**data))
     except ValueError as exc:
@@ -95,7 +99,7 @@ async def answer_nutrition_followup(
 @router.post("/consumption/analyze", response_model=Response[ConsumptionAnalysisResponse])
 async def analyze_consumption(
         request: ConsumptionAnalysisRequest,
-        _principal=Depends(get_current_principal),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[ConsumptionAnalysisResponse]:
     try:
@@ -103,6 +107,7 @@ async def analyze_consumption(
             request.file_id,
             request.serving_grams,
             model_id=request.model_id,
+            scope=ctx.scope,
         )
         return Response.success(data=ConsumptionAnalysisResponse(**data))
     except ValueError as exc:
@@ -141,7 +146,7 @@ async def correct_consumption(
 @router.post("/translation/translate", response_model=Response[TranslationResponse])
 async def translate(
         request: TranslationRequest,
-        _principal=Depends(get_current_principal),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
         marketplace_service: MarketplaceService = Depends(get_marketplace_service),
 ) -> Response[TranslationResponse]:
     try:
@@ -151,6 +156,7 @@ async def translate(
             target_language=request.target_language,
             style=request.style,
             model_id=request.model_id,
+            scope=ctx.scope,
         )
         return Response.success(data=TranslationResponse(**data))
     except ValueError as exc:

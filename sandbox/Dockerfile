@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y \
 
 # 5.创建用户ubuntu并赋予sudo权限
 RUN useradd -m -d /home/ubuntu -s /bin/bash ubuntu && \
-    echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu
+    install -d -o ubuntu -g ubuntu /sandbox
 
 # 6.安装Python 3.10版本(非uv)
 RUN add-apt-repository ppa:deadsnakes/ppa && \
@@ -99,6 +99,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # 15.拷贝当前整个项目文件
 COPY . .
+RUN chown -R ubuntu:ubuntu /sandbox /home/ubuntu
 
 # 16.将supervisord.conf拷贝至supervisor服务配置目录中
 COPY supervisord.conf /etc/supervisor/conf.d/sandbox.conf
@@ -112,4 +113,5 @@ ENV UVI_ARGS=""
 ENV PATH="/venv/bin:$PATH"
 
 # 19.使用supervisor管理所有进程
+USER ubuntu
 CMD ["supervisord", "-n", "-c", "/sandbox/supervisord.conf"]

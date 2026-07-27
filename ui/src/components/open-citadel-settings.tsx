@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   Bot,
   LayoutGrid,
@@ -463,6 +463,7 @@ export function MCPSetting({
                 </DialogHeader>
                 {editServer ? (
                   <McpServerForm
+                    key={editServer.server_id ?? editServer.server_name}
                     ref={editFormRef}
                     server={editServer}
                     isAdmin={isAdmin}
@@ -637,12 +638,6 @@ export function SettingsDialog({
   const { user } = useAuth();
   const isAdmin = user?.global_role === "admin";
   const [activeSetting, setActiveSetting] = useState<SettingTab>(initialTab);
-
-  useEffect(() => {
-    if (open) {
-      setActiveSetting(initialTab);
-    }
-  }, [open, initialTab]);
 
   const showFooterSave = activeSetting === "agent-setting";
   const {

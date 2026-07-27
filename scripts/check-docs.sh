@@ -46,6 +46,15 @@ check_pair_dir() {
   done < <(find "$dir" -name '*.zh-CN.md' -print0 2>/dev/null)
 }
 
+require_marker() {
+  local file="$1"
+  local marker="$2"
+  local description="$3"
+  if ! grep -Fq -- "$marker" "$file"; then
+    fail "$file missing $description marker: $marker"
+  fi
+}
+
 echo "==> Checking docs/ bilingual pairs ..."
 check_pair_dir docs/architecture
 check_pair_dir docs/operations
@@ -120,6 +129,89 @@ fi
 echo "==> Checking four-images Helm wording ..."
 if rg -n 'four images|四镜像' docs/operations/deployment.md docs/operations/deployment.zh-CN.md 2>/dev/null; then
   fail "deployment docs still mention four images; should be five (api/worker/migrate/ui/sandbox)"
+fi
+
+echo "==> Checking security architecture contracts ..."
+for f in docs/architecture/security-model.md docs/architecture/security-model.zh-CN.md; do
+  for marker in \
+    AuthorizationContext \
+    "FORCE ROW LEVEL SECURITY" \
+    AUDITOR \
+    llm_model_preferences \
+    AUDIT_SIGNING_KEY \
+    /api/status \
+    /api/metrics \
+    OPTIONS; do
+    require_marker "$f" "$marker" "security architecture"
+  done
+done
+
+echo "==> Checking production deployment contracts ..."
+for f in docs/operations/deployment.md docs/operations/deployment.zh-CN.md; do
+  for marker in \
+    API_KEY_SECRET \
+    API_KEY_SECRET_ID \
+    API_KEY_PREVIOUS_SECRETS \
+    AUDIT_SIGNING_KEY \
+    AUDIT_SIGNING_KEY_ID \
+    AUDIT_PREVIOUS_SIGNING_KEYS \
+    JWT_SECRET \
+    SESSION_SECRET \
+    SANDBOX_BROKER_TOKEN \
+    BOOTSTRAP_ADMIN_PASSWORD \
+    POSTGRES_ADMIN_USER \
+    POSTGRES_ADMIN_PASSWORD \
+    POSTGRES_USER \
+    POSTGRES_PASSWORD \
+    REDIS_PASSWORD \
+    COOKIE_SECURE \
+    FRONTEND_BASE_URL \
+    OAUTH_REDIRECT_BASE \
+    TRUSTED_PROXY_CIDRS \
+    OUTBOUND_ALLOWED_PORTS \
+    OUTBOUND_PRIVATE_HOST_ALLOWLIST; do
+    require_marker "$f" "$marker" "production configuration"
+  done
+  for marker in \
+    10-opencitadel-app-role.sh \
+    rolsuper \
+    rolbypassrls \
+    security.yml \
+    Gitleaks \
+    CodeQL \
+    Trivy \
+    SBOM \
+    provenance; do
+    require_marker "$f" "$marker" "production operation"
+  done
+done
+
+echo "==> Checking Helm existing-PVC contracts ..."
+for f in deploy/helm/opencitadel/README.md deploy/helm/opencitadel/README.zh-CN.md; do
+  require_marker "$f" "files/postgres/init-app-role.sh" "existing-PVC role migration"
+  require_marker "$f" "rolsuper" "application-role verification"
+  require_marker "$f" "rolbypassrls" "application-role verification"
+done
+
+echo "==> Checking production examples for empty Redis passwords ..."
+if rg -n '^REDIS_PASSWORD=[[:space:]]*$' \
+  docs/operations/deployment.md \
+  docs/operations/deployment.zh-CN.md 2>/dev/null; then
+  fail "production deployment examples must not contain an empty REDIS_PASSWORD"
+fi
+
+echo "==> Checking obsolete API key rotation instructions ..."
+if rg -n \
+  'After (rotation|rotating `API_KEY_SECRET`).*re-save|Key rotation requires re-saving|轮换(`API_KEY_SECRET` )?后.*重新保存|轮换 secret 需在 UI 重新保存' \
+  docs/architecture/security-model.md \
+  docs/architecture/security-model.zh-CN.md \
+  docs/architecture/technical-decisions.md \
+  docs/architecture/technical-decisions.zh-CN.md \
+  docs/operations/deployment.md \
+  docs/operations/deployment.zh-CN.md \
+  api/README.md \
+  api/README.zh-CN.md 2>/dev/null; then
+  fail "found obsolete manual endpoint re-save instruction for API key rotation"
 fi
 
 if [[ "$errors" -gt 0 ]]; then

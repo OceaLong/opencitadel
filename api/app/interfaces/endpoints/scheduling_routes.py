@@ -7,9 +7,11 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
+from app.application.security.authorization_context import authorization_scope
 from app.application.services.notification_service import NotificationService
 from app.application.services.scheduled_job_service import ScheduledJobService
 from app.domain.models.scheduled_job import NotifyChannel
+from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.scope import WorkspaceContext
 from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
 from app.interfaces.schemas import Response as ApiResponse
@@ -47,7 +49,7 @@ async def list_jobs(
         ctx: WorkspaceContext = Depends(get_workspace_context),
         service: ScheduledJobService = Depends(get_scheduled_job_service),
 ):
-    jobs = await service.list_jobs(ctx.principal.user_id)
+    jobs = await service.list_jobs(ctx.scope)
     return ApiResponse.success(ScheduledJobListResponse(jobs=[_job_response(j) for j in jobs]))
 
 
@@ -74,6 +76,7 @@ async def create_job(
         operator_domains=body.operator_domains,
         gate_profile=body.gate_profile,
         enabled=body.enabled,
+        scope=ctx.scope,
     )
     return ApiResponse.success(CreateScheduledJobResponse(job=_job_response(job), webhook_secret=secret))
 
@@ -90,7 +93,7 @@ async def update_job(
         channels = [NotifyChannel.model_validate(c.model_dump()) for c in body.notify_channels]
     job = await service.patch_job(
         job_id,
-        ctx.principal.user_id,
+        ctx.scope,
         name=body.name,
         trigger_type=body.trigger_type,
         trigger_spec=body.trigger_spec,
@@ -116,10 +119,10 @@ async def delete_job(
         ctx: WorkspaceContext = Depends(get_workspace_context),
         service: ScheduledJobService = Depends(get_scheduled_job_service),
 ):
-    job = await service.get_job(job_id)
-    if not job or job.owner_user_id != ctx.principal.user_id:
+    job = await service.get_job(job_id, scope=ctx.scope)
+    if not job:
         raise HTTPException(status_code=404, detail="任务不存在")
-    await service.delete_job(job_id)
+    await service.delete_job(job_id, scope=ctx.scope)
     return ApiResponse.success({"deleted": True})
 
 
@@ -129,10 +132,10 @@ async def rotate_secret(
         ctx: WorkspaceContext = Depends(get_workspace_context),
         service: ScheduledJobService = Depends(get_scheduled_job_service),
 ):
-    job = await service.get_job(job_id)
-    if not job or job.owner_user_id != ctx.principal.user_id:
+    job = await service.get_job(job_id, scope=ctx.scope)
+    if not job:
         raise HTTPException(status_code=404, detail="任务不存在")
-    secret, token = await service.rotate_webhook_secret(job_id)
+    secret, token = await service.rotate_webhook_secret(job_id, scope=ctx.scope)
     if not secret or not token:
         raise HTTPException(status_code=400, detail="无法轮换密钥")
     return ApiResponse.success(WebhookSecretResponse(webhook_secret=secret, webhook_token=token))
@@ -146,13 +149,14 @@ async def trigger_job_now(
         service: ScheduledJobService = Depends(get_scheduled_job_service),
         notification_service: NotificationService = Depends(get_notification_service),
 ):
-    job = await service.get_job(job_id)
-    if not job or job.owner_user_id != ctx.principal.user_id:
+    job = await service.get_job(job_id, scope=ctx.scope)
+    if not job:
         raise HTTPException(status_code=404, detail="任务不存在")
     try:
         session_id = await service.manual_trigger(
             job_id,
             ctx.principal.user_id,
+            scope=ctx.scope,
             notification_service=notification_service,
         )
     except ValueError as exc:
@@ -223,13 +227,14 @@ async def webhook_trigger(
         payload = json.loads(body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
         payload = {"raw": body.decode("utf-8", errors="replace")}
-    session_id, error = await service.trigger_webhook(
-        job_token,
-        body,
-        x_webhook_signature or "",
-        payload,
-        notification_service=notification_service,
-    )
+    with authorization_scope(AuthorizationContext.system("signed-webhook")):
+        session_id, error = await service.trigger_webhook(
+            job_token,
+            body,
+            x_webhook_signature or "",
+            payload,
+            notification_service=notification_service,
+        )
     if error == "unauthorized":
         raise HTTPException(status_code=401, detail="Webhook 签名无效")
     if error == "not_found" or not session_id:

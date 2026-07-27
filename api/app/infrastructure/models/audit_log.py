@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import DateTime, ForeignKey, String, text
+from sqlalchemy import DateTime, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,12 +16,12 @@ class AuditLogORM(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True, default=lambda: str(uuid.uuid4()))
-    actor_user_id: Mapped[Optional[str]] = mapped_column(String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_user_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     actor_ip: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("''"))
     action: Mapped[str] = mapped_column(String(128), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(128), nullable=False, server_default=text("''"))
     resource_id: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
-    team_id: Mapped[Optional[str]] = mapped_column(String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
+    team_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     request_id: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
     metadata_json: Mapped[Dict[str, Any]] = mapped_column(
         "metadata",
@@ -30,6 +30,11 @@ class AuditLogORM(Base):
         server_default=text("'{}'::jsonb"),
     )
     chain_seq: Mapped[Optional[int]] = mapped_column(nullable=True)
+    signing_key_id: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        server_default=text("'legacy'"),
+    )
     prev_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     entry_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)"))
@@ -47,6 +52,7 @@ class AuditLogORM(Base):
             request_id=log.request_id,
             metadata_json=log.metadata,
             chain_seq=log.chain_seq,
+            signing_key_id=log.signing_key_id or "legacy",
             prev_hash=log.prev_hash or None,
             entry_hash=log.entry_hash or None,
             created_at=log.created_at,
@@ -65,6 +71,7 @@ class AuditLogORM(Base):
             metadata=self.metadata_json or {},
             created_at=self.created_at,
             chain_seq=self.chain_seq,
+            signing_key_id=self.signing_key_id or "legacy",
             prev_hash=self.prev_hash or "",
             entry_hash=self.entry_hash or "",
         )

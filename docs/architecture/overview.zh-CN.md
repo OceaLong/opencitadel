@@ -221,7 +221,7 @@ stateDiagram-v2
 
 | 模式 | 典型场景 | 配置 | 说明 |
 |------|----------|------|------|
-| Docker 本地动态沙箱 | 单机 Docker Compose | `sandbox.driver=auto` 或 `docker`，`sandbox.address` 为空 | Worker 挂载 `docker.sock`，动态创建 `opencitadel-sandbox-*` |
+| Docker 本地动态沙箱 | 单机 Docker Compose | `sandbox.driver=auto` 或 `docker`，`sandbox.address` 为空 | API/Worker 使用认证生命周期 broker；仅 broker 持有 `docker.sock` |
 | Kubernetes Pod 沙箱 | Helm 集群部署 | `sandbox.driver=kubernetes`，`sandbox.address` 为空 | Worker 使用 ServiceAccount + RBAC 创建 Pod，ResourceQuota 限制总量 |
 | 远程沙箱网关 | 沙箱执行面外置 | `sandbox.address=http://sandbox-gateway.internal:8080` | Worker 直连远程服务，不再调用本地 Docker 或 K8s API |
 
