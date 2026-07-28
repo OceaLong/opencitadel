@@ -23,21 +23,35 @@ Session id for ingest tasks: `kb-ingest:{kb_id}` (not a user chat session).
 
 ## Ingestion pipeline
 
+Ingestion is an **incremental** pipeline by default; a full reindex is just one special case of it:
+
+- `KBIngestionRunner.run(kb_id)` processes only the documents in the KB with `status IN (pending, failed)` on each run (parse → chunk → embed → index → optional GraphRAG). Before indexing, `purge_documents_index_data` clears the old chunks/relations/refs belonging to **those documents only** (leftovers from a failed retry), then the new chunks are **appended** — the pipeline no longer calls `replace_index_chunks`/`clear_index_data` against the whole KB. Other documents already `ready` in the KB, and their index data, are untouched throughout.
+- New documents (`add_documents`): new documents are naturally `pending`, so once the task is dispatched the runner only processes the new documents; retrieval/Q&A over existing documents is unaffected during ingestion.
+- Manual `reindex` (full rebuild fallback): before dispatch, all documents in the KB are reset to `pending` and `clear_index_data` is called (including `knowledge_entity_refs`), then the same pipeline reprocesses every document — semantically equivalent to ingesting a brand-new KB. Retrieval has a blackout window during a full rebuild.
+- Document deletion does not go through this pipeline; it completes synchronously at the service layer (see "Document deletion semantics").
+
 ```mermaid
 flowchart TD
-  Start["kb_ingest task claimed"] --> Parse["Parse documents"]
+  Start["kb_ingest task claimed"] --> Select["Filter pending/failed documents"]
+  Select --> HasPending{"any documents pending?"}
+  HasPending -->|"no"| NoOp["Index unchanged, DONE"]
+  HasPending -->|"yes"| Parse["Parse pending documents"]
   Parse --> ParseFail{"any doc parsed?"}
-  ParseFail -->|"no"| NonRecov["NonRecoverableIngestError DOCUMENT_PARSE_FAILED"]
-  ParseFail -->|"yes"| Chunk["Parent/child chunk"]
-  Chunk --> Embed["Embed + replace_index_chunks"]
+  ParseFail -->|"no, and no ready docs in KB"| NonRecov["NonRecoverableIngestError DOCUMENT_PARSE_FAILED"]
+  ParseFail -->|"no, but KB already has ready docs"| KeepReady["KB status back to READY, error records failure summary"]
+  ParseFail -->|"yes"| Chunk["Parent/child chunk (this round's docs only)"]
+  Chunk --> Purge["purge_documents_index_data (clears own leftovers)"]
+  Purge --> Embed["Embed + save_chunks append"]
   Embed --> EmbedOk{"embedding ok?"}
-  EmbedOk -->|"no"| Degraded["vector_degraded=true BM25-only path"]
+  EmbedOk -->|"no"| Degraded["vector_degraded=true BM25-only"]
   EmbedOk -->|"yes"| Index["BM25 + vector index"]
   Degraded --> GraphCheck{"graphrag.enabled?"}
   Index --> GraphCheck
-  GraphCheck -->|"yes"| Graph["GraphBuilder LLM entities"]
-  GraphCheck -->|"no"| Ready["KB status READY"]
-  Graph --> Ready
+  GraphCheck -->|"yes"| Graph["GraphBuilder incremental merge (upsert entities+refs)"]
+  GraphCheck -->|"no"| Finalize["Finalize status by document-level check"]
+  Graph --> Finalize
+  Finalize --> Ready["KB has ready doc(s) → KB status READY"]
+  Finalize --> Failed2["No ready docs in KB → KB status FAILED"]
   NonRecov --> Failed["KB status FAILED fast_fail"]
 ```
 
@@ -65,14 +79,44 @@ knowledge_base:
 
 ### Chunk and index
 
-- `KBChunker` produces parent/child chunks (`parent_max_chars`, `child_max_chars`, `overlap`)
+- `KBChunker` produces parent/child chunks (`parent_max_chars`, `child_max_chars`, `overlap`), processing only this round's `pending`/`failed` documents
 - `KBVectorService` embeds child chunks when `knowledge_base.vector_enabled=true`
 - Embedding failure sets `vector_degraded=true`; BM25/hybrid retrieval continues without vectors
+- `save_chunks` takes one of two paths depending on whether embeddings are present, batch-`INSERT`ing 500 rows at a time (`db_knowledge_base_repository.py`) instead of writing row by row
 - SSE `step` events: `parse`, `chunk`, `index`, `graph` (when enabled)
 
-### GraphRAG (optional)
+### GraphRAG (optional, incremental merge)
 
-When `graphrag.enabled=true`, `GraphBuilder` runs after index write. GraphRAG LLM unavailability is logged and skipped — ingestion can still reach `READY`.
+When `graphrag.enabled=true`, `GraphBuilder` runs after index write, extracting entities/relations only from the parent chunks of **this round's newly processed documents**. GraphRAG LLM unavailability is logged and skipped — ingestion can still reach `READY`.
+
+Entity merging upserts by `(kb_id, name)` (`upsert_entities`): if an entity with the same name already exists, its id is reused and only a new provenance ref row is written; otherwise a new entity is created. Relations are inserted as usual with `chunk_id` provenance; cross-document relations emerge naturally from entity merging, with no special handling needed. See "Entity provenance table" below for details.
+
+## Entity provenance table (knowledge_entity_refs)
+
+Incremental document deletion needs to know whether an entity is still backed by other documents, so a provenance table records which documents an entity came from:
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | varchar PK | |
+| `kb_id` | varchar | FK `knowledge_bases.id`, `ondelete=CASCADE` |
+| `entity_id` | varchar | FK `knowledge_entities.id`, `ondelete=CASCADE` |
+| `doc_id` | varchar | FK `knowledge_documents.id`, `ondelete=CASCADE` |
+| `created_at` | timestamp | |
+
+`UNIQUE(entity_id, doc_id)`, plus one index each on `doc_id` and `entity_id` (migration `a5b6c7d8e9f0_create_knowledge_entity_refs`). Writes go through `save_entity_refs` (`INSERT … ON CONFLICT (entity_id, doc_id) DO NOTHING`), so an entity hit multiple times by the same document is not double-counted.
+
+**Existing-data backfill**: right after creating the table, the migration runs `INSERT … SELECT DISTINCT`, using `knowledge_relations.chunk_id → knowledge_chunks.doc_id` to derive, for each relation, which documents its two entities (`src_entity_id`/`dst_entity_id`) came from; `id` is `md5(entity_id || ':' || doc_id)` so the backfill is idempotent and re-runnable. **Orphan entities** that appear in no relation cannot have their provenance derived this way, so they are conservatively left unbackfilled — they get no ref rows, so they never enter the candidate set for deletion and can't be accidentally deleted; such pre-existing orphan entities are only cleared and rebuilt via `clear_index_data` during a manual `reindex`.
+
+## Document deletion semantics
+
+Deleting a single document (`DELETE /knowledge-bases/{id}/documents/{doc_id}`) **no longer triggers a reindex**. Instead it's cleaned up synchronously and precisely within a single UoW transaction, in an order-sensitive sequence (`purge_documents_index_data`):
+
+1. Delete the relations attached to that document's chunks (via a `chunk_id IN (this document's chunks)` subquery).
+2. Delete that document's entity ref rows (`doc_id = ?`), first reading the `entity_id` set of the rows about to be deleted as candidates.
+3. Within that candidate set, delete entities whose ref count has dropped to zero: `DELETE FROM knowledge_entities WHERE id IN (candidates) AND NOT EXISTS (SELECT 1 FROM knowledge_entity_refs WHERE entity_id = knowledge_entities.id)`; scoping the deletion to the candidate set guarantees that pre-existing orphan entities with no ref rows to begin with are never accidentally deleted by this step. Relations left dangling on zeroed-out entities are cleared automatically via FK `ondelete=CASCADE`.
+4. Delete that document's chunks, then finally the document row itself.
+
+Effect: chunks, relations, and entities exclusive to that document all disappear; entities shared with other documents are kept. After deletion, `kb.doc_count`/`kb.chunk_count`/`kb.ready_doc_count` are recomputed; if all documents are deleted, the KB reverts to `PENDING` and clears `ingest_task_id`, otherwise it converges to `READY` or `FAILED` per the KB-level determination described below.
 
 ## Retrieval stack (KB vs Codebase)
 
@@ -107,11 +151,20 @@ flowchart TB
 
 See [Codebase reindex](codebase-reindex.md) for the lighter codebase retrieval path.
 
+## State machine & Q&A gate
+
+The document state machine is unchanged: `PENDING → PARSING → READY | FAILED`.
+
+The KB state machine (`PENDING → PARSING → CHUNKING → INDEXING → GRAPH_BUILDING → READY | FAILED`) is also unchanged, but **KB-level failure determination is now document-level**: at the end of an ingestion round (`_finalize_kb`), the KB's final status is `READY` as long as **at least one `READY` document exists** in the KB; it is only set to `FAILED` when the KB has **no `READY` documents at all**. When some documents fail, the KB's `error` field is written with a summary (e.g. "2 documents failed to parse or index"), and the frontend displays it as a warning rather than a fatal error; each document's own failure reason is recorded in that document's `error` field.
+
+`KnowledgeBase.ready_doc_count` (`count_ready_documents` aggregates the count of documents with `status='ready'`, returned alongside the existing `doc_count`) is the gate for "can Q&A start": `create_session_for_kb` requires `ready_doc_count > 0`, and the frontend's "Start Q&A" button likewise gates on `ready_doc_count > 0` (rather than waiting for the whole KB's `status === READY`). This means that while new documents are being incrementally ingested, or if a new document fails to parse, retrieval and Q&A remain unaffected throughout as long as the KB already has ready documents.
+
 ## Failure and recovery
 
 | Failure type | Error code | Worker behavior |
 |--------------|------------|-----------------|
-| All documents fail parse | `DOCUMENT_PARSE_FAILED` | `NonRecoverableIngestError` → `fast_fail`, no auto retry |
+| All documents fail parse AND no ready docs in KB | `DOCUMENT_PARSE_FAILED` | `NonRecoverableIngestError` → `fast_fail`, no auto retry |
+| This round's documents fail parse/chunk but KB already has ready docs | — | Failed documents marked `FAILED`; KB reverts to `READY`; `error` records failure summary; index data unaffected |
 | Transient infra mid-run | `TASK_INFRA_FAILED` or generic | `prepare_recoverable_retry` for agent tasks; KB ingest may finalize FAILED if task ends failed |
 | Stuck ingest (orphan task) | — | `_reconcile_stuck_kb_ingests()` every 30s + startup |
 

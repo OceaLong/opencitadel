@@ -1,4 +1,4 @@
-import type { KnowledgeSourceType } from "@/lib/api/types";
+import type { KnowledgeDocument, KnowledgeSourceType } from "@/lib/api/types";
 import { translate } from "@/i18n/translate";
 
 export function parseKbDocHref(value: string): { docId: string; page?: number; chunkId?: string } | null {
@@ -44,4 +44,16 @@ export function formatIngestStreamError(data: unknown): string {
     if (message) return message;
   }
   return translate("knowledge.indexFailed");
+}
+
+export function canStartAsk(kb: { ready_doc_count?: number }): boolean {
+  return (kb.ready_doc_count ?? 0) > 0;
+}
+
+export function appendDocumentsPage(
+  prev: KnowledgeDocument[],
+  incoming: KnowledgeDocument[],
+): KnowledgeDocument[] {
+  const seen = new Set(prev.map((doc) => doc.id));
+  return [...prev, ...incoming.filter((doc) => !seen.has(doc.id))];
 }

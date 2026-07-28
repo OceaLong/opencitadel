@@ -73,10 +73,20 @@ class KBIngestionRunner:
                 await self._set_status(kb_id, KBStatus.FAILED, "知识库没有待解析文档")
                 yield ErrorEvent(error="知识库没有待解析文档", code=DOCUMENT_PARSE_FAILED)
                 return
+            pending_docs = [d for d in documents if d.status in (DocStatus.PENDING, DocStatus.FAILED)]
+            pending_ids = {d.id for d in pending_docs}
+            ready_elsewhere = any(
+                d.status == DocStatus.READY for d in documents if d.id not in pending_ids
+            )
+            if not pending_docs:
+                await self._finalize_kb(kb_id, failed_doc_count=0, vector_degraded=None)
+                yield MessageEvent(role="assistant", message="没有待处理的文档，索引保持不变。")
+                yield DoneEvent()
+                return
 
             parsed: list[tuple[str, list[PageBlock]]] = []
             parse_errors: list[str] = []
-            for doc in documents:
+            for doc in pending_docs:
                 try:
                     await self._update_document(doc.id, DocStatus.PARSING)
                     blocks, page_count, warning = await self._parse_document(doc)
@@ -89,7 +99,7 @@ class KBIngestionRunner:
             parsed_count = len(parsed)
             yield _step_event(
                 "parse",
-                f"文档解析完成: {parsed_count}/{len(documents)}",
+                f"文档解析完成: {parsed_count}/{len(pending_docs)}",
                 StepEventStatus.COMPLETED,
             )
             if not parsed:
@@ -98,7 +108,14 @@ class KBIngestionRunner:
                     if len(parse_errors) == 1
                     else "；".join(parse_errors[:3])
                 )
-                error_msg = f"全部文档解析失败: {detail}" if detail else "全部文档解析失败"
+                error_msg = f"全部新增文档解析失败: {detail}" if detail else "全部新增文档解析失败"
+                if ready_elsewhere:
+                    await self._finalize_kb(
+                        kb_id, failed_doc_count=len(pending_docs), vector_degraded=None
+                    )
+                    yield MessageEvent(role="assistant", message=f"{error_msg}，已有索引未受影响。")
+                    yield DoneEvent()
+                    return
                 await self._set_status(kb_id, KBStatus.FAILED, error_msg)
                 yield ErrorEvent(error=error_msg, code=DOCUMENT_PARSE_FAILED)
                 return
@@ -131,8 +148,16 @@ class KBIngestionRunner:
             if all_children and all(not chunk.embedding for chunk in all_children):
                 vector_degraded = True
             if not all_children:
-                await self._set_status(kb_id, KBStatus.FAILED, "全部文档分块失败，未生成检索索引")
-                yield ErrorEvent(error="全部文档分块失败", code=DOCUMENT_PARSE_FAILED)
+                error_msg = "全部新增文档分块失败，未生成检索索引"
+                if ready_elsewhere:
+                    await self._finalize_kb(
+                        kb_id, failed_doc_count=len(pending_docs), vector_degraded=None
+                    )
+                    yield MessageEvent(role="assistant", message=f"{error_msg}，已有索引未受影响。")
+                    yield DoneEvent()
+                    return
+                await self._set_status(kb_id, KBStatus.FAILED, error_msg)
+                yield ErrorEvent(error=error_msg, code=DOCUMENT_PARSE_FAILED)
                 return
             chunk_desc = f"分块完成: 父块 {len(all_parents)}，子块 {len(all_children)}"
             if vector_degraded:
@@ -147,7 +172,8 @@ class KBIngestionRunner:
             await self._set_status(kb_id, KBStatus.INDEXING)
             try:
                 async with self._uow_factory() as uow:
-                    await uow.knowledge_base.replace_index_chunks(kb_id, [*all_parents, *all_children])
+                    await uow.knowledge_base.purge_documents_index_data([doc.id for doc in pending_docs])
+                    await uow.knowledge_base.save_chunks([*all_parents, *all_children])
             except Exception as exc:
                 logger.exception("索引写入失败 kb=%s: %s", kb_id, exc)
                 await self._set_status(kb_id, KBStatus.FAILED, f"索引写入失败: {exc}")
@@ -181,25 +207,17 @@ class KBIngestionRunner:
                     graph_desc = "知识图谱跳过：JSON 解析器不可用"
                 yield _step_event("graph", graph_desc, StepEventStatus.COMPLETED)
 
-            failed_doc_count = len(documents) - parsed_count + len(chunk_failed_docs)
-            kb_error = None
-            if failed_doc_count > 0:
-                kb_error = f"{failed_doc_count} 个文档解析或索引失败"
+            failed_doc_count = (len(pending_docs) - parsed_count) + len(chunk_failed_docs)
+            await self._finalize_kb(
+                kb_id, failed_doc_count=failed_doc_count, vector_degraded=vector_degraded
+            )
             async with self._uow_factory() as uow:
                 kb = await uow.knowledge_base.get_kb(kb_id)
-                if kb:
-                    kb.status = KBStatus.READY if parsed_count > len(chunk_failed_docs) else KBStatus.FAILED
-                    kb.error = kb_error
-                    kb.doc_count = len(documents)
-                    kb.chunk_count = len(all_children)
-                    kb.vector_degraded = vector_degraded
-                    kb.updated_at = datetime.now()
-                    await uow.knowledge_base.save_kb(kb)
 
             logger.info(
                 "知识库索引完成 kb=%s docs=%s parsed=%s chunks=%s vector_degraded=%s failed=%s",
                 kb_id,
-                len(documents),
+                len(pending_docs),
                 parsed_count,
                 len(all_children),
                 vector_degraded,
@@ -210,7 +228,7 @@ class KBIngestionRunner:
                 role="assistant",
                 message=(
                     f"文档知识库 **{kb.name if kb else kb_id}** 索引完成。\n\n"
-                    f"- 文档: {len(documents)}\n"
+                    f"- 本次处理文档: {len(pending_docs)}\n"
                     f"- 解析成功: {parsed_count}\n"
                     f"- 父块: {len(all_parents)}\n"
                     f"- 子块: {len(all_children)}"
@@ -222,6 +240,28 @@ class KBIngestionRunner:
             await self._set_status(kb_id, KBStatus.FAILED, str(exc))
             code = EMBEDDING_UNAVAILABLE if "embed" in str(exc).lower() else None
             yield ErrorEvent(error=str(exc), code=code)
+
+    async def _finalize_kb(
+            self,
+            kb_id: str,
+            *,
+            failed_doc_count: int,
+            vector_degraded: Optional[bool],
+    ) -> None:
+        async with self._uow_factory() as uow:
+            kb = await uow.knowledge_base.get_kb(kb_id)
+            if not kb:
+                return
+            docs = await uow.knowledge_base.list_documents(kb_id)
+            has_ready = any(d.status == DocStatus.READY for d in docs)
+            kb.status = KBStatus.READY if has_ready else KBStatus.FAILED
+            kb.error = f"{failed_doc_count} 个文档解析或索引失败" if failed_doc_count > 0 else None
+            kb.doc_count = len(docs)
+            kb.chunk_count = await uow.knowledge_base.count_child_chunks(kb_id)
+            if vector_degraded is not None:
+                kb.vector_degraded = vector_degraded
+            kb.updated_at = datetime.now()
+            await uow.knowledge_base.save_kb(kb)
 
     async def _parse_document(self, doc) -> tuple[list[PageBlock], int, Optional[str]]:
         runtime = get_runtime_config()

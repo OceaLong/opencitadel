@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { MermaidDiagram } from "@/components/mermaid-diagram";
-import { parseKbDocHref } from "@/components/knowledge/knowledge-utils";
+import { appendDocumentsPage, parseKbDocHref } from "@/components/knowledge/knowledge-utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -37,14 +37,27 @@ export function KnowledgeContextPanel({
 
   useEffect(() => {
     if (!knowledgeBaseId) return;
+    let cancelled = false;
     void (async () => {
       try {
-        const docs = await knowledgeApi.listDocuments(knowledgeBaseId);
-        setDocuments(docs.documents);
+        const pageSize = 200;
+        const maxDocs = 1000;
+        let all: KnowledgeDocument[] = [];
+        let offset = 0;
+        for (;;) {
+          const page = await knowledgeApi.listDocuments(knowledgeBaseId, pageSize, offset);
+          all = appendDocumentsPage(all, page.documents);
+          offset = all.length;
+          if (all.length >= page.total || page.documents.length === 0 || all.length >= maxDocs) break;
+        }
+        if (!cancelled) setDocuments(all);
       } catch {
-        setDocuments([]);
+        if (!cancelled) setDocuments([]);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [knowledgeBaseId]);
 
   const graph = useMemo(

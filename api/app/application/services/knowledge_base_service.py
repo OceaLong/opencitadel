@@ -158,40 +158,47 @@ class KnowledgeBaseService:
             kb.status = KBStatus.PENDING
             kb.updated_at = datetime.now()
             await uow.knowledge_base.save_kb(kb)
-        return await self.reindex(kb_id, scope=scope)
+        return await self._dispatch_ingest(kb)
 
     async def get_kb(self, kb_id: str, scope: Optional[OwnerScope] = None) -> KnowledgeBase:
         async with self._uow_factory() as uow:
             kb = await uow.knowledge_base.get_kb(kb_id, scope=scope)
+            if kb:
+                counts = await uow.knowledge_base.count_ready_documents([kb_id])
+                kb.ready_doc_count = counts.get(kb_id, 0)
         if not kb:
             raise NotFoundError(f"知识库[{kb_id}]不存在")
         return kb
 
     async def list_kbs(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[KnowledgeBase]:
         async with self._uow_factory() as uow:
-            return await uow.knowledge_base.list_kbs(limit=limit, offset=offset, scope=scope)
+            kbs = await uow.knowledge_base.list_kbs(limit=limit, offset=offset, scope=scope)
+            counts = await uow.knowledge_base.count_ready_documents([kb.id for kb in kbs])
+        for kb in kbs:
+            kb.ready_doc_count = counts.get(kb.id, 0)
+        return kbs
 
-    async def list_documents(self, kb_id: str, scope: Optional[OwnerScope] = None) -> List[KnowledgeDocument]:
+    async def list_documents(
+            self,
+            kb_id: str,
+            limit: int = 50,
+            offset: int = 0,
+            scope: Optional[OwnerScope] = None,
+    ) -> tuple[List[KnowledgeDocument], int]:
         await self.get_kb(kb_id, scope=scope)
         async with self._uow_factory() as uow:
-            return await uow.knowledge_base.list_documents(kb_id)
+            return await uow.knowledge_base.list_documents_page(kb_id, limit=limit, offset=offset)
 
-    async def reindex(self, kb_id: str, scope: Optional[OwnerScope] = None) -> KnowledgeBase:
-        kb = await self.get_kb(kb_id, scope=scope)
-        if await self._ingest_in_progress(kb):
-            logger.info("知识库 reindex 幂等返回: kb_id=%s task_id=%s", kb_id, kb.ingest_task_id)
-            return kb
-
+    async def _dispatch_ingest(self, kb: KnowledgeBase) -> KnowledgeBase:
         old_task_id = kb.ingest_task_id
         if old_task_id:
             await self._retire_ingest_task(old_task_id)
-
         task_id = str(uuid.uuid4())
         await self._task_state.register_task(
             task_id,
-            session_id=f"kb-ingest:{kb_id}",
+            session_id=f"kb-ingest:{kb.id}",
             task_type="kb_ingest",
-            resource_id=kb_id,
+            resource_id=kb.id,
         )
         kb.ingest_task_id = task_id
         kb.status = KBStatus.PENDING
@@ -199,9 +206,19 @@ class KnowledgeBaseService:
         kb.updated_at = datetime.now()
         async with self._uow_factory() as uow:
             await uow.knowledge_base.save_kb(kb)
-        task = RedisStreamTask(task_id=task_id, session_id=f"kb-ingest:{kb_id}")
+        task = RedisStreamTask(task_id=task_id, session_id=f"kb-ingest:{kb.id}")
         await task.dispatch_to_worker()
         return kb
+
+    async def reindex(self, kb_id: str, scope: Optional[OwnerScope] = None) -> KnowledgeBase:
+        kb = await self.get_kb(kb_id, scope=scope)
+        if await self._ingest_in_progress(kb):
+            logger.info("知识库 reindex 幂等返回: kb_id=%s task_id=%s", kb_id, kb.ingest_task_id)
+            return kb
+        async with self._uow_factory() as uow:
+            await uow.knowledge_base.mark_documents_pending(kb_id)
+            await uow.knowledge_base.clear_index_data(kb_id)
+        return await self._dispatch_ingest(kb)
 
     async def stream_ingest(
             self,
@@ -240,8 +257,8 @@ class KnowledgeBaseService:
             scope: Optional[OwnerScope] = None,
     ) -> Session:
         kb = await self.get_kb(kb_id, scope=scope)
-        if kb.status != KBStatus.READY:
-            raise BadRequestError("知识库尚未就绪，请等待索引完成后再开始问答")
+        if kb.ready_doc_count <= 0:
+            raise BadRequestError("知识库尚无就绪文档，请等待索引完成后再开始问答")
         if mode == SessionMode.AGENT:
             mode = SessionMode.ASK
         session = Session(
@@ -310,19 +327,16 @@ class KnowledgeBaseService:
         async with self._uow_factory() as uow:
             await uow.knowledge_base.delete_document(doc_id)
             remaining = await uow.knowledge_base.count_documents(kb_id)
-        if remaining > 0:
+            ready_counts = await uow.knowledge_base.count_ready_documents([kb_id])
             kb.doc_count = remaining
-            kb.updated_at = datetime.now()
-            async with self._uow_factory() as uow:
-                await uow.knowledge_base.save_kb(kb)
-            return await self.reindex(kb_id, scope=scope)
-        async with self._uow_factory() as uow:
-            await uow.knowledge_base.clear_index_data(kb_id)
-            kb.doc_count = 0
-            kb.chunk_count = 0
-            kb.status = KBStatus.PENDING
+            kb.chunk_count = await uow.knowledge_base.count_child_chunks(kb_id) if remaining else 0
+            kb.ready_doc_count = ready_counts.get(kb_id, 0)
+            if remaining == 0:
+                kb.status = KBStatus.PENDING
+                kb.ingest_task_id = None
+            else:
+                kb.status = KBStatus.READY if kb.ready_doc_count > 0 else KBStatus.FAILED
             kb.error = None
-            kb.ingest_task_id = None
             kb.updated_at = datetime.now()
             await uow.knowledge_base.save_kb(kb)
         return kb

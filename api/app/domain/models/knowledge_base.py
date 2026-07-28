@@ -47,6 +47,7 @@ class KnowledgeBase(BaseModel):
     ingest_task_id: Optional[str] = None
     error: Optional[str] = None
     vector_degraded: bool = False
+    ready_doc_count: int = 0
     settings: Dict[str, Any] = Field(default_factory=dict)
     owner_user_id: Optional[str] = None
     team_id: Optional[str] = None
@@ -99,6 +100,13 @@ class KnowledgeRelation(BaseModel):
     dst_entity_id: str
     relation: str = ""
     chunk_id: Optional[str] = None
+
+
+class KnowledgeEntityRef(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    kb_id: str
+    entity_id: str
+    doc_id: str
 
 
 class DocTreeNode(BaseModel):

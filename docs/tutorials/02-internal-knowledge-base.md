@@ -37,7 +37,7 @@ flowchart TD
 
 - **Parse**: upload, ZIP, web, Confluence, or Feishu sources → `PageBlock` per document; image PDFs use vision LLM OCR when `knowledge_base.ocr.mode=vision_llm`
 - **Chunk**: parent/child chunks via `KBChunker`; embeddings via `KBVectorService`
-- **Index**: `replace_index_chunks()` persists searchable chunks
+- **Index**: `purge_documents_index_data()` clears this round's own leftovers, then `save_chunks()` batch-appends searchable chunks (incremental; a full rebuild happens only on a manual reindex)
 - **Graph** (optional): `GraphBuilder` when `graphrag.enabled=true` (default **enabled** in seed `config.yaml`)
 - **Degraded path**: embedding failure sets `vector_degraded=true`; retrieval falls back to BM25/hybrid without vectors
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import List, Optional, Protocol, Tuple
+from typing import Dict, List, Optional, Protocol, Tuple
 
 from app.domain.models.knowledge_base import (
     DocStatus,
@@ -9,6 +9,7 @@ from app.domain.models.knowledge_base import (
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeEntity,
+    KnowledgeEntityRef,
     KnowledgeRelation,
 )
 from app.domain.models.scope import OwnerScope
@@ -104,6 +105,32 @@ class KnowledgeBaseRepository(Protocol):
         ...
 
     async def save_entities(self, entities: List[KnowledgeEntity]) -> None:
+        ...
+
+    async def upsert_entities(self, entities: List[KnowledgeEntity]) -> Dict[str, str]:
+        ...
+
+    async def save_entity_refs(self, refs: List[KnowledgeEntityRef]) -> None:
+        ...
+
+    async def purge_documents_index_data(self, doc_ids: List[str]) -> None:
+        ...
+
+    async def count_ready_documents(self, kb_ids: List[str]) -> Dict[str, int]:
+        ...
+
+    async def count_child_chunks(self, kb_id: str) -> int:
+        ...
+
+    async def list_documents_page(
+            self,
+            kb_id: str,
+            limit: int = 50,
+            offset: int = 0,
+    ) -> Tuple[List[KnowledgeDocument], int]:
+        ...
+
+    async def mark_documents_pending(self, kb_id: str) -> None:
         ...
 
     async def save_relations(self, relations: List[KnowledgeRelation]) -> None:

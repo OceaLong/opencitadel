@@ -35,6 +35,7 @@ from .knowledge_base import (
     KnowledgeChunkModel,
     KnowledgeEntityModel,
     KnowledgeRelationModel,
+    KnowledgeEntityRefModel,
 )
 from .delivery_artifact import DeliveryArtifactModel
 from .scheduled_job import ScheduledJobModel
@@ -75,6 +76,7 @@ __all__ = [
     "KnowledgeChunkModel",
     "KnowledgeEntityModel",
     "KnowledgeRelationModel",
+    "KnowledgeEntityRefModel",
     "DeliveryArtifactModel",
     "ScheduledJobModel",
     "NotificationModel",

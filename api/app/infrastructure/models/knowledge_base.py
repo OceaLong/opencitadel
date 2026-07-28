@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,6 +16,7 @@ from app.domain.models.knowledge_base import (
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeEntity,
+    KnowledgeEntityRef,
     KnowledgeRelation,
 )
 from .base import Base
@@ -223,3 +224,29 @@ class KnowledgeRelationModel(Base):
             relation=self.relation or "",
             chunk_id=self.chunk_id,
         )
+
+
+class KnowledgeEntityRefModel(Base):
+    __tablename__ = "knowledge_entity_refs"
+    __table_args__ = (
+        UniqueConstraint("entity_id", "doc_id", name="uq_kb_entity_refs_entity_doc"),
+        Index("ix_kb_entity_refs_doc", "doc_id"),
+        Index("ix_kb_entity_refs_entity", "entity_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    kb_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False
+    )
+    entity_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("knowledge_entities.id", ondelete="CASCADE"), nullable=False
+    )
+    doc_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+    )
+
+    def to_domain(self) -> KnowledgeEntityRef:
+        return KnowledgeEntityRef(id=self.id, kb_id=self.kb_id, entity_id=self.entity_id, doc_id=self.doc_id)

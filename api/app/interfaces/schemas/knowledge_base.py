@@ -23,6 +23,7 @@ class KnowledgeBaseResponse(BaseModel):
     ingest_task_id: Optional[str] = None
     error: Optional[str] = None
     vector_degraded: bool = False
+    ready_doc_count: int = 0
     settings: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
@@ -55,6 +56,7 @@ class AddKnowledgeDocumentsRequest(BaseModel):
 
 class ListKnowledgeDocumentsResponse(BaseModel):
     documents: List[KnowledgeDocumentResponse]
+    total: int = 0
 
 
 class CreateKnowledgeBaseSessionRequest(BaseModel):

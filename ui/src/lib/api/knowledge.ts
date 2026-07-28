@@ -34,8 +34,8 @@ export const knowledgeApi = {
     return post<KnowledgeBase>(`/knowledge-bases/${kbId}/documents`, params);
   },
 
-  listDocuments: (kbId: string): Promise<KnowledgeDocumentsData> => {
-    return get<KnowledgeDocumentsData>(`/knowledge-bases/${kbId}/documents`);
+  listDocuments: (kbId: string, limit = 50, offset = 0): Promise<KnowledgeDocumentsData> => {
+    return get<KnowledgeDocumentsData>(`/knowledge-bases/${kbId}/documents`, { limit, offset });
   },
 
   deleteDocument: (kbId: string, docId: string): Promise<KnowledgeBase> => {

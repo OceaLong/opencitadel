@@ -7,7 +7,7 @@ import { toast } from "sonner";
 
 import { AddDocumentDialog } from "@/components/knowledge/add-document-dialog";
 import { CreateKBDialog } from "@/components/knowledge/create-kb-dialog";
-import { formatIngestStreamError } from "@/components/knowledge/knowledge-utils";
+import { appendDocumentsPage, canStartAsk, formatIngestStreamError } from "@/components/knowledge/knowledge-utils";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
@@ -23,6 +23,11 @@ import { IconAdd, IconDelete, IconKnowledge, IconLoading, IconRefresh } from "@/
 import { cn } from "@/lib/utils";
 
 const TERMINAL_KB_STATUSES = new Set<KnowledgeBase["status"]>(["ready", "failed"]);
+
+const PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 200;
+
+type DocsPage = { items: KnowledgeDocument[]; total: number; loading: boolean };
 
 type PendingDelete =
   | { kind: "kb"; kb: KnowledgeBase }
@@ -42,38 +47,112 @@ export function KnowledgeLibrary() {
   const tCommon = useTranslations("common");
   const { user } = useAuth();
   const [items, setItems] = useState<KnowledgeBase[]>([]);
-  const [documentsByKb, setDocumentsByKb] = useState<Record<string, KnowledgeDocument[]>>({});
+  const [docsByKb, setDocsByKb] = useState<Record<string, DocsPage>>({});
+  const [expandedKbs, setExpandedKbs] = useState<Set<string>>(new Set());
   const [createOpen, setCreateOpen] = useState(false);
   const [addOpenFor, setAddOpenFor] = useState<string | null>(null);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [ingestingIds, setIngestingIds] = useState<Set<string>>(new Set());
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
   const ingestCleanupRef = useRef<Map<string, () => void>>(new Map());
+  // Mirrors of state used inside loadList/refreshExpandedDocs so those callbacks
+  // can read the latest value without depending on the state itself — otherwise
+  // loadList would be re-created (and its mount/polling effects re-run) on every
+  // expand/collapse toggle, since expandedKbs/docsByKb get new references often.
+  const expandedKbsRef = useRef<Set<string>>(new Set());
+  const docsByKbRef = useRef<Record<string, DocsPage>>({});
+
+  useEffect(() => {
+    expandedKbsRef.current = expandedKbs;
+  }, [expandedKbs]);
+
+  useEffect(() => {
+    docsByKbRef.current = docsByKb;
+  }, [docsByKb]);
+
+  const loadDocsPage = useCallback(
+    async (kbId: string, offset: number) => {
+      setDocsByKb((prev) => ({
+        ...prev,
+        [kbId]: {
+          items: offset === 0 ? [] : (prev[kbId]?.items ?? []),
+          total: prev[kbId]?.total ?? 0,
+          loading: true,
+        },
+      }));
+      try {
+        const page = await knowledgeApi.listDocuments(kbId, PAGE_SIZE, offset);
+        setDocsByKb((prev) => ({
+          ...prev,
+          [kbId]: {
+            items:
+              offset === 0
+                ? page.documents
+                : appendDocumentsPage(prev[kbId]?.items ?? [], page.documents),
+            total: page.total,
+            loading: false,
+          },
+        }));
+      } catch {
+        setDocsByKb((prev) => ({
+          ...prev,
+          [kbId]: { ...(prev[kbId] ?? { items: [], total: 0 }), loading: false },
+        }));
+        toast.error(t("loadListFailed"));
+      }
+    },
+    [t],
+  );
+
+  // Re-fetches an already-expanded card's documents from offset 0, but requests
+  // enough items to cover what the user had already paged in (capped at
+  // MAX_PAGE_SIZE), so auto-refreshes (SSE done / 5s poll / post-delete) don't
+  // silently truncate a card back to the first page.
+  const refreshExpandedDocs = useCallback(
+    async (kbId: string) => {
+      const currentCount = docsByKbRef.current[kbId]?.items.length ?? 0;
+      const limit = Math.min(MAX_PAGE_SIZE, Math.max(PAGE_SIZE, currentCount));
+      setDocsByKb((prev) => ({
+        ...prev,
+        [kbId]: {
+          items: prev[kbId]?.items ?? [],
+          total: prev[kbId]?.total ?? 0,
+          loading: true,
+        },
+      }));
+      try {
+        const page = await knowledgeApi.listDocuments(kbId, limit, 0);
+        setDocsByKb((prev) => ({
+          ...prev,
+          [kbId]: { items: page.documents, total: page.total, loading: false },
+        }));
+      } catch {
+        setDocsByKb((prev) => ({
+          ...prev,
+          [kbId]: { ...(prev[kbId] ?? { items: [], total: 0 }), loading: false },
+        }));
+        toast.error(t("loadListFailed"));
+      }
+    },
+    [t],
+  );
 
   const loadList = useCallback(async () => {
     if (!user) {
       setItems([]);
-      setDocumentsByKb({});
+      setDocsByKb({});
       return;
     }
     try {
       const data = await knowledgeApi.list();
       setItems(data.knowledge_bases);
-      const entries = await Promise.all(
-        data.knowledge_bases.map(async (kb) => {
-          try {
-            const docs = await knowledgeApi.listDocuments(kb.id);
-            return [kb.id, docs.documents] as const;
-          } catch {
-            return [kb.id, []] as const;
-          }
-        }),
-      );
-      setDocumentsByKb(Object.fromEntries(entries));
+      for (const kbId of expandedKbsRef.current) {
+        void refreshExpandedDocs(kbId);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("loadListFailed"));
     }
-  }, [user, t]);
+  }, [user, t, refreshExpandedDocs]);
 
   useEffect(() => {
     void loadList();
@@ -161,24 +240,33 @@ export function KnowledgeLibrary() {
       if (pendingDelete.kind === "kb") {
         await knowledgeApi.delete(pendingDelete.kb.id);
         setItems((prev) => prev.filter((kb) => kb.id !== pendingDelete.kb.id));
-        setDocumentsByKb((prev) => {
+        setDocsByKb((prev) => {
           const next = { ...prev };
           delete next[pendingDelete.kb.id];
+          return next;
+        });
+        setExpandedKbs((prev) => {
+          if (!prev.has(pendingDelete.kb.id)) return prev;
+          const next = new Set(prev);
+          next.delete(pendingDelete.kb.id);
           return next;
         });
         toast.success(t("deleteKbSuccess", { name: pendingDelete.kb.name }));
       } else {
         const updated = await knowledgeApi.deleteDocument(pendingDelete.kbId, pendingDelete.doc.id);
         setItems((prev) => prev.map((kb) => (kb.id === updated.id ? updated : kb)));
-        setDocumentsByKb((prev) => ({
-          ...prev,
-          [pendingDelete.kbId]: (prev[pendingDelete.kbId] ?? []).filter(
-            (doc) => doc.id !== pendingDelete.doc.id,
-          ),
-        }));
-        if (updated.ingest_task_id) {
-          watchIngest(updated.id, updated.ingest_task_id);
-        }
+        setDocsByKb((prev) => {
+          const existing = prev[pendingDelete.kbId];
+          if (!existing) return prev;
+          return {
+            ...prev,
+            [pendingDelete.kbId]: {
+              ...existing,
+              items: existing.items.filter((doc) => doc.id !== pendingDelete.doc.id),
+              total: Math.max(0, existing.total - 1),
+            },
+          };
+        });
         toast.success(t("deleteDocumentSuccess", { title: pendingDelete.doc.title }));
       }
       setPendingDelete(null);
@@ -218,13 +306,17 @@ export function KnowledgeLibrary() {
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((kb) => {
             const ingesting = isKbIngesting(kb, ingestingIds);
-            const documents = documentsByKb[kb.id] ?? [];
+            const docsPage = docsByKb[kb.id];
+            const documents = docsPage?.items ?? [];
+            const expanded = expandedKbs.has(kb.id);
             return (
               <Card key={kb.id} className={cn(ingesting && "border-primary/30")}>
                 <CardHeader className="pb-2">
                   <CardTitle className="truncate text-base">{kb.name}</CardTitle>
                   <CardDescription className="text-xs">
                     {t("statusDocCount", { status: kb.status, count: kb.doc_count ?? 0 })}
+                    {" · "}
+                    {t("readyDocCount", { ready: kb.ready_doc_count ?? 0, count: kb.doc_count ?? 0 })}
                     {ingesting && (
                       <span className="ml-2 inline-flex items-center gap-1">
                         <IconLoading className="size-3 animate-spin" />
@@ -236,13 +328,18 @@ export function KnowledgeLibrary() {
                         {t("indexFailedDetail", { error: kb.error })}
                       </span>
                     )}
+                    {kb.status !== "failed" && kb.error && (
+                      <span className="mt-1 block text-amber-600 dark:text-amber-500">
+                        {t("partialFailureWarning", { error: kb.error })}
+                      </span>
+                    )}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
-                      disabled={startingId === kb.id || kb.status !== "ready"}
+                      disabled={startingId === kb.id || !canStartAsk(kb)}
                       onClick={() => void startTask(kb.id, "ask")}
                     >
                       {startingId === kb.id ? (
@@ -284,35 +381,72 @@ export function KnowledgeLibrary() {
                   </div>
 
                   <div className="space-y-1">
-                    <p className="text-muted-foreground text-xs font-medium">{t("documentsLabel")}</p>
-                    {documents.length === 0 ? (
-                      <p className="text-muted-foreground text-xs">{t("noDocuments")}</p>
-                    ) : (
-                      <ul className="space-y-1">
-                        {documents.map((doc) => (
-                          <li
-                            key={doc.id}
-                            className="flex items-center justify-between gap-2 rounded-md border px-2 py-1"
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-muted-foreground text-xs font-medium">{t("documentsLabel")}</p>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setExpandedKbs((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(kb.id)) {
+                              next.delete(kb.id);
+                            } else {
+                              next.add(kb.id);
+                              if (!docsByKb[kb.id]) void loadDocsPage(kb.id, 0);
+                            }
+                            return next;
+                          });
+                        }}
+                      >
+                        {t("showDocuments")}
+                      </Button>
+                    </div>
+                    {expanded && (
+                      <div className="space-y-1">
+                        {documents.length === 0 ? (
+                          <p className="text-muted-foreground text-xs">{t("noDocuments")}</p>
+                        ) : (
+                          <ul className="space-y-1">
+                            {documents.map((doc) => (
+                              <li
+                                key={doc.id}
+                                className="flex items-center justify-between gap-2 rounded-md border px-2 py-1"
+                              >
+                                <span className="truncate text-xs" title={doc.title}>
+                                  {doc.title}
+                                </span>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="size-7 shrink-0 text-destructive hover:text-destructive"
+                                  disabled={ingesting}
+                                  title={ingesting ? t("deleteBlockedIngesting") : tCommon("delete")}
+                                  onClick={() =>
+                                    setPendingDelete({ kind: "document", kbId: kb.id, doc })
+                                  }
+                                >
+                                  <IconDelete className="size-3.5" />
+                                </Button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {(docsPage?.items.length ?? 0) < (docsPage?.total ?? 0) && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={docsPage?.loading}
+                            onClick={() => void loadDocsPage(kb.id, docsPage?.items.length ?? 0)}
                           >
-                            <span className="truncate text-xs" title={doc.title}>
-                              {doc.title}
-                            </span>
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="ghost"
-                              className="size-7 shrink-0 text-destructive hover:text-destructive"
-                              disabled={ingesting}
-                              title={ingesting ? t("deleteBlockedIngesting") : tCommon("delete")}
-                              onClick={() =>
-                                setPendingDelete({ kind: "document", kbId: kb.id, doc })
-                              }
-                            >
-                              <IconDelete className="size-3.5" />
-                            </Button>
-                          </li>
-                        ))}
-                      </ul>
+                            {t("loadMoreDocuments", {
+                              shown: docsPage?.items.length ?? 0,
+                              total: docsPage?.total ?? 0,
+                            })}
+                          </Button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </CardContent>

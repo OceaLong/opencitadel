@@ -1662,6 +1662,7 @@
     "deleteFailed": "删除失败",
     "deleteBlockedIngesting": "索引进行中，无法删除",
     "indexFailedDetail": "索引失败: {error}",
+    "partialFailureWarning": "部分文档失败：{error}",
     "tabGraph": "图谱",
     "addDialog": {
       "title": "添加知识文档",
@@ -1690,6 +1691,9 @@
     "startAsk": "Ask",
     "startTaskFailed": "启动任务失败",
     "statusDocCount": "{status} · {count} 篇文档",
+    "readyDocCount": "{ready}/{count} 篇就绪",
+    "showDocuments": "查看文档",
+    "loadMoreDocuments": "加载更多（已显示 {shown}/{total}）",
     "title": "文档知识库"
   },
   "codebase": {

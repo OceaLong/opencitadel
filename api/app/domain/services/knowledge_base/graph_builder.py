@@ -8,17 +8,22 @@ from typing import Callable, List, Optional
 
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
-from app.domain.models.knowledge_base import KnowledgeChunk, KnowledgeEntity, KnowledgeRelation
+from app.domain.models.knowledge_base import (
+    KnowledgeChunk,
+    KnowledgeEntity,
+    KnowledgeEntityRef,
+    KnowledgeRelation,
+)
 from app.domain.repositories.uow import IUnitOfWork
 
 logger = logging.getLogger(__name__)
 
 GRAPH_EXTRACT_PROMPT = """从以下企业文档片段中抽取对问答有帮助的实体与关系。
 只返回 JSON，格式:
-{
-  "entities": [{"name": "...", "type": "组织|产品|流程|制度|人|地点|概念|其他", "description": "..."}],
-  "relations": [{"src": "实体名", "dst": "实体名", "relation": "关系说明"}]
-}
+{{
+  "entities": [{{"name": "...", "type": "组织|产品|流程|制度|人|地点|概念|其他", "description": "..."}}],
+  "relations": [{{"src": "实体名", "dst": "实体名", "relation": "关系说明"}}]
+}}
 
 文档片段:
 {content}
@@ -68,6 +73,7 @@ class GraphBuilder:
                     return chunk, {}
 
         results = await asyncio.gather(*(extract(chunk) for chunk in selected))
+        entity_doc_pairs: set[tuple[str, str]] = set()
         for chunk, payload in results:
             entities = payload.get("entities") if isinstance(payload, dict) else []
             rels = payload.get("relations") if isinstance(payload, dict) else []
@@ -90,6 +96,7 @@ class GraphBuilder:
                         description=str(item.get("description") or ""),
                     ),
                 )
+                entity_doc_pairs.add((key, chunk.doc_id))
             if not isinstance(rels, list):
                 continue
             for item in rels:
@@ -111,8 +118,22 @@ class GraphBuilder:
                 )
 
         async with self._uow_factory() as uow:
-            await uow.knowledge_base.save_entities(list(entity_by_name.values()))
+            id_map = await uow.knowledge_base.upsert_entities(list(entity_by_name.values()))
+            key_by_temp_id = {entity.id: key for key, entity in entity_by_name.items()}
+            for relation in relations:
+                relation.src_entity_id = id_map.get(
+                    key_by_temp_id.get(relation.src_entity_id, ""), relation.src_entity_id
+                )
+                relation.dst_entity_id = id_map.get(
+                    key_by_temp_id.get(relation.dst_entity_id, ""), relation.dst_entity_id
+                )
             await uow.knowledge_base.save_relations(relations)
+            refs = [
+                KnowledgeEntityRef(kb_id=kb_id, entity_id=id_map[key], doc_id=doc_id)
+                for key, doc_id in sorted(entity_doc_pairs)
+                if key in id_map
+            ]
+            await uow.knowledge_base.save_entity_refs(refs)
         warning = f"图谱抽取已达上限，跳过 {skipped} 个父块" if skipped else None
         return len(entity_by_name), len(relations), warning
 

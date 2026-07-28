@@ -37,7 +37,7 @@ flowchart TD
 
 - **Parse**：上传、ZIP、网页、Confluence 或飞书来源 → 每文档生成 `PageBlock`；`knowledge_base.ocr.mode=vision_llm` 时对图片型 PDF 做视觉 LLM OCR
 - **Chunk**：通过 `KBChunker` 生成父/子块；通过 `KBVectorService` 嵌入
-- **Index**：`replace_index_chunks()` 持久化可检索块
+- **Index**：`purge_documents_index_data()` 清理本轮文档残留后，`save_chunks()` 批量追加写入可检索块（增量；手动 reindex 时才全量重建）
 - **Graph**（可选）：`graphrag.enabled=true` 时运行 `GraphBuilder`（种子 `config.yaml` 中**默认启用**）
 - **降级路径**：嵌入失败时设置 `vector_degraded=true`；检索回退到 BM25/混合模式，不使用向量
 

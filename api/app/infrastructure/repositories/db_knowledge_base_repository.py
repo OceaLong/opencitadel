@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,7 @@ from app.domain.models.knowledge_base import (
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeEntity,
+    KnowledgeEntityRef,
     KnowledgeRelation,
 )
 from app.domain.models.scope import OwnerScope, OwnerScopeType
@@ -23,7 +24,35 @@ from app.infrastructure.models.knowledge_base import (
     KnowledgeChunkModel,
     KnowledgeDocumentModel,
     KnowledgeEntityModel,
+    KnowledgeEntityRefModel,
     KnowledgeRelationModel,
+)
+
+
+_CHUNK_INSERT_BATCH_SIZE = 500
+
+_CHUNK_INSERT_WITH_EMBEDDING_SQL = text(
+    """
+    INSERT INTO knowledge_chunks
+        (id, kb_id, doc_id, parent_id, level, content, content_tsv,
+         page_no, heading_path, ordinal, embedding)
+    VALUES
+        (:id, :kb_id, :doc_id, :parent_id, :level, :content,
+         to_tsvector('simple', :segmented_content),
+         :page_no, :heading_path, :ordinal, :embedding::vector)
+    """
+)
+
+_CHUNK_INSERT_PLAIN_SQL = text(
+    """
+    INSERT INTO knowledge_chunks
+        (id, kb_id, doc_id, parent_id, level, content, content_tsv,
+         page_no, heading_path, ordinal)
+    VALUES
+        (:id, :kb_id, :doc_id, :parent_id, :level, :content,
+         to_tsvector('simple', :segmented_content),
+         :page_no, :heading_path, :ordinal)
+    """
 )
 
 
@@ -176,10 +205,7 @@ class DBKnowledgeBaseRepository(KnowledgeBaseRepository):
         )
 
     async def delete_document(self, doc_id: str) -> None:
-        chunk_ids_stmt = select(KnowledgeChunkModel.id).where(KnowledgeChunkModel.doc_id == doc_id)
-        await self.db_session.execute(
-            delete(KnowledgeRelationModel).where(KnowledgeRelationModel.chunk_id.in_(chunk_ids_stmt))
-        )
+        await self.purge_documents_index_data([doc_id])
         await self.db_session.execute(
             delete(KnowledgeDocumentModel).where(KnowledgeDocumentModel.id == doc_id)
         )
@@ -209,53 +235,28 @@ class DBKnowledgeBaseRepository(KnowledgeBaseRepository):
         await self.save_chunks(chunks)
 
     async def save_chunks(self, chunks: List[KnowledgeChunk]) -> None:
-        for chunk in chunks:
-            await self._insert_chunk(chunk)
+        embedded = [c for c in chunks if c.embedding]
+        plain = [c for c in chunks if not c.embedding]
+        for batch_source, sql in ((embedded, _CHUNK_INSERT_WITH_EMBEDDING_SQL), (plain, _CHUNK_INSERT_PLAIN_SQL)):
+            for start in range(0, len(batch_source), _CHUNK_INSERT_BATCH_SIZE):
+                batch = batch_source[start:start + _CHUNK_INSERT_BATCH_SIZE]
+                await self.db_session.execute(sql, [self._chunk_params(chunk) for chunk in batch])
 
-    async def _insert_chunk(self, chunk: KnowledgeChunk) -> None:
-            params = {
-                "id": chunk.id,
-                "kb_id": chunk.kb_id,
-                "doc_id": chunk.doc_id,
-                "parent_id": chunk.parent_id,
-                "level": chunk.level.value,
-                "content": chunk.content,
-                "segmented_content": chunk.segmented_content or chunk.content,
-                "page_no": chunk.page_no,
-                "heading_path": chunk.heading_path,
-                "ordinal": chunk.ordinal,
-                "embedding": str(chunk.embedding),
-            }
-            if chunk.embedding:
-                await self.db_session.execute(
-                    text(
-                        """
-                        INSERT INTO knowledge_chunks
-                            (id, kb_id, doc_id, parent_id, level, content, content_tsv,
-                             page_no, heading_path, ordinal, embedding)
-                        VALUES
-                            (:id, :kb_id, :doc_id, :parent_id, :level, :content,
-                             to_tsvector('simple', :segmented_content),
-                             :page_no, :heading_path, :ordinal, :embedding::vector)
-                        """
-                    ),
-                    params,
-                )
-            else:
-                await self.db_session.execute(
-                    text(
-                        """
-                        INSERT INTO knowledge_chunks
-                            (id, kb_id, doc_id, parent_id, level, content, content_tsv,
-                             page_no, heading_path, ordinal)
-                        VALUES
-                            (:id, :kb_id, :doc_id, :parent_id, :level, :content,
-                             to_tsvector('simple', :segmented_content),
-                             :page_no, :heading_path, :ordinal)
-                        """
-                    ),
-                    params,
-                )
+    @staticmethod
+    def _chunk_params(chunk: KnowledgeChunk) -> dict:
+        return {
+            "id": chunk.id,
+            "kb_id": chunk.kb_id,
+            "doc_id": chunk.doc_id,
+            "parent_id": chunk.parent_id,
+            "level": chunk.level.value,
+            "content": chunk.content,
+            "segmented_content": chunk.segmented_content or chunk.content,
+            "page_no": chunk.page_no,
+            "heading_path": chunk.heading_path,
+            "ordinal": chunk.ordinal,
+            "embedding": str(chunk.embedding),
+        }
 
     async def vector_search_chunks(
             self,
@@ -355,6 +356,136 @@ class DBKnowledgeBaseRepository(KnowledgeBaseRepository):
                     description=entity.description,
                 )
             )
+
+    async def upsert_entities(self, entities: List[KnowledgeEntity]) -> Dict[str, str]:
+        keyed: Dict[str, KnowledgeEntity] = {}
+        for entity in entities:
+            key = entity.name.strip().lower()
+            if key:
+                keyed.setdefault(key, entity)
+        if not keyed:
+            return {}
+        kb_id = next(iter(keyed.values())).kb_id
+        stmt = (
+            select(KnowledgeEntityModel)
+            .where(KnowledgeEntityModel.kb_id == kb_id)
+            .where(func.lower(KnowledgeEntityModel.name).in_(list(keyed)))
+        )
+        result = await self.db_session.execute(stmt)
+        existing = {record.name.strip().lower(): record.id for record in result.scalars().all()}
+        id_map: Dict[str, str] = {}
+        for key, entity in keyed.items():
+            if key in existing:
+                id_map[key] = existing[key]
+                continue
+            self.db_session.add(
+                KnowledgeEntityModel(
+                    id=entity.id,
+                    kb_id=entity.kb_id,
+                    name=entity.name,
+                    type=entity.type,
+                    description=entity.description,
+                )
+            )
+            id_map[key] = entity.id
+        return id_map
+
+    async def save_entity_refs(self, refs: List[KnowledgeEntityRef]) -> None:
+        sql = text(
+            """
+            INSERT INTO knowledge_entity_refs (id, kb_id, entity_id, doc_id)
+            VALUES (:id, :kb_id, :entity_id, :doc_id)
+            ON CONFLICT (entity_id, doc_id) DO NOTHING
+            """
+        )
+        for start in range(0, len(refs), _CHUNK_INSERT_BATCH_SIZE):
+            batch = refs[start:start + _CHUNK_INSERT_BATCH_SIZE]
+            await self.db_session.execute(
+                sql,
+                [
+                    {"id": ref.id, "kb_id": ref.kb_id, "entity_id": ref.entity_id, "doc_id": ref.doc_id}
+                    for ref in batch
+                ],
+            )
+
+    async def purge_documents_index_data(self, doc_ids: List[str]) -> None:
+        if not doc_ids:
+            return
+        chunk_ids_stmt = select(KnowledgeChunkModel.id).where(KnowledgeChunkModel.doc_id.in_(doc_ids))
+        await self.db_session.execute(
+            delete(KnowledgeRelationModel).where(KnowledgeRelationModel.chunk_id.in_(chunk_ids_stmt))
+        )
+        candidate_result = await self.db_session.execute(
+            select(KnowledgeEntityRefModel.entity_id)
+            .where(KnowledgeEntityRefModel.doc_id.in_(doc_ids))
+            .distinct()
+        )
+        candidates = [str(entity_id) for entity_id in candidate_result.scalars().all()]
+        await self.db_session.execute(
+            delete(KnowledgeEntityRefModel).where(KnowledgeEntityRefModel.doc_id.in_(doc_ids))
+        )
+        if candidates:
+            remaining_refs = select(KnowledgeEntityRefModel.entity_id).where(
+                KnowledgeEntityRefModel.entity_id == KnowledgeEntityModel.id
+            )
+            await self.db_session.execute(
+                delete(KnowledgeEntityModel)
+                .where(KnowledgeEntityModel.id.in_(candidates))
+                .where(~remaining_refs.exists())
+            )
+        await self.db_session.execute(
+            delete(KnowledgeChunkModel).where(KnowledgeChunkModel.doc_id.in_(doc_ids))
+        )
+
+    async def count_ready_documents(self, kb_ids: List[str]) -> Dict[str, int]:
+        if not kb_ids:
+            return {}
+        stmt = (
+            select(KnowledgeDocumentModel.kb_id, func.count())
+            .where(KnowledgeDocumentModel.kb_id.in_(kb_ids))
+            .where(KnowledgeDocumentModel.status == DocStatus.READY.value)
+            .group_by(KnowledgeDocumentModel.kb_id)
+        )
+        result = await self.db_session.execute(stmt)
+        counts = {kb_id: 0 for kb_id in kb_ids}
+        for kb_id, count in result.all():
+            counts[str(kb_id)] = int(count)
+        return counts
+
+    async def count_child_chunks(self, kb_id: str) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(KnowledgeChunkModel)
+            .where(KnowledgeChunkModel.kb_id == kb_id)
+            .where(KnowledgeChunkModel.level == ChunkLevel.CHILD.value)
+        )
+        result = await self.db_session.execute(stmt)
+        return int(result.scalar_one())
+
+    async def list_documents_page(
+            self,
+            kb_id: str,
+            limit: int = 50,
+            offset: int = 0,
+    ) -> Tuple[List[KnowledgeDocument], int]:
+        stmt = (
+            select(KnowledgeDocumentModel)
+            .where(KnowledgeDocumentModel.kb_id == kb_id)
+            .order_by(KnowledgeDocumentModel.created_at.asc())
+            .offset(max(offset, 0))
+            .limit(max(1, min(limit, 200)))
+        )
+        result = await self.db_session.execute(stmt)
+        items = [record.to_domain() for record in result.scalars().all()]
+        total = await self.count_documents(kb_id)
+        return items, total
+
+    async def mark_documents_pending(self, kb_id: str) -> None:
+        await self.db_session.execute(
+            update(KnowledgeDocumentModel)
+            .where(KnowledgeDocumentModel.kb_id == kb_id)
+            .values(status=DocStatus.PENDING.value, error=None, updated_at=datetime.now())
+        )
 
     async def save_relations(self, relations: List[KnowledgeRelation]) -> None:
         for relation in relations:

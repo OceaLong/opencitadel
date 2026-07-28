@@ -1662,6 +1662,7 @@
     "deleteFailed": "Delete failed",
     "deleteBlockedIngesting": "Cannot delete while indexing is in progress",
     "indexFailedDetail": "Indexing failed: {error}",
+    "partialFailureWarning": "Some documents failed: {error}",
     "tabGraph": "Graph",
     "addDialog": {
       "title": "Add knowledge documents",
@@ -1690,6 +1691,9 @@
     "startAsk": "Ask",
     "startTaskFailed": "Failed to start task",
     "statusDocCount": "{status} · {count} documents",
+    "readyDocCount": "{ready}/{count} ready",
+    "showDocuments": "Show documents",
+    "loadMoreDocuments": "Load more ({shown}/{total} shown)",
     "title": "Document knowledge base"
   },
   "codebase": {

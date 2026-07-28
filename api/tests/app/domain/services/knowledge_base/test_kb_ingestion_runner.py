@@ -7,8 +7,9 @@ import pytest
 from app.domain.models.app_config import AppConfig
 from app.domain.models.error_codes import DOCUMENT_PARSE_FAILED
 from app.domain.models.event import DoneEvent, ErrorEvent, StepEvent, StepEventStatus
-from app.domain.models.knowledge_base import KBStatus, KnowledgeBase
+from app.domain.models.knowledge_base import DocStatus, KBStatus, KnowledgeBase, KnowledgeDocument
 from app.domain.services.knowledge_base.ingestion_runner import KBIngestionRunner
+from app.domain.services.knowledge_base.parsers import PageBlock
 
 
 class _FakeKbRepo:
@@ -38,9 +39,27 @@ class _FakeKbRepo:
             page_count: int | None = None,
     ):
         self.doc_updates.append((doc_id, status, error, warning, page_count))
+        for doc in self._documents:
+            if doc.id == doc_id:
+                doc.status = status
+                doc.error = error
+                doc.warning = warning
+                if page_count is not None:
+                    doc.page_count = page_count
 
     async def replace_index_chunks(self, kb_id: str, chunks):
         self.replaced_chunks = chunks
+
+    async def save_chunks(self, chunks):
+        self.saved_chunks = getattr(self, "saved_chunks", [])
+        self.saved_chunks.extend(chunks)
+
+    async def purge_documents_index_data(self, doc_ids):
+        self.purged_doc_ids = getattr(self, "purged_doc_ids", [])
+        self.purged_doc_ids.extend(doc_ids)
+
+    async def count_child_chunks(self, kb_id):
+        return len([c for c in getattr(self, "saved_chunks", []) if c.level.value == "child"])
 
     async def save_kb(self, kb: KnowledgeBase) -> None:
         self._kb = kb
@@ -158,7 +177,7 @@ async def test_empty_document_content_fails_at_parse_stage(monkeypatch):
     events = await _collect_events(runner, "kb1")
 
     assert isinstance(events[-1], ErrorEvent)
-    assert events[-1].error.startswith("全部文档解析失败:")
+    assert events[-1].error.startswith("全部新增文档解析失败:")
     assert "OCR 未执行" in events[-1].error
     assert kb_repo.doc_updates
     assert kb_repo.doc_updates[-1][1] == DocStatus.FAILED
@@ -227,9 +246,107 @@ async def test_run_degrades_when_embedding_fails(monkeypatch):
     assert isinstance(events[-1], DoneEvent)
     assert kb.status == KBStatus.READY
     assert kb.vector_degraded is True
-    assert getattr(kb_repo, "replaced_chunks", None)
-    assert all(not chunk.embedding for chunk in kb_repo.replaced_chunks)
+    assert getattr(kb_repo, "saved_chunks", None)
+    assert all(not chunk.embedding for chunk in kb_repo.saved_chunks)
     assert any(
         update[1] == DocStatus.READY and update[3] == "向量化失败，已降级为 BM25 检索"
         for update in kb_repo.doc_updates
     )
+
+
+def _make_doc(doc_id: str, status: DocStatus) -> KnowledgeDocument:
+    return KnowledgeDocument(id=doc_id, kb_id="kb1", title=doc_id, status=status)
+
+
+@pytest.mark.anyio
+async def test_run_processes_only_pending_and_failed_documents(monkeypatch):
+    kb = KnowledgeBase(id="kb1", name="test")
+    docs = [
+        _make_doc("d-ready", DocStatus.READY),
+        _make_doc("d-pending", DocStatus.PENDING),
+        _make_doc("d-failed", DocStatus.FAILED),
+    ]
+    kb_repo = _FakeKbRepo(kb, documents=docs)
+    runner = KBIngestionRunner(uow_factory=lambda: _FakeUow(kb_repo), file_storage=MagicMock())
+    monkeypatch.setattr(
+        "app.domain.services.knowledge_base.ingestion_runner.get_runtime_config",
+        lambda: AppConfig(),
+    )
+    parsed_ids = []
+
+    async def fake_parse(self, doc):
+        parsed_ids.append(doc.id)
+        return [PageBlock(page_no=1, heading_path="h", text="hello world")], 1, None
+
+    monkeypatch.setattr(KBIngestionRunner, "_parse_document", fake_parse)
+
+    events = await _collect_events(runner, "kb1")
+
+    assert sorted(parsed_ids) == ["d-failed", "d-pending"]          # ready 文档未被重新解析
+    assert sorted(kb_repo.purged_doc_ids) == ["d-failed", "d-pending"]  # 先清自身残留
+    assert not hasattr(kb_repo, "replaced_chunks")                   # 不再全量替换
+    assert kb.status == KBStatus.READY
+    assert any(isinstance(ev, DoneEvent) for ev in events)
+
+
+@pytest.mark.anyio
+async def test_run_short_circuits_when_no_pending_documents(monkeypatch):
+    kb = KnowledgeBase(id="kb1", name="test")
+    kb_repo = _FakeKbRepo(kb, documents=[_make_doc("d-ready", DocStatus.READY)])
+    runner = KBIngestionRunner(uow_factory=lambda: _FakeUow(kb_repo), file_storage=MagicMock())
+    monkeypatch.setattr(
+        "app.domain.services.knowledge_base.ingestion_runner.get_runtime_config",
+        lambda: AppConfig(),
+    )
+
+    events = await _collect_events(runner, "kb1")
+
+    assert kb.status == KBStatus.READY
+    assert any(isinstance(ev, DoneEvent) for ev in events)
+    assert not any(isinstance(ev, ErrorEvent) for ev in events)
+
+
+@pytest.mark.anyio
+async def test_run_keeps_kb_ready_when_new_doc_fails_but_ready_docs_exist(monkeypatch):
+    kb = KnowledgeBase(id="kb1", name="test")
+    docs = [_make_doc("d-ready", DocStatus.READY), _make_doc("d-new", DocStatus.PENDING)]
+    kb_repo = _FakeKbRepo(kb, documents=docs)
+    runner = KBIngestionRunner(uow_factory=lambda: _FakeUow(kb_repo), file_storage=MagicMock())
+    monkeypatch.setattr(
+        "app.domain.services.knowledge_base.ingestion_runner.get_runtime_config",
+        lambda: AppConfig(),
+    )
+
+    async def failing_parse(self, doc):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(KBIngestionRunner, "_parse_document", failing_parse)
+
+    events = await _collect_events(runner, "kb1")
+
+    assert kb.status == KBStatus.READY          # 库不因新文档失败而 failed
+    assert kb.error and "1" in kb.error          # 错误摘要
+    doc_failed = [u for u in kb_repo.doc_updates if u[0] == "d-new" and u[1] == DocStatus.FAILED]
+    assert doc_failed
+    assert any(isinstance(ev, DoneEvent) for ev in events)
+
+
+@pytest.mark.anyio
+async def test_run_fails_kb_when_all_docs_fail_and_none_ready(monkeypatch):
+    kb = KnowledgeBase(id="kb1", name="test")
+    kb_repo = _FakeKbRepo(kb, documents=[_make_doc("d-new", DocStatus.PENDING)])
+    runner = KBIngestionRunner(uow_factory=lambda: _FakeUow(kb_repo), file_storage=MagicMock())
+    monkeypatch.setattr(
+        "app.domain.services.knowledge_base.ingestion_runner.get_runtime_config",
+        lambda: AppConfig(),
+    )
+
+    async def failing_parse(self, doc):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(KBIngestionRunner, "_parse_document", failing_parse)
+
+    events = await _collect_events(runner, "kb1")
+
+    assert kb.status == KBStatus.FAILED
+    assert any(isinstance(ev, ErrorEvent) for ev in events)

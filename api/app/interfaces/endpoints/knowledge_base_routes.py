@@ -97,11 +97,15 @@ async def add_documents(
 @router.get("/{kb_id}/documents", response_model=Response[ListKnowledgeDocumentsResponse])
 async def list_documents(
         kb_id: str,
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
         ctx: WorkspaceContext = Depends(get_workspace_context),
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[ListKnowledgeDocumentsResponse]:
-    docs = await service.list_documents(kb_id, scope=ctx.scope)
-    return Response.success(data=ListKnowledgeDocumentsResponse(documents=[_to_doc_response(doc) for doc in docs]))
+    docs, total = await service.list_documents(kb_id, limit=limit, offset=offset, scope=ctx.scope)
+    return Response.success(
+        data=ListKnowledgeDocumentsResponse(documents=[_to_doc_response(doc) for doc in docs], total=total)
+    )
 
 
 @router.delete("/{kb_id}/documents/{doc_id}", response_model=Response[KnowledgeBaseResponse])

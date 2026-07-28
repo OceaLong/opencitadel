@@ -1312,6 +1312,7 @@ export type KnowledgeBase = {
   status: KnowledgeBaseStatus;
   doc_count: number;
   chunk_count: number;
+  ready_doc_count?: number;
   ingest_task_id?: string | null;
   error?: string | null;
   vector_degraded?: boolean;
@@ -1341,6 +1342,7 @@ export type KnowledgeDocument = {
 
 export type KnowledgeDocumentsData = {
   documents: KnowledgeDocument[];
+  total: number;
 };
 
 export type CreateKnowledgeBaseParams = {

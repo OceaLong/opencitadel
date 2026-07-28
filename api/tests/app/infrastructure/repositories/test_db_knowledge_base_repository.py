@@ -1,0 +1,195 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+from types import SimpleNamespace
+
+import pytest
+
+from app.domain.models.knowledge_base import KnowledgeChunk, KnowledgeEntity, KnowledgeEntityRef
+from app.infrastructure.repositories.db_knowledge_base_repository import DBKnowledgeBaseRepository
+
+
+class _RecordingSession:
+    """记录 execute 调用的假 AsyncSession。"""
+
+    def __init__(self, results=None):
+        self.calls: list[tuple[str, object]] = []  # (sql_text, params)
+        self.added: list[object] = []
+        self._results = list(results or [])
+
+    async def execute(self, stmt, params=None):
+        self.calls.append((str(stmt), params))
+        if self._results:
+            return self._results.pop(0)
+        return None
+
+    def add(self, obj):
+        self.added.append(obj)
+
+
+def _chunk(i: int, with_embedding: bool) -> KnowledgeChunk:
+    return KnowledgeChunk(
+        id=f"c{i}",
+        kb_id="kb1",
+        doc_id="d1",
+        content=f"content {i}",
+        embedding=[0.1, 0.2] if with_embedding else [],
+    )
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_save_chunks_batches_by_500_and_embedding_presence():
+    session = _RecordingSession()
+    repo = DBKnowledgeBaseRepository(db_session=session)
+    chunks = [_chunk(i, with_embedding=True) for i in range(1200)]
+    chunks += [_chunk(2000 + i, with_embedding=False) for i in range(700)]
+
+    await repo.save_chunks(chunks)
+
+    # 1200 条带向量 -> 3 批；700 条无向量 -> 2 批
+    assert len(session.calls) == 5
+    embed_calls = [c for c in session.calls if "::vector" in c[0]]
+    plain_calls = [c for c in session.calls if "::vector" not in c[0]]
+    assert [len(params) for _, params in embed_calls] == [500, 500, 200]
+    assert [len(params) for _, params in plain_calls] == [500, 200]
+    # executemany 参数为字典列表，且键完整
+    first_params = embed_calls[0][1]
+    assert isinstance(first_params, list)
+    assert set(first_params[0].keys()) == {
+        "id", "kb_id", "doc_id", "parent_id", "level", "content",
+        "segmented_content", "page_no", "heading_path", "ordinal", "embedding",
+    }
+
+
+@pytest.mark.anyio
+async def test_save_chunks_empty_is_noop():
+    session = _RecordingSession()
+    repo = DBKnowledgeBaseRepository(db_session=session)
+    await repo.save_chunks([])
+    assert session.calls == []
+
+
+class _FakeResult:
+    def __init__(self, scalars_all=None, rows=None, scalar_one=0):
+        self._scalars_all = scalars_all or []
+        self._rows = rows or []
+        self._scalar_one = scalar_one
+
+    def scalars(self):
+        outer = self
+
+        class _S:
+            def all(self):
+                return outer._scalars_all
+
+        return _S()
+
+    def all(self):
+        return self._rows
+
+    def fetchall(self):
+        return self._rows
+
+    def scalar_one(self):
+        return self._scalar_one
+
+
+@pytest.mark.anyio
+async def test_upsert_entities_reuses_existing_ids_and_inserts_new():
+    existing = SimpleNamespace(id="e-old", name="OpenCitadel")
+    session = _RecordingSession(results=[_FakeResult(scalars_all=[existing])])
+    repo = DBKnowledgeBaseRepository(db_session=session)
+    entities = [
+        KnowledgeEntity(id="e-new-1", kb_id="kb1", name="opencitadel"),  # 与已有实体同名（忽略大小写）
+        KnowledgeEntity(id="e-new-2", kb_id="kb1", name="RAG"),
+    ]
+
+    id_map = await repo.upsert_entities(entities)
+
+    assert id_map == {"opencitadel": "e-old", "rag": "e-new-2"}
+    assert [obj.id for obj in session.added] == ["e-new-2"]  # 只插入新实体
+
+
+@pytest.mark.anyio
+async def test_upsert_entities_empty_returns_empty_map():
+    session = _RecordingSession()
+    repo = DBKnowledgeBaseRepository(db_session=session)
+    assert await repo.upsert_entities([]) == {}
+    assert session.calls == []
+
+
+@pytest.mark.anyio
+async def test_save_entity_refs_uses_on_conflict_do_nothing():
+    session = _RecordingSession(results=[_FakeResult()])
+    repo = DBKnowledgeBaseRepository(db_session=session)
+    refs = [KnowledgeEntityRef(kb_id="kb1", entity_id="e1", doc_id="d1")]
+
+    await repo.save_entity_refs(refs)
+
+    sql, params = session.calls[0]
+    assert "ON CONFLICT (entity_id, doc_id) DO NOTHING" in sql
+    assert len(params) == 1
+
+
+@pytest.mark.anyio
+async def test_purge_documents_deletes_zero_ref_entities_from_candidates_only():
+    # execute 依次: 删关系 -> 查候选 entity_id -> 删引用 -> 删归零实体 -> 删 chunks
+    session = _RecordingSession(
+        results=[
+            _FakeResult(),                                 # delete relations
+            _FakeResult(scalars_all=["e1", "e2"]),         # select candidate entity ids
+            _FakeResult(),                                 # delete refs
+            _FakeResult(),                                 # delete zero-ref entities
+            _FakeResult(),                                 # delete chunks
+        ]
+    )
+    repo = DBKnowledgeBaseRepository(db_session=session)
+
+    await repo.purge_documents_index_data(["d1"])
+
+    assert len(session.calls) == 5
+    sql_texts = [sql for sql, _ in session.calls]
+    assert "knowledge_relations" in sql_texts[0]
+    assert "knowledge_entity_refs" in sql_texts[2]
+    assert "knowledge_entities" in sql_texts[3]
+    assert "knowledge_chunks" in sql_texts[4]
+
+
+@pytest.mark.anyio
+async def test_purge_documents_without_candidates_skips_entity_delete():
+    session = _RecordingSession(
+        results=[
+            _FakeResult(),                       # delete relations
+            _FakeResult(scalars_all=[]),         # no candidates
+            _FakeResult(),                       # delete refs
+            _FakeResult(),                       # delete chunks
+        ]
+    )
+    repo = DBKnowledgeBaseRepository(db_session=session)
+    await repo.purge_documents_index_data(["d1"])
+    assert len(session.calls) == 4
+    assert not any("DELETE FROM knowledge_entities" in sql for sql, _ in session.calls)
+
+
+@pytest.mark.anyio
+async def test_count_ready_documents_groups_by_kb():
+    session = _RecordingSession(results=[_FakeResult(rows=[("kb1", 3), ("kb2", 0)])])
+    repo = DBKnowledgeBaseRepository(db_session=session)
+    counts = await repo.count_ready_documents(["kb1", "kb2"])
+    assert counts == {"kb1": 3, "kb2": 0}
+
+
+@pytest.mark.anyio
+async def test_list_documents_page_returns_items_and_total():
+    doc_record = SimpleNamespace(to_domain=lambda: "DOC")
+    session = _RecordingSession(
+        results=[_FakeResult(scalars_all=[doc_record]), _FakeResult(scalar_one=7)]
+    )
+    repo = DBKnowledgeBaseRepository(db_session=session)
+    items, total = await repo.list_documents_page("kb1", limit=5, offset=0)
+    assert items == ["DOC"]
+    assert total == 7
