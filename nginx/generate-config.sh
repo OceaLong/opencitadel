@@ -14,12 +14,12 @@ case "${HTTPS_ENABLED}" in
       exit 1
     fi
     envsubst '${OPENCITADEL_DOMAIN}' \
-      < /etc/nginx/templates/default.https.conf.template \
+      < /etc/nginx/templates-src/default.https.conf.template \
       > "${CONF}"
     ;;
   *)
     envsubst '${OPENCITADEL_DOMAIN}' \
-      < /etc/nginx/templates/default.http.conf.template \
+      < /etc/nginx/templates-src/default.http.conf.template \
       > "${CONF}"
     ;;
 esac

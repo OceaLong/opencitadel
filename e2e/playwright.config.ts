@@ -5,6 +5,6 @@ export default defineConfig({
   timeout: 120_000,
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:8088",
-    trace: "on-first-retry",
+    trace: "retain-on-failure",
   },
 });

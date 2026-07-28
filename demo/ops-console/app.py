@@ -110,8 +110,9 @@ async def root(request: Request):
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, error: Optional[str] = None):
     return templates.TemplateResponse(
+        request,
         "login.html",
-        {"request": request, "error": error},
+        {"error": error},
     )
 
 
@@ -131,8 +132,9 @@ async def login_submit(
         conn.close()
     if not row:
         return templates.TemplateResponse(
+            request,
             "login.html",
-            {"request": request, "error": "Invalid username or password"},
+            {"error": "Invalid username or password"},
             status_code=401,
         )
     token = secrets.token_urlsafe(32)
@@ -197,9 +199,9 @@ async def ticket_list(
     finally:
         conn.close()
     return templates.TemplateResponse(
+        request,
         "tickets.html",
         {
-            "request": request,
             "user": _current_user(request),
             "tickets": tickets,
             "status_filter": status or "",
@@ -224,9 +226,9 @@ async def settlement_list(request: Request):
     finally:
         conn.close()
     return templates.TemplateResponse(
+        request,
         "settlements.html",
         {
-            "request": request,
             "user": _current_user(request),
             "settlements": settlements,
         },
@@ -247,9 +249,9 @@ async def ticket_detail(request: Request, ticket_id: int, message: Optional[str]
     if not ticket:
         return HTMLResponse("Ticket not found", status_code=404)
     return templates.TemplateResponse(
+        request,
         "ticket_detail.html",
         {
-            "request": request,
             "user": _current_user(request),
             "ticket": ticket,
             "message": message,
@@ -304,8 +306,9 @@ async def ticket_close_confirm(request: Request, ticket_id: int):
     if not ticket:
         return HTMLResponse("Ticket not found", status_code=404)
     return templates.TemplateResponse(
+        request,
         "confirm_close.html",
-        {"request": request, "user": _current_user(request), "ticket": ticket},
+        {"user": _current_user(request), "ticket": ticket},
     )
 
 
@@ -357,8 +360,9 @@ async def ticket_refund_confirm(request: Request, ticket_id: int):
     if not ticket:
         return HTMLResponse("Ticket not found", status_code=404)
     return templates.TemplateResponse(
+        request,
         "confirm_refund.html",
-        {"request": request, "user": _current_user(request), "ticket": ticket},
+        {"user": _current_user(request), "ticket": ticket},
     )
 
 

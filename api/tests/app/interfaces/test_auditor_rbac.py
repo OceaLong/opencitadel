@@ -5,6 +5,8 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from fastapi.routing import iter_route_contexts
+
 from app.application.errors.exceptions import ForbiddenError
 from app.domain.models.scope import Principal
 from app.domain.models.user import GlobalRole
@@ -100,14 +102,22 @@ async def test_service_api_key_cannot_bypass_auditor_read_only_role(monkeypatch)
 
 def test_marketplace_mutations_use_authenticated_read_only_boundary():
     router = create_api_routes()
+    # FastAPI >=0.130 lazily wraps included sub-routers in `_IncludedRouter`
+    # instead of eagerly flattening them into `router.routes`, so nested
+    # routes (e.g. those registered via multiple levels of
+    # `include_router`) no longer expose `.path` directly on
+    # `router.routes`. `iter_route_contexts` walks the nesting and yields
+    # the effective route contexts, which still expose `.path` and
+    # `.dependant` like the original flattened `APIRoute` objects did.
+    route_contexts = list(iter_route_contexts(router.routes))
     mutation = next(
         route
-        for route in router.routes
+        for route in route_contexts
         if route.path == "/marketplace/assistant/route"
     )
     catalog = next(
         route
-        for route in router.routes
+        for route in route_contexts
         if route.path == "/marketplace/apps"
     )
 

@@ -19,10 +19,20 @@ spec:
       {{- end }}
       {{- $secretName := printf "%s-secret" (include "opencitadel.fullname" .) }}
       {{- $configName := printf "%s-config" (include "opencitadel.fullname" .) }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: worker
           image: "{{ .Values.image.worker.repository }}:{{ .Values.image.worker.tag }}"
           imagePullPolicy: {{ .Values.image.worker.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           command: ["./worker.sh"]
           readinessProbe:
             exec:
@@ -60,7 +70,11 @@ spec:
             - name: app-config
               mountPath: /app/config.yaml
               subPath: config.yaml
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: app-config
           configMap:
             name: {{ $configName }}
+        - name: tmp
+          emptyDir: {}

@@ -3,6 +3,7 @@
 import pytest
 
 from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
+from app.interfaces.auth_dependencies import get_current_principal, get_workspace_context
 from app.interfaces.endpoints.marketplace_routes import (
     analyze_consumption,
     analyze_nutrition,
@@ -27,6 +28,21 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture
+def authed_client(client):
+    principal = Principal(user_id="marketplace-test-user")
+    app.dependency_overrides[get_current_principal] = lambda: principal
+    app.dependency_overrides[get_workspace_context] = lambda: WorkspaceContext(
+        principal=principal,
+        scope=OwnerScope.personal(principal.user_id),
+    )
+    try:
+        yield client
+    finally:
+        app.dependency_overrides.pop(get_current_principal, None)
+        app.dependency_overrides.pop(get_workspace_context, None)
+
+
 def test_list_marketplace_apps(client):
     response = client.get("/api/marketplace/apps")
     assert response.status_code == 200
@@ -38,8 +54,8 @@ def test_list_marketplace_apps(client):
     assert {"tags", "featured", "accent", "needs_vision", "examples"}.issubset(apps[0])
 
 
-def test_calculate_consumption_manual(client):
-    response = client.post(
+def test_calculate_consumption_manual(authed_client):
+    response = authed_client.post(
         "/api/marketplace/consumption/calculate",
         json={"total_grams": 1000, "serving_grams": 50},
     )
@@ -52,8 +68,8 @@ def test_calculate_consumption_manual(client):
     assert "20 次" in data["message"]
 
 
-def test_correct_consumption_from_natural_language(client):
-    response = client.post(
+def test_correct_consumption_from_natural_language(authed_client):
+    response = authed_client.post(
         "/api/marketplace/consumption/correct",
         json={"text": "其实净含量是 1.2kg", "serving_grams": 60},
     )
@@ -66,7 +82,7 @@ def test_correct_consumption_from_natural_language(client):
     assert data["full_servings"] == 20
 
 
-def test_route_marketplace_request_contract(client):
+def test_route_marketplace_request_contract(authed_client):
     class FakeMarketplaceService:
         async def route_request(self, query, *, model_id=None, scope):
             assert query == "帮我翻译这段英文"
@@ -80,7 +96,7 @@ def test_route_marketplace_request_contract(client):
 
     app.dependency_overrides[get_marketplace_service] = lambda: FakeMarketplaceService()
     try:
-        response = client.post(
+        response = authed_client.post(
             "/api/marketplace/assistant/route",
             json={"query": "帮我翻译这段英文"},
         )

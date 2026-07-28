@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.e2e
 
 .DS_Store
 .idea/
@@ -17,3 +18,9 @@ node_modules/
 dist/
 build/
 coverage/
+
+# Playwright (e2e/)
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/

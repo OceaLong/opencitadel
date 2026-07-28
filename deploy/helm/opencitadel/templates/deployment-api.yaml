@@ -16,11 +16,21 @@ spec:
     spec:
       {{- $secretName := printf "%s-secret" (include "opencitadel.fullname" .) }}
       {{- $configName := printf "%s-config" (include "opencitadel.fullname" .) }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         {{- if .Values.migrate.enabled }}
         - name: migrate
           image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}"
           command: ["python", "-m", "app.migrate"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           envFrom:
             - secretRef:
                 name: {{ $secretName }}
@@ -37,11 +47,19 @@ spec:
               value: {{ include "opencitadel.redisHost" . | quote }}
             - name: MINIO_ENDPOINT
               value: {{ include "opencitadel.minioEndpoint" . | quote }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
         {{- end }}
       containers:
         - name: api
           image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}"
           imagePullPolicy: {{ .Values.image.api.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 8000
           readinessProbe:
@@ -78,7 +96,11 @@ spec:
             - name: app-config
               mountPath: /app/config.yaml
               subPath: config.yaml
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: app-config
           configMap:
             name: {{ $configName }}
+        - name: tmp
+          emptyDir: {}
