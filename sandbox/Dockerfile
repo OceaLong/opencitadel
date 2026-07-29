@@ -7,7 +7,7 @@ ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 ARG PIP_DEFAULT_TIMEOUT=300
 ARG PIP_RETRIES=5
 ARG UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-ARG UV_VERSION=0.11.19
+ARG UV_VERSION=0.11.33
 ARG UV_HTTP_TIMEOUT=300
 ARG PYPI_FILES_MIRROR=https://mirrors.aliyun.com/pypi/packages/
 ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
@@ -26,7 +26,7 @@ RUN sed -i 's|http://archive.ubuntu.com/ubuntu/|http://mirrors.aliyun.com/ubuntu
     sed -i 's|http://ports.ubuntu.com/ubuntu-ports/|http://mirrors.aliyun.com/ubuntu-ports/|g' /etc/apt/sources.list
 
 # 4.更新和安装基础软件后并移除依赖
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo bc curl wget gnupg software-properties-common supervisor \
     socat xvfb x11vnc websockify git unzip \
     && apt-get clean \
@@ -39,7 +39,7 @@ RUN useradd -m -d /home/ubuntu -s /bin/bash ubuntu && \
 # 6.安装Python 3.10版本(非uv)
 RUN add-apt-repository ppa:deadsnakes/ppa && \
     apt-get update && \
-    apt-get install -y python3.10 python3.10-venv python3.10-dev python3-pip && \
+    apt-get install -y --no-install-recommends python3.10 python3.10-venv python3.10-dev python3-pip && \
     update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -57,12 +57,21 @@ RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
     apt-get update && \
-    apt-get install -y nodejs && \
+    apt-get install -y --no-install-recommends nodejs && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # 9.将npm镜像源设置为可覆盖的 registry
 RUN npm config set registry "${NPM_CONFIG_REGISTRY}"
+
+# 9.1 升级 node 自带的 npm,消除其捆绑依赖中的已知漏洞(tar/undici 等)
+RUN npm install -g npm@12 && \
+    cd /tmp && npm pack brace-expansion@5.0.8 --silent && \
+    rm -rf /usr/lib/node_modules/npm/node_modules/brace-expansion && \
+    mkdir -p /usr/lib/node_modules/npm/node_modules/brace-expansion && \
+    tar -xzf brace-expansion-5.0.8.tgz -C /usr/lib/node_modules/npm/node_modules/brace-expansion --strip-components=1 && \
+    rm -f brace-expansion-5.0.8.tgz && \
+    npm cache clean --force
 
 # 10.安装Google Chrome浏览器
 RUN add-apt-repository ppa:xtradeb/apps -y && \
@@ -72,7 +81,7 @@ RUN add-apt-repository ppa:xtradeb/apps -y && \
     && rm -rf /var/lib/apt/lists/*
 
 # 11.安装中文字体和语言支持
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
     language-pack-zh-hans \

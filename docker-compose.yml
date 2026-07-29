@@ -119,13 +119,23 @@ services:
       - ./deploy/squid/squid.conf:/etc/squid/squid.conf:ro
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
-      - /var/log/squid:rw,nosuid,nodev,noexec,size=64m
-      - /var/spool/squid:rw,nosuid,nodev,noexec,size=64m
+      # mode=1777: squid drops privileges to the unprivileged "proxy" user
+      # after startup; without an explicit mode these tmpfs mounts default
+      # to root:root 0755 and squid cannot open its log files.
+      - /var/log/squid:rw,nosuid,nodev,noexec,size=64m,mode=1777
+      - /var/spool/squid:rw,nosuid,nodev,noexec,size=64m,mode=1777
     networks:
       - opencitadel-sandbox-network
       - opencitadel-egress-network
     healthcheck:
-      test: ["CMD", "pebble", "health"]
+      # The stock ubuntu/squid rock image has no "pebble" binary (that's a
+      # different family of Canonical rock images) and ships no built-in
+      # healthcheck, so `pebble health` always exits 127 (command not
+      # found) and the service can never report healthy. bash's /dev/tcp
+      # is available in the image and needs no extra tooling (no curl,
+      # wget, nc, or squidclient present) to confirm the proxy is accepting
+      # connections.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3128"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -192,6 +202,16 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    # api/Dockerfile now runs as non-root uid 10001 (appuser). This is the
+    # only api-image service that needs the host Docker socket. Add the
+    # socket's group as a supplementary group so appuser can reach it
+    # without granting root to the process itself (cap_drop: ALL, read_only,
+    # no-new-privileges all remain in effect). Default 0 matches Docker
+    # Desktop, where the socket is root:root; on native Linux hosts the
+    # socket is typically root:docker with a host-specific gid, so set
+    # DOCKER_SOCK_GID accordingly (see .env.example).
+    group_add:
+      - "${DOCKER_SOCK_GID:-0}"
     environment:
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
       SANDBOX_IMAGE: opencitadel-sandbox
@@ -396,7 +416,15 @@ services:
       - "${NGINX_HTTPS_PORT:-443}:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/templates:/etc/nginx/templates:ro
+      # Mounted outside the image's default /etc/nginx/templates so the stock
+      # 20-envsubst-on-templates.sh entrypoint script (which blindly envsubst's
+      # every *.template file it finds there) does not also render these -
+      # it substitutes ALL env vars including an empty OPENCITADEL_DOMAIN,
+      # producing an invalid `server_name ;` directive and a broken
+      # default.https.conf with unresolved cert paths. Our own
+      # 40-generate-config.sh reads from here instead and is the only
+      # renderer for these templates.
+      - ./nginx/templates:/etc/nginx/templates-src:ro
       - ./nginx/generate-config.sh:/docker-entrypoint.d/40-generate-config.sh:ro
       - nginx_conf:/etc/nginx/conf.d
       - /etc/letsencrypt:/etc/letsencrypt:ro

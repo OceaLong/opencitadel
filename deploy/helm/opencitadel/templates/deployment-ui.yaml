@@ -15,12 +15,32 @@ spec:
       labels:
         app.kubernetes.io/component: ui
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: ui
           image: "{{ .Values.image.ui.repository }}:{{ .Values.image.ui.tag }}"
           imagePullPolicy: {{ .Values.image.ui.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 3000
           resources:
             {{- toYaml .Values.resources.ui | nindent 12 }}
+          volumeMounts:
+            - name: nextjs-cache
+              mountPath: /app/.next/cache
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: nextjs-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
 {{- end }}

@@ -7,7 +7,7 @@ ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 ARG PIP_DEFAULT_TIMEOUT=300
 ARG PIP_RETRIES=5
 ARG UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-ARG UV_VERSION=0.11.19
+ARG UV_VERSION=0.11.33
 ARG UV_HTTP_TIMEOUT=300
 ARG PYPI_FILES_MIRROR=https://mirrors.aliyun.com/pypi/packages/
 
@@ -18,7 +18,7 @@ ENV UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT}
 WORKDIR /app
 
 # 2.1 weasyprint PDF 依赖（合规证据 PDF）
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libgdk-pixbuf-2.0-0 \
@@ -27,11 +27,21 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 3.安装curl, 便于后续使用curl安装nodejs(Playwrigh需要安装nodejs作为中转连接)
-RUN apt-get update && apt-get install -y curl
+RUN apt-get update && apt-get install -y --no-install-recommends curl
 
 # 4.安装v22版本的node.js
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y nodejs
+    apt-get install -y --no-install-recommends nodejs
+
+# 4.1 升级 node 自带的 npm,消除其捆绑依赖中的已知漏洞(tar/brace-expansion 等);
+#     npm@12 自身捆绑的 brace-expansion 5.0.7 仍有 CVE-2026-14257,单独补丁到修复版
+RUN npm install -g npm@12 && \
+    cd /tmp && npm pack brace-expansion@5.0.8 --silent && \
+    rm -rf /usr/lib/node_modules/npm/node_modules/brace-expansion && \
+    mkdir -p /usr/lib/node_modules/npm/node_modules/brace-expansion && \
+    tar -xzf brace-expansion-5.0.8.tgz -C /usr/lib/node_modules/npm/node_modules/brace-expansion --strip-components=1 && \
+    rm -f brace-expansion-5.0.8.tgz && \
+    npm cache clean --force
 
 # 5.安装uv, 使用uv来同步依赖环境（pip 走国内镜像，避免 files.pythonhosted.org 超时）
 RUN pip install --no-cache-dir \
@@ -62,6 +72,12 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # 9.1 禁用Python输出缓冲，确保日志实时输出到docker logs
 ENV PYTHONUNBUFFERED=1
+
+# 9.2 以非 root 用户运行(uid 与 Helm runAsUser 保持一致)
+RUN useradd --system --uid 10001 --create-home --home-dir /home/appuser \
+    --shell /usr/sbin/nologin appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 
 # ==================== API 镜像 ====================
 FROM base AS api

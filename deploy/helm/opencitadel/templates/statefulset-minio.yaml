@@ -14,10 +14,21 @@ spec:
       labels:
         app.kubernetes.io/component: minio
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: minio
           image: {{ .Values.minio.image }}
           args: ["server", "/data"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 9000
           env:

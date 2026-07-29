@@ -1,0 +1,19 @@
+title = "OpenCitadel gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and documentation placeholders (not real credentials)"
+paths = [
+  '''api/tests/.*''',
+  # CI/e2e-only dummy env file (generated via openssl rand -hex 32, never
+  # used for any real deployment) so the compose stack can boot for CI/local
+  # e2e smoke testing. .env.example itself is NOT allowlisted - its
+  # placeholder-marker secrets are intentionally rejected by production
+  # startup validation and must never be "fixed" into real-looking values.
+  '''(^|/)\.env\.e2e$''',
+]
+regexes = [
+  '''<[^<>\n]{0,60}(SECRET|KEY|PASSWORD|TOKEN|Secret|密钥|随机)[^<>\n]{0,60}>''',
+]
