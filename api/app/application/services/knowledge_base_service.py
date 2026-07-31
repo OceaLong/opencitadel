@@ -1,12 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import asyncio
 import base64
 import hashlib
 import json
 import logging
-import time
-import uuid
 from datetime import datetime
 from typing import AsyncGenerator, Awaitable, Callable, List, Optional
 
@@ -18,6 +15,12 @@ from app.application.dto.knowledge_build import (
     KnowledgeVersionProjection,
 )
 from app.application.errors.exceptions import BadRequestError, ConflictError, NotFoundError
+from app.application.services.ingest_task_support import IngestTaskSupport
+from app.application.services.resource_build_support import (
+    ResourceBuildSupport,
+    _ACTIVE_BUILD_STATES,
+    _RETRYABLE_BUILD_STATES,
+)
 from app.application.services.resource_binding_service import ResourceBindingService
 from app.application.services.resource_guard_service import ResourceGuardService
 from app.domain.external.file_storage import FileStorage
@@ -40,7 +43,6 @@ from app.domain.models.knowledge_version import (
     mutable_json_value,
 )
 from app.domain.models.resource_governance import (
-    BuildState,
     ResourceBuild,
     ResourceKind,
 )
@@ -64,18 +66,30 @@ from app.domain.services.knowledge_base.version_builder import (
     KnowledgeVersionBuilder,
 )
 from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
-from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
-from app.infrastructure.external.task.task_state import TaskStatus, get_task_state
+from app.infrastructure.external.task.task_state import get_task_state
 
 logger = logging.getLogger(__name__)
 
 _TERMINAL_KB_STATUSES = {KBStatus.READY, KBStatus.FAILED}
-_INGEST_STALE_AFTER_SECONDS = 120.0
-_DELETE_TASK_DRAIN_TIMEOUT_SECONDS = 30.0
-_DELETE_TASK_POLL_INTERVAL_SECONDS = 0.5
+_PUBLISHED_KB_VERSION_STATES = {
+    KnowledgeVersionState.READY,
+    KnowledgeVersionState.DEGRADED,
+}
 
 
-class KnowledgeBaseService:
+class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
+    # Consistency-assertion hooks consumed by ResourceBuildSupport. Error
+    # strings are byte-identical to the pre-extraction literals (API contract).
+    _build_resource_kind = ResourceKind.KNOWLEDGE_BASE
+    _published_version_states = _PUBLISHED_KB_VERSION_STATES
+
+    _build_owner_closure_error = "knowledge build owner closure is malformed"
+    _build_candidate_closure_error = "knowledge build candidate closure is malformed"
+    _version_publication_error = "knowledge version publication is malformed"
+    _active_version_not_published_error = "knowledge base active version is not published"
+    _version_build_missing_error = "knowledge version has no matching build"
+    _version_build_closure_error = "knowledge version build closure is malformed"
+
     def __init__(
             self,
             uow_factory: Callable[[], IUnitOfWork],
@@ -113,42 +127,10 @@ class KnowledgeBaseService:
             confluence_fetcher or fetch_confluence_document
         )
         self._feishu_fetcher = feishu_fetcher or fetch_feishu_document
-
-    async def _ingest_in_progress(self, kb: KnowledgeBase) -> bool:
-        if not kb.ingest_task_id:
-            return False
-        if kb.status in _TERMINAL_KB_STATUSES:
-            return False
-        meta = await self._task_state.get_task_meta(kb.ingest_task_id)
-        if not meta:
-            return False
-        if await self._task_state.is_done(kb.ingest_task_id):
-            return False
-        if self._task_state.heartbeat_is_stale(meta, _INGEST_STALE_AFTER_SECONDS):
-            return False
-        return True
-
-    async def _wait_for_task_drain(self, task_id: str) -> None:
-        deadline = time.monotonic() + _DELETE_TASK_DRAIN_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
-            snapshot = await self._task_state.get_runtime_snapshot(task_id)
-            if snapshot.get("is_done"):
-                return
-            await asyncio.sleep(_DELETE_TASK_POLL_INTERVAL_SECONDS)
-        logger.warning("等待知识库摄取任务结束超时 task_id=%s", task_id)
-
-    async def _retire_ingest_task(self, task_id: str) -> None:
-        try:
-            meta = await self._task_state.get_task_meta(task_id)
-            if not meta:
-                return
-            await self._task_state.set_status(
-                task_id,
-                int(meta.get("run_generation", 1)),
-                TaskStatus.FAILED,
-            )
-        except Exception as exc:
-            logger.warning("标记旧知识库摄取任务失败 task_id=%s: %s", task_id, exc)
+        self._ingest_terminal_statuses = _TERMINAL_KB_STATUSES
+        self._ingest_resource_label = "知识库"
+        self._ingest_session_prefix = "kb-ingest"
+        self._ingest_task_type = "kb_ingest"
 
     @staticmethod
     def _infer_file_source_type(filename: str, mime: str, fallback: KBSourceType) -> KBSourceType:
@@ -187,17 +169,7 @@ class KnowledgeBaseService:
         build_id: str,
         kb_id: str,
     ) -> None:
-        await self._task_state.register_task(
-            build_id,
-            session_id=f"kb-ingest:{kb_id}",
-            task_type="kb_ingest",
-            resource_id=kb_id,
-        )
-        task = RedisStreamTask(
-            task_id=build_id,
-            session_id=f"kb-ingest:{kb_id}",
-        )
-        await task.dispatch_to_worker()
+        await self._dispatch_ingest_task(build_id, resource_id=kb_id)
 
     async def _fetch_url_document(
         self,
@@ -647,27 +619,6 @@ class KnowledgeBaseService:
         async with self._uow_factory() as uow:
             return await uow.knowledge_base.list_documents_page(kb_id, limit=limit, offset=offset)
 
-    async def _dispatch_ingest(self, kb: KnowledgeBase) -> KnowledgeBase:
-        old_task_id = kb.ingest_task_id
-        if old_task_id:
-            await self._retire_ingest_task(old_task_id)
-        task_id = str(uuid.uuid4())
-        await self._task_state.register_task(
-            task_id,
-            session_id=f"kb-ingest:{kb.id}",
-            task_type="kb_ingest",
-            resource_id=kb.id,
-        )
-        kb.ingest_task_id = task_id
-        kb.status = KBStatus.PENDING
-        kb.error = None
-        kb.updated_at = datetime.now()
-        async with self._uow_factory() as uow:
-            await uow.knowledge_base.save_kb(kb)
-        task = RedisStreamTask(task_id=task_id, session_id=f"kb-ingest:{kb.id}")
-        await task.dispatch_to_worker()
-        return kb
-
     async def _create_reindex_candidate(
         self,
         kb_id: str,
@@ -805,6 +756,10 @@ class KnowledgeBaseService:
         *,
         scope: Optional[OwnerScope] = None,
     ) -> KnowledgeBuildProjection:
+        # Not hoisted to ResourceBuildSupport: semantically diverges from the
+        # codebase variant (no owner-scope guard, and it does not mark_failed
+        # the candidate, clear the ingest task or append a governance event
+        # before projecting).
         async with self._uow_factory() as uow:
             kb = await uow.knowledge_base.get_kb(kb_id, scope=scope)
             if kb is None:
@@ -819,7 +774,7 @@ class KnowledgeBaseService:
                 or build.resource_id != kb.id
             ):
                 raise NotFoundError("knowledge build not found in owner scope")
-            if build.state not in {BuildState.QUEUED, BuildState.RUNNING}:
+            if build.state not in _ACTIVE_BUILD_STATES:
                 raise ConflictError(
                     "only an active knowledge build can be cancelled"
                 )
@@ -845,49 +800,26 @@ class KnowledgeBaseService:
         await self._task_state.request_cancel(build.id)
         return projection
 
-    async def _project_version(
+    async def _get_projection_version(
         self,
         uow: IUnitOfWork,
-        kb: KnowledgeBase,
-        version: KnowledgeBaseVersion,
-    ) -> KnowledgeVersionProjection:
-        is_published = (
-            version.published_at is not None
-            and version.state
-            in {KnowledgeVersionState.READY, KnowledgeVersionState.DEGRADED}
+        version_id: str,
+        resource_id: str,
+    ) -> KnowledgeBaseVersion | None:
+        return await uow.knowledge_version.get_version(
+            version_id,
+            knowledge_base_id=resource_id,
         )
-        if (
-            version.published_at is None
-            and version.state
-            in {KnowledgeVersionState.READY, KnowledgeVersionState.DEGRADED}
-        ) or (
-            version.published_at is not None
-            and version.state
-            not in {KnowledgeVersionState.READY, KnowledgeVersionState.DEGRADED}
-        ):
-            raise ConflictError("knowledge version publication is malformed")
-        if version.id == kb.active_version_id and not is_published:
-            raise ConflictError("knowledge base active version is not published")
-        build_projection = None
-        if version.build_id is not None:
-            build = await uow.resource_governance.get_build(version.build_id)
-            if build is None:
-                raise ConflictError(
-                    "knowledge version has no matching build"
-                )
-            build_projection = await self._project_build(
-                uow,
-                kb.id,
-                build,
-                active_version_id=kb.active_version_id,
-            )
-            if (
-                build.version_id != version.id
-                or build.parent_version_id != version.parent_version_id
-            ):
-                raise ConflictError(
-                    "knowledge version build closure is malformed"
-                )
+
+    def _build_version_projection(
+        self,
+        version: KnowledgeBaseVersion,
+        *,
+        is_active: bool,
+        is_published: bool,
+        is_candidate: bool,
+        build: KnowledgeBuildProjection | None,
+    ) -> KnowledgeVersionProjection:
         return KnowledgeVersionProjection(
             id=version.id,
             knowledge_base_id=version.knowledge_base_id,
@@ -900,44 +832,10 @@ class KnowledgeBaseService:
             legacy_snapshot=version.legacy_snapshot,
             created_at=version.created_at,
             published_at=version.published_at,
-            is_active=version.id == kb.active_version_id,
+            is_active=is_active,
             is_published=is_published,
-            is_candidate=not is_published,
-            build=build_projection,
-        )
-
-    async def _project_build(
-        self,
-        uow: IUnitOfWork,
-        kb_id: str,
-        build: ResourceBuild,
-        *,
-        active_version_id: str | None,
-    ) -> KnowledgeBuildProjection:
-        if (
-            build.resource_kind is not ResourceKind.KNOWLEDGE_BASE
-            or build.resource_id != kb_id
-        ):
-            raise ConflictError("knowledge build owner closure is malformed")
-        candidate = await uow.knowledge_version.get_version(
-            build.version_id,
-            knowledge_base_id=kb_id,
-        )
-        if (
-            candidate is None
-            or candidate.build_id != build.id
-            or candidate.parent_version_id != build.parent_version_id
-            or (
-                build.state in {BuildState.QUEUED, BuildState.RUNNING}
-                and build.parent_version_id != active_version_id
-            )
-        ):
-            raise ConflictError(
-                "knowledge build candidate closure is malformed"
-            )
-        return self._build_projection(
-            build,
-            active_version_id=active_version_id,
+            is_candidate=is_candidate,
+            build=build,
         )
 
     @staticmethod
@@ -965,11 +863,9 @@ class KnowledgeBaseService:
             created_at=build.created_at,
             started_at=build.started_at,
             finished_at=build.finished_at,
-            can_retry=build.state
-            in {BuildState.FAILED, BuildState.CANCELLED}
+            can_retry=build.state in _RETRYABLE_BUILD_STATES
             and build.parent_version_id == active_version_id,
-            can_cancel=build.state
-            in {BuildState.QUEUED, BuildState.RUNNING},
+            can_cancel=build.state in _ACTIVE_BUILD_STATES,
         )
 
     @classmethod
@@ -977,6 +873,9 @@ class KnowledgeBaseService:
         cls,
         result: CandidateBuildResult,
     ) -> KnowledgeVersionProjection:
+        # Not hoisted: the signature diverges from the codebase variant
+        # (resource read from ``result.resource`` vs an explicit arg) and the
+        # projected DTO omits the codebase-only ``source_*`` fields.
         version = result.version
         return KnowledgeVersionProjection(
             id=version.id,

@@ -993,6 +993,8 @@ docker push your-registry/opencitadel-api your-registry/opencitadel-worker your-
 
 > **Helm 说明**：migrate initContainer 复用 `image.api`（同一 Dockerfile target）。独立的 `opencitadel-migrate` 标签供 Docker Compose 一次性任务与 release 发布使用。
 
+> **kubernetes extra 说明**：`api/Dockerfile` 通过 `ARG WITH_K8S`（默认 `1`）控制是否安装 `kubernetes` Python SDK，该 SDK 仅 K8s Pod 沙箱 driver 需要。发布/CI 镜像始终以 `WITH_K8S=1` 构建（全功能）——用这些镜像做 Helm/K8s 部署已自带 k8s extra，无需额外操作。本地 `docker-compose.yml` 构建传 `WITH_K8S=0`，因为 Compose 始终只跑 Docker 沙箱 driver。若你自行构建 `api`/`worker`/`migrate` 镜像用于 K8s 部署，不传 `WITH_K8S`（默认即 `1`）或显式传 `--build-arg WITH_K8S=1` 即可。
+
 ```bash
 helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --namespace opencitadel --create-namespace \

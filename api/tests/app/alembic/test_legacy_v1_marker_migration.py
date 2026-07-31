@@ -37,7 +37,7 @@ def _offline_sql(action: str) -> str:
 def test_b8_remains_in_the_single_linear_chain_after_b7():
     script = ScriptDirectory.from_config(Config("alembic.ini"))
 
-    assert script.get_heads() == ["d8e9f0a1b2c3"]
+    assert len(script.get_heads()) == 1, "migration chain must stay linear"
     assert script.get_revision("d8e9f0a1b2c3").down_revision == "c7d8e9f0a1b2"
     assert script.get_revision("c7d8e9f0a1b2").down_revision == "b8d9e0f1a2b3"
     assert script.get_revision("b8d9e0f1a2b3").down_revision == "b7c8d9e0f1a2"

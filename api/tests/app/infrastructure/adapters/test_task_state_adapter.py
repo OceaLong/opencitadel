@@ -20,7 +20,7 @@ async def test_production_adapter_registers_candidate_before_dispatch(
     monkeypatch.setattr(domain_ports, "get_task_state", lambda: task_state)
     dispatch = AsyncMock()
     monkeypatch.setattr(
-        "app.application.services.knowledge_base_service."
+        "app.application.services.ingest_task_support."
         "RedisStreamTask.dispatch_to_worker",
         dispatch,
     )

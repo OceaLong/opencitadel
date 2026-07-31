@@ -18,12 +18,12 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --namespace opencitadel --create-namespace \
   --values production-values.yaml \
   --set image.api.repository=your-registry/opencitadel-api \
-  --set image.api.tag=latest \
-  --set image.worker.repository=your-registry/opencitadel-worker \
-  --set image.worker.tag=latest \
-  --set replicaCount.api=2 \
-  --set replicaCount.worker=2
+  --set image.worker.repository=your-registry/opencitadel-worker
 ```
+
+Full image build/push steps and the production `--set` flags (five images,
+ingress, sandbox driver): see the Kubernetes / Helm section of the
+[deployment guide](../../../docs/operations/deployment.md).
 
 ### local mode (in-cluster MinIO)
 
@@ -67,24 +67,22 @@ When `minio.enabled=true`, the chart deploys a MinIO StatefulSet and sets `MINIO
 
 ## Production security requirements
 
-- `secrets.apiKeySecret`, `secrets.auditSigningKey`,
-  `secrets.jwtSecret`, and `secrets.sessionSecret` must be distinct and at
-  least 32 characters. Set their key ids and previous-key JSON maps when
-  rotating.
-- `secrets.bootstrapAdminPassword` must be at least 12 characters.
+- `secrets.apiKeySecret`, `secrets.auditSigningKey`, `secrets.jwtSecret`,
+  `secrets.sessionSecret`, `secrets.bootstrapAdminPassword`,
   `secrets.postgresAdminPassword`, `secrets.postgresPassword`, and
-  `secrets.redisPassword` must be at least 16 characters; the two PostgreSQL
-  passwords must differ.
+  `secrets.redisPassword` must meet the length/distinctness rules in the
+  [deployment guide — local mode](../../../docs/operations/deployment.md#local-mode)
+  (rules apply to both cloud and local `.env` templates). Set key ids and
+  previous-key JSON maps when rotating.
 - API, Worker, and the migration initContainer connect as
   `postgresql.user`, a non-superuser role subject to RLS. Production startup
   rejects `rolsuper=true` or `rolbypassrls=true`.
 - Keep `networkPolicy.enabled=true`. It restricts sandbox ingress to
   API/Worker and egress to DNS plus public address ranges; private, link-local,
   metadata, and reserved ranges remain blocked.
-- Set `env.COOKIE_SECURE=true`, public HTTPS frontend/OAuth URLs, exact
-  ingress-controller `env.TRUSTED_PROXY_CIDRS`, approved
-  `env.OUTBOUND_ALLOWED_PORTS`, and only exact hostnames in
-  `env.OUTBOUND_PRIVATE_HOST_ALLOWLIST`.
+- Set `env.COOKIE_SECURE=true`, public HTTPS frontend/OAuth URLs, and
+  `env.TRUSTED_PROXY_CIDRS` / `env.OUTBOUND_ALLOWED_PORTS` /
+  `env.OUTBOUND_PRIVATE_HOST_ALLOWLIST` per the same guide.
 - Store `production-values.yaml` in an approved encrypted secret mechanism;
   do not commit it.
 

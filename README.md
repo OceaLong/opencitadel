@@ -59,7 +59,7 @@ make quickstart
 
 Open **http://localhost:8088**, sign in, add an LLM **endpoint** and **model** in Settings → Models, and run your first agent task.
 
-`make quickstart` builds the `opencitadel-sandbox` image (required for Agent tools), starts bundled MinIO (`COMPOSE_PROFILES=local`), and sets `STORAGE_PROVIDER=minio` in a new `.env`. Override in `.env` for cloud COS.
+`make quickstart` also builds the sandbox image and defaults to local MinIO storage — see the guides below for cloud storage and full configuration.
 
 - Step-by-step: [Self-host in 10 minutes](docs/tutorials/01-self-host-10-minutes.md)
 - Production: [Deployment guide](docs/operations/deployment.md)

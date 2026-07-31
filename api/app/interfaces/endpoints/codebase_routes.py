@@ -31,7 +31,13 @@ from app.interfaces.schemas.codebase import (
 )
 from app.interfaces.schemas.event import EventMapper
 from app.domain.external.object_storage import ObjectStoragePort
-from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
+from app.interfaces.auth_dependencies import get_workspace_context
+from app.interfaces.endpoints.resource_version_shared import (
+    NonAuditorWriteGuardDep,
+    WorkspaceContextDep,
+    to_build_response,
+    to_version_response,
+)
 from app.interfaces.service_dependencies import get_codebase_service, get_object_storage
 
 logger = logging.getLogger(__name__)
@@ -43,24 +49,18 @@ def _to_codebase_response(cb) -> CodebaseResponse:
 
 
 def _to_build_response(build) -> CodebaseBuildResponse:
-    return CodebaseBuildResponse.model_validate(
-        build,
-        from_attributes=True,
-    )
+    return to_build_response(CodebaseBuildResponse, build)
 
 
 def _to_version_response(version) -> CodebaseVersionResponse:
-    return CodebaseVersionResponse.model_validate(
-        version,
-        from_attributes=True,
-    )
+    return to_version_response(CodebaseVersionResponse, version)
 
 
 @router.post("", response_model=Response[CodebaseResponse])
 async def create_codebase(
         request: CreateCodebaseRequest,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[CodebaseResponse]:
     codebase = await service.create_codebase(
@@ -146,8 +146,8 @@ async def get_codebase_version(
 )
 async def create_codebase_build(
         codebase_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[CodebaseVersionResponse]:
     version = await service.create_build(codebase_id, scope=ctx.scope)
@@ -161,8 +161,8 @@ async def create_codebase_build(
 async def retry_codebase_build(
         codebase_id: str,
         build_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[CodebaseVersionResponse]:
     version = await service.retry_build(
@@ -180,8 +180,8 @@ async def retry_codebase_build(
 async def cancel_codebase_build(
         codebase_id: str,
         build_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[CodebaseBuildResponse]:
     build = await service.cancel_build(
@@ -295,8 +295,8 @@ async def list_artifacts(
 async def read_source(
         codebase_id: str,
         request: ReadSourceRequest,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: CodebaseService = Depends(get_codebase_service),
         object_storage: ObjectStoragePort = Depends(get_object_storage),
 ) -> Response[ReadSourceResponse]:
@@ -337,8 +337,8 @@ async def ingest_stream(
 @router.post("/{codebase_id}/reanalyze", response_model=Response[CodebaseResponse])
 async def reanalyze(
         codebase_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[CodebaseResponse]:
     if hasattr(service, "create_build"):
@@ -372,8 +372,8 @@ async def download_codebase(
 @router.post("/{codebase_id}/snapshots", response_model=Response[DownloadCodebaseResponse])
 async def create_codebase_snapshot(
         codebase_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: CodebaseService = Depends(get_codebase_service),
         object_storage: ObjectStoragePort = Depends(get_object_storage),
 ) -> Response[DownloadCodebaseResponse]:
@@ -389,8 +389,8 @@ async def create_codebase_snapshot(
 async def create_codebase_session(
         codebase_id: str,
         request: CreateCodebaseSessionRequest,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[CreateCodebaseSessionResponse]:
     session = await service.create_session_for_codebase(
@@ -412,8 +412,8 @@ async def create_codebase_session(
 @router.delete("/{codebase_id}", response_model=Response[Optional[Dict]])
 async def delete_codebase(
         codebase_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[Optional[Dict]]:
     await service.delete_codebase(codebase_id, scope=ctx.scope)

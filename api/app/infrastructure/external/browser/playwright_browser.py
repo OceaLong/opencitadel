@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# worker 专用重库(markdownify/playwright)延迟到函数内导入,保持 app.main 的 api-lite 导入闭包可用
+from __future__ import annotations
+
 import asyncio
 import base64
 import json
 import logging
 import re
 import time
-from typing import Optional, List, Any, Tuple
-
-from markdownify import markdownify
-from playwright.async_api import async_playwright, Playwright, Browser, Page
+from typing import Optional, List, Any, Tuple, TYPE_CHECKING
 
 from app.domain.external.browser import Browser as BrowserProtocol
 from app.domain.external.llm import LLM
@@ -20,6 +20,9 @@ from .playwright_browser_fun import (
     GET_INTERACTIVE_ELEMENTS_FUNC,
     INJECT_CONSOLE_LOGS_FUNC,
 )
+
+if TYPE_CHECKING:
+    from playwright.async_api import Playwright, Browser, Page
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +92,9 @@ class PlaywrightBrowser(BrowserProtocol):
 
     async def _extract_content(self) -> str:
         """提取当前页面内容"""
+        # 延迟导入:markdownify 是 worker 专用重库,api 进程不装
+        from markdownify import markdownify
+
         # 1.使用js代码获取当前页面可见元素内容
         visible_content = await self.page.evaluate(GET_VISIBLE_CONTENT_FUNC)
 
@@ -334,6 +340,9 @@ class PlaywrightBrowser(BrowserProtocol):
 
     async def initialize(self) -> bool:
         """初始化并确保资源是可用的"""
+        # 延迟导入:playwright 是 worker 专用重库,api 进程不装
+        from playwright.async_api import async_playwright
+
         # 1.定义重试次数+重试延迟确保资源存在
         max_retries = 5
         retry_interval = 1

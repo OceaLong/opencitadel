@@ -71,6 +71,12 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [SECURITY.md](../.github/SECURITY.md) | Vulnerability reporting |
 | [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.md) | Community standards |
 
+### Audits (historical)
+
+| Document | Scope |
+|----------|-------|
+| [2026-07-28 governance audit](superpowers/audits/2026-07-28-agent-kb-codebase-governance-audit.md) | Superseded audit snapshot (zh-only, see status banner) |
+
 ## Maintenance rules
 
 - **One topic, one authoritative doc** — avoid duplicating policy across README and topic docs.

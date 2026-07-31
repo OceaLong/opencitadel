@@ -7,7 +7,6 @@ from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
-from markdownify import markdownify as md
 
 from app.application.errors.exceptions import BadRequestError
 from app.domain.services.knowledge_base.url_guard import validate_public_url
@@ -27,6 +26,9 @@ class WebDocument:
 
 
 async def fetch_web_document(url: str, *, timeout_seconds: float = 20.0) -> WebDocument:
+    # 延迟导入:markdownify 是 worker 专用重库,api 进程不装
+    from markdownify import markdownify as md
+
     headers = {"User-Agent": "OpenCitadel-KnowledgeBase/1.0"}
     response, current = await _request_with_safe_redirects(
         url,
@@ -75,6 +77,9 @@ async def _request_with_safe_redirects(
 
 
 async def fetch_confluence_document(url: str, token: Optional[str] = None) -> WebDocument:
+    # 延迟导入:markdownify 是 worker 专用重库,api 进程不装
+    from markdownify import markdownify as md
+
     headers = {"Authorization": f"Bearer {token}"} if token else None
     response, current = await _request_with_safe_redirects(
         url,

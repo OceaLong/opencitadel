@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
+import { type ResourceLibraryApi, useResourceLibrary } from "@/hooks/use-resource-library";
 import { knowledgeApi } from "@/lib/api/knowledge";
 import { sessionApi } from "@/lib/api/session";
 import type { KnowledgeBase, KnowledgeDocument, SessionMode } from "@/lib/api/types";
@@ -59,23 +60,35 @@ function isKbIngesting(kb: KnowledgeBase, ingestingIds: Set<string>): boolean {
   );
 }
 
+// Stable module-level adapter: `knowledgeApi` is itself a stable singleton, so
+// this object never needs to be recreated per render (see
+// `use-resource-library.ts` for why identity stability matters here).
+const knowledgeLibraryApi: ResourceLibraryApi<KnowledgeBase, never> = {
+  list: async () => (await knowledgeApi.list()).knowledge_bases,
+  remove: (id) => knowledgeApi.delete(id),
+  ingestStream: knowledgeApi.ingestStream,
+};
+
+function knowledgeShouldPoll(
+  kb: KnowledgeBase,
+  { ingestingIds }: { ingestingIds: Set<string> },
+): boolean {
+  return isKbIngesting(kb, ingestingIds);
+}
+
 export function KnowledgeLibrary() {
   const router = useRouter();
   const t = useTranslations("knowledge");
   const tCommon = useTranslations("common");
   const { user } = useAuth();
-  const [items, setItems] = useState<KnowledgeBase[]>([]);
   const [docsByKb, setDocsByKb] = useState<Record<string, DocsPage>>({});
   const [expandedKbs, setExpandedKbs] = useState<Set<string>>(new Set());
   const [createOpen, setCreateOpen] = useState(false);
   const [addOpenFor, setAddOpenFor] = useState<string | null>(null);
-  const [startingId, setStartingId] = useState<string | null>(null);
-  const [ingestingIds, setIngestingIds] = useState<Set<string>>(new Set());
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
-  const ingestCleanupRef = useRef<Map<string, () => void>>(new Map());
-  // Mirrors of state used inside loadList/refreshExpandedDocs so those callbacks
-  // can read the latest value without depending on the state itself — otherwise
-  // loadList would be re-created (and its mount/polling effects re-run) on every
+  // Mirrors of state used inside refreshExpandedDocs so that callback can read
+  // the latest value without depending on the state itself — otherwise it
+  // would be re-created (and the hook's `onLoaded` along with it) on every
   // expand/collapse toggle, since expandedKbs/docsByKb get new references often.
   const expandedKbsRef = useRef<Set<string>>(new Set());
   const docsByKbRef = useRef<Record<string, DocsPage>>({});
@@ -155,74 +168,31 @@ export function KnowledgeLibrary() {
     [t],
   );
 
-  const loadList = useCallback(async () => {
-    if (!user) {
-      setItems([]);
-      setDocsByKb({});
-      return;
-    }
-    try {
-      const data = await knowledgeApi.list();
-      setItems(data.knowledge_bases);
+  const {
+    items,
+    setItems,
+    ingestingIds,
+    startingId,
+    load: loadList,
+    remove: removeKnowledgeBase,
+    watchIngest,
+    startTask: runStartTask,
+  } = useResourceLibrary<KnowledgeBase, never>({
+    api: knowledgeLibraryApi,
+    enabled: Boolean(user),
+    onReset: () => setDocsByKb({}),
+    onLoaded: () => {
       for (const kbId of expandedKbsRef.current) {
         void refreshExpandedDocs(kbId);
       }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("loadListFailed"));
-    }
-  }, [user, t, refreshExpandedDocs]);
-
-  useEffect(() => {
-    void loadList();
-  }, [loadList]);
-
-  useEffect(() => {
-    const cleanups = ingestCleanupRef.current;
-    return () => {
-      cleanups.forEach((cleanup) => cleanup());
-      cleanups.clear();
-    };
-  }, []);
-
-  const watchIngest = useCallback(
-    (id: string, ingestTaskId?: string | null) => {
-      if (!ingestTaskId || ingestCleanupRef.current.has(id)) return;
-      setIngestingIds((prev) => new Set(prev).add(id));
-      const finish = () => {
-        setIngestingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-        ingestCleanupRef.current.delete(id);
-        void loadList();
-      };
-      const cleanup = knowledgeApi.ingestStream(
-        id,
-        (ev) => {
-          if (ev.type === "error") {
-            toast.error(formatIngestStreamError(ev));
-            finish();
-          } else if (ev.type === "done") {
-            finish();
-          }
-        },
-        () => {
-          toast.error(t("ingestStreamFailed"));
-          setIngestingIds((prev) => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-          });
-          ingestCleanupRef.current.delete(id);
-        },
-        undefined,
-        finish,
-      );
-      ingestCleanupRef.current.set(id, cleanup);
     },
-    [loadList, t],
-  );
+    loadErrorMessage: t("loadListFailed"),
+    shouldPoll: knowledgeShouldPoll,
+    pollMs: 5000,
+    requireIngestTaskId: true,
+    formatIngestError: formatIngestStreamError,
+    onStreamConnectError: () => toast.error(t("ingestStreamFailed")),
+  });
 
   useEffect(() => {
     for (const kb of items) {
@@ -232,32 +202,19 @@ export function KnowledgeLibrary() {
     }
   }, [items, watchIngest]);
 
-  useEffect(() => {
-    const hasIngesting = items.some((kb) => isKbIngesting(kb, ingestingIds));
-    if (!hasIngesting) return;
-    const timer = setInterval(() => {
-      void loadList();
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [items, ingestingIds, loadList]);
-
   const startTask = async (kbId: string, versionId: string, mode: SessionMode = "ask") => {
-    setStartingId(kbId);
-    try {
-      await startKnowledgeTask(kbId, versionId, mode, sessionApi.createSession, router.push);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("startTaskFailed"));
-    } finally {
-      setStartingId(null);
-    }
+    await runStartTask(
+      kbId,
+      () => startKnowledgeTask(kbId, versionId, mode, sessionApi.createSession, router.push),
+      t("startTaskFailed"),
+    );
   };
 
   const handleDeleteConfirm = async () => {
     if (!pendingDelete) return;
     try {
       if (pendingDelete.kind === "kb") {
-        await knowledgeApi.delete(pendingDelete.kb.id);
-        setItems((prev) => prev.filter((kb) => kb.id !== pendingDelete.kb.id));
+        await removeKnowledgeBase(pendingDelete.kb.id);
         setDocsByKb((prev) => {
           const next = { ...prev };
           delete next[pendingDelete.kb.id];

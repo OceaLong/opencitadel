@@ -1,4 +1,4 @@
-import type { ApiResponse } from "./types";
+import type { ApiResponse, SSEEventData, SSEEventHandler } from "./types";
 import { dispatchAuthRequired } from "../auth-events";
 import { ACTIVE_WORKSPACE_KEY, LEGACY_ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
 import { readLocalStorageKey } from "@/lib/storage-migration";
@@ -567,6 +567,63 @@ export async function parseSSEStream(
       // 忽略 releaseLock 错误，可能已经被释放
     }
   }
+}
+
+/**
+ * 创建 ingest 事件的 SSE 流订阅（GET + EventSource 语义，支持断线重连的 event_id）
+ *
+ * @param path        完整资源路径（调用方拼接好资源 id 与 `/ingest`，不含 query string）
+ * @param onEvent     收到事件时的回调
+ * @param onError     出错时的回调
+ * @param eventId     断线重连时的 Last-Event-Id，作为 `event_id` query 参数传递
+ * @param onComplete  流正常结束时的回调
+ * @returns           中止函数，调用后会中止底层连接
+ */
+export function createIngestStream(
+  path: string,
+  onEvent: SSEEventHandler,
+  onError?: (error: Error) => void,
+  eventId?: string,
+  onComplete?: () => void,
+): () => void {
+  const controller = new AbortController();
+  const url = `${path}${eventId ? `?event_id=${encodeURIComponent(eventId)}` : ""}`;
+
+  const start = async () => {
+    try {
+      const response = await authenticatedFetch(url, {
+        method: "GET",
+        headers: { Accept: "text/event-stream" },
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) {
+        throw new Error(
+          translate("errors.ingestStreamConnectionFailed", { status: String(response.status) }),
+        );
+      }
+      await parseSSEStream(
+        response.body,
+        (messageEvent) => {
+          const data =
+            typeof messageEvent.data === "string"
+              ? JSON.parse(messageEvent.data)
+              : messageEvent.data;
+          onEvent({
+            type: messageEvent.type as SSEEventData["type"],
+            data,
+          } as SSEEventData);
+        },
+        onError,
+      );
+      onComplete?.();
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        onError?.(err as Error);
+      }
+    }
+  };
+  void start();
+  return () => controller.abort();
 }
 
 /**

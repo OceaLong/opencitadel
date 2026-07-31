@@ -4,16 +4,15 @@
 from collections.abc import Callable
 from datetime import datetime
 
-from app.application.errors.exceptions import BadRequestError, NotFoundError
+from app.application.services.resource_version_provider import (
+    OwnerScopedVersionProvider,
+)
+from app.domain.models.codebase import Codebase
 from app.domain.models.codebase_version import (
     CodebaseVersion,
     CodebaseVersionState,
 )
-from app.domain.models.resource_governance import (
-    BuildState,
-    PublishedResourceVersion,
-    ResourceKind,
-)
+from app.domain.models.resource_governance import ResourceKind
 from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.codebase.version_builder import (
@@ -22,12 +21,14 @@ from app.domain.services.codebase.version_builder import (
 )
 
 
-class CodebaseVersionService:
+class CodebaseVersionService(OwnerScopedVersionProvider[Codebase, CodebaseVersion]):
     kind = ResourceKind.CODEBASE
-    _PAGE_SIZE = 500
+    _resource_label = "codebase"
+    _version_label = "codebase version"
+    _cursor_label = "codebase-version"
 
     def __init__(self, *, uow_factory: Callable[[], IUnitOfWork]) -> None:
-        self._uow_factory = uow_factory
+        super().__init__(uow_factory=uow_factory)
         self._builder = CodebaseVersionBuilder(uow_factory)
 
     async def create_reanalysis(
@@ -43,62 +44,35 @@ class CodebaseVersionService:
             scope=scope,
         )
 
-    async def resolve_published_version(
-        self,
-        resource_id: str,
-        requested_version_id: str | None,
-        scope: OwnerScope,
-    ) -> PublishedResourceVersion:
-        async with self._uow_factory() as uow:
-            codebase = await uow.codebase.get_by_id(resource_id, scope=scope)
-            if codebase is None:
-                raise NotFoundError("codebase not found in owner scope")
-            version_id = requested_version_id or codebase.active_version_id
-            if version_id is None:
-                raise BadRequestError("codebase has no published version")
-            version = await uow.codebase_version.get_version(
-                version_id,
-                codebase_id=resource_id,
-            )
-            if version is None:
-                if requested_version_id is None:
-                    raise BadRequestError(
-                        "active codebase version is not published"
-                    )
-                raise NotFoundError(
-                    "codebase version not found in owner scope"
-                )
-            return self._published_projection(version)
+    async def _get_resource(
+        self, uow: IUnitOfWork, resource_id: str, scope: OwnerScope
+    ) -> Codebase | None:
+        return await uow.codebase.get_by_id(resource_id, scope=scope)
 
-    async def list_published_versions(
-        self,
-        resource_id: str,
-        scope: OwnerScope,
-    ) -> list[PublishedResourceVersion]:
-        async with self._uow_factory() as uow:
-            codebase = await uow.codebase.get_by_id(resource_id, scope=scope)
-            if codebase is None:
-                raise NotFoundError("codebase not found in owner scope")
-            versions: list[CodebaseVersion] = []
-            before: tuple[datetime, str] | None = None
-            while True:
-                page = await uow.codebase_version.list_versions(
-                    resource_id,
-                    limit=self._PAGE_SIZE,
-                    before=before,
-                )
-                versions.extend(page)
-                if len(page) < self._PAGE_SIZE:
-                    break
-                before = (page[-1].created_at, page[-1].id)
-            return [
-                self._published_projection(version)
-                for version in versions
-                if self._is_published(version)
-            ]
+    async def _get_version(
+        self, uow: IUnitOfWork, version_id: str, resource_id: str
+    ) -> CodebaseVersion | None:
+        return await uow.codebase_version.get_version(
+            version_id,
+            codebase_id=resource_id,
+        )
 
-    @staticmethod
-    def _is_published(version: CodebaseVersion) -> bool:
+    async def _list_page(
+        self,
+        uow: IUnitOfWork,
+        resource_id: str,
+        *,
+        limit: int,
+        before: tuple[datetime, str] | None,
+    ) -> list[CodebaseVersion]:
+        return await uow.codebase_version.list_versions(
+            resource_id,
+            limit=limit,
+            before=before,
+        )
+
+    @classmethod
+    def _is_published(cls, version: CodebaseVersion) -> bool:
         return (
             version.published_at is not None
             and version.state
@@ -109,24 +83,9 @@ class CodebaseVersionService:
         )
 
     @classmethod
-    def _published_projection(
-        cls,
-        version: CodebaseVersion,
-    ) -> PublishedResourceVersion:
-        if not cls._is_published(version):
-            raise BadRequestError("codebase version is not published")
-        degraded = version.state is CodebaseVersionState.DEGRADED
-        if degraded and not version.degraded_reasons:
-            raise BadRequestError(
-                "degraded codebase version lacks degradation reason"
-            )
-        return PublishedResourceVersion(
-            resource_kind=ResourceKind.CODEBASE,
-            resource_id=version.codebase_id,
-            version_id=version.id,
-            state=BuildState.DEGRADED if degraded else BuildState.SUCCEEDED,
-            published=True,
-            degraded=degraded,
-            capabilities=dict(version.capabilities),
-            degraded_reasons=list(version.degraded_reasons),
-        )
+    def _is_degraded(cls, version: CodebaseVersion) -> bool:
+        return version.state is CodebaseVersionState.DEGRADED
+
+    @classmethod
+    def _resource_id_of(cls, version: CodebaseVersion) -> str:
+        return version.codebase_id

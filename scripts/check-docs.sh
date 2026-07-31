@@ -2,6 +2,8 @@
 # Lightweight documentation consistency checks.
 set -euo pipefail
 
+command -v rg >/dev/null 2>&1 || { echo "ERROR: ripgrep (rg) is required for content checks" >&2; exit 1; }
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
@@ -59,7 +61,24 @@ echo "==> Checking docs/ bilingual pairs ..."
 check_pair_dir docs/architecture
 check_pair_dir docs/operations
 check_pair_dir docs/tutorials
+# docs/superpowers/ 为审计/内部治理文档,单语(zh)豁免双语校验——有意不检查,勿加 check_pair_dir
 check_pair docs/DOCUMENTATION_INVENTORY.md
+
+check_size_parity() {
+  local dir="$1" threshold="$2"
+  echo "==> Checking bilingual size parity in $dir (zh >= ${threshold}% of en lines) ..."
+  while IFS= read -r -d '' en; do
+    local zh="${en%.md}.zh-CN.md"
+    [[ -f "$zh" ]] || continue
+    local en_lines zh_lines
+    en_lines=$(wc -l < "$en")
+    zh_lines=$(wc -l < "$zh")
+    if (( zh_lines * 100 < en_lines * threshold )); then
+      fail "$zh is only $((zh_lines * 100 / en_lines))% of $en by lines (min ${threshold}%) — content drift"
+    fi
+  done < <(find "$dir" -name '*.md' ! -name '*.zh-CN.md' -print0 2>/dev/null)
+}
+check_size_parity docs/tutorials 60
 
 echo "==> Checking module README bilingual pairs ..."
 for en in README.md api/README.md ui/README.md sandbox/README.md nginx/README.md \
