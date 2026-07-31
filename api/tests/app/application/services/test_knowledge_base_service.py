@@ -341,14 +341,8 @@ def _inc_service(monkeypatch, repo):
         "app.application.services.knowledge_base_service.validate_public_url",
         lambda url: url,
     )
-    dispatch = AsyncMock()
-    monkeypatch.setattr(
-        "app.application.services.knowledge_base_service.RedisStreamTask.dispatch_to_worker",
-        dispatch,
-        raising=True,
-    )
     service = KnowledgeBaseService(uow_factory=lambda: _IncFakeUow(repo), file_storage=MagicMock())
-    return service, dispatch
+    return service, None
 
 
 def _inc_doc(doc_id, status=DocStatus.READY):

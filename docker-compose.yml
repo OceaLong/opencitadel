@@ -189,6 +189,10 @@ services:
       target: api
       args:
         <<: *pip-build-args
+        # 与 opencitadel-api 共享同一 image:opencitadel-api 标签,build args 必须保持一致,
+        # 否则镜像内容取决于哪个服务先触发构建;broker 只 import docker、driver 硬编码为
+        # "docker"(app/infrastructure/external/sandbox/broker.py),任何场景都不需要 kubernetes SDK
+        WITH_K8S: "0"
     image: opencitadel-api
     container_name: opencitadel-sandbox-broker
     restart: unless-stopped
@@ -249,6 +253,8 @@ services:
       target: api
       args:
         <<: *pip-build-args
+        # 本地 compose 使用 docker 驱动沙箱,不需要 kubernetes SDK;CI/发布构建不传此参数,默认 1(全功能)
+        WITH_K8S: "0"
     image: opencitadel-migrate
     mem_limit: 512m
     env_file:
@@ -270,6 +276,8 @@ services:
       target: api
       args:
         <<: *pip-build-args
+        # 本地 compose 使用 docker 驱动沙箱,不需要 kubernetes SDK;CI/发布构建不传此参数,默认 1(全功能)
+        WITH_K8S: "0"
     image: opencitadel-api
     container_name: opencitadel-api
     restart: unless-stopped
@@ -313,6 +321,8 @@ services:
       target: worker
       args:
         <<: *pip-build-args
+        # 本地 compose 使用 docker 驱动沙箱,不需要 kubernetes SDK;CI/发布构建不传此参数,默认 1(全功能)
+        WITH_K8S: "0"
     image: opencitadel-worker
     container_name: opencitadel-worker
     restart: unless-stopped

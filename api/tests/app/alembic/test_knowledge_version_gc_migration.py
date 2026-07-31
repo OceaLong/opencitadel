@@ -55,7 +55,7 @@ def _offline_sql(action: str) -> str:
 def test_d8_is_single_linear_head_after_c7():
     script = ScriptDirectory.from_config(Config("alembic.ini"))
 
-    assert script.get_heads() == ["d8e9f0a1b2c3"]
+    assert len(script.get_heads()) == 1, "migration chain must stay linear"
     assert script.get_revision("d8e9f0a1b2c3").down_revision == "c7d8e9f0a1b2"
 
 

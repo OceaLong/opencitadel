@@ -1,5 +1,11 @@
 # Agent、文档知识库与代码知识库实现审计
 
+> **状态:已过时(superseded)。** 本审计基于 2026-07-28 的代码快照。其中 P0-05/07/08/09
+> 所指的资源版本化/原子发布/版本绑定,已由 commit db986f2(2026-07-31)落地实现
+> (见 `api/app/application/services/*_version_service.py` 与迁移 e9f0a1b2c3d4)。
+> 保留本文作为审计轨迹,勿据此判断当前实现状态。
+> 注:文中引用的审计基线 spec 按本项目惯例不入库,存于本地。
+
 - 日期：2026-07-28
 - 审计基线：`docs/superpowers/specs/2026-07-28-agent-kb-codebase-governance-design.md`
 - 审计对象：当前 `main` 分支实现

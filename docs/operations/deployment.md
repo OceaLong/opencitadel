@@ -1008,6 +1008,8 @@ docker push your-registry/opencitadel-api your-registry/opencitadel-worker your-
 
 > **Helm note**: the migrate initContainer reuses `image.api` (same Dockerfile target). The separate `opencitadel-migrate` tag is used by Docker Compose one-off jobs and release publishing.
 
+> **kubernetes extra**: `api/Dockerfile` gates the `kubernetes` Python SDK behind `ARG WITH_K8S` (default `1`), required only by the K8s Pod sandbox driver. Published release/CI images always build with `WITH_K8S=1` (full-featured) — Helm/K8s deployments using those images already include the extra, no action needed. The local `docker-compose.yml` build passes `WITH_K8S=0` because Compose only ever runs the Docker sandbox driver. If you build the `api`/`worker`/`migrate` images yourself for a K8s deployment, either omit `WITH_K8S` (defaults to `1`) or pass `--build-arg WITH_K8S=1` explicitly.
+
 ```bash
 helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --namespace opencitadel --create-namespace \

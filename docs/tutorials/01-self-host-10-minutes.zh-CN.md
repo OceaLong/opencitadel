@@ -39,7 +39,7 @@ make quickstart
 
 健康检查通过后，打开 **http://localhost:8088**。
 
-> **对象存储默认**：quickstart 在新建 `.env` 时会设置 `COMPOSE_PROFILES=local` 与 `STORAGE_PROVIDER=minio`，以便文件上传开箱可用。若使用腾讯云 COS，请清空 `COMPOSE_PROFILES` 并设置 `STORAGE_PROVIDER=cos` 及 `COS_*` 凭证（见 [部署指南](../operations/deployment.zh-CN.md)）。
+> **对象存储默认**：quickstart 开箱即用内置 MinIO 存储。如需腾讯云 COS 或其他存储配置，见[部署指南 — 部署模式](../operations/deployment.zh-CN.md#部署模式-env)。
 
 ### 3. 登录
 
@@ -65,10 +65,9 @@ LLM 配置分两步：**端点**（Provider + API Key）→ **模型**（该端�
 
 ## 完全离线（可选）
 
-适用于气隙或纯本地部署：
+适用于气隙或纯本地部署，在 `.env` 中设置：
 
 ```bash
-# 在 .env 中
 COMPOSE_PROFILES=local
 STORAGE_PROVIDER=minio
 COOKIE_SECURE=false
@@ -76,7 +75,7 @@ FRONTEND_BASE_URL=http://localhost:8088
 OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal
 ```
 
-在宿主机安装 [Ollama](https://ollama.com)，拉取能力足够的模型（如 `qwen2.5:14b`），然后在 **设置 → 模型** 中添加 **端点**（Base URL `http://host.docker.internal:11434/v1`），再在该端点下添加 **模型**。保留上述精确私网白名单，不要使用通配符。
+安装 [Ollama](https://ollama.com)，拉取一个模型，然后在设置中添加**端点**（`http://host.docker.internal:11434/v1`）与其下的**模型**。保留精确白名单，不要使用通配符。完整本地模式说明见[部署指南 — local 模式](../operations/deployment.zh-CN.md#local-模式配置)。
 
 **注意：** 较小的本地模型可能难以完成多步 Agent 任务。自带云端 API Key 能获得最佳首次体验。
 

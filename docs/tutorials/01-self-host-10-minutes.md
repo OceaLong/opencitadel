@@ -40,7 +40,7 @@ First build may take 5–10 minutes.
 
 Open **http://localhost:8088** when health check passes.
 
-> **Storage default**: quickstart sets `COMPOSE_PROFILES=local` and `STORAGE_PROVIDER=minio` in a new `.env` so file uploads work out of the box. For cloud COS, clear `COMPOSE_PROFILES` and set `STORAGE_PROVIDER=cos` with `COS_*` credentials (see [deployment guide](../operations/deployment.md)).
+> **Storage default**: quickstart uses local MinIO storage out of the box. For cloud COS and other storage config, see [deployment guide — deployment mode](../operations/deployment.md#deployment-mode-env).
 
 ### 3. Log in
 
@@ -66,10 +66,9 @@ Watch the Agent plan, use tools in the sandbox, and stream results in real time.
 
 ## Fully offline (optional)
 
-For air-gapped or local-only deployments:
+For air-gapped or local-only deployments, set in `.env`:
 
 ```bash
-# In .env
 COMPOSE_PROFILES=local
 STORAGE_PROVIDER=minio
 COOKIE_SECURE=false
@@ -77,7 +76,7 @@ FRONTEND_BASE_URL=http://localhost:8088
 OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal
 ```
 
-Install [Ollama](https://ollama.com) on the host, pull a capable model (e.g. `qwen2.5:14b`), then in Settings add an **endpoint** with base URL `http://host.docker.internal:11434/v1`, then add a **model** under it. Keep the exact private-host allowlist above; do not use a wildcard.
+Install [Ollama](https://ollama.com), pull a model, then add an **endpoint** (`http://host.docker.internal:11434/v1`) and a **model** under it in Settings. Keep the allowlist exact — no wildcard. Full local-mode reference: [deployment guide — local mode](../operations/deployment.md#local-mode).
 
 **Note:** Smaller local models may struggle with multi-step Agent tasks. BYO cloud API keys give the best first-run experience.
 

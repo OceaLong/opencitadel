@@ -71,6 +71,12 @@
 | [SECURITY.zh-CN.md](../.github/SECURITY.zh-CN.md) | 漏洞披露政策 |
 | [CODE_OF_CONDUCT.zh-CN.md](../.github/CODE_OF_CONDUCT.zh-CN.md) | 行为准则 |
 
+### 历史审计
+
+| 文档 | 说明 |
+|------|------|
+| [2026-07-28 治理审计](superpowers/audits/2026-07-28-agent-kb-codebase-governance-audit.md) | 已过时的审计快照（仅中文，见文首状态块） |
+
 ## 维护规则
 
 - **一主题一权威文档**：避免在 README 与专题文档中重复维护同一策略。

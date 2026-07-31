@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# mcp 是 worker 专用重库,api 进程不装:类型注解延迟求值,实际连接逻辑在方法内延迟导入
+from __future__ import annotations
+
 import hashlib
 import logging
 import os
@@ -7,11 +10,7 @@ import re
 import asyncio
 from contextlib import AsyncExitStack
 from datetime import timedelta
-from typing import Optional, Dict, List, Any, Tuple
-
-from mcp import ClientSession, Tool, StdioServerParameters, stdio_client
-from mcp.client.sse import sse_client
-from mcp.client.streamable_http import streamablehttp_client
+from typing import Optional, Dict, List, Any, Tuple, TYPE_CHECKING
 
 from app.application.errors.exceptions import NotFoundError
 from app.application.services.config_provider import get_runtime_config
@@ -31,6 +30,9 @@ from app.domain.services.tools.capability_policy import (
     CapabilityDeniedError,
     CapabilityPolicy,
 )
+
+if TYPE_CHECKING:
+    from mcp import ClientSession, Tool
 
 """
 MCP客户端管理器的开发思路:
@@ -209,6 +211,9 @@ class MCPClientManager:
 
     async def _connect_stdio_server(self, server_name: str, server_config: MCPServerConfig) -> None:
         """根据服务名字+配置连接stdio服务"""
+        # 延迟导入:mcp 是 worker 专用重库,api 进程不装
+        from mcp import ClientSession, StdioServerParameters, stdio_client
+
         # 1.从配置中提取相关命令信息
         command = server_config.command
         args = server_config.args
@@ -257,6 +262,10 @@ class MCPClientManager:
 
     async def _connect_sse_server(self, server_name: str, server_config: MCPServerConfig) -> None:
         """根据服务名字+配置连接sse服务"""
+        # 延迟导入:mcp 是 worker 专用重库,api 进程不装
+        from mcp import ClientSession
+        from mcp.client.sse import sse_client
+
         url = server_config.url
         if not url:
             raise ValueError("连接sse-mcp服务器需要配置url")
@@ -297,6 +306,10 @@ class MCPClientManager:
 
     async def _connect_streamable_http_server(self, server_name: str, server_config: MCPServerConfig) -> None:
         """根据服务名字+配置连接streamable-http服务"""
+        # 延迟导入:mcp 是 worker 专用重库,api 进程不装
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamablehttp_client
+
         url = server_config.url
         if not url:
             raise ValueError("连接streamable-http-mcp服务器需要配置url")

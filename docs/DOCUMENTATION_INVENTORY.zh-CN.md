@@ -84,6 +84,12 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.zh-CN.md) | 行为准则 | governance | paired | low |
 | [pull_request_template.md](../.github/pull_request_template.zh-CN.md) | PR 模板 | governance | paired | low |
 
+## 审计（`docs/superpowers/audits/`）
+
+| 路径 | 主题 | 权威性 | 双语 | 图示 | 代码锚点 | 过期风险 |
+|------|------|--------|------|------|----------|----------|
+| [2026-07-28-agent-kb-codebase-governance-audit.md](superpowers/audits/2026-07-28-agent-kb-codebase-governance-audit.md) | 已过时的治理审计 — 资源版本化缺口结论（见文首状态块） | historical | zh-only (exempt) | none | `api/app/application/services/*_version_service.py` | low |
+
 ## 废弃候选（已处理 — 保留供 grep 回归）
 
 | 位置 | 问题 | 处理 |

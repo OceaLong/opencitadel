@@ -3,7 +3,7 @@
 """SQLAlchemy persistence for immutable knowledge-base versions."""
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, delete, exists, func, or_, select
+from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.knowledge_version import (
@@ -36,7 +36,9 @@ from app.infrastructure.models.knowledge_version import (
 from app.infrastructure.models.resource_governance import (
     ResourceBuildEventORM,
     ResourceBuildORM,
-    SessionResourceBindingORM,
+)
+from app.infrastructure.repositories.version_gc_base import (
+    VersionGarbageCollector,
 )
 
 
@@ -84,80 +86,41 @@ def _require_document_transition(
         )
 
 
-class DBKnowledgeVersionRepository(KnowledgeVersionRepository):
+class DBKnowledgeVersionRepository(
+    VersionGarbageCollector,
+    KnowledgeVersionRepository,
+):
     """All writes participate in the caller's Unit of Work transaction."""
 
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
-    async def collect_garbage(
-        self,
-        *,
-        retain_count: int,
-        older_than: datetime,
-        batch_size: int,
-    ) -> KnowledgeVersionGCResult:
-        """Collect one deterministic batch under KB -> version row locks."""
-        if (
-            not isinstance(retain_count, int)
-            or isinstance(retain_count, bool)
-            or retain_count < 0
-        ):
-            raise ValueError("retain_count must be a non-negative integer")
-        if not isinstance(older_than, datetime) or older_than.tzinfo is None:
-            raise ValueError("GC cutoff must be timezone-aware")
-        if (
-            not isinstance(batch_size, int)
-            or isinstance(batch_size, bool)
-            or not 1 <= batch_size <= 500
-        ):
-            raise ValueError("batch_size must be between 1 and 500")
+    @property
+    def _version_model(self):
+        return KnowledgeBaseVersionORM
 
-        ranked = self._ranked_versions()
-        bound = self._binding_reference_exists(
-            ranked.c.knowledge_base_id,
-            ranked.c.version_id,
-        )
-        active_build = self._active_build_exists(
-            ranked.c.knowledge_base_id,
-            ranked.c.version_id,
-        )
-        candidates_result = await self.db_session.execute(
-            select(
-                ranked.c.version_id,
-                ranked.c.knowledge_base_id,
-                ranked.c.created_at,
-            )
-            .join(
-                KnowledgeBaseModel,
-                KnowledgeBaseModel.id == ranked.c.knowledge_base_id,
-            )
-            .where(
-                ranked.c.retention_rank > retain_count,
-                ranked.c.created_at < older_than,
-                or_(
-                    KnowledgeBaseModel.active_version_id.is_(None),
-                    KnowledgeBaseModel.active_version_id
-                    != ranked.c.version_id,
-                ),
-                ~bound,
-                ~active_build,
-            )
-            .order_by(
-                ranked.c.created_at.asc(),
-                ranked.c.knowledge_base_id.asc(),
-                ranked.c.version_id.asc(),
-            )
-            .limit(batch_size)
-        )
-        candidate_rows = candidates_result.all()
+    @property
+    def _resource_model(self):
+        return KnowledgeBaseModel
 
-        protected = await self._protected_counts(
-            ranked=ranked,
-            older_than=older_than,
-            retain_count=retain_count,
-        )
-        totals = {
+    @property
+    def _resource_fk_column(self):
+        return KnowledgeBaseVersionORM.knowledge_base_id
+
+    @property
+    def _ranked_cte_name(self) -> str:
+        return "ranked_knowledge_versions"
+
+    @property
+    def _resource_kind(self) -> str:
+        return ResourceKind.KNOWLEDGE_BASE.value
+
+    @property
+    def _active_build_states(self):
+        return (BuildState.QUEUED.value, BuildState.RUNNING.value)
+
+    def _empty_totals(self) -> dict:
+        return {
             "deleted_manifests": 0,
             "deleted_revisions": 0,
             "deleted_chunks": 0,
@@ -169,47 +132,15 @@ class DBKnowledgeVersionRepository(KnowledgeVersionRepository):
             "deleted_build_events": 0,
             "retained_shared_revisions": 0,
         }
-        collected: list[str] = []
-        for candidate in candidate_rows:
-            knowledge_base_id = candidate.knowledge_base_id
-            version_id = candidate.version_id
 
-            # Shared mutex and lock order used by publish and KB binding writes.
-            kb_result = await self.db_session.execute(
-                select(KnowledgeBaseModel)
-                .where(KnowledgeBaseModel.id == knowledge_base_id)
-                .with_for_update()
-            )
-            knowledge_base = kb_result.scalar_one_or_none()
-            if (
-                knowledge_base is None
-                or knowledge_base.active_version_id == version_id
-            ):
-                continue
-            version_result = await self.db_session.execute(
-                select(KnowledgeBaseVersionORM)
-                .where(
-                    KnowledgeBaseVersionORM.id == version_id,
-                    KnowledgeBaseVersionORM.knowledge_base_id
-                    == knowledge_base_id,
-                )
-                .with_for_update()
-            )
-            version = version_result.scalar_one_or_none()
-            if version is None:
-                continue
-            if not await self._candidate_still_collectible(
-                version,
-                retain_count=retain_count,
-                older_than=older_than,
-            ):
-                continue
-            deleted = await self._delete_version_closure(version)
-            for name, count in deleted.items():
-                totals[name] += count
-            collected.append(version_id)
+    def _empty_extras(self) -> dict:
+        return {}
 
-        await self.db_session.flush()
+    def _accumulate_deleted(self, totals, extras, deleted) -> None:
+        for name, count in deleted.items():
+            totals[name] += count
+
+    def _build_gc_result(self, *, collected, protected, totals, extras):
         return KnowledgeVersionGCResult(
             collected_version_ids=tuple(collected),
             deleted_versions=len(collected),
@@ -220,163 +151,6 @@ class DBKnowledgeVersionRepository(KnowledgeVersionRepository):
             protected_retention_versions=protected["retention"],
             **totals,
         )
-
-    @staticmethod
-    def _ranked_versions():
-        return (
-            select(
-                KnowledgeBaseVersionORM.id.label("version_id"),
-                KnowledgeBaseVersionORM.knowledge_base_id.label(
-                    "knowledge_base_id"
-                ),
-                KnowledgeBaseVersionORM.created_at.label("created_at"),
-                func.row_number()
-                .over(
-                    partition_by=(
-                        KnowledgeBaseVersionORM.knowledge_base_id
-                    ),
-                    order_by=(
-                        KnowledgeBaseVersionORM.created_at.desc(),
-                        KnowledgeBaseVersionORM.id.desc(),
-                    ),
-                )
-                .label("retention_rank"),
-            )
-            .cte("ranked_knowledge_versions")
-        )
-
-    @staticmethod
-    def _binding_reference_exists(knowledge_base_id, version_id):
-        return exists(
-            select(SessionResourceBindingORM.id).where(
-                SessionResourceBindingORM.resource_kind
-                == ResourceKind.KNOWLEDGE_BASE.value,
-                SessionResourceBindingORM.resource_id == knowledge_base_id,
-                SessionResourceBindingORM.version_id == version_id,
-            )
-        )
-
-    @staticmethod
-    def _active_build_exists(knowledge_base_id, version_id):
-        return exists(
-            select(ResourceBuildORM.id).where(
-                ResourceBuildORM.resource_kind
-                == ResourceKind.KNOWLEDGE_BASE.value,
-                ResourceBuildORM.resource_id == knowledge_base_id,
-                ResourceBuildORM.version_id == version_id,
-                ResourceBuildORM.state.in_(
-                    (BuildState.QUEUED.value, BuildState.RUNNING.value)
-                ),
-            )
-        )
-
-    async def _protected_counts(
-        self,
-        *,
-        ranked,
-        older_than: datetime,
-        retain_count: int,
-    ) -> dict[str, int]:
-        active = await self.db_session.execute(
-            select(func.count())
-            .select_from(KnowledgeBaseVersionORM)
-            .join(
-                KnowledgeBaseModel,
-                KnowledgeBaseModel.id
-                == KnowledgeBaseVersionORM.knowledge_base_id,
-            )
-            .where(
-                KnowledgeBaseModel.active_version_id
-                == KnowledgeBaseVersionORM.id
-            )
-        )
-        bound = await self.db_session.execute(
-            select(func.count())
-            .select_from(KnowledgeBaseVersionORM)
-            .where(
-                self._binding_reference_exists(
-                    KnowledgeBaseVersionORM.knowledge_base_id,
-                    KnowledgeBaseVersionORM.id,
-                )
-            )
-        )
-        active_build = await self.db_session.execute(
-            select(func.count())
-            .select_from(KnowledgeBaseVersionORM)
-            .where(
-                self._active_build_exists(
-                    KnowledgeBaseVersionORM.knowledge_base_id,
-                    KnowledgeBaseVersionORM.id,
-                )
-            )
-        )
-        age = await self.db_session.execute(
-            select(func.count())
-            .select_from(KnowledgeBaseVersionORM)
-            .where(KnowledgeBaseVersionORM.created_at >= older_than)
-        )
-        retention = await self.db_session.execute(
-            select(func.count())
-            .select_from(ranked)
-            .where(ranked.c.retention_rank <= retain_count)
-        )
-        return {
-            "active": int(active.scalar_one()),
-            "bound": int(bound.scalar_one()),
-            "active_build": int(active_build.scalar_one()),
-            "age": int(age.scalar_one()),
-            "retention": int(retention.scalar_one()),
-        }
-
-    async def _candidate_still_collectible(
-        self,
-        version: KnowledgeBaseVersionORM,
-        *,
-        retain_count: int,
-        older_than: datetime,
-    ) -> bool:
-        created_at = version.created_at
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
-        if created_at >= older_than:
-            return False
-        newer_result = await self.db_session.execute(
-            select(func.count())
-            .select_from(KnowledgeBaseVersionORM)
-            .where(
-                KnowledgeBaseVersionORM.knowledge_base_id
-                == version.knowledge_base_id,
-                or_(
-                    KnowledgeBaseVersionORM.created_at > version.created_at,
-                    and_(
-                        KnowledgeBaseVersionORM.created_at
-                        == version.created_at,
-                        KnowledgeBaseVersionORM.id > version.id,
-                    ),
-                ),
-            )
-        )
-        if int(newer_result.scalar_one()) < retain_count:
-            return False
-        bound_result = await self.db_session.execute(
-            select(
-                self._binding_reference_exists(
-                    version.knowledge_base_id,
-                    version.id,
-                )
-            )
-        )
-        if bool(bound_result.scalar_one()):
-            return False
-        active_build_result = await self.db_session.execute(
-            select(
-                self._active_build_exists(
-                    version.knowledge_base_id,
-                    version.id,
-                )
-            )
-        )
-        return not bool(active_build_result.scalar_one())
 
     async def _delete_version_closure(
         self,
@@ -561,10 +335,6 @@ class DBKnowledgeVersionRepository(KnowledgeVersionRepository):
             "deleted_build_events": deleted_build_events,
             "retained_shared_revisions": retained_shared_revisions,
         }
-
-    async def _delete_returning_count(self, statement) -> int:
-        result = await self.db_session.execute(statement)
-        return len(result.scalars().all())
 
     async def create_candidate(
         self,

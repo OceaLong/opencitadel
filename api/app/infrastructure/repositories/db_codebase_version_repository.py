@@ -4,7 +4,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import and_, delete, exists, func, or_, select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.codebase import CodebaseStatus
@@ -29,7 +29,9 @@ from app.infrastructure.models.codebase_version import CodebaseVersionORM
 from app.infrastructure.models.resource_governance import (
     ResourceBuildEventORM,
     ResourceBuildORM,
-    SessionResourceBindingORM,
+)
+from app.infrastructure.repositories.version_gc_base import (
+    VersionGarbageCollector,
 )
 
 
@@ -42,77 +44,39 @@ _TERMINAL_BUILD_STATES = (
 )
 
 
-class DBCodebaseVersionRepository(CodebaseVersionRepository):
+class DBCodebaseVersionRepository(
+    VersionGarbageCollector,
+    CodebaseVersionRepository,
+):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
-    async def collect_garbage(
-        self,
-        *,
-        retain_count: int,
-        older_than: datetime,
-        batch_size: int,
-    ) -> CodebaseVersionGCResult:
-        """Collect one deterministic batch under codebase -> version locks."""
-        if (
-            not isinstance(retain_count, int)
-            or isinstance(retain_count, bool)
-            or retain_count < 0
-        ):
-            raise ValueError("retain_count must be a non-negative integer")
-        if not isinstance(older_than, datetime) or older_than.tzinfo is None:
-            raise ValueError("GC cutoff must be timezone-aware")
-        if (
-            not isinstance(batch_size, int)
-            or isinstance(batch_size, bool)
-            or not 1 <= batch_size <= 500
-        ):
-            raise ValueError("batch_size must be between 1 and 500")
+    @property
+    def _version_model(self):
+        return CodebaseVersionORM
 
-        ranked = self._ranked_versions()
-        bound = self._binding_reference_exists(
-            ranked.c.codebase_id,
-            ranked.c.version_id,
-        )
-        active_build = self._active_build_exists(
-            ranked.c.codebase_id,
-            ranked.c.version_id,
-        )
-        candidates_result = await self.db_session.execute(
-            select(
-                ranked.c.version_id,
-                ranked.c.codebase_id,
-                ranked.c.created_at,
-            )
-            .join(
-                CodebaseModel,
-                CodebaseModel.id == ranked.c.codebase_id,
-            )
-            .where(
-                ranked.c.retention_rank > retain_count,
-                ranked.c.created_at < older_than,
-                or_(
-                    CodebaseModel.active_version_id.is_(None),
-                    CodebaseModel.active_version_id != ranked.c.version_id,
-                ),
-                ~bound,
-                ~active_build,
-            )
-            .order_by(
-                ranked.c.created_at.asc(),
-                ranked.c.codebase_id.asc(),
-                ranked.c.version_id.asc(),
-            )
-            .limit(batch_size)
-        )
-        candidate_rows = candidates_result.all()
+    @property
+    def _resource_model(self):
+        return CodebaseModel
 
-        protected = await self._protected_counts(
-            ranked=ranked,
-            older_than=older_than,
-            retain_count=retain_count,
-        )
-        totals = {
+    @property
+    def _resource_fk_column(self):
+        return CodebaseVersionORM.codebase_id
+
+    @property
+    def _ranked_cte_name(self) -> str:
+        return "ranked_codebase_versions"
+
+    @property
+    def _resource_kind(self) -> str:
+        return ResourceKind.CODEBASE.value
+
+    @property
+    def _active_build_states(self):
+        return _ACTIVE_BUILD_STATES
+
+    def _empty_totals(self) -> dict:
+        return {
             "deleted_files": 0,
             "deleted_symbols": 0,
             "deleted_edges": 0,
@@ -123,47 +87,18 @@ class DBCodebaseVersionRepository(CodebaseVersionRepository):
             "deleted_build_events": 0,
             "retained_shared_snapshots": 0,
         }
-        snapshot_keys_to_delete: list[str] = []
-        collected: list[str] = []
-        for candidate in candidate_rows:
-            codebase_id = candidate.codebase_id
-            version_id = candidate.version_id
 
-            # Shared mutex and lock order used by publish and binding writes.
-            codebase_result = await self.db_session.execute(
-                select(CodebaseModel)
-                .where(CodebaseModel.id == codebase_id)
-                .with_for_update()
-            )
-            codebase = codebase_result.scalar_one_or_none()
-            if codebase is None or codebase.active_version_id == version_id:
-                continue
-            version_result = await self.db_session.execute(
-                select(CodebaseVersionORM)
-                .where(
-                    CodebaseVersionORM.id == version_id,
-                    CodebaseVersionORM.codebase_id == codebase_id,
-                )
-                .with_for_update()
-            )
-            version = version_result.scalar_one_or_none()
-            if version is None:
-                continue
-            if not await self._candidate_still_collectible(
-                version,
-                retain_count=retain_count,
-                older_than=older_than,
-            ):
-                continue
-            deleted = await self._delete_version_closure(version)
-            for name, count in deleted.items():
-                if name == "snapshot_keys_to_delete":
-                    snapshot_keys_to_delete.extend(count)
-                    continue
-                totals[name] += count
-            collected.append(version_id)
+    def _empty_extras(self) -> dict:
+        return {"snapshot_keys_to_delete": []}
 
-        await self.db_session.flush()
+    def _accumulate_deleted(self, totals, extras, deleted) -> None:
+        for name, count in deleted.items():
+            if name == "snapshot_keys_to_delete":
+                extras["snapshot_keys_to_delete"].extend(count)
+                continue
+            totals[name] += count
+
+    def _build_gc_result(self, *, collected, protected, totals, extras):
         return CodebaseVersionGCResult(
             collected_version_ids=tuple(collected),
             deleted_versions=len(collected),
@@ -172,153 +107,11 @@ class DBCodebaseVersionRepository(CodebaseVersionRepository):
             protected_active_build_versions=protected["active_build"],
             protected_age_versions=protected["age"],
             protected_retention_versions=protected["retention"],
-            snapshot_keys_to_delete=tuple(dict.fromkeys(snapshot_keys_to_delete)),
+            snapshot_keys_to_delete=tuple(
+                dict.fromkeys(extras["snapshot_keys_to_delete"])
+            ),
             **totals,
         )
-
-    @staticmethod
-    def _ranked_versions():
-        return (
-            select(
-                CodebaseVersionORM.id.label("version_id"),
-                CodebaseVersionORM.codebase_id.label("codebase_id"),
-                CodebaseVersionORM.created_at.label("created_at"),
-                func.row_number()
-                .over(
-                    partition_by=CodebaseVersionORM.codebase_id,
-                    order_by=(
-                        CodebaseVersionORM.created_at.desc(),
-                        CodebaseVersionORM.id.desc(),
-                    ),
-                )
-                .label("retention_rank"),
-            )
-            .cte("ranked_codebase_versions")
-        )
-
-    @staticmethod
-    def _binding_reference_exists(codebase_id, version_id):
-        return exists(
-            select(SessionResourceBindingORM.id).where(
-                SessionResourceBindingORM.resource_kind
-                == ResourceKind.CODEBASE.value,
-                SessionResourceBindingORM.resource_id == codebase_id,
-                SessionResourceBindingORM.version_id == version_id,
-            )
-        )
-
-    @staticmethod
-    def _active_build_exists(codebase_id, version_id):
-        return exists(
-            select(ResourceBuildORM.id).where(
-                ResourceBuildORM.resource_kind == ResourceKind.CODEBASE.value,
-                ResourceBuildORM.resource_id == codebase_id,
-                ResourceBuildORM.version_id == version_id,
-                ResourceBuildORM.state.in_(_ACTIVE_BUILD_STATES),
-            )
-        )
-
-    async def _protected_counts(
-        self,
-        *,
-        ranked,
-        older_than: datetime,
-        retain_count: int,
-    ) -> dict[str, int]:
-        active = await self.db_session.execute(
-            select(func.count())
-            .select_from(CodebaseVersionORM)
-            .join(
-                CodebaseModel,
-                CodebaseModel.id == CodebaseVersionORM.codebase_id,
-            )
-            .where(CodebaseModel.active_version_id == CodebaseVersionORM.id)
-        )
-        bound = await self.db_session.execute(
-            select(func.count())
-            .select_from(CodebaseVersionORM)
-            .where(
-                self._binding_reference_exists(
-                    CodebaseVersionORM.codebase_id,
-                    CodebaseVersionORM.id,
-                )
-            )
-        )
-        active_build = await self.db_session.execute(
-            select(func.count())
-            .select_from(CodebaseVersionORM)
-            .where(
-                self._active_build_exists(
-                    CodebaseVersionORM.codebase_id,
-                    CodebaseVersionORM.id,
-                )
-            )
-        )
-        age = await self.db_session.execute(
-            select(func.count())
-            .select_from(CodebaseVersionORM)
-            .where(CodebaseVersionORM.created_at >= older_than)
-        )
-        retention = await self.db_session.execute(
-            select(func.count())
-            .select_from(ranked)
-            .where(ranked.c.retention_rank <= retain_count)
-        )
-        return {
-            "active": int(active.scalar_one()),
-            "bound": int(bound.scalar_one()),
-            "active_build": int(active_build.scalar_one()),
-            "age": int(age.scalar_one()),
-            "retention": int(retention.scalar_one()),
-        }
-
-    async def _candidate_still_collectible(
-        self,
-        version: CodebaseVersionORM,
-        *,
-        retain_count: int,
-        older_than: datetime,
-    ) -> bool:
-        created_at = version.created_at
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
-        if created_at >= older_than:
-            return False
-        newer_result = await self.db_session.execute(
-            select(func.count())
-            .select_from(CodebaseVersionORM)
-            .where(
-                CodebaseVersionORM.codebase_id == version.codebase_id,
-                or_(
-                    CodebaseVersionORM.created_at > version.created_at,
-                    and_(
-                        CodebaseVersionORM.created_at == version.created_at,
-                        CodebaseVersionORM.id > version.id,
-                    ),
-                ),
-            )
-        )
-        if int(newer_result.scalar_one()) < retain_count:
-            return False
-        bound_result = await self.db_session.execute(
-            select(
-                self._binding_reference_exists(
-                    version.codebase_id,
-                    version.id,
-                )
-            )
-        )
-        if bool(bound_result.scalar_one()):
-            return False
-        active_build_result = await self.db_session.execute(
-            select(
-                self._active_build_exists(
-                    version.codebase_id,
-                    version.id,
-                )
-            )
-        )
-        return not bool(active_build_result.scalar_one())
 
     async def _delete_version_closure(
         self,
@@ -452,10 +245,6 @@ class DBCodebaseVersionRepository(CodebaseVersionRepository):
             "retained_shared_snapshots": retained_shared_snapshots,
             "snapshot_keys_to_delete": snapshot_keys_to_delete,
         }
-
-    async def _delete_returning_count(self, statement) -> int:
-        result = await self.db_session.execute(statement)
-        return len(result.scalars().all())
 
     async def add_version(
         self,

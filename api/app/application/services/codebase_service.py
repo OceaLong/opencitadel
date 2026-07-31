@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import asyncio
 import logging
-import time
 import uuid
 from datetime import datetime
 from typing import AsyncGenerator, Callable, List, Optional, Type
@@ -18,6 +16,12 @@ from app.application.errors.exceptions import (
     NotFoundError,
 )
 from app.application.services.codebase_version_service import CodebaseVersionService
+from app.application.services.ingest_task_support import IngestTaskSupport
+from app.application.services.resource_build_support import (
+    ResourceBuildSupport,
+    _ACTIVE_BUILD_STATES,
+    _RETRYABLE_BUILD_STATES,
+)
 from app.application.services.resource_binding_service import ResourceBindingService
 from app.application.services.resource_guard_service import ResourceGuardService
 from app.domain.external.file_storage import FileStorage
@@ -60,18 +64,27 @@ from pydantic import TypeAdapter
 logger = logging.getLogger(__name__)
 
 _TERMINAL_CODEBASE_STATUSES = {CodebaseStatus.READY, CodebaseStatus.FAILED}
-_ACTIVE_BUILD_STATES = {BuildState.QUEUED, BuildState.RUNNING}
-_RETRYABLE_BUILD_STATES = {BuildState.FAILED, BuildState.CANCELLED}
+# _ACTIVE_BUILD_STATES / _RETRYABLE_BUILD_STATES are shared with the knowledge
+# base service and imported from resource_build_support (values unchanged).
 _PUBLISHED_CODEBASE_VERSION_STATES = {
     CodebaseVersionState.READY,
     CodebaseVersionState.DEGRADED,
 }
-_INGEST_STALE_AFTER_SECONDS = 120.0
-_DELETE_TASK_DRAIN_TIMEOUT_SECONDS = 30.0
-_DELETE_TASK_POLL_INTERVAL_SECONDS = 0.5
 
 
-class CodebaseService:
+class CodebaseService(ResourceBuildSupport, IngestTaskSupport):
+    # Consistency-assertion hooks consumed by ResourceBuildSupport. Error
+    # strings are byte-identical to the pre-extraction literals (API contract).
+    _build_resource_kind = ResourceKind.CODEBASE
+    _published_version_states = _PUBLISHED_CODEBASE_VERSION_STATES
+
+    _build_owner_closure_error = "codebase build owner closure is malformed"
+    _build_candidate_closure_error = "codebase build candidate closure is malformed"
+    _version_publication_error = "codebase version publication is malformed"
+    _active_version_not_published_error = "codebase active version is not published"
+    _version_build_missing_error = "codebase version has no matching build"
+    _version_build_closure_error = "codebase version build closure is malformed"
+
     def __init__(
             self,
             uow_factory: Callable[[], IUnitOfWork],
@@ -90,29 +103,10 @@ class CodebaseService:
         self._resource_binding_service = resource_binding_service
         self._codebase_version_service = codebase_version_service
         self._source_validator = source_validator or CodebaseSourceValidator()
-
-    async def _ingest_in_progress(self, codebase: Codebase) -> bool:
-        if not codebase.ingest_task_id:
-            return False
-        if codebase.status in _TERMINAL_CODEBASE_STATUSES:
-            return False
-        meta = await self._task_state.get_task_meta(codebase.ingest_task_id)
-        if not meta:
-            return False
-        if await self._task_state.is_done(codebase.ingest_task_id):
-            return False
-        if self._task_state.heartbeat_is_stale(meta, _INGEST_STALE_AFTER_SECONDS):
-            return False
-        return True
-
-    async def _wait_for_task_drain(self, task_id: str) -> None:
-        deadline = time.monotonic() + _DELETE_TASK_DRAIN_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
-            snapshot = await self._task_state.get_runtime_snapshot(task_id)
-            if snapshot.get("is_done"):
-                return
-            await asyncio.sleep(_DELETE_TASK_POLL_INTERVAL_SECONDS)
-        logger.warning("等待代码库摄取任务结束超时 task_id=%s", task_id)
+        self._ingest_terminal_statuses = _TERMINAL_CODEBASE_STATUSES
+        self._ingest_resource_label = "代码库"
+        self._ingest_session_prefix = "codebase-ingest"
+        self._ingest_task_type = "codebase_ingest"
 
     async def create_codebase(
             self,
@@ -452,6 +446,10 @@ class CodebaseService:
             *,
             scope: Optional[OwnerScope] = None,
     ) -> CodebaseBuildProjection:
+        # Not hoisted to ResourceBuildSupport: semantically diverges from the
+        # knowledge-base variant (mandatory owner-scope guard, mark_failed of
+        # the candidate, ingest_task clearing and a resource_governance
+        # append_event step that the KB side does not perform).
         if scope is None:
             raise BadRequestError("codebase version builds require owner scope")
         async with self._uow_factory() as uow:
@@ -538,56 +536,28 @@ class CodebaseService:
         raise NotFoundError("代码库版本快照不可用")
 
     async def _dispatch_codebase_build(self, build: ResourceBuild) -> None:
-        await self._task_state.register_task(
-            build.id,
-            session_id=f"codebase-ingest:{build.resource_id}",
-            task_type="codebase_ingest",
-            resource_id=build.resource_id,
-        )
-        task = RedisStreamTask(
-            task_id=build.id,
-            session_id=f"codebase-ingest:{build.resource_id}",
-        )
-        await task.dispatch_to_worker()
+        await self._dispatch_ingest_task(build.id, resource_id=build.resource_id)
 
-    async def _project_version(
+    async def _get_projection_version(
             self,
             uow: IUnitOfWork,
-            codebase: Codebase,
-            version: CodebaseVersion,
-    ) -> CodebaseVersionProjection:
-        is_published = (
-            version.published_at is not None
-            and version.state in _PUBLISHED_CODEBASE_VERSION_STATES
+            version_id: str,
+            resource_id: str,
+    ) -> CodebaseVersion | None:
+        return await uow.codebase_version.get_version(
+            version_id,
+            codebase_id=resource_id,
         )
-        if (
-            version.published_at is None
-            and version.state in _PUBLISHED_CODEBASE_VERSION_STATES
-        ) or (
-            version.published_at is not None
-            and version.state not in _PUBLISHED_CODEBASE_VERSION_STATES
-        ):
-            raise ConflictError("codebase version publication is malformed")
-        if version.id == codebase.active_version_id and not is_published:
-            raise ConflictError("codebase active version is not published")
-        build_projection = None
-        if version.build_id is not None:
-            build = await uow.resource_governance.get_build(version.build_id)
-            if build is None:
-                raise ConflictError("codebase version has no matching build")
-            build_projection = await self._project_build(
-                uow,
-                codebase.id,
-                build,
-                active_version_id=codebase.active_version_id,
-            )
-            if (
-                build.version_id != version.id
-                or build.parent_version_id != version.parent_version_id
-            ):
-                raise ConflictError(
-                    "codebase version build closure is malformed"
-                )
+
+    def _build_version_projection(
+            self,
+            version: CodebaseVersion,
+            *,
+            is_active: bool,
+            is_published: bool,
+            is_candidate: bool,
+            build: CodebaseBuildProjection | None,
+    ) -> CodebaseVersionProjection:
         return CodebaseVersionProjection(
             id=version.id,
             codebase_id=version.codebase_id,
@@ -603,44 +573,10 @@ class CodebaseService:
             legacy_snapshot=version.legacy_snapshot,
             created_at=version.created_at,
             published_at=version.published_at,
-            is_active=version.id == codebase.active_version_id,
+            is_active=is_active,
             is_published=is_published,
-            is_candidate=not is_published,
-            build=build_projection,
-        )
-
-    async def _project_build(
-            self,
-            uow: IUnitOfWork,
-            codebase_id: str,
-            build: ResourceBuild,
-            *,
-            active_version_id: str | None,
-    ) -> CodebaseBuildProjection:
-        if (
-            build.resource_kind is not ResourceKind.CODEBASE
-            or build.resource_id != codebase_id
-        ):
-            raise ConflictError("codebase build owner closure is malformed")
-        candidate = await uow.codebase_version.get_version(
-            build.version_id,
-            codebase_id=codebase_id,
-        )
-        if (
-            candidate is None
-            or candidate.build_id != build.id
-            or candidate.parent_version_id != build.parent_version_id
-            or (
-                build.state in _ACTIVE_BUILD_STATES
-                and build.parent_version_id != active_version_id
-            )
-        ):
-            raise ConflictError(
-                "codebase build candidate closure is malformed"
-            )
-        return self._build_projection(
-            build,
-            active_version_id=active_version_id,
+            is_candidate=is_candidate,
+            build=build,
         )
 
     @staticmethod
@@ -679,6 +615,9 @@ class CodebaseService:
             result: CodebaseBuildPlan,
             codebase: Codebase,
     ) -> CodebaseVersionProjection:
+        # Not hoisted: the signature diverges from the knowledge-base variant
+        # (explicit ``codebase`` arg vs ``result.resource``) and the projected
+        # DTO carries codebase-only ``source_*`` fields.
         version = result.version
         return CodebaseVersionProjection(
             id=version.id,

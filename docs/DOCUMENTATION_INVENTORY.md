@@ -84,6 +84,12 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.md) | Community standards | governance | paired | none | low |
 | [pull_request_template.md](../.github/pull_request_template.md) | PR template | governance | paired | none | low |
 
+## Audits (`docs/superpowers/audits/`)
+
+| Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
+|------|-------|-----------|-----------|----------|-------------|------------|
+| [2026-07-28-agent-kb-codebase-governance-audit.md](superpowers/audits/2026-07-28-agent-kb-codebase-governance-audit.md) | Superseded governance audit — resource versioning gap claim (see status banner) | historical | zh-only (exempt) | none | `api/app/application/services/*_version_service.py` | low |
+
 ## Deprecation candidates (resolved — kept for grep regression)
 
 | Location | Issue | Action |

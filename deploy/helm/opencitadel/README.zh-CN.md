@@ -18,12 +18,12 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --namespace opencitadel --create-namespace \
   --values production-values.yaml \
   --set image.api.repository=your-registry/opencitadel-api \
-  --set image.api.tag=latest \
-  --set image.worker.repository=your-registry/opencitadel-worker \
-  --set image.worker.tag=latest \
-  --set replicaCount.api=2 \
-  --set replicaCount.worker=2
+  --set image.worker.repository=your-registry/opencitadel-worker
 ```
+
+完整镜像构建/推送步骤与生产环境 `--set` 参数（五个镜像、ingress、sandbox
+driver）：见[部署指南](../../../docs/operations/deployment.zh-CN.md)的
+Kubernetes / Helm 部署一节。
 
 ### local 模式（集群内 MinIO）
 
@@ -66,22 +66,22 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
 
 ## 生产安全要求
 
-- `secrets.apiKeySecret`、`secrets.auditSigningKey`、
-  `secrets.jwtSecret`、`secrets.sessionSecret` 必须互不相同且至少
-  32 字符；轮换时同步设置 key id 与 previous-key JSON Map。
-- `secrets.bootstrapAdminPassword` 至少 12 字符；
+- `secrets.apiKeySecret`、`secrets.auditSigningKey`、`secrets.jwtSecret`、
+  `secrets.sessionSecret`、`secrets.bootstrapAdminPassword`、
   `secrets.postgresAdminPassword`、`secrets.postgresPassword`、
-  `secrets.redisPassword` 至少 16 字符，两个 PostgreSQL 密码必须不同。
+  `secrets.redisPassword` 的长度与互异性要求见[部署指南 — local
+  模式](../../../docs/operations/deployment.zh-CN.md#local-模式配置)（该规则对
+  cloud 与 local 两套 `.env` 模板均适用）；轮换时同步设置 key id 与
+  previous-key JSON Map。
 - API、Worker、迁移 initContainer 都使用 `postgresql.user`，这是受
   RLS 约束的非超级用户。生产启动会拒绝 `rolsuper=true` 或
   `rolbypassrls=true`。
 - 保持 `networkPolicy.enabled=true`。它只允许 API/Worker 访问沙箱，
   沙箱出站仅放行 DNS 与公网地址段，阻断私网、Link-local、Metadata 与
   保留地址。
-- 设置 `env.COOKIE_SECURE=true`、公网 HTTPS 前端/OAuth URL、精确的
-  Ingress Controller `env.TRUSTED_PROXY_CIDRS`、批准的
-  `env.OUTBOUND_ALLOWED_PORTS`，并只在
-  `env.OUTBOUND_PRIVATE_HOST_ALLOWLIST` 填写精确 Hostname。
+- 设置 `env.COOKIE_SECURE=true`、公网 HTTPS 前端/OAuth URL，并按同一指南
+  设置 `env.TRUSTED_PROXY_CIDRS` / `env.OUTBOUND_ALLOWED_PORTS` /
+  `env.OUTBOUND_PRIVATE_HOST_ALLOWLIST`。
 - `production-values.yaml` 应存放在批准的加密 Secret 机制中，不得提交。
 
 ## 已有 Chart 托管 PostgreSQL PVC

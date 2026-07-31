@@ -8,7 +8,13 @@ from sse_starlette import EventSourceResponse, ServerSentEvent
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.domain.models.event_policy import should_project_event
 from app.domain.models.scope import WorkspaceContext
-from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
+from app.interfaces.auth_dependencies import get_workspace_context
+from app.interfaces.endpoints.resource_version_shared import (
+    NonAuditorWriteGuardDep,
+    WorkspaceContextDep,
+    to_build_response,
+    to_version_response,
+)
 from app.interfaces.schemas import Response
 from app.interfaces.schemas.event import EventMapper
 from app.interfaces.schemas.knowledge_base import (
@@ -41,24 +47,18 @@ def _to_doc_response(doc) -> KnowledgeDocumentResponse:
 
 
 def _to_build_response(build) -> KnowledgeBuildResponse:
-    return KnowledgeBuildResponse.model_validate(
-        build,
-        from_attributes=True,
-    )
+    return to_build_response(KnowledgeBuildResponse, build)
 
 
 def _to_version_response(version) -> KnowledgeVersionResponse:
-    return KnowledgeVersionResponse.model_validate(
-        version,
-        from_attributes=True,
-    )
+    return to_version_response(KnowledgeVersionResponse, version)
 
 
 @router.post("", response_model=Response[KnowledgeBaseResponse])
 async def create_knowledge_base(
         request: CreateKnowledgeBaseRequest,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[KnowledgeBaseResponse]:
     kb = await service.create_kb(name=request.name, settings=request.settings, scope=ctx.scope)
@@ -136,8 +136,8 @@ async def get_kb_version(
 )
 async def create_kb_build(
         kb_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[KnowledgeVersionResponse]:
     version = await service.create_build(kb_id, scope=ctx.scope)
@@ -151,8 +151,8 @@ async def create_kb_build(
 async def retry_kb_build(
         kb_id: str,
         build_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[KnowledgeVersionResponse]:
     version = await service.retry_build(
@@ -170,8 +170,8 @@ async def retry_kb_build(
 async def cancel_kb_build(
         kb_id: str,
         build_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[KnowledgeBuildResponse]:
     build = await service.cancel_build(
@@ -216,8 +216,8 @@ async def get_knowledge_graph(
 @router.delete("/{kb_id}", response_model=Response[Optional[Dict]])
 async def delete_knowledge_base(
         kb_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[Optional[Dict]]:
     await service.delete_kb(kb_id, scope=ctx.scope)
@@ -228,8 +228,8 @@ async def delete_knowledge_base(
 async def add_documents(
         kb_id: str,
         request: AddKnowledgeDocumentsRequest,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[KnowledgeBaseResponse]:
     kb = await service.add_documents(
@@ -260,8 +260,8 @@ async def list_documents(
 async def delete_document(
         kb_id: str,
         doc_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[KnowledgeBaseResponse]:
     kb = await service.delete_document(kb_id, doc_id, scope=ctx.scope)
@@ -288,8 +288,8 @@ async def ingest_stream(
 @router.post("/{kb_id}/reindex", response_model=Response[KnowledgeBaseResponse])
 async def reindex(
         kb_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[KnowledgeBaseResponse]:
     return Response.success(data=_to_kb_response(await service.reindex(kb_id, scope=ctx.scope)))
@@ -299,8 +299,8 @@ async def reindex(
 async def create_kb_session(
         kb_id: str,
         request: CreateKnowledgeBaseSessionRequest,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
+        ctx: WorkspaceContextDep,
+        _write_guard: NonAuditorWriteGuardDep,
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[CreateKnowledgeBaseSessionResponse]:
     session = await service.create_session_for_kb(

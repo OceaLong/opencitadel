@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
+import { type ResourceLibraryApi, useResourceLibrary } from "@/hooks/use-resource-library";
 import { codebaseApi } from "@/lib/api/codebase";
 import { sessionApi } from "@/lib/api/session";
 import type { Codebase, CodebaseStatus, CodebaseVersionsData, SessionMode } from "@/lib/api/types";
@@ -57,140 +58,81 @@ function truncateError(error: string, maxLength = 120): string {
   return `${text.slice(0, maxLength)}...`;
 }
 
+// Stable module-level adapter: `codebaseApi` is itself a stable singleton, so
+// this object never needs to be recreated per render (see
+// `use-resource-library.ts` for why identity stability matters here).
+const codebaseLibraryApi: ResourceLibraryApi<Codebase, CodebaseVersionsData> = {
+  list: async () => (await codebaseApi.list()).codebases,
+  listVersions: (id) => codebaseApi.listVersions(id),
+  remove: (id) => codebaseApi.delete(id),
+  ingestStream: codebaseApi.ingestStream,
+};
+
+function codebaseShouldPoll(
+  cb: Codebase,
+  { versionsById }: { versionsById: Record<string, CodebaseVersionsData | null> },
+): boolean {
+  return (
+    hasActiveBuild(versionsById[cb.id]) ||
+    (isIngestingStatus(cb.status) && Boolean(cb.ingest_task_id))
+  );
+}
+
 export function CodebaseLibrary() {
   const router = useRouter();
   const t = useTranslations("codebase");
   const tCommon = useTranslations("common");
   const { user } = useAuth();
-  const [codebases, setCodebases] = useState<Codebase[]>([]);
-  const [versionHistories, setVersionHistories] = useState<Record<string, CodebaseVersionsData | null>>({});
   const [createOpen, setCreateOpen] = useState(false);
-  const [startingId, setStartingId] = useState<string | null>(null);
-  const [ingestingIds, setIngestingIds] = useState<Set<string>>(new Set());
   const [pendingDelete, setPendingDelete] = useState<Codebase | null>(null);
-  const ingestCleanupRef = useRef<Map<string, () => void>>(new Map());
 
-  const loadCodebases = useCallback(async () => {
-    if (!user) {
-      setCodebases([]);
-      return;
-    }
-    try {
-      const data = await codebaseApi.list();
-      const histories = await Promise.all(
-        data.codebases.map(async (codebase) => {
-          try {
-            return [codebase.id, await codebaseApi.listVersions(codebase.id)] as const;
-          } catch {
-            return [codebase.id, null] as const;
-          }
-        }),
-      );
-      setVersionHistories(Object.fromEntries(histories));
-      setCodebases(data.codebases);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("loadError"));
-    }
-  }, [t, user]);
-
-  useEffect(() => {
-    void loadCodebases();
-  }, [loadCodebases]);
-
-  useEffect(() => {
-    const hasActiveIngest = codebases.some(
-      (cb) =>
-        hasActiveBuild(versionHistories[cb.id]) ||
-        (isIngestingStatus(cb.status) && Boolean(cb.ingest_task_id)),
-    );
-    if (!hasActiveIngest) return;
-
-    const timer = window.setInterval(() => {
-      void loadCodebases();
-    }, INGEST_POLL_INTERVAL_MS);
-
-    return () => window.clearInterval(timer);
-  }, [codebases, loadCodebases, versionHistories]);
-
-  useEffect(() => {
-    const cleanupMap = ingestCleanupRef.current;
-    return () => {
-      cleanupMap.forEach((cleanup) => cleanup());
-      cleanupMap.clear();
-    };
-  }, []);
-
-  const watchIngest = useCallback(
-    (id: string) => {
-      if (ingestCleanupRef.current.has(id)) return;
-      setIngestingIds((prev) => new Set(prev).add(id));
-      const finish = () => {
-        setIngestingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-        ingestCleanupRef.current.delete(id);
-        void loadCodebases();
-      };
-      const cleanup = codebaseApi.ingestStream(
-        id,
-        (ev) => {
-          if (ev.type === "error") {
-            const message =
-              typeof ev.data?.error === "string" && ev.data.error.trim()
-                ? ev.data.error
-                : t("indexFailed");
-            toast.error(t("indexFailedDetail", { error: message }));
-            finish();
-            return;
-          }
-          if (ev.type === "done") {
-            finish();
-          }
-        },
-        () => {
-          setIngestingIds((prev) => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-          });
-          ingestCleanupRef.current.delete(id);
-        },
-        undefined,
-        finish,
-      );
-      ingestCleanupRef.current.set(id, cleanup);
+  const {
+    items: codebases,
+    setItems: setCodebases,
+    versionsById: versionHistories,
+    ingestingIds,
+    startingId,
+    load: loadCodebases,
+    remove: removeCodebase,
+    watchIngest,
+    startTask: runStartTask,
+  } = useResourceLibrary<Codebase, CodebaseVersionsData>({
+    api: codebaseLibraryApi,
+    enabled: Boolean(user),
+    loadErrorMessage: t("loadError"),
+    shouldPoll: codebaseShouldPoll,
+    pollMs: INGEST_POLL_INTERVAL_MS,
+    formatIngestError: (ev) => {
+      const message =
+        typeof ev.data?.error === "string" && ev.data.error.trim() ? ev.data.error : t("indexFailed");
+      return t("indexFailedDetail", { error: message });
     },
-    [loadCodebases, t],
-  );
+  });
 
   const startTask = async (codebase: Codebase, mode: SessionMode = "ask") => {
     const versionId =
       versionHistories[codebase.id]?.active_version_id ??
       codebase.active_version_id ??
       undefined;
-    setStartingId(codebase.id);
-    try {
-      const data = await sessionApi.createSession({
-        codebase_id: codebase.id,
-        codebase_version_id: versionId,
-        mode,
-      });
-      router.push(`/sessions/${data.session_id}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("startTaskFailed"));
-    } finally {
-      setStartingId(null);
-    }
+    await runStartTask(
+      codebase.id,
+      async () => {
+        const data = await sessionApi.createSession({
+          codebase_id: codebase.id,
+          codebase_version_id: versionId,
+          mode,
+        });
+        router.push(`/sessions/${data.session_id}`);
+      },
+      t("startTaskFailed"),
+    );
   };
 
   const handleDeleteConfirm = async () => {
     if (!pendingDelete) return;
     const name = pendingDelete.name;
     try {
-      await codebaseApi.delete(pendingDelete.id);
-      setCodebases((prev) => prev.filter((cb) => cb.id !== pendingDelete.id));
+      await removeCodebase(pendingDelete.id);
       toast.success(t("deleteSuccess", { name }));
       setPendingDelete(null);
     } catch (err) {
