@@ -51,6 +51,87 @@ flowchart TD
 
 批准/拒绝后，Agent 将工具结果注入 memory，经 `continue_tool_iteration_loop` 继续 ReAct 循环。
 
+## 共享工具治理契约
+
+每个已注册工具都暴露 `ToolExecutionPolicy`；治理层在向模型展示 schema
+和真正执行前都会检查同一份 descriptor。
+
+| 字段 | 取值 | 含义 |
+|------|------|------|
+| `capability` | `message`、`knowledge_read`、`code_read`、`integration_read`、`web_read`、`generation`、`execution`、`unknown` | 按模式限制的能力 |
+| `effect` | `read_only`、`workspace_write`、`external_write`、`interactive` | 副作用类别 |
+| `idempotency` | `safe`、`idempotent_with_key`、`non_idempotent`、`unknown` | 自动重试边界 |
+| `approval` | `never`、`policy`、`always` | 审批来源 |
+| `concurrency_group` | 字符串，默认 `none` | 串行执行 lane |
+
+缺失或非法声明一律回落到最保守策略：
+`capability=unknown`、`effect=interactive`、`idempotency=unknown`、
+`approval=always`、`concurrency_group=unknown`。
+
+Ask 模式只允许只读的 `message`、`knowledge_read`、`code_read`，以及经管理员
+明确分类为 `integration_read` 的集成 descriptor。MCP/A2A 在真正调用时仍会
+重复校验同一策略。子 Agent 继承父策略且只能收窄。对于创建、修改、删除、
+执行、外部写入或委派请求，Ask 以零副作用完成问答，明确引导用户切换到
+Agent 模式。
+
+### 持久化审批批次
+
+权威工具门控是持久化批次，不是旧的单值 `pending_tool_call`。标准 API
+`data` 包装内的 JSON 结构如下：
+
+```json
+{
+  "id": "batch-id",
+  "session_id": "session-id",
+  "status": "pending",
+  "expires_at": "2026-07-29T10:15:00Z",
+  "created_at": "2026-07-29T10:00:00Z",
+  "decided_at": null,
+  "calls": [
+    {
+      "id": "approval-call-id",
+      "batch_id": "batch-id",
+      "tool_call_id": "model-call-id",
+      "ordinal": 0,
+      "tool_name": "browser_click",
+      "normalized_args": {"target": "submit"},
+      "args_hash": "sha256",
+      "capability": "execution",
+      "effect": "interactive",
+      "idempotency": "non_idempotent",
+      "approval": "always",
+      "concurrency_group": "browser",
+      "status": "pending",
+      "decided_by": null,
+      "decided_at": null
+    }
+  ]
+}
+```
+
+批次状态为 `pending`、`approved`、`rejected`、`expired` 或 `consumed`。
+仅首个消费事务可见的临时标志 `execution_claimed` 不进入 JSON，也不持久化。
+
+模型生成的完整调用列表会先按 ordinal 完成规范化、授权并持久化。无需人工
+审批的调用记录为 policy-approved；但只要任一兄弟调用仍为 pending，执行器
+不会执行任何调用（包括只读调用），因此审批前不可能发生副作用。
+
+| 路由 | 契约 |
+|------|------|
+| `GET /api/sessions/{session_id}/tool-approval-batch` | 返回当前 owner scope 下的待审批批次 |
+| `POST /api/sessions/{session_id}/tool-approval-batches/{batch_id}/decision` | Body：`{"action":"approve|approve_same|reject","tool_call_ids":[...]?}` |
+
+显式 `tool_call_ids` 支持部分决策；省略的 ID 不会扩张先前的部分决策，部分
+批次继续等待。`approve_same` 只会为本次从 pending 新变为 approved 的调用
+增加会话级同类授权。
+
+恢复时按 ID 读取持久化批次，拒绝跨会话、缺失、过期、拒绝、部分完成或已
+消费批次，并重新校验 ownership、授权、能力、规范化参数哈希、函数签名和
+完整策略快照。只有全部批准且未过期的批次才能原子变为 `consumed`，且只有
+拿到临时执行 claim 的事务可以调用工具。重复恢复不会执行，因此幂等。
+`safe` 仅对明确的瞬态失败做有界重试；`idempotent_with_key` 仅在 schema 与
+callable 都接收同一个稳定 key 时重试；`non_idempotent` 与 `unknown` 只执行一次。
+
 ### 接管恢复
 
 用户发送 `takeover` 或 `skip`；清除 pending 阶段，`roll_back` 将用户消息注入待处理的 `message_ask_user` 工具调用后继续循环。

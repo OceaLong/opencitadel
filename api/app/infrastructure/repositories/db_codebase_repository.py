@@ -38,6 +38,28 @@ class DBCodebaseRepository(CodebaseRepository):
             return stmt.where(CodebaseModel.team_id == scope.team_id)
         return stmt.where(CodebaseModel.owner_user_id == scope.user_id, CodebaseModel.team_id.is_(None))
 
+    def _apply_version_projection(
+            self,
+            stmt,
+            row_model,
+            codebase_id: str,
+            version_id: Optional[str],
+    ):
+        if version_id is not None:
+            return stmt.where(row_model.version_id == version_id)
+        active_version_id = (
+            select(CodebaseModel.active_version_id)
+            .where(CodebaseModel.id == codebase_id)
+            .scalar_subquery()
+        )
+        return stmt.where(
+            (
+                active_version_id.is_(None)
+                & row_model.version_id.is_(None)
+            )
+            | (row_model.version_id == active_version_id)
+        )
+
     async def save(self, codebase: Codebase) -> None:
         stmt = select(CodebaseModel).where(CodebaseModel.id == codebase.id)
         result = await self.db_session.execute(stmt)
@@ -56,6 +78,9 @@ class DBCodebaseRepository(CodebaseRepository):
         record.snapshot_key = codebase.snapshot_key
         record.ingest_task_id = codebase.ingest_task_id
         record.error = codebase.error
+        record.vector_degraded = codebase.vector_degraded
+        record.legacy_v1_migrated = codebase.legacy_v1_migrated
+        record.active_version_id = codebase.active_version_id
         record.owner_user_id = codebase.owner_user_id
         record.team_id = codebase.team_id
         record.updated_at = codebase.updated_at
@@ -98,6 +123,7 @@ class DBCodebaseRepository(CodebaseRepository):
                 CodebaseFileModel(
                     id=f.id,
                     codebase_id=f.codebase_id,
+                    version_id=f.version_id,
                     path=f.path,
                     language=f.language,
                     size=f.size,
@@ -105,20 +131,41 @@ class DBCodebaseRepository(CodebaseRepository):
                 )
             )
 
-    async def list_files(self, codebase_id: str) -> List[CodebaseFile]:
+    async def list_files(
+            self,
+            codebase_id: str,
+            version_id: Optional[str] = None,
+    ) -> List[CodebaseFile]:
         stmt = (
             select(CodebaseFileModel)
             .where(CodebaseFileModel.codebase_id == codebase_id)
             .order_by(CodebaseFileModel.path.asc())
         )
+        stmt = self._apply_version_projection(
+            stmt,
+            CodebaseFileModel,
+            codebase_id,
+            version_id,
+        )
         result = await self.db_session.execute(stmt)
         return [r.to_domain() for r in result.scalars().all()]
 
-    async def get_file_by_path(self, codebase_id: str, path: str) -> Optional[CodebaseFile]:
+    async def get_file_by_path(
+            self,
+            codebase_id: str,
+            path: str,
+            version_id: Optional[str] = None,
+    ) -> Optional[CodebaseFile]:
         stmt = (
             select(CodebaseFileModel)
             .where(CodebaseFileModel.codebase_id == codebase_id)
             .where(CodebaseFileModel.path == path)
+        )
+        stmt = self._apply_version_projection(
+            stmt,
+            CodebaseFileModel,
+            codebase_id,
+            version_id,
         )
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
@@ -130,29 +177,55 @@ class DBCodebaseRepository(CodebaseRepository):
                 CodebaseSymbolModel(
                     id=s.id,
                     codebase_id=s.codebase_id,
+                    version_id=s.version_id,
                     file_id=s.file_id,
                     name=s.name,
+                    qualified_name=s.qualified_name or s.name,
                     kind=s.kind.value,
                     signature=s.signature,
                     start_line=s.start_line,
                     end_line=s.end_line,
                     parent_id=s.parent_id,
+                    parser=s.parser,
+                    confidence=s.confidence,
                 )
             )
 
-    async def list_symbols(self, codebase_id: str, name: Optional[str] = None) -> List[CodebaseSymbol]:
+    async def list_symbols(
+            self,
+            codebase_id: str,
+            name: Optional[str] = None,
+            version_id: Optional[str] = None,
+    ) -> List[CodebaseSymbol]:
         stmt = select(CodebaseSymbolModel).where(CodebaseSymbolModel.codebase_id == codebase_id)
+        stmt = self._apply_version_projection(
+            stmt,
+            CodebaseSymbolModel,
+            codebase_id,
+            version_id,
+        )
         if name:
             stmt = stmt.where(CodebaseSymbolModel.name.ilike(f"%{name}%"))
         stmt = stmt.order_by(CodebaseSymbolModel.name.asc())
         result = await self.db_session.execute(stmt)
         return [r.to_domain() for r in result.scalars().all()]
 
-    async def find_symbol_by_name(self, codebase_id: str, name: str) -> List[CodebaseSymbol]:
+    async def find_symbol_by_name(
+            self,
+            codebase_id: str,
+            name: str,
+            version_id: Optional[str] = None,
+    ) -> List[CodebaseSymbol]:
         stmt = (
             select(CodebaseSymbolModel)
             .where(CodebaseSymbolModel.codebase_id == codebase_id)
             .where(CodebaseSymbolModel.name == name)
+        )
+        stmt = self._apply_version_projection(
+            stmt,
+            CodebaseSymbolModel,
+            codebase_id,
+            version_id,
         )
         result = await self.db_session.execute(stmt)
         return [r.to_domain() for r in result.scalars().all()]
@@ -163,10 +236,14 @@ class DBCodebaseRepository(CodebaseRepository):
                 CodebaseEdgeModel(
                     id=e.id,
                     codebase_id=e.codebase_id,
+                    version_id=e.version_id,
                     src_symbol_id=e.src_symbol_id,
                     dst_symbol_id=e.dst_symbol_id,
                     callee_name=e.callee_name,
                     kind=e.kind.value,
+                    resolution=e.resolution,
+                    confidence=e.confidence,
+                    evidence=[ref.model_dump() for ref in e.evidence],
                 )
             )
 
@@ -176,8 +253,15 @@ class DBCodebaseRepository(CodebaseRepository):
             src_symbol_id: Optional[str] = None,
             dst_symbol_id: Optional[str] = None,
             callee_name: Optional[str] = None,
+            version_id: Optional[str] = None,
     ) -> List[CodebaseEdge]:
         stmt = select(CodebaseEdgeModel).where(CodebaseEdgeModel.codebase_id == codebase_id)
+        stmt = self._apply_version_projection(
+            stmt,
+            CodebaseEdgeModel,
+            codebase_id,
+            version_id,
+        )
         if src_symbol_id:
             stmt = stmt.where(CodebaseEdgeModel.src_symbol_id == src_symbol_id)
         if dst_symbol_id:
@@ -191,6 +275,7 @@ class DBCodebaseRepository(CodebaseRepository):
             self,
             codebase_id: str,
             symbol_ids: List[str],
+            version_id: Optional[str] = None,
     ) -> List[CodebaseSymbol]:
         if not symbol_ids:
             return []
@@ -198,6 +283,12 @@ class DBCodebaseRepository(CodebaseRepository):
             select(CodebaseSymbolModel)
             .where(CodebaseSymbolModel.codebase_id == codebase_id)
             .where(CodebaseSymbolModel.id.in_(symbol_ids))
+        )
+        stmt = self._apply_version_projection(
+            stmt,
+            CodebaseSymbolModel,
+            codebase_id,
+            version_id,
         )
         result = await self.db_session.execute(stmt)
         return [r.to_domain() for r in result.scalars().all()]
@@ -209,17 +300,26 @@ class DBCodebaseRepository(CodebaseRepository):
                     text(
                         """
                         INSERT INTO codebase_chunks
-                            (id, codebase_id, file_id, symbol_id, content, embedding)
+                            (
+                                id, codebase_id, version_id, file_id,
+                                symbol_id, content, search_text, embedding
+                            )
                         VALUES
-                            (:id, :codebase_id, :file_id, :symbol_id, :content, :embedding::vector)
+                            (
+                                :id, :codebase_id, :version_id, :file_id,
+                                :symbol_id, :content, :search_text,
+                                :embedding::vector
+                            )
                         """
                     ),
                     {
                         "id": chunk.id,
                         "codebase_id": chunk.codebase_id,
+                        "version_id": chunk.version_id,
                         "file_id": chunk.file_id,
                         "symbol_id": chunk.symbol_id,
                         "content": chunk.content,
+                        "search_text": chunk.search_text or chunk.content,
                         "embedding": str(chunk.embedding),
                     },
                 )
@@ -228,9 +328,11 @@ class DBCodebaseRepository(CodebaseRepository):
                     CodebaseChunkModel(
                         id=chunk.id,
                         codebase_id=chunk.codebase_id,
+                        version_id=chunk.version_id,
                         file_id=chunk.file_id,
                         symbol_id=chunk.symbol_id,
                         content=chunk.content,
+                        search_text=chunk.search_text or chunk.content,
                     )
                 )
 
@@ -239,36 +341,126 @@ class DBCodebaseRepository(CodebaseRepository):
             codebase_id: str,
             query_embedding: List[float],
             limit: int = 10,
+            version_id: Optional[str] = None,
     ) -> List[Tuple[CodebaseChunk, float]]:
+        if version_id is not None:
+            return await self.search_vector(
+                codebase_id,
+                version_id,
+                query_embedding,
+                limit=limit,
+            )
         if not query_embedding:
             return []
-        stmt = text(
+        version_filter = ""
+        params = {
+            "query": str(query_embedding),
+            "codebase_id": codebase_id,
+            "limit": limit,
+        }
+        if version_id is not None:
+            version_filter = "AND version_id = :version_id"
+            params["version_id"] = version_id
+        else:
+            version_filter = """
+              AND version_id IS NOT DISTINCT FROM (
+                    SELECT active_version_id FROM codebases WHERE id = :codebase_id
+                  )
             """
-            SELECT id, codebase_id, file_id, symbol_id, content,
+        stmt = text(
+            f"""
+            SELECT id, codebase_id, version_id, file_id, symbol_id, content,
+                   search_text,
                    1 - (embedding <=> :query::vector) AS score
             FROM codebase_chunks
             WHERE codebase_id = :codebase_id AND embedding IS NOT NULL
+              {version_filter}
             ORDER BY embedding <=> :query::vector
             LIMIT :limit
             """
         )
+        result = await self.db_session.execute(stmt, params)
+        return self._rows_to_chunk_scores(result.fetchall())
+
+    async def search_vector(
+            self,
+            codebase_id: str,
+            version_id: str,
+            query_embedding: List[float],
+            limit: int = 10,
+    ) -> List[Tuple[CodebaseChunk, float]]:
+        if not query_embedding:
+            return []
         result = await self.db_session.execute(
-            stmt,
+            text(
+                """
+                SELECT id, codebase_id, version_id, file_id, symbol_id, content,
+                       search_text,
+                       1 - (embedding <=> :query::vector) AS score
+                FROM codebase_chunks
+                WHERE codebase_id = :codebase_id
+                  AND version_id = :version_id
+                  AND embedding IS NOT NULL
+                ORDER BY embedding <=> :query::vector
+                LIMIT :limit
+                """
+            ),
             {
-                "query": str(query_embedding),
                 "codebase_id": codebase_id,
-                "limit": limit,
+                "version_id": version_id,
+                "query": str([float(item) for item in query_embedding]),
+                "limit": max(1, min(limit, 200)),
             },
         )
-        rows = result.fetchall()
+        return self._rows_to_chunk_scores(result.fetchall())
+
+    async def search_lexical(
+            self,
+            codebase_id: str,
+            version_id: str,
+            query: str,
+            limit: int = 10,
+    ) -> List[Tuple[CodebaseChunk, float]]:
+        if not str(query or "").strip():
+            return []
+        result = await self.db_session.execute(
+            text(
+                """
+                SELECT id, codebase_id, version_id, file_id, symbol_id, content,
+                       search_text,
+                       ts_rank(
+                         search_vector,
+                         plainto_tsquery('simple', :query)
+                       ) AS score
+                FROM codebase_chunks
+                WHERE codebase_id = :codebase_id
+                  AND version_id = :version_id
+                  AND search_vector @@ plainto_tsquery('simple', :query)
+                ORDER BY score DESC, id ASC
+                LIMIT :limit
+                """
+            ),
+            {
+                "codebase_id": codebase_id,
+                "version_id": version_id,
+                "query": query,
+                "limit": max(1, min(limit, 200)),
+            },
+        )
+        return self._rows_to_chunk_scores(result.fetchall())
+
+    @staticmethod
+    def _rows_to_chunk_scores(rows) -> List[Tuple[CodebaseChunk, float]]:
         out: List[Tuple[CodebaseChunk, float]] = []
         for row in rows:
             chunk = CodebaseChunk(
                 id=row.id,
                 codebase_id=row.codebase_id,
+                version_id=row.version_id,
                 file_id=row.file_id,
                 symbol_id=row.symbol_id,
                 content=row.content or "",
+                search_text=row.search_text or row.content or "",
             )
             out.append((chunk, float(row.score or 0)))
         return out
@@ -279,6 +471,7 @@ class DBCodebaseRepository(CodebaseRepository):
                 CodebaseArtifactModel(
                     id=a.id,
                     codebase_id=a.codebase_id,
+                    version_id=a.version_id,
                     kind=a.kind.value,
                     format=a.format.value,
                     title=a.title,
@@ -292,8 +485,15 @@ class DBCodebaseRepository(CodebaseRepository):
             self,
             codebase_id: str,
             kind: Optional[ArtifactKind] = None,
+            version_id: Optional[str] = None,
     ) -> List[CodebaseArtifact]:
         stmt = select(CodebaseArtifactModel).where(CodebaseArtifactModel.codebase_id == codebase_id)
+        stmt = self._apply_version_projection(
+            stmt,
+            CodebaseArtifactModel,
+            codebase_id,
+            version_id,
+        )
         if kind:
             stmt = stmt.where(CodebaseArtifactModel.kind == kind.value)
         stmt = stmt.order_by(CodebaseArtifactModel.created_at.asc())

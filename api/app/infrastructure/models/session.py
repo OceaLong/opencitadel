@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
+    BigInteger,
     String,
     Integer,
     Boolean,
@@ -121,6 +122,18 @@ class SessionModel(Base):
         nullable=False,
         server_default=text("''::character varying"),
     )  # 会话状态
+    current_run_epoch_id: Mapped[Optional[str]] = mapped_column(
+        String(511),
+        nullable=True,
+    )
+    current_run_epoch_seq: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        nullable=True,
+    )
+    current_run_terminal_status: Mapped[Optional[str]] = mapped_column(
+        String(32),
+        nullable=True,
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
@@ -139,7 +152,14 @@ class SessionModel(Base):
         return cls(
             **session.model_dump(
                 mode="python",
-                exclude={"memories", "files", "events", "updated_at", "created_at"},
+                exclude={
+                    "memories",
+                    "files",
+                    "events",
+                    "resource_bindings",
+                    "updated_at",
+                    "created_at",
+                },
             ),
         )
 
@@ -161,6 +181,7 @@ class SessionModel(Base):
             "thinking_enabled": self.thinking_enabled,
             "codebase_id": self.codebase_id,
             "knowledge_base_id": self.knowledge_base_id,
+            "resource_bindings": [],
             "owner_user_id": self.owner_user_id,
             "team_id": self.team_id,
             "mode": self.mode,
@@ -179,7 +200,14 @@ class SessionModel(Base):
         # 1.基础字段: Python模式
         base_data = session.model_dump(
             mode="python",
-            exclude={"memories", "files", "events", "updated_at", "created_at"},
+            exclude={
+                "memories",
+                "files",
+                "events",
+                "resource_bindings",
+                "updated_at",
+                "created_at",
+            },
         )
 
         for field, value in base_data.items():

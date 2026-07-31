@@ -6,6 +6,7 @@
  * 前端统一使用 { type, data }，需先归一化。
  */
 
+import { modelErrorMessage } from "@/lib/api/llm-status";
 import type {
   ChatMessage,
   ClarifyQuestion,
@@ -15,15 +16,16 @@ import type {
   PlanEvent,
   PlanStep,
   SessionFile,
+  SessionStatus,
   SSEEventData,
   SSEEventType,
   StepEvent,
   SubAgentEvent,
   ToolEvent,
 } from "@/lib/api/types";
+
 import type { Locale } from "@/i18n/routing";
 import { translate } from "@/i18n/translate";
-import { modelErrorMessage } from "@/lib/api/llm-status";
 
 const TRANSIENT_EVENT_TYPES = new Set(["message_delta", "reasoning_delta", "tool_args_delta"]);
 
@@ -197,6 +199,80 @@ export function normalizeEvents(rawList: unknown): SSEEventData[] {
     if (normalized) out.push(normalized);
   }
   return out;
+}
+
+const TERMINAL_SESSION_STATUSES = new Set<SessionStatus>([
+  "waiting",
+  "completed",
+  "cancelled",
+  "failed",
+]);
+
+export function isTerminalSessionStatus(
+  status: SessionStatus | undefined,
+): status is "waiting" | "completed" | "cancelled" | "failed" {
+  return status !== undefined && TERMINAL_SESSION_STATUSES.has(status);
+}
+
+export type SessionStatusReductionState = {
+  status?: SessionStatus;
+  persistedTerminal?: "waiting" | "completed" | "cancelled" | "failed";
+  lastPersistedSeq?: number;
+};
+
+export function reduceSessionStatusState(
+  events: SSEEventData[],
+  initialState: SessionStatusReductionState = {},
+): SessionStatusReductionState {
+  const state = { ...initialState };
+  if (!state.persistedTerminal && isTerminalSessionStatus(state.status)) {
+    state.persistedTerminal = state.status;
+  }
+
+  for (const event of events) {
+    if (event.type !== "session_status") continue;
+    const data = event.data as {
+      event_id?: string;
+      status?: SessionStatus;
+      persist?: boolean;
+    };
+    const incoming = data.status;
+    if (!incoming) continue;
+
+    const persisted = data.persist !== false;
+    const parsedSeq = persisted ? Number(data.event_id) : Number.NaN;
+    const seq = Number.isInteger(parsedSeq) && parsedSeq > 0
+      ? parsedSeq
+      : undefined;
+    if (
+      seq !== undefined
+      && state.lastPersistedSeq !== undefined
+      && seq <= state.lastPersistedSeq
+    ) {
+      continue;
+    }
+    if (seq !== undefined) state.lastPersistedSeq = seq;
+
+    if (incoming === "running") {
+      state.status = incoming;
+      if (persisted) state.persistedTerminal = undefined;
+      continue;
+    }
+    if (state.persistedTerminal) continue;
+    if (isTerminalSessionStatus(incoming) && persisted) {
+      state.persistedTerminal = incoming;
+    }
+    state.status = incoming;
+  }
+
+  return state;
+}
+
+export function reduceSessionStatusEvents(
+  events: SSEEventData[],
+  initialStatus?: SessionStatus,
+): SessionStatus | undefined {
+  return reduceSessionStatusState(events, { status: initialStatus }).status;
 }
 
 /** 时间线单项：用于渲染对话区的一条记录 */
@@ -389,6 +465,7 @@ export function eventsToTimeline(events: SSEEventData[], locale?: Locale): Timel
           delta?: string;
           role?: string;
           event_id?: string;
+          resource_bindings?: ChatMessage["resource_bindings"];
         };
         if (deltaData.role && deltaData.role !== "assistant") break;
         const streamId = deltaData.stream_id || deltaData.event_id;
@@ -400,7 +477,7 @@ export function eventsToTimeline(events: SSEEventData[], locale?: Locale): Timel
           if (item?.kind === "assistant") {
             list[existing.listIndex] = {
               ...item,
-              data: { ...item.data, message: existing.content, stream_id: streamId },
+              data: { ...item.data, message: existing.content, stream_id: streamId, resource_bindings: deltaData.resource_bindings ?? item.data.resource_bindings },
             };
           }
         } else {
@@ -409,7 +486,7 @@ export function eventsToTimeline(events: SSEEventData[], locale?: Locale): Timel
           list.push({
             kind: "assistant",
             id: stableId("assistant-stream", messageIndex++, streamId),
-            data: { role: "assistant", message: deltaData.delta, stream_id: streamId },
+            data: { role: "assistant", message: deltaData.delta, stream_id: streamId, resource_bindings: deltaData.resource_bindings },
           });
         }
         break;

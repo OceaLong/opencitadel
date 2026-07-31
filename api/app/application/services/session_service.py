@@ -6,6 +6,8 @@ import time
 from typing import List, Callable, Type, Optional, Tuple
 
 from app.application.dto.session_io import FileReadResult, ShellReadResult
+from app.application.services.resource_binding_service import ResourceBindingService
+from app.application.services.resource_guard_service import ResourceGuardService
 from app.application.errors.exceptions import NotFoundError, ServerRequestsError
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.session_list_notifier import NoopSessionListNotifier, SessionListNotifierPort
@@ -32,12 +34,16 @@ class SessionService:
             sandbox_cls: Type[Sandbox],
             session_list_notifier: Optional[SessionListNotifierPort] = None,
             task_state_port: Optional[TaskStatePort] = None,
+            resource_guard: Optional[ResourceGuardService] = None,
+            resource_binding_service: Optional[ResourceBindingService] = None,
     ) -> None:
         """构造函数，完成会话服务初始化"""
         self._uow_factory = uow_factory
         self._sandbox_cls = sandbox_cls
         self._session_list_notifier = session_list_notifier or NoopSessionListNotifier()
         self._task_state = task_state_port
+        self._resource_guard = resource_guard
+        self._resource_binding_service = resource_binding_service
 
     async def _wait_for_task_drain(self, task_id: str) -> None:
         if not self._task_state:
@@ -57,7 +63,9 @@ class SessionService:
             skill_id: Optional[str] = None,
             thinking_enabled: bool = False,
             codebase_id: Optional[str] = None,
+            codebase_version_id: Optional[str] = None,
             knowledge_base_id: Optional[str] = None,
+            knowledge_base_version_id: Optional[str] = None,
             mode: Optional[SessionMode] = None,
             operator_scope: Optional[str] = None,
             operator_domains: Optional[List[str]] = None,
@@ -72,8 +80,16 @@ class SessionService:
             else SessionMode.AGENT
         )
         resolved_mode = mode or default_mode
-        if knowledge_base_id and not codebase_id and resolved_mode == SessionMode.AGENT:
-            resolved_mode = SessionMode.ASK
+        validated_resources = None
+        if self._resource_guard and scope and (codebase_id or knowledge_base_id):
+            validated_resources = await self._resource_guard.validate_session_request(
+                mode=resolved_mode,
+                codebase_id=codebase_id,
+                codebase_version_id=codebase_version_id,
+                knowledge_base_id=knowledge_base_id,
+                knowledge_base_version_id=knowledge_base_version_id,
+                scope=scope,
+            )
         session = Session(
             title=title,
             model_id=model_id,
@@ -101,6 +117,13 @@ class SessionService:
             ):
                 raise NotFoundError("指定知识库不存在或无权访问")
             await uow.session.save(session)
+            if validated_resources and self._resource_binding_service and scope:
+                for version in validated_resources.versions:
+                    binding = await self._resource_binding_service.bind_initial_resolved(
+                        uow, session_id=session.id, resolved=version,
+                        scope=scope, actor_id=scope.user_id,
+                    )
+                    session.resource_bindings.append(binding.to_projection())
         await self._session_list_notifier.notify_sessions_changed()
         logger.info(f"成功创建一个新任务会话: {session.id}")
         return session

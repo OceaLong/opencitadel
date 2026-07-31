@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 from app.domain.models.app_config import MCPTransport
+from app.domain.models.tool_policy import ToolExecutionPolicy
 
 
 class ListMCPServerItem(BaseModel):
@@ -34,6 +35,7 @@ class ListA2AServerItem(BaseModel):
     streaming: bool = False  # 是否支持流式
     push_notifications: bool = False  # 是否支持推送通知
     enabled: bool = True  # 启用状态
+    tool_policies: Dict[str, ToolExecutionPolicy] = Field(default_factory=dict)
 
 
 class ListA2AServerResponse(BaseModel):

@@ -6,17 +6,23 @@ import logging
 import signal
 import socket
 import uuid
+from datetime import datetime, timedelta, timezone
+from enum import Enum
 
 from app.application.services.bootstrap_service import bootstrap_data
 from app.application.services.config_provider import get_runtime_config
 from app.application.services.task_runner_factory import TaskRunnerFactory
 from app.container import get_worker_container, init_worker_container, shutdown_worker_container
 from app.domain.external.sandbox import Sandbox
+from app.domain.external.task import RecoverableTaskReconciliationRequired
 from app.domain.models.event import MessageEvent
 from app.domain.models.session import SessionStatus
 from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.services.codebase.ingestion_task_runner import CodebaseIngestionTaskRunner
 from app.domain.services.knowledge_base.ingest_errors import NonRecoverableIngestError
+from app.domain.services.knowledge_base.ingestion_runner import (
+    KBIngestionRunner,
+)
 from app.domain.services.knowledge_base.ingestion_task_runner import KBIngestionTaskRunner
 from app.domain.external.file_storage import FileStorage
 from app.infrastructure.external.runtime_settings import get_admission_runtime_settings
@@ -24,6 +30,7 @@ from app.infrastructure.external.sandbox.admission import get_sandbox_quota
 from app.infrastructure.external.sandbox.sandbox_maintenance import run_sandbox_maintenance
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
 from app.infrastructure.external.task.task_lease import (
+    TaskLeaseAcquireResult,
     get_task_lease_owner,
     get_worker_id,
     release_task_lease,
@@ -36,6 +43,10 @@ from app.application.services.recoverable_task_retry import (
 )
 from app.domain.models.error_codes import MODEL_UNAVAILABLE
 from app.domain.models.knowledge_base import KBStatus
+from app.domain.models.resource_governance import (
+    BuildState,
+    ResourceKind,
+)
 from app.domain.utils.llm_retry import classify_llm_error_code
 from app.infrastructure.external.llm.circuit_breaker import get_llm_circuit_breaker
 from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError, create_resilient_llm
@@ -82,6 +93,12 @@ def _kb_id_from_ingest_session(session_id: str) -> str | None:
 
 SHUTDOWN_GRACE_SECONDS = 30
 TASK_RECONCILE_INTERVAL_SECONDS = 30
+
+
+class DispatchClaimDecision(str, Enum):
+    ACK_DUPLICATE = "ACK_DUPLICATE"
+    EXECUTE = "EXECUTE"
+    REQUEUE = "REQUEUE"
 
 
 async def _sandbox_cleanup_loop() -> None:
@@ -138,6 +155,7 @@ class AgentWorker:
         await self._task_state.ensure_consumer_group()
         admission = get_admission_runtime_settings()
         await self._reconcile_orphaned_tasks("startup")
+        await self._reconcile_stale_kb_builds("startup")
         await self._reconcile_stuck_kb_ingests("startup")
         reconcile_task = asyncio.create_task(self._task_reconcile_loop())
         runtime = get_runtime_config()
@@ -163,9 +181,14 @@ class AgentWorker:
                     continue
                 await self._semaphore.acquire()
                 try:
-                    message_id, task_id, session_id = claim
+                    message_id, task_id, session_id, run_generation = claim
                     task = asyncio.create_task(
-                        self._handle_claimed_job(message_id, task_id, session_id),
+                        self._handle_claimed_job(
+                            message_id,
+                            task_id,
+                            session_id,
+                            run_generation,
+                        ),
                     )
                     self._active_tasks.add(task)
                     task.add_done_callback(self._on_job_task_done)
@@ -210,6 +233,7 @@ class AgentWorker:
         while self._running:
             await asyncio.sleep(TASK_RECONCILE_INTERVAL_SECONDS)
             await self._reconcile_orphaned_tasks("periodic")
+            await self._reconcile_stale_kb_builds("periodic")
             await self._reconcile_stuck_kb_ingests("periodic")
 
     async def _dlq_replay_loop(self) -> None:
@@ -262,6 +286,7 @@ class AgentWorker:
                 continue
             try:
                 snapshot = await self._task_state.get_runtime_snapshot(task_id)
+                run_generation = int(snapshot.get("run_generation") or 1)
                 if snapshot.get("is_done") or not self._task_state.heartbeat_is_stale(
                     snapshot.get("meta"),
                     stale_after,
@@ -290,6 +315,7 @@ class AgentWorker:
                     task_id,
                     session.id,
                     self._task_state,
+                    run_generation,
                 )
                 if not checkpoint or not await requeue_latest_user_message(
                         task,
@@ -301,14 +327,29 @@ class AgentWorker:
                         session.id,
                         task_id,
                     )
-                    await self._task_state.set_status(task_id, TaskStatus.FAILED)
+                    await self._task_state.set_status(
+                        task_id,
+                        run_generation,
+                        TaskStatus.FAILED,
+                    )
                     async with get_uow() as uow:
                         await uow.session.update_status(session.id, SessionStatus.FAILED)
                     continue
 
                 await self._task_state.clear_cancel(task_id)
-                await self._task_state.set_status(task_id, TaskStatus.PENDING)
-                await self._task_state.dispatch(task_id, session.id)
+                replacement_generation = run_generation + 1
+                replacement_message_id = await self._task_state.dispatch(
+                    task_id,
+                    session.id,
+                    replacement_generation,
+                )
+                next_generation = await self._task_state.begin_recovery_attempt(
+                    task_id,
+                    run_generation,
+                    durable_dispatch_message_id=replacement_message_id,
+                )
+                if next_generation is None:
+                    continue
                 logger.warning(
                     "孤儿任务已从 checkpoint 恢复并重新派发: session_id=%s task_id=%s checkpoint_id=%s reason=%s",
                     session.id,
@@ -324,7 +365,59 @@ class AgentWorker:
                     exc,
                 )
 
+    async def _reconcile_stale_kb_builds(self, reason: str) -> None:
+        """Terminalize stale shared builds without touching the active pin."""
+        admission = get_admission_runtime_settings()
+        stale_seconds = max(
+            120.0,
+            admission.task_execution_lease_seconds * 2.0,
+        )
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            seconds=stale_seconds
+        )
+        try:
+            async with get_uow() as uow:
+                builds = await uow.resource_governance.list_stale_builds(
+                    ResourceKind.KNOWLEDGE_BASE,
+                    stale_before=cutoff,
+                    limit=100,
+                )
+        except Exception as exc:
+            logger.warning(
+                "共享知识库构建对账查询失败 reason=%s: %s",
+                reason,
+                exc,
+            )
+            return
+
+        build_service = get_worker_container().resource_build_service()
+        runner = KBIngestionRunner(
+            uow_factory=get_uow,
+            file_storage=getattr(self, "_file_storage", None),
+            build_service=build_service,
+        )
+        for build in builds:
+            try:
+                lease_owner = await get_task_lease_owner(build.id)
+                if lease_owner:
+                    continue
+                error = "knowledge-base build heartbeat expired"
+                await runner.reconcile_stale(build.id, error=error)
+                logger.warning(
+                    "共享知识库构建已对账: build=%s kb=%s reason=%s",
+                    build.id,
+                    build.resource_id,
+                    reason,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "共享知识库构建对账失败 build=%s: %s",
+                    build.id,
+                    exc,
+                )
+
     async def _reconcile_stuck_kb_ingests(self, reason: str) -> None:
+        """Compatibility-only reconciliation for pre-versioned tasks."""
         admission = get_admission_runtime_settings()
         stale_after = max(120.0, admission.task_execution_lease_seconds * 2.0)
         try:
@@ -339,7 +432,16 @@ class AgentWorker:
             if not task_id:
                 continue
             try:
+                async with get_uow() as uow:
+                    shared_build = (
+                        await uow.resource_governance.get_build(task_id)
+                    )
+                if shared_build is not None:
+                    # PostgreSQL ResourceBuild is authoritative for all new
+                    # candidates; Redis metadata must not terminalize it.
+                    continue
                 snapshot = await self._task_state.get_runtime_snapshot(task_id)
+                run_generation = int(snapshot.get("run_generation") or 1)
                 if snapshot.get("is_done"):
                     await _finalize_kb_ingest_failure(
                         kb.id,
@@ -351,7 +453,11 @@ class AgentWorker:
                 lease_owner = await get_task_lease_owner(task_id)
                 if lease_owner:
                     continue
-                await self._task_state.set_status(task_id, TaskStatus.FAILED)
+                await self._task_state.set_status(
+                    task_id,
+                    run_generation,
+                    TaskStatus.FAILED,
+                )
                 await _finalize_kb_ingest_failure(
                     kb.id,
                     kb.error or "知识库索引任务超时或 worker 异常退出",
@@ -375,7 +481,8 @@ class AgentWorker:
             message_id: str,
             task_id: str,
             session_id: str,
-    ) -> None:
+            run_generation: int,
+    ) -> DispatchClaimDecision:
         meta = await self._task_state.get_task_meta(task_id) or {}
         request_id = meta.get("request_id") or ""
         with bind_context(
@@ -385,25 +492,95 @@ class AgentWorker:
             request_id=request_id or None,
         ):
             admission = get_admission_runtime_settings()
-            lease_acquired = await try_acquire_task_lease(
+            if not meta:
+                return DispatchClaimDecision.REQUEUE
+            current_generation = int(meta.get("run_generation", 1))
+            if run_generation < current_generation:
+                if await self._task_state.can_ack_stale_dispatch(
+                    task_id,
+                    run_generation,
+                ):
+                    await self._task_state.ack_dispatch(message_id)
+                    return DispatchClaimDecision.ACK_DUPLICATE
+                return DispatchClaimDecision.REQUEUE
+            if run_generation > current_generation:
+                return DispatchClaimDecision.REQUEUE
+            if meta.get("status") in {
+                TaskStatus.DONE.value,
+                TaskStatus.CANCELLED.value,
+                TaskStatus.FAILED.value,
+            }:
+                await self._task_state.ack_dispatch(message_id)
+                return DispatchClaimDecision.ACK_DUPLICATE
+            lease_result = await try_acquire_task_lease(
                 task_id,
+                run_generation,
                 admission.task_execution_lease_seconds,
             )
-            if not lease_acquired:
+            if lease_result == TaskLeaseAcquireResult.STALE_GENERATION:
+                if not await self._task_state.can_ack_stale_dispatch(
+                    task_id,
+                    run_generation,
+                ):
+                    return DispatchClaimDecision.REQUEUE
+                await self._task_state.ack_dispatch(message_id)
+                return DispatchClaimDecision.ACK_DUPLICATE
+            if lease_result in {
+                TaskLeaseAcquireResult.TERMINAL,
+                TaskLeaseAcquireResult.SAME_GENERATION_CONFLICT,
+            }:
+                await self._task_state.ack_dispatch(message_id)
+                if (
+                    lease_result
+                    == TaskLeaseAcquireResult.SAME_GENERATION_CONFLICT
+                ):
+                    logger.warning(
+                        "任务执行租约冲突，跳过重复执行: task_id=%s session_id=%s",
+                        task_id,
+                        session_id,
+                    )
+                return DispatchClaimDecision.ACK_DUPLICATE
+            if lease_result != TaskLeaseAcquireResult.ACQUIRED:
                 logger.warning(
-                    "任务执行租约冲突，跳过重复执行: task_id=%s session_id=%s",
+                    "任务执行租约暂不可用，保留派发: "
+                    "task_id=%s session_id=%s classification=%s",
                     task_id,
                     session_id,
+                    lease_result.value,
                 )
-                return
-            await self._task_state.record_heartbeat(task_id, get_worker_id())
+                return DispatchClaimDecision.REQUEUE
+            heartbeat_changed = await self._task_state.record_heartbeat(
+                task_id,
+                run_generation,
+                get_worker_id(),
+            )
+            if not heartbeat_changed:
+                await release_task_lease(task_id, run_generation)
+                if await self._task_state.can_ack_stale_dispatch(
+                    task_id,
+                    run_generation,
+                ):
+                    await self._task_state.ack_dispatch(message_id)
+                    return DispatchClaimDecision.ACK_DUPLICATE
+                return DispatchClaimDecision.REQUEUE
             try:
                 await self._execute_job_with_lease_renewal(
                     task_id,
                     session_id,
+                    run_generation,
                     admission.task_execution_lease_seconds,
                 )
                 await self._task_state.ack_dispatch(message_id)
+                return DispatchClaimDecision.EXECUTE
+            except RecoverableTaskReconciliationRequired as exc:
+                logger.warning(
+                    "Worker 保留待对账派发，等待重新认领: "
+                    "task_id=%s session_id=%s error=%s",
+                    task_id,
+                    session_id,
+                    exc,
+                )
+                return DispatchClaimDecision.REQUEUE
             except ModelUnavailableError as exc:
                 logger.warning(
                     "Worker 模型快速失败: task_id=%s session_id=%s code=%s error=%s",
@@ -418,10 +595,12 @@ class AgentWorker:
                     message_id=message_id,
                     task_id=task_id,
                     session_id=session_id,
+                    run_generation=run_generation,
                     error=str(exc),
                     error_code=exc.error_code,
                     fast_fail=True,
                 )
+                return DispatchClaimDecision.EXECUTE
             except NonRecoverableIngestError as exc:
                 logger.error(
                     "Worker 知识库摄取不可恢复失败: task_id=%s session_id=%s error=%s",
@@ -436,10 +615,12 @@ class AgentWorker:
                     message_id=message_id,
                     task_id=task_id,
                     session_id=session_id,
+                    run_generation=run_generation,
                     error=str(exc),
                     error_code=exc.error_code,
                     fast_fail=True,
                 )
+                return DispatchClaimDecision.EXECUTE
             except Exception as exc:
                 logger.exception(
                     "Worker 执行任务失败: task_id=%s session_id=%s error=%s",
@@ -460,6 +641,7 @@ class AgentWorker:
                     message_id=message_id,
                     task_id=task_id,
                     session_id=session_id,
+                    run_generation=run_generation,
                     error=str(exc),
                     error_code=error_code,
                 )
@@ -468,16 +650,20 @@ class AgentWorker:
                     meta = await self._task_state.get_task_meta(task_id) or {}
                     if meta.get("status") == TaskStatus.FAILED.value:
                         await _finalize_kb_ingest_failure(kb_id, str(exc))
+                return DispatchClaimDecision.EXECUTE
             finally:
-                await release_task_lease(task_id)
+                await release_task_lease(task_id, run_generation)
 
     async def _execute_job_with_lease_renewal(
             self,
             task_id: str,
             session_id: str,
+            run_generation: int,
             lease_ttl_seconds: int,
     ) -> None:
-        execution = asyncio.create_task(self._execute_job(task_id, session_id))
+        execution = asyncio.create_task(
+            self._execute_job(task_id, session_id, run_generation)
+        )
         lease_lost = asyncio.Event()
 
         async def lease_renewer() -> None:
@@ -486,7 +672,11 @@ class AgentWorker:
                 await asyncio.sleep(interval)
                 if execution.done():
                     return
-                if not await renew_task_lease(task_id, lease_ttl_seconds):
+                if not await renew_task_lease(
+                    task_id,
+                    run_generation,
+                    lease_ttl_seconds,
+                ):
                     logger.warning(
                         "任务执行租约续期失败，停止当前执行: task_id=%s session_id=%s",
                         task_id,
@@ -494,7 +684,14 @@ class AgentWorker:
                     )
                     lease_lost.set()
                     return
-                await self._task_state.record_heartbeat(task_id, get_worker_id())
+                changed = await self._task_state.record_heartbeat(
+                    task_id,
+                    run_generation,
+                    get_worker_id(),
+                )
+                if not changed:
+                    lease_lost.set()
+                    return
 
         renewal = asyncio.create_task(lease_renewer())
         try:
@@ -517,30 +714,67 @@ class AgentWorker:
             except asyncio.CancelledError:
                 pass
 
-    async def _execute_job(self, task_id: str, session_id: str) -> None:
+    async def _execute_job(
+            self,
+            task_id: str,
+            session_id: str,
+            run_generation: int,
+    ) -> None:
         meta = await self._task_state.get_task_meta(task_id) or {}
         if meta.get("status") == TaskStatus.PENDING.value:
             await self._task_state.clear_cancel(task_id)
 
         if await self._task_state.is_cancelled(task_id):
-            await self._task_state.set_status(task_id, TaskStatus.CANCELLED)
+            if meta.get("task_type") == "kb_ingest":
+                container = get_worker_container()
+                await KBIngestionRunner(
+                    uow_factory=get_uow,
+                    file_storage=self._file_storage,
+                    build_service=container.resource_build_service(),
+                ).cancel(task_id)
+            await self._task_state.set_status(
+                task_id,
+                run_generation,
+                TaskStatus.CANCELLED,
+            )
             return
 
         if meta.get("task_type") == "codebase_ingest":
-            await self._execute_ingest_job(task_id, meta.get("resource_id", ""))
+            await self._execute_ingest_job(
+                task_id,
+                meta.get("resource_id", ""),
+                run_generation,
+            )
             return
         if meta.get("task_type") == "kb_ingest":
-            await self._execute_kb_ingest_job(task_id, meta.get("resource_id", ""))
+            await self._execute_kb_ingest_job(
+                task_id,
+                meta.get("resource_id", ""),
+                run_generation,
+            )
             return
 
         async with get_uow() as uow:
             session = await uow.session.get_by_id(session_id)
         if not session:
             logger.error("Worker 找不到会话: session_id=%s task_id=%s", session_id, task_id)
-            await self._task_state.set_status(task_id, TaskStatus.FAILED)
+            await self._task_state.set_status(
+                task_id,
+                run_generation,
+                TaskStatus.FAILED,
+            )
             raise RuntimeError(f"任务会话不存在: {session_id}")
-        if session.status in {SessionStatus.CANCELLED, SessionStatus.FAILED}:
-            meta = await self._task_state.get_task_meta(task_id) or {}
+        has_run_reconciliation = isinstance(
+            meta.get("run_reconciliation"),
+            dict,
+        )
+        if (
+            session.status in {
+                SessionStatus.CANCELLED,
+                SessionStatus.FAILED,
+            }
+            and not has_run_reconciliation
+        ):
             allow_failed_retry = (
                 session.status == SessionStatus.FAILED
                 and meta.get("status") == TaskStatus.PENDING.value
@@ -555,14 +789,16 @@ class AgentWorker:
                 )
                 await self._task_state.set_status(
                     task_id,
+                    run_generation,
                     TaskStatus.CANCELLED if session.status == SessionStatus.CANCELLED else TaskStatus.FAILED,
                 )
                 return
+        if not has_run_reconciliation:
             async with get_uow() as uow:
-                await uow.session.update_status(session_id, SessionStatus.RUNNING)
-
-        async with get_uow() as uow:
-            await uow.session.update_status(session_id, SessionStatus.RUNNING)
+                await uow.session.update_status(
+                    session_id,
+                    SessionStatus.RUNNING,
+                )
 
         model_id = session.model_id
         if not model_id:
@@ -583,7 +819,9 @@ class AgentWorker:
         task = self._task_cls(
             task_id=task_id,
             session_id=session_id,
+            run_generation=run_generation,
             task_runner=runner,
+            task_state=self._task_state,
         )
 
         async def cancel_watcher() -> None:
@@ -595,6 +833,13 @@ class AgentWorker:
         watcher = asyncio.create_task(cancel_watcher())
         try:
             await task.execute_locally()
+            recoverable_error = getattr(
+                task,
+                "recoverable_error",
+                None,
+            )
+            if isinstance(recoverable_error, BaseException):
+                raise recoverable_error
         finally:
             watcher.cancel()
             try:
@@ -606,9 +851,18 @@ class AgentWorker:
             await container.mcp_connection_pool().release_stale()
             await container.a2a_connection_pool().release_stale()
 
-    async def _execute_ingest_job(self, task_id: str, codebase_id: str) -> None:
+    async def _execute_ingest_job(
+            self,
+            task_id: str,
+            codebase_id: str,
+            run_generation: int,
+    ) -> None:
         if not codebase_id:
-            await self._task_state.set_status(task_id, TaskStatus.FAILED)
+            await self._task_state.set_status(
+                task_id,
+                run_generation,
+                TaskStatus.FAILED,
+            )
             raise RuntimeError("代码库摄取任务缺少 resource_id")
         runner = CodebaseIngestionTaskRunner(
             uow_factory=get_uow,
@@ -619,13 +873,24 @@ class AgentWorker:
         task = self._task_cls(
             task_id=task_id,
             session_id=f"codebase-ingest:{codebase_id}",
+            run_generation=run_generation,
             task_runner=runner,
+            task_state=self._task_state,
         )
         await task.execute_locally()
 
-    async def _execute_kb_ingest_job(self, task_id: str, kb_id: str) -> None:
+    async def _execute_kb_ingest_job(
+            self,
+            task_id: str,
+            kb_id: str,
+            run_generation: int,
+    ) -> None:
         if not kb_id:
-            await self._task_state.set_status(task_id, TaskStatus.FAILED)
+            await self._task_state.set_status(
+                task_id,
+                run_generation,
+                TaskStatus.FAILED,
+            )
             raise RuntimeError("知识库摄取任务缺少 resource_id")
         llm = None
         ocr_llm = None
@@ -654,15 +919,18 @@ class AgentWorker:
         runner = KBIngestionTaskRunner(
             uow_factory=get_uow,
             file_storage=self._file_storage,
-            kb_id=kb_id,
+            build_id=task_id,
             llm=llm,
             ocr_llm=ocr_llm,
             json_parser=container.json_parser(),
+            build_service=container.resource_build_service(),
         )
         task = self._task_cls(
             task_id=task_id,
             session_id=f"kb-ingest:{kb_id}",
+            run_generation=run_generation,
             task_runner=runner,
+            task_state=self._task_state,
         )
         await task.execute_locally()
 
@@ -693,6 +961,9 @@ async def main() -> None:
     from app.infrastructure.external.scheduler.job_scheduler import run_scheduler_loop
     from app.application.services.scheduled_job_service import ScheduledJobService
     from app.application.services.notification_service import NotificationService
+    from app.application.services.resource_version_gc_service import (
+        ResourceVersionGCService,
+    )
 
     notification_service = NotificationService(uow_factory=get_uow)
     app_config = await container.app_config_provider().get()
@@ -704,6 +975,10 @@ async def main() -> None:
             notification_service=notification_service,
             mcp_pool=container.mcp_connection_pool(),
             app_config=app_config,
+            resource_version_gc_service=ResourceVersionGCService(
+                uow_factory=get_uow,
+                object_storage=container.object_storage(),
+            ),
             stop_event=scheduler_stop,
         )
     )

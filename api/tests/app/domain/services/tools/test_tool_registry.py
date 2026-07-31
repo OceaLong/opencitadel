@@ -18,7 +18,9 @@ class _DummyExtraTool(BaseTool):
 
 def test_build_ask_tools_excludes_shell_file_browser():
     mcp_tool = MagicMock(spec=MCPTool)
+    mcp_tool.name = "mcp"
     a2a_tool = MagicMock(spec=A2ATool)
+    a2a_tool.name = "a2a"
     extra = _DummyExtraTool()
 
     tools = ToolRegistry.build_ask_tools(
@@ -27,11 +29,11 @@ def test_build_ask_tools_excludes_shell_file_browser():
         extra_tools=[extra],
     )
 
-    tool_types = {type(tool) for tool in tools}
-    assert FileTool not in tool_types
-    assert ShellTool not in tool_types
-    assert BrowserTool not in tool_types
-    assert MessageTool in tool_types
-    assert mcp_tool in tools
-    assert a2a_tool in tools
-    assert extra in tools
+    tool_names = {tool.name for tool in tools if isinstance(tool, BaseTool)}
+    assert "file" not in tool_names
+    assert "shell" not in tool_names
+    assert "browser" not in tool_names
+    assert "message" in tool_names
+    assert "mcp" in tool_names
+    assert "a2a" in tool_names
+    assert "dummy" in tool_names

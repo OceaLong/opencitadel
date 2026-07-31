@@ -121,6 +121,7 @@ class PlannerReActFlow(BaseFlow):
         self._session_id = session_id
         self.status = FlowStatus.IDLE
         self.plan: Optional[Plan] = None
+        self._reset_outcome()
 
         self._agent_config = agent_config
         self._flow_step_budget = agent_config.max_flow_steps
@@ -216,6 +217,7 @@ class PlannerReActFlow(BaseFlow):
             self.status.value,
             event.code,
         )
+        self._mark_failed(event.error, event.code)
         self.status = FlowStatus.COMPLETED
         return True
 
@@ -247,7 +249,11 @@ class PlannerReActFlow(BaseFlow):
                 step.result = summary[:4000]
                 events.append(StepEvent(step=step, status=StepEventStatus.COMPLETED))
                 if step.result:
-                    events.append(MessageEvent(role="assistant", message=step.result))
+                    events.append(MessageEvent(
+                        role="assistant",
+                        message=step.result,
+                        citations=result.citations,
+                    ))
             else:
                 step.status = ExecutionStatus.FAILED
                 step.error = result.message
@@ -280,10 +286,18 @@ class PlannerReActFlow(BaseFlow):
 
     async def invoke(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
         """传递消息，运行流，在六中调用planner&react智能体组合完成任务并返回对应事件"""
+        self._reset_outcome()
         tracer = self._observability.create_agent_tracer(self._session_id, "planner_react_flow")
-        with tracer.span("planner_react_flow"):
-            async for event in self._invoke_flow(message, tracer):
-                yield event
+        try:
+            with tracer.span("planner_react_flow"):
+                async for event in self._invoke_flow(message, tracer):
+                    yield event
+        except asyncio.CancelledError:
+            self._mark_cancelled()
+            raise
+        except Exception as exc:
+            self._mark_failed(str(exc), getattr(exc, "error_code", None))
+            raise
 
     async def _invoke_flow(self, message: Message, tracer) -> AsyncGenerator[BaseEvent, None]:
         # 1.调用会话仓库查询会话是否存在
@@ -327,6 +341,7 @@ class PlannerReActFlow(BaseFlow):
         if plan_approval_resume:
             action, feedback = parse_gate_action(message.message)
             if action == "unknown":
+                self._mark_waiting()
                 yield WaitEvent()
                 return
             metadata = session.pending_metadata or {}
@@ -386,6 +401,10 @@ class PlannerReActFlow(BaseFlow):
                     self._flow_step_budget,
                 )
                 yield ErrorEvent(error="任务步骤数超过上限，已终止执行")
+                self._mark_failed(
+                    "任务步骤数超过上限，已终止执行",
+                    "FLOW_STEP_BUDGET_EXCEEDED",
+                )
                 self.status = FlowStatus.COMPLETED
                 break
 
@@ -403,6 +422,9 @@ class PlannerReActFlow(BaseFlow):
                         if isinstance(event, ClarifyEvent):
                             asked = True
                         yield event
+                        if isinstance(event, WaitEvent):
+                            self._mark_waiting()
+                            return
                         if self._abort_flow_on_error(event):
                             flow_aborted = True
                             break
@@ -411,6 +433,7 @@ class PlannerReActFlow(BaseFlow):
 
                 if asked:
                     await self._set_pending_phase(CLARIFY_PENDING_PHASE)
+                    self._mark_waiting()
                     yield WaitEvent()
                     return
 
@@ -422,6 +445,10 @@ class PlannerReActFlow(BaseFlow):
                         self._session_id,
                     )
                     yield ErrorEvent(error="澄清阶段未生成有效需求摘要，无法继续规划")
+                    self._mark_failed(
+                        "澄清阶段未生成有效需求摘要，无法继续规划",
+                        "FLOW_CLARIFICATION_EMPTY",
+                    )
                     self.status = FlowStatus.COMPLETED
                     break
                 message = Message(
@@ -457,6 +484,9 @@ class PlannerReActFlow(BaseFlow):
 
                         # 14.将生成的事件直接输出(一般来说是PlanEvent)
                         yield event
+                        if isinstance(event, WaitEvent):
+                            self._mark_waiting()
+                            return
                         if self._abort_flow_on_error(event):
                             flow_aborted = True
                             break
@@ -492,6 +522,7 @@ class PlannerReActFlow(BaseFlow):
                         },
                         options=["approve", "approve_with_edits", "reject"],
                     )
+                    self._mark_waiting()
                     yield WaitEvent()
                     return
 
@@ -501,6 +532,10 @@ class PlannerReActFlow(BaseFlow):
                 # 16.判断计划是否生成，步骤是否正常
                 if not self.plan or len(self.plan.steps) == 0:
                     logger.info(f"Planner&ReAct流创建计划失败或无子步骤")
+                    self._mark_failed(
+                        "规划阶段未生成可执行步骤",
+                        "FLOW_PLAN_EMPTY",
+                    )
                     self.status = FlowStatus.COMPLETED
                     break
             elif self.status == FlowStatus.EXECUTING:
@@ -516,6 +551,9 @@ class PlannerReActFlow(BaseFlow):
                     )
                     async for event in self._execute_parallel_steps(batch, message):
                         yield event
+                        if isinstance(event, WaitEvent):
+                            self._mark_waiting()
+                            return
                         if self._abort_flow_on_error(event):
                             break
                     if self.status == FlowStatus.COMPLETED:
@@ -541,6 +579,9 @@ class PlannerReActFlow(BaseFlow):
                         vision_attachments=message.vision_attachments,
                 ):
                     yield event
+                    if isinstance(event, WaitEvent):
+                        self._mark_waiting()
+                        return
                     if self._abort_flow_on_error(event):
                         break
 
@@ -563,6 +604,9 @@ class PlannerReActFlow(BaseFlow):
                 flow_aborted = False
                 async for event in self.planner.update_plan(self.plan, step):
                     yield event
+                    if isinstance(event, WaitEvent):
+                        self._mark_waiting()
+                        return
                     if self._abort_flow_on_error(event):
                         flow_aborted = True
                         break
@@ -580,6 +624,9 @@ class PlannerReActFlow(BaseFlow):
                 flow_aborted = False
                 async for event in self.react.summarize(message):
                     yield event
+                    if isinstance(event, WaitEvent):
+                        self._mark_waiting()
+                        return
                     if self._abort_flow_on_error(event):
                         flow_aborted = True
                         break
@@ -596,6 +643,7 @@ class PlannerReActFlow(BaseFlow):
                 # 27.计划状态已完成则更新plan状态，并发送计划事件通知API已完成
                 self.plan.status = ExecutionStatus.COMPLETED
                 self.status = FlowStatus.IDLE
+                self._mark_succeeded()
                 yield PlanEvent(status=PlanEventStatus.COMPLETED, plan=self.plan)
                 break
         # 28.任务已经结束则返回结束事件

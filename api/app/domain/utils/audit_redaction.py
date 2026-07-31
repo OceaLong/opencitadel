@@ -43,9 +43,14 @@ def redact_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def summarize_tool_result(result: Any, max_chars: int = 500) -> str:
-    text = ""
     if result is None:
         return ""
+    if hasattr(result, "success"):
+        if bool(getattr(result, "success")):
+            return "success"
+        failure_kind = str(getattr(result, "failure_kind", "") or "failed")
+        return f"failure:{failure_kind}"[:max_chars]
+    text = ""
     if hasattr(result, "message"):
         text = str(getattr(result, "message") or "")
     elif hasattr(result, "model_dump"):

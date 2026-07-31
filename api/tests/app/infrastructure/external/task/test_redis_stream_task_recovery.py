@@ -14,7 +14,7 @@ async def _test_recoverable_input_gap_does_not_mark_done():
     runner.on_done = AsyncMock()
 
     task_state = AsyncMock()
-    task_state.set_status = AsyncMock()
+    task_state.set_status = AsyncMock(return_value=True)
     task_state.get_status = AsyncMock(return_value=TaskStatus.PENDING)
 
     task = RedisStreamTask(
@@ -26,8 +26,12 @@ async def _test_recoverable_input_gap_does_not_mark_done():
 
     await task._execute_task()
 
-    task_state.set_status.assert_awaited_with("task-1", TaskStatus.PENDING)
-    assert ("task-1", TaskStatus.DONE) not in [
+    task_state.set_status.assert_awaited_with(
+        "task-1",
+        1,
+        TaskStatus.PENDING,
+    )
+    assert ("task-1", 1, TaskStatus.DONE) not in [
         call.args for call in task_state.set_status.await_args_list
     ]
 

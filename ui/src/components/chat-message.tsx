@@ -135,6 +135,11 @@ function ChatMessageComponent({
           <div className="text-foreground flex items-center justify-center gap-1">
             <OpenCitadelIcon variant="icon" />
           </div>
+          {item.data.resource_bindings?.length ? (
+            <span className="text-muted-foreground text-xs" aria-label="消息资源版本">
+              {item.data.resource_bindings.map((binding) => binding.version_id).join(", ")}
+            </span>
+          ) : null}
         </div>
         <div className="text-foreground m-0 max-w-none p-0">
           <MarkdownContent content={item.data.message ?? ""} onSourceClick={onSourceClick} />

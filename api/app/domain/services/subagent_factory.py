@@ -14,7 +14,9 @@ from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
 from app.domain.models.app_config import AgentConfig
+from app.domain.models.codebase import SessionMode
 from app.domain.models.event import ErrorEvent, MessageEvent
+from app.domain.models.knowledge_citation import deduplicate_citations
 from app.application.services.config_provider import get_runtime_config
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agents.base import BaseAgent
@@ -22,12 +24,20 @@ from app.domain.services.agents.subagent import SubAgentAgent
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.mcp import MCPTool
-from app.domain.services.tools.subagent import SubAgentTool
+from app.domain.services.tools.subagent import SubAgentOutcome, SubAgentTool
 from app.domain.services.prompts.loader import compose_system_prompt, load_prompts, resolve_writing_style
 from app.domain.services.tools.tool_names import is_tool_allowed, normalize_allowed_tool_names
 from app.domain.services.tools.tool_registry import ToolRegistry
+from app.domain.services.tools.capability_policy import CapabilityPolicy
 
 logger = logging.getLogger(__name__)
+
+
+def create_child_policy(
+        parent_policy: CapabilityPolicy,
+        requested_tool_names: Optional[List[str]] = None,
+) -> CapabilityPolicy:
+    return parent_policy.for_child(requested_tool_names)
 
 
 def extract_last_assistant_text(agent: SubAgentAgent) -> str:
@@ -79,19 +89,29 @@ def build_subagent_tool(
         writing_style_override: Optional[str] = None,
         override_base_rules: bool = False,
         prompt_locale: str = "en",
+        parent_policy: Optional[CapabilityPolicy] = None,
 ) -> SubAgentTool:
     """Build SubAgentTool with a closure that spawns isolated SubAgentAgent instances."""
     base_extra = [t for t in (extra_tools or []) if not isinstance(t, SubAgentTool)]
     lock = stateful_tool_lock or asyncio.Lock()
     parent_allowed = normalize_allowed_tool_names(allowed_tool_names)
+    effective_parent_policy = parent_policy or CapabilityPolicy.for_mode(
+        SessionMode.AGENT,
+        allowed_tool_names=parent_allowed,
+    )
 
     async def _run_subagent(
             *,
             goal: str,
             agent_name: str,
             allowed_tools: Optional[List[str]] = None,
-    ) -> str:
-        sub_allowed = normalize_allowed_tool_names(allowed_tools) if allowed_tools else parent_allowed
+    ) -> SubAgentOutcome:
+        child_policy = create_child_policy(effective_parent_policy, allowed_tools)
+        sub_allowed = (
+            list(child_policy.allowed_tool_names)
+            if child_policy.allowed_tool_names is not None
+            else parent_allowed
+        )
         if parent_allowed is not None and sub_allowed is not None:
             sub_allowed = [n for n in sub_allowed if is_tool_allowed(n, parent_allowed)]
         tools = ToolRegistry.build_default_tools(
@@ -102,6 +122,7 @@ def build_subagent_tool(
             mcp_tool=mcp_tool,
             a2a_tool=a2a_tool,
             extra_tools=base_extra,
+            policy=child_policy,
         )
         sub_iterations = min(agent_config.subagent_max_iterations, agent_config.max_iterations)
         sub_config = agent_config.model_copy(update={"max_iterations": sub_iterations})
@@ -143,9 +164,15 @@ def build_subagent_tool(
         agent.name = agent_name
         summary = ""
         last_error = ""
+        trusted_citations = []
         async for event in agent.invoke(goal, format=None, emit_deltas=False):
-            if isinstance(event, MessageEvent) and event.message:
-                summary = event.message
+            if isinstance(event, MessageEvent):
+                trusted_citations = deduplicate_citations([
+                    *trusted_citations,
+                    *event.citations,
+                ])
+                if event.message:
+                    summary = event.message
             elif isinstance(event, ErrorEvent) and event.error:
                 if not last_error:
                     last_error = event.error
@@ -163,7 +190,10 @@ def build_subagent_tool(
             if last_error:
                 raise RuntimeError(f"子 Agent 执行失败: {last_error}")
             raise RuntimeError("子 Agent 未返回有效摘要")
-        return summary
+        return SubAgentOutcome(
+            summary=summary,
+            citations=tuple(trusted_citations),
+        )
 
     return SubAgentTool(
         run_subagent=_run_subagent,

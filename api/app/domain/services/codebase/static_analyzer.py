@@ -1,21 +1,24 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """Multi-language static analysis for symbols, imports, and call sites."""
-import ast
 import hashlib
-import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from app.domain.models.codebase import (
+    CodeEvidenceRef,
     CodebaseEdge,
     CodebaseFile,
     CodebaseSymbol,
     EdgeKind,
     SymbolKind,
 )
+from app.domain.services.codebase.parsers.base import ParsedCallSite, ParsedFile
+from app.domain.services.codebase.parsers.python_parser import PythonParser
+from app.domain.services.codebase.parsers.regex_fallback import RegexFallbackParser
+from app.domain.services.codebase.parsers.tree_sitter_parser import TreeSitterParser
 
 IGNORE_DIRS = {
     ".git", ".svn", "node_modules", "__pycache__", ".venv", "venv",
@@ -79,20 +82,41 @@ def should_skip_path(rel_path: str) -> bool:
     parts = Path(rel_path).parts
     if any(p in IGNORE_DIRS for p in parts):
         return True
-    ext = Path(rel_path).suffix.lower()
-    return ext in IGNORE_EXTENSIONS
+    lowered = rel_path.lower()
+    return any(lowered.endswith(ext) for ext in IGNORE_EXTENSIONS)
 
 
 class StaticAnalyzer:
     """Extract symbols and coarse call edges from source files."""
+
+    def __init__(self) -> None:
+        self._python = PythonParser()
+        self._tree_sitter = TreeSitterParser()
+        self._regex = RegexFallbackParser()
+
+    def analyze(
+            self,
+            files: Dict[str, str],
+            *,
+            codebase_id: str = "cb1",
+            version_id: Optional[str] = None,
+    ) -> AnalysisResult:
+        return self.analyze_tree(
+            codebase_id,
+            "",
+            list(files.items()),
+            version_id=version_id,
+        )
 
     def analyze_tree(
             self,
             codebase_id: str,
             root_dir: str,
             file_entries: List[Tuple[str, str]],
+            version_id: Optional[str] = None,
     ) -> AnalysisResult:
         result = AnalysisResult()
+        parsed_calls: list[tuple[ParsedCallSite, str, str]] = []
 
         for rel_path, content in file_entries:
             if should_skip_path(rel_path):
@@ -114,130 +138,69 @@ class StaticAnalyzer:
                 )
             )
             result.file_contents[rel_path] = content
-            symbols = self._extract_symbols(codebase_id, file_id, rel_path, lang, content)
+            parsed = self._parse_file(rel_path, lang, content)
+            symbols = self._to_domain_symbols(
+                codebase_id,
+                file_id,
+                parsed,
+                version_id=version_id,
+            )
             result.symbols.extend(symbols)
+            parsed_calls.extend(
+                (call, file_id, rel_path)
+                for call in parsed.calls
+            )
 
         result.edges = self.build_call_edges(
-            codebase_id, result.symbols, result.files, result.file_contents
+            codebase_id,
+            result.symbols,
+            result.files,
+            result.file_contents,
+            parsed_calls,
         )
         return result
 
-    def _extract_symbols(
-            self,
-            codebase_id: str,
-            file_id: str,
-            path: str,
-            lang: str,
-            content: str,
-    ) -> List[CodebaseSymbol]:
+    def _parse_file(self, path: str, lang: str, content: str) -> ParsedFile:
         if lang == "python":
-            return self._extract_python(codebase_id, file_id, content)
-        return self._extract_regex(codebase_id, file_id, lang, content)
+            try:
+                return self._python.parse(path, content)
+            except SyntaxError:
+                return self._regex.parse(path, content, lang)
+        return self._tree_sitter.parse(path, content, lang)
 
-    def _extract_python(self, codebase_id: str, file_id: str, content: str) -> List[CodebaseSymbol]:
-        symbols: List[CodebaseSymbol] = []
-        try:
-            tree = ast.parse(content)
-        except SyntaxError:
-            return self._extract_regex(codebase_id, file_id, "python", content)
-
-        class Visitor(ast.NodeVisitor):
-            def __init__(self) -> None:
-                self.class_stack: List[str] = []
-
-            def visit_ClassDef(self, node: ast.ClassDef) -> None:
-                sym_id = str(uuid.uuid4())
-                symbols.append(
-                    CodebaseSymbol(
-                        id=sym_id,
-                        codebase_id=codebase_id,
-                        file_id=file_id,
-                        name=node.name,
-                        kind=SymbolKind.CLASS,
-                        signature=f"class {node.name}",
-                        start_line=node.lineno,
-                        end_line=getattr(node, "end_lineno", node.lineno) or node.lineno,
-                    )
-                )
-                self.class_stack.append(node.name)
-                self.generic_visit(node)
-                self.class_stack.pop()
-
-            def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-                self._add_func(node)
-
-            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-                self._add_func(node)
-
-            def _add_func(self, node) -> None:
-                kind = SymbolKind.METHOD if self.class_stack else SymbolKind.FUNCTION
-                parent = None
-                name = node.name
-                if self.class_stack:
-                    parent_name = self.class_stack[-1]
-                    for s in symbols:
-                        if s.name == parent_name and s.kind == SymbolKind.CLASS:
-                            parent = s.id
-                            break
-                args = [a.arg for a in node.args.args]
-                sym_id = str(uuid.uuid4())
-                symbols.append(
-                    CodebaseSymbol(
-                        id=sym_id,
-                        codebase_id=codebase_id,
-                        file_id=file_id,
-                        name=name,
-                        kind=kind,
-                        signature=f"def {name}({', '.join(args)})",
-                        start_line=node.lineno,
-                        end_line=getattr(node, "end_lineno", node.lineno) or node.lineno,
-                        parent_id=parent,
-                    )
-                )
-
-        Visitor().visit(tree)
-        return symbols
-
-    def _extract_regex(
-            self,
+    @staticmethod
+    def _to_domain_symbols(
             codebase_id: str,
             file_id: str,
-            lang: str,
-            content: str,
+            parsed: ParsedFile,
+            *,
+            version_id: Optional[str],
     ) -> List[CodebaseSymbol]:
-        patterns = [
-            (r"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)", SymbolKind.FUNCTION),
-            (r"^\s*(?:export\s+)?class\s+(\w+)", SymbolKind.CLASS),
-            (r"^\s*(?:public|private|protected)?\s*(?:static\s+)?(?:async\s+)?(\w+)\s*\([^)]*\)\s*(?:\{|:)", SymbolKind.METHOD),
-            (r"^\s*func\s+(\w+)\s*\(", SymbolKind.FUNCTION),
-            (r"^\s*fn\s+(\w+)\s*[\(<]", SymbolKind.FUNCTION),
-            (r"^\s*(?:pub\s+)?fn\s+(\w+)\s*\(", SymbolKind.FUNCTION),
-            (r"^\s*(?:public|private|protected)?\s*(?:static\s+)?(?:void|int|String|bool|float|double|\w+)\s+(\w+)\s*\(", SymbolKind.METHOD),
-        ]
+        id_by_qualified = {
+            symbol.qualified_name: str(uuid.uuid4())
+            for symbol in parsed.symbols
+        }
         symbols: List[CodebaseSymbol] = []
-        seen: Set[str] = set()
-        for i, line in enumerate(content.splitlines(), start=1):
-            for pattern, kind in patterns:
-                m = re.match(pattern, line)
-                if m:
-                    name = m.group(1)
-                    if name in seen or name in {"if", "for", "while", "switch", "return"}:
-                        continue
-                    seen.add(name)
-                    sym_id = str(uuid.uuid4())
-                    symbols.append(
-                        CodebaseSymbol(
-                            id=sym_id,
-                            codebase_id=codebase_id,
-                            file_id=file_id,
-                            name=name,
-                            kind=kind,
-                            signature=line.strip()[:200],
-                            start_line=i,
-                            end_line=i,
-                        )
-                    )
-                    break
+        for symbol in parsed.symbols:
+            symbols.append(
+                CodebaseSymbol(
+                    id=id_by_qualified[symbol.qualified_name],
+                    codebase_id=codebase_id,
+                    version_id=version_id,
+                    file_id=file_id,
+                    name=symbol.name,
+                    qualified_name=symbol.qualified_name or symbol.name,
+                    kind=symbol.kind,
+                    signature=symbol.signature,
+                    start_line=symbol.range.start_line,
+                    end_line=symbol.range.end_line,
+                    parent_id=id_by_qualified.get(
+                        symbol.parent_qualified_name or ""
+                    ),
+                    parser=symbol.parser,
+                    confidence=symbol.confidence,
+                )
+            )
         return symbols
 
     def build_call_edges(
@@ -246,36 +209,73 @@ class StaticAnalyzer:
             symbols: List[CodebaseSymbol],
             files: List[CodebaseFile],
             file_contents: Dict[str, str],
+            parsed_calls: List[tuple[ParsedCallSite, str, str]],
     ) -> List[CodebaseEdge]:
         edges: List[CodebaseEdge] = []
         path_by_file_id = {f.id: f.path for f in files}
-        name_index: Dict[str, List[str]] = {}
+        symbol_by_qualified = {s.qualified_name: s for s in symbols}
+        name_index: Dict[str, List[CodebaseSymbol]] = {}
         for s in symbols:
-            name_index.setdefault(s.name, []).append(s.id)
+            name_index.setdefault(s.name, []).append(s)
 
-        for sym in symbols:
-            path = path_by_file_id.get(sym.file_id, "")
-            content = file_contents.get(path, "")
-            if not content:
+        seen: set[tuple[str, str, int]] = set()
+        for call, _file_id, path in parsed_calls:
+            src = symbol_by_qualified.get(call.caller_qualified_name)
+            if src is None:
                 continue
-            lines = content.splitlines()
-            start = max(0, sym.start_line - 1)
-            end = min(len(lines), sym.end_line + 20)
-            block = "\n".join(lines[start:end])
-            for m in re.finditer(r"\b([a-zA-Z_]\w*)\s*\(", block):
-                callee = m.group(1)
-                if callee == sym.name or callee in {"if", "for", "while", "switch", "return", "print", "len"}:
-                    continue
-                dst_ids = name_index.get(callee, [])
-                dst_id = dst_ids[0] if dst_ids else None
-                edges.append(
-                    CodebaseEdge(
-                        id=str(uuid.uuid4()),
-                        codebase_id=codebase_id,
-                        src_symbol_id=sym.id,
-                        dst_symbol_id=dst_id,
-                        callee_name=callee,
-                        kind=EdgeKind.CALL,
-                    )
+            key = (src.id, call.callee_name, call.line)
+            if key in seen:
+                continue
+            seen.add(key)
+            dst, resolution = self._resolve_call(
+                src,
+                name_index.get(call.callee_name, []),
+            )
+            confidence = call.confidence if resolution == "resolved" else min(call.confidence, 0.45)
+            edges.append(
+                CodebaseEdge(
+                    id=str(uuid.uuid4()),
+                    codebase_id=codebase_id,
+                    version_id=src.version_id,
+                    src_symbol_id=src.id,
+                    dst_symbol_id=dst.id if dst else None,
+                    callee_name=call.callee_name,
+                    kind=call.kind or EdgeKind.CALL,
+                    resolution=resolution,
+                    confidence=confidence,
+                    evidence=[
+                        CodeEvidenceRef(
+                            version_id=src.version_id or "",
+                            file_id=src.file_id,
+                            path=path or path_by_file_id.get(src.file_id, ""),
+                            start_line=call.line,
+                            end_line=call.line,
+                            symbol_id=src.id,
+                            analyzer=call.parser or "static_analyzer",
+                            confidence=confidence,
+                        )
+                    ],
                 )
+            )
         return edges
+
+    @staticmethod
+    def _resolve_call(
+            src: CodebaseSymbol,
+            candidates: List[CodebaseSymbol],
+    ) -> tuple[Optional[CodebaseSymbol], str]:
+        candidates = [
+            candidate for candidate in candidates
+            if candidate.id != src.id
+        ]
+        if not candidates:
+            return None, "unresolved"
+        same_file = [
+            candidate for candidate in candidates
+            if candidate.file_id == src.file_id
+        ]
+        if len(same_file) == 1:
+            return same_file[0], "resolved"
+        if len(candidates) == 1:
+            return candidates[0], "resolved"
+        return None, "ambiguous"

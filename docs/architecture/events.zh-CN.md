@@ -66,6 +66,99 @@ flowchart TD
 
 `error` 事件可选携带 `code` 字段（如 `MODEL_UNAVAILABLE`、`EMBEDDING_UNAVAILABLE`、`DOCUMENT_PARSE_FAILED`），用于前端与运维区分错误类型。完整错误码列表见 [模型韧性设计](model-resilience.zh-CN.md) 与 `api/app/domain/models/error_codes.py`。前端应容忍缺失 `code` 并按 `error` 文本降级展示。
 
+## RunOutcome 与终态转换契约
+
+Flow 显式返回 `RunOutcome`；生成器结束和展示事件都不能隐式推断语义成功。
+
+| `RunOutcome.status` | 会话终态事件 | Redis 任务映射 |
+|---------------------|-------------|----------------|
+| `succeeded` | `session_status=completed` | `done` |
+| `failed` | `session_status=failed` | `failed` |
+| `cancelled` | `session_status=cancelled` | `cancelled` |
+| `waiting` | `session_status=waiting` | 保持 `pending`，等待恢复 |
+
+`RunOutcome.error` 为 null 或 `{message, code?, details?}`；`usage` 是数值
+计数 map。完整 outcome 保存在 PostgreSQL status-event payload 内供权威
+对账；内部 `outcome` 对象不会投影到 Redis/SSE，公共兼容字段仍为 `status`、
+`reason` 和 `code`。
+
+持久化状态机如下：
+
+| `run_epoch_id` 当前状态 | 允许的下一状态 |
+|-------------------------|----------------|
+| 无 | `running` |
+| `running` | `waiting`、`completed`、`failed`、`cancelled` 中恰好一个 |
+| 任意终态 | 同一 epoch 不再接受任何状态 |
+| 后续用户轮次 | 使用新的确定性 epoch 写入新的 `running` |
+
+`waiting` 是当前 run epoch 的终态，但不是会话或 Redis 任务的完成。
+`DoneEvent`、`ErrorEvent`、投递失败或清理都不能选择或覆盖语义终态。
+PostgreSQL 在 Redis 发布前原子 claim 终态；CAS 失败方重新读取并采用持久化
+胜者。因此每个 run 恰好有一个持久化终态 `SessionStatusEvent`。
+
+## 调度代次与持久化交接
+
+任务 metadata 从 `run_generation=1` 开始，每个 dispatch、lease、heartbeat、
+状态变更和对账记录都携带 generation。初始投递和普通 redelivery 不推进它；
+只有创建替代执行尝试时，才通过 expected-generation CAS 推进。
+
+Worker 将 claim 明确分类为 `ACK_DUPLICATE`、`EXECUTE` 或 `REQUEUE`。旧代次、
+当前代次已终态或已证明存在同代活 lease 的消息不能再次执行；缺失、损坏、
+未来代次或无法确认的 lease 状态保留以供 reclaim。本地执行按
+`(task_id, run_generation)` 去重，旧 Worker 不能覆盖新代状态或清除新代
+对账 proposal。
+
+重试、孤儿恢复与 DLQ 重放采用 durable-first 交接：
+
+1. 先追加替代 dispatch/DLQ 行并取得真实 message ID；
+2. 原子推进 generation、重置执行字段、记录 durable dispatch marker，并迁移
+   已有 `RunOutcome` 对账 proposal；
+3. 只有证明后继已持久化后才确认源消息。
+
+同代 DLQ identity 同时匹配 status、session、retry count、error code 和 error
+text。`RecoverableTaskReconciliationRequired` 会故意保持当前 dispatch
+未确认。如果主任务 metadata 暂时无法保存已选 outcome，内部
+`run_reconciliation` 输入 envelope 是持久化 fallback；只有 PostgreSQL
+成功 claim 或重新读到权威终态后才确认该 envelope。
+
+## 资源绑定与构建事件投影
+
+每条用户输入都在保存消息的同一事务内快照当前 session bindings。普通事件
+和持久化 status 事件复制以下不可变四字段投影：
+
+```json
+{
+  "binding_id": "binding-id",
+  "resource_kind": "knowledge_base",
+  "resource_id": "kb-id",
+  "version_id": "version-id"
+}
+```
+
+缺少该 metadata 的历史事件只在内存中升级为空列表；服务端不会猜测版本，
+也不会重写旧事件。
+
+资源构建使用独立持久化事件日志和 SSE 端点：
+`GET /api/resource-builds/{build_id}/events?after=<seq>`。外层 SSE event 名为
+`resource-build-event`；每个 JSON data 对象使用同一投影：
+
+| 字段 | 契约 |
+|------|------|
+| `event` | 固定为 `resource_build` |
+| `id`、`seq`、`build_id` | 持久化事件 identity 与每 build 游标 |
+| `resource_kind`、`resource_id`、`version_id` | 来自 owner-scoped 权威 build |
+| `phase`、`state`、`progress` | 事件转换；progress 为 0 到 1 的浮点数 |
+| `degraded_reasons` | 来自权威 build；旧 null 值投影为 `[]` |
+| `payload`、`created_at` | 事件专属增量数据与时间戳 |
+
+`after` 采用排除式游标：返回 `seq > after` 的已提交记录。合法范围为 `0`
+到持久化 `last_event_seq`；更大的游标在发送 stream headers 前稳定返回
+400。PostgreSQL 是权威源：端点先重放数据库，再订阅并立即 catch-up 关闭
+竞争窗口，此后每个 hint 或 heartbeat 都重新查询。Redis 只携带
+`{"build_id", "seq"}`，不保存历史，因此通知丢失、重复、乱序、缺口或 Redis
+失败都不改变重放。读到终态事件，或重连游标恰好等于已终态的最后游标时，
+stream 立即关闭且不会等待 Redis。
+
 ### 摄取 `step` 事件
 
 Codebase 与知识库摄取任务发出固定 step id 的 `step` 事件：

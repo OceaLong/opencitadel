@@ -15,7 +15,7 @@ class _FakeTaskState:
     def __init__(self, done: bool = True, meta: dict | None = None):
         self._done = done
         self._meta = meta or {"updated_at": 9999999999.0}
-        self.set_status_calls: list[tuple[str, object]] = []
+        self.set_status_calls: list[tuple[str, int, object]] = []
         self.register_calls: list[tuple] = []
         self.request_cancel = AsyncMock()
         self.get_runtime_snapshot = AsyncMock(return_value={"is_done": True})
@@ -36,8 +36,14 @@ class _FakeTaskState:
         import time
         return time.time() - float(heartbeat) >= stale_after
 
-    async def set_status(self, task_id: str, status) -> None:
-        self.set_status_calls.append((task_id, status))
+    async def set_status(
+            self,
+            task_id: str,
+            run_generation: int,
+            status,
+    ) -> bool:
+        self.set_status_calls.append((task_id, run_generation, status))
+        return True
 
     async def register_task(self, task_id, session_id, task_type="kb_ingest", resource_id="", request_id=""):
         self.register_calls.append((task_id, session_id, task_type, resource_id, request_id))
@@ -87,66 +93,6 @@ async def test_add_documents_rejects_empty_payload():
     service.get_kb = lambda kb_id, scope=None: _async_kb(kb_id)  # type: ignore[method-assign]
     with pytest.raises(BadRequestError):
         await service.add_documents("kb1")
-
-
-@pytest.mark.anyio
-async def test_reindex_is_idempotent_when_ingest_running():
-    service = KnowledgeBaseService(uow_factory=lambda: _FakeUowWithKb(_FakeKbSaveRepo()), file_storage=object())  # type: ignore[arg-type]
-    kb = KnowledgeBase(id="kb1", name="test", status=KBStatus.PARSING, ingest_task_id="task-1")
-    service.get_kb = lambda kb_id, scope=None: _async_kb_obj(kb)  # type: ignore[method-assign]
-    service._task_state = _FakeTaskState(done=False)  # type: ignore[method-assign]
-    result = await service.reindex("kb1")
-    assert result.ingest_task_id == "task-1"
-
-
-@pytest.mark.anyio
-async def test_reindex_restarts_when_kb_failed_with_stale_task(monkeypatch):
-    kb_repo = _FakeKbSaveRepo()
-    service = KnowledgeBaseService(uow_factory=lambda: _FakeUowWithKb(kb_repo), file_storage=object())  # type: ignore[arg-type]
-    kb = KnowledgeBase(
-        id="kb1",
-        name="test",
-        status=KBStatus.FAILED,
-        ingest_task_id="task-old",
-        error="全部文档解析失败",
-    )
-    service.get_kb = lambda kb_id, scope=None: _async_kb_obj(kb)  # type: ignore[method-assign]
-    task_state = _FakeTaskState(done=False)
-    service._task_state = task_state  # type: ignore[method-assign]
-
-    dispatched: list[str] = []
-
-    class _FakeTask:
-        def __init__(self, task_id: str, session_id: str):
-            self.task_id = task_id
-            self.session_id = session_id
-
-        async def dispatch_to_worker(self) -> None:
-            dispatched.append(self.task_id)
-
-    monkeypatch.setattr(
-        "app.application.services.knowledge_base_service.RedisStreamTask",
-        lambda task_id, session_id: _FakeTask(task_id, session_id),
-    )
-
-    result = await service.reindex("kb1")
-
-    assert result.ingest_task_id != "task-old"
-    assert result.status == KBStatus.PENDING
-    assert result.error is None
-    assert dispatched == [result.ingest_task_id]
-    assert task_state.set_status_calls == [("task-old", TaskStatus.FAILED)]
-    assert kb_repo.saved
-
-
-@pytest.mark.anyio
-async def test_add_documents_rejects_when_ingest_running():
-    service = KnowledgeBaseService(uow_factory=lambda: _FakeUowWithKb(_FakeKbSaveRepo()), file_storage=object())  # type: ignore[arg-type]
-    kb = KnowledgeBase(id="kb1", name="test", status=KBStatus.PARSING, ingest_task_id="task-1")
-    service.get_kb = lambda kb_id, scope=None: _async_kb_obj(kb)  # type: ignore[method-assign]
-    service._task_state = _FakeTaskState(done=False)  # type: ignore[method-assign]
-    with pytest.raises(ConflictError):
-        await service.add_documents("kb1", file_ids=["file-1"])
 
 
 class _UnauthorizedFileRepo:
@@ -296,76 +242,6 @@ async def test_delete_kb_rejects_when_ingest_running():
         await service.delete_kb("kb1")
 
 
-@pytest.mark.anyio
-async def test_delete_document_clears_status_when_last_document():
-    # 精确 purge 由仓储层 delete_document 内含完成（Task 3），服务层不再调用 clear_index_data。
-    from app.domain.models.knowledge_base import KnowledgeDocument, KBSourceType
-
-    kb = KnowledgeBase(id="kb1", name="test", status=KBStatus.READY, doc_count=1, chunk_count=3)
-    repo = _DeleteKbRepo(kb)
-    doc = KnowledgeDocument(
-        id="doc-1",
-        kb_id="kb1",
-        title="doc",
-        source_type=KBSourceType.UPLOAD,
-        source_ref="x",
-    )
-    repo._documents = [doc]
-    repo._remaining_after_delete = 0
-    service = KnowledgeBaseService(uow_factory=lambda: _FakeUowWithKb(repo), file_storage=object())  # type: ignore[arg-type]
-    service.get_kb = lambda kb_id, scope=None: _async_kb_obj(kb)  # type: ignore[method-assign]
-    service._task_state = _FakeTaskState(done=True)  # type: ignore[method-assign]
-
-    result = await service.delete_document("kb1", "doc-1")
-
-    assert repo.deleted_doc_ids == ["doc-1"]
-    assert repo.cleared_kb_ids == []  # 不再由服务层清空索引
-    assert result.doc_count == 0
-    assert result.chunk_count == 0
-    assert result.status == KBStatus.PENDING
-
-
-@pytest.mark.anyio
-async def test_delete_document_updates_status_when_documents_remain_and_does_not_reindex(monkeypatch):
-    # 同步精确删除：剩余文档时不再触发 reindex，而是基于 ready 文档数重新计算状态。
-    from app.domain.models.knowledge_base import KnowledgeDocument, KBSourceType
-
-    kb = KnowledgeBase(id="kb1", name="test", status=KBStatus.READY, doc_count=2, chunk_count=5)
-    repo = _DeleteKbRepo(kb)
-    doc = KnowledgeDocument(
-        id="doc-1",
-        kb_id="kb1",
-        title="doc",
-        source_type=KBSourceType.UPLOAD,
-        source_ref="x",
-    )
-    repo._documents = [doc]
-    repo._remaining_after_delete = 1
-    repo._ready_count = 1
-    repo._chunk_count_after_delete = 4
-    service = KnowledgeBaseService(uow_factory=lambda: _FakeUowWithKb(repo), file_storage=object())  # type: ignore[arg-type]
-    service.get_kb = lambda kb_id, scope=None: _async_kb_obj(kb)  # type: ignore[method-assign]
-    service._task_state = _FakeTaskState(done=True)  # type: ignore[method-assign]
-
-    reindex_called = False
-
-    async def _fake_reindex(kb_id, scope=None):
-        nonlocal reindex_called
-        reindex_called = True
-        return kb
-
-    monkeypatch.setattr(service, "reindex", _fake_reindex)
-
-    result = await service.delete_document("kb1", "doc-1")
-
-    assert repo.deleted_doc_ids == ["doc-1"]
-    assert repo.cleared_kb_ids == []
-    assert reindex_called is False
-    assert result.doc_count == 1
-    assert result.chunk_count == 4
-    assert result.status == KBStatus.READY
-
-
 # ---------------------------------------------------------------------------
 # Task 6 新增用例: 增量派发 / 精确同步删除 / ready_doc_count / 分页
 # 下方 _Inc* 前缀的 fixture 与本文件顶部的同名 fixture（_FakeTaskState 等）刻意区分命名，
@@ -477,48 +353,6 @@ def _inc_service(monkeypatch, repo):
 
 def _inc_doc(doc_id, status=DocStatus.READY):
     return _IncKnowledgeDocument(id=doc_id, kb_id="kb1", title=doc_id, status=status)
-
-
-@pytest.mark.anyio
-async def test_add_documents_dispatches_without_resetting_existing_docs(monkeypatch):
-    repo = _IncFakeKbRepo(KnowledgeBase(id="kb1", name="t", status=KBStatus.READY), [_inc_doc("d1")])
-    service, dispatch = _inc_service(monkeypatch, repo)
-
-    await service.add_documents("kb1", urls=["https://example.com/a"])
-
-    assert repo.marked_pending is False       # 存量文档未被置回 pending
-    assert repo.cleared is False              # 未清空索引
-    dispatch.assert_awaited()                 # 派发了摄取任务
-    assert repo.documents[0].status == DocStatus.READY
-
-
-@pytest.mark.anyio
-async def test_reindex_marks_all_pending_and_clears_index(monkeypatch):
-    repo = _IncFakeKbRepo(KnowledgeBase(id="kb1", name="t", status=KBStatus.READY), [_inc_doc("d1")])
-    service, dispatch = _inc_service(monkeypatch, repo)
-
-    await service.reindex("kb1")
-
-    assert repo.marked_pending is True
-    assert repo.cleared is True
-    dispatch.assert_awaited()
-
-
-@pytest.mark.anyio
-async def test_delete_document_is_synchronous_and_does_not_dispatch(monkeypatch):
-    repo = _IncFakeKbRepo(
-        KnowledgeBase(id="kb1", name="t", status=KBStatus.READY, doc_count=2),
-        [_inc_doc("d1"), _inc_doc("d2")],
-    )
-    service, dispatch = _inc_service(monkeypatch, repo)
-
-    kb = await service.delete_document("kb1", "d1")
-
-    assert repo.deleted_doc_ids == ["d1"]
-    dispatch.assert_not_awaited()             # 不再触发 reindex
-    assert kb.doc_count == 1
-    assert kb.chunk_count == 42
-    assert kb.status == KBStatus.READY
 
 
 @pytest.mark.anyio

@@ -27,8 +27,28 @@ class WebDocument:
 
 
 async def fetch_web_document(url: str, *, timeout_seconds: float = 20.0) -> WebDocument:
-    current = validate_public_url(url)
     headers = {"User-Agent": "OpenCitadel-KnowledgeBase/1.0"}
+    response, current = await _request_with_safe_redirects(
+        url,
+        headers=headers,
+        timeout_seconds=timeout_seconds,
+    )
+    soup = BeautifulSoup(response.text, "html.parser")
+    for node in soup(["script", "style", "noscript"]):
+        node.decompose()
+    title = _pick_title(soup) or current
+    main = soup.find("main") or soup.find("article") or soup.body or soup
+    content = md(str(main), heading_style="ATX").strip()
+    return WebDocument(title=title, content=content, mime="text/markdown")
+
+
+async def _request_with_safe_redirects(
+    url: str,
+    *,
+    headers: dict[str, str] | None,
+    timeout_seconds: float,
+) -> tuple[httpx.Response, str]:
+    current = validate_public_url(url)
     async with create_ssrf_safe_async_client(
         timeout=timeout_seconds,
         follow_redirects=False,
@@ -51,29 +71,18 @@ async def fetch_web_document(url: str, *, timeout_seconds: float = 20.0) -> WebD
             raise BadRequestError("URL 重定向次数过多")
     if response is None:
         raise BadRequestError("无法获取网页内容")
-    soup = BeautifulSoup(response.text, "html.parser")
-    for node in soup(["script", "style", "noscript"]):
-        node.decompose()
-    title = _pick_title(soup) or current
-    main = soup.find("main") or soup.find("article") or soup.body or soup
-    content = md(str(main), heading_style="ATX").strip()
-    return WebDocument(title=title, content=content, mime="text/markdown")
+    return response, current
 
 
 async def fetch_confluence_document(url: str, token: Optional[str] = None) -> WebDocument:
-    validate_public_url(url)
     headers = {"Authorization": f"Bearer {token}"} if token else None
-    async with create_ssrf_safe_async_client(
-        timeout=20.0,
-        follow_redirects=False,
+    response, current = await _request_with_safe_redirects(
+        url,
         headers=headers,
-        allowed_ports={80, 443},
-    ) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        _ensure_bounded_response(response)
+        timeout_seconds=20.0,
+    )
     soup = BeautifulSoup(response.text, "html.parser")
-    title = _pick_title(soup) or url
+    title = _pick_title(soup) or current
     content = md(str(soup.find("main") or soup.body or soup), heading_style="ATX").strip()
     return WebDocument(title=title, content=content, mime="text/markdown")
 

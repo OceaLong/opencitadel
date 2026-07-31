@@ -37,6 +37,9 @@ class MCPServerORM(Base):
         String(32), nullable=False, server_default=text("'legacy_plaintext'")
     )
     extra: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    tool_policies: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     owner_user_id: Mapped[Optional[str]] = mapped_column(
         String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -69,6 +72,7 @@ class MCPServerORM(Base):
             headers=headers,
             env=env,
             extra=self.extra or {},
+            tool_policies=self.tool_policies or {},
             owner_user_id=self.owner_user_id,
             team_id=self.team_id,
             visibility=ResourceVisibility(self.visibility),
@@ -83,6 +87,9 @@ class A2AServerORM(Base):
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    tool_policies: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     owner_user_id: Mapped[Optional[str]] = mapped_column(
         String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -102,6 +109,7 @@ class A2AServerORM(Base):
             id=self.id,
             base_url=self.base_url,
             enabled=self.enabled,
+            tool_policies=self.tool_policies or {},
             owner_user_id=self.owner_user_id,
             team_id=self.team_id,
             visibility=ResourceVisibility(self.visibility),

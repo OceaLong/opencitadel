@@ -589,6 +589,10 @@
         "timeout_seconds": "Timeout (seconds)",
         "max_parent_chunks_per_doc": "Max parent chunks per doc",
         "concurrency": "Concurrency",
+        "max_chunks": "Maximum graph chunks",
+        "max_llm_calls": "Maximum graph LLM calls",
+        "max_tokens": "Maximum graph token budget",
+        "deadline_seconds": "Graph build deadline (seconds)",
         "mode": "Mode",
         "max_pages": "Max pages",
         "max_bytes": "Max bytes",
@@ -709,6 +713,10 @@
         "timeout_seconds": "Timeout for rerank API requests.",
         "max_parent_chunks_per_doc": "Max parent chunks per document for GraphRAG build.",
         "concurrency": "Concurrent GraphRAG build tasks.",
+        "max_chunks": "Maximum parent chunks admitted across the complete GraphRAG build and its retries.",
+        "max_llm_calls": "Maximum durably reserved LLM calls across the complete GraphRAG build.",
+        "max_tokens": "Maximum worst-case token capacity reserved across the complete GraphRAG build.",
+        "deadline_seconds": "Absolute wall-clock allowance for the complete GraphRAG build, including retries.",
         "mode": "OCR mode: vision_llm, rapidocr, or off.",
         "max_pages": "Maximum pages for OCR/document processing.",
         "max_bytes": "Maximum bytes allowed per document.",
@@ -1255,26 +1263,13 @@
       "nutritionAnalysis": {
         "name": "Nutrition analysis",
         "description": "Upload a meal photo, analyze macros, and get personalized nutrition advice",
-        "tags": [
-          "Nutrition",
-          "Meal photo",
-          "Calories",
-          "Health"
-        ],
-        "examples": [
-          "Analyze this lunch for a cut goal",
-          "Is this meal high in protein?"
-        ]
+        "tags": ["Nutrition", "Meal photo", "Calories", "Health"],
+        "examples": ["Analyze this lunch for a cut goal", "Is this meal high in protein?"]
       },
       "consumptionCalculator": {
         "name": "Consumption calculator",
         "description": "Upload a nutrition label to estimate servings and consumption amounts",
-        "tags": [
-          "Nutrition label",
-          "Servings",
-          "OCR",
-          "Calculator"
-        ],
+        "tags": ["Nutrition label", "Servings", "OCR", "Calculator"],
         "examples": [
           "How many servings in this package?",
           "Calculate consumption for 50g per serving"
@@ -1283,12 +1278,7 @@
       "smartTranslation": {
         "name": "Smart translation",
         "description": "Auto-detect language, translate in formal/casual/technical style",
-        "tags": [
-          "Translation",
-          "Polish",
-          "Multilingual",
-          "Technical docs"
-        ],
+        "tags": ["Translation", "Polish", "Multilingual", "Technical docs"],
         "examples": [
           "Translate this English to formal Chinese",
           "Translate screenshot text to English"
@@ -1297,12 +1287,7 @@
       "promptLab": {
         "name": "Prompt lab",
         "description": "Turn rough ideas into reusable high-quality prompts",
-        "tags": [
-          "Prompt",
-          "Workflow",
-          "Creation",
-          "Productivity"
-        ],
+        "tags": ["Prompt", "Workflow", "Creation", "Productivity"],
         "examples": [
           "Write a data analysis Agent prompt",
           "Optimize this customer service reply prompt"
@@ -1311,70 +1296,31 @@
       "qrGenerator": {
         "name": "QR code generator",
         "description": "Quickly generate downloadable QR code images from text or links",
-        "tags": [
-          "QR code",
-          "Link",
-          "Share",
-          "Download"
-        ],
-        "examples": [
-          "Generate QR for https://example.com",
-          "Make a QR code from this text"
-        ]
+        "tags": ["QR code", "Link", "Share", "Download"],
+        "examples": ["Generate QR for https://example.com", "Make a QR code from this text"]
       },
       "devToolbox": {
         "name": "Developer toolbox",
         "description": "JSON formatting, Base64 and URL encode/decode in one place",
-        "tags": [
-          "JSON",
-          "Base64",
-          "URL",
-          "Formatting"
-        ],
-        "examples": [
-          "Format this JSON",
-          "Base64 encode this text",
-          "URL decode these params"
-        ]
+        "tags": ["JSON", "Base64", "URL", "Formatting"],
+        "examples": ["Format this JSON", "Base64 encode this text", "URL decode these params"]
       },
       "secretGenerator": {
         "name": "Password & UUID generator",
         "description": "Generate configurable-strength passwords and batch UUIDs",
-        "tags": [
-          "Password",
-          "UUID",
-          "Security",
-          "Random"
-        ],
-        "examples": [
-          "Generate a 16-char strong password",
-          "Batch generate 5 UUIDs"
-        ]
+        "tags": ["Password", "UUID", "Security", "Random"],
+        "examples": ["Generate a 16-char strong password", "Batch generate 5 UUIDs"]
       },
       "documentConverter": {
         "name": "Document format converter",
         "description": "md/txt to PDF, PDF to Word, common document format conversion",
-        "tags": [
-          "PDF",
-          "Word",
-          "Markdown",
-          "Format conversion"
-        ],
-        "examples": [
-          "Convert this PDF to Word",
-          "md to pdf",
-          "pdf to markdown"
-        ]
+        "tags": ["PDF", "Word", "Markdown", "Format conversion"],
+        "examples": ["Convert this PDF to Word", "md to pdf", "pdf to markdown"]
       },
       "watermarkTool": {
         "name": "Watermark tool",
         "description": "Add watermarks to images/PDF, AI remove watermarks from images and PDFs",
-        "tags": [
-          "Watermark",
-          "Remove watermark",
-          "PDF",
-          "Image processing"
-        ],
+        "tags": ["Watermark", "Remove watermark", "PDF", "Image processing"],
         "examples": [
           "Add confidential watermark to PDF",
           "Remove bottom-right watermark from image",
@@ -1662,7 +1608,6 @@
     "deleteFailed": "Delete failed",
     "deleteBlockedIngesting": "Cannot delete while indexing is in progress",
     "indexFailedDetail": "Indexing failed: {error}",
-    "partialFailureWarning": "Some documents failed: {error}",
     "tabGraph": "Graph",
     "addDialog": {
       "title": "Add knowledge documents",
@@ -1691,17 +1636,73 @@
     "startAsk": "Ask",
     "startTaskFailed": "Failed to start task",
     "statusDocCount": "{status} · {count} documents",
-    "readyDocCount": "{ready}/{count} ready",
+    "readyDocCount": "{ready} of {count} ready",
+    "partialFailureWarning": "Some documents failed: {error}",
     "showDocuments": "Show documents",
-    "loadMoreDocuments": "Load more ({shown}/{total} shown)",
+    "loadMoreDocuments": "Load more ({shown} of {total})",
+    "activeVersion": "Active version: {version}",
+    "boundVersion": "Bound version: {version}",
+    "noActiveVersion": "No published version is available",
+    "candidateBuild": "{state} · {phase} · {progress}%",
+    "candidatePhasePending": "Pending",
+    "candidateDegraded": "Degraded: {reasons}",
+    "retryBuild": "Retry",
+    "cancelBuild": "Cancel",
+    "viewBuild": "View build",
+    "candidateHeartbeat": "Heartbeat: {heartbeat}",
+    "versionCapabilities": "Capabilities: {capabilities}",
+    "capabilityAvailable": "available",
+    "capabilityUnavailable": "unavailable",
+    "noCapabilities": "none",
+    "previousVersions": "Previous versions",
+    "viewHistoricalVersion": "View version {version}",
+    "viewingHistoricalVersion": "Viewing historical version: {version}",
+    "versionStatusLoading": "Loading version status",
+    "versionStatusLoadError": "Failed to load version status",
+    "versionActionError": "Version action failed",
+    "graphLoading": "Loading knowledge graph",
+    "graphLoadError": "Failed to load knowledge graph",
+    "graphUnavailable": "Graph search is unavailable for this version",
+    "graphEmpty": "This version has no graph entities",
+    "graphEntities": "Knowledge graph entities",
+    "graphRelations": "Knowledge graph relations",
+    "graphEvidence": "Relation evidence",
+    "graphEvidenceItem": "Document {document}, revision {revision}, page {page}",
+    "documentPageLoadMore": "Load more source",
+    "documentPageEmpty": "No immutable source chunks are available",
+    "documentPageError": "Failed to load document source",
+    "documentRevisionMismatch": "The citation revision does not match the bound version",
+    "citationVersionMismatch": "The citation belongs to a different knowledge-base version",
     "title": "Document knowledge base"
   },
   "codebase": {
-    "readFailed": "Read failed",
-    "downloadSuccess": "Packaged: {key}",
-    "downloadFailed": "Download failed",
-    "reanalyze": "Re-analyze",
-    "deleteTitle": "Delete codebase?",
+  "readFailed": "Read failed",
+  "evidence": "Evidence",
+  "downloadSuccess": "Packaged: {key}",
+  "downloadFailed": "Download failed",
+  "reanalyze": "Re-analyze",
+  "viewBuild": "View build",
+  "versionStatusLoading": "Loading codebase versions",
+  "versionStatusLoadError": "Failed to load codebase versions",
+  "versionActionError": "Failed to update codebase build",
+  "activeVersion": "Active version: {version}",
+  "noActiveVersion": "No active version",
+  "versionCapabilities": "Capabilities: {capabilities}",
+  "capabilityAvailable": "available",
+  "capabilityUnavailable": "unavailable",
+  "noCapabilities": "none",
+  "versionDegraded": "Degraded: {reasons}",
+  "unsupportedViews": "Unsupported views: {views}",
+  "candidateBuild": "Candidate build {state} · {phase} · {progress}%",
+  "candidatePhasePending": "pending",
+  "candidateDegraded": "Candidate degraded: {reasons}",
+  "candidateHeartbeat": "Heartbeat: {heartbeat}",
+  "retryBuild": "Retry",
+  "cancelBuild": "Cancel",
+  "previousVersions": "Previous versions",
+  "viewHistoricalVersion": "View version {version}",
+  "viewingHistoricalVersion": "Viewing version: {version}",
+  "deleteTitle": "Delete codebase?",
     "deleteDescription": "This will permanently delete the codebase and its index. This cannot be undone.",
     "deleteSuccess": "Deleted \"{name}\"",
     "deleteFailed": "Failed to delete codebase",
@@ -2009,7 +2010,8 @@
   "redirect": {
     "openingCodebaseTask": "Opening codebase task...",
     "openingKnowledgeTask": "Opening knowledge task...",
-    "startTaskFailed": "Failed to start task"
+    "startTaskFailed": "Failed to start task",
+    "noActiveVersion": "No published knowledge-base version is available"
   },
   "settingsNav": {
     "memory": "Long-term memory",
@@ -2028,6 +2030,15 @@
     "knowledgePanelTitle": "Knowledge context",
     "knowledgeTab": "Knowledge",
     "sourceHintKb": "Click a document citation in an answer to view the source",
-    "tabOriginalText": "Source"
+    "tabOriginalText": "Source",
+    "knowledgeVersionUnavailable": "This session has no bound knowledge-base version",
+    "resourceVersionsAria": "Resource version context",
+    "currentResourceVersion": "Current resource versions",
+    "upgradeContext": "Upgrade context",
+    "upgradeContextDescription": "The upgrade applies only to future messages; historical answers keep their original version labels.",
+    "cancelUpgrade": "Cancel",
+    "confirmUpgrade": "Confirm upgrade to {version}",
+    "upgradeSuccess": "Future-message context upgraded to {version}",
+    "upgradeFailed": "Context upgrade failed"
   }
 }

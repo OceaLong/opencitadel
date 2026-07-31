@@ -1,192 +1,169 @@
-# 知识库文档摄取
+# 知识库版本化摄取
 
-[English](knowledge-base-ingestion.md)
+OpenCitadel 将知识库视为一个稳定的逻辑资源，其可读内容则来自不可变的已发布版本。重建不会原地修改当前索引，而是先创建候选闭包、完成验证，最后仅在闭包可安全读取时原子切换
+`knowledge_bases.active_version_id`。
 
-知识库文档摄取的权威说明：解析、OCR、分块、向量化、GraphRAG、向量降级、失败处理与 Worker 对账。
+本文是新代码的权威模型。无版本文档内容接口仅为旧客户端保留兼容；检索、引用、来源展开、GraphRAG、Ask 与 Agent 执行都必须携带明确的已发布
+`version_id`。
 
-## 概览
+## 标识与存储模型
 
-| 组件 | 文件 | 职责 |
-|------|------|------|
-| API 触发 | `knowledge_base_routes.py` | 创建 `kb_ingest` 任务，绑定 `ingest_task_id` |
-| 任务 Runner | `KBIngestionTaskRunner` | 包装 `KBIngestionRunner`，映射终态错误 |
-| 流水线 | `KBIngestionRunner` | 解析 → 分块 → 向量化 → 索引 → 可选 GraphRAG |
-| OCR | `ocr_service.py` | `ocr.mode=vision_llm` 时对图片型 PDF 页做视觉 LLM OCR |
-| Worker 入口 | `worker/main.py` `_execute_kb_ingest_job` | 解析 GraphRAG LLM 与独立 OCR 视觉模型 |
+| 概念 | 标识与职责 |
+| --- | --- |
+| 知识库 | 稳定、受所有权范围保护的资源，并指向当前已发布版本 |
+| 知识库版本 | 不可变候选或已发布快照；记录父版本、构建、能力、降级原因、指标和发布时间 |
+| 逻辑文档 | 知识库内稳定的文档元数据 |
+| 文档修订 | 对应一次确定源内容摘要及处理状态的不可变对象 |
+| 版本清单 | 从版本到精确 `(document_id, document_revision_id)` 的有序映射 |
+| 分块和图数据 | 同时携带 `kb_id` 与 `version_id` 的派生数据，不能跨版本推断复用 |
+| 资源构建 | 对应一个候选版本、可持久恢复的 queued/running/terminal 操作 |
+| 会话绑定 | 将 Ask 或 Agent 会话固定到某个明确已发布版本的不可变记录 |
 
-Worker 为摄取解析两个 LLM 句柄：
+只有当清单中的每一项都能解析到精确修订，且强制派生数据完整时，版本才构成可读闭包。父子分块、关键词、向量、实体、关系和证据引用都必须按绑定版本过滤。
 
-- **GraphRAG LLM** — 默认对话模型，用于实体/关系抽取（`GraphBuilder`）
-- **OCR LLM** — 首个可用视觉模型（`resolve_vision_model()`）；未单独注入时回退到 GraphRAG LLM
+## 状态机
 
-摄取任务 session id：`kb-ingest:{kb_id}`（非用户聊天会话）。
+文档修订状态：
 
-## 摄取流水线
-
-摄取是**增量**的常态化流水线，全量重建只是它的一个特例：
-
-- `KBIngestionRunner.run(kb_id)` 每次只选取库内 `status IN (pending, failed)` 的文档处理（解析 → 分块 → 向量化 → 索引 → 可选 GraphRAG）。索引前先 `purge_documents_index_data` 清掉**这些文档自己**的旧 chunks/关系/引用行（失败重试场景的残留），随后把新 chunks **追加**写入，不再对整库调用 `replace_index_chunks`/`clear_index_data`。库内其他已 `ready` 的文档、其索引数据全程不受触碰。
-- 新增文档（`add_documents`）：新文档天然是 `pending`，派发任务后 runner 自然只处理新文档；已有文档的检索/问答在摄取期间不受影响。
-- 手动 `reindex`（全量兜底）：派发前把库内**所有**文档重置为 `pending` 并调用 `clear_index_data`（含 `knowledge_entity_refs`），之后走同一条流水线重新处理全部文档，语义与「摄取一个全新的库」等价。全量重建期间检索为空窗。
-- 删除文档不进入这条流水线，而是在服务层同步完成（见「删除文档语义」）。
-
-```mermaid
-flowchart TD
-  Start["claim kb_ingest 任务"] --> Select["筛选 pending/failed 文档"]
-  Select --> HasPending{"有待处理文档?"}
-  HasPending -->|"否"| NoOp["索引保持不变，直接 DONE"]
-  HasPending -->|"是"| Parse["解析待处理文档"]
-  Parse --> ParseFail{"是否有文档解析成功?"}
-  ParseFail -->|"否 且 库内无 ready 文档"| NonRecov["NonRecoverableIngestError DOCUMENT_PARSE_FAILED"]
-  ParseFail -->|"否 但 库内已有 ready 文档"| KeepReady["KB 状态回 READY，error 记失败摘要"]
-  ParseFail -->|"是"| Chunk["父子分块（仅本轮文档）"]
-  Chunk --> Purge["purge_documents_index_data（清自身残留）"]
-  Purge --> Embed["向量化 + save_chunks 追加写入"]
-  Embed --> EmbedOk{"embedding 成功?"}
-  EmbedOk -->|"否"| Degraded["vector_degraded=true 仅 BM25"]
-  EmbedOk -->|"是"| Index["BM25 + 向量索引"]
-  Degraded --> GraphCheck{"graphrag.enabled?"}
-  Index --> GraphCheck
-  GraphCheck -->|"是"| Graph["GraphBuilder 增量建图（upsert 实体+引用）"]
-  GraphCheck -->|"否"| Finalize["按文档级判定收尾状态"]
-  Graph --> Finalize
-  Finalize --> Ready["库内存在 ready 文档 → KB 状态 READY"]
-  Finalize --> Failed2["库内无 ready 文档 → KB 状态 FAILED"]
-  NonRecov --> Failed["KB 状态 FAILED fast_fail"]
+```text
+uploaded -> parsing -> parsed -> indexing -> indexed
+                    \              \-> failed
+                     \-> failed
 ```
 
-### 解析阶段
+`parsed` 仅表示源内容提取成功，不表示可被检索，也不允许据此创建会话。生产问答只能读取已发布闭包中的 `indexed` 修订。
 
-来源（`KBSourceType`）：文件上传、ZIP、网页 URL、Confluence、飞书。
+知识库版本状态：
 
-- 单文档状态：`PARSING` → `READY` 或 `FAILED`
-- 纯图片 PDF：`knowledge_base.ocr.mode=vision_llm` 时通过 `ocr_pdf_to_blocks()` OCR
-- 超大文件：在 `knowledge_base.document.max_bytes`（默认 50 MB）处截断并告警 — 若未超过 nginx 限制则不会在 API 层拒绝
+```text
+building -> ready
+         -> degraded
+         -> failed
+```
 
-配置（`api/config.yaml`）：
+`ready` 和 `degraded` 是可发布终态。`degraded` 必须如实表达：强制的关键词检索与来源阅读仍可用，但一个或多个可选能力被禁用，并由版本/构建状态面展示具体原因。
+
+资源构建从持久化的 `queued`、`running` 进入唯一终态：`succeeded`、`degraded`、`failed` 或 `cancelled`。取消接口只写入取消请求，不在 HTTP 请求内伪造终态；worker 在安全检查点观察请求并负责最终收敛。
+
+## 候选构建流水线
+
+新增、移除、重建和重试都只操作候选版本：
+
+1. 锁定知识库变更边界，创建一个持久构建和一个 `building` 版本，父版本为当前 active。
+2. 复制父版本清单，再应用新增或移除。未变更修订按标识复用；源字节变化时创建新的不可变修订。
+3. 解析变更修订并持久化提取状态。
+4. 构建父子层级分块。
+5. 构建强制关键词索引。
+6. 在显式预算内按需构建向量与知识图。
+7. 验证完整候选闭包及其标识约束。
+8. 在同一事务中比较预期父版本与当前 active，收敛版本/构建状态，并通过切换 `active_version_id` 发布。
+
+发布时的 compare-and-swap 防止过期并发候选覆盖新版本。任务派发失败时，持久化 queued 构建交给 worker 恢复，不重复创建构建。
+
+## 失败语义
+
+| 失败位置 | 候选/构建结果 | 当前版本 |
+| --- | --- | --- |
+| 解析 | failed | 不变且持续可读 |
+| 分块 | failed | 不变且持续可读 |
+| 关键词索引 | failed | 不变且持续可读 |
+| 闭包验证 | failed | 不变且持续可读 |
+| 发布 CAS 或事务提交 | failed | 不变且持续可读 |
+| 向量索引 | 以 `degraded` 发布，`vector_search=false` | 原子前移 |
+| 图抽取、预算或截止时间 | 以 `degraded` 发布，`graph_search=false` | 原子前移 |
+
+强制阶段失败绝不清空 active 分块，也不会造成检索黑屏。可选阶段失败不能伪装能力可用；未完成图数据不会作为“半张图”暴露。
+
+当前降级原因包括 `DOCUMENT_PARTIAL`、`EMBEDDING_UNAVAILABLE` 以及 GraphRAG
+失败/预算原因。应从版本或构建状态读取。图接口在图能力不可用时只返回
+`capability=false` 和空节点、空边。
+
+## 检索与会话一致性
+
+Ask 和 Agent 创建会话时都先解析已发布版本，在最终事务边界再次检查，并与会话一起持久化唯一的知识库绑定。`ready_doc_count` 只是展示/兼容计数，不是授权条件。
+
+runner 会再次校验持久绑定，并将同一个 `version_id` 传给 retriever 与知识库工具。缺失、重复、资源不匹配、`building`、`failed` 或未发布绑定都会 fail closed。发布新版本不会静默改变已有会话。
+
+显式升级会话时，系统创建新的 current 绑定，并将被替代绑定保留为历史，从而保证审计和旧事件日志可复现。
+
+## 引用与来源展开
+
+每个检索结果和图证据都携带完整标识：
+
+```text
+(version_id, document_revision_id, doc_id, page_no, chunk_id)
+```
+
+对没有页码元数据的源格式，`page_no` 可以为空；其余标识仍必须解析到精确版本闭包。来源展开使用：
+
+```text
+GET /knowledge-bases/{kb_id}/versions/{version_id}/documents/{doc_id}/content
+```
+
+响应包含解析后的 `document_revision_id`、有序内容项、`next_cursor`、`total` 和
+`truncated`。游标绑定知识库、版本、文档、修订和页码过滤条件；改变其中任意字段后都不能复用旧游标。版本化接口是引用来源查看器的权威入口。
+
+## GraphRAG
+
+图抽取生成真实实体节点、关系边以及指向真实分块的证据。接口为：
+
+```text
+GET /knowledge-bases/{kb_id}/versions/{version_id}/graph
+```
+
+接口接受 `q`、`cursor`、`limit`，返回真实实体端点，不合成文档占位节点。每条边的端点都必须出现在返回节点集合中，证据使用同一五元引用标识。
+
+图构建受 `max_parent_chunks_per_doc`、`max_chunks`、`max_llm_calls`、
+`max_tokens`、并发度和持久截止时间约束。检查点保存候选版本、游标、累计调用/Token
+以及截止时间，重试不能重置预算。触达上限、超时或抽取失败会降低图能力，但不阻塞强制关键词索引发布。
+
+## 命令与运行恢复
+
+受所有权范围保护的 API 包括：
+
+```text
+GET  /knowledge-bases/{kb_id}/versions
+GET  /knowledge-bases/{kb_id}/versions/{version_id}
+POST /knowledge-bases/{kb_id}/builds
+POST /knowledge-bases/{kb_id}/builds/{build_id}/retry
+POST /knowledge-bases/{kb_id}/builds/{build_id}/cancel
+POST /knowledge-bases/{kb_id}/reindex
+```
+
+同一知识库同时只能有一个 active 候选。完全相同的命令具备幂等性。重试会基于失败候选的不可变清单创建新候选，而不是复活或覆盖旧版本。重建从 active 清单创建候选，绝不调用原地
+`clear_index_data`。
+
+移除文档只修改下一个候选清单，不会同步物理删除逻辑文档、修订、分块、图证据或旧版本。只有移除候选发布后 active 才会切换。
+
+worker 恢复会发现已持久化但未成功派发的 queued 构建，以及 lease/heartbeat 已失效的 stale running 构建；随后从持久状态继续或将候选收敛为终态，不改变 active 版本。
+
+## 保留与垃圾回收
+
+版本 GC 默认关闭：
 
 ```yaml
 knowledge_base:
-  ocr:
-    mode: vision_llm  # vision_llm | rapidocr | off
-    max_pages: 50
-  document:
-    max_bytes: 52428800
-    max_pages: 1000
-  graphrag:
-    enabled: true
+  version_gc_enabled: false
+  version_retention_count: 10
+  version_retention_min_days: 30
+  version_gc_batch_size: 50
 ```
 
-### 分块与索引
+scheduler 在 leader lease 下执行有界 GC。当前 active、被非终态构建引用的候选，以及被任意会话绑定引用的版本（**包括 `is_current=false` 的历史绑定**）都是本次回收的永久根。父版本指针对 GC 安全，删除顺序维护图数据、分块、清单、修订和逻辑文档的外键。只有没有任何保留版本引用时，共享修订/文档才可回收。GC 会报告保护数量以及回收行数/字节。
 
-- `KBChunker` 生成父子块（`parent_max_chars`、`child_max_chars`、`overlap`），只处理本轮 `pending`/`failed` 文档的内容
-- `knowledge_base.vector_enabled=true` 时对子块做 embedding
-- embedding 失败设置 `vector_degraded=true`；BM25/混合检索仍可用
-- `save_chunks` 按有无 embedding 分两路、每批 500 条批量 `INSERT`（`db_knowledge_base_repository.py`），不再逐条写入
-- SSE `step` 事件：`parse`、`chunk`、`index`、`graph`（启用时）
+启用 GC 前，应先观察一个无回收的运行窗口，并根据审计要求设定保留数量与最短天数。
 
-### GraphRAG（可选，增量合并）
+## 迁移与兼容
 
-`graphrag.enabled=true` 时在索引写入后运行 `GraphBuilder`，只对**本轮新处理文档**的父块做实体/关系抽取。GraphRAG LLM 不可用会记录日志并跳过 — 摄取仍可能达到 `READY`。
+版本化 schema 使用线性 Alembic 链：
 
-实体合并按 `(kb_id, name)` upsert（`upsert_entities`）：同名实体已存在则复用其 id，只补写一条来源引用行；不存在则新建实体。关系照常插入并带 `chunk_id` 溯源；跨文档关系由实体合并自然产生，无需特殊处理。详见下节「实体来源引用表」。
-
-## 实体来源引用表（knowledge_entity_refs）
-
-增量删除文档需要知道「一个实体是否还被其他文档支撑」，为此引入引用表记录实体的来源文档：
-
-| 列 | 类型 | 说明 |
-|----|------|------|
-| `id` | varchar PK | |
-| `kb_id` | varchar | FK `knowledge_bases.id`，`ondelete=CASCADE` |
-| `entity_id` | varchar | FK `knowledge_entities.id`，`ondelete=CASCADE` |
-| `doc_id` | varchar | FK `knowledge_documents.id`，`ondelete=CASCADE` |
-| `created_at` | timestamp | |
-
-`UNIQUE(entity_id, doc_id)`，并各建一条 `doc_id`/`entity_id` 索引（迁移 `a5b6c7d8e9f0_create_knowledge_entity_refs`）。写入走 `save_entity_refs`（`INSERT … ON CONFLICT (entity_id, doc_id) DO NOTHING`），同一实体被同一文档多次命中不会重复计数。
-
-**存量回填**：迁移在建表后立即执行 `INSERT … SELECT DISTINCT`，用 `knowledge_relations.chunk_id → knowledge_chunks.doc_id` 反推每条关系两端实体（`src_entity_id`/`dst_entity_id`）各自关联的文档，`id` 用 `md5(entity_id || ':' || doc_id)` 保证幂等可重跑。不出现在任何关系里的**孤儿实体**无法反推来源，保守不回填——它们没有引用行，因此也不会进入删除文档时的候选集，不会被误删；这类存量孤儿实体只在手动 `reindex` 时随 `clear_index_data` 被清除并重建。
-
-## 删除文档语义
-
-删除单个文档（`DELETE /knowledge-bases/{id}/documents/{doc_id}`）**不再触发 reindex**，而是在单个 UoW 事务内同步精确清理，顺序敏感（`purge_documents_index_data`）：
-
-1. 删除该文档 chunks 关联的关系（按 `chunk_id IN (该文档的 chunks)` 子查询）。
-2. 删除该文档的实体引用行（`doc_id = ?`），删除前先查出被删行的 `entity_id` 集合作为候选。
-3. 在候选集合内删除引用计数归零的实体：`DELETE FROM knowledge_entities WHERE id IN (候选) AND NOT EXISTS (SELECT 1 FROM knowledge_entity_refs WHERE entity_id = knowledge_entities.id)`；候选集合的范围保证「本来就没有引用行的存量孤儿实体」不会被这一步误删。归零实体的残余关系由 FK `ondelete=CASCADE` 一并清除。
-4. 删除该文档的 chunks，最后删除文档行本身。
-
-效果：该文档独占的 chunks、关系、实体全部消失；被其他文档共享的实体保留。删除后 `kb.doc_count`/`kb.chunk_count`/`kb.ready_doc_count` 重新统计；若删空全部文档则 KB 回到 `PENDING` 并清空 `ingest_task_id`，否则按下节的库级判定收敛到 `READY` 或 `FAILED`。
-
-## 检索栈（KB vs Codebase）
-
-知识库检索有意设计得比代码库语义搜索更复杂：
-
-```mermaid
-flowchart TB
-  subgraph kb ["知识库 HybridRetriever"]
-    Q1["用户查询"] --> V1["向量 top-k"]
-    Q1 --> B1["BM25 top-k"]
-    V1 --> RRF["RRF 融合"]
-    B1 --> RRF
-    RRF --> Graph["GraphRAG 扩展"]
-    Graph --> Parent["父块扩展"]
-    Parent --> Rerank["LLM rerank"]
-    Rerank --> Out1["kb_search 引用"]
-  end
-  subgraph cb ["代码库语义检索"]
-    Q2["用户查询"] --> Embed2["查询 embedding"]
-    Embed2 --> Vec2["pgvector chunk 检索"]
-    Vec2 --> Out2["semantic_search / read_code"]
-  end
+```text
+b8d9e0f1a2b3 -> c7d8e9f0a1b2 -> d8e9f0a1b2c3 (head)
 ```
 
-| 维度 | 知识库 | 代码库 |
-|------|--------|--------|
-| 向量索引 | `knowledge_base.vector_enabled`（默认 true） | 可用时建向量；失败时 `vector_degraded` |
-| 全文 | BM25 + `zh_tokenizer` | 符号索引 + 静态分析 |
-| 图 | 可选 GraphRAG | 静态分析依赖边 |
-| Rerank | LLM rerank（`knowledge_base.rerank`） | 无 |
-| Agent 工具 | `KnowledgeBaseTool.kb_search` | `CodebaseTool.semantic_search` |
+`b8d9e0f1a2b3` 标记兼容边界前已 ready 的资源。`c7d8e9f0a1b2` 扩展
+schema、回填不可变 legacy-v1 版本/修订/清单，并为派生数据补充版本标识。
+`d8e9f0a1b2c3` 使父版本关系和 GC 查询索引安全。当前唯一 head 为
+`d8e9f0a1b2c3`，其父版本是 `c7d8e9f0a1b2`。
 
-见 [Codebase 重新索引](codebase-reindex.zh-CN.md) 了解更轻量的代码库检索路径。
-
-## 状态机与问答门槛
-
-文档状态机不变：`PENDING → PARSING → READY | FAILED`。
-
-KB 状态机（`PENDING → PARSING → CHUNKING → INDEXING → GRAPH_BUILDING → READY | FAILED`）也不变，但**库级失败判定是文档级的**：一轮摄取结束时（`_finalize_kb`），只要库内**存在任意一个 `READY` 文档**，KB 最终状态就是 `READY`；只有库内**没有任何 `READY` 文档**才置为 `FAILED`。部分文档失败时，KB 的 `error` 字段写入摘要（如「2 个文档解析或索引失败」），前端按 warning 展示而非致命错误，单个文档自身的失败原因记录在该文档的 `error` 字段。
-
-`KnowledgeBase.ready_doc_count`（`count_ready_documents` 聚合 `status='ready'` 的文档数，与既有 `doc_count` 并列返回）是「能否开始问答」的门槛：`create_session_for_kb` 要求 `ready_doc_count > 0`，前端「开始问答」按钮同样以 `ready_doc_count > 0` 为条件（而非等待整库 `status === READY`）。这使得增量摄取新文档、或新文档解析失败时，只要库内已有 ready 文档，检索与问答全程不受影响。
-
-## 失败与恢复
-
-| 失败类型 | 错误码 | Worker 行为 |
-|----------|--------|-------------|
-| 全部文档解析失败且库内无 ready 文档 | `DOCUMENT_PARSE_FAILED` | `NonRecoverableIngestError` → `fast_fail`，不自动重试 |
-| 本轮文档解析/分块失败但库内已有 ready 文档 | — | 失败文档标记 `FAILED`，KB 回到 `READY`，`error` 记失败摘要，索引数据未受影响 |
-| 运行中瞬态基础设施故障 | `TASK_INFRA_FAILED` 等 | Agent 任务走 `prepare_recoverable_retry`；KB 摄取若任务终态 failed 则 `_finalize_kb_ingest_failure` |
-| 卡住摄取（孤儿任务） | — | `_reconcile_stuck_kb_ingests()` 每 30 秒 + 启动时 |
-
-`NonRecoverableIngestError`（`ingest_errors.py`）表示内容损坏或不可解析 — Worker 调用 `_finalize_kb_ingest_failure()` 设置 `KBStatus.FAILED` 并清除 `ingest_task_id`。
-
-可恢复 Agent 重试（`RecoverableTaskInputUnavailable`、检查点恢复）适用于**聊天 Agent 任务**，不适用于「全部解析失败」的 KB 摄取。
-
-## 上传与大小限制
-
-| 层级 | 限制 | 说明 |
-|------|------|------|
-| Nginx 网关 | 200 MB | `nginx/nginx.conf` 中 `client_max_body_size 200m` |
-| KB 文档 | 默认 50 MB | AppConfig `knowledge_base.document.max_bytes` |
-| 市场资源 | 默认 25 MB | `server.marketplace_max_upload_bytes` |
-
-勿对所有功能统一写「200 MB 上传」— KB 文档有更低的 AppConfig 上限。
-
-## 相关文档
-
-- [教程：内部知识库](../tutorials/02-internal-knowledge-base.zh-CN.md)
-- [Codebase 向量降级与重新索引](codebase-reindex.zh-CN.md)
-- [任务恢复](task-recovery.zh-CN.md)
-- [事件系统](events.zh-CN.md)
-- [配置来源治理](config-source-governance.zh-CN.md)
-- [生产部署](../operations/deployment.zh-CN.md)
+旧 readiness 字段和无版本来源接口仍保留兼容，但所有新写入都必须明确候选版本标识，所有新的生产读取都必须沿已发布的会话/版本绑定执行。

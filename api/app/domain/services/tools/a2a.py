@@ -13,6 +13,11 @@ from app.application.errors.exceptions import ServerRequestsError
 from app.domain.external.connection_pool import A2AConnectionPoolPort
 from app.domain.models.app_config import A2AConfig
 from app.domain.models.tool_result import ToolResult
+from app.domain.models.tool_policy import (
+    CONSERVATIVE_TOOL_POLICY,
+    ToolDescriptor,
+    ToolExecutionPolicy,
+)
 from app.domain.utils.app_config_filter import filter_enabled_a2a_config
 from app.domain.utils.outbound_url import resolve_outbound_url
 from app.infrastructure.security.outbound_http import (
@@ -261,12 +266,35 @@ class A2ATool(BaseTool):
         self._initialized: bool = False
         self.manager: Optional[A2AClientManager] = None
         self._uses_pool: bool = False
+        self._tool_policies: Dict[str, ToolExecutionPolicy] = {}
+
+    @staticmethod
+    def _aggregate_policy(
+            servers,
+            function_name: str,
+    ) -> ToolExecutionPolicy:
+        configured = [
+            server.tool_policies.get(function_name)
+            for server in servers
+            if server.enabled
+        ]
+        if not configured or any(policy is None for policy in configured):
+            return CONSERVATIVE_TOOL_POLICY
+        first = configured[0]
+        if any(policy != first for policy in configured[1:]):
+            return CONSERVATIVE_TOOL_POLICY
+        return first
 
     async def initialize(self, a2a_config: Optional[A2AConfig] = None) -> None:
         """初始化A2A工具包（软失败，不向外抛异常）"""
         if self._initialized:
             return
         filtered = filter_enabled_a2a_config(a2a_config) if a2a_config else A2AConfig()
+        self._tool_policies = {
+            name: self._aggregate_policy(filtered.a2a_servers, name)
+            for name in ("get_remote_agent_cards", "call_remote_agent")
+        }
+        self._tools_cache = None
         try:
             self.manager = await self._connection_pool.acquire(filtered)
             self._uses_pool = True
@@ -275,6 +303,16 @@ class A2ATool(BaseTool):
             self.manager = None
             self._uses_pool = False
         self._initialized = True
+
+    def get_tool_descriptor(self, name: str) -> ToolDescriptor:
+        descriptor = super().get_tool_descriptor(name)
+        return ToolDescriptor(
+            name=descriptor.name,
+            schema=descriptor.schema,
+            method=descriptor.method,
+            tool_pack=descriptor.tool_pack,
+            policy=self._tool_policies.get(name, descriptor.policy),
+        )
 
     @tool(
         name="get_remote_agent_cards",
@@ -329,8 +367,12 @@ class A2ATool(BaseTool):
             self.manager = None
             self._initialized = False
             self._uses_pool = False
+            self._tool_policies = {}
+            self._tools_cache = None
             return
         if self.manager:
             await self.manager.cleanup()
         self.manager = None
         self._initialized = False
+        self._tool_policies = {}
+        self._tools_cache = None

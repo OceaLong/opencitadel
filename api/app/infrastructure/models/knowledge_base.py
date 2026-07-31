@@ -3,7 +3,19 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +36,19 @@ from .base import Base
 
 class KnowledgeBaseModel(Base):
     __tablename__ = "knowledge_bases"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["active_version_id", "id"],
+            [
+                "knowledge_base_versions.id",
+                "knowledge_base_versions.knowledge_base_id",
+            ],
+            name="fk_knowledge_bases_active_version_owner",
+            use_alter=True,
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     name: Mapped[str] = mapped_column(String(512), nullable=False, server_default=text("''"))
@@ -33,6 +58,13 @@ class KnowledgeBaseModel(Base):
     ingest_task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     vector_degraded: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    legacy_v1_migrated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    active_version_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
     settings: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     owner_user_id: Mapped[Optional[str]] = mapped_column(
         String(255),
@@ -61,6 +93,8 @@ class KnowledgeBaseModel(Base):
             ingest_task_id=self.ingest_task_id,
             error=self.error,
             vector_degraded=bool(self.vector_degraded),
+            legacy_v1_migrated=bool(self.legacy_v1_migrated),
+            active_version_id=self.active_version_id,
             settings=self.settings or {},
             owner_user_id=self.owner_user_id,
             team_id=self.team_id,
@@ -79,6 +113,8 @@ class KnowledgeBaseModel(Base):
             ingest_task_id=kb.ingest_task_id,
             error=kb.error,
             vector_degraded=kb.vector_degraded,
+            legacy_v1_migrated=kb.legacy_v1_migrated,
+            active_version_id=kb.active_version_id,
             settings=kb.settings,
             owner_user_id=kb.owner_user_id,
             team_id=kb.team_id,
@@ -90,6 +126,11 @@ class KnowledgeBaseModel(Base):
 class KnowledgeDocumentModel(Base):
     __tablename__ = "knowledge_documents"
     __table_args__ = (
+        UniqueConstraint(
+            "id",
+            "kb_id",
+            name="uq_knowledge_documents_id_kb",
+        ),
         Index("ix_kb_documents_kb_status", "kb_id", "status"),
     )
 
@@ -134,9 +175,32 @@ class KnowledgeDocumentModel(Base):
 class KnowledgeChunkModel(Base):
     __tablename__ = "knowledge_chunks"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["version_id", "kb_id"],
+            [
+                "knowledge_base_versions.id",
+                "knowledge_base_versions.knowledge_base_id",
+            ],
+            name="fk_knowledge_chunks_version_owner",
+        ),
+        ForeignKeyConstraint(
+            ["version_id", "doc_id"],
+            [
+                "knowledge_base_version_documents.version_id",
+                "knowledge_base_version_documents.document_id",
+            ],
+            name="fk_knowledge_chunks_manifest_membership",
+        ),
+        UniqueConstraint(
+            "version_id",
+            "id",
+            name="uq_kb_chunks_version_id",
+        ),
         Index("ix_kb_chunks_kb_level", "kb_id", "level"),
         Index("ix_kb_chunks_parent", "parent_id"),
         Index("ix_kb_chunks_doc_ordinal", "doc_id", "ordinal"),
+        Index("ix_kb_chunks_version_doc", "version_id", "doc_id"),
+        Index("ix_kb_chunks_version", "version_id"),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
@@ -145,6 +209,10 @@ class KnowledgeChunkModel(Base):
     )
     doc_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    version_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
     )
     parent_id: Mapped[Optional[str]] = mapped_column(
         String(255), ForeignKey("knowledge_chunks.id", ondelete="CASCADE"), nullable=True
@@ -160,6 +228,7 @@ class KnowledgeChunkModel(Base):
             id=self.id,
             kb_id=self.kb_id,
             doc_id=self.doc_id,
+            version_id=self.version_id,
             parent_id=self.parent_id,
             level=ChunkLevel(self.level),
             content=self.content or "",
@@ -172,14 +241,43 @@ class KnowledgeChunkModel(Base):
 class KnowledgeEntityModel(Base):
     __tablename__ = "knowledge_entities"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["version_id", "kb_id"],
+            [
+                "knowledge_base_versions.id",
+                "knowledge_base_versions.knowledge_base_id",
+            ],
+            name="fk_knowledge_entities_version_owner",
+        ),
+        UniqueConstraint(
+            "version_id",
+            "id",
+            name="uq_kb_entities_version_id",
+        ),
         Index("ix_kb_entities_name", "kb_id", "name"),
+        Index("ix_kb_entities_version_name", "version_id", "normalized_name"),
+        Index(
+            "uq_kb_entities_version_normalized_name_type",
+            "version_id",
+            "normalized_name",
+            "type",
+            unique=True,
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     kb_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False
     )
+    version_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
     name: Mapped[str] = mapped_column(String(512), nullable=False)
+    normalized_name: Mapped[Optional[str]] = mapped_column(
+        String(512),
+        nullable=True,
+    )
     type: Mapped[str] = mapped_column(String(128), nullable=False, server_default=text("''"))
     description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
 
@@ -187,7 +285,9 @@ class KnowledgeEntityModel(Base):
         return KnowledgeEntity(
             id=self.id,
             kb_id=self.kb_id,
+            version_id=self.version_id,
             name=self.name,
+            normalized_name=self.normalized_name,
             type=self.type or "",
             description=self.description or "",
         )
@@ -196,13 +296,42 @@ class KnowledgeEntityModel(Base):
 class KnowledgeRelationModel(Base):
     __tablename__ = "knowledge_relations"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["version_id", "kb_id"],
+            [
+                "knowledge_base_versions.id",
+                "knowledge_base_versions.knowledge_base_id",
+            ],
+            name="fk_knowledge_relations_version_owner",
+        ),
+        ForeignKeyConstraint(
+            ["version_id", "src_entity_id"],
+            ["knowledge_entities.version_id", "knowledge_entities.id"],
+            name="fk_knowledge_relations_version_src",
+        ),
+        ForeignKeyConstraint(
+            ["version_id", "dst_entity_id"],
+            ["knowledge_entities.version_id", "knowledge_entities.id"],
+            name="fk_knowledge_relations_version_dst",
+        ),
+        ForeignKeyConstraint(
+            ["version_id", "chunk_id"],
+            ["knowledge_chunks.version_id", "knowledge_chunks.id"],
+            name="fk_knowledge_relations_version_chunk",
+        ),
         Index("ix_kb_relations_src", "kb_id", "src_entity_id"),
         Index("ix_kb_relations_dst", "kb_id", "dst_entity_id"),
+        Index("ix_kb_relations_version_src", "version_id", "src_entity_id"),
+        Index("ix_kb_relations_version_dst", "version_id", "dst_entity_id"),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     kb_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False
+    )
+    version_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
     )
     src_entity_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("knowledge_entities.id", ondelete="CASCADE"), nullable=False
@@ -219,6 +348,7 @@ class KnowledgeRelationModel(Base):
         return KnowledgeRelation(
             id=self.id,
             kb_id=self.kb_id,
+            version_id=self.version_id,
             src_entity_id=self.src_entity_id,
             dst_entity_id=self.dst_entity_id,
             relation=self.relation or "",
@@ -229,14 +359,41 @@ class KnowledgeRelationModel(Base):
 class KnowledgeEntityRefModel(Base):
     __tablename__ = "knowledge_entity_refs"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["version_id", "kb_id"],
+            [
+                "knowledge_base_versions.id",
+                "knowledge_base_versions.knowledge_base_id",
+            ],
+            name="fk_knowledge_entity_refs_version_owner",
+        ),
+        ForeignKeyConstraint(
+            ["version_id", "doc_id"],
+            [
+                "knowledge_base_version_documents.version_id",
+                "knowledge_base_version_documents.document_id",
+            ],
+            name="fk_knowledge_entity_refs_manifest_membership",
+        ),
+        ForeignKeyConstraint(
+            ["version_id", "entity_id"],
+            ["knowledge_entities.version_id", "knowledge_entities.id"],
+            name="fk_knowledge_entity_refs_version_entity",
+        ),
         UniqueConstraint("entity_id", "doc_id", name="uq_kb_entity_refs_entity_doc"),
         Index("ix_kb_entity_refs_doc", "doc_id"),
         Index("ix_kb_entity_refs_entity", "entity_id"),
+        Index("ix_kb_entity_refs_version_doc", "version_id", "doc_id"),
+        Index("ix_kb_entity_refs_version_entity", "version_id", "entity_id"),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     kb_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False
+    )
+    version_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
     )
     entity_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("knowledge_entities.id", ondelete="CASCADE"), nullable=False
@@ -249,4 +406,10 @@ class KnowledgeEntityRefModel(Base):
     )
 
     def to_domain(self) -> KnowledgeEntityRef:
-        return KnowledgeEntityRef(id=self.id, kb_id=self.kb_id, entity_id=self.entity_id, doc_id=self.doc_id)
+        return KnowledgeEntityRef(
+            id=self.id,
+            kb_id=self.kb_id,
+            version_id=self.version_id,
+            entity_id=self.entity_id,
+            doc_id=self.doc_id,
+        )

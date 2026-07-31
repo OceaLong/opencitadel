@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.domain.models.file import File
 from app.domain.models.codebase import SessionMode
 from app.domain.models.session import SessionStatus
+from app.domain.models.resource_governance import ResourceBindingProjection
 from app.interfaces.schemas.event import AgentSSEEvent
 from app.interfaces.schemas.skill import SkillSummaryResponse
 from app.interfaces.schemas.llm_model import LLMModelResponse
@@ -20,7 +21,9 @@ class CreateSessionRequest(BaseModel):
     skill_id: Optional[str] = None
     thinking_enabled: Optional[bool] = None
     codebase_id: Optional[str] = None
+    codebase_version_id: Optional[str] = None
     knowledge_base_id: Optional[str] = None
+    knowledge_base_version_id: Optional[str] = None
     mode: Optional[SessionMode] = None
     operator_scope: Optional[str] = Field(
         default=None,
@@ -39,6 +42,25 @@ class CreateSessionRequest(BaseModel):
 class CreateSessionResponse(BaseModel):
     """创建会话响应结构"""
     session_id: str  # 会话id
+
+
+class UpgradeResourceBindingRequest(BaseModel):
+    target_version_id: str
+
+
+class ResourceBindingResponse(BaseModel):
+    binding_id: str
+    resource_kind: str
+    resource_id: str
+    version_id: str
+    is_current: bool
+    supersedes_binding_id: Optional[str] = None
+
+
+class UpgradeResourceBindingResponse(BaseModel):
+    old_binding_id: str
+    new_binding_id: str
+    current_version_id: str
 
 
 class ClarifyAnswer(BaseModel):
@@ -61,6 +83,7 @@ class ListSessionItem(BaseModel):
     codebase_id: Optional[str] = None
     knowledge_base_id: Optional[str] = None
     mode: Optional[SessionMode] = None
+    resource_bindings: List[ResourceBindingProjection] = Field(default_factory=list)
 
 
 class ListSessionResponse(BaseModel):
@@ -145,6 +168,7 @@ class GetSessionResponse(BaseModel):
     codebase_id: Optional[str] = None
     knowledge_base_id: Optional[str] = None
     mode: Optional[SessionMode] = None
+    resource_bindings: List[ResourceBindingProjection] = Field(default_factory=list)
 
 
 class GetSessionEventsResponse(BaseModel):

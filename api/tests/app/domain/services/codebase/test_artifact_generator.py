@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from app.domain.models.codebase import (
+    CodeEvidenceRef,
     CodebaseEdge,
     CodebaseFile,
     CodebaseSymbol,
@@ -14,18 +15,21 @@ def test_call_chain_node_locations_include_path_and_dedupe():
     file_a = CodebaseFile(
         id="file-a",
         codebase_id="cb-1",
+        version_id="cbv1",
         path="src/captcha.py",
         language="python",
     )
     file_b = CodebaseFile(
         id="file-b",
         codebase_id="cb-1",
+        version_id="cbv1",
         path="src/gateway.py",
         language="python",
     )
     foo = CodebaseSymbol(
         id="sym-foo",
         codebase_id="cb-1",
+        version_id="cbv1",
         file_id="file-a",
         name="checkCaptcha",
         kind=SymbolKind.FUNCTION,
@@ -34,6 +38,7 @@ def test_call_chain_node_locations_include_path_and_dedupe():
     bar = CodebaseSymbol(
         id="sym-bar",
         codebase_id="cb-1",
+        version_id="cbv1",
         file_id="file-b",
         name="routerFunction",
         kind=SymbolKind.FUNCTION,
@@ -45,17 +50,43 @@ def test_call_chain_node_locations_include_path_and_dedupe():
             src_symbol_id="sym-foo",
             dst_symbol_id="sym-bar",
             kind=EdgeKind.CALL,
+            version_id="cbv1",
+            evidence=[
+                CodeEvidenceRef(
+                    version_id="cbv1",
+                    file_id="file-a",
+                    path="src/captcha.py",
+                    start_line=101,
+                    end_line=101,
+                    symbol_id="sym-foo",
+                    analyzer="test",
+                    confidence=1.0,
+                )
+            ],
         ),
         CodebaseEdge(
             codebase_id="cb-1",
             src_symbol_id="sym-foo",
             dst_symbol_id="sym-bar",
             kind=EdgeKind.CALL,
+            version_id="cbv1",
+            evidence=[
+                CodeEvidenceRef(
+                    version_id="cbv1",
+                    file_id="file-a",
+                    path="src/captcha.py",
+                    start_line=101,
+                    end_line=101,
+                    symbol_id="sym-foo",
+                    analyzer="test",
+                    confidence=1.0,
+                )
+            ],
         ),
     ]
 
     gen = ArtifactGenerator()
-    artifacts = gen.generate_all(
+    result = gen.generate_all(
         "cb-1",
         "demo",
         [file_a, file_b],
@@ -63,6 +94,7 @@ def test_call_chain_node_locations_include_path_and_dedupe():
         edges,
         {"python": 2},
     )
+    artifacts = result.artifacts
     call_chain = next(a for a in artifacts if a.kind.value == "call_chain")
     locations = call_chain.meta["node_locations"]
 

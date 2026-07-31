@@ -5,6 +5,7 @@ from typing import Optional
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
 from .base import BaseTool, tool
+from .capability_policy import SHELL_INTERACTIVE
 
 
 class ShellTool(BaseTool):
@@ -34,6 +35,7 @@ class ShellTool(BaseTool):
             },
         },
         required=["session_id", "exec_dir", "command"],
+        policy=SHELL_INTERACTIVE,
     )
     async def shell_execute(
             self,
@@ -54,6 +56,7 @@ class ShellTool(BaseTool):
             },
         },
         required=["session_id"],
+        policy=SHELL_INTERACTIVE,
     )
     async def shell_read_output(self, session_id: str) -> ToolResult:
         """根据会话id查看Shell会话内容"""
@@ -73,6 +76,7 @@ class ShellTool(BaseTool):
             }
         },
         required=["session_id"],
+        policy=SHELL_INTERACTIVE,
     )
     async def shell_wait_process(self, session_id: str, seconds: Optional[int] = None) -> ToolResult:
         """等待指定shell会话中正在运行的进程返回"""
@@ -96,6 +100,7 @@ class ShellTool(BaseTool):
             }
         },
         required=["session_id", "input_text", "press_enter"],
+        policy=SHELL_INTERACTIVE,
     )
     async def shell_write_input(
             self,
@@ -116,6 +121,7 @@ class ShellTool(BaseTool):
             },
         },
         required=["session_id"],
+        policy=SHELL_INTERACTIVE,
     )
     async def shell_kill_process(self, session_id: str) -> ToolResult:
         """在指定Shell会话中终止正在运行的进程"""

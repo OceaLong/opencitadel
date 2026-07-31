@@ -15,6 +15,9 @@ class CosObjectStorageAdapter(ObjectStoragePort):
     async def get_bytes(self, key: str) -> bytes:
         return await self._cos.get_bytes(key)
 
+    async def delete_bytes(self, key: str) -> None:
+        await self._cos.delete_bytes(key)
+
 
 class MinioObjectStorageAdapter(ObjectStoragePort):
     def __init__(self, minio: Minio) -> None:
@@ -25,3 +28,6 @@ class MinioObjectStorageAdapter(ObjectStoragePort):
 
     async def get_bytes(self, key: str) -> bytes:
         return await self._minio.get_bytes(key)
+
+    async def delete_bytes(self, key: str) -> None:
+        await self._minio.delete_bytes(key)

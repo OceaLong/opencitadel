@@ -6,6 +6,7 @@ from typing import Awaitable, Callable, List, Optional
 from app.domain.models.event import BaseEvent
 from app.domain.models.tool_result import ToolResult
 from app.domain.services.tools.base import BaseTool, tool
+from app.domain.services.tools.capability_policy import WORKSPACE_WRITE
 
 WriteArtifactFn = Callable[..., Awaitable[tuple[dict, BaseEvent]]]
 FinalizeArtifactFn = Callable[[str], Awaitable[tuple[dict, BaseEvent]]]
@@ -75,6 +76,7 @@ class ArtifactTool(BaseTool):
             },
         },
         required=["kind", "title"],
+        policy=WORKSPACE_WRITE,
     )
     async def artifact_write(
             self,
@@ -119,6 +121,7 @@ class ArtifactTool(BaseTool):
             },
         },
         required=["artifact_id"],
+        policy=WORKSPACE_WRITE,
     )
     async def artifact_finalize(self, artifact_id: str) -> ToolResult:
         try:

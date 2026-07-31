@@ -17,12 +17,19 @@ from app.application.services.app_config_service import AppConfigService
 from app.application.services.auth_service import AuthService
 from app.application.services.audit_service import AuditService
 from app.application.services.codebase_service import CodebaseService
+from app.application.services.codebase_version_service import CodebaseVersionService
+from app.application.services.resource_binding_service import ResourceBindingService
+from app.application.services.resource_build_service import ResourceBuildService
+from app.application.services.resource_guard_service import ResourceGuardService
 from app.application.services.compliance_service import ComplianceService
 from app.application.services.config_provider import AppConfigProvider, create_app_config_provider
 from app.application.services.evidence_service import EvidenceService
 from app.application.services.integration_server_service import A2AServerConfigService, MCPServerService
 from app.application.services.file_service import FileService
 from app.application.services.knowledge_base_service import KnowledgeBaseService
+from app.application.services.knowledge_version_service import (
+    KnowledgeVersionService,
+)
 from app.application.services.llm_endpoint_service import LLMEndpointService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
@@ -30,6 +37,7 @@ from app.application.services.marketplace_service import MarketplaceService
 from app.application.services.memory_service import MemoryService
 from app.application.services.quota_service import QuotaService
 from app.application.services.session_service import SessionService
+from app.domain.services.resource_version_provider import ResourceVersionProviderRegistry
 from app.application.services.session_state_service import SessionStateService
 from app.application.services.service_api_key_service import ServiceApiKeyService
 from app.application.services.skill_service import SkillService
@@ -58,6 +66,9 @@ from app.infrastructure.external.json_parser.repair_json_parser import RepairJSO
 from app.infrastructure.external.sandbox.sandbox_driver import get_sandbox_class
 from app.infrastructure.external.search.bing_search import BingSearchEngine
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
+from app.infrastructure.external.resource_build_event_notifier import (
+    RedisResourceBuildEventNotifier,
+)
 from app.infrastructure.repositories.db_uow import DBUnitOfWork
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.security.cookie import AuthCookieManager
@@ -347,12 +358,47 @@ class BaseContainer(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         file_storage=file_storage,
     )
+    codebase_version_provider = providers.Singleton(
+        CodebaseVersionService,
+        uow_factory=uow_factory,
+    )
+    knowledge_base_version_provider = providers.Singleton(
+        KnowledgeVersionService,
+        uow_factory=uow_factory,
+    )
+    resource_version_providers = providers.Singleton(
+        ResourceVersionProviderRegistry,
+        providers=providers.List(
+            codebase_version_provider,
+            knowledge_base_version_provider,
+        ),
+    )
+    resource_binding_service = providers.Singleton(
+        ResourceBindingService,
+        uow_factory=uow_factory,
+        providers=resource_version_providers,
+    )
+    resource_build_event_notifier = providers.Singleton(
+        RedisResourceBuildEventNotifier,
+        redis=redis,
+    )
+    resource_build_service = providers.Singleton(
+        ResourceBuildService,
+        uow_factory=uow_factory,
+        notifier=resource_build_event_notifier,
+    )
+    resource_guard = providers.Singleton(
+        ResourceGuardService,
+        providers=resource_version_providers,
+    )
     session_service = providers.Singleton(
         SessionService,
         uow_factory=uow_factory,
         sandbox_cls=sandbox_cls,
         session_list_notifier=session_list_notifier,
         task_state_port=task_state_port,
+        resource_guard=resource_guard,
+        resource_binding_service=resource_binding_service,
     )
     marketplace_service = providers.Factory(
         MarketplaceService,
@@ -365,11 +411,17 @@ class BaseContainer(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         sandbox_cls=sandbox_cls,
         file_storage=file_storage,
+        resource_guard=resource_guard,
+        resource_binding_service=resource_binding_service,
+        codebase_version_service=codebase_version_provider,
     )
     knowledge_base_service = providers.Singleton(
         KnowledgeBaseService,
         uow_factory=uow_factory,
         file_storage=file_storage,
+        resource_guard=resource_guard,
+        resource_binding_service=resource_binding_service,
+        task_state_port=task_state_port,
     )
     artifact_service = providers.Singleton(
         ArtifactService,

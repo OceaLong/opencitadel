@@ -4,11 +4,19 @@
 import logging
 from typing import Callable, Optional
 
+from app.application.errors.exceptions import NotFoundError
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.codebase import ArtifactKind
 from app.domain.repositories.uow import IUnitOfWork
-from app.domain.services.codebase.vector_service import CodebaseVectorService
+from app.domain.services.codebase.snapshot_service import (
+    CodeSourceProvenance,
+    CodeSourceReadResult,
+    VersionedCodeSource,
+)
+from app.domain.services.codebase.hybrid_retriever import HybridCodeRetriever
+from app.domain.services.codebase.source_validator import normalize_contained_path
 from app.domain.services.tools.base import BaseTool, tool
+from app.domain.services.tools.capability_policy import CODE_READ
 from app.domain.utils.sandbox_result import file_content
 
 logger = logging.getLogger(__name__)
@@ -23,13 +31,20 @@ class CodebaseTool(BaseTool):
             codebase_id: str,
             sandbox: Sandbox,
             workspace_path: str = "/home/ubuntu/codebase",
+            version_id: Optional[str] = None,
+            source_reader: Optional[VersionedCodeSource] = None,
+            base_version_id: Optional[str] = None,
+            retriever: Optional[HybridCodeRetriever] = None,
     ) -> None:
         super().__init__()
         self._uow_factory = uow_factory
         self._codebase_id = codebase_id
         self._sandbox = sandbox
         self._workspace = workspace_path.rstrip("/")
-        self._vector = CodebaseVectorService()
+        self._version_id = version_id
+        self._source_reader = source_reader
+        self._base_version_id = base_version_id or version_id
+        self._retriever = retriever or HybridCodeRetriever(uow_factory)
 
     @tool(
         name="semantic_search",
@@ -39,16 +54,31 @@ class CodebaseTool(BaseTool):
             "limit": {"type": "integer", "description": "返回结果数量，默认5"},
         },
         required=["query"],
+        policy=CODE_READ,
     )
     async def semantic_search(self, query: str, limit: int = 5) -> str:
-        embedding = await self._vector.embed(query)
-        async with self._uow_factory() as uow:
-            results = await uow.codebase.search_chunks(self._codebase_id, embedding, limit=limit)
-            files = {f.id: f for f in await uow.codebase.list_files(self._codebase_id)}
+        if not self._version_id:
+            return "代码库版本未绑定，无法执行版本隔离检索"
+        response = await self._retriever.retrieve(
+            self._codebase_id,
+            self._version_id,
+            query,
+            limit,
+        )
         lines = []
-        for chunk, score in results:
-            path = files[chunk.file_id].path if chunk.file_id and chunk.file_id in files else "?"
-            lines.append(f"[score={score:.3f}] {path}\n{chunk.content[:800]}")
+        if response.degraded_reasons:
+            lines.append(
+                "检索降级: " + ", ".join(response.degraded_reasons)
+            )
+        for item in response.items:
+            start, end = item.lines
+            line_suffix = f":{start}-{end}" if start or end else ""
+            sources = ",".join(item.sources)
+            lines.append(
+                f"[score={item.score:.3f} sources={sources} "
+                f"version={item.version_id}] {item.path}{line_suffix}\n"
+                f"{item.content[:800]}"
+            )
         return "\n\n---\n\n".join(lines) if lines else "未找到相关代码"
 
     @tool(
@@ -58,11 +88,22 @@ class CodebaseTool(BaseTool):
             "name": {"type": "string", "description": "符号名称"},
         },
         required=["name"],
+        policy=CODE_READ,
     )
     async def find_symbol(self, name: str) -> str:
         async with self._uow_factory() as uow:
-            symbols = await uow.codebase.find_symbol_by_name(self._codebase_id, name)
-            files = {f.id: f for f in await uow.codebase.list_files(self._codebase_id)}
+            symbols = await uow.codebase.find_symbol_by_name(
+                self._codebase_id,
+                name,
+                version_id=self._version_id,
+            )
+            files = {
+                f.id: f
+                for f in await uow.codebase.list_files(
+                    self._codebase_id,
+                    version_id=self._version_id,
+                )
+            }
         if not symbols:
             return f"未找到符号: {name}"
         lines = []
@@ -78,10 +119,15 @@ class CodebaseTool(BaseTool):
             "name": {"type": "string", "description": "符号名称"},
         },
         required=["name"],
+        policy=CODE_READ,
     )
     async def find_references(self, name: str) -> str:
         async with self._uow_factory() as uow:
-            symbols = await uow.codebase.find_symbol_by_name(self._codebase_id, name)
+            symbols = await uow.codebase.find_symbol_by_name(
+                self._codebase_id,
+                name,
+                version_id=self._version_id,
+            )
             if not symbols:
                 return f"未找到 {name} 的引用"
             sym_ids = {s.id for s in symbols}
@@ -91,12 +137,14 @@ class CodebaseTool(BaseTool):
                     await uow.codebase.list_edges(
                         self._codebase_id,
                         dst_symbol_id=sym_id,
+                        version_id=self._version_id,
                     ),
                 )
             refs.extend(
                 await uow.codebase.list_edges(
                     self._codebase_id,
                     callee_name=name,
+                    version_id=self._version_id,
                 ),
             )
             seen = set()
@@ -112,7 +160,13 @@ class CodebaseTool(BaseTool):
             src_ids = [e.src_symbol_id for e in unique_refs if e.src_symbol_id]
             src_symbols = await uow.codebase.list_symbols_by_ids(self._codebase_id, src_ids)
             sym_by_id = {s.id: s for s in src_symbols}
-            files = {f.id: f for f in await uow.codebase.list_files(self._codebase_id)}
+            files = {
+                f.id: f
+                for f in await uow.codebase.list_files(
+                    self._codebase_id,
+                    version_id=self._version_id,
+                )
+            }
         lines = []
         for e in unique_refs[:30]:
             src = sym_by_id.get(e.src_symbol_id)
@@ -128,15 +182,28 @@ class CodebaseTool(BaseTool):
             "symbol_name": {"type": "string", "description": "符号名称"},
         },
         required=["symbol_name"],
+        policy=CODE_READ,
     )
     async def get_call_chain(self, symbol_name: str) -> str:
         async with self._uow_factory() as uow:
-            symbols = await uow.codebase.find_symbol_by_name(self._codebase_id, symbol_name)
+            symbols = await uow.codebase.find_symbol_by_name(
+                self._codebase_id,
+                symbol_name,
+                version_id=self._version_id,
+            )
             if not symbols:
                 return f"未找到符号: {symbol_name}"
             sym = symbols[0]
-            out_edges = await uow.codebase.list_edges(self._codebase_id, src_symbol_id=sym.id)
-            in_edges = await uow.codebase.list_edges(self._codebase_id, dst_symbol_id=sym.id)
+            out_edges = await uow.codebase.list_edges(
+                self._codebase_id,
+                src_symbol_id=sym.id,
+                version_id=self._version_id,
+            )
+            in_edges = await uow.codebase.list_edges(
+                self._codebase_id,
+                dst_symbol_id=sym.id,
+                version_id=self._version_id,
+            )
             related_ids = {
                 *(e.dst_symbol_id for e in out_edges if e.dst_symbol_id),
                 *(e.src_symbol_id for e in in_edges if e.src_symbol_id),
@@ -144,6 +211,7 @@ class CodebaseTool(BaseTool):
             related_symbols = await uow.codebase.list_symbols_by_ids(
                 self._codebase_id,
                 list(related_ids),
+                version_id=self._version_id,
             )
             sym_by_id = {s.id: s for s in related_symbols}
         lines = [f"## {symbol_name} 调用链", "### 调用 (outbound)"]
@@ -164,10 +232,14 @@ class CodebaseTool(BaseTool):
         description="获取代码库文件目录树概览",
         parameters={},
         required=[],
+        policy=CODE_READ,
     )
     async def get_file_tree(self) -> str:
         async with self._uow_factory() as uow:
-            files = await uow.codebase.list_files(self._codebase_id)
+            files = await uow.codebase.list_files(
+                self._codebase_id,
+                version_id=self._version_id,
+            )
         dirs: dict = {}
         for f in files:
             parts = f.path.split("/")
@@ -187,6 +259,7 @@ class CodebaseTool(BaseTool):
             "end_line": {"type": "integer", "description": "结束行号"},
         },
         required=["path"],
+        policy=CODE_READ,
     )
     async def read_code(
             self,
@@ -194,12 +267,52 @@ class CodebaseTool(BaseTool):
             start_line: Optional[int] = None,
             end_line: Optional[int] = None,
     ) -> str:
-        full_path = f"{self._workspace}/{path.lstrip('/')}"
-        result = await self._sandbox.read_file(full_path, start_line=start_line, end_line=end_line)
+        try:
+            result = await self.read(
+                path,
+                start_line=start_line,
+                end_line=end_line,
+            )
+        except Exception as exc:
+            return f"读取失败: {exc}"
+        loc = f"{result.path}:{start_line or 1}"
+        meta = f"# {loc} provenance={result.provenance.value}"
+        if result.base_version_id:
+            meta = f"{meta} version={result.base_version_id}"
+        if result.source_digest:
+            meta = f"{meta} digest={result.source_digest}"
+        return f"```{result.path}\n{meta}\n{result.content}\n```"
+
+    async def read(
+            self,
+            path: str,
+            start_line: Optional[int] = None,
+            end_line: Optional[int] = None,
+    ) -> CodeSourceReadResult:
+        if self._source_reader is not None:
+            return await self._source_reader.read(
+                path,
+                start_line=start_line,
+                end_line=end_line,
+            )
+
+        normalized = normalize_contained_path(self._workspace, path)
+        result = await self._sandbox.read_file(
+            str(normalized),
+            start_line=start_line,
+            end_line=end_line,
+        )
         if not result.success:
-            return f"读取失败: {result.message or path}"
-        loc = f"{path}:{start_line or 1}"
-        return f"```{path}\n# {loc}\n{file_content(result)}\n```"
+            raise NotFoundError(result.message or path)
+        relative = str(
+            normalize_contained_path("/source", path).relative_to("/source")
+        )
+        return CodeSourceReadResult(
+            path=relative,
+            content=file_content(result),
+            provenance=CodeSourceProvenance.SESSION_WORKSPACE,
+            base_version_id=self._base_version_id,
+        )
 
     @tool(
         name="get_diagram",
@@ -211,6 +324,7 @@ class CodebaseTool(BaseTool):
             },
         },
         required=["kind"],
+        policy=CODE_READ,
     )
     async def get_diagram(self, kind: str) -> str:
         try:
@@ -218,7 +332,11 @@ class CodebaseTool(BaseTool):
         except ValueError:
             return f"未知图类型: {kind}"
         async with self._uow_factory() as uow:
-            artifacts = await uow.codebase.list_artifacts(self._codebase_id, kind=artifact_kind)
+            artifacts = await uow.codebase.list_artifacts(
+                self._codebase_id,
+                kind=artifact_kind,
+                version_id=self._version_id,
+            )
         if not artifacts:
             return f"暂无 {kind} 图表"
         a = artifacts[-1]

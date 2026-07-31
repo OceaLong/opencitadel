@@ -1,18 +1,22 @@
-import { authenticatedFetch, del, get, parseSSEStream, post } from "./fetch";
 import { translate } from "@/i18n/translate";
+
+import { authenticatedFetch, del, get, parseSSEStream, post } from "./fetch";
 import type {
   Codebase,
   CodebaseArtifact,
   CodebaseArtifactsData,
+  CodebaseBuild,
   CodebasesData,
   CodebaseSessionData,
+  CodebaseSymbolsData,
+  CodebaseVersion,
+  CodebaseVersionsData,
   CreateCodebaseParams,
   CreateCodebaseSessionParams,
   DownloadCodebaseData,
   FileTreeData,
   ReadSourceData,
   ReadSourceParams,
-  CodebaseSymbolsData,
   SSEEventData,
   SSEEventHandler,
 } from "./types";
@@ -28,6 +32,26 @@ export const codebaseApi = {
 
   get: (codebaseId: string): Promise<Codebase> => {
     return get<Codebase>(`/codebases/${codebaseId}`);
+  },
+
+  listVersions: (codebaseId: string): Promise<CodebaseVersionsData> => {
+    return get<CodebaseVersionsData>(`/codebases/${codebaseId}/versions`);
+  },
+
+  getVersion: (codebaseId: string, versionId: string): Promise<CodebaseVersion> => {
+    return get<CodebaseVersion>(`/codebases/${codebaseId}/versions/${versionId}`);
+  },
+
+  createBuild: (codebaseId: string): Promise<CodebaseVersion> => {
+    return post<CodebaseVersion>(`/codebases/${codebaseId}/builds`);
+  },
+
+  retryBuild: (codebaseId: string, buildId: string): Promise<CodebaseVersion> => {
+    return post<CodebaseVersion>(`/codebases/${codebaseId}/builds/${buildId}/retry`);
+  },
+
+  cancelBuild: (codebaseId: string, buildId: string): Promise<CodebaseBuild> => {
+    return post<CodebaseBuild>(`/codebases/${codebaseId}/builds/${buildId}/cancel`);
   },
 
   getTree: (codebaseId: string): Promise<FileTreeData> => {
@@ -48,8 +72,30 @@ export const codebaseApi = {
     );
   },
 
+  getVersionArtifacts: (
+    codebaseId: string,
+    versionId: string,
+    kind?: string,
+  ): Promise<CodebaseArtifactsData> => {
+    return get<CodebaseArtifactsData>(
+      `/codebases/${codebaseId}/versions/${versionId}/artifacts`,
+      kind ? { kind } : undefined,
+    );
+  },
+
   readSource: (codebaseId: string, params: ReadSourceParams): Promise<ReadSourceData> => {
     return post<ReadSourceData>(`/codebases/${codebaseId}/source`, params);
+  },
+
+  readVersionSource: (
+    codebaseId: string,
+    versionId: string,
+    params: ReadSourceParams,
+  ): Promise<ReadSourceData> => {
+    return post<ReadSourceData>(
+      `/codebases/${codebaseId}/versions/${versionId}/source`,
+      params,
+    );
   },
 
   reanalyze: (codebaseId: string): Promise<Codebase> => {

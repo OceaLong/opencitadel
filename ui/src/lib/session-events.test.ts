@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { EventMeta, SSEEventData } from "@/lib/api/types";
 
-import { eventsToTimeline, extractSessionErrors } from "./session-events";
+import * as sessionEvents from "./session-events";
+
+const { eventsToTimeline, extractSessionErrors } = sessionEvents;
 
 function eventMeta(createdAt: number, eventId?: string): EventMeta {
   return {
@@ -192,5 +194,123 @@ describe("eventsToTimeline error i18n", () => {
     if (assistantItem?.kind === "assistant") {
       expect(assistantItem.data.message).toBe("Fallback notice for qwen3.6-35b-a3b");
     }
+  });
+});
+
+describe("session status reducer", () => {
+  function statusEvent(
+    status: "running" | "waiting" | "completed" | "cancelled" | "failed",
+    eventId: string,
+    persist = true,
+  ): SSEEventData {
+    return {
+      type: "session_status",
+      data: { status, ...eventMeta(Number(eventId), eventId), persist },
+    };
+  }
+
+  it("retains the first persisted terminal state in a run", () => {
+    const reducer = (
+      sessionEvents as typeof sessionEvents & {
+        reduceSessionStatusEvents?: (events: SSEEventData[]) => string | undefined;
+      }
+    ).reduceSessionStatusEvents;
+
+    expect(reducer).toBeTypeOf("function");
+    expect(
+      reducer?.([
+        statusEvent("running", "1"),
+        statusEvent("failed", "2"),
+        statusEvent("completed", "3"),
+      ]),
+    ).toBe("failed");
+  });
+
+  it("allows a later running event to start a new run", () => {
+    const reducer = (
+      sessionEvents as typeof sessionEvents & {
+        reduceSessionStatusEvents?: (events: SSEEventData[]) => string | undefined;
+      }
+    ).reduceSessionStatusEvents;
+
+    expect(
+      reducer?.([
+        statusEvent("running", "1"),
+        statusEvent("failed", "2"),
+        statusEvent("running", "3"),
+        statusEvent("completed", "4"),
+      ]),
+    ).toBe("completed");
+  });
+
+  it("ignores a late nonterminal status after the first persisted terminal", () => {
+    expect(
+      sessionEvents.reduceSessionStatusEvents([
+        statusEvent("running", "1"),
+        statusEvent("failed", "2"),
+        statusEvent("waiting", "3"),
+      ]),
+    ).toBe("failed");
+  });
+
+  it("latches waiting as the terminal outcome of a run epoch", () => {
+    expect(
+      sessionEvents.reduceSessionStatusEvents([
+        statusEvent("running", "1"),
+        statusEvent("waiting", "2"),
+        statusEvent("completed", "3"),
+      ]),
+    ).toBe("waiting");
+  });
+
+  it("allows a new running epoch after waiting", () => {
+    expect(
+      sessionEvents.reduceSessionStatusEvents([
+        statusEvent("running", "1"),
+        statusEvent("waiting", "2"),
+        statusEvent("running", "3"),
+        statusEvent("completed", "4"),
+      ]),
+    ).toBe("completed");
+  });
+
+  it("ignores a reconnect replay of an older running event", () => {
+    expect(
+      sessionEvents.reduceSessionStatusEvents([
+        statusEvent("running", "10"),
+        statusEvent("failed", "11"),
+        statusEvent("running", "10"),
+      ]),
+    ).toBe("failed");
+  });
+
+  it("keeps sequence state across one-event stream reductions", () => {
+    const first = sessionEvents.reduceSessionStatusState([
+      statusEvent("running", "10"),
+      statusEvent("failed", "11"),
+    ]);
+    const replayed = sessionEvents.reduceSessionStatusState(
+      [statusEvent("running", "10")],
+      first,
+    );
+
+    expect(replayed.status).toBe("failed");
+    expect(replayed.lastPersistedSeq).toBe(11);
+  });
+
+  it("does not latch a transient terminal event", () => {
+    const reducer = (
+      sessionEvents as typeof sessionEvents & {
+        reduceSessionStatusEvents?: (events: SSEEventData[]) => string | undefined;
+      }
+    ).reduceSessionStatusEvents;
+
+    expect(
+      reducer?.([
+        statusEvent("running", "1"),
+        statusEvent("failed", "2", false),
+        statusEvent("completed", "3"),
+      ]),
+    ).toBe("completed");
   });
 });

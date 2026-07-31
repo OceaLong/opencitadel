@@ -142,6 +142,13 @@ class Minio:
             response.close()
             response.release_conn()
 
+    async def delete_bytes(self, key: str) -> None:
+        await run_in_threadpool(
+            self.client.remove_object,
+            self.bucket,
+            key,
+        )
+
     async def presigned_get_url(self, key: str, expires_seconds: int = 604800) -> Optional[str]:
         if self._settings.env == "test":
             return f"https://example.com/{key}"

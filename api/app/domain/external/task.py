@@ -4,17 +4,22 @@ from abc import ABC, abstractmethod
 from typing import Protocol, Optional
 
 from app.domain.external.message_queue import MessageQueue
+from app.domain.models.run_outcome import RunOutcome
 
 
 class RecoverableTaskInputUnavailable(RuntimeError):
     """Raised when a reclaimed task has no durable input to process yet."""
 
 
+class RecoverableTaskReconciliationRequired(RuntimeError):
+    """Raised when a task outcome cannot yet be reconciled durably."""
+
+
 class TaskRunner(ABC):
     """任务运行器，负责任务的执行、关心的是如何执行任务、销毁任务释放资源"""
 
     @abstractmethod
-    async def invoke(self, task: "Task") -> None:
+    async def invoke(self, task: "Task") -> Optional[RunOutcome]:
         """调用任务并执行"""
         raise NotImplementedError
 
@@ -53,6 +58,11 @@ class Task(Protocol):
     @property
     def id(self) -> str:
         """只读属性，返回任务的id"""
+        ...
+
+    @property
+    def run_generation(self) -> int:
+        """Execution-attempt generation carried by this dispatch."""
         ...
 
     @property

@@ -15,9 +15,11 @@ from core.config import get_settings
 from .db_audit_repository import DBAuditRepository
 from .db_checkpoint_repository import DBCheckpointRepository
 from .db_codebase_repository import DBCodebaseRepository
+from .db_codebase_version_repository import DBCodebaseVersionRepository
 from .db_file_repository import DBFileRepository
 from .db_invitation_repository import DBInvitationRepository
 from .db_knowledge_base_repository import DBKnowledgeBaseRepository
+from .db_knowledge_version_repository import DBKnowledgeVersionRepository
 from .db_llm_endpoint_repository import DBLLMEndpointRepository
 from .db_llm_model_repository import DBLLMModelRepository
 from .db_llm_model_preference_repository import DBLLMModelPreferenceRepository
@@ -35,12 +37,18 @@ from .db_integration_server_repository import DBA2AServerRepository, DBMCPServer
 from .db_scheduled_job_repository import DBScheduledJobRepository
 from .db_notification_repository import DBNotificationRepository
 from .db_user_repository import DBUserRepository
+from .db_resource_governance_repository import DBResourceGovernanceRepository
+from app.domain.repositories.resource_governance_repository import (
+    ResourceGovernanceRepository,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class DBUnitOfWork(IUnitOfWork):
     """基于Postgres数据库的UoW实例"""
+
+    resource_governance: ResourceGovernanceRepository
 
     def __init__(
         self,
@@ -84,7 +92,13 @@ class DBUnitOfWork(IUnitOfWork):
         self.audit = DBAuditRepository(db_session=self.db_session)
         self.checkpoint = DBCheckpointRepository(db_session=self.db_session)
         self.codebase = DBCodebaseRepository(db_session=self.db_session)
+        self.codebase_version = DBCodebaseVersionRepository(
+            db_session=self.db_session
+        )
         self.knowledge_base = DBKnowledgeBaseRepository(db_session=self.db_session)
+        self.knowledge_version = DBKnowledgeVersionRepository(
+            db_session=self.db_session
+        )
         self.file = DBFileRepository(db_session=self.db_session)
         self.invitation = DBInvitationRepository(db_session=self.db_session)
         self.session = DBSessionRepository(
@@ -110,6 +124,9 @@ class DBUnitOfWork(IUnitOfWork):
         self.a2a_server = DBA2AServerRepository(db_session=self.db_session)
         self.scheduled_job = DBScheduledJobRepository(db_session=self.db_session)
         self.notification = DBNotificationRepository(db_session=self.db_session)
+        self.resource_governance = DBResourceGovernanceRepository(
+            db_session=self.db_session
+        )
 
         return self
 
@@ -129,30 +146,40 @@ class DBUnitOfWork(IUnitOfWork):
         会导致连接池中的连接处于异常状态，影响后续使用该池的其他任务。
         """
         commit_error: Optional[Exception] = None
+        cancelled_error: Optional[asyncio.CancelledError] = None
         try:
             if exc_type:
                 await self.rollback()
             else:
                 await self.commit()
-        except asyncio.CancelledError:
-            # SSE断连等场景下cancel scope取消了commit/rollback操作，
-            # 记录警告但不让异常传播，避免后续close操作也被跳过
+        except asyncio.CancelledError as exc:
+            cancelled_error = exc
             logger.warning("UoW提交/回滚操作被取消(可能是客户端断开连接)")
+            try:
+                await asyncio.shield(self.rollback())
+            except asyncio.CancelledError:
+                logger.warning("UoW取消后的回滚清理再次被取消")
+            except Exception as rollback_error:
+                logger.warning(f"UoW取消后的回滚失败: {rollback_error}")
         except Exception as e:
             commit_error = e
             logger.warning(f"UoW提交/回滚操作失败: {e}")
             try:
-                await self.rollback()
+                await asyncio.shield(self.rollback())
             except asyncio.CancelledError:
                 logger.warning("UoW回滚操作被取消(可能是客户端断开连接)")
             except Exception as rollback_error:
                 logger.warning(f"UoW回滚失败: {rollback_error}")
         finally:
             try:
-                await self.db_session.close()
-            except asyncio.CancelledError:
+                await asyncio.shield(self.db_session.close())
+            except asyncio.CancelledError as exc:
                 logger.warning("UoW关闭数据库会话被取消(可能是客户端断开连接)")
+                if cancelled_error is None:
+                    cancelled_error = exc
             except Exception as e:
                 logger.warning(f"UoW关闭数据库会话失败: {e}")
+        if cancelled_error is not None:
+            raise cancelled_error
         if commit_error is not None and exc_type is None:
             raise commit_error

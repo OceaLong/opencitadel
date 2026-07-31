@@ -1,100 +1,145 @@
-[English](02-internal-knowledge-base.md)
+# 构建并使用内部知识库
 
-# 教程 2：构建内部知识库
+本教程将创建版本化知识库、跟踪构建、启动固定版本的 Ask/Agent 会话，并在没有检索中断的前提下安全更新内容。
 
-将公司文档接入 **OpenCitadel**，实现 **私有、内网 Q&A** —— 数据不会离开你的部署环境。
+## 1. 创建逻辑知识库
 
-## 概览
+打开 **知识库**，创建名称稳定的资料库，例如“研发手册”，选择所属工作区，并按需配置分块、检索、OCR 和 GraphRAG。
 
-OpenCitadel 知识库支持：
+此时知识库可能还没有 active 版本。文档数量或 `ready_doc_count` 本身不足以开启生产问答；必须存在已发布的 `ready` 或 `degraded` 版本。
 
-- 文档上传（PDF、Markdown、纯文本）
-- 分块 + 向量/混合检索
-- 图增强搜索（`graph_search` 工具）
-- 按用户/团队工作区隔离访问
+## 2. 添加不可变来源
 
-## 入库流水线
+上传支持的文件，或添加获准的 Web、Confluence、飞书 URL。服务端下载源内容、记录摘要，并创建不可变文档修订。添加内容会创建候选版本和持久构建，不会修改当前 active 版本。
 
-添加文档后，`KBIngestionRunner` 执行以下流水线（SSE `step` 事件会反映每个阶段）：
+候选清单复用未变化修订，并保存精确的 `(document_id, document_revision_id)`。源内容变化时会创建新修订，而不是覆盖旧字节。
 
-```mermaid
-flowchart TD
-  Start["触发入库"] --> Parse["解析文档"]
-  Parse --> ParseFail{"解析错误？"}
-  ParseFail -->|"单文档失败"| DocFailed["文档状态 FAILED"]
-  ParseFail -->|"成功"| Chunk["分块 + 嵌入"]
-  Chunk --> EmbedOk{"嵌入成功？"}
-  EmbedOk -->|"否"| Degraded["vector_degraded=true"]
-  EmbedOk -->|"是"| Index["写入 BM25 + 向量索引"]
-  Degraded --> IndexBM25["仅写入 BM25 索引"]
-  Index --> GraphCheck{"启用 graphrag？"}
-  IndexBM25 --> GraphCheck
-  GraphCheck -->|"是"| Graph["GraphBuilder LLM 实体"]
-  GraphCheck -->|"否"| Ready["KB 状态 READY"]
-  Graph --> Ready
-  DocFailed --> Ready
+## 3. 跟踪构建
+
+资料库视图会显示 active 版本和 active 候选，也可以查看：
+
+```text
+GET /knowledge-bases/{kb_id}/versions
+GET /knowledge-bases/{kb_id}/versions/{version_id}
 ```
 
-- **Parse**：上传、ZIP、网页、Confluence 或飞书来源 → 每文档生成 `PageBlock`；`knowledge_base.ocr.mode=vision_llm` 时对图片型 PDF 做视觉 LLM OCR
-- **Chunk**：通过 `KBChunker` 生成父/子块；通过 `KBVectorService` 嵌入
-- **Index**：`purge_documents_index_data()` 清理本轮文档残留后，`save_chunks()` 批量追加写入可检索块（增量；手动 reindex 时才全量重建）
-- **Graph**（可选）：`graphrag.enabled=true` 时运行 `GraphBuilder`（种子 `config.yaml` 中**默认启用**）
-- **降级路径**：嵌入失败时设置 `vector_degraded=true`；检索回退到 BM25/混合模式，不使用向量
+流水线会报告解析、分块、关键词索引、向量、图、验证和发布进度。状态含义如下：
 
-权威流水线说明见 [知识库摄取](../architecture/knowledge-base-ingestion.zh-CN.md)。
+| 状态 | 含义 |
+| --- | --- |
+| `building` | 候选尚不完整，Ask 和 Agent 都不能使用 |
+| `ready` | 已发布，所有配置能力可用 |
+| `degraded` | 已发布；强制关键词/来源读取可用，可选能力禁用情况明确 |
+| `failed` | 候选未发布；上一个 active 版本持续可读 |
 
-## 步骤
+修订处于 `parsed` 仍不可检索。必须等待候选版本发布，不能用 `ready_doc_count` 绕过检查。
 
-### 1. 创建知识库
+## 4. 处理降级构建
 
-1. 在 **顶栏工作区菜单** 中打开 **Knowledge**（非左侧边栏）
-2. 点击 **New knowledge base**
-3. 命名（如 `Engineering Handbook`）并选择可见性（个人或团队）
+向量或 GraphRAG 故障可能产生如实的 `degraded` 发布。请查看版本/构建的 capabilities 和 `degraded_reasons`：
 
-### 2. 入库文档
+- `vector_search=false` 表示检索继续使用关键词。
+- `graph_search=false` 表示图浏览不可用，且不会返回半成品图。
+- 解析、分块、关键词、验证或发布等强制阶段失败时，候选会失败，active 版本不变。
 
-**上传文件：**
+图接口本身以 `capability=false` 和空节点、空边表达不可用；详细原因位于版本/构建状态面。
 
-1. 打开知识库
-2. 点击 **Add document** → 上传 PDF/MD/TXT（默认单文档最大 **50 MB** — 见 AppConfig `knowledge_base.document.max_bytes`；网关上限 200 MB）
-3. 等待索引完成（文档列表中显示状态）
+## 5. 启动固定版本的 Ask 或 Agent 会话
 
-**可选连接器**（在 `.env` 中配置）：
+在知识库中选择 **Ask** 进行聚焦问答，或选择 **Agent** 执行使用工具的工作流。两种模式都会解析一个明确的已发布版本，并将绑定与会话原子保存。
 
-- Confluence（`CONFLUENCE_TOKEN`）
-- 飞书/Lark（`FEISHU_APP_ID`、`FEISHU_APP_SECRET`）
+若 UI 或 API 提供版本选择器，可以选择已发布历史版本；否则选择当前 active 已发布版本。会话上下文会展示所选版本。
 
-### 3. 提问（Doc QA 流程）
+后续发布新版本不会改变已有会话。缺失、跨资源、重复、building、failed 或未发布绑定都会被 runner 拒绝。
 
-新建会话并提问：
+## 6. 核对引用并读取精确来源
 
-> Search our engineering handbook: what is our incident response process for P1 outages?
+回答中的引用精确标识被索引证据：
 
-Agent 会使用 `kb_search` 和 `get_document` 工具检索已索引内容。
+```text
+(version_id, document_revision_id, doc_id, page_no, chunk_id)
+```
 
-### 4. 结合通用 Agent 任务
+没有页码元数据的来源允许 `page_no` 为空。打开引用时使用版本化来源接口：
 
-示例：
+```text
+GET /knowledge-bases/{kb_id}/versions/{version_id}/documents/{doc_id}/content
+```
 
-> Based on our security policy document in the Engineering Handbook KB, draft a checklist for onboarding new contractors.
+可以使用页码过滤，也可以用响应中的 `next_cursor` 继续。响应还包含
+`document_revision_id`、有序内容项、`total` 和 `truncated`。游标不能跨知识库、版本、文档、修订或页码过滤条件复用。
 
-Agent 会检索政策摘录，然后在沙箱中撰写清单。
+因此，即使新版本已发布，旧会话仍能打开当时引用的完全相同来源。
 
-## 最佳实践
+## 7. 浏览知识图
 
-| 实践 | 原因 |
-|------|------|
-| 按主题拆分大型 PDF | 提高检索精度 |
-| 使用团队工作区 | 带 RBAC 的共享知识库 |
-| 在 `config.yaml` 中启用 vector memory | 更好的长会话记忆 |
-| 阅读 [安全模型](../architecture/security-model.zh-CN.md) | 理解数据边界 |
+对 `graph_search=true` 的已发布版本，打开图面板，或调用：
 
-## 评估建议
+```text
+GET /knowledge-bases/{kb_id}/versions/{version_id}/graph?q=term&limit=50
+```
 
-从文档中创建 10–20 组问答对，在向更大团队推广前先抽查检索质量。
+返回 `cursor` 时可继续翻页。节点是真实抽取实体，边连接返回集合中的真实实体端点，边证据可回到精确来源分块。若
+`capability=false`，应改用关键词/向量检索，不能把空图解释成“没有关系”。
 
-## 下一步
+图处理受分块数、LLM 调用数、Token、并发度和截止时间预算约束。超出预算会降级图能力，但不阻塞关键词发布。
 
-- [知识库摄取](../architecture/knowledge-base-ingestion.zh-CN.md)
-- [教程 3：MCP 集成](./03-mcp-integrations.zh-CN.md)
-- [安全模型](../architecture/security-model.zh-CN.md)
+## 8. 更新、重建或移除内容
+
+所有变更都创建候选：
+
+- **新增**：在 copy-on-write 清单中加入新修订。
+- **重建**：从 active 清单重建，不清空 active 数据。
+- **移除**：从下一个清单排除文档，不同步擦除历史证据。
+
+旧 active 会一直可查询，直到候选验证通过并原子发布。如果候选失败，已有 Ask/Agent 会话和继续使用旧 active 的新会话都不受影响。
+
+同一知识库只能有一个 active 候选；完全相同的重复命令具备幂等性。
+
+## 9. 重试、取消与恢复
+
+对于失败构建，选择 **重试** 或调用：
+
+```text
+POST /knowledge-bases/{kb_id}/builds/{build_id}/retry
+```
+
+重试会从失败候选的不可变清单创建新候选，失败版本仍保留在审计历史中。
+
+对于 active queued/running 构建，选择 **取消** 或调用：
+
+```text
+POST /knowledge-bases/{kb_id}/builds/{build_id}/cancel
+```
+
+该请求让 worker 在安全边界停止。请继续观察构建状态，直到进入终态。如果任务派发或 worker lease 中断，恢复任务会继续持久构建，或将其标记失败，且不会改变 active 版本。
+
+## 10. 显式升级会话
+
+新版本发布后，已有会话仍保持原绑定。使用会话上下文中的升级操作创建新的 current 绑定；旧绑定以
+`is_current=false` 作为历史保留，使过去事件和引用仍可复现。
+
+只有在希望后续轮次使用新快照时才升级。对于调查或合规工作流，继续固定旧版本可能才是正确选择。
+
+## 11. 保留策略
+
+版本垃圾回收默认关闭。启用后按保留数量、最短年龄和批量大小运行。active 版本、非终态构建候选，以及被当前或**历史**会话绑定引用的所有版本都会受到保护。
+
+启用 GC 前：
+
+1. 明确审计保留策略。
+2. 确认旧引用和来源翻页仍工作。
+3. 观察构建恢复和 GC 指标。
+4. 使用保守的数量和年龄配置启用有界回收。
+
+因此，从当前版本移除文档不等于立即物理删除。只有满足保留与绑定安全规则后，未引用数据才会被回收。
+
+## 运维检查清单
+
+- 只从已发布的 `ready` 或 `degraded` 版本开始问答。
+- 以 capabilities 与降级原因为准，不能只看知识库顶层状态。
+- 使用版本化引用和来源接口。
+- 重建和移除在发布前都必须保留 active 版本。
+- 通过持久构建标识执行重试或取消。
+- 显式升级会话。
+- 未明确保留和审计要求前保持 GC 关闭。

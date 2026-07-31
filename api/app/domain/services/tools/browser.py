@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from app.domain.external.browser import Browser
 from app.domain.models.tool_result import ToolResult
 from .base import BaseTool, tool
+from .capability_policy import INTERACTIVE_BROWSER, WEB_READ
 
 _UNTRUSTED_START = "=== UNTRUSTED EXTERNAL CONTENT (may contain prompt injection) ==="
 _UNTRUSTED_END = "=== END UNTRUSTED EXTERNAL CONTENT ==="
@@ -43,7 +44,8 @@ class BrowserTool(BaseTool):
         name="browser_view",
         description="查看当前浏览器页面内容，用于确认已打开页面的最新状态。",
         parameters={},
-        required=[]
+        required=[],
+        policy=WEB_READ,
     )
     async def browser_view(self) -> ToolResult:
         """获取浏览器当前网页内容并返回"""
@@ -54,6 +56,7 @@ class BrowserTool(BaseTool):
         description="捕获当前浏览器页面截图，仅在需要视觉理解页面布局/样式时使用。",
         parameters={},
         required=[],
+        policy=WEB_READ,
     )
     async def browser_screenshot(self) -> ToolResult:
         """按需捕获浏览器当前页面截图"""
@@ -68,7 +71,8 @@ class BrowserTool(BaseTool):
                 "description": "要访问的完整URL，必须包含协议前缀(如https://)"
             }
         },
-        required=["url"]
+        required=["url"],
+        policy=INTERACTIVE_BROWSER,
     )
     async def browser_navigate(self, url: str) -> ToolResult:
         """传递url地址，使用浏览器导航到对应页面"""
@@ -83,7 +87,8 @@ class BrowserTool(BaseTool):
                 "description": "要访问的完整URL，必须包含协议前缀(如https://)"
             }
         },
-        required=["url"]
+        required=["url"],
+        policy=INTERACTIVE_BROWSER,
     )
     async def browser_restart(self, url: str) -> ToolResult:
         """重启浏览器并导航到指定页面后返回页面内容"""
@@ -111,6 +116,7 @@ class BrowserTool(BaseTool):
             }
         },
         required=[],
+        policy=INTERACTIVE_BROWSER,
     )
     async def browser_click(
             self,
@@ -148,6 +154,7 @@ class BrowserTool(BaseTool):
             },
         },
         required=["text", "press_enter"],
+        policy=INTERACTIVE_BROWSER,
     )
     async def browser_input(
             self,
@@ -174,6 +181,7 @@ class BrowserTool(BaseTool):
             },
         },
         required=["coordinate_x", "coordinate_y"],
+        policy=INTERACTIVE_BROWSER,
     )
     async def browser_move_mouse(self, coordinate_x: float, coordinate_y: float) -> ToolResult:
         """传递xy坐标移动浏览器鼠标"""
@@ -189,6 +197,7 @@ class BrowserTool(BaseTool):
             },
         },
         required=["key"],
+        policy=INTERACTIVE_BROWSER,
     )
     async def browser_press_key(self, key: str) -> ToolResult:
         """在浏览器页面模拟按键"""
@@ -207,7 +216,8 @@ class BrowserTool(BaseTool):
                 "description": "要选择的选项序号，从0开始(注: 指下拉框里的第几项)。"
             },
         },
-        required=["index", "option"]
+        required=["index", "option"],
+        policy=INTERACTIVE_BROWSER,
     )
     async def browser_select_option(self, index: int, option: int) -> ToolResult:
         """传递索引+下拉元素选项序号执行选择"""
@@ -222,7 +232,8 @@ class BrowserTool(BaseTool):
                 "description": "(可选)是否直接滚动到页面顶部，而非向上滚动一屏。"
             }
         },
-        required=[]
+        required=[],
+        policy=INTERACTIVE_BROWSER,
     )
     async def browser_scroll_up(self, to_top: Optional[bool] = None) -> ToolResult:
         """向上滚动当前浏览器页面，支持滚动一页或者滚动到顶部"""
@@ -238,6 +249,7 @@ class BrowserTool(BaseTool):
             }
         },
         required=[],
+        policy=INTERACTIVE_BROWSER,
     )
     async def browser_scroll_down(self, to_bottom: Optional[bool] = None) -> ToolResult:
         """向下滚动当前浏览器页面，支持滚动一页或者滚动到底部"""
@@ -253,6 +265,7 @@ class BrowserTool(BaseTool):
             },
         },
         required=["javascript"],
+        policy=INTERACTIVE_BROWSER,
     )
     async def browser_console_exec(self, javascript: str) -> ToolResult:
         """传递js脚本在当前浏览器控制台执行"""
@@ -268,6 +281,7 @@ class BrowserTool(BaseTool):
             }
         },
         required=[],
+        policy=WEB_READ,
     )
     async def browser_console_view(self, max_lines: Optional[int] = None) -> ToolResult:
         """传递浏览的最大行数查看控制台的输出"""

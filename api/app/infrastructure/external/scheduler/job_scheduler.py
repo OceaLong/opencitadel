@@ -2,38 +2,257 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import logging
+import math
 import socket
 import uuid
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Callable, Optional, TYPE_CHECKING
 
 from app.application.services.config_provider import get_runtime_config
 from app.application.services.scheduled_job_service import ScheduledJobService
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.storage.redis import get_redis
 
+if TYPE_CHECKING:
+    from app.application.services.resource_version_gc_service import (
+        ResourceVersionGCService,
+    )
+
 logger = logging.getLogger(__name__)
 
 SCHEDULER_LEADER_KEY = "scheduler:leader"
+KNOWLEDGE_VERSION_GC_LEASE_KEY = "scheduler:knowledge-version-gc"
+CODEBASE_VERSION_GC_LEASE_KEY = "scheduler:codebase-version-gc"
 _WORKER_ID = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
+
+_RENEW_SCHEDULER_LEASE = """
+-- opencitadel:renew-scheduler-lease
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then
+    return 0
+end
+redis.call("PEXPIRE", KEYS[1], ARGV[2])
+return 1
+"""
+
+_RELEASE_SCHEDULER_LEASE = """
+-- opencitadel:release-scheduler-lease
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then
+    return 0
+end
+redis.call("DEL", KEYS[1])
+return 1
+"""
+
+
+def _lease_ttl_milliseconds(lease_seconds: float) -> int:
+    if lease_seconds <= 0:
+        raise ValueError("scheduler lease must be positive")
+    return max(1, math.ceil(lease_seconds * 1000))
+
+
+async def acquire_scheduler_lease(
+    key: str,
+    owner_token: str,
+    lease_seconds: float,
+) -> bool:
+    """Acquire one token-owned lease without replacing an existing owner."""
+    if not key or not owner_token:
+        return False
+    try:
+        return bool(
+            await get_redis().client.set(
+                key,
+                owner_token,
+                nx=True,
+                px=_lease_ttl_milliseconds(lease_seconds),
+            )
+        )
+    except Exception as exc:
+        logger.warning("Scheduler lease acquire failed key=%s: %s", key, exc)
+        return False
+
+
+async def renew_scheduler_lease(
+    key: str,
+    owner_token: str,
+    lease_seconds: float,
+) -> bool:
+    """Atomically renew only while the same token still owns the key."""
+    if not key or not owner_token:
+        return False
+    try:
+        renewed = await get_redis().client.eval(
+            _RENEW_SCHEDULER_LEASE,
+            1,
+            key,
+            owner_token,
+            _lease_ttl_milliseconds(lease_seconds),
+        )
+        return int(renewed) == 1
+    except Exception as exc:
+        logger.warning("Scheduler lease renew failed key=%s: %s", key, exc)
+        return False
+
+
+async def release_scheduler_lease(
+    key: str,
+    owner_token: str,
+) -> bool:
+    """Atomically release only while the same token still owns the key."""
+    if not key or not owner_token:
+        return False
+    try:
+        released = await get_redis().client.eval(
+            _RELEASE_SCHEDULER_LEASE,
+            1,
+            key,
+            owner_token,
+        )
+        return int(released) == 1
+    except Exception as exc:
+        logger.warning("Scheduler lease release failed key=%s: %s", key, exc)
+        return False
 
 
 async def try_become_scheduler_leader(lease_seconds: int) -> bool:
-    """Acquire or renew leader lease only when this worker owns the key."""
-    redis = get_redis()
-    acquired = await redis.client.set(
+    """Atomically acquire or token-check renewal of the worker leader lease."""
+    if await acquire_scheduler_lease(
         SCHEDULER_LEADER_KEY,
         _WORKER_ID,
-        nx=True,
-        ex=lease_seconds,
+        lease_seconds,
+    ):
+        return True
+    return await renew_scheduler_lease(
+        SCHEDULER_LEADER_KEY,
+        _WORKER_ID,
+        lease_seconds,
     )
-    if acquired:
-        return True
-    current = await redis.client.get(SCHEDULER_LEADER_KEY)
-    if current and current.decode() == _WORKER_ID:
-        await redis.client.expire(SCHEDULER_LEADER_KEY, lease_seconds)
-        return True
-    return False
+
+
+async def _keep_scheduler_lease_alive(
+    key: str,
+    owner_token: str,
+    lease_seconds: float,
+) -> None:
+    interval = max(0.01, lease_seconds / 3)
+    while True:
+        await asyncio.sleep(interval)
+        if not await renew_scheduler_lease(
+            key,
+            owner_token,
+            lease_seconds,
+        ):
+            raise RuntimeError(f"scheduler lease lost: {key}")
+
+
+async def run_knowledge_version_gc_tick(
+    service: "ResourceVersionGCService",
+    *,
+    retain_count: int,
+    min_age_days: int,
+    batch_size: int,
+    lease_seconds: float,
+    owner_token: str | None = None,
+):
+    """Run one GC transaction inside a token-owned, renewed cluster lease."""
+    token = owner_token or f"{_WORKER_ID}:{uuid.uuid4().hex}"
+    if not await acquire_scheduler_lease(
+        KNOWLEDGE_VERSION_GC_LEASE_KEY,
+        token,
+        lease_seconds,
+    ):
+        return None
+
+    collection = asyncio.create_task(
+        service.collect_knowledge_versions(
+            retain_count,
+            min_age_days,
+            batch_size,
+        )
+    )
+    keepalive = asyncio.create_task(
+        _keep_scheduler_lease_alive(
+            KNOWLEDGE_VERSION_GC_LEASE_KEY,
+            token,
+            lease_seconds,
+        )
+    )
+    try:
+        done, _pending = await asyncio.wait(
+            {collection, keepalive},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if collection in done:
+            return await collection
+        collection.cancel()
+        await asyncio.gather(collection, return_exceptions=True)
+        await keepalive
+        raise RuntimeError("knowledge-version GC lease ended unexpectedly")
+    finally:
+        if not collection.done():
+            collection.cancel()
+            await asyncio.gather(collection, return_exceptions=True)
+        keepalive.cancel()
+        await asyncio.gather(keepalive, return_exceptions=True)
+        await release_scheduler_lease(
+            KNOWLEDGE_VERSION_GC_LEASE_KEY,
+            token,
+        )
+
+
+async def run_codebase_version_gc_tick(
+    service: "ResourceVersionGCService",
+    *,
+    retain_count: int,
+    min_age_days: int,
+    batch_size: int,
+    lease_seconds: float,
+    owner_token: str | None = None,
+):
+    """Run one codebase GC transaction inside a token-owned cluster lease."""
+    token = owner_token or f"{_WORKER_ID}:{uuid.uuid4().hex}"
+    if not await acquire_scheduler_lease(
+        CODEBASE_VERSION_GC_LEASE_KEY,
+        token,
+        lease_seconds,
+    ):
+        return None
+
+    collection = asyncio.create_task(
+        service.collect_codebase_versions(
+            retain_count,
+            min_age_days,
+            batch_size,
+        )
+    )
+    keepalive = asyncio.create_task(
+        _keep_scheduler_lease_alive(
+            CODEBASE_VERSION_GC_LEASE_KEY,
+            token,
+            lease_seconds,
+        )
+    )
+    try:
+        done, _pending = await asyncio.wait(
+            {collection, keepalive},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if collection in done:
+            return await collection
+        collection.cancel()
+        await asyncio.gather(collection, return_exceptions=True)
+        await keepalive
+        raise RuntimeError("codebase-version GC lease ended unexpectedly")
+    finally:
+        if not collection.done():
+            collection.cancel()
+            await asyncio.gather(collection, return_exceptions=True)
+        keepalive.cancel()
+        await asyncio.gather(keepalive, return_exceptions=True)
+        await release_scheduler_lease(
+            CODEBASE_VERSION_GC_LEASE_KEY,
+            token,
+        )
 
 
 async def run_scheduler_loop(
@@ -43,6 +262,9 @@ async def run_scheduler_loop(
         notification_service=None,
         mcp_pool=None,
         app_config=None,
+        resource_version_gc_service: Optional[
+            "ResourceVersionGCService"
+        ] = None,
         stop_event: Optional[asyncio.Event] = None,
 ) -> None:
     """Worker background loop: poll due jobs and dispatch."""
@@ -57,6 +279,55 @@ async def run_scheduler_loop(
         if not await try_become_scheduler_leader(sched_cfg.leader_lease_seconds):
             await asyncio.sleep(sched_cfg.poll_interval_seconds)
             continue
+
+        kb_cfg = config.knowledge_base
+        if (
+            kb_cfg.version_gc_enabled
+            and resource_version_gc_service is not None
+        ):
+            try:
+                result = await run_knowledge_version_gc_tick(
+                    resource_version_gc_service,
+                    retain_count=kb_cfg.version_retention_count,
+                    min_age_days=kb_cfg.version_retention_min_days,
+                    batch_size=kb_cfg.version_gc_batch_size,
+                    lease_seconds=sched_cfg.leader_lease_seconds,
+                )
+                if result is not None:
+                    logger.info(
+                        "Knowledge-version GC tick metrics=%s",
+                        result.metrics(),
+                    )
+            except Exception as exc:
+                logger.exception(
+                    "Knowledge-version GC tick failed: %s",
+                    exc,
+                )
+
+        codebase_cfg = getattr(config, "codebase", None)
+        if (
+            codebase_cfg is not None
+            and codebase_cfg.version_gc_enabled
+            and resource_version_gc_service is not None
+        ):
+            try:
+                result = await run_codebase_version_gc_tick(
+                    resource_version_gc_service,
+                    retain_count=codebase_cfg.version_retention_count,
+                    min_age_days=codebase_cfg.version_retention_min_days,
+                    batch_size=codebase_cfg.version_gc_batch_size,
+                    lease_seconds=sched_cfg.leader_lease_seconds,
+                )
+                if result is not None:
+                    logger.info(
+                        "Codebase-version GC tick metrics=%s",
+                        result.metrics(),
+                    )
+            except Exception as exc:
+                logger.exception(
+                    "Codebase-version GC tick failed: %s",
+                    exc,
+                )
 
         try:
             async with uow_factory() as uow:

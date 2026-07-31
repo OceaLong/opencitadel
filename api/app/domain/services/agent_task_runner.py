@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -13,13 +14,23 @@ from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
-from app.domain.external.task import RecoverableTaskInputUnavailable, TaskRunner, Task
+from app.domain.external.task import (
+    RecoverableTaskInputUnavailable,
+    RecoverableTaskReconciliationRequired,
+    Task,
+    TaskRunner,
+)
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig
-from app.domain.models.event import ErrorEvent, Event, MessageEvent, BaseEvent, ToolEvent, \
+from app.domain.models.event import ApprovalEvent, ErrorEvent, Event, MessageEvent, BaseEvent, ToolEvent, \
     TitleEvent, WaitEvent, DoneEvent, AssistantNoticeEvent, StepEvent, StepEventStatus, ToolEventStatus
 from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
+from app.domain.models.run_outcome import (
+    RunOutcome,
+    RunReconciliationEnvelope,
+    RunStatus,
+)
 from app.domain.utils.vision import is_image_mime, is_video_mime
 from app.domain.utils.sandbox_result import shell_output
 from app.domain.services import vision_service
@@ -35,6 +46,7 @@ from app.domain.services.flows.planner_react import PlannerReActFlow
 from app.domain.services.flows.code_ask_flow import CodeAskFlow
 from app.domain.services.flows.doc_qa_flow import DocQAFlow
 from app.domain.services.flows.hybrid_ask_flow import HybridAskFlow
+from app.domain.services.session_flow_resolver import FlowKind, SessionFlowResolver
 from app.domain.services.tool_event_presenter import FILE_MUTATING_FUNCTIONS, ToolEventPresenter
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.mcp import MCPTool
@@ -129,6 +141,11 @@ class AgentTaskRunner(TaskRunner):
         )
         self._agent_config = agent_config
         self._run_started_at: Optional[float] = None
+        self._run_epoch_id: Optional[str] = None
+        self._unpersisted_run_reconciliation: Optional[
+            tuple[str, RunOutcome]
+        ] = None
+        self._unpersisted_reconciliation_message_id: Optional[str] = None
         self._terminal_session_status: Optional[SessionStatus] = None
         self._step_started_at: Dict[str, datetime] = {}
         self._tool_started_at: Dict[str, datetime] = {}
@@ -148,11 +165,12 @@ class AgentTaskRunner(TaskRunner):
         self._codebase_id = codebase_id
         self._knowledge_base_id = knowledge_base_id
         self._stateful_tool_lock = stateful_tool_lock or asyncio.Lock()
-        if (
-            codebase_id
-            and knowledge_base_id
-            and mode == SessionMode.ASK
-        ):
+        flow_decision = SessionFlowResolver.resolve(
+            mode,
+            has_kb=bool(knowledge_base_id),
+            has_codebase=bool(codebase_id),
+        )
+        if flow_decision.flow_kind == FlowKind.HYBRID_ASK:
             self._flow = HybridAskFlow(
                 uow_factory=uow_factory,
                 llm=llm,
@@ -169,7 +187,7 @@ class AgentTaskRunner(TaskRunner):
                 observability_port=self._observability,
                 runtime_settings=self._runtime_settings,
             )
-        elif codebase_id and mode == SessionMode.ASK:
+        elif flow_decision.flow_kind == FlowKind.CODE_ASK:
             self._flow = CodeAskFlow(
                 uow_factory=uow_factory,
                 llm=llm,
@@ -186,7 +204,7 @@ class AgentTaskRunner(TaskRunner):
                 observability_port=self._observability,
                 runtime_settings=self._runtime_settings,
             )
-        elif knowledge_base_id and not codebase_id:
+        elif flow_decision.flow_kind == FlowKind.DOC_ASK:
             self._flow = DocQAFlow(
                 uow_factory=uow_factory,
                 llm=llm,
@@ -227,24 +245,420 @@ class AgentTaskRunner(TaskRunner):
                 sandbox_lifecycle=self._sandbox_lifecycle,
             )
 
-    async def _put_and_add_event(self, task: Task, event: Event) -> None:
-        await self._event_emitter.emit(task, event)
+    async def _put_and_add_event(self, task: Task, event: Event) -> bool:
+        return await self._event_emitter.emit(task, event)
+
+    async def _try_emit_presentation_event(
+            self,
+            task: Task,
+            event: Event,
+    ) -> bool:
+        try:
+            return await self._put_and_add_event(task, event)
+        except Exception as exc:
+            logger.warning(
+                "展示事件投递失败，不改变运行结果 session=%s type=%s: %s",
+                self._session_id,
+                event.type,
+                exc,
+            )
+            return False
+
+    async def _try_flush_presentation_events(self) -> bool:
+        try:
+            await self._flush_event_persist_buffer()
+            return True
+        except Exception as exc:
+            logger.warning(
+                "展示事件落库失败，不改变运行结果 session=%s: %s",
+                self._session_id,
+                exc,
+            )
+            return False
+
+    async def _try_update_session_projection(self, event: Event) -> bool:
+        """Update list/detail projections without changing the semantic run."""
+        try:
+            if isinstance(event, TitleEvent):
+                async with self._uow_factory() as uow:
+                    await uow.session.update_title(
+                        self._session_id,
+                        event.title,
+                    )
+            elif isinstance(event, (MessageEvent, AssistantNoticeEvent)):
+                async with self._uow_factory() as uow:
+                    await uow.session.update_latest_message(
+                        self._session_id,
+                        event.message,
+                        event.created_at,
+                    )
+                    await uow.session.increment_unread_message_count(
+                        self._session_id,
+                    )
+            else:
+                return True
+            return True
+        except Exception as exc:
+            logger.warning(
+                "会话展示投影更新失败，不改变运行结果 session=%s type=%s: %s",
+                self._session_id,
+                event.type,
+                exc,
+            )
+            return False
 
     async def _flush_event_persist_buffer(self) -> None:
         await self._event_emitter.flush()
 
-    async def _emit_session_status(self, task: Task, status: SessionStatus) -> None:
+    async def _emit_session_status(
+            self,
+            task: Task,
+            status: SessionStatus,
+            *,
+            reason: Optional[str] = None,
+            code: Optional[str] = None,
+            outcome: Optional[RunOutcome] = None,
+    ) -> bool:
         """推送服务端权威会话状态事件"""
+        from app.domain.models.event import SessionStatusEvent
+
+        event = SessionStatusEvent(
+            status=status.value,
+            run_epoch_id=self._run_epoch_id,
+            reason=reason,
+            code=code,
+            outcome=outcome,
+        )
+        accepted = await self._put_and_add_event(task, event)
+        if not accepted:
+            return False
         if status != SessionStatus.RUNNING:
             self._terminal_session_status = status
-        event = await self._session_state.transition(self._session_id, status, emit_event=True)
-        if event:
-            await self._put_and_add_event(task, event)
-        if status != SessionStatus.RUNNING and self._on_session_terminal_callback:
+        if (
+            status != SessionStatus.RUNNING
+            and self._on_session_terminal_callback
+        ):
             try:
                 await self._on_session_terminal_callback(self._session_id, status)
             except Exception as exc:
                 logger.warning("会话终态回调失败 session=%s: %s", self._session_id, exc)
+        return True
+
+    async def _apply_run_outcome(
+            self,
+            task: Task,
+            outcome: RunOutcome,
+    ) -> bool:
+        status_map = {
+            RunStatus.SUCCEEDED: SessionStatus.COMPLETED,
+            RunStatus.FAILED: SessionStatus.FAILED,
+            RunStatus.CANCELLED: SessionStatus.CANCELLED,
+            RunStatus.WAITING: SessionStatus.WAITING,
+        }
+        error = outcome.error
+        return await self._emit_session_status(
+            task,
+            status_map[outcome.status],
+            reason=error.message if error else None,
+            code=error.code if error else None,
+            outcome=outcome,
+        )
+
+    @staticmethod
+    def _outcome_from_terminal_event(
+            event,
+    ) -> RunOutcome:
+        if event.outcome is not None:
+            return event.outcome
+        if event.status == SessionStatus.COMPLETED.value:
+            return RunOutcome.succeeded()
+        if event.status == SessionStatus.FAILED.value:
+            return RunOutcome.failed(
+                event.reason or "Another worker durably selected failed",
+                code=event.code or "AUTHORITATIVE_RUN_FAILED",
+            )
+        if event.status == SessionStatus.CANCELLED.value:
+            return RunOutcome.cancelled(
+                event.reason or "Run cancelled",
+                code=event.code or "RUN_CANCELLED",
+            )
+        if event.status == SessionStatus.WAITING.value:
+            return RunOutcome.waiting()
+        raise ValueError(
+            f"Unsupported terminal session status: {event.status}"
+        )
+
+    async def _finalize_run_outcome(
+            self,
+            task: Task,
+            outcome: RunOutcome,
+    ) -> RunOutcome:
+        """Persist the selected outcome without remapping delivery failures."""
+        run_epoch_id = self._run_epoch_id or f"{task.id}:outcome"
+        self._run_epoch_id = run_epoch_id
+        try:
+            persisted = await self._task_state_port.set_run_reconciliation(
+                task.id,
+                getattr(task, "run_generation", 1),
+                run_epoch_id,
+                outcome.model_dump(mode="json"),
+            )
+        except Exception as exc:
+            if run_epoch_id is not None:
+                self._unpersisted_run_reconciliation = (
+                    run_epoch_id,
+                    outcome,
+                )
+                if (
+                    getattr(
+                        self,
+                        "_unpersisted_reconciliation_message_id",
+                        None,
+                    )
+                    is None
+                ):
+                    try:
+                        envelope = RunReconciliationEnvelope(
+                            run_epoch_id=run_epoch_id,
+                            outcome=outcome,
+                        )
+                        message_id = await task.input_stream.put(
+                            envelope.model_dump_json(),
+                        )
+                        self._unpersisted_reconciliation_message_id = (
+                            message_id
+                        )
+                    except asyncio.CancelledError:
+                        logger.warning(
+                            "任务[%s]运行结果对账输入写入被取消",
+                            task.id,
+                        )
+                    except Exception as queue_exc:
+                        logger.error(
+                            "任务[%s]运行结果对账输入写入失败: %s",
+                            task.id,
+                            queue_exc,
+                            exc_info=True,
+                        )
+            raise RecoverableTaskReconciliationRequired(
+                f"任务[{task.id}]运行结果暂未写入对账存储"
+            ) from exc
+        if not persisted:
+            raise RecoverableTaskReconciliationRequired(
+                f"任务[{task.id}]运行代次已推进，忽略旧执行结果"
+            )
+        await self._ack_queued_run_reconciliation(task)
+        self._unpersisted_run_reconciliation = None
+        try:
+            accepted = await self._apply_run_outcome(task, outcome)
+        except Exception as exc:
+            accepted = False
+            logger.error(
+                "会话终态首次落库失败，尝试重放 session=%s outcome=%s: %s",
+                self._session_id,
+                outcome.status,
+                exc,
+                exc_info=True,
+            )
+        try:
+            await self._flush_event_persist_buffer()
+        except Exception as exc:
+            logger.error(
+                "会话终态重放仍失败 session=%s outcome=%s: %s",
+                self._session_id,
+                outcome.status,
+                exc,
+                exc_info=True,
+            )
+        expected_status = {
+            RunStatus.SUCCEEDED: SessionStatus.COMPLETED,
+            RunStatus.FAILED: SessionStatus.FAILED,
+            RunStatus.CANCELLED: SessionStatus.CANCELLED,
+            RunStatus.WAITING: SessionStatus.WAITING,
+        }[outcome.status]
+        emitter = getattr(self, "_event_emitter", None)
+        claimed_event = getattr(
+            emitter,
+            "claimed_terminal_event",
+            None,
+        )
+        claimed = (
+            claimed_event.status
+            if claimed_event is not None
+            else getattr(
+                emitter,
+                "claimed_terminal_status",
+                None,
+            )
+        )
+        if accepted:
+            self._terminal_session_status = expected_status
+            return outcome
+        if claimed is not None:
+            authoritative_status = SessionStatus(claimed)
+            self._terminal_session_status = authoritative_status
+            if claimed_event is not None:
+                return self._outcome_from_terminal_event(claimed_event)
+            if authoritative_status == expected_status:
+                return outcome
+            if authoritative_status == SessionStatus.COMPLETED:
+                return RunOutcome.succeeded()
+            if authoritative_status == SessionStatus.FAILED:
+                return RunOutcome.failed(
+                    "Another worker durably selected failed",
+                    code="AUTHORITATIVE_RUN_FAILED",
+                )
+            if authoritative_status == SessionStatus.CANCELLED:
+                return RunOutcome.cancelled()
+            if authoritative_status == SessionStatus.WAITING:
+                return RunOutcome.waiting()
+        if emitter is not None:
+            raise RecoverableTaskReconciliationRequired(
+                f"任务[{task.id}]终态尚未持久化，等待恢复对账"
+            )
+        return outcome
+
+    async def _recover_run_outcome(
+            self,
+            task: Task,
+    ) -> Optional[RunOutcome]:
+        try:
+            reconciliation = (
+                await self._task_state_port.get_run_reconciliation(
+                    task.id,
+                    getattr(task, "run_generation", 1),
+                )
+            )
+        except Exception as exc:
+            raise RecoverableTaskReconciliationRequired(
+                f"任务[{task.id}]暂时无法读取运行结果对账记录"
+            ) from exc
+        if not reconciliation:
+            return None
+        run_epoch_id = reconciliation.get("run_epoch_id")
+        outcome_data = reconciliation.get("outcome")
+        if not run_epoch_id or not isinstance(outcome_data, dict):
+            return None
+        self._run_epoch_id = str(run_epoch_id)
+        proposed = RunOutcome.model_validate(outcome_data)
+        self._run_outcome = proposed
+        await self._find_queued_run_reconciliation(
+            task,
+            expected=RunReconciliationEnvelope(
+                run_epoch_id=self._run_epoch_id,
+                outcome=proposed,
+            ),
+        )
+        recovered = await self._finalize_run_outcome(task, proposed)
+        self._run_outcome = recovered
+        return recovered
+
+    async def _ack_queued_run_reconciliation(
+            self,
+            task: Task,
+    ) -> None:
+        message_id = getattr(
+            self,
+            "_unpersisted_reconciliation_message_id",
+            None,
+        )
+        if message_id is None:
+            return
+        try:
+            deleted = await task.input_stream.delete_message(message_id)
+        except asyncio.CancelledError as exc:
+            raise RecoverableTaskReconciliationRequired(
+                f"任务[{task.id}]对账输入删除被取消"
+            ) from exc
+        except Exception as exc:
+            raise RecoverableTaskReconciliationRequired(
+                f"任务[{task.id}]对账输入尚未可靠消费"
+            ) from exc
+        if not deleted:
+            raise RecoverableTaskReconciliationRequired(
+                f"任务[{task.id}]对账输入尚未可靠消费"
+            )
+        self._unpersisted_reconciliation_message_id = None
+
+    async def _find_queued_run_reconciliation(
+            self,
+            task: Task,
+            *,
+            expected: Optional[RunReconciliationEnvelope] = None,
+    ) -> Optional[RunReconciliationEnvelope]:
+        """Find a durable handoff without consuming it or ordinary user input."""
+        get_range = getattr(task.input_stream, "get_range", None)
+        if not callable(get_range):
+            return None
+        scan_limit = max(
+            10_000,
+            get_runtime_config().streams.task_input_maxlen,
+        )
+        try:
+            async for message_id, event_str in get_range(count=scan_limit):
+                raw_event = json.loads(event_str)
+                if (
+                    not isinstance(raw_event, dict)
+                    or raw_event.get("type") != "run_reconciliation"
+                ):
+                    continue
+                envelope = RunReconciliationEnvelope.model_validate(
+                    raw_event,
+                )
+                if expected is not None and envelope != expected:
+                    continue
+                self._run_epoch_id = envelope.run_epoch_id
+                self._run_outcome = envelope.outcome
+                self._unpersisted_reconciliation_message_id = message_id
+                return envelope
+        except RecoverableTaskReconciliationRequired:
+            raise
+        except Exception as exc:
+            raise RecoverableTaskReconciliationRequired(
+                f"任务[{task.id}]暂时无法读取对账输入"
+            ) from exc
+        return None
+
+    async def _recover_queued_run_outcome(
+            self,
+            task: Task,
+    ) -> Optional[RunOutcome]:
+        envelope = await self._find_queued_run_reconciliation(task)
+        if envelope is None:
+            return None
+        recovered = await self._finalize_run_outcome(
+            task,
+            envelope.outcome,
+        )
+        self._run_outcome = recovered
+        return recovered
+
+    async def _retry_unpersisted_run_outcome(
+            self,
+            task: Task,
+    ) -> Optional[RunOutcome]:
+        pending = getattr(
+            self,
+            "_unpersisted_run_reconciliation",
+            None,
+        )
+        if pending is None:
+            return None
+        run_epoch_id, proposed = pending
+        self._run_epoch_id = run_epoch_id
+        if (
+            getattr(
+                self,
+                "_unpersisted_reconciliation_message_id",
+                None,
+            )
+            is not None
+        ):
+            return None
+        self._run_outcome = proposed
+        recovered = await self._finalize_run_outcome(task, proposed)
+        self._run_outcome = recovered
+        return recovered
 
     async def _is_cancelled(self, task: Task) -> bool:
         return await self._task_state_port.is_cancelled(task.id)
@@ -256,19 +670,50 @@ class AgentTaskRunner(TaskRunner):
         return (time.monotonic() - self._run_started_at) >= max_seconds
 
     async def _handle_run_timeout(self, task: Task) -> None:
-        await self._put_and_add_event(task, ErrorEvent(error="Agent 运行超时，任务已终止"))
+        await self._try_emit_presentation_event(
+            task,
+            ErrorEvent(error="Agent 运行超时，任务已终止"),
+        )
         await self._emit_session_status(task, SessionStatus.FAILED)
         await self._flush_event_persist_buffer()
         raise RuntimeError("Agent 运行超时")
 
-    @classmethod
-    async def _pop_event(cls, task: Task) -> Optional[Event]:
+    async def _pop_event(
+            self,
+            task: Task,
+    ) -> Optional[Event | RunReconciliationEnvelope]:
         """从任务的输入流中获取事件信息"""
         # 1.从任务task中读取数据
         event_id, event_str = await task.input_stream.pop()
         if event_str is None:
             logger.warning(f"AgentTaskRunner接收到空消息")
             return
+
+        raw_event = json.loads(event_str)
+        if (
+            isinstance(raw_event, dict)
+            and raw_event.get("type") == "run_reconciliation"
+        ):
+            envelope = RunReconciliationEnvelope.model_validate(raw_event)
+            self._unpersisted_reconciliation_message_id = None
+            try:
+                self._unpersisted_reconciliation_message_id = (
+                    await task.input_stream.put(
+                        envelope.model_dump_json(),
+                    )
+                )
+            except asyncio.CancelledError:
+                logger.warning(
+                    "任务[%s]对账输入重入队被取消，将先尝试主对账存储",
+                    task.id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "任务[%s]对账输入重入队失败，将先尝试主对账存储: %s",
+                    task.id,
+                    exc,
+                )
+            return envelope
 
         # 2.使用pydantic+type类型将字符串转换成事件
         event = TypeAdapter(Event).validate_json(event_str)
@@ -365,7 +810,7 @@ class AgentTaskRunner(TaskRunner):
             diff_text = shell_output(result).strip()
             if result.success and diff_text:
                 diff_text = diff_text[:12000]
-                await self._put_and_add_event(
+                await self._try_emit_presentation_event(
                     task,
                     MessageEvent(
                         role="assistant",
@@ -435,7 +880,7 @@ class AgentTaskRunner(TaskRunner):
             else:
                 parts.append(f"{name}（{err}）")
         details = "；".join(parts)
-        await self._put_and_add_event(
+        await self._try_emit_presentation_event(
             task,
             AssistantNoticeEvent(
                 message="",
@@ -481,12 +926,51 @@ class AgentTaskRunner(TaskRunner):
                 errors,
             )
 
-    async def invoke(self, task: Task) -> None:
+    async def invoke(self, task: Task) -> RunOutcome:
         """根据传递的任务处理agent消息队列并运行agent流"""
         cancelled = False
+        run_outcome = RunOutcome.failed(
+            "Agent task ended without an explicit flow outcome",
+            code="RUN_OUTCOME_UNSET",
+        )
+        self._run_outcome = run_outcome
         try:
             logger.info(f"AgentTaskRunner任务处理开始")
+            recovered_outcome = await self._recover_run_outcome(task)
+            if recovered_outcome is not None:
+                return recovered_outcome
+            recovered_outcome = await self._recover_queued_run_outcome(task)
+            if recovered_outcome is not None:
+                return recovered_outcome
+            recovered_outcome = (
+                await self._retry_unpersisted_run_outcome(task)
+            )
+            if recovered_outcome is not None:
+                return recovered_outcome
             await self._sandbox_lifecycle.ensure_ready()
+            first_event = await self._pop_event(task)
+            if first_event is None:
+                logger.warning(
+                    "任务[%s]未读取到可执行输入，等待重启恢复对账",
+                    task.id,
+                )
+                raise RecoverableTaskInputUnavailable(
+                    f"任务[{task.id}]缺少可执行输入，等待恢复对账",
+                )
+            if isinstance(first_event, RunReconciliationEnvelope):
+                self._run_epoch_id = first_event.run_epoch_id
+                self._run_outcome = first_event.outcome
+                recovered_outcome = await self._finalize_run_outcome(
+                    task,
+                    first_event.outcome,
+                )
+                self._run_outcome = recovered_outcome
+                return recovered_outcome
+            if isinstance(first_event, MessageEvent):
+                emitter = getattr(self, "_event_emitter", None)
+                if emitter is not None:
+                    emitter.start_turn(first_event.resource_bindings)
+            self._run_epoch_id = f"{task.id}:{first_event.id}"
             await self._emit_session_status(task, SessionStatus.RUNNING)
             await self._initialize_integration_tool(
                 task,
@@ -504,30 +988,36 @@ class AgentTaskRunner(TaskRunner):
             )
             self._run_started_at = time.monotonic()
 
-            processed_input = False
+            pending_event: Optional[Event] = first_event
             while True:
                 if self._is_run_timed_out():
                     await self._handle_run_timeout(task)
-                    return
                 if await self._is_cancelled(task):
                     cancelled = True
                     break
 
-                event = await self._pop_event(task)
+                if pending_event is not None:
+                    event = pending_event
+                    pending_event = None
+                else:
+                    event = await self._pop_event(task)
                 if event is None:
-                    if not processed_input:
-                        logger.warning(
-                            "任务[%s]在运行态未读取到输入，等待重启恢复对账",
-                            task.id,
-                        )
-                        raise RecoverableTaskInputUnavailable(
-                            f"任务[{task.id}]缺少可执行输入，等待恢复对账",
-                        )
                     break
-                processed_input = True
+                if isinstance(event, RunReconciliationEnvelope):
+                    self._run_epoch_id = event.run_epoch_id
+                    self._run_outcome = event.outcome
+                    recovered_outcome = await self._finalize_run_outcome(
+                        task,
+                        event.outcome,
+                    )
+                    self._run_outcome = recovered_outcome
+                    return recovered_outcome
                 message = ""
 
                 if isinstance(event, MessageEvent):
+                    emitter = getattr(self, "_event_emitter", None)
+                    if emitter is not None:
+                        emitter.start_turn(event.resource_bindings)
                     message = event.message or ""
                     if self._sandbox_provider.materialized() is not None:
                         await self._attachment_sync.sync_message_attachments_to_sandbox(event)
@@ -543,15 +1033,23 @@ class AgentTaskRunner(TaskRunner):
                 if isinstance(event, MessageEvent):
                     await self._sandbox_lifecycle.create_user_message_checkpoint(event)
 
+                flow_interrupted = False
+                flow_waited = False
+                approval_pending = False
                 async for event in self._run_flow(message_obj):
                     if self._is_run_timed_out():
                         await self._handle_run_timeout(task)
-                        return
                     if await self._is_cancelled(task):
                         cancelled = True
                         break
 
-                    await self._put_and_add_event(task, event)
+                    await self._try_emit_presentation_event(task, event)
+                    if isinstance(event, ApprovalEvent):
+                        approval_pending = True
+                    if isinstance(event, WaitEvent):
+                        await self._try_flush_presentation_events()
+                        flow_waited = True
+                        break
 
                     if (
                         self._checkpoint_service
@@ -568,53 +1066,77 @@ class AgentTaskRunner(TaskRunner):
                         except Exception as exc:
                             logger.warning("创建步骤还原点失败: %s", exc)
 
-                    if isinstance(event, TitleEvent):
-                        async with self._uow_factory() as uow:
-                            await uow.session.update_title(self._session_id, event.title)
-                    elif isinstance(event, (MessageEvent, AssistantNoticeEvent)):
-                        async with self._uow_factory() as uow:
-                            await uow.session.update_latest_message(
-                                self._session_id,
-                                event.message,
-                                event.created_at,
-                            )
-                            await uow.session.increment_unread_message_count(self._session_id)
-                    elif isinstance(event, WaitEvent):
-                        await self._emit_session_status(task, SessionStatus.WAITING)
-                        await self._flush_event_persist_buffer()
-                        return
-
-                    if await task.input_stream.size() > 0:
-                        await self._flush_event_persist_buffer()
+                    await self._try_update_session_projection(event)
+                    if (
+                        not approval_pending
+                        and await task.input_stream.size() > 0
+                    ):
+                        await self._try_flush_presentation_events()
+                        flow_interrupted = True
                         break
 
                 if cancelled:
+                    break
+                if flow_waited:
+                    run_outcome = self._flow.outcome
+                    self._run_outcome = run_outcome
                     break
 
                 if self._codebase_id and self._mode == SessionMode.AGENT:
                     if self._sandbox_provider.materialized() is not None:
                         await self._emit_code_diff_if_needed(task)
 
+                if not flow_interrupted:
+                    run_outcome = self._flow.outcome
+                    self._run_outcome = run_outcome
+                    if run_outcome.status in {
+                        RunStatus.FAILED,
+                        RunStatus.CANCELLED,
+                        RunStatus.WAITING,
+                    }:
+                        break
+
             if not cancelled and await self._is_cancelled(task):
                 cancelled = True
 
             if cancelled:
-                await self._put_and_add_event(task, DoneEvent())
-                await self._emit_session_status(task, SessionStatus.CANCELLED)
-                await self._flush_event_persist_buffer()
+                await self._try_emit_presentation_event(
+                    task,
+                    DoneEvent(),
+                )
+                run_outcome = RunOutcome.cancelled()
+                self._run_outcome = run_outcome
                 self._observability.record_agent_cancel(self._session_id)
-            else:
-                await self._emit_session_status(task, SessionStatus.COMPLETED)
-                await self._flush_event_persist_buffer()
+            run_outcome = await self._finalize_run_outcome(task, run_outcome)
+            self._run_outcome = run_outcome
+            return run_outcome
         except asyncio.CancelledError:
             logger.info(f"AgentTaskRunner任务运行取消")
-            await self._put_and_add_event(task, DoneEvent())
-            await self._emit_session_status(task, SessionStatus.CANCELLED)
-            await self._flush_event_persist_buffer()
-            self._observability.record_agent_cancel(self._session_id)
-            raise
+            run_outcome = RunOutcome.cancelled()
+            self._run_outcome = run_outcome
+            await self._try_emit_presentation_event(
+                task,
+                DoneEvent(),
+            )
+            try:
+                run_outcome = await self._finalize_run_outcome(
+                    task,
+                    run_outcome,
+                )
+            except RecoverableTaskReconciliationRequired:
+                raise
+            self._run_outcome = run_outcome
+            if run_outcome.status == RunStatus.CANCELLED:
+                self._observability.record_agent_cancel(self._session_id)
+                raise
+            return run_outcome
         except RecoverableTaskInputUnavailable:
-            await self._flush_event_persist_buffer()
+            try:
+                await self._flush_event_persist_buffer()
+            except Exception as exc:
+                logger.warning("缺少输入时事件落库失败 session=%s: %s", self._session_id, exc)
+            raise
+        except RecoverableTaskReconciliationRequired:
             raise
         except Exception as e:
             from app.domain.utils.llm_retry import classify_llm_error_code
@@ -622,13 +1144,35 @@ class AgentTaskRunner(TaskRunner):
 
             logger.exception(f"AgentTaskRunner运行出错: {str(e)}")
             code = e.error_code if isinstance(e, ModelUnavailableError) else classify_llm_error_code(e)
-            await self._put_and_add_event(task, ErrorEvent(error=f"AgentTaskRunner出错: {str(e)}", code=code))
-            await self._emit_session_status(task, SessionStatus.FAILED)
-            await self._flush_event_persist_buffer()
-            raise
+            await self._try_emit_presentation_event(
+                task,
+                ErrorEvent(
+                    error=f"AgentTaskRunner出错: {str(e)}",
+                    code=code,
+                ),
+            )
+            run_outcome = RunOutcome.failed(str(e), code=code)
+            self._run_outcome = run_outcome
+            run_outcome = await self._finalize_run_outcome(task, run_outcome)
+            self._run_outcome = run_outcome
+            return run_outcome
         finally:
-            await self._flush_event_persist_buffer()
-            await self._cleanup_tools()
+            try:
+                await self._flush_event_persist_buffer()
+            except asyncio.CancelledError:
+                logger.warning(
+                    "最终事件落库清理被取消，保留已选择的运行结果 session=%s",
+                    self._session_id,
+                )
+            except Exception as exc:
+                logger.error("最终事件落库失败 session=%s: %s", self._session_id, exc)
+            try:
+                await self._cleanup_tools()
+            except asyncio.CancelledError:
+                logger.warning(
+                    "工具清理被取消，保留已选择的运行结果 session=%s",
+                    self._session_id,
+                )
 
     async def cleanup(self) -> None:
         """清理任务级资源（保留 sandbox 供后续对话复用）"""
@@ -641,6 +1185,10 @@ class AgentTaskRunner(TaskRunner):
         if self._sandbox_provider.materialized() is not None:
             logger.info("销毁AgentTaskRunner中的沙箱环境")
             await self._sandbox.destroy()
+
+    @property
+    def terminal_status(self) -> Optional[SessionStatus]:
+        return self._terminal_session_status
 
     async def on_done(self, task: Task) -> None:
         """任务结束时执行的回调函数"""

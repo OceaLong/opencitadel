@@ -4,7 +4,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.domain.models.knowledge_base import KnowledgeChunk, KnowledgeEntity, KnowledgeEntityRef
+from app.domain.models.knowledge_base import (
+    KnowledgeBase,
+    KnowledgeChunk,
+    KnowledgeEntity,
+    KnowledgeEntityRef,
+)
+from app.domain.models.scope import OwnerScope
+from app.infrastructure.repositories import (
+    db_knowledge_base_repository as knowledge_repository_module,
+)
 from app.infrastructure.repositories.db_knowledge_base_repository import DBKnowledgeBaseRepository
 
 
@@ -60,9 +69,10 @@ async def test_save_chunks_batches_by_500_and_embedding_presence():
     first_params = embed_calls[0][1]
     assert isinstance(first_params, list)
     assert set(first_params[0].keys()) == {
-        "id", "kb_id", "doc_id", "parent_id", "level", "content",
-        "segmented_content", "page_no", "heading_path", "ordinal", "embedding",
-    }
+            "id", "kb_id", "doc_id", "parent_id", "level", "content",
+            "version_id", "segmented_content", "content_tsv", "page_no",
+            "heading_path", "ordinal", "embedding",
+        }
 
 
 @pytest.mark.anyio
@@ -97,6 +107,32 @@ class _FakeResult:
     def scalar_one(self):
         return self._scalar_one
 
+    def scalar_one_or_none(self):
+        return self._scalar_one
+
+
+@pytest.mark.anyio
+async def test_get_kb_for_update_uses_owner_scoped_row_lock():
+    expected = KnowledgeBase(
+        id="kb1",
+        name="locked",
+        owner_user_id="user1",
+    )
+    record = SimpleNamespace(to_domain=lambda: expected)
+    session = _RecordingSession(
+        results=[_FakeResult(scalar_one=record)]
+    )
+    repo = DBKnowledgeBaseRepository(db_session=session)
+
+    result = await repo.get_kb_for_update(
+        "kb1",
+        scope=OwnerScope.personal("user1"),
+    )
+
+    assert result == expected
+    sql, _ = session.calls[0]
+    assert "FOR UPDATE" in sql
+    assert "owner_user_id" in sql
 
 @pytest.mark.anyio
 async def test_upsert_entities_reuses_existing_ids_and_inserts_new():
@@ -193,3 +229,99 @@ async def test_list_documents_page_returns_items_and_total():
     items, total = await repo.list_documents_page("kb1", limit=5, offset=0)
     assert items == ["DOC"]
     assert total == 7
+
+
+@pytest.mark.anyio
+async def test_versioned_bm25_sql_closes_version_manifest_and_revision():
+    session = _RecordingSession(results=[_FakeResult(rows=[])])
+    repo = DBKnowledgeBaseRepository(db_session=session)
+
+    assert await repo.bm25_search_chunks_for_version(
+        "kb1", "kbv1", "release", limit=7
+    ) == []
+
+    sql, params = session.calls[0]
+    assert "c.version_id = :version_id" in sql
+    assert "version.state IN ('ready', 'degraded')" in sql
+    assert "version.published_at IS NOT NULL" in sql
+    assert "knowledge_base_version_documents manifest" in sql
+    assert "manifest.document_revision_id" in sql
+    assert "knowledge_document_revisions revision" in sql
+    assert "c.version_id IS NULL" not in sql
+    assert "active_version_id" not in sql
+    assert params == {
+        "kb_id": "kb1",
+        "version_id": "kbv1",
+        "query": "release",
+        "limit": 7,
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "embedding",
+    [[], [float("nan")], ["bad"], [0.1] * 1535, [0.1] * 1537],
+)
+async def test_versioned_vector_sql_rejects_empty_or_malformed_embedding(
+    embedding,
+):
+    session = _RecordingSession()
+    repo = DBKnowledgeBaseRepository(db_session=session)
+
+    with pytest.raises(ValueError, match="embedding"):
+        await repo.vector_search_chunks_for_version(
+            "kb1", "kbv1", embedding, limit=7
+        )
+
+    assert session.calls == []
+
+
+@pytest.mark.anyio
+async def test_versioned_vector_sql_enables_iterative_scan_before_query():
+    session = _RecordingSession(
+        results=[_FakeResult(), _FakeResult(rows=[])]
+    )
+    repo = DBKnowledgeBaseRepository(db_session=session)
+
+    assert await repo.vector_search_chunks_for_version(
+        "kb1",
+        "kbv1",
+        [0.0] * 1536,
+        limit=10,
+    ) == []
+
+    assert session.calls[0][0].strip() == (
+        "SET LOCAL hnsw.iterative_scan = 'strict_order'"
+    )
+    query_sql, query_params = session.calls[1]
+    assert "c.version_id = :version_id" in query_sql
+    assert "ORDER BY c.embedding <=> :query::vector" in query_sql
+    assert query_params["version_id"] == "kbv1"
+
+
+def test_versioned_vector_sql_and_explain_share_production_statement():
+    builder = getattr(
+        knowledge_repository_module,
+        "build_versioned_vector_search_statement",
+        None,
+    )
+    assert callable(builder)
+
+    production = str(builder())
+    explained = str(builder(explain=True))
+    assert production in explained
+    assert explained.lstrip().startswith(
+        "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)"
+    )
+    for predicate in (
+        "c.kb_id = :kb_id",
+        "c.version_id = :version_id",
+        "version.state IN ('ready', 'degraded')",
+        "version.published_at IS NOT NULL",
+        "manifest.state = 'indexed'",
+        "revision.state = 'indexed'",
+        "ix_kb_chunks_embedding",
+    ):
+        if predicate == "ix_kb_chunks_embedding":
+            continue
+        assert predicate in production

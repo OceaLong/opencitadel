@@ -5,13 +5,16 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal, List, Union, Optional, Any, Dict, Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .event_policy import EVENT_SCHEMA_VERSION
 from .file import File
 from .plan import Plan, Step
 from .search import SearchResultItem
 from .tool_result import ToolResult
+from .run_outcome import RunOutcome
+from .resource_governance import ResourceBindingProjection
+from .knowledge_citation import KnowledgeCitation, deduplicate_citations
 
 
 class EventVisibility(str, Enum):
@@ -57,6 +60,9 @@ class BaseEvent(BaseModel):
     visibility: EventVisibility = EventVisibility.USER
     channel: EventChannel = EventChannel.UI
     persist: bool = True
+    resource_bindings: List[ResourceBindingProjection] = Field(
+        default_factory=list
+    )
 
 
 class ClarifyOption(BaseModel):
@@ -140,6 +146,12 @@ class MessageEvent(BaseEvent):
     attachments: List[File] = Field(default_factory=list)  # 附件列表信息
     stream_id: Optional[str] = None  # 流式消息合并 id
     clarify_answers: List[ClarifyAnswer] = Field(default_factory=list)
+    citations: List[KnowledgeCitation] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _deduplicate_citations(self) -> "MessageEvent":
+        self.citations = deduplicate_citations(self.citations)
+        return self
 
 
 class MessageDeltaEvent(BaseEvent):
@@ -187,6 +199,10 @@ class SessionStatusEvent(BaseEvent):
     """服务端权威的会话状态事件"""
     type: Literal["session_status"] = "session_status"
     status: Literal["pending", "running", "waiting", "completed", "cancelled", "failed"] = "running"
+    run_epoch_id: Optional[str] = None
+    reason: Optional[str] = None
+    code: Optional[str] = None
+    outcome: Optional[RunOutcome] = None
 
 
 class DebugItemEvent(BaseEvent):
@@ -254,6 +270,15 @@ class ToolEvent(BaseEvent):
     error: Optional[str] = None
     span_id: Optional[str] = None
     parent_span_id: Optional[str] = None
+    citations: List[KnowledgeCitation] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _copy_trusted_result_citations(self) -> "ToolEvent":
+        citations = list(self.citations)
+        if self.function_result is not None:
+            citations.extend(self.function_result.citations)
+        self.citations = deduplicate_citations(citations)
+        return self
 
 
 class WaitEvent(BaseEvent):

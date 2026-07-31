@@ -12,3 +12,6 @@ class ObjectStoragePort(Protocol):
 
     async def get_bytes(self, key: str) -> bytes:
         ...
+
+    async def delete_bytes(self, key: str) -> None:
+        ...

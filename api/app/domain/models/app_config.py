@@ -5,7 +5,28 @@ from enum import Enum
 from typing import Dict, Optional, List, Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
+from app.domain.models.tool_policy import (
+    CONSERVATIVE_TOOL_POLICY,
+    ToolCapability,
+    ToolEffect,
+    ToolExecutionPolicy,
+)
+
+
+def normalize_integration_tool_policies(
+        policies: Dict[str, ToolExecutionPolicy],
+) -> Dict[str, ToolExecutionPolicy]:
+    """Fail closed for read declarations using a non-integration capability."""
+    return {
+        name: (
+            CONSERVATIVE_TOOL_POLICY
+            if policy.effect == ToolEffect.READ_ONLY
+            and policy.capability != ToolCapability.INTEGRATION_READ
+            else policy
+        )
+        for name, policy in policies.items()
+    }
 
 
 class ServerConfig(BaseModel):
@@ -133,8 +154,14 @@ class MCPServerConfig(BaseModel):
     # streamable_http&sse配置
     url: Optional[str] = None  # MCP服务URL地址
     headers: Optional[Dict[str, Any]] = None  # MCP服务请求头
+    tool_policies: Dict[str, ToolExecutionPolicy] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="allow")
+
+    @field_validator("tool_policies")
+    @classmethod
+    def validate_tool_policies(cls, value):
+        return normalize_integration_tool_policies(value)
 
     @model_validator(mode="after")
     def validate_mcp_server_config(self):
@@ -169,6 +196,12 @@ class A2AServerConfig(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # 唯一标识
     base_url: str  # 服务基础URL
     enabled: bool = True  # 服务是否开启
+    tool_policies: Dict[str, ToolExecutionPolicy] = Field(default_factory=dict)
+
+    @field_validator("tool_policies")
+    @classmethod
+    def validate_tool_policies(cls, value):
+        return normalize_integration_tool_policies(value)
 
 
 class A2AConfig(BaseModel):
@@ -298,6 +331,14 @@ class KBGraphRAGConfig(BaseModel):
     enabled: bool = True
     max_parent_chunks_per_doc: int = Field(default=200, ge=0, le=5000)
     concurrency: int = Field(default=3, gt=0, le=20)
+    max_chunks: int = Field(default=10_000, gt=0, le=1_000_000)
+    max_llm_calls: int = Field(default=10_000, gt=0, le=1_000_000)
+    max_tokens: int = Field(
+        default=1_000_000,
+        gt=0,
+        le=1_000_000_000,
+    )
+    deadline_seconds: float = Field(default=300.0, gt=0, le=3600)
 
 
 class KBOCRConfig(BaseModel):
@@ -319,6 +360,10 @@ class KBConnectorsConfig(BaseModel):
 
 class KnowledgeBaseConfig(BaseModel):
     vector_enabled: bool = True
+    version_gc_enabled: bool = False
+    version_retention_count: int = Field(default=10, ge=0, le=10_000)
+    version_retention_min_days: int = Field(default=30, ge=0, le=36_500)
+    version_gc_batch_size: int = Field(default=50, gt=0, le=500)
     chunk: KBChunkConfig = Field(default_factory=KBChunkConfig)
     retrieval: KBRetrievalConfig = Field(default_factory=KBRetrievalConfig)
     rerank: KBRerankConfig = Field(default_factory=KBRerankConfig)
@@ -326,6 +371,13 @@ class KnowledgeBaseConfig(BaseModel):
     ocr: KBOCRConfig = Field(default_factory=KBOCRConfig)
     document: KBDocumentConfig = Field(default_factory=KBDocumentConfig)
     connectors: KBConnectorsConfig = Field(default_factory=KBConnectorsConfig)
+
+
+class CodebaseConfig(BaseModel):
+    version_gc_enabled: bool = False
+    version_retention_count: int = Field(default=10, ge=0, le=10_000)
+    version_retention_min_days: int = Field(default=30, ge=0, le=36_500)
+    version_gc_batch_size: int = Field(default=50, gt=0, le=500)
 
 
 class AppConfig(BaseModel):
@@ -346,5 +398,6 @@ class AppConfig(BaseModel):
     hitl: HitlConfig = Field(default_factory=HitlConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     knowledge_base: KnowledgeBaseConfig = Field(default_factory=KnowledgeBaseConfig)
+    codebase: CodebaseConfig = Field(default_factory=CodebaseConfig)
 
     model_config = ConfigDict(extra="allow")

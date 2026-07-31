@@ -66,6 +66,111 @@ Current `EVENT_SCHEMA_VERSION=3`. Legacy payloads are upgraded via `event_upgrad
 
 The `error` event may optionally carry a `code` field (e.g. `MODEL_UNAVAILABLE`, `EMBEDDING_UNAVAILABLE`, `DOCUMENT_PARSE_FAILED`) for frontend and ops to distinguish error types. See [Model Resilience Design](model-resilience.md) and `api/app/domain/models/error_codes.py` for the full error code list. Frontends should tolerate missing `code` and fall back to displaying the `error` text.
 
+## RunOutcome and terminal transition contract
+
+Flows return an explicit `RunOutcome`; generator exhaustion and presentation
+events never infer semantic success.
+
+| `RunOutcome.status` | Session terminal event | Redis task mapping |
+|---------------------|------------------------|--------------------|
+| `succeeded` | `session_status=completed` | `done` |
+| `failed` | `session_status=failed` | `failed` |
+| `cancelled` | `session_status=cancelled` | `cancelled` |
+| `waiting` | `session_status=waiting` | remains `pending` for resume |
+
+`RunOutcome.error` is either null or
+`{message, code?, details?}`; `usage` is a numeric counter map. Complete
+outcomes are stored inside the PostgreSQL status-event payload for
+authoritative reconciliation. The internal `outcome` object is excluded from
+Redis/SSE projection; public compatibility fields remain `status`, `reason`,
+and `code`.
+
+The durable status state machine is:
+
+| Current state for `run_epoch_id` | Accepted next state |
+|----------------------------------|---------------------|
+| none | `running` |
+| `running` | exactly one of `waiting`, `completed`, `failed`, `cancelled` |
+| any terminal | none for the same epoch |
+| a later user turn | a new `running` event with a new deterministic epoch |
+
+`waiting` is terminal for the current run epoch, but not completion of the
+session or Redis task. `DoneEvent`, `ErrorEvent`, delivery failure, or cleanup
+cannot select or overwrite the semantic terminal. PostgreSQL atomically claims
+the terminal before Redis publication; a CAS loser rereads and adopts the
+durable winner. Thus every run has exactly one persisted terminal
+`SessionStatusEvent`.
+
+## Dispatch generations and durable handoff
+
+Task metadata starts with `run_generation=1`, and every dispatch, lease,
+heartbeat, status mutation, and reconciliation record carries that generation.
+Initial delivery and ordinary redelivery keep it; only creation of a
+replacement execution attempt advances it through an expected-generation CAS.
+
+Workers classify claims as `ACK_DUPLICATE`, `EXECUTE`, or `REQUEUE`. A stale
+generation, a terminal current generation, or a proven live same-generation
+lease cannot execute again. Missing, malformed, future, or unresolved lease
+state remains reclaimable. Local execution is keyed by
+`(task_id, run_generation)`, so an old worker cannot overwrite a newer
+generation or clear its reconciliation proposal.
+
+Retry, orphan recovery, and DLQ replay use durable-first handoff:
+
+1. append the replacement dispatch/DLQ row and obtain its real message ID;
+2. atomically advance generation, reset execution fields, record the durable
+   dispatch marker, and promote any `RunOutcome` reconciliation proposal;
+3. acknowledge the source only after the successor is durably proven.
+
+The same-generation DLQ identity includes status, session, retry count, error
+code, and error text. `RecoverableTaskReconciliationRequired` deliberately
+leaves the current dispatch unacknowledged. If primary task metadata cannot
+store a selected outcome, an internal `run_reconciliation` input envelope is
+the durable fallback; it is acknowledged only after PostgreSQL has claimed or
+reread the authoritative terminal.
+
+## Resource binding and build-event projection
+
+Every user input snapshots current session bindings in the same transaction as
+the message. Ordinary and durable status events copy the immutable four-field
+projection:
+
+```json
+{
+  "binding_id": "binding-id",
+  "resource_kind": "knowledge_base",
+  "resource_id": "kb-id",
+  "version_id": "version-id"
+}
+```
+
+Historical events without this metadata upgrade in memory to an empty list;
+the server never guesses or rewrites their version.
+
+Resource builds have a separate persisted event log and SSE endpoint:
+`GET /api/resource-builds/{build_id}/events?after=<seq>`. The outer SSE event
+name is `resource-build-event`; every JSON data object has one unified
+projection:
+
+| Field | Contract |
+|-------|----------|
+| `event` | Always `resource_build` |
+| `id`, `seq`, `build_id` | Durable event identity and per-build cursor |
+| `resource_kind`, `resource_id`, `version_id` | From the owner-scoped authoritative build |
+| `phase`, `state`, `progress` | Event transition; progress is a float from 0 through 1 |
+| `degraded_reasons` | From the authoritative build; older null values project `[]` |
+| `payload`, `created_at` | Event-specific additive data and timestamp |
+
+`after` is inclusive-exclusion: replay returns committed rows with
+`seq > after`. Valid cursors are from `0` through the durable
+`last_event_seq`; a higher cursor returns a stable 400 before streaming
+headers. PostgreSQL is authoritative: the endpoint replays it first, then
+subscribes, immediately catches up to close the race, and refetches after every
+hint or heartbeat. Redis carries only `{"build_id", "seq"}` and retains no
+history. Notification loss, duplication, gaps, ordering, or Redis failure
+therefore cannot alter replay. A terminal event—or reconnect exactly at an
+already-terminal last cursor—closes the stream without waiting on Redis.
+
 ### Ingestion `step` events
 
 Codebase and knowledge-base ingest tasks emit `step` events with stable step ids:

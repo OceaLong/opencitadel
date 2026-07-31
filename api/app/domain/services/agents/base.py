@@ -23,10 +23,21 @@ from app.domain.models.event import (
 from app.domain.models.memory import Memory
 from app.domain.models.message import Message, VisionAttachment
 from app.domain.models.tool_result import ToolResult
+from app.domain.models.knowledge_citation import (
+    KnowledgeCitation,
+    deduplicate_citations,
+)
+from app.domain.models.tool_policy import ApprovalMode
 from app.domain.services import vision_service
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agents.token_accountant import TokenAccountant
 from app.domain.services.agents.retry_budget import LLMRetryBudget, RetryBudgetExceeded
+from app.domain.services.agents.tool_batch_executor import (
+    PreparedToolCall,
+    ToolBatchExecutor,
+    ToolBatchExecutionResult,
+    UowApprovalRepository,
+)
 from app.domain.services.tools.base import BaseTool
 from app.domain.services.tools.tool_names import (
     is_tool_allowed,
@@ -41,6 +52,7 @@ from app.application.services.config_provider import get_runtime_config
 from app.domain.utils.hitl import (
     TOOL_APPROVAL_PHASE,
     merge_pending_metadata,
+    preserve_session_tracking_metadata,
     tool_matches_risk_list,
     domain_in_whitelist,
     matches_critical_action,
@@ -142,6 +154,8 @@ class BaseAgent(ABC):
         self._all_tool_schemas: List[Dict[str, Any]] = []
         self._cached_available_tools: Optional[List[Dict[str, Any]]] = None
         self._tool_cache_signature: Optional[str] = None
+        self._batch_executor: Optional[ToolBatchExecutor] = None
+        self._knowledge_citations: list[KnowledgeCitation] = []
         resilience_cfg = get_runtime_config().model_resilience
         self._retry_budget = LLMRetryBudget.create(
             max_calls=self._agent_config.max_retries * resilience_cfg.max_attempts_per_call + 2,
@@ -151,6 +165,16 @@ class BaseAgent(ABC):
     def _refresh_retry_budget(self) -> None:
         resilience_cfg = get_runtime_config().model_resilience
         self._retry_budget.refresh_deadline(resilience_cfg.max_call_budget_seconds)
+
+    def _record_tool_result_citations(self, result: ToolResult) -> None:
+        """Accumulate only structured identities produced by trusted tools."""
+        self._knowledge_citations = deduplicate_citations([
+            *self._knowledge_citations,
+            *result.citations,
+        ])
+
+    def _trusted_knowledge_citations(self) -> list[KnowledgeCitation]:
+        return list(self._knowledge_citations)
 
     def _tool_cache_signature_value(self) -> str:
         names = sorted(
@@ -385,10 +409,15 @@ class BaseAgent(ABC):
         )
         budget = max(0, max_chars - len(notice))
         truncated_payload = serialized[:budget] + notice
-        return ToolResult(
-            success=result.success,
-            message=(result.message or "") + notice if result.message else notice.strip(),
-            data=truncated_payload,
+        return result.model_copy(
+            update={
+                "message": (
+                    (result.message or "") + notice
+                    if result.message
+                    else notice.strip()
+                ),
+                "data": truncated_payload,
+            },
         )
 
     async def _offload_large_result(
@@ -422,13 +451,14 @@ class BaseAgent(ABC):
             return result
         digest = serialized[:500]
         internal = self._internal_prompts()
-        return ToolResult(
-            success=result.success,
-            message=internal.OFFLOAD_NOTICE.format(
-                cache_path=cache_path,
-                original_len=len(serialized),
-            ),
-            data=digest,
+        return result.model_copy(
+            update={
+                "message": internal.OFFLOAD_NOTICE.format(
+                    cache_path=cache_path,
+                    original_len=len(serialized),
+                ),
+                "data": digest,
+            },
         )
 
     async def _ensure_memory(self) -> None:
@@ -728,53 +758,58 @@ class BaseAgent(ABC):
         """传递工具包+工具名字+对应参数调用指定工具"""
         started = time.monotonic()
         normalized_args = arguments if isinstance(arguments, dict) else {}
-        # 1.执行循环调用工具获取结果
-        err = ""
-        timeout_seconds = max(1, self._runtime_settings.tool_timeout_seconds)
-        for _ in range(self._agent_config.max_retries):
-            try:
-                result = await asyncio.wait_for(
-                    tool.invoke(tool_name, **arguments),
-                    timeout=timeout_seconds,
-                )
-                if tool.name in {"mcp", "a2a"} and not result.success:
-                    err = result.message or f"调用工具[{tool_name}]失败"
-                    logger.warning("调用工具[%s]返回失败，准备重试: %s", tool_name, err)
-                    await asyncio.sleep(self._retry_interval)
-                    continue
-                truncated = self._truncate_tool_result(
-                    result,
-                    self._agent_config.tool_result_max_chars,
-                    function_name=tool_name,
-                    function_args=normalized_args,
-                )
-                await self._maybe_record_tool_audit(
-                    tool_name=tool_name,
-                    arguments=normalized_args,
-                    result=truncated,
-                    started=started,
-                )
-                return truncated
-            except asyncio.TimeoutError:
-                err = f"调用工具[{tool_name}]超时({timeout_seconds}s)"
-                logger.warning(err)
-                await asyncio.sleep(self._retry_interval)
-                continue
-            except Exception as e:
-                err = str(e)
-                logger.exception(f"调用工具[{tool_name}]出错, 错误: {str(e)}")
-                await asyncio.sleep(self._retry_interval)
-                continue
-
-        # 2.循环最大重试次数后没有结果则将错误作为工具的执行结果，让LLM自行处理
-        failed = ToolResult(success=False, message=err)
+        result = await self._invoke_tool_once(tool, tool_name, normalized_args)
         await self._maybe_record_tool_audit(
             tool_name=tool_name,
             arguments=normalized_args,
-            result=failed,
+            result=result,
             started=started,
         )
-        return failed
+        return result
+
+    async def _invoke_tool_once(
+            self,
+            tool: BaseTool,
+            tool_name: str,
+            arguments: Dict[str, Any],
+    ) -> ToolResult:
+        """Perform one bounded invocation; governed retries belong to the batch executor."""
+        normalized_args = arguments if isinstance(arguments, dict) else {}
+        timeout_seconds = max(1, self._runtime_settings.tool_timeout_seconds)
+        try:
+            result = await asyncio.wait_for(
+                tool.invoke(tool_name, **normalized_args),
+                timeout=timeout_seconds,
+            )
+            return self._truncate_tool_result(
+                result,
+                self._agent_config.tool_result_max_chars,
+                function_name=tool_name,
+                function_args=normalized_args,
+            )
+        except asyncio.TimeoutError:
+            message = f"调用工具[{tool_name}]超时({timeout_seconds}s)"
+            logger.warning(message)
+            return ToolResult(
+                success=False,
+                message=message,
+                failure_kind="timeout",
+            )
+        except Exception as exc:
+            logger.exception("调用工具[%s]出错, 错误: %s", tool_name, exc)
+            return ToolResult(
+                success=False,
+                message=str(exc),
+                failure_kind=(
+                    "authorization"
+                    if isinstance(exc, PermissionError)
+                    else (
+                        "transport"
+                        if ToolBatchExecutor._failure_kind(exc) == "transport"
+                        else exc.__class__.__name__.lower()
+                    )
+                ),
+            )
 
     async def _strip_images_from_memory(self) -> bool:
         """Remove image parts from persisted memory after multimodal rejection."""
@@ -1070,140 +1105,88 @@ class BaseAgent(ABC):
 
             tool_calls = message.get("tool_calls") or []
             tool_messages: List[Dict[str, Any]] = []
-
-            async def _run_tool_call(tool_call: Dict[str, Any]) -> tuple[List[BaseEvent], List[Dict[str, Any]], bool]:
-                events: List[BaseEvent] = []
-                msgs: List[Dict[str, Any]] = []
-                if not tool_call.get("function"):
-                    return events, msgs, False
-
-                tool_call_id = tool_call["id"] or str(uuid.uuid4())
-                function_name = normalize_tool_name(tool_call["function"]["name"])
-                raw_arguments = tool_call["function"]["arguments"]
-                if isinstance(raw_arguments, dict):
-                    function_args = raw_arguments
-                else:
-                    function_args = await self._json_parser.invoke(raw_arguments)
-
-                if self._allowed_tool_names is not None and not is_tool_allowed(
-                        function_name, self._allowed_tool_names
-                ):
-                    result = ToolResult(success=False, message=f"工具[{function_name}]未被当前Skill授权")
-                    events.append(ToolEvent(
+            executor = self._get_tool_batch_executor()
+            try:
+                batch = await executor.preflight(tool_calls)
+            except Exception as exc:
+                logger.warning(
+                    "会话[%s] 工具批次预检失败: %s",
+                    self._session_id,
+                    exc,
+                )
+                for ordinal, raw_call in enumerate(tool_calls):
+                    function = raw_call.get("function") or {}
+                    tool_call_id = str(
+                        raw_call.get("id") or f"preflight-{ordinal}"
+                    )
+                    function_name = normalize_tool_name(
+                        str(function.get("name") or "")
+                    )
+                    raw_args = function.get("arguments")
+                    function_args = (
+                        raw_args if isinstance(raw_args, dict) else {}
+                    )
+                    result = ToolResult(
+                        success=False,
+                        message=f"工具批次预检失败: {_format_agent_error(exc)}",
+                    )
+                    yield ToolEvent(
                         tool_call_id=tool_call_id,
                         tool_name="blocked",
                         function_name=function_name,
-                        function_args=function_args if isinstance(function_args, dict) else {},
+                        function_args=function_args,
                         function_result=result,
                         status=ToolEventStatus.CALLED,
-                    ))
-                    msgs.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "_function_name": function_name,
-                        "content": result.model_dump_json(),
-                    })
-                    return events, msgs, False
-
-                try:
-                    tool = self._resolve_tool(function_name)
-                except ValueError as exc:
-                    logger.warning(
-                        "会话[%s] 调用未知工具[%s]: %s",
-                        self._session_id,
-                        function_name,
-                        exc,
                     )
-                    result = ToolResult(success=False, message=str(exc))
-                    events.append(ToolEvent(
-                        tool_call_id=tool_call_id,
-                        tool_name="unknown",
-                        function_name=function_name,
-                        function_args=function_args if isinstance(function_args, dict) else {},
-                        function_result=result,
-                        status=ToolEventStatus.CALLED,
-                    ))
-                    msgs.append({
+                    tool_messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call_id,
                         "_function_name": function_name,
                         "content": result.model_dump_json(),
                     })
-                    return events, msgs, False
-
-                async def _execute() -> tuple[List[BaseEvent], List[Dict[str, Any]], bool]:
-                    inner_events: List[BaseEvent] = []
-                    inner_msgs: List[Dict[str, Any]] = []
-                    inner_events.append(ToolEvent(
-                        tool_call_id=tool_call_id,
-                        tool_name=tool.name,
-                        function_name=function_name,
-                        function_args=function_args,
-                        status=ToolEventStatus.CALLING,
-                    ))
-                    if await self._require_first_visit_domain_gate(
-                            function_name,
-                            function_args if isinstance(function_args, dict) else {},
-                            tool_call_id,
-                            inner_events,
-                    ):
-                        return inner_events, [], True
-                    if await self._require_tool_approval_gate(
-                            function_name,
-                            function_args if isinstance(function_args, dict) else {},
-                            tool_call_id,
-                            inner_events,
-                    ):
-                        return inner_events, [], True
-                    result = await self._invoke_tool(tool, function_name, function_args)
-                    if function_name == "browser_navigate" and result.success:
-                        await self._record_visited_domain(function_args)
-                    result = await self._offload_large_result(tool_call_id, function_name, result)
-                    inner_events.append(ToolEvent(
-                        tool_call_id=tool_call_id,
-                        tool_name=tool.name,
-                        function_name=function_name,
-                        function_args=function_args,
-                        function_result=result,
-                        status=ToolEventStatus.CALLED,
-                    ))
-                    extra_messages: List[Dict[str, Any]] = []
-                    if (
-                            function_name in BROWSER_VISION_TOOLS
-                            and vision_service.vision_enabled(self._llm)
-                            and result.success
-                    ):
-                        tool_content, extra_messages = await self._build_browser_tool_payload(
-                            function_name,
-                            result,
-                        )
-                    else:
-                        tool_content = result.model_dump_json()
-                    inner_msgs.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "_function_name": function_name,
-                        "content": tool_content,
-                    })
-                    inner_msgs.extend(extra_messages)
-                    return inner_events, inner_msgs, False
-
-                if tool.name in STATEFUL_TOOL_NAMES:
-                    async with self._stateful_tool_lock:
-                        return await _execute()
-                return await _execute()
-
-            results = await asyncio.gather(*[_run_tool_call(tc) for tc in tool_calls])
-            if any(wait_flag for _, _, wait_flag in results):
-                for event_list, _, _ in results:
-                    for event in event_list:
-                        yield event
-                yield WaitEvent()
-                return
-            for events, msgs, _ in results:
-                for event in events:
+            else:
+                execution = await executor.execute(batch)
+                if execution.waiting:
+                    await self._enter_tool_approval_batch_gate(execution)
+                    approval_batch = execution.approval_batch
+                    compatibility_call = next(
+                        (
+                            call
+                            for call in approval_batch.calls
+                            if call.status.value == "pending"
+                        ),
+                        approval_batch.calls[0],
+                    )
+                    yield ApprovalEvent(
+                        approval_id=approval_batch.id,
+                        kind="tool",
+                        payload={
+                            "approval_batch_id": approval_batch.id,
+                            "tool_call_id": compatibility_call.tool_call_id,
+                            "tool_name": compatibility_call.tool_name,
+                            "args": compatibility_call.normalized_args,
+                            "calls": [
+                                {
+                                    "tool_call_id": call.tool_call_id,
+                                    "tool_name": call.tool_name,
+                                    "args": call.normalized_args,
+                                    "effect": call.effect.value,
+                                    "approval": call.approval.value,
+                                    "concurrency_group": call.concurrency_group,
+                                }
+                                for call in approval_batch.calls
+                            ],
+                        },
+                        options=["approve", "approve_same", "reject"],
+                    )
+                    yield WaitEvent()
+                    return
+                async for event, tool_message in self._project_batch_results(
+                        batch.calls,
+                        execution,
+                ):
                     yield event
-                tool_messages.extend(msgs)
+                    tool_messages.extend(tool_message)
 
             # Drain auxiliary events from tools (e.g. SubAgentEvent)
             for tool in self._tools:
@@ -1231,6 +1214,7 @@ class BaseAgent(ABC):
             yield MessageEvent(
                 message=content,
                 stream_id=message.get("stream_id"),
+                citations=self._trusted_knowledge_citations(),
             )
         else:
             yield ErrorEvent(error="Agent未能生成有效回复内容", code=MODEL_UNAVAILABLE)
@@ -1331,6 +1315,13 @@ class BaseAgent(ABC):
                     "tool": tool_name,
                     "args": redact_tool_args(arguments if isinstance(arguments, dict) else {}),
                     "success": result.success,
+                    "execution_status": (
+                        result.status.value if result.status is not None else None
+                    ),
+                    "attempts": [
+                        attempt.model_dump(mode="json")
+                        for attempt in result.attempts
+                    ],
                     "result_summary": summarize_tool_result(result),
                     "duration_ms": duration_ms,
                     "gate_profile": self._runtime_settings.gate_profile,
@@ -1357,6 +1348,191 @@ class BaseAgent(ABC):
                 self._session_id,
                 merge_pending_metadata(meta, {"visited_domains": visited}),
             )
+
+    def _get_tool_batch_executor(self) -> ToolBatchExecutor:
+        if self._batch_executor is None:
+            self._batch_executor = ToolBatchExecutor(
+                session_id=self._session_id,
+                tools=self._tools,
+                approval_repository=UowApprovalRepository(self._uow_factory),
+                json_parser=self._json_parser,
+                approval_resolver=self._preflight_requires_policy_approval,
+                authorization_resolver=self._preflight_authorizes_tool,
+                invoke_call=self._invoke_tool_once,
+                audit_call=lambda tool_name, arguments, result, started: (
+                    self._maybe_record_tool_audit(
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        result=result,
+                        started=started,
+                    )
+                ),
+                stateful_tool_lock=self._stateful_tool_lock,
+                max_attempts=self._agent_config.max_retries,
+                timeout_seconds=self._runtime_settings.tool_timeout_seconds,
+                retry_interval=self._retry_interval,
+            )
+        return self._batch_executor
+
+    async def _preflight_authorizes_tool(
+            self,
+            call: PreparedToolCall,
+    ) -> bool:
+        return (
+            self._allowed_tool_names is None
+            or is_tool_allowed(call.function_name, self._allowed_tool_names)
+        )
+
+    async def _preflight_requires_policy_approval(
+            self,
+            call: PreparedToolCall,
+    ) -> bool:
+        if call.policy.approval != ApprovalMode.POLICY:
+            return call.policy.approval == ApprovalMode.ALWAYS
+        runtime = get_runtime_config()
+        function_name = call.function_name
+        function_args = call.normalized_args
+
+        first_visit_domain = None
+        if function_name == "browser_navigate":
+            url = function_args.get("url")
+            domain = self._normalize_domain(str(url or ""))
+            if domain:
+                first_visit_domain = domain
+
+        risk_gated = (
+            self._tool_gate_call_level_enabled()
+            and tool_matches_risk_list(
+                function_name,
+                runtime.hitl.tool_gate_risk_list,
+            )
+        )
+        profile_settings = (
+            self._gate_profile_settings()
+            if self._runtime_settings.gate_profile
+            else None
+        )
+        if (
+            risk_gated
+            and profile_settings
+            and profile_settings.selective_critical_only
+            and not matches_critical_action(
+                function_name,
+                function_args,
+                runtime.hitl.critical_action_patterns,
+            )
+        ):
+            risk_gated = False
+
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(self._session_id)
+            if not session or not getattr(session, "operator_scope", None):
+                return False
+            meta = session.pending_metadata or {}
+            if risk_gated:
+                approved = meta.get("approved_tools") or []
+                if any(
+                    tool_matches_risk_list(function_name, [item])
+                    for item in approved
+                ):
+                    risk_gated = False
+            if first_visit_domain:
+                whitelist = list(
+                    self._runtime_settings.operator_domains
+                    or getattr(session, "operator_domains", None)
+                    or []
+                )
+                already_allowed = (
+                    domain_in_whitelist(first_visit_domain, whitelist)
+                    or first_visit_domain
+                    in set(meta.get("visited_domains") or [])
+                    or first_visit_domain
+                    in set(meta.get("approved_domains") or [])
+                )
+                if not already_allowed:
+                    return True
+        return risk_gated
+
+    async def _enter_tool_approval_batch_gate(
+            self,
+            execution: ToolBatchExecutionResult,
+    ) -> None:
+        approval_batch = execution.approval_batch
+        if approval_batch is None:
+            raise RuntimeError("waiting tool batch has no approval record")
+        if self._sandbox_lifecycle:
+            for call in approval_batch.calls:
+                if call.approval != ApprovalMode.NEVER:
+                    await self._sandbox_lifecycle.create_tool_checkpoint(
+                        call.tool_name,
+                        call.tool_call_id,
+                    )
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(self._session_id)
+            if not session:
+                return
+            tracking = preserve_session_tracking_metadata(
+                session.pending_metadata
+            ) or {}
+            tracking["approval_batch_id"] = approval_batch.id
+            await uow.session.set_pending_metadata(
+                self._session_id,
+                tracking,
+            )
+            await uow.session.set_pending_phase(
+                self._session_id,
+                TOOL_APPROVAL_PHASE,
+            )
+
+    async def _project_batch_results(
+            self,
+            prepared_calls,
+            execution: ToolBatchExecutionResult,
+    ):
+        prepared_by_id = {
+            call.tool_call_id: call for call in prepared_calls
+        }
+        for executed in execution.calls:
+            call = prepared_by_id[executed.tool_call_id]
+            result = executed.result
+            if call.function_name == "browser_navigate" and result.success:
+                await self._record_visited_domain(call.normalized_args)
+            result = await self._offload_large_result(
+                call.tool_call_id,
+                call.function_name,
+                result,
+            )
+            self._record_tool_result_citations(result)
+            extra_messages: List[Dict[str, Any]] = []
+            if (
+                call.function_name in BROWSER_VISION_TOOLS
+                and vision_service.vision_enabled(self._llm)
+                and result.success
+            ):
+                tool_content, extra_messages = (
+                    await self._build_browser_tool_payload(
+                        call.function_name,
+                        result,
+                    )
+                )
+            else:
+                tool_content = result.model_dump_json()
+            event = ToolEvent(
+                tool_call_id=call.tool_call_id,
+                tool_name=call.tool.name,
+                function_name=call.function_name,
+                function_args=call.normalized_args,
+                function_result=result,
+                status=ToolEventStatus.CALLED,
+            )
+            messages = [{
+                "role": "tool",
+                "tool_call_id": call.tool_call_id,
+                "_function_name": call.function_name,
+                "content": tool_content,
+            }]
+            messages.extend(extra_messages)
+            yield event, messages
 
     async def _require_first_visit_domain_gate(
             self,
@@ -1453,36 +1629,42 @@ class BaseAgent(ABC):
             extra_metadata: Optional[Dict[str, Any]] = None,
             approval_note: Optional[str] = None,
     ) -> bool:
-        async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(self._session_id)
-            if not session:
-                return False
-            meta = session.pending_metadata or {}
-            pending_tool_call = {
-                "tool_call_id": tool_call_id,
-                "tool_name": function_name,
-                "args": function_args,
-            }
-            if extra_metadata:
-                pending_tool_call.update(extra_metadata)
-            await uow.session.set_pending_metadata(
-                self._session_id,
-                merge_pending_metadata(meta, {
-                    "pending_tool_call": pending_tool_call,
-                }),
-            )
-            await uow.session.set_pending_phase(self._session_id, TOOL_APPROVAL_PHASE)
+        executor = self._get_tool_batch_executor()
+        batch = await executor.preflight([{
+            "id": tool_call_id,
+            "function": {
+                "name": function_name,
+                "arguments": function_args,
+            },
+        }])
+        execution = await executor.execute(batch)
+        if not execution.waiting:
+            return False
+        await self._enter_tool_approval_batch_gate(execution)
+        approval_batch = execution.approval_batch
         payload = {
+            "approval_batch_id": approval_batch.id,
             "tool_call_id": tool_call_id,
             "tool_name": function_name,
             "args": function_args,
+            "calls": [
+                {
+                    "tool_call_id": call.tool_call_id,
+                    "tool_name": call.tool_name,
+                    "args": call.normalized_args,
+                    "effect": call.effect.value,
+                    "approval": call.approval.value,
+                    "concurrency_group": call.concurrency_group,
+                }
+                for call in approval_batch.calls
+            ],
         }
         if extra_metadata:
             payload.update(extra_metadata)
         if approval_note:
             payload["note"] = approval_note
         events.append(ApprovalEvent(
-            approval_id=str(uuid.uuid4()),
+            approval_id=approval_batch.id,
             kind="tool",
             payload=payload,
             options=["approve", "approve_same", "reject"],

@@ -19,7 +19,10 @@ def upgrade_event_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     if upgraded.get("type") == "error":
         upgraded.setdefault("code", None)
+    if upgraded.get("type") in {"tool", "message"}:
+        upgraded.setdefault("citations", [])
 
+    upgraded.setdefault("resource_bindings", [])
     upgraded["schema_version"] = EVENT_SCHEMA_VERSION
     return upgraded
 

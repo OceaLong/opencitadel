@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronRight, FileCode2, Search } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { ChevronRight, FileCode2, Search } from "lucide-react";
 
+import { CodeEvidencePanel } from "@/components/codebase/code-evidence-panel";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -85,12 +86,14 @@ function FileTreeItem({
 
 type CodebaseContextPanelProps = {
   codebaseId: string;
+  codebaseVersionId?: string;
   onSourceNavigate?: (path: string, line?: number) => void;
   onSourceClickRef?: React.MutableRefObject<((path: string, line?: number) => void) | null>;
 };
 
 export function CodebaseContextPanel({
   codebaseId,
+  codebaseVersionId,
   onSourceNavigate,
   onSourceClickRef,
 }: CodebaseContextPanelProps) {
@@ -114,7 +117,9 @@ export function CodebaseContextPanel({
       try {
         const [treeData, artData] = await Promise.all([
           codebaseApi.getTree(codebaseId),
-          codebaseApi.getArtifacts(codebaseId),
+          codebaseVersionId
+            ? codebaseApi.getVersionArtifacts(codebaseId, codebaseVersionId)
+            : codebaseApi.getArtifacts(codebaseId),
         ]);
         setTree(treeData.tree);
         setArtifacts(artData.artifacts);
@@ -123,7 +128,7 @@ export function CodebaseContextPanel({
         setArtifacts([]);
       }
     })();
-  }, [codebaseId]);
+  }, [codebaseId, codebaseVersionId]);
 
   useEffect(() => {
     if (!codebaseId) return;
@@ -152,11 +157,14 @@ export function CodebaseContextPanel({
       setSourceLoading(true);
       onSourceNavigate?.(path, line);
       try {
-        const data = await codebaseApi.readSource(codebaseId, {
+        const request = {
           path,
           start_line: line ? Math.max(1, line - 5) : undefined,
           end_line: line ? line + 20 : undefined,
-        });
+        };
+        const data = codebaseVersionId
+          ? await codebaseApi.readVersionSource(codebaseId, codebaseVersionId, request)
+          : await codebaseApi.readSource(codebaseId, request);
         setSourceContent(data.content);
       } catch (err) {
         setSourceContent(err instanceof Error ? err.message : t("readFailed"));
@@ -164,7 +172,7 @@ export function CodebaseContextPanel({
         setSourceLoading(false);
       }
     },
-    [codebaseId, onSourceNavigate, t],
+    [codebaseId, codebaseVersionId, onSourceNavigate, t],
   );
 
   useEffect(() => {
@@ -304,6 +312,10 @@ export function CodebaseContextPanel({
                   ) : (
                     <pre className="text-xs whitespace-pre-wrap">{art.content}</pre>
                   )}
+                  <CodeEvidencePanel
+                    artifact={art}
+                    onOpenSource={(path, line) => void loadSource(path, line)}
+                  />
                   {kind === "call_chain" && callChainLocations.length > 0 && (
                     <ul className="mt-2 space-y-1 text-xs">
                       {callChainLocations.map((loc) => {

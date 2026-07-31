@@ -10,6 +10,8 @@ import type {
   SessionFile,
   SessionsData,
   SessionTokenUsageData,
+  SessionResourceBinding,
+  ResourceBindingUpgrade,
   SSEEventData,
   SSEEventHandler,
   UpdateSessionConfigParams,
@@ -170,6 +172,30 @@ export const sessionApi = {
     params: UpdateSessionConfigParams,
   ): Promise<SessionDetail> => {
     return patch<SessionDetail>(`/sessions/${sessionId}`, params);
+  },
+
+  getResourceBindings: (sessionId: string): Promise<SessionResourceBinding[]> => {
+    return get<SessionResourceBinding[]>(`/sessions/${sessionId}/resource-bindings`);
+  },
+
+  getAvailableResourceVersions: (
+    sessionId: string,
+    resourceKind: "knowledge_base" | "codebase",
+  ): Promise<SessionResourceBinding[]> => {
+    return get<SessionResourceBinding[]>(
+      `/sessions/${sessionId}/resource-bindings/${resourceKind}/available-versions`,
+    );
+  },
+
+  upgradeResourceBinding: (
+    sessionId: string,
+    resourceKind: "knowledge_base" | "codebase",
+    targetVersionId: string,
+  ): Promise<ResourceBindingUpgrade> => {
+    return post<ResourceBindingUpgrade>(
+      `/sessions/${sessionId}/resource-bindings/${resourceKind}/upgrade`,
+      { target_version_id: targetVersionId },
+    );
   },
 
   /**

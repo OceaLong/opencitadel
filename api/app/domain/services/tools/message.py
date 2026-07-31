@@ -4,6 +4,7 @@ from typing import Optional, Union, List
 
 from app.domain.models.tool_result import ToolResult
 from .base import BaseTool, tool
+from .capability_policy import MESSAGE_READ
 
 
 class MessageTool(BaseTool):
@@ -23,7 +24,8 @@ class MessageTool(BaseTool):
                 "description": "要显示给用户的消息文本",
             },
         },
-        required=["text"]
+        required=["text"],
+        policy=MESSAGE_READ,
     )
     async def message_notify_user(self, text: str) -> ToolResult:
         """发送通知消息给用户，不需要用户响应"""
@@ -51,6 +53,7 @@ class MessageTool(BaseTool):
             },
         },
         required=["text"],
+        policy=MESSAGE_READ,
     )
     async def message_ask_user(
             self,

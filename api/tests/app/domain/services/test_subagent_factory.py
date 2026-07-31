@@ -7,11 +7,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.domain.models.app_config import AgentConfig
+from app.domain.models.codebase import SessionMode
 from app.domain.models.event import BaseEvent, ErrorEvent, MessageEvent
+from app.domain.models.knowledge_citation import KnowledgeCitation
 from app.domain.services.subagent_factory import (
     build_subagent_tool,
+    create_child_policy,
     extract_last_assistant_text,
     finalize_subagent_summary,
+)
+from app.domain.services.tools.capability_policy import (
+    CapabilityDeniedError,
+    CapabilityPolicy,
 )
 
 
@@ -175,3 +182,74 @@ async def _test_run_subagent_finalize_summary_when_invoke_empty():
 
 def test_run_subagent_finalize_summary_when_invoke_empty():
     asyncio.run(_test_run_subagent_finalize_summary_when_invoke_empty())
+
+
+async def _test_run_subagent_preserves_only_trusted_message_citations():
+    citation = KnowledgeCitation(
+        version_id="kbv1",
+        document_revision_id="revision1",
+        doc_id="doc1",
+        page_no=2,
+        chunk_id="chunk1",
+    )
+    fake_agent = _FakeSubAgent([
+        MessageEvent(
+            message="Structured KB summary",
+            citations=[citation, citation],
+        ),
+    ])
+
+    with patch(
+        "app.domain.services.subagent_factory.SubAgentAgent",
+        return_value=fake_agent,
+    ), patch(
+        "app.domain.services.subagent_factory.ToolRegistry.build_default_tools",
+        return_value=[],
+    ), patch(
+        "app.domain.services.subagent_factory.compose_system_prompt",
+        return_value="sys",
+    ):
+        tool = build_subagent_tool(
+            uow_factory=MagicMock(),
+            session_id="sess-1",
+            llm=AsyncMock(),
+            agent_config=AgentConfig(),
+            json_parser=AsyncMock(),
+            browser=MagicMock(),
+            sandbox=MagicMock(),
+            search_engine=MagicMock(),
+            mcp_tool=MagicMock(),
+            a2a_tool=MagicMock(),
+            observability_port=MagicMock(),
+            runtime_settings=MagicMock(),
+            prompt_locale="zh",
+        )
+        result = await tool.delegate_subtask("检索知识库")
+
+    assert result.success is True
+    assert result.data["summary"] == "Structured KB summary"
+    assert result.citations == [citation]
+
+
+def test_run_subagent_preserves_only_trusted_message_citations():
+    asyncio.run(
+        _test_run_subagent_preserves_only_trusted_message_citations()
+    )
+
+
+def test_ask_subagent_cannot_expand_parent_policy():
+    parent = CapabilityPolicy.for_mode(SessionMode.ASK)
+
+    with pytest.raises(CapabilityDeniedError):
+        create_child_policy(parent, requested_tool_names=["shell_execute"])
+
+
+def test_agent_subagent_inherits_parent_allowlist_and_can_narrow_it():
+    parent = CapabilityPolicy.for_mode(
+        SessionMode.AGENT,
+        allowed_tool_names=["semantic_search", "read_code"],
+    )
+
+    child = create_child_policy(parent, requested_tool_names=["read_code"])
+
+    assert child.allowed_tool_names == frozenset({"read_code"})

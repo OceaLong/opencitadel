@@ -14,6 +14,7 @@ from app.domain.models.audit_log import AuditLog
 from app.domain.models.integration_server import A2AServerRecord, MCPServerRecord
 from app.domain.models.llm_model import ResourceVisibility
 from app.domain.models.scope import OwnerScope, OwnerScopeType
+from app.domain.models.tool_policy import ToolExecutionPolicy
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.utils.integration_config_builder import a2a_records_to_config, mcp_records_to_config
 from app.domain.utils.mcp_url import validate_mcp_http_url
@@ -131,6 +132,8 @@ class MCPServerService:
         is_admin: bool = False,
     ) -> MCPServerRecord:
         _ensure_stdio_allowed(record, is_admin=is_admin)
+        if record.tool_policies and not is_admin:
+            raise ForbiddenError("仅管理员可声明 MCP 工具能力策略")
         if record.visibility == ResourceVisibility.GLOBAL and not is_admin:
             raise ForbiddenError("只有管理员可创建全局 MCP 服务")
         _ensure_valid_mcp_record(record)
@@ -174,6 +177,15 @@ class MCPServerService:
                 raise BadRequestError("MCP 服务可见性不可通过更新修改")
             if existing.visibility == ResourceVisibility.GLOBAL and not is_admin:
                 raise ForbiddenError("只有管理员可修改全局 MCP 服务")
+            policies_supplied = "tool_policies" in updates.model_fields_set
+            if (
+                not is_admin
+                and policies_supplied
+                and updates.tool_policies != existing.tool_policies
+            ):
+                raise ForbiddenError("仅管理员可修改 MCP 工具能力策略")
+            if not policies_supplied:
+                updates.tool_policies = existing.tool_policies
             updates.id = server_id
             updates.url = _merge_url_secrets(updates.url, existing.url)
             if updates.headers is not None:
@@ -272,9 +284,12 @@ class A2AServerConfigService:
         scope: Optional[OwnerScope] = None,
         actor_user_id: Optional[str] = None,
         visibility: ResourceVisibility = ResourceVisibility.GLOBAL,
+        tool_policies: Optional[Dict[str, ToolExecutionPolicy]] = None,
         *,
         is_admin: bool = False,
     ) -> A2AServerRecord:
+        if tool_policies and not is_admin:
+            raise ForbiddenError("仅管理员可声明 A2A 工具能力策略")
         if visibility == ResourceVisibility.GLOBAL and not is_admin:
             raise ForbiddenError("只有管理员可创建全局 A2A 服务")
         try:
@@ -285,6 +300,7 @@ class A2AServerConfigService:
             id=str(uuid.uuid4()),
             base_url=base_url,
             enabled=True,
+            tool_policies=tool_policies or {},
             visibility=visibility,
             owner_user_id=scope.user_id if scope and visibility != ResourceVisibility.GLOBAL else None,
             team_id=(

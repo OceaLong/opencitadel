@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from unittest.mock import AsyncMock, MagicMock
+import io
+import zipfile
 
 import pytest
 
@@ -64,6 +66,9 @@ class _FakeSandbox:
 
     def __init__(self):
         self.read_file = AsyncMock()
+
+    async def create_workspace_snapshot(self, snapshot_id: str) -> bytes:
+        return b"snapshot-bytes"
 
 
 @pytest.fixture
@@ -188,8 +193,11 @@ async def test_materialize_zip_uses_python_zipfile(monkeypatch):
 
     runner._sandbox_cls.create = fake_create
     runner._sandbox_cls.get = AsyncMock(return_value=None)
+    zip_stream = io.BytesIO()
+    with zipfile.ZipFile(zip_stream, "w") as archive:
+        archive.writestr("main.py", "print('hi')")
     runner._file_storage.download_file = AsyncMock(
-        return_value=(MagicMock(read=lambda: b"zip-bytes"), MagicMock(filename="repo.zip"))
+        return_value=(MagicMock(read=lambda: zip_stream.getvalue()), MagicMock(filename="repo.zip"))
     )
     fake_sandbox.upload_file = AsyncMock()
 
@@ -310,10 +318,15 @@ async def test_run_flushes_symbols_before_edges(monkeypatch):
 
 @pytest.mark.anyio
 async def test_materialize_mkdir_uses_sandbox_home(monkeypatch):
-    codebase = Codebase(id="cb1", source_type=CodebaseSourceType.GIT, source_ref="https://example.com/repo.git")
+    codebase = Codebase(
+        id="cb1",
+        source_type=CodebaseSourceType.GIT,
+        source_ref="https://example.com/repo.git",
+        ingest_task_id="build-1",
+    )
     runner, _ = _make_runner(codebase)
     fake_sandbox = _FakeSandbox()
-    workspace = "/home/ubuntu/codebase"
+    workspace = "/home/ubuntu/codebase-builds/build-1"
     exec_calls: list[tuple[str, str, str]] = []
 
     async def fake_create():
@@ -335,7 +348,11 @@ async def test_materialize_mkdir_uses_sandbox_home(monkeypatch):
 
     assert sandbox is fake_sandbox
     assert result_workspace == workspace
-    assert exec_calls[0] == ("ingest", "/home/ubuntu", f"mkdir -p {workspace}")
+    assert exec_calls[0] == (
+        "ingest",
+        "/home/ubuntu",
+        f"rm -rf {workspace} && mkdir -p {workspace}",
+    )
 
 
 @pytest.mark.anyio

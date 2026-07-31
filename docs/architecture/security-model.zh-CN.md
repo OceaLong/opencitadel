@@ -156,6 +156,27 @@ sequenceDiagram
 - API 与 Worker 共用同一存储抽象；切换后端需对象迁移（`python -m app.migrate_storage`）。
 - 可选 `MINIO_PUBLIC_ENDPOINT` 向 LLM 暴露预签名/公开 URL 用于视觉；否则图片以 base64 内联（无额外公网 URL）。
 
+### 代码库源码与版本安全
+
+代码库分析把源码材料视为不可变、可版本化的证据，而不是可变沙箱状态。
+
+- 创建源码任务前先校验参数形状与文件归属。
+- ZIP 导入拒绝绝对路径、`..`、符号链接、过多 entry、过大解压体积和异常压缩比。
+- Git 导入仅允许 HTTPS，拒绝凭据和非默认端口，并拒绝任何解析到私有、
+  loopback、link-local、多播或 metadata 地址的目标。
+- 每次导入/重建都物化到干净临时工作区，然后把内容寻址源码 snapshot
+  存入对象存储。
+- 已发布版本不可变。会话绑定明确的 `codebase_version_id`；即使新版本发布，
+  源码读取与 Agent 工作区恢复也使用该绑定 snapshot。
+- 重建发布使用基于前一个 active version 的 compare-and-swap。失败保留当前
+  active analysis，而不是清空共享行。
+- Lexical search 是强制能力。Vector search 可降级，必须回退到 lexical 结果并
+  返回可见 `degraded_reasons`。
+- 静态分析图事实必须带 `EvidenceRef`。不支持的图会被省略并记录 unsupported
+  reason，而不是用通用模板渲染。
+- Version GC 保护 active versions、历史 session bindings 和 queued/running
+  builds。snapshot object 只有在数据库里最后一个引用被回收后才会删除。
+
 ### 可观测性
 
 - `/api/metrics` 暴露 Prometheus 指标（不含密钥）。

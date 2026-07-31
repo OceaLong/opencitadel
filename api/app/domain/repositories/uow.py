@@ -5,8 +5,10 @@ from typing import TypeVar
 
 from .checkpoint_repository import CheckpointRepository
 from .codebase_repository import CodebaseRepository
+from .codebase_version_repository import CodebaseVersionRepository
 from .file_repository import FileRepository
 from .knowledge_base_repository import KnowledgeBaseRepository
+from .knowledge_version_repository import KnowledgeVersionRepository
 from .llm_endpoint_repository import LLMEndpointRepository
 from .llm_model_repository import LLMModelRepository
 from .llm_model_preference_repository import LLMModelPreferenceRepository
@@ -26,6 +28,7 @@ from .service_api_key_repository import ServiceApiKeyRepository
 from .skill_repository import SkillRepository
 from .team_repository import TeamRepository
 from .user_repository import UserRepository
+from .resource_governance_repository import ResourceGovernanceRepository
 
 T = TypeVar("T", bound="IUnitOfWork")
 
@@ -35,7 +38,9 @@ class IUnitOfWork(ABC):
     checkpoint: CheckpointRepository
     audit: AuditRepository
     codebase: CodebaseRepository
+    codebase_version: CodebaseVersionRepository
     knowledge_base: KnowledgeBaseRepository
+    knowledge_version: KnowledgeVersionRepository
     file: FileRepository
     session: SessionRepository
     llm_endpoint: LLMEndpointRepository
@@ -56,6 +61,7 @@ class IUnitOfWork(ABC):
     a2a_server: A2AServerRepository
     scheduled_job: ScheduledJobRepository
     notification: NotificationRepository
+    resource_governance: ResourceGovernanceRepository
 
     @abstractmethod
     async def commit(self):

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """Lightweight RAG flow for codebase Ask mode."""
+import asyncio
 import logging
 from typing import AsyncGenerator, Callable, List, Optional
 
@@ -13,7 +14,7 @@ from app.domain.external.search import SearchEngine
 from app.domain.external.observability import ObservabilityPort
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
 from app.domain.models.app_config import AgentConfig
-from app.domain.models.event import BaseEvent, DoneEvent, ErrorEvent
+from app.domain.models.event import BaseEvent, DoneEvent, ErrorEvent, WaitEvent
 from app.domain.models.message import Message
 from app.domain.services.agents.base import BaseAgent
 from app.domain.services.prompts.loader import compose_system_prompt, detect_locale_from_text, load_prompts
@@ -57,6 +58,7 @@ class CodeAskFlow(BaseFlow):
         self._uow_factory = uow_factory
         self._session_id = session_id
         self.status = FlowStatus.EXECUTING
+        self._reset_outcome()
         tools = ToolRegistry.build_ask_tools(
             mcp_tool=mcp_tool,
             a2a_tool=a2a_tool,
@@ -79,6 +81,7 @@ class CodeAskFlow(BaseFlow):
         return self.status == FlowStatus.COMPLETED
 
     async def invoke(self, message: Message) -> AsyncGenerator[BaseEvent, None]:
+        self._reset_outcome()
         try:
             prompts = load_prompts(detect_locale_from_text(message.message))
             runtime = get_runtime_config()
@@ -93,10 +96,23 @@ class CodeAskFlow(BaseFlow):
                 message.message,
                 vision_attachments=message.vision_attachments or None,
             ):
+                if isinstance(event, ErrorEvent):
+                    self._mark_failed(event.error, event.code)
+                elif isinstance(event, WaitEvent):
+                    self._mark_waiting()
                 yield event
+                if isinstance(event, WaitEvent):
+                    self.status = FlowStatus.COMPLETED
+                    return
             self.status = FlowStatus.COMPLETED
+            if self.outcome.error and self.outcome.error.code == "FLOW_OUTCOME_UNSET":
+                self._mark_succeeded()
             yield DoneEvent()
+        except asyncio.CancelledError:
+            self._mark_cancelled()
+            raise
         except Exception as exc:
             logger.exception("CodeAskFlow 失败: %s", exc)
+            self._mark_failed(str(exc), getattr(exc, "error_code", None))
             yield ErrorEvent(error=str(exc))
             self.status = FlowStatus.COMPLETED

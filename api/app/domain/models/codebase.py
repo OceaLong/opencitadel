@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.domain.models.codebase_version import CodeEvidenceRef
+
 
 class CodebaseSourceType(str, Enum):
     ZIP = "zip"
@@ -72,6 +74,8 @@ class Codebase(BaseModel):
     ingest_task_id: Optional[str] = None
     error: Optional[str] = None
     vector_degraded: bool = False
+    legacy_v1_migrated: bool = False
+    active_version_id: Optional[str] = None
     owner_user_id: Optional[str] = None
     team_id: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
@@ -81,6 +85,7 @@ class Codebase(BaseModel):
 class CodebaseFile(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     codebase_id: str
+    version_id: Optional[str] = None
     path: str
     language: str = ""
     size: int = 0
@@ -90,36 +95,47 @@ class CodebaseFile(BaseModel):
 class CodebaseSymbol(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     codebase_id: str
+    version_id: Optional[str] = None
     file_id: str
     name: str
+    qualified_name: str = ""
     kind: SymbolKind = SymbolKind.FUNCTION
     signature: str = ""
     start_line: int = 0
     end_line: int = 0
     parent_id: Optional[str] = None
+    parser: str = "regex"
+    confidence: float = 0.0
 
 
 class CodebaseEdge(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     codebase_id: str
+    version_id: Optional[str] = None
     src_symbol_id: str
     dst_symbol_id: Optional[str] = None
     callee_name: str = ""
     kind: EdgeKind = EdgeKind.CALL
+    resolution: str = "unresolved"
+    confidence: float = 0.0
+    evidence: List[CodeEvidenceRef] = Field(default_factory=list)
 
 
 class CodebaseChunk(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     codebase_id: str
+    version_id: Optional[str] = None
     file_id: Optional[str] = None
     symbol_id: Optional[str] = None
     content: str = ""
+    search_text: str = ""
     embedding: List[float] = Field(default_factory=list)
 
 
 class CodebaseArtifact(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     codebase_id: str
+    version_id: Optional[str] = None
     kind: ArtifactKind
     format: ArtifactFormat = ArtifactFormat.MERMAID
     title: str = ""

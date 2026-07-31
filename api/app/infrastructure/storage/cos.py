@@ -150,6 +150,14 @@ class Cos:
             f"expected={last_expected_length} got={len(last_data)}"
         )
 
+    async def delete_bytes(self, key: str) -> None:
+        """Delete raw bytes from COS."""
+        await run_in_threadpool(
+            self.client.delete_object,
+            Bucket=self.bucket,
+            Key=key,
+        )
+
     async def presigned_get_url(self, key: str, expires_seconds: int = 604800) -> Optional[str]:
         """Generate a presigned download URL for LLM-accessible image references."""
         if self._settings.env == "test":

@@ -4,10 +4,14 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.domain.models.app_config import MCPTransport
+from app.domain.models.app_config import (
+    MCPTransport,
+    normalize_integration_tool_policies,
+)
 from app.domain.models.llm_model import ResourceVisibility
+from app.domain.models.tool_policy import ToolExecutionPolicy
 from app.domain.utils.secret_masking import mask_url
 
 
@@ -23,11 +27,17 @@ class MCPServerRecord(BaseModel):
     headers: Optional[Dict[str, Any]] = None
     env: Optional[Dict[str, Any]] = None
     extra: Dict[str, Any] = Field(default_factory=dict)
+    tool_policies: Dict[str, ToolExecutionPolicy] = Field(default_factory=dict)
     owner_user_id: Optional[str] = None
     team_id: Optional[str] = None
     visibility: ResourceVisibility = ResourceVisibility.GLOBAL
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
+
+    @field_validator("tool_policies")
+    @classmethod
+    def validate_tool_policies(cls, value):
+        return normalize_integration_tool_policies(value)
 
     @model_validator(mode="after")
     def validate_transport_fields(self) -> "MCPServerRecord":
@@ -56,11 +66,17 @@ class A2AServerRecord(BaseModel):
     id: str
     base_url: str
     enabled: bool = True
+    tool_policies: Dict[str, ToolExecutionPolicy] = Field(default_factory=dict)
     owner_user_id: Optional[str] = None
     team_id: Optional[str] = None
     visibility: ResourceVisibility = ResourceVisibility.GLOBAL
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
+
+    @field_validator("tool_policies")
+    @classmethod
+    def validate_tool_policies(cls, value):
+        return normalize_integration_tool_policies(value)
 
 
 def _mask_value(value: Any) -> Any:

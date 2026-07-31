@@ -7,6 +7,7 @@ from typing import Callable, Type
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.task import TaskRunner, Task
+from app.domain.models.resource_governance import ResourceKind
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.codebase.ingestion_runner import CodebaseIngestionRunner
 
@@ -26,10 +27,20 @@ class CodebaseIngestionTaskRunner(TaskRunner):
             sandbox_cls=sandbox_cls,
             file_storage=file_storage,
         )
+        self._uow_factory = uow_factory
         self._codebase_id = codebase_id
 
     async def invoke(self, task: Task) -> None:
-        async for event in self._runner.run(self._codebase_id):
+        stream = self._runner.run(self._codebase_id)
+        async with self._uow_factory() as uow:
+            build = await uow.resource_governance.get_build(task.id)
+            if (
+                build is not None
+                and build.resource_kind is ResourceKind.CODEBASE
+                and build.resource_id == self._codebase_id
+            ):
+                stream = self._runner.run_build(task.id)
+        async for event in stream:
             await task.output_stream.put(event.model_dump_json())
 
     async def on_done(self, task: Task) -> None:

@@ -676,6 +676,7 @@ export type Session = {
   codebase_id?: string | null;
   knowledge_base_id?: string | null;
   mode?: SessionMode;
+  resource_bindings?: SessionResourceBinding[];
   [key: string]: unknown;
 };
 
@@ -697,12 +698,31 @@ export type CreateSessionParams = {
   skill_id?: string;
   thinking_enabled?: boolean;
   codebase_id?: string;
+  codebase_version_id?: string;
   knowledge_base_id?: string;
+  knowledge_base_version_id?: string;
   mode?: SessionMode;
   operator_scope?: "owned" | "third_party_saas";
   operator_domains?: string[];
   gate_profile?: "loose" | "standard" | "strict";
   [key: string]: unknown;
+};
+
+export type ResourceKind = "knowledge_base" | "codebase";
+
+export type SessionResourceBinding = {
+  binding_id: string;
+  resource_kind: ResourceKind;
+  resource_id: string;
+  version_id: string;
+  is_current: boolean;
+  supersedes_binding_id?: string | null;
+};
+
+export type ResourceBindingUpgrade = {
+  old_binding_id: string;
+  new_binding_id: string;
+  current_version_id: string;
 };
 
 /**
@@ -728,6 +748,8 @@ export type ChatMessage = {
     [key: string]: unknown;
   }>;
   clarify_answers?: ClarifyAnswer[];
+  /** Immutable turn snapshot; never derived from the current session pin. */
+  resource_bindings?: SessionResourceBinding[];
   [key: string]: unknown;
 };
 
@@ -792,6 +814,7 @@ export type SessionDetail = Session & {
   operator_domains?: string[];
   gate_profile?: string | null;
   awaiting_human?: boolean;
+  resource_bindings?: SessionResourceBinding[];
 };
 
 export type UpdateSessionConfigParams = {
@@ -946,7 +969,15 @@ export type SSEEventData =
         i18n_params?: Record<string, string | number>;
       } & EventMeta;
     }
-  | { type: "session_status"; data: { status: SessionStatus } & EventMeta }
+  | {
+      type: "session_status";
+      data: {
+        status: SessionStatus;
+        run_epoch_id?: string | null;
+        reason?: string | null;
+        code?: string | null;
+      } & EventMeta;
+    }
   | { type: "debug_item"; data: DebugItemEvent }
   | { type: "title"; data: { title: string } & EventMeta }
   | { type: "plan"; data: PlanEvent & EventMeta }
@@ -1204,6 +1235,7 @@ export type Codebase = {
   ingest_task_id?: string | null;
   error?: string | null;
   vector_degraded?: boolean;
+  active_version_id?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -1242,6 +1274,7 @@ export type CodebaseSymbolsData = {
 
 export type CodebaseArtifact = {
   id: string;
+  version_id?: string | null;
   kind: ArtifactKind;
   format: "mermaid" | "markdown";
   title: string;
@@ -1266,6 +1299,7 @@ export type CreateCodebaseSessionParams = {
   mode?: SessionMode;
   model_id?: string;
   skill_id?: string;
+  codebase_version_id?: string;
 };
 
 export type CodebaseSessionData = {
@@ -1292,6 +1326,67 @@ export type DownloadCodebaseData = {
   download_url?: string;
 };
 
+export type CodebaseBuildState =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "degraded"
+  | "failed"
+  | "cancelled";
+
+export type CodebaseVersionState = "building" | "ready" | "degraded" | "failed";
+
+export type CodebaseBuild = {
+  id: string;
+  codebase_id: string;
+  version_id: string;
+  parent_version_id?: string | null;
+  command_key: string;
+  state: CodebaseBuildState;
+  phase?: string | null;
+  progress: number;
+  capabilities: unknown[];
+  degraded_reasons: unknown[];
+  metrics: Record<string, unknown>;
+  error_code?: string | null;
+  error_message?: string | null;
+  heartbeat_at?: string | null;
+  last_event_seq: number;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  can_retry: boolean;
+  can_cancel: boolean;
+};
+
+export type CodebaseVersion = {
+  id: string;
+  codebase_id: string;
+  parent_version_id?: string | null;
+  build_id?: string | null;
+  state: CodebaseVersionState;
+  source_snapshot_key?: string | null;
+  source_revision?: string;
+  source_digest?: string;
+  capabilities: Record<string, unknown>;
+  degraded_reasons: string[];
+  metrics: Record<string, unknown>;
+  legacy_snapshot: boolean;
+  created_at: string;
+  published_at?: string | null;
+  is_active: boolean;
+  is_published: boolean;
+  is_candidate: boolean;
+  build?: CodebaseBuild | null;
+};
+
+export type CodebaseVersionsData = {
+  codebase_id: string;
+  active_version_id?: string | null;
+  active_build?: CodebaseBuild | null;
+  versions: CodebaseVersion[];
+};
+
 // ==================== 文档知识库 ====================
 
 export type KnowledgeBaseStatus =
@@ -1313,6 +1408,7 @@ export type KnowledgeBase = {
   doc_count: number;
   chunk_count: number;
   ready_doc_count?: number;
+  active_version_id?: string | null;
   ingest_task_id?: string | null;
   error?: string | null;
   vector_degraded?: boolean;
@@ -1360,6 +1456,7 @@ export type CreateKnowledgeSessionParams = {
   mode?: SessionMode;
   model_id?: string;
   skill_id?: string;
+  knowledge_base_version_id?: string;
 };
 
 export type KnowledgeSessionData = {
@@ -1370,5 +1467,107 @@ export type KnowledgeSessionData = {
 
 export type ReadKnowledgeDocumentData = {
   document: KnowledgeDocument;
+  content: string;
+  version_id?: string | null;
+  document_revision_id?: string | null;
+  items?: KnowledgeDocumentContentItem[];
+  next_cursor?: string | null;
+  total?: number;
+  truncated?: boolean;
+};
+
+export type KnowledgeBuildState =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "degraded"
+  | "failed"
+  | "cancelled";
+
+export type KnowledgeVersionState = "building" | "ready" | "degraded" | "failed";
+
+export type KnowledgeBuild = {
+  id: string;
+  knowledge_base_id: string;
+  version_id: string;
+  parent_version_id?: string | null;
+  command_key: string;
+  state: KnowledgeBuildState;
+  phase?: string | null;
+  progress: number;
+  capabilities: unknown[];
+  degraded_reasons: unknown[];
+  metrics: Record<string, unknown>;
+  error_code?: string | null;
+  error_message?: string | null;
+  heartbeat_at?: string | null;
+  last_event_seq: number;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  can_retry: boolean;
+  can_cancel: boolean;
+};
+
+export type KnowledgeVersion = {
+  id: string;
+  knowledge_base_id: string;
+  parent_version_id?: string | null;
+  build_id?: string | null;
+  state: KnowledgeVersionState;
+  capabilities: Record<string, unknown>;
+  degraded_reasons: string[];
+  metrics: Record<string, unknown>;
+  legacy_snapshot: boolean;
+  created_at: string;
+  published_at?: string | null;
+  is_active: boolean;
+  is_published: boolean;
+  is_candidate: boolean;
+  build?: KnowledgeBuild | null;
+};
+
+export type KnowledgeVersionsData = {
+  knowledge_base_id: string;
+  active_version_id?: string | null;
+  active_build?: KnowledgeBuild | null;
+  versions: KnowledgeVersion[];
+};
+
+export type KnowledgeCitation = {
+  version_id: string;
+  document_revision_id: string;
+  doc_id: string;
+  page_no?: number | null;
+  chunk_id?: string | null;
+};
+
+export type KnowledgeGraphNode = {
+  id: string;
+  name: string;
+  type: string;
+  description: string;
+};
+
+export type KnowledgeGraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  relation: string;
+  evidence: KnowledgeCitation[];
+};
+
+export type KnowledgeGraphData = {
+  nodes: KnowledgeGraphNode[];
+  edges: KnowledgeGraphEdge[];
+  capability: boolean;
+  next_cursor?: string | null;
+};
+
+export type KnowledgeDocumentContentItem = {
+  id: string;
+  page_no?: number | null;
+  heading_path: string;
+  ordinal: number;
   content: string;
 };

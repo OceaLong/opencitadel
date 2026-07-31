@@ -17,9 +17,14 @@ from app.interfaces.schemas.knowledge_base import (
     CreateKnowledgeBaseSessionRequest,
     CreateKnowledgeBaseSessionResponse,
     KnowledgeBaseResponse,
+    KnowledgeBuildResponse,
+    KnowledgeDocumentContentItemResponse,
     KnowledgeDocumentResponse,
+    KnowledgeGraphResponse,
+    KnowledgeVersionResponse,
     ListKnowledgeBasesResponse,
     ListKnowledgeDocumentsResponse,
+    ListKnowledgeVersionsResponse,
     ReadKnowledgeDocumentResponse,
 )
 from app.interfaces.service_dependencies import get_knowledge_base_service
@@ -33,6 +38,20 @@ def _to_kb_response(kb) -> KnowledgeBaseResponse:
 
 def _to_doc_response(doc) -> KnowledgeDocumentResponse:
     return KnowledgeDocumentResponse(**doc.model_dump(mode="json"))
+
+
+def _to_build_response(build) -> KnowledgeBuildResponse:
+    return KnowledgeBuildResponse.model_validate(
+        build,
+        from_attributes=True,
+    )
+
+
+def _to_version_response(version) -> KnowledgeVersionResponse:
+    return KnowledgeVersionResponse.model_validate(
+        version,
+        from_attributes=True,
+    )
 
 
 @router.post("", response_model=Response[KnowledgeBaseResponse])
@@ -66,6 +85,134 @@ async def get_knowledge_base(
     return Response.success(data=_to_kb_response(await service.get_kb(kb_id, scope=ctx.scope)))
 
 
+@router.get(
+    "/{kb_id}/versions",
+    response_model=Response[ListKnowledgeVersionsResponse],
+)
+async def list_kb_versions(
+        kb_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+) -> Response[ListKnowledgeVersionsResponse]:
+    history = await service.list_versions(kb_id, scope=ctx.scope)
+    return Response.success(
+        data=ListKnowledgeVersionsResponse(
+            knowledge_base_id=history.knowledge_base_id,
+            active_version_id=history.active_version_id,
+            active_build=(
+                _to_build_response(history.active_build)
+                if history.active_build is not None
+                else None
+            ),
+            versions=[
+                _to_version_response(version)
+                for version in history.versions
+            ],
+        )
+    )
+
+
+@router.get(
+    "/{kb_id}/versions/{version_id}",
+    response_model=Response[KnowledgeVersionResponse],
+)
+async def get_kb_version(
+        kb_id: str,
+        version_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+) -> Response[KnowledgeVersionResponse]:
+    version = await service.get_version(
+        kb_id,
+        version_id,
+        scope=ctx.scope,
+    )
+    return Response.success(data=_to_version_response(version))
+
+
+@router.post(
+    "/{kb_id}/builds",
+    response_model=Response[KnowledgeVersionResponse],
+)
+async def create_kb_build(
+        kb_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
+        service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+) -> Response[KnowledgeVersionResponse]:
+    version = await service.create_build(kb_id, scope=ctx.scope)
+    return Response.success(data=_to_version_response(version))
+
+
+@router.post(
+    "/{kb_id}/builds/{build_id}/retry",
+    response_model=Response[KnowledgeVersionResponse],
+)
+async def retry_kb_build(
+        kb_id: str,
+        build_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
+        service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+) -> Response[KnowledgeVersionResponse]:
+    version = await service.retry_build(
+        kb_id,
+        build_id,
+        scope=ctx.scope,
+    )
+    return Response.success(data=_to_version_response(version))
+
+
+@router.post(
+    "/{kb_id}/builds/{build_id}/cancel",
+    response_model=Response[KnowledgeBuildResponse],
+)
+async def cancel_kb_build(
+        kb_id: str,
+        build_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
+        service: KnowledgeBaseService = Depends(get_knowledge_base_service),
+) -> Response[KnowledgeBuildResponse]:
+    build = await service.cancel_build(
+        kb_id,
+        build_id,
+        scope=ctx.scope,
+    )
+    return Response.success(data=_to_build_response(build))
+
+
+@router.get(
+    "/{kb_id}/versions/{version_id}/graph",
+    response_model=Response[KnowledgeGraphResponse],
+)
+async def get_knowledge_graph(
+        kb_id: str,
+        version_id: str,
+        q: Optional[str] = Query(None, max_length=200),
+        cursor: Optional[str] = Query(None, min_length=1, max_length=2048),
+        limit: int = Query(50, ge=1, le=100),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        service: KnowledgeBaseService = Depends(
+            get_knowledge_base_service
+        ),
+) -> Response[KnowledgeGraphResponse]:
+    graph = await service.get_version_graph(
+        kb_id,
+        version_id,
+        q=q,
+        cursor=cursor,
+        limit=limit,
+        scope=ctx.scope,
+    )
+    return Response.success(
+        data=KnowledgeGraphResponse.model_validate(
+            graph,
+            from_attributes=True,
+        )
+    )
+
+
 @router.delete("/{kb_id}", response_model=Response[Optional[Dict]])
 async def delete_knowledge_base(
         kb_id: str,
@@ -82,6 +229,7 @@ async def add_documents(
         kb_id: str,
         request: AddKnowledgeDocumentsRequest,
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[KnowledgeBaseResponse]:
     kb = await service.add_documents(
@@ -141,6 +289,7 @@ async def ingest_stream(
 async def reindex(
         kb_id: str,
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[KnowledgeBaseResponse]:
     return Response.success(data=_to_kb_response(await service.reindex(kb_id, scope=ctx.scope)))
@@ -151,6 +300,7 @@ async def create_kb_session(
         kb_id: str,
         request: CreateKnowledgeBaseSessionRequest,
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
         service: KnowledgeBaseService = Depends(get_knowledge_base_service),
 ) -> Response[CreateKnowledgeBaseSessionResponse]:
     session = await service.create_session_for_kb(
@@ -158,12 +308,66 @@ async def create_kb_session(
         mode=request.mode,
         model_id=request.model_id,
         skill_id=request.skill_id,
+        knowledge_base_version_id=request.knowledge_base_version_id,
         scope=ctx.scope,
     )
     return Response.success(data=CreateKnowledgeBaseSessionResponse(
             session_id=session.id,
             knowledge_base_id=kb_id,
             mode=session.mode,
+        )
+    )
+
+
+@router.get(
+    "/{kb_id}/versions/{version_id}/documents/{doc_id}/content",
+    response_model=Response[ReadKnowledgeDocumentResponse],
+)
+async def read_document_version_content(
+        kb_id: str,
+        version_id: str,
+        doc_id: str,
+        page: Optional[int] = Query(None, ge=1),
+        cursor: Optional[str] = Query(
+            None,
+            min_length=1,
+            max_length=2048,
+        ),
+        limit: int = Query(30, ge=1, le=200),
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        service: KnowledgeBaseService = Depends(
+            get_knowledge_base_service
+        ),
+) -> Response[ReadKnowledgeDocumentResponse]:
+    document, revision_id, source_page = (
+        await service.read_document_page(
+            kb_id,
+            version_id,
+            doc_id,
+            page=page,
+            cursor=cursor,
+            limit=limit,
+            scope=ctx.scope,
+        )
+    )
+    return Response.success(
+        data=ReadKnowledgeDocumentResponse(
+            document=_to_doc_response(document),
+            content="\n\n".join(
+                item.content for item in source_page.items
+            ),
+            version_id=version_id,
+            document_revision_id=revision_id,
+            items=[
+                KnowledgeDocumentContentItemResponse.model_validate(
+                    item,
+                    from_attributes=True,
+                )
+                for item in source_page.items
+            ],
+            next_cursor=source_page.next_cursor,
+            total=source_page.total,
+            truncated=source_page.truncated,
         )
     )
 

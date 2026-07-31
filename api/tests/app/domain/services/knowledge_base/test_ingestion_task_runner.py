@@ -11,12 +11,12 @@ from app.domain.services.knowledge_base.ingestion_task_runner import KBIngestion
 
 
 class _ErrorRunner:
-    async def run(self, _kb_id):
+    async def run(self, _build_id):
         yield ErrorEvent(error="全部文档解析失败", code=DOCUMENT_PARSE_FAILED)
 
 
 class _SuccessRunner:
-    async def run(self, _kb_id):
+    async def run(self, _build_id):
         yield DoneEvent()
 
 
@@ -30,7 +30,7 @@ async def test_invoke_raises_when_error_without_done():
     runner = KBIngestionTaskRunner(
         uow_factory=MagicMock(),
         file_storage=MagicMock(),
-        kb_id="kb1",
+        build_id="build-1",
     )
     runner._runner = _ErrorRunner()
     task = MagicMock()
@@ -47,7 +47,7 @@ async def test_invoke_completes_on_done_event():
     runner = KBIngestionTaskRunner(
         uow_factory=MagicMock(),
         file_storage=MagicMock(),
-        kb_id="kb1",
+        build_id="build-1",
     )
     runner._runner = _SuccessRunner()
     task = MagicMock()

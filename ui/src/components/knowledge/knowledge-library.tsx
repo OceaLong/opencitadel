@@ -5,27 +5,46 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { AddDocumentDialog } from "@/components/knowledge/add-document-dialog";
-import { CreateKBDialog } from "@/components/knowledge/create-kb-dialog";
-import { appendDocumentsPage, canStartAsk, formatIngestStreamError } from "@/components/knowledge/knowledge-utils";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { EmptyState } from "@/components/empty-state";
+import { AddDocumentDialog } from "@/components/knowledge/add-document-dialog";
+import { CreateKBDialog } from "@/components/knowledge/create-kb-dialog";
+import {
+  appendDocumentsPage,
+  formatIngestStreamError,
+} from "@/components/knowledge/knowledge-utils";
+import { KnowledgeVersionStatus } from "@/components/knowledge/knowledge-version-status";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-import { useAuth } from "@/providers/auth-provider";
 import { knowledgeApi } from "@/lib/api/knowledge";
 import { sessionApi } from "@/lib/api/session";
 import type { KnowledgeBase, KnowledgeDocument, SessionMode } from "@/lib/api/types";
-import { IconAdd, IconDelete, IconKnowledge, IconLoading, IconRefresh } from "@/lib/icons";
+import { IconAdd, IconDelete, IconKnowledge, IconLoading } from "@/lib/icons";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/auth-provider";
 
 const TERMINAL_KB_STATUSES = new Set<KnowledgeBase["status"]>(["ready", "failed"]);
 
 const PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
+
+export async function startKnowledgeTask(
+  kbId: string,
+  versionId: string,
+  mode: SessionMode,
+  createSession: typeof sessionApi.createSession,
+  push: (href: string) => void,
+): Promise<void> {
+  const data = await createSession({
+    knowledge_base_id: kbId,
+    knowledge_base_version_id: versionId,
+    mode,
+  });
+  push(`/sessions/${data.session_id}`);
+}
 
 type DocsPage = { items: KnowledgeDocument[]; total: number; loading: boolean };
 
@@ -36,8 +55,7 @@ type PendingDelete =
 
 function isKbIngesting(kb: KnowledgeBase, ingestingIds: Set<string>): boolean {
   return (
-    ingestingIds.has(kb.id) ||
-    (!TERMINAL_KB_STATUSES.has(kb.status) && Boolean(kb.ingest_task_id))
+    ingestingIds.has(kb.id) || (!TERMINAL_KB_STATUSES.has(kb.status) && Boolean(kb.ingest_task_id))
   );
 }
 
@@ -159,9 +177,10 @@ export function KnowledgeLibrary() {
   }, [loadList]);
 
   useEffect(() => {
+    const cleanups = ingestCleanupRef.current;
     return () => {
-      ingestCleanupRef.current.forEach((cleanup) => cleanup());
-      ingestCleanupRef.current.clear();
+      cleanups.forEach((cleanup) => cleanup());
+      cleanups.clear();
     };
   }, []);
 
@@ -222,11 +241,10 @@ export function KnowledgeLibrary() {
     return () => clearInterval(timer);
   }, [items, ingestingIds, loadList]);
 
-  const startTask = async (kbId: string, mode: SessionMode = "ask") => {
+  const startTask = async (kbId: string, versionId: string, mode: SessionMode = "ask") => {
     setStartingId(kbId);
     try {
-      const data = await sessionApi.createSession({ knowledge_base_id: kbId, mode });
-      router.push(`/sessions/${data.session_id}`);
+      await startKnowledgeTask(kbId, versionId, mode, sessionApi.createSession, router.push);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("startTaskFailed"));
     } finally {
@@ -278,9 +296,7 @@ export function KnowledgeLibrary() {
   const deleteDialogTitle =
     pendingDelete?.kind === "document" ? t("deleteDocumentTitle") : t("deleteKbTitle");
   const deleteDialogDescription =
-    pendingDelete?.kind === "document"
-      ? t("deleteDocumentDescription")
-      : t("deleteKbDescription");
+    pendingDelete?.kind === "document" ? t("deleteDocumentDescription") : t("deleteKbDescription");
 
   return (
     <div className="flex h-full flex-col">
@@ -316,7 +332,10 @@ export function KnowledgeLibrary() {
                   <CardDescription className="text-xs">
                     {t("statusDocCount", { status: kb.status, count: kb.doc_count ?? 0 })}
                     {" · "}
-                    {t("readyDocCount", { ready: kb.ready_doc_count ?? 0, count: kb.doc_count ?? 0 })}
+                    {t("readyDocCount", {
+                      ready: kb.ready_doc_count ?? 0,
+                      count: kb.doc_count ?? 0,
+                    })}
                     {ingesting && (
                       <span className="ml-2 inline-flex items-center gap-1">
                         <IconLoading className="size-3 animate-spin" />
@@ -324,7 +343,7 @@ export function KnowledgeLibrary() {
                       </span>
                     )}
                     {kb.status === "failed" && kb.error && (
-                      <span className="mt-1 block text-destructive">
+                      <span className="text-destructive mt-1 block">
                         {t("indexFailedDetail", { error: kb.error })}
                       </span>
                     )}
@@ -336,11 +355,16 @@ export function KnowledgeLibrary() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  <KnowledgeVersionStatus knowledgeBaseId={kb.id} onBuildChanged={loadList} />
                   <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
-                      disabled={startingId === kb.id || !canStartAsk(kb)}
-                      onClick={() => void startTask(kb.id, "ask")}
+                      disabled={startingId === kb.id || !kb.active_version_id}
+                      onClick={() =>
+                        kb.active_version_id
+                          ? void startTask(kb.id, kb.active_version_id, "ask")
+                          : undefined
+                      }
                     >
                       {startingId === kb.id ? (
                         <IconLoading className="size-4 animate-spin" />
@@ -348,24 +372,20 @@ export function KnowledgeLibrary() {
                         t("startAsk")
                       )}
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => setAddOpenFor(kb.id)}>
-                      {t("addDocument")}
-                    </Button>
                     <Button
                       size="sm"
-                      variant="ghost"
-                      onClick={async () => {
-                        try {
-                          const updated = await knowledgeApi.reindex(kb.id);
-                          watchIngest(kb.id, updated.ingest_task_id);
-                          toast.success(t("reindexStarted"));
-                        } catch (err) {
-                          toast.error(err instanceof Error ? err.message : t("reindexFailed"));
-                        }
-                      }}
+                      variant="outline"
+                      disabled={startingId === kb.id || !kb.active_version_id}
+                      onClick={() =>
+                        kb.active_version_id
+                          ? void startTask(kb.id, kb.active_version_id, "agent")
+                          : undefined
+                      }
                     >
-                      <IconRefresh className="mr-1 size-3" />
-                      {t("reindex")}
+                      {t("startAgent")}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setAddOpenFor(kb.id)}>
+                      {t("addDocument")}
                     </Button>
                     <Button
                       size="sm"
@@ -382,7 +402,9 @@ export function KnowledgeLibrary() {
 
                   <div className="space-y-1">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-muted-foreground text-xs font-medium">{t("documentsLabel")}</p>
+                      <p className="text-muted-foreground text-xs font-medium">
+                        {t("documentsLabel")}
+                      </p>
                       <Button
                         size="sm"
                         variant="ghost"
@@ -420,9 +442,11 @@ export function KnowledgeLibrary() {
                                   type="button"
                                   size="icon"
                                   variant="ghost"
-                                  className="size-7 shrink-0 text-destructive hover:text-destructive"
+                                  className="text-destructive hover:text-destructive size-7 shrink-0"
                                   disabled={ingesting}
-                                  title={ingesting ? t("deleteBlockedIngesting") : tCommon("delete")}
+                                  title={
+                                    ingesting ? t("deleteBlockedIngesting") : tCommon("delete")
+                                  }
                                   onClick={() =>
                                     setPendingDelete({ kind: "document", kbId: kb.id, doc })
                                   }

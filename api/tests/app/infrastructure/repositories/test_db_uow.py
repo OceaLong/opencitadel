@@ -54,6 +54,26 @@ def test_db_uow_preserves_body_exception_over_commit_error():
     asyncio.run(_run_db_uow_preserves_body_exception_over_commit_error())
 
 
+async def _run_db_uow_propagates_commit_cancellation_after_cleanup():
+    mock_session = AsyncMock()
+    mock_session.commit = AsyncMock(side_effect=asyncio.CancelledError())
+    mock_session.rollback = AsyncMock()
+    mock_session.close = AsyncMock()
+
+    uow = DBUnitOfWork(MagicMock())
+    uow.db_session = mock_session
+
+    with pytest.raises(asyncio.CancelledError):
+        await uow.__aexit__(None, None, None)
+
+    mock_session.rollback.assert_awaited()
+    mock_session.close.assert_awaited()
+
+
+def test_db_uow_propagates_commit_cancellation_after_cleanup():
+    asyncio.run(_run_db_uow_propagates_commit_cancellation_after_cleanup())
+
+
 async def _run_db_uow_sets_transaction_local_authorization_context():
     mock_session = AsyncMock()
     mock_session.commit = AsyncMock()

@@ -27,6 +27,11 @@ from app.domain.models.event import (
 from app.domain.models.event_policy import EVENT_SCHEMA_VERSION
 from app.domain.models.event_upgrader import upgrade_event_payload
 from app.domain.models.plan import Plan, Step
+from app.domain.models.run_outcome import RunOutcome
+from app.domain.models.resource_governance import (
+    ResourceBindingProjection,
+    ResourceKind,
+)
 from app.interfaces.schemas.event import EventMapper
 
 
@@ -55,6 +60,58 @@ def test_session_status_sse_mapping_allows_cancelled():
     sse = EventMapper.event_to_sse_event(event)
     assert sse.event == "session_status"
     assert sse.data.status == "cancelled"
+
+
+def test_session_status_sse_mapping_preserves_terminal_reason():
+    event = SessionStatusEvent(
+        status="failed",
+        reason="flow failed",
+        code="FLOW_FAILED",
+    )
+
+    sse = EventMapper.event_to_sse_event(event)
+
+    assert sse.data.reason == "flow failed"
+    assert sse.data.code == "FLOW_FAILED"
+
+
+def test_session_status_sse_omits_internal_authoritative_outcome():
+    event = SessionStatusEvent(
+        status="failed",
+        reason="flow failed",
+        code="FLOW_FAILED",
+        outcome=RunOutcome.model_validate(
+            {
+                "status": "failed",
+                "error": {
+                    "message": "flow failed",
+                    "code": "FLOW_FAILED",
+                    "details": {
+                        "authorization": "Bearer secret",
+                        "provider": "model-a",
+                    },
+                },
+                "usage": {"tokens": 7},
+            }
+        ),
+    )
+
+    sse = EventMapper.event_to_sse_event(event)
+
+    assert sse.data.reason == "flow failed"
+    assert sse.data.code == "FLOW_FAILED"
+    assert "outcome" not in sse.data.model_dump(mode="json")
+
+
+def test_session_status_sse_mapping_preserves_run_epoch_identity():
+    event = SessionStatusEvent(
+        status="waiting",
+        run_epoch_id="task-1:input-7",
+    )
+
+    sse = EventMapper.event_to_sse_event(event)
+
+    assert sse.data.run_epoch_id == "task-1:input-7"
 
 
 def test_all_event_types_have_typed_sse_mapping_and_meta():
@@ -124,6 +181,50 @@ def test_message_sse_mapping_projects_clarify_answers():
     assert sse.event == "message"
     assert sse.data.clarify_answers[0].question_id == "travelers"
     assert sse.data.clarify_answers[0].option_labels == ["情侣/夫妻双人"]
+
+
+def test_event_mapper_projects_exact_public_resource_binding_shape():
+    event = MessageEvent(
+        role="assistant",
+        message="answer",
+        resource_bindings=[
+            ResourceBindingProjection(
+                binding_id="binding-kb-v1",
+                resource_kind=ResourceKind.KNOWLEDGE_BASE,
+                resource_id="kb1",
+                version_id="kbv1",
+            )
+        ],
+    )
+
+    sse = EventMapper.event_to_sse_event(event)
+
+    assert sse.data.model_dump(mode="json")["resource_bindings"] == [
+        {
+            "binding_id": "binding-kb-v1",
+            "resource_kind": "knowledge_base",
+            "resource_id": "kb1",
+            "version_id": "kbv1",
+        }
+    ]
+
+
+def test_legacy_event_payload_defaults_to_empty_resource_bindings():
+    upgraded = upgrade_event_payload(
+        {
+            "id": "legacy-message",
+            "type": "message",
+            "created_at": "2026-06-08T00:00:00",
+            "role": "assistant",
+            "message": "old answer",
+        }
+    )
+
+    event = MessageEvent.model_validate(upgraded)
+    sse = EventMapper.event_to_sse_event(event)
+
+    assert event.resource_bindings == []
+    assert sse.data.resource_bindings == []
 
 
 def test_clarify_sse_mapping_projects_questions():

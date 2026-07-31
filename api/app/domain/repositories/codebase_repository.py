@@ -39,19 +39,38 @@ class CodebaseRepository(Protocol):
     async def save_files(self, files: List[CodebaseFile]) -> None:
         ...
 
-    async def list_files(self, codebase_id: str) -> List[CodebaseFile]:
+    async def list_files(
+            self,
+            codebase_id: str,
+            version_id: Optional[str] = None,
+    ) -> List[CodebaseFile]:
         ...
 
-    async def get_file_by_path(self, codebase_id: str, path: str) -> Optional[CodebaseFile]:
+    async def get_file_by_path(
+            self,
+            codebase_id: str,
+            path: str,
+            version_id: Optional[str] = None,
+    ) -> Optional[CodebaseFile]:
         ...
 
     async def save_symbols(self, symbols: List[CodebaseSymbol]) -> None:
         ...
 
-    async def list_symbols(self, codebase_id: str, name: Optional[str] = None) -> List[CodebaseSymbol]:
+    async def list_symbols(
+            self,
+            codebase_id: str,
+            name: Optional[str] = None,
+            version_id: Optional[str] = None,
+    ) -> List[CodebaseSymbol]:
         ...
 
-    async def find_symbol_by_name(self, codebase_id: str, name: str) -> List[CodebaseSymbol]:
+    async def find_symbol_by_name(
+            self,
+            codebase_id: str,
+            name: str,
+            version_id: Optional[str] = None,
+    ) -> List[CodebaseSymbol]:
         ...
 
     async def save_edges(self, edges: List[CodebaseEdge]) -> None:
@@ -63,6 +82,7 @@ class CodebaseRepository(Protocol):
             src_symbol_id: Optional[str] = None,
             dst_symbol_id: Optional[str] = None,
             callee_name: Optional[str] = None,
+            version_id: Optional[str] = None,
     ) -> List[CodebaseEdge]:
         ...
 
@@ -70,6 +90,7 @@ class CodebaseRepository(Protocol):
             self,
             codebase_id: str,
             symbol_ids: List[str],
+            version_id: Optional[str] = None,
     ) -> List[CodebaseSymbol]:
         ...
 
@@ -81,13 +102,37 @@ class CodebaseRepository(Protocol):
             codebase_id: str,
             query_embedding: List[float],
             limit: int = 10,
+            version_id: Optional[str] = None,
+    ) -> List[Tuple[CodebaseChunk, float]]:
+        ...
+
+    async def search_vector(
+            self,
+            codebase_id: str,
+            version_id: str,
+            query_embedding: List[float],
+            limit: int = 10,
+    ) -> List[Tuple[CodebaseChunk, float]]:
+        ...
+
+    async def search_lexical(
+            self,
+            codebase_id: str,
+            version_id: str,
+            query: str,
+            limit: int = 10,
     ) -> List[Tuple[CodebaseChunk, float]]:
         ...
 
     async def save_artifacts(self, artifacts: List[CodebaseArtifact]) -> None:
         ...
 
-    async def list_artifacts(self, codebase_id: str, kind: Optional[ArtifactKind] = None) -> List[CodebaseArtifact]:
+    async def list_artifacts(
+            self,
+            codebase_id: str,
+            kind: Optional[ArtifactKind] = None,
+            version_id: Optional[str] = None,
+    ) -> List[CodebaseArtifact]:
         ...
 
     async def clear_analysis_data(self, codebase_id: str) -> None:

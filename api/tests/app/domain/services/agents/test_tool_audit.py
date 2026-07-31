@@ -5,7 +5,15 @@ from typing import List
 
 from app.domain.models.audit_log import AuditLog
 from app.domain.models.tool_result import ToolResult
+from app.domain.models.tool_policy import (
+    ApprovalMode,
+    ToolCapability,
+    ToolEffect,
+    ToolExecutionPolicy,
+    ToolIdempotency,
+)
 from app.domain.services.agents.base import BaseAgent
+from app.domain.services.tools.base import BaseTool, tool
 from tests.app.domain.services.agents.conftest import agent_test_observability_port, agent_test_runtime_settings
 
 
@@ -20,6 +28,28 @@ class _FailingTool:
 
     async def invoke(self, tool_name: str, **kwargs):
         raise RuntimeError("simulated failure")
+
+
+class _SecretFailureTool(BaseTool):
+    name = "browser"
+
+    @tool(
+        name="browser_click",
+        description="fails with an external response",
+        parameters={},
+        required=[],
+        policy=ToolExecutionPolicy(
+            capability=ToolCapability.CODE_READ,
+            effect=ToolEffect.READ_ONLY,
+            idempotency=ToolIdempotency.SAFE,
+            approval=ApprovalMode.NEVER,
+        ),
+    )
+    async def browser_click(self):
+        raise RuntimeError(
+            "Authorization: Bearer top-secret-token; "
+            "https://alice:password@example.com; user secret=rosebud"
+        )
 
 
 class _FakeAuditRepo:
@@ -140,3 +170,25 @@ def test_failed_tool_invoke_skips_audit_without_gate_profile():
 
     assert result.success is False
     assert audit_repo.items == []
+
+
+def test_governed_attempt_audit_never_persists_failure_secrets():
+    audit_repo = _FakeAuditRepo()
+    agent = _make_agent(audit_repo, tools=[_SecretFailureTool()])
+
+    async def run():
+        executor = agent._get_tool_batch_executor()
+        batch = await executor.preflight([{
+            "id": "secret-call",
+            "function": {"name": "browser_click", "arguments": {}},
+        }])
+        return await executor.execute(batch)
+
+    execution = asyncio.run(run())
+
+    assert execution.calls[0].result.success is False
+    assert len(audit_repo.items) == 1
+    persisted = str(audit_repo.items[0].metadata)
+    assert "top-secret-token" not in persisted
+    assert "alice:password" not in persisted
+    assert "rosebud" not in persisted

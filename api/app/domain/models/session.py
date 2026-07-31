@@ -13,6 +13,7 @@ from .memory import Memory
 from .plan import Plan
 from .skill import SkillSummary
 from .codebase import SessionMode
+from .resource_governance import ResourceBindingProjection
 
 
 class SessionStatus(str, Enum):
@@ -42,6 +43,9 @@ class Session(BaseModel):
     thinking_enabled: bool = False  # 会话级思考模式，默认关闭
     codebase_id: Optional[str] = None  # 关联代码库
     knowledge_base_id: Optional[str] = None  # 关联文档知识库
+    resource_bindings: List[ResourceBindingProjection] = Field(
+        default_factory=list
+    )  # 当前不可变资源版本投影；历史回答以事件快照为准
     owner_user_id: Optional[str] = None  # 所属用户
     team_id: Optional[str] = None  # 所属团队工作区
     mode: SessionMode = SessionMode.AGENT  # ask=快速问答, agent=规划改码

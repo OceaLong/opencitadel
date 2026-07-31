@@ -13,7 +13,9 @@ from app.domain.models.event_policy import should_project_event
 from app.interfaces.schemas import Response
 from app.interfaces.schemas.codebase import (
     ArtifactResponse,
+    CodebaseBuildResponse,
     CodebaseResponse,
+    CodebaseVersionResponse,
     CreateCodebaseRequest,
     CreateCodebaseSessionRequest,
     CreateCodebaseSessionResponse,
@@ -21,6 +23,7 @@ from app.interfaces.schemas.codebase import (
     FileTreeResponse,
     ListArtifactsResponse,
     ListCodebasesResponse,
+    ListCodebaseVersionsResponse,
     ListSymbolsResponse,
     ReadSourceRequest,
     ReadSourceResponse,
@@ -37,6 +40,20 @@ router = APIRouter(prefix="/codebases", tags=["代码知识库"])
 
 def _to_codebase_response(cb) -> CodebaseResponse:
     return CodebaseResponse(**cb.model_dump(mode="json"))
+
+
+def _to_build_response(build) -> CodebaseBuildResponse:
+    return CodebaseBuildResponse.model_validate(
+        build,
+        from_attributes=True,
+    )
+
+
+def _to_version_response(version) -> CodebaseVersionResponse:
+    return CodebaseVersionResponse.model_validate(
+        version,
+        from_attributes=True,
+    )
 
 
 @router.post("", response_model=Response[CodebaseResponse])
@@ -76,6 +93,161 @@ async def get_codebase(
 ) -> Response[CodebaseResponse]:
     codebase = await service.get_codebase(codebase_id, scope=ctx.scope)
     return Response.success(data=_to_codebase_response(codebase))
+
+
+@router.get(
+    "/{codebase_id}/versions",
+    response_model=Response[ListCodebaseVersionsResponse],
+)
+async def list_codebase_versions(
+        codebase_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        service: CodebaseService = Depends(get_codebase_service),
+) -> Response[ListCodebaseVersionsResponse]:
+    history = await service.list_versions(codebase_id, scope=ctx.scope)
+    return Response.success(
+        data=ListCodebaseVersionsResponse(
+            codebase_id=history.codebase_id,
+            active_version_id=history.active_version_id,
+            active_build=(
+                _to_build_response(history.active_build)
+                if history.active_build is not None
+                else None
+            ),
+            versions=[
+                _to_version_response(version)
+                for version in history.versions
+            ],
+        )
+    )
+
+
+@router.get(
+    "/{codebase_id}/versions/{version_id}",
+    response_model=Response[CodebaseVersionResponse],
+)
+async def get_codebase_version(
+        codebase_id: str,
+        version_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        service: CodebaseService = Depends(get_codebase_service),
+) -> Response[CodebaseVersionResponse]:
+    version = await service.get_version(
+        codebase_id,
+        version_id,
+        scope=ctx.scope,
+    )
+    return Response.success(data=_to_version_response(version))
+
+
+@router.post(
+    "/{codebase_id}/builds",
+    response_model=Response[CodebaseVersionResponse],
+)
+async def create_codebase_build(
+        codebase_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
+        service: CodebaseService = Depends(get_codebase_service),
+) -> Response[CodebaseVersionResponse]:
+    version = await service.create_build(codebase_id, scope=ctx.scope)
+    return Response.success(data=_to_version_response(version))
+
+
+@router.post(
+    "/{codebase_id}/builds/{build_id}/retry",
+    response_model=Response[CodebaseVersionResponse],
+)
+async def retry_codebase_build(
+        codebase_id: str,
+        build_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
+        service: CodebaseService = Depends(get_codebase_service),
+) -> Response[CodebaseVersionResponse]:
+    version = await service.retry_build(
+        codebase_id,
+        build_id,
+        scope=ctx.scope,
+    )
+    return Response.success(data=_to_version_response(version))
+
+
+@router.post(
+    "/{codebase_id}/builds/{build_id}/cancel",
+    response_model=Response[CodebaseBuildResponse],
+)
+async def cancel_codebase_build(
+        codebase_id: str,
+        build_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
+        service: CodebaseService = Depends(get_codebase_service),
+) -> Response[CodebaseBuildResponse]:
+    build = await service.cancel_build(
+        codebase_id,
+        build_id,
+        scope=ctx.scope,
+    )
+    return Response.success(data=_to_build_response(build))
+
+
+@router.post(
+    "/{codebase_id}/versions/{version_id}/source",
+    response_model=Response[ReadSourceResponse],
+)
+async def read_version_source(
+        codebase_id: str,
+        version_id: str,
+        request: ReadSourceRequest,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        service: CodebaseService = Depends(get_codebase_service),
+        object_storage: ObjectStoragePort = Depends(get_object_storage),
+) -> Response[ReadSourceResponse]:
+    content = await service.read_source(
+        codebase_id,
+        request.path,
+        start_line=request.start_line,
+        end_line=request.end_line,
+        scope=ctx.scope,
+        codebase_version_id=version_id,
+        object_storage=object_storage,
+    )
+    return Response.success(
+        data=ReadSourceResponse(
+            path=request.path,
+            content=content,
+            start_line=request.start_line,
+            end_line=request.end_line,
+        )
+    )
+
+
+@router.get(
+    "/{codebase_id}/versions/{version_id}/artifacts",
+    response_model=Response[ListArtifactsResponse],
+)
+async def list_version_artifacts(
+        codebase_id: str,
+        version_id: str,
+        kind: Optional[ArtifactKind] = None,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        service: CodebaseService = Depends(get_codebase_service),
+) -> Response[ListArtifactsResponse]:
+    artifacts = await service.list_artifacts(
+        codebase_id,
+        kind=kind,
+        codebase_version_id=version_id,
+        scope=ctx.scope,
+    )
+    return Response.success(
+        data=ListArtifactsResponse(
+            artifacts=[
+                ArtifactResponse(**artifact.model_dump(mode="json"))
+                for artifact in artifacts
+            ],
+        )
+    )
 
 
 @router.get("/{codebase_id}/tree", response_model=Response[FileTreeResponse])
@@ -124,7 +296,9 @@ async def read_source(
         codebase_id: str,
         request: ReadSourceRequest,
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
         service: CodebaseService = Depends(get_codebase_service),
+        object_storage: ObjectStoragePort = Depends(get_object_storage),
 ) -> Response[ReadSourceResponse]:
     content = await service.read_source(
         codebase_id,
@@ -132,6 +306,7 @@ async def read_source(
         start_line=request.start_line,
         end_line=request.end_line,
         scope=ctx.scope,
+        object_storage=object_storage,
     )
     return Response.success(data=ReadSourceResponse(
             path=request.path,
@@ -163,9 +338,14 @@ async def ingest_stream(
 async def reanalyze(
         codebase_id: str,
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[CodebaseResponse]:
-    codebase = await service.reanalyze(codebase_id, scope=ctx.scope)
+    if hasattr(service, "create_build"):
+        await service.create_build(codebase_id, scope=ctx.scope)
+        codebase = await service.get_codebase(codebase_id, scope=ctx.scope)
+    else:
+        codebase = await service.reanalyze(codebase_id, scope=ctx.scope)
     return Response.success(data=_to_codebase_response(codebase))
 
 
@@ -174,10 +354,35 @@ async def download_codebase(
         codebase_id: str,
         ctx: WorkspaceContext = Depends(get_workspace_context),
         service: CodebaseService = Depends(get_codebase_service),
+) -> Response[DownloadCodebaseResponse]:
+    """Deprecated, read-only compatibility lookup for an existing snapshot."""
+    if hasattr(service, "get_download_snapshot_key"):
+        snapshot_key = await service.get_download_snapshot_key(
+            codebase_id,
+            scope=ctx.scope,
+        )
+    else:
+        codebase = await service.get_codebase(codebase_id, scope=ctx.scope)
+        snapshot_key = codebase.snapshot_key or ""
+    return Response.success(data=DownloadCodebaseResponse(
+        snapshot_key=snapshot_key,
+    ))
+
+
+@router.post("/{codebase_id}/snapshots", response_model=Response[DownloadCodebaseResponse])
+async def create_codebase_snapshot(
+        codebase_id: str,
+        ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
+        service: CodebaseService = Depends(get_codebase_service),
         object_storage: ObjectStoragePort = Depends(get_object_storage),
 ) -> Response[DownloadCodebaseResponse]:
     key = await service.package_download(codebase_id, object_storage, scope=ctx.scope)
-    return Response.success(data=DownloadCodebaseResponse(snapshot_key=key))
+    codebase = await service.get_codebase(codebase_id, scope=ctx.scope)
+    return Response.success(data=DownloadCodebaseResponse(
+        snapshot_key=key,
+        updated_at=codebase.updated_at,
+    ))
 
 
 @router.post("/{codebase_id}/sessions", response_model=Response[CreateCodebaseSessionResponse])
@@ -185,6 +390,7 @@ async def create_codebase_session(
         codebase_id: str,
         request: CreateCodebaseSessionRequest,
         ctx: WorkspaceContext = Depends(get_workspace_context),
+        _write_guard=Depends(require_non_auditor),
         service: CodebaseService = Depends(get_codebase_service),
 ) -> Response[CreateCodebaseSessionResponse]:
     session = await service.create_session_for_codebase(
@@ -192,6 +398,7 @@ async def create_codebase_session(
         mode=request.mode,
         model_id=request.model_id,
         skill_id=request.skill_id,
+        codebase_version_id=request.codebase_version_id,
         scope=ctx.scope,
     )
     return Response.success(data=CreateCodebaseSessionResponse(

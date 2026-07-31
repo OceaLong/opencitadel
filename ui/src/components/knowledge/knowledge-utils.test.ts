@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { KnowledgeDocument } from "@/lib/api/types";
+
 import { translate } from "@/i18n/translate";
 
 import {
@@ -12,7 +14,6 @@ import {
   isStaleRequest,
   parseKbDocHref,
 } from "./knowledge-utils";
-import type { KnowledgeDocument } from "@/lib/api/types";
 
 describe("parseKbDocHref", () => {
   it("parses doc id and page", () => {
@@ -25,6 +26,28 @@ describe("parseKbDocHref", () => {
 
   it("returns null for non-kb links", () => {
     expect(parseKbDocHref("https://example.com")).toBeNull();
+  });
+
+  it("preserves immutable version and revision identities", () => {
+    expect(parseKbDocHref("kbdoc://doc-1?page=2&version=v7&revision=r9&chunk=c4")).toEqual({
+      docId: "doc-1",
+      page: 2,
+      chunkId: "c4",
+      versionId: "v7",
+      revisionId: "r9",
+    });
+  });
+
+  it.each([
+    "kbdoc://doc-1?page=-1",
+    "kbdoc://doc-1?page=1.5",
+    "kbdoc://doc-1?page=nope",
+    "kbdoc://doc-1?page=1&page=2",
+    "kbdoc://doc-1?version=",
+    "kbdoc://doc-1?version=v1&version=v2",
+    "kbdoc://?version=v1",
+  ])("rejects malformed or ambiguous citation identity: %s", (value) => {
+    expect(parseKbDocHref(value)).toBeNull();
   });
 });
 
@@ -66,14 +89,20 @@ describe("formatIngestStreamError", () => {
   });
 
   it("falls back to default message", () => {
-    expect(formatIngestStreamError({})).toBe(
-      translate("knowledge.indexFailed", undefined, "en"),
-    );
+    expect(formatIngestStreamError({})).toBe(translate("knowledge.indexFailed", undefined, "en"));
   });
 });
 
 const doc = (id: string): KnowledgeDocument =>
-  ({ id, kb_id: "kb1", title: id, source_type: "upload", mime: "", page_count: 0, status: "ready" }) as KnowledgeDocument;
+  ({
+    id,
+    kb_id: "kb1",
+    title: id,
+    source_type: "upload",
+    mime: "",
+    page_count: 0,
+    status: "ready",
+  }) as KnowledgeDocument;
 
 describe("canStartAsk", () => {
   it("allows when ready_doc_count > 0", () => {

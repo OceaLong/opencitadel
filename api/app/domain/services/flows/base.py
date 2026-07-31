@@ -6,6 +6,7 @@ from typing import AsyncGenerator
 
 from app.domain.models.event import BaseEvent
 from app.domain.models.message import Message
+from app.domain.models.run_outcome import RunOutcome
 
 
 class FlowStatus(str, Enum):
@@ -22,6 +23,30 @@ class FlowStatus(str, Enum):
 
 class BaseFlow(ABC):
     """基础流抽象类"""
+
+    @property
+    def outcome(self) -> RunOutcome:
+        if not hasattr(self, "_outcome"):
+            self._reset_outcome()
+        return self._outcome
+
+    def _reset_outcome(self) -> None:
+        self._outcome = RunOutcome.failed(
+            "Flow ended without an explicit outcome",
+            code="FLOW_OUTCOME_UNSET",
+        )
+
+    def _mark_succeeded(self) -> None:
+        self._outcome = RunOutcome.succeeded()
+
+    def _mark_failed(self, message: str, code: str | None = None) -> None:
+        self._outcome = RunOutcome.failed(message, code=code)
+
+    def _mark_cancelled(self) -> None:
+        self._outcome = RunOutcome.cancelled()
+
+    def _mark_waiting(self) -> None:
+        self._outcome = RunOutcome.waiting()
 
     @abstractmethod
     async def invoke(self, message: Message) -> AsyncGenerator[BaseEvent, None]:

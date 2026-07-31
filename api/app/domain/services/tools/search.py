@@ -6,6 +6,7 @@ from app.domain.external.search import SearchEngine
 from app.domain.models.search import SearchResults
 from app.domain.models.tool_result import ToolResult
 from .base import BaseTool, tool
+from .capability_policy import WEB_READ
 
 
 class SearchTool(BaseTool):
@@ -31,7 +32,8 @@ class SearchTool(BaseTool):
                 "description": "（可选）搜索结果的时间范围过滤。当用户询问特定时效性的新闻或事件时（如'昨天'、'上周'），必须指定此参数。默认为 'all'。"
             }
         },
-        required=["query"]
+        required=["query"],
+        policy=WEB_READ,
     )
     async def search_web(self, query: str, date_range: Optional[str] = None) -> ToolResult[SearchResults]:
         """调用搜索引擎获取搜索结果后返回"""

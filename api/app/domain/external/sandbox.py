@@ -58,6 +58,16 @@ class Sandbox(Protocol):
         """根据传递的文件路径+起点终点行数+超级权限读取对应的文件内容"""
         ...
 
+    async def read_files(
+            self,
+            filepaths: list[str],
+            *,
+            sudo: bool = False,
+            max_length: int = 10000,
+    ) -> list[ToolResult]:
+        """Batch-read sandbox files with one per-file byte cap."""
+        ...
+
     async def check_file_exists(self, filepath: str) -> ToolResult:
         """根据传递的文件路径判断文件是否存在"""
         ...
@@ -99,6 +109,14 @@ class Sandbox(Protocol):
 
     async def download_file(self, filepath: str) -> BinaryIO:
         """根据传递的文件路径下载沙箱中的文件"""
+        ...
+
+    async def create_workspace_snapshot(self, snapshot_id: str) -> bytes:
+        """Create a tar.gz snapshot of the sandbox workspace."""
+        ...
+
+    async def restore_workspace_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
+        """Restore a tar.gz snapshot into the sandbox workspace."""
         ...
 
     async def ensure_sandbox(self) -> None:

@@ -29,7 +29,10 @@ from app.domain.external.task_state_port import TaskStatePort
 from app.domain.models.agent_runtime_settings import AgentMemoryRuntimeSettings, AgentRuntimeSettings
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig, ModelResilienceConfig
 from app.domain.models.codebase import Codebase, SessionMode
+from app.domain.models.codebase_version import CodebaseVersionState
 from app.domain.models.knowledge_base import KnowledgeBase
+from app.domain.models.knowledge_version import KnowledgeVersionState
+from app.domain.models.resource_governance import ResourceKind
 from app.domain.models.session import Session, SessionStatus
 from app.domain.models.scope import OwnerScope
 from app.domain.models.skill import Skill
@@ -37,6 +40,7 @@ from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agent_task_runner import AgentTaskRunner
 from app.domain.services.agent.sandbox_provider import LazyBrowser, LazySandbox, SandboxProvider
 from app.domain.services.checkpoint_service import CheckpointService
+from app.domain.services.codebase.snapshot_service import VersionedCodeSource
 from app.domain.services.tools.codebase_tools import CodebaseTool
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.image_generation import ImageGenerationTool
@@ -44,6 +48,8 @@ from app.domain.services.tools.knowledge_base_tools import KnowledgeBaseTool
 from app.domain.services.tools.artifact import ArtifactTool
 from app.domain.services.tools.memory import MemoryTool
 from app.domain.services.tools.mcp import MCPTool
+from app.domain.services.tools.capability_policy import CapabilityPolicy
+from app.domain.services.session_flow_resolver import SessionFlowResolver
 from app.domain.services.subagent_factory import build_subagent_tool
 from app.domain.services.skills.skill_loader import render_active
 from app.application.services.skill_recommender_service import SkillRecommenderService
@@ -147,14 +153,47 @@ class TaskRunnerFactory:
             self,
             session: Session,
             scope: OwnerScope,
-    ) -> tuple[Optional[Codebase], Optional[KnowledgeBase]]:
+    ) -> tuple[Optional[Codebase], Optional[str], Optional[KnowledgeBase], Optional[str]]:
         codebase = None
+        codebase_version_id = None
         knowledge_base = None
+        knowledge_base_version_id = None
         async with self._uow_factory() as uow:
             if session.codebase_id:
                 codebase = await uow.codebase.get_by_id(session.codebase_id, scope=scope)
                 if codebase is None:
                     raise NotFoundError("会话关联代码库不存在或无权访问")
+                bindings = [
+                    binding
+                    for binding in session.resource_bindings
+                    if binding.resource_kind == ResourceKind.CODEBASE
+                ]
+                if (
+                    len(bindings) != 1
+                    or bindings[0].resource_id != session.codebase_id
+                ):
+                    raise NotFoundError(
+                        "会话代码库版本绑定缺失、重复或不匹配"
+                    )
+                binding = bindings[0]
+                version = await uow.codebase_version.get_version(
+                    binding.version_id,
+                    codebase_id=session.codebase_id,
+                )
+                if (
+                    version is None
+                    or version.id != binding.version_id
+                    or version.codebase_id != session.codebase_id
+                    or version.published_at is None
+                    or version.state not in {
+                        CodebaseVersionState.READY,
+                        CodebaseVersionState.DEGRADED,
+                    }
+                ):
+                    raise NotFoundError(
+                        "会话代码库版本不是可用的已发布版本"
+                    )
+                codebase_version_id = version.id
             if session.knowledge_base_id:
                 knowledge_base = await uow.knowledge_base.get_kb(
                     session.knowledge_base_id,
@@ -162,7 +201,73 @@ class TaskRunnerFactory:
                 )
                 if knowledge_base is None:
                     raise NotFoundError("会话关联知识库不存在或无权访问")
-        return codebase, knowledge_base
+                bindings = [
+                    binding
+                    for binding in session.resource_bindings
+                    if (
+                        binding.resource_kind
+                        == ResourceKind.KNOWLEDGE_BASE
+                    )
+                ]
+                if (
+                    len(bindings) != 1
+                    or bindings[0].resource_id
+                    != session.knowledge_base_id
+                ):
+                    raise NotFoundError(
+                        "会话知识库版本绑定缺失、重复或不匹配"
+                    )
+                binding = bindings[0]
+                version = await uow.knowledge_version.get_version(
+                    binding.version_id,
+                    knowledge_base_id=session.knowledge_base_id,
+                )
+                if (
+                    version is None
+                    or version.id != binding.version_id
+                    or version.knowledge_base_id
+                    != session.knowledge_base_id
+                    or version.published_at is None
+                    or version.state not in {
+                        KnowledgeVersionState.READY,
+                        KnowledgeVersionState.DEGRADED,
+                    }
+                ):
+                    raise NotFoundError(
+                        "会话知识库版本不是可用的已发布版本"
+                    )
+                knowledge_base_version_id = version.id
+        return (
+            codebase,
+            codebase_version_id,
+            knowledge_base,
+            knowledge_base_version_id,
+        )
+
+    async def _build_versioned_code_source(
+            self,
+            codebase_id: str,
+            version_id: str,
+    ) -> VersionedCodeSource:
+        if self._object_storage is None:
+            raise NotFoundError("代码库快照存储不可用")
+        async with self._uow_factory() as uow:
+            version = await uow.codebase_version.get_version(
+                version_id,
+                codebase_id=codebase_id,
+            )
+        if (
+            version is None
+            or not version.source_snapshot_key
+            or not version.source_digest
+        ):
+            raise NotFoundError("代码库版本快照不可用")
+        return VersionedCodeSource(
+            version_id=version.id,
+            snapshot_key=version.source_snapshot_key,
+            source_digest=version.source_digest,
+            object_storage=self._object_storage,
+        )
 
     async def _refresh_runtime_config(self, session: Optional[Session] = None) -> None:
         scope = self._scope_for_session(session) if session else None
@@ -273,10 +378,12 @@ class TaskRunnerFactory:
 
     async def create_runner(self, session: Session) -> AgentTaskRunner:
         session_scope = self._scope_for_session(session)
-        authorized_codebase, authorized_knowledge_base = await self._authorize_session_resources(
-            session,
-            session_scope,
-        )
+        (
+            authorized_codebase,
+            authorized_codebase_version_id,
+            authorized_knowledge_base,
+            authorized_knowledge_base_version_id,
+        ) = await self._authorize_session_resources(session, session_scope)
         await self._refresh_runtime_config(session)
 
         latest_message = await self._latest_user_message(session.id)
@@ -297,20 +404,16 @@ class TaskRunnerFactory:
             codebase_id = session.codebase_id
             codebase_service = self._codebase_service
             object_storage = self._object_storage
+            codebase_version_id = authorized_codebase_version_id
 
             async def ensure_codebase_attached(sandbox: Sandbox) -> None:
-                try:
-                    await codebase_service.attach_to_session_sandbox(
-                        codebase_id,
-                        sandbox,
-                        object_storage,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "代码库物化到会话沙箱失败 session=%s: %s",
-                        session.id,
-                        exc,
-                    )
+                await codebase_service.attach_to_session_sandbox(
+                    codebase_id,
+                    sandbox,
+                    object_storage,
+                    scope=session_scope,
+                    codebase_version_id=codebase_version_id,
+                )
 
             on_ready = ensure_codebase_attached
 
@@ -389,17 +492,24 @@ class TaskRunnerFactory:
                         name=codebase.name,
                         workspace_path=codebase.workspace_path,
                     )
-                read_sandbox = sandbox
-                if session.mode == SessionMode.ASK and codebase.sandbox_id:
-                    ingestion_sandbox = await self._sandbox_cls.get(codebase.sandbox_id)
-                    if ingestion_sandbox:
-                        read_sandbox = ingestion_sandbox
+                source_reader = None
+                if (
+                    session.mode == SessionMode.ASK
+                    and authorized_codebase_version_id
+                ):
+                    source_reader = await self._build_versioned_code_source(
+                        codebase.id,
+                        authorized_codebase_version_id,
+                    )
                 extra_tools.append(
                     CodebaseTool(
                         uow_factory=self._uow_factory,
                         codebase_id=codebase.id,
-                        sandbox=read_sandbox,
+                        sandbox=sandbox,
                         workspace_path=codebase.workspace_path,
+                        version_id=authorized_codebase_version_id,
+                        source_reader=source_reader,
+                        base_version_id=authorized_codebase_version_id,
                     )
                 )
         if codebase_prompt:
@@ -408,12 +518,13 @@ class TaskRunnerFactory:
         if session.knowledge_base_id:
             kb = authorized_knowledge_base
             if kb:
-                if session.mode == SessionMode.AGENT and session.codebase_id:
+                if session.mode == SessionMode.AGENT:
                     knowledge_base_prompt = DOC_AGENT_SKILL_PROMPT
                 extra_tools.append(
                     KnowledgeBaseTool(
                         uow_factory=self._uow_factory,
                         kb_id=kb.id,
+                        version_id=authorized_knowledge_base_version_id,
                         llm=llm,
                     )
                 )
@@ -470,6 +581,16 @@ class TaskRunnerFactory:
         import asyncio
         stateful_tool_lock = asyncio.Lock()
         allowed_for_subagent = skill.allowed_tools if (skill and skill.allowed_tools) else None
+        session_policy = SessionFlowResolver.resolve(
+            session.mode,
+            has_kb=bool(session.knowledge_base_id),
+            has_codebase=bool(session.codebase_id),
+        ).policy
+        if allowed_for_subagent is not None:
+            session_policy = CapabilityPolicy.for_mode(
+                session.mode,
+                allowed_tool_names=allowed_for_subagent,
+            )
         subagent_overrides = {}
         if skill:
             params = skill.agent_params
@@ -498,6 +619,7 @@ class TaskRunnerFactory:
             file_storage=self._file_storage,
             stateful_tool_lock=stateful_tool_lock,
             prompt_locale=prompt_locale,
+            parent_policy=session_policy,
             **subagent_overrides,
         )
         extra_tools = list(extra_tools) + [subagent_tool]

@@ -4,6 +4,7 @@ from typing import Awaitable, Callable, Optional
 
 from app.domain.models.tool_result import ToolResult
 from app.domain.services.tools.base import BaseTool, tool
+from app.domain.services.tools.capability_policy import EXTERNAL_WRITE
 
 SaveMemoryFn = Callable[[str, str, list, str], Awaitable[dict]]
 
@@ -36,6 +37,7 @@ class MemoryTool(BaseTool):
             },
         },
         required=["title", "content"],
+        policy=EXTERNAL_WRITE,
     )
     async def memory_save(
             self,

@@ -1,13 +1,18 @@
-import { authenticatedFetch, del, get, parseSSEStream, post } from "./fetch";
 import { translate } from "@/i18n/translate";
+
+import { authenticatedFetch, del, get, parseSSEStream, post } from "./fetch";
 import type {
   AddKnowledgeDocumentsParams,
   CreateKnowledgeBaseParams,
   CreateKnowledgeSessionParams,
   KnowledgeBase,
   KnowledgeBasesData,
+  KnowledgeBuild,
   KnowledgeDocumentsData,
+  KnowledgeGraphData,
   KnowledgeSessionData,
+  KnowledgeVersion,
+  KnowledgeVersionsData,
   ReadKnowledgeDocumentData,
   SSEEventData,
   SSEEventHandler,
@@ -24,6 +29,26 @@ export const knowledgeApi = {
 
   get: (kbId: string): Promise<KnowledgeBase> => {
     return get<KnowledgeBase>(`/knowledge-bases/${kbId}`);
+  },
+
+  listVersions: (kbId: string): Promise<KnowledgeVersionsData> => {
+    return get<KnowledgeVersionsData>(`/knowledge-bases/${kbId}/versions`);
+  },
+
+  getVersion: (kbId: string, versionId: string): Promise<KnowledgeVersion> => {
+    return get<KnowledgeVersion>(`/knowledge-bases/${kbId}/versions/${versionId}`);
+  },
+
+  createBuild: (kbId: string): Promise<KnowledgeVersion> => {
+    return post<KnowledgeVersion>(`/knowledge-bases/${kbId}/builds`);
+  },
+
+  retryBuild: (kbId: string, buildId: string): Promise<KnowledgeVersion> => {
+    return post<KnowledgeVersion>(`/knowledge-bases/${kbId}/builds/${buildId}/retry`);
+  },
+
+  cancelBuild: (kbId: string, buildId: string): Promise<KnowledgeBuild> => {
+    return post<KnowledgeBuild>(`/knowledge-bases/${kbId}/builds/${buildId}/cancel`);
   },
 
   delete: (kbId: string): Promise<void> => {
@@ -53,11 +78,35 @@ export const knowledgeApi = {
     return post<KnowledgeSessionData>(`/knowledge-bases/${kbId}/sessions`, params || {});
   },
 
-  readDocument: (kbId: string, docId: string, page?: number): Promise<ReadKnowledgeDocumentData> => {
+  readDocument: (
+    kbId: string,
+    docId: string,
+    page?: number,
+  ): Promise<ReadKnowledgeDocumentData> => {
     return get<ReadKnowledgeDocumentData>(
       `/knowledge-bases/${kbId}/documents/${docId}`,
       page ? { page } : undefined,
     );
+  },
+
+  readDocumentPage: (
+    kbId: string,
+    versionId: string,
+    docId: string,
+    params?: { page?: number; cursor?: string; limit?: number },
+  ): Promise<ReadKnowledgeDocumentData> => {
+    return get<ReadKnowledgeDocumentData>(
+      `/knowledge-bases/${kbId}/versions/${versionId}/documents/${docId}/content`,
+      params,
+    );
+  },
+
+  getGraph: (
+    kbId: string,
+    versionId: string,
+    params?: { q?: string; cursor?: string; limit?: number },
+  ): Promise<KnowledgeGraphData> => {
+    return get<KnowledgeGraphData>(`/knowledge-bases/${kbId}/versions/${versionId}/graph`, params);
   },
 
   ingestStream: (

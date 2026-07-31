@@ -391,13 +391,18 @@ def test_artifact_finalize_not_found_returns_failure():
 def test_scheduler_leader_only_renews_own_lease():
     redis = MagicMock()
     redis.client.set = AsyncMock(return_value=False)
-    redis.client.get = AsyncMock(return_value=b"other-worker")
-    redis.client.expire = AsyncMock(return_value=True)
+    redis.client.eval = AsyncMock(return_value=0)
 
     async def _run():
         with patch("app.infrastructure.external.scheduler.job_scheduler.get_redis", return_value=redis):
             assert await try_become_scheduler_leader(30) is False
-        redis.client.expire.assert_not_awaited()
+        redis.client.eval.assert_awaited_once()
+        script, key_count, key, owner, ttl_ms = (
+            redis.client.eval.await_args.args
+        )
+        assert "opencitadel:renew-scheduler-lease" in script
+        assert (key_count, key, ttl_ms) == (1, "scheduler:leader", 30_000)
+        assert owner
 
     asyncio.run(_run())
 
@@ -406,8 +411,7 @@ def test_scheduler_leader_renews_when_owner():
     redis = MagicMock()
     worker_id = "test-worker-1"
     redis.client.set = AsyncMock(side_effect=[True, False])
-    redis.client.get = AsyncMock(return_value=worker_id.encode())
-    redis.client.expire = AsyncMock(return_value=True)
+    redis.client.eval = AsyncMock(return_value=1)
 
     async def _run():
         with patch(
@@ -417,7 +421,17 @@ def test_scheduler_leader_renews_when_owner():
             with patch("app.infrastructure.external.scheduler.job_scheduler.get_redis", return_value=redis):
                 assert await try_become_scheduler_leader(30) is True
                 assert await try_become_scheduler_leader(30) is True
-        redis.client.expire.assert_awaited_once()
+        redis.client.eval.assert_awaited_once()
+        script, key_count, key, owner, ttl_ms = (
+            redis.client.eval.await_args.args
+        )
+        assert "opencitadel:renew-scheduler-lease" in script
+        assert (key_count, key, owner, ttl_ms) == (
+            1,
+            "scheduler:leader",
+            worker_id,
+            30_000,
+        )
 
     asyncio.run(_run())
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { type MutableRefObject, useCallback, useRef, useState } from "react";
 import type React from "react";
 
 import { sessionApi } from "@/lib/api/session";
@@ -8,6 +8,7 @@ import type { SSEEventData } from "@/lib/api/types";
 import { normalizeEvent, normalizeEvents } from "@/lib/session-events";
 
 const INITIAL_EVENTS_LIMIT = 100;
+const RECONNECT_EVENTS_LIMIT = 500;
 
 export type EventIndexRefs = {
   eventIds: React.MutableRefObject<Set<string>>;
@@ -76,7 +77,7 @@ function rebuildEventIndexRefs(events: SSEEventData[], refs: EventIndexRefs) {
 
 export function useSessionEventLog(sessionId: string | null) {
   const eventsRef = useRef<SSEEventData[]>([]);
-  const [eventsTick, setEventsTick] = useState(0);
+  const [, setEventsTick] = useState(0);
   const flushFrameRef = useRef<number | null>(null);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [hasEarlierHistory, setHasEarlierHistory] = useState(false);
@@ -89,19 +90,18 @@ export function useSessionEventLog(sessionId: string | null) {
   const toolArgsDeltaIndexRef = useRef<Map<string, number>>(new Map());
   const lastEventIdRef = useRef<string | null>(null);
   const lastPersistedSeqRef = useRef<number | null>(null);
-
-  const indexRefs: EventIndexRefs = {
-    eventIds: eventIdSetRef,
-    dedupeKeys: dedupeKeySetRef,
-    messageDelta: messageDeltaIndexRef,
-    reasoningDelta: reasoningDeltaIndexRef,
-    toolArgsDelta: toolArgsDeltaIndexRef,
-  };
+  const lastReconciledSeqRef = useRef<number | null>(null);
 
   const bumpEvents = useCallback((next?: SSEEventData[]) => {
     if (next) {
       eventsRef.current = next;
-      rebuildEventIndexRefs(next, indexRefs);
+      rebuildEventIndexRefs(next, {
+        eventIds: eventIdSetRef,
+        dedupeKeys: dedupeKeySetRef,
+        messageDelta: messageDeltaIndexRef,
+        reasoningDelta: reasoningDeltaIndexRef,
+        toolArgsDelta: toolArgsDeltaIndexRef,
+      });
     }
     setEventsTick((tick) => tick + 1);
   }, []);
@@ -150,32 +150,68 @@ export function useSessionEventLog(sessionId: string | null) {
       }
 
       const eventId = (evToAppend.data as { event_id?: string })?.event_id;
-      if (eventId) lastEventIdRef.current = eventId;
-      updatePersistedSeqRef(lastPersistedSeqRef, eventId);
-
+      const persistedSeq = parsePersistedSeq(eventId);
       const dedupeKey = buildDedupeKey(evToAppend);
-      if (eventId && eventIdSetRef.current.has(eventId)) return;
-      if (dedupeKey && dedupeKeySetRef.current.has(dedupeKey)) return;
+      if (eventId && eventIdSetRef.current.has(eventId)) return false;
+      if (dedupeKey && dedupeKeySetRef.current.has(dedupeKey)) return false;
+
+      const previousPersistedSeq = lastPersistedSeqRef.current;
+      if (
+        persistedSeq !== null
+        && lastReconciledSeqRef.current === null
+      ) {
+        lastReconciledSeqRef.current = persistedSeq;
+      }
+      if (
+        eventId
+        && (
+          persistedSeq === null
+          || previousPersistedSeq === null
+          || persistedSeq >= previousPersistedSeq
+        )
+      ) {
+        lastEventIdRef.current = eventId;
+      }
+      updatePersistedSeqRef(lastPersistedSeqRef, eventId);
 
       if (evToAppend.type === "message_delta") {
         const data = evToAppend.data as { stream_id?: string; delta?: string };
         if (mergeDeltaInPlace(messageDeltaIndexRef, data.stream_id, data.delta)) {
           scheduleDeltaFlush();
-          return;
+          return true;
         }
       }
       if (evToAppend.type === "reasoning_delta") {
         const data = evToAppend.data as { stream_id?: string; delta?: string };
         if (mergeDeltaInPlace(reasoningDeltaIndexRef, data.stream_id, data.delta)) {
           scheduleDeltaFlush();
-          return;
+          return true;
         }
       }
       if (evToAppend.type === "tool_args_delta") {
         const data = evToAppend.data as { tool_call_id?: string; delta?: string };
         if (mergeDeltaInPlace(toolArgsDeltaIndexRef, data.tool_call_id, data.delta)) {
           scheduleDeltaFlush();
-          return;
+          return true;
+        }
+      }
+
+      if (persistedSeq !== null) {
+        const insertAt = eventsRef.current.findIndex((existingEvent) => {
+          const existingEventId = (
+            existingEvent.data as { event_id?: string }
+          )?.event_id;
+          const existingSeq = parsePersistedSeq(existingEventId);
+          return existingSeq !== null && existingSeq > persistedSeq;
+        });
+        if (insertAt >= 0) {
+          const next = [
+            ...eventsRef.current.slice(0, insertAt),
+            evToAppend,
+            ...eventsRef.current.slice(insertAt),
+          ];
+          bumpEvents(next);
+          return true;
         }
       }
 
@@ -197,6 +233,7 @@ export function useSessionEventLog(sessionId: string | null) {
       }
       eventsRef.current = next;
       bumpEvents();
+      return true;
     },
     [bumpEvents, mergeDeltaInPlace, scheduleDeltaFlush],
   );
@@ -220,7 +257,10 @@ export function useSessionEventLog(sessionId: string | null) {
           }
           const lastEvId = (pagedEvents[pagedEvents.length - 1]?.data as { event_id?: string })
             ?.event_id;
-          if (lastEvId) lastEventIdRef.current = lastEvId;
+          if (lastEvId) {
+            lastEventIdRef.current = lastEvId;
+            lastReconciledSeqRef.current = parsePersistedSeq(lastEvId);
+          }
         }
         bumpEvents(pagedEvents);
       } finally {
@@ -233,20 +273,46 @@ export function useSessionEventLog(sessionId: string | null) {
   const syncMissingEvents = useCallback(
     async (includeDebug: boolean) => {
       if (!sessionId) return;
-      const after = lastPersistedSeqRef.current;
-      if (after == null) {
+      const latestPersistedSeq = lastPersistedSeqRef.current;
+      if (latestPersistedSeq == null) {
         await loadEventsPage(includeDebug);
         return;
       }
-      const page = await sessionApi.getSessionEvents(sessionId, {
-        after,
-        limit: 500,
+      const reconciliationFloor =
+        lastReconciledSeqRef.current ?? latestPersistedSeq;
+      let page = await sessionApi.getSessionEvents(sessionId, {
+        latest: true,
+        limit: RECONNECT_EVENTS_LIMIT,
         include_debug: includeDebug,
       });
-      const missingEvents = normalizeEvents(page.events);
-      for (const ev of missingEvents) {
-        appendEvent(ev);
+      let reconciledHigh = latestPersistedSeq;
+      let before: number | null = null;
+      while (true) {
+        const missingEvents = normalizeEvents(page.events);
+        for (const ev of missingEvents) {
+          const eventId = (ev.data as { event_id?: string })?.event_id;
+          const seq = parsePersistedSeq(eventId);
+          if (seq !== null) reconciledHigh = Math.max(reconciledHigh, seq);
+          appendEvent(ev);
+        }
+
+        const nextBefore = page.prev_cursor ?? null;
+        if (
+          !page.has_earlier
+          || nextBefore === null
+          || nextBefore <= reconciliationFloor
+          || (before !== null && nextBefore >= before)
+        ) {
+          break;
+        }
+        before = nextBefore;
+        page = await sessionApi.getSessionEvents(sessionId, {
+          before,
+          limit: RECONNECT_EVENTS_LIMIT,
+          include_debug: includeDebug,
+        });
       }
+      lastReconciledSeqRef.current = reconciledHigh;
     },
     [sessionId, appendEvent, loadEventsPage],
   );
@@ -283,12 +349,13 @@ export function useSessionEventLog(sessionId: string | null) {
     toolArgsDeltaIndexRef.current.clear();
     lastEventIdRef.current = null;
     lastPersistedSeqRef.current = null;
+    lastReconciledSeqRef.current = null;
     setHasEarlierHistory(false);
     setInitialEventsLoaded(false);
     bumpEvents([]);
   }, [bumpEvents]);
 
-  const events = useMemo(() => eventsRef.current, [eventsTick]);
+  const events = eventsRef.current;
 
   return {
     events,

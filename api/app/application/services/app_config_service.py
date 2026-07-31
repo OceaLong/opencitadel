@@ -31,6 +31,7 @@ from app.domain.models.app_config_scope import (
 )
 from app.domain.models.integration_server import MCPServerRecord
 from app.domain.models.scope import OwnerScope
+from app.domain.models.tool_policy import ToolExecutionPolicy
 from app.domain.repositories.app_config_repository import AppConfigRepository
 from app.infrastructure.external.tools.connection_pool import A2AConnectionPool, MCPConnectionPool
 from app.interfaces.schemas.app_config import ListMCPServerItem, ListA2AServerItem
@@ -255,6 +256,10 @@ class AppConfigService:
                         "url": record.url,
                         "headers": record.headers,
                         "env": record.env,
+                        "tool_policies": {
+                            name: policy.model_dump(mode="json")
+                            for name, policy in record.tool_policies.items()
+                        },
                     },
                 )
             )
@@ -299,6 +304,11 @@ class AppConfigService:
             args=cfg.args,
             url=cfg.url,
             headers=cfg.headers,
+            tool_policies=(
+                cfg.tool_policies
+                if "tool_policies" in cfg.model_fields_set
+                else target.tool_policies
+            ),
             owner_user_id=target.owner_user_id,
             team_id=target.team_id,
             visibility=target.visibility,
@@ -338,6 +348,7 @@ class AppConfigService:
                 args=cfg.args,
                 url=cfg.url,
                 headers=cfg.headers,
+                tool_policies=cfg.tool_policies,
             )
             if not is_admin:
                 from app.domain.models.llm_model import ResourceVisibility
@@ -407,6 +418,7 @@ class AppConfigService:
         scope: Optional[OwnerScope] = None,
         actor_user_id: Optional[str] = None,
         is_admin: bool = False,
+        tool_policies: Optional[Dict[str, ToolExecutionPolicy]] = None,
     ) -> A2AConfig:
         if self._a2a_server_service is None:
             raise BadRequestError("A2A 服务未启用")
@@ -417,6 +429,7 @@ class AppConfigService:
             scope=scope,
             actor_user_id=actor_user_id,
             visibility=visibility,
+            tool_policies=tool_policies,
             is_admin=is_admin,
         )
         self._invalidate_runtime_pools()
@@ -429,6 +442,10 @@ class AppConfigService:
         app_config = AppConfig(a2a_config=await self._a2a_server_service.resolve_a2a_config(scope))
         a2a_client_manager = await A2AConnectionPool.acquire(app_config.a2a_config)
         agent_cards = a2a_client_manager.agent_cards
+        policies_by_id = {
+            server.id: server.tool_policies
+            for server in app_config.a2a_config.a2a_servers
+        }
         return [
             ListA2AServerItem(
                 id=id,
@@ -439,6 +456,7 @@ class AppConfigService:
                 streaming=agent_card.get("capabilities", {}).get("streaming", False),
                 push_notifications=agent_card.get("capabilities", {}).get("push_notifications", False),
                 enabled=agent_card.get("enabled", False),
+                tool_policies=policies_by_id.get(id, {}),
             )
             for id, agent_card in agent_cards.items()
         ]

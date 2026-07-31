@@ -16,6 +16,17 @@ from app.domain.models.event import (
 from app.domain.models.event_policy import EVENT_SCHEMA_VERSION, project_events
 from app.domain.models.file import File
 from app.domain.models.plan import ExecutionStatus
+from app.domain.models.resource_governance import ResourceKind
+from app.domain.models.knowledge_citation import KnowledgeCitation
+
+
+class ResourceBindingProjectionData(BaseModel):
+    """Public additive resource-version snapshot carried by session events."""
+
+    binding_id: str
+    resource_kind: ResourceKind
+    resource_id: str
+    version_id: str
 
 
 class BaseEventData(BaseModel):
@@ -26,6 +37,9 @@ class BaseEventData(BaseModel):
     visibility: Literal["user", "internal", "debug"] = "user"
     channel: Literal["ui", "debug", "runtime"] = "ui"
     persist: bool = True
+    resource_bindings: List[ResourceBindingProjectionData] = Field(
+        default_factory=list
+    )
 
     # pydantic v2写法，序列化时将datetime转换为时间戳
     model_config = ConfigDict(json_encoders={
@@ -48,6 +62,14 @@ class BaseEventData(BaseModel):
             "visibility": visibility,
             "channel": channel,
             "persist": getattr(event, "persist", True),
+            "resource_bindings": [
+                binding.model_dump(mode="json")
+                for binding in getattr(
+                    event,
+                    "resource_bindings",
+                    [],
+                )
+            ],
         }
 
     @classmethod
@@ -109,6 +131,7 @@ class MessageEventData(BaseEventData):
     attachments: List[File] = Field(default_factory=list)
     stream_id: Optional[str] = None
     clarify_answers: List[ClarifyAnswerData] = Field(default_factory=list)
+    citations: List[KnowledgeCitation] = Field(default_factory=list)
 
 
 class MessageSSEEvent(BaseSSEEvent):
@@ -214,6 +237,7 @@ class ToolEventData(BaseEventData):
     error: Optional[str] = None
     span_id: Optional[str] = None
     parent_span_id: Optional[str] = None
+    citations: List[KnowledgeCitation] = Field(default_factory=list)
 
 
 class ToolSSEEvent(BaseSSEEvent):
@@ -277,6 +301,9 @@ class AssistantNoticeSSEEvent(BaseSSEEvent):
 class SessionStatusEventData(BaseEventData):
     """会话状态事件数据"""
     status: Literal["pending", "running", "waiting", "completed", "cancelled", "failed"] = "running"
+    run_epoch_id: Optional[str] = None
+    reason: Optional[str] = None
+    code: Optional[str] = None
 
 
 class SessionStatusSSEEvent(BaseSSEEvent):
@@ -411,6 +438,7 @@ class EventMapper:
         "visibility",
         "channel",
         "persist",
+        "resource_bindings",
     }
 
     @staticmethod
@@ -454,6 +482,7 @@ class EventMapper:
                 "error": event.error,
                 "span_id": event.span_id,
                 "parent_span_id": event.parent_span_id,
+                "citations": event.citations,
             }
 
         return event.model_dump(mode="json", exclude=EventMapper._DOMAIN_EXCLUDE_FIELDS)

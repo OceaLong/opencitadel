@@ -6,15 +6,27 @@ from app.infrastructure.models.knowledge_base import KnowledgeEntityRefModel
 def test_entity_ref_table_shape():
     table = KnowledgeEntityRefModel.__table__
     assert table.name == "knowledge_entity_refs"
-    assert set(table.columns.keys()) == {"id", "kb_id", "entity_id", "doc_id", "created_at"}
+    assert set(table.columns.keys()) == {
+        "id",
+        "kb_id",
+        "version_id",
+        "entity_id",
+        "doc_id",
+        "created_at",
+    }
     fk_targets = {fk.target_fullname for fk in table.foreign_keys}
     assert fk_targets == {
         "knowledge_bases.id",
+        "knowledge_base_versions.id",
+        "knowledge_base_versions.knowledge_base_id",
+        "knowledge_base_version_documents.version_id",
+        "knowledge_base_version_documents.document_id",
+        "knowledge_entities.version_id",
         "knowledge_entities.id",
         "knowledge_documents.id",
     }
-    for fk in table.foreign_keys:
-        assert fk.ondelete == "CASCADE"
+    assert sum(fk.ondelete == "CASCADE" for fk in table.foreign_keys) == 3
+    assert sum(fk.ondelete is None for fk in table.foreign_keys) == 6
     uniques = [c for c in table.constraints if c.__class__.__name__ == "UniqueConstraint"]
     assert any({col.name for col in c.columns} == {"entity_id", "doc_id"} for c in uniques)
 

@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Protocol, List, Optional, Dict, Any, Tuple
 
-from app.domain.models.event import BaseEvent
+from app.domain.models.event import BaseEvent, SessionStatusEvent
 from app.domain.models.file import File
 from app.domain.models.memory import Memory
 from app.domain.models.scope import OwnerScope
@@ -43,6 +43,14 @@ class SessionRepository(Protocol):
 
     async def get_metadata(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[Session]:
         """仅加载会话元数据（不含 memories/files）"""
+        ...
+
+    async def lock_by_id(
+        self,
+        session_id: str,
+        scope: Optional[OwnerScope] = None,
+    ) -> Optional[Session]:
+        """Scope-filter and lock the session row for transactional commands."""
         ...
 
     async def get_files(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[List[File]]:
@@ -123,6 +131,15 @@ class SessionRepository(Protocol):
             payloads: List[Tuple[BaseEvent, Dict[str, Any]]],
     ) -> None:
         """批量新增已序列化的会话事件"""
+        ...
+
+    async def claim_session_status_event(
+            self,
+            session_id: str,
+            event: SessionStatusEvent,
+            event_data: Dict[str, Any],
+    ) -> bool:
+        """Atomically claim a run-epoch status and append its event."""
         ...
 
     async def list_events(

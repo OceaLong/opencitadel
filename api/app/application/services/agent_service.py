@@ -282,14 +282,7 @@ class AgentService:
                         if mode is not None:
                             session = await uow.session.get_by_id(session_id)
                             if session:
-                                effective_mode = mode
-                                if (
-                                    session.knowledge_base_id
-                                    and not session.codebase_id
-                                    and mode == SessionMode.AGENT
-                                ):
-                                    effective_mode = SessionMode.ASK
-                                session.mode = effective_mode
+                                session.mode = mode
                                 await uow.session.save(session)
                         session = await uow.session.get_by_id(session_id)
 
@@ -324,6 +317,15 @@ class AgentService:
                         )
                         db_attachments = await uow.file.list_by_ids(attachments or [])
                         message_event.attachments = db_attachments
+                        current_bindings = (
+                            await uow.resource_governance.list_current_bindings(
+                                session_id
+                            )
+                        )
+                        message_event.resource_bindings = [
+                            binding.to_projection()
+                            for binding in current_bindings
+                        ]
                         await uow.session.add_event(session_id, message_event, seq=seq)
                     await task.input_stream.put(message_event.model_dump_json())
                     yield message_event

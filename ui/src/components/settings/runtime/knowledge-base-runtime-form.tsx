@@ -39,6 +39,10 @@ type KBGraphRAGConfig = {
   enabled?: boolean;
   max_parent_chunks_per_doc?: number;
   concurrency?: number;
+  max_chunks?: number;
+  max_llm_calls?: number;
+  max_tokens?: number;
+  deadline_seconds?: number;
 };
 
 type KBOCRConfig = {
@@ -99,6 +103,10 @@ const GRAPHRAG_FIELDS: Record<string, ConfigFieldSchema> = {
   enabled: { type: "boolean" },
   max_parent_chunks_per_doc: { type: "number", min: 0, max: 5000 },
   concurrency: { type: "number", min: 1, max: 20 },
+  max_chunks: { type: "number", min: 1, max: 1000000 },
+  max_llm_calls: { type: "number", min: 1, max: 1000000 },
+  max_tokens: { type: "number", min: 1, max: 1000000000 },
+  deadline_seconds: { type: "number", min: 0.001, max: 3600, step: 0.1 },
 };
 
 const OCR_FIELDS: Record<string, ConfigFieldSchema> = {

@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import TypeAdapter
 
-from app.domain.models.event import BaseEvent, Event
+from app.domain.models.event import BaseEvent, Event, SessionStatusEvent
 from app.domain.models.event_upgrader import upgrade_event_payload
 from app.domain.models.file import File
 from app.domain.models.memory import Memory
@@ -21,6 +21,7 @@ from app.infrastructure.models import (
     SessionEventModel,
     SessionFileAttachmentModel,
     SessionModel,
+    SessionResourceBindingORM,
 )
 
 
@@ -79,7 +80,27 @@ class DBSessionRepository(SessionRepository):
         session = record.to_domain()
         session.memories = await self._load_memories(record.id)
         session.files = await self._load_files(record.id)
+        session.resource_bindings = await self._load_resource_bindings(
+            record.id
+        )
         return session
+
+    async def _load_resource_bindings(
+        self,
+        session_id: str,
+    ):
+        result = await self.db_session.execute(
+            select(SessionResourceBindingORM)
+            .where(
+                SessionResourceBindingORM.session_id == session_id,
+                SessionResourceBindingORM.is_current.is_(True),
+            )
+            .order_by(SessionResourceBindingORM.resource_kind.asc())
+        )
+        return [
+            record.to_domain().to_projection()
+            for record in result.scalars().all()
+        ]
 
     async def _persist_memories(self, session_id: str, memories: Dict[str, Memory]) -> None:
         if not memories:
@@ -191,7 +212,24 @@ class DBSessionRepository(SessionRepository):
         record = result.scalar_one_or_none()
         if record is None:
             return None
-        return record.to_domain()
+        session = record.to_domain()
+        session.resource_bindings = await self._load_resource_bindings(
+            record.id
+        )
+        return session
+
+    async def lock_by_id(
+        self,
+        session_id: str,
+        scope: Optional[OwnerScope] = None,
+    ) -> Optional[Session]:
+        stmt = self._apply_scope(
+            select(SessionModel).where(SessionModel.id == session_id),
+            scope,
+        ).with_for_update()
+        result = await self.db_session.execute(stmt)
+        record = result.scalar_one_or_none()
+        return record.to_domain() if record is not None else None
 
     async def get_files(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[List[File]]:
         if await self.get_metadata(session_id, scope=scope) is None:
@@ -327,6 +365,67 @@ class DBSessionRepository(SessionRepository):
             )
         self.db_session.add_all(records)
         await self.db_session.flush()
+
+    async def claim_session_status_event(
+            self,
+            session_id: str,
+            event: SessionStatusEvent,
+            event_data: Dict[str, Any],
+    ) -> bool:
+        """Claim and persist a status under a row lock.
+
+        The session transition, epoch terminal latch, and append-only event
+        record are committed by the surrounding UoW as one transaction.
+        """
+        if not event.run_epoch_id:
+            raise ValueError("Session status event requires run_epoch_id")
+        seq_value = int(str(event_data["id"]))
+        session = await self.db_session.scalar(
+            select(SessionModel)
+            .where(SessionModel.id == session_id)
+            .with_for_update()
+        )
+        if session is None:
+            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
+
+        terminal_statuses = {"waiting", "completed", "cancelled", "failed"}
+        if event.status == "running":
+            if session.current_run_epoch_id == event.run_epoch_id:
+                return False
+            if (
+                session.current_run_epoch_seq is not None
+                and seq_value <= session.current_run_epoch_seq
+            ):
+                return False
+            session.current_run_epoch_id = event.run_epoch_id
+            session.current_run_epoch_seq = seq_value
+            session.current_run_terminal_status = None
+        elif event.status in terminal_statuses:
+            if (
+                session.current_run_epoch_id != event.run_epoch_id
+                or session.current_run_terminal_status is not None
+            ):
+                return False
+            session.current_run_terminal_status = event.status
+        else:
+            return False
+
+        payload = dict(event_data)
+        payload["id"] = str(seq_value)
+        event.id = str(seq_value)
+        session.status = event.status
+        self.db_session.add(
+            SessionEventModel(
+                seq=seq_value,
+                session_id=session_id,
+                stream_id=str(seq_value),
+                type=event.type,
+                payload=payload,
+                created_at=event.created_at,
+            )
+        )
+        await self.db_session.flush()
+        return True
 
     async def list_events(
             self,

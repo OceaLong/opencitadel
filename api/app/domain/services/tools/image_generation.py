@@ -10,6 +10,7 @@ from app.domain.models.llm_model import LLMModel
 from app.domain.models.tool_result import ToolResult
 from app.domain.services import image_generation_service, vision_service
 from .base import BaseTool, tool
+from .capability_policy import GENERATION_WRITE
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class ImageGenerationTool(BaseTool):
             },
         },
         required=["prompt"],
+        policy=GENERATION_WRITE,
     )
     async def generate_image(
             self,

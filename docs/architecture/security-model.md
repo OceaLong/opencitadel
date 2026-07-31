@@ -156,6 +156,33 @@ sequenceDiagram
 - API and Worker share the same storage abstraction; switching backends requires object migration (`python -m app.migrate_storage`).
 - Optional `MINIO_PUBLIC_ENDPOINT` exposes presigned/public URLs to LLMs for vision; otherwise images are inlined as base64 (no additional public URL).
 
+### Codebase Source and Version Security
+
+Codebase analysis treats source material as immutable, versioned evidence rather
+than mutable sandbox state.
+
+- Source creation validates shape and ownership before a task is created.
+- ZIP imports reject absolute paths, `..`, symlinks, excessive entry count,
+  excessive uncompressed size, and suspicious compression ratios.
+- Git imports are HTTPS-only, reject credentials and non-default ports, and
+  reject any resolved private, loopback, link-local, multicast, or metadata
+  address.
+- Each import/rebuild materializes into a clean temporary workspace and then
+  stores a content-addressed source snapshot in object storage.
+- Published versions are immutable. Sessions bind to an explicit
+  `codebase_version_id`; source reads and Agent workspace restore use that bound
+  snapshot even after a newer version publishes.
+- Rebuild publication uses a compare-and-swap on the previous active version.
+  Failures preserve the current active analysis instead of clearing shared rows.
+- Lexical search is mandatory. Vector search is degradable and must fall back to
+  lexical results with visible `degraded_reasons`.
+- Static-analysis graph facts must carry `EvidenceRef` values. Unsupported
+  diagrams are omitted and recorded as unsupported reasons rather than rendered
+  from generic templates.
+- Version GC protects active versions, historical session bindings, and
+  queued/running builds. Snapshot objects are deleted only after the final DB
+  reference to that object key is collected.
+
 ### Observability
 
 - `/api/metrics` exposes Prometheus metrics (no secrets).

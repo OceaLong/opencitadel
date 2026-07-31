@@ -119,7 +119,7 @@ def test_doc_qa_flow_re_raises_model_unavailable():
         asyncio.run(_collect_invoke(flow, Message(message="test")))
 
 
-def test_doc_qa_flow_ignores_token_integrity_error():
+def test_doc_qa_flow_does_not_misclassify_agent_integrity_error_as_token_accounting():
     from app.domain.models.event import ErrorEvent
     from sqlalchemy.exc import IntegrityError
 
@@ -134,5 +134,6 @@ def test_doc_qa_flow_ignores_token_integrity_error():
 
     events = asyncio.run(_collect_invoke(flow, Message(message="test")))
 
-    assert any(isinstance(event, DoneEvent) for event in events)
-    assert not any(isinstance(event, ErrorEvent) for event in events)
+    assert any(isinstance(event, ErrorEvent) for event in events)
+    assert not any(isinstance(event, DoneEvent) for event in events)
+    assert flow.outcome.status == "failed"

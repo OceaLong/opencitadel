@@ -66,7 +66,7 @@ def _build_runner(
     ("codebase_id", "knowledge_base_id", "mode", "expected_flow"),
     [
         (None, "kb-1", SessionMode.ASK, DocQAFlow),
-        (None, "kb-1", SessionMode.AGENT, DocQAFlow),
+        (None, "kb-1", SessionMode.AGENT, PlannerReActFlow),
         ("cb-1", "kb-1", SessionMode.ASK, HybridAskFlow),
         ("cb-1", "kb-1", SessionMode.AGENT, PlannerReActFlow),
         ("cb-1", None, SessionMode.ASK, CodeAskFlow),

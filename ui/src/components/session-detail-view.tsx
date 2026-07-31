@@ -432,6 +432,8 @@ export function SessionDetailView({
             <SessionContextPanel
               codebaseId={session.codebase_id}
               knowledgeBaseId={session.knowledge_base_id}
+              sessionId={session.session_id}
+              resourceBindings={session.resource_bindings}
               codeSourceRef={codeSourceRef}
               kbSourceRef={kbSourceRef}
             />
@@ -453,6 +455,8 @@ export function SessionDetailView({
             <SessionContextPanel
               codebaseId={session.codebase_id}
               knowledgeBaseId={session.knowledge_base_id}
+              sessionId={session.session_id}
+              resourceBindings={session.resource_bindings}
               codeSourceRef={codeSourceRef}
               kbSourceRef={kbSourceRef}
               className="h-full w-full max-w-none border-0"

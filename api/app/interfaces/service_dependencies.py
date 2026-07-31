@@ -24,6 +24,8 @@ from app.application.services.marketplace_service import MarketplaceService
 from app.application.services.memory_service import MemoryService
 from app.application.services.quota_service import QuotaService
 from app.application.services.session_service import SessionService
+from app.application.services.resource_binding_service import ResourceBindingService
+from app.application.services.resource_build_service import ResourceBuildService
 from app.application.services.service_api_key_service import ServiceApiKeyService
 from app.application.services.skill_service import SkillService
 from app.application.services.team_service import TeamService
@@ -35,6 +37,9 @@ from app.infrastructure.external.health_checker.postgres_health_checker import P
 from app.infrastructure.external.health_checker.redis_health_checker import RedisHealthChecker
 from app.infrastructure.storage.postgres import get_db_session
 from app.infrastructure.storage.redis import RedisClient
+from app.infrastructure.external.resource_build_event_notifier import (
+    RedisResourceBuildEventNotifier,
+)
 from app.infrastructure.security.cookie import AuthCookieManager
 from app.infrastructure.security.jwt_service import JwtService
 
@@ -175,6 +180,33 @@ async def get_session_service(
         service: SessionService = Depends(Provide[ApiContainer.session_service]),
 ) -> SessionService:
     return service
+
+
+@inject
+async def get_resource_binding_service(
+        service: ResourceBindingService = Depends(
+            Provide[ApiContainer.resource_binding_service]
+        ),
+) -> ResourceBindingService:
+    return service
+
+
+@inject
+async def get_resource_build_service(
+        service: ResourceBuildService = Depends(
+            Provide[ApiContainer.resource_build_service]
+        ),
+) -> ResourceBuildService:
+    return service
+
+
+@inject
+async def get_resource_build_event_notifier(
+        notifier: RedisResourceBuildEventNotifier = Depends(
+            Provide[ApiContainer.resource_build_event_notifier]
+        ),
+) -> RedisResourceBuildEventNotifier:
+    return notifier
 
 
 @inject

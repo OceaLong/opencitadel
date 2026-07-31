@@ -92,6 +92,10 @@ class DBMCPServerRepository(MCPServerRepository):
                 existing.env = encrypted_env
                 existing.env_encryption = env_encryption
             existing.extra = record.extra
+            existing.tool_policies = {
+                name: policy.model_dump(mode="json")
+                for name, policy in record.tool_policies.items()
+            }
             existing.owner_user_id = record.owner_user_id
             existing.team_id = record.team_id
             existing.visibility = record.visibility.value if hasattr(record.visibility, "value") else record.visibility
@@ -113,6 +117,10 @@ class DBMCPServerRepository(MCPServerRepository):
                     env=encrypted_env,
                     env_encryption=env_encryption,
                     extra=record.extra,
+                    tool_policies={
+                        name: policy.model_dump(mode="json")
+                        for name, policy in record.tool_policies.items()
+                    },
                     owner_user_id=record.owner_user_id,
                     team_id=record.team_id,
                     visibility=record.visibility.value if hasattr(record.visibility, "value") else record.visibility,
@@ -158,6 +166,10 @@ class DBA2AServerRepository(A2AServerRepository):
         if existing:
             existing.base_url = record.base_url
             existing.enabled = record.enabled
+            existing.tool_policies = {
+                name: policy.model_dump(mode="json")
+                for name, policy in record.tool_policies.items()
+            }
             existing.owner_user_id = record.owner_user_id
             existing.team_id = record.team_id
             existing.visibility = record.visibility.value if hasattr(record.visibility, "value") else record.visibility
@@ -168,6 +180,10 @@ class DBA2AServerRepository(A2AServerRepository):
                     id=record.id,
                     base_url=record.base_url,
                     enabled=record.enabled,
+                    tool_policies={
+                        name: policy.model_dump(mode="json")
+                        for name, policy in record.tool_policies.items()
+                    },
                     owner_user_id=record.owner_user_id,
                     team_id=record.team_id,
                     visibility=record.visibility.value if hasattr(record.visibility, "value") else record.visibility,

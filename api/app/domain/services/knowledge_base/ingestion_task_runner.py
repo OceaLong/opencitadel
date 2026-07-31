@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 """TaskRunner wrapper for knowledge-base ingestion jobs."""
 import logging
+import asyncio
 from typing import Callable, Optional
 
+from app.application.services.resource_build_service import ResourceBuildService
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
@@ -22,10 +24,11 @@ class KBIngestionTaskRunner(TaskRunner):
             self,
             uow_factory: Callable[[], IUnitOfWork],
             file_storage: FileStorage,
-            kb_id: str,
+            build_id: str,
             llm: Optional[LLM] = None,
             ocr_llm: Optional[LLM] = None,
             json_parser: Optional[JSONParser] = None,
+            build_service: ResourceBuildService | None = None,
     ) -> None:
         self._runner = KBIngestionRunner(
             uow_factory=uow_factory,
@@ -33,22 +36,28 @@ class KBIngestionTaskRunner(TaskRunner):
             llm=llm,
             ocr_llm=ocr_llm,
             json_parser=json_parser,
+            build_service=build_service,
         )
-        self._kb_id = kb_id
+        self._build_id = build_id
 
     async def invoke(self, task: Task) -> None:
         saw_error = False
         saw_done = False
         last_error: str | None = None
         last_error_code: str | None = None
-        async for event in self._runner.run(self._kb_id):
-            await task.output_stream.put(event.model_dump_json())
-            if isinstance(event, ErrorEvent):
-                saw_error = True
-                last_error = event.error
-                last_error_code = event.code
-            elif isinstance(event, DoneEvent):
-                saw_done = True
+        try:
+            async for event in self._runner.run(self._build_id):
+                await task.output_stream.put(event.model_dump_json())
+                if isinstance(event, ErrorEvent):
+                    saw_error = True
+                    last_error = event.error
+                    last_error_code = event.code
+                elif isinstance(event, DoneEvent):
+                    saw_done = True
+        except asyncio.CancelledError:
+            # KBIngestionRunner persists the durable cancellation before
+            # propagating cancellation back to the transport task.
+            raise
         if saw_error and not saw_done:
             error_code = last_error_code or DOCUMENT_PARSE_FAILED
             if error_code == DOCUMENT_PARSE_FAILED:
@@ -59,7 +68,11 @@ class KBIngestionTaskRunner(TaskRunner):
             raise RuntimeError(last_error or "知识库索引失败")
 
     async def on_done(self, task: Task) -> None:
-        logger.info("知识库摄取任务完成: kb_id=%s task_id=%s", self._kb_id, task.id)
+        logger.info(
+            "知识库摄取任务完成: build_id=%s task_id=%s",
+            self._build_id,
+            task.id,
+        )
 
     async def cleanup(self) -> None:
         return

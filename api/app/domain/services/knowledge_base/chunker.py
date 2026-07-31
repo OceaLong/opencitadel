@@ -12,6 +12,7 @@ from app.domain.services.knowledge_base.vector_service import KBVectorService
 from app.domain.services.knowledge_base.zh_tokenizer import segment_for_bm25
 
 logger = logging.getLogger(__name__)
+_CHUNK_ID_NAMESPACE = uuid.UUID("75c22383-d8f9-4679-9461-71d965303eda")
 
 
 @dataclass
@@ -35,9 +36,23 @@ class KBChunker:
             kb_id: str,
             doc_id: str,
             blocks: List[PageBlock],
+            *,
+            version_id: str,
     ) -> Tuple[List[KnowledgeChunk], List[KnowledgeChunk]]:
-        parents = self._build_parent_chunks(kb_id, doc_id, blocks)
-        children = self._build_child_chunks(kb_id, doc_id, parents)
+        if not version_id.strip():
+            raise ValueError("candidate version_id is required")
+        parents = self._build_parent_chunks(
+            kb_id,
+            doc_id,
+            blocks,
+            version_id=version_id,
+        )
+        children = self._build_child_chunks(
+            kb_id,
+            doc_id,
+            parents,
+            version_id=version_id,
+        )
         embeddings: list[list[float]] = [[] for _ in children]
         if children and self._vector.enabled:
             try:
@@ -54,6 +69,8 @@ class KBChunker:
             kb_id: str,
             doc_id: str,
             blocks: List[PageBlock],
+            *,
+            version_id: str,
     ) -> List[KnowledgeChunk]:
         parents: list[KnowledgeChunk] = []
         ordinal = 0
@@ -63,9 +80,15 @@ class KBChunker:
                 continue
             for part in _split_by_size(text, self._settings.parent_max_chars, 0):
                 parent = KnowledgeChunk(
-                    id=str(uuid.uuid4()),
+                    id=_stable_chunk_id(
+                        version_id,
+                        doc_id,
+                        ChunkLevel.PARENT,
+                        ordinal,
+                    ),
                     kb_id=kb_id,
                     doc_id=doc_id,
+                    version_id=version_id,
                     level=ChunkLevel.PARENT,
                     content=_with_header(block.heading_path, block.page_no, part),
                     segmented_content=segment_for_bm25(part),
@@ -82,6 +105,8 @@ class KBChunker:
             kb_id: str,
             doc_id: str,
             parents: List[KnowledgeChunk],
+            *,
+            version_id: str,
     ) -> List[KnowledgeChunk]:
         children: list[KnowledgeChunk] = []
         ordinal = 0
@@ -92,9 +117,15 @@ class KBChunker:
                 self._settings.overlap,
             ):
                 child = KnowledgeChunk(
-                    id=str(uuid.uuid4()),
+                    id=_stable_chunk_id(
+                        version_id,
+                        doc_id,
+                        ChunkLevel.CHILD,
+                        ordinal,
+                    ),
                     kb_id=kb_id,
                     doc_id=doc_id,
+                    version_id=version_id,
                     parent_id=parent.id,
                     level=ChunkLevel.CHILD,
                     content=_with_header(parent.heading_path, parent.page_no or 1, part),
@@ -127,6 +158,20 @@ def _split_by_size(text: str, max_chars: int, overlap: int) -> List[str]:
             break
         start = max(0, end - overlap)
     return [chunk for chunk in chunks if chunk]
+
+
+def _stable_chunk_id(
+    version_id: str,
+    doc_id: str,
+    level: ChunkLevel,
+    ordinal: int,
+) -> str:
+    return str(
+        uuid.uuid5(
+            _CHUNK_ID_NAMESPACE,
+            f"{version_id}\x1f{doc_id}\x1f{level.value}\x1f{ordinal}",
+        )
+    )
 
 
 def _with_header(heading_path: str, page_no: int, content: str) -> str:

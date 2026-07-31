@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { CodebaseVersionStatus } from "@/components/codebase/codebase-version-status";
 import { CreateCodebaseDialog } from "@/components/codebase/create-codebase-dialog";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { EmptyState } from "@/components/empty-state";
@@ -13,10 +14,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-import { useAuth } from "@/providers/auth-provider";
 import { codebaseApi } from "@/lib/api/codebase";
 import { sessionApi } from "@/lib/api/session";
-import type { Codebase, CodebaseStatus, SessionMode } from "@/lib/api/types";
+import type { Codebase, CodebaseStatus, CodebaseVersionsData, SessionMode } from "@/lib/api/types";
 import {
   IconAdd,
   IconCodebase,
@@ -26,8 +26,10 @@ import {
   IconRefresh,
 } from "@/lib/icons";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/auth-provider";
 
 const TERMINAL_CODEBASE_STATUSES: CodebaseStatus[] = ["ready", "failed"];
+const ACTIVE_BUILD_STATES = new Set(["queued", "running"]);
 const INGEST_POLL_INTERVAL_MS = 3000;
 
 const CODEBASE_STATUS_LABEL_KEYS: Record<CodebaseStatus, `status.${CodebaseStatus}`> = {
@@ -44,6 +46,11 @@ function isIngestingStatus(status: CodebaseStatus): boolean {
   return !TERMINAL_CODEBASE_STATUSES.includes(status);
 }
 
+function hasActiveBuild(history?: CodebaseVersionsData | null): boolean {
+  const state = history?.active_build?.state;
+  return Boolean(state && ACTIVE_BUILD_STATES.has(state));
+}
+
 function truncateError(error: string, maxLength = 120): string {
   const text = error.trim();
   if (text.length <= maxLength) return text;
@@ -56,6 +63,7 @@ export function CodebaseLibrary() {
   const tCommon = useTranslations("common");
   const { user } = useAuth();
   const [codebases, setCodebases] = useState<Codebase[]>([]);
+  const [versionHistories, setVersionHistories] = useState<Record<string, CodebaseVersionsData | null>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [ingestingIds, setIngestingIds] = useState<Set<string>>(new Set());
@@ -69,6 +77,16 @@ export function CodebaseLibrary() {
     }
     try {
       const data = await codebaseApi.list();
+      const histories = await Promise.all(
+        data.codebases.map(async (codebase) => {
+          try {
+            return [codebase.id, await codebaseApi.listVersions(codebase.id)] as const;
+          } catch {
+            return [codebase.id, null] as const;
+          }
+        }),
+      );
+      setVersionHistories(Object.fromEntries(histories));
       setCodebases(data.codebases);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("loadError"));
@@ -81,7 +99,9 @@ export function CodebaseLibrary() {
 
   useEffect(() => {
     const hasActiveIngest = codebases.some(
-      (cb) => isIngestingStatus(cb.status) && Boolean(cb.ingest_task_id),
+      (cb) =>
+        hasActiveBuild(versionHistories[cb.id]) ||
+        (isIngestingStatus(cb.status) && Boolean(cb.ingest_task_id)),
     );
     if (!hasActiveIngest) return;
 
@@ -90,12 +110,13 @@ export function CodebaseLibrary() {
     }, INGEST_POLL_INTERVAL_MS);
 
     return () => window.clearInterval(timer);
-  }, [codebases, loadCodebases]);
+  }, [codebases, loadCodebases, versionHistories]);
 
   useEffect(() => {
+    const cleanupMap = ingestCleanupRef.current;
     return () => {
-      ingestCleanupRef.current.forEach((cleanup) => cleanup());
-      ingestCleanupRef.current.clear();
+      cleanupMap.forEach((cleanup) => cleanup());
+      cleanupMap.clear();
     };
   }, []);
 
@@ -144,10 +165,18 @@ export function CodebaseLibrary() {
     [loadCodebases, t],
   );
 
-  const startTask = async (codebaseId: string, mode: SessionMode = "ask") => {
-    setStartingId(codebaseId);
+  const startTask = async (codebase: Codebase, mode: SessionMode = "ask") => {
+    const versionId =
+      versionHistories[codebase.id]?.active_version_id ??
+      codebase.active_version_id ??
+      undefined;
+    setStartingId(codebase.id);
     try {
-      const data = await sessionApi.createSession({ codebase_id: codebaseId, mode });
+      const data = await sessionApi.createSession({
+        codebase_id: codebase.id,
+        codebase_version_id: versionId,
+        mode,
+      });
       router.push(`/sessions/${data.session_id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("startTaskFailed"));
@@ -192,9 +221,15 @@ export function CodebaseLibrary() {
       <ScrollArea className="flex-1">
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
           {codebases.map((cb) => {
+            const history = versionHistories[cb.id] ?? null;
+            const activeVersionId =
+              history?.active_version_id ?? cb.active_version_id;
+            const rebuilding = hasActiveBuild(history);
             const ingesting =
+              rebuilding ||
               ingestingIds.has(cb.id) ||
               (isIngestingStatus(cb.status) && Boolean(cb.ingest_task_id));
+            const canStart = Boolean(activeVersionId) && cb.status !== "failed";
             const statusLabel = t(CODEBASE_STATUS_LABEL_KEYS[cb.status]);
             return (
               <Card key={cb.id} className={cn(ingesting && "border-primary/30")}>
@@ -219,18 +254,25 @@ export function CodebaseLibrary() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-wrap gap-2">
+                  <div className="basis-full">
+                    <CodebaseVersionStatus
+                      codebaseId={cb.id}
+                      history={history}
+                      onBuildChanged={loadCodebases}
+                    />
+                  </div>
                   <Button
                     size="sm"
-                    disabled={startingId === cb.id || cb.status !== "ready"}
-                    onClick={() => void startTask(cb.id, "ask")}
+                    disabled={startingId === cb.id || !canStart}
+                    onClick={() => void startTask(cb, "ask")}
                   >
                     {startingId === cb.id ? <IconLoading className="size-4 animate-spin" /> : t("startAsk")}
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={startingId === cb.id || cb.status !== "ready"}
-                    onClick={() => void startTask(cb.id, "agent")}
+                    disabled={startingId === cb.id || !canStart}
+                    onClick={() => void startTask(cb, "agent")}
                   >
                     {t("startAgent")}
                   </Button>
@@ -238,12 +280,17 @@ export function CodebaseLibrary() {
                     size="sm"
                     variant="outline"
                     onClick={async () => {
-                      await codebaseApi.reanalyze(cb.id);
+                      if (rebuilding) {
+                        await loadCodebases();
+                        return;
+                      }
+                      await codebaseApi.createBuild(cb.id);
                       watchIngest(cb.id);
+                      await loadCodebases();
                     }}
                   >
                     <IconRefresh className="mr-1 size-3" />
-                    {t("reanalyze")}
+                    {rebuilding ? t("viewBuild") : t("reanalyze")}
                   </Button>
                   <Button
                     size="sm"

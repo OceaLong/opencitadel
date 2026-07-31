@@ -386,6 +386,20 @@ class KubernetesSandbox(Sandbox):
         )
         return ToolResult.from_sandbox(**response.json())
 
+    async def read_files(
+            self,
+            filepaths: list[str],
+            *,
+            sudo: bool = False,
+            max_length: int = 10000,
+    ) -> list[ToolResult]:
+        return await asyncio.gather(
+            *(
+                self.read_file(path, sudo=sudo, max_length=max_length)
+                for path in filepaths
+            )
+        )
+
     async def write_file(self, filepath: str, content: str, append: bool = False,
                          leading_newline: bool = False, trailing_newline: bool = False,
                          sudo: bool = False) -> ToolResult:

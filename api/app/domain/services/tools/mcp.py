@@ -18,10 +18,19 @@ from app.application.services.config_provider import get_runtime_config
 from app.domain.external.connection_pool import MCPConnectionPoolPort
 from app.domain.models.app_config import MCPConfig, MCPServerConfig, MCPTransport
 from app.domain.models.tool_result import ToolResult
+from app.domain.models.tool_policy import (
+    CONSERVATIVE_TOOL_POLICY,
+    ToolDescriptor,
+    ToolExecutionPolicy,
+)
 from app.domain.utils.app_config_filter import filter_enabled_mcp_config
 from app.domain.utils.mcp_url import validate_mcp_http_url
 from app.infrastructure.security.outbound_http import create_ssrf_safe_mcp_client
 from .base import BaseTool
+from app.domain.services.tools.capability_policy import (
+    CapabilityDeniedError,
+    CapabilityPolicy,
+)
 
 """
 MCP客户端管理器的开发思路:
@@ -384,6 +393,16 @@ class MCPClientManager:
                 return server_name, tool_name[len(expected_prefix) + 1:]
         return None, None
 
+    def get_tool_policy(self, tool_name: str) -> ToolExecutionPolicy:
+        """Resolve administrator-owned metadata for one canonical MCP function."""
+        server_name, source_name = self._resolve_tool_source(tool_name)
+        if not server_name or not source_name:
+            return CONSERVATIVE_TOOL_POLICY
+        server = self._mcp_config.mcpServers.get(server_name)
+        if server is None:
+            return CONSERVATIVE_TOOL_POLICY
+        return server.tool_policies.get(source_name, CONSERVATIVE_TOOL_POLICY)
+
     async def invoke(self, tool_name: str, arguments: Dict[str, Any]) -> ToolResult:
         """根据传递的工具名字+参数调用MCP工具"""
         try:
@@ -460,6 +479,7 @@ class MCPTool(BaseTool):
         self._connection_pool = connection_pool
         self._initialized: bool = False
         self._tools: List[Dict[str, Any]] = []
+        self._tool_policies: Dict[str, ToolExecutionPolicy] = {}
         self._manager: Optional[MCPClientManager] = None
         self._uses_pool: bool = False
         self._init_errors: Dict[str, str] = {}
@@ -473,17 +493,80 @@ class MCPTool(BaseTool):
             self._manager = await self._connection_pool.acquire(filtered)
             self._uses_pool = True
             self._tools = await self._manager.get_all_tools()
+            self._tool_policies = {
+                schema["function"]["name"]: self._manager.get_tool_policy(
+                    schema["function"]["name"]
+                )
+                for schema in self._tools
+            }
         except Exception as exc:
             logger.warning("MCP 工具包初始化失败: %s", exc)
             self._init_errors["__init__"] = str(exc)
             self._manager = None
             self._tools = []
+            self._tool_policies = {}
             self._uses_pool = False
         self._initialized = True
 
     def get_tools(self) -> List[Dict[str, Any]]:
         """同步获取工具包下的所有工具列表"""
-        return self._tools
+        if self._capability_policy is None:
+            return self._tools
+        return self.schemas_for(self._capability_policy)
+
+    def register_schema(
+            self,
+            name: str,
+            *,
+            schema: Dict[str, Any],
+            policy: Optional[ToolExecutionPolicy],
+    ) -> None:
+        self._tools.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": "",
+                "parameters": schema,
+            },
+        })
+        self._tool_policies[name] = policy or CONSERVATIVE_TOOL_POLICY
+
+    def schemas_for(self, policy: CapabilityPolicy) -> List[Dict[str, Any]]:
+        return [
+            schema
+            for schema in self._tools
+            if policy.allows_integration(
+                self._tool_policies.get(
+                    schema["function"]["name"],
+                    CONSERVATIVE_TOOL_POLICY,
+                ),
+                tool_name=schema["function"]["name"],
+            )
+        ]
+
+    def get_tool_descriptor(self, name: str) -> ToolDescriptor:
+        schema = next(
+            (
+                item for item in self._tools
+                if item.get("function", {}).get("name") == name
+            ),
+            None,
+        )
+        if schema is None:
+            raise ValueError(f"工具[{name}]未找到")
+        return ToolDescriptor(
+            name=name,
+            schema=schema,
+            method=self.invoke,
+            tool_pack=self.name,
+            policy=self._tool_policies.get(name, CONSERVATIVE_TOOL_POLICY),
+        )
+
+    def get_tool_descriptors(self) -> List[ToolDescriptor]:
+        return [
+            self.get_tool_descriptor(schema["function"]["name"])
+            for schema in self.get_tools()
+        ]
 
     @property
     def connection_errors(self) -> Dict[str, str]:
@@ -505,6 +588,15 @@ class MCPTool(BaseTool):
 
     async def invoke(self, tool_name: str, **kwargs) -> ToolResult:
         """传递工具名字+参数调用MCP工具并获取结果"""
+        descriptor = self.get_tool_descriptor(tool_name)
+        if (
+            self._capability_policy is not None
+            and not self._capability_policy.allows_integration(
+                descriptor.policy,
+                tool_name=tool_name,
+            )
+        ):
+            raise CapabilityDeniedError(f"当前会话策略禁止工具[{tool_name}]")
         if self._manager is None:
             return ToolResult(success=False, message="MCP工具未初始化")
         return await self._manager.invoke(tool_name, kwargs)
@@ -513,6 +605,7 @@ class MCPTool(BaseTool):
         """清除MCP工具资源（连接池模式下仅重置本地状态）"""
         if self._uses_pool:
             self._tools = []
+            self._tool_policies = {}
             self._manager = None
             self._initialized = False
             self._uses_pool = False
@@ -520,5 +613,6 @@ class MCPTool(BaseTool):
         if self._manager:
             await self._manager.cleanup()
         self._tools = []
+        self._tool_policies = {}
         self._manager = None
         self._initialized = False

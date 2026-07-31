@@ -1,13 +1,49 @@
 import type { KnowledgeDocument, KnowledgeSourceType } from "@/lib/api/types";
+
 import { translate } from "@/i18n/translate";
 
-export function parseKbDocHref(value: string): { docId: string; page?: number; chunkId?: string } | null {
+export function parseKbDocHref(value: string): {
+  docId: string;
+  page?: number;
+  chunkId?: string;
+  versionId?: string;
+  revisionId?: string;
+} | null {
   if (!value.startsWith("kbdoc://")) return null;
-  const [docId, query = ""] = value.slice("kbdoc://".length).split("?");
+  const raw = value.slice("kbdoc://".length);
+  const queryIndex = raw.indexOf("?");
+  const docId = queryIndex === -1 ? raw : raw.slice(0, queryIndex);
+  const query = queryIndex === -1 ? "" : raw.slice(queryIndex + 1);
+  if (!docId || docId.trim() !== docId || /[\s/?#]/.test(docId)) return null;
   const params = new URLSearchParams(query);
-  const page = Number(params.get("page") || 0) || undefined;
-  const chunkId = params.get("chunk") || undefined;
-  return { docId, page, chunkId };
+  const identityKeys = ["page", "chunk", "version", "revision"] as const;
+  if (identityKeys.some((key) => params.getAll(key).length > 1)) return null;
+  const pageValue = params.get("page");
+  if (
+    pageValue !== null &&
+    (!/^[1-9]\d*$/.test(pageValue) || !Number.isSafeInteger(Number(pageValue)))
+  )
+    return null;
+  const page = pageValue === null ? undefined : Number(pageValue);
+  const optionalIdentity = (key: "chunk" | "version" | "revision") => {
+    const item = params.get(key);
+    if (item === null) return undefined;
+    if (!item || item.trim() !== item || /\s/.test(item)) return null;
+    return item;
+  };
+  const chunkId = optionalIdentity("chunk");
+  const versionId = optionalIdentity("version");
+  const revisionId = optionalIdentity("revision");
+  if (chunkId === null || versionId === null || revisionId === null) {
+    return null;
+  }
+  return {
+    docId,
+    ...(page ? { page } : {}),
+    ...(chunkId ? { chunkId } : {}),
+    ...(versionId ? { versionId } : {}),
+    ...(revisionId ? { revisionId } : {}),
+  };
 }
 
 export function inferSourceType(filename: string): KnowledgeSourceType {

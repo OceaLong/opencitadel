@@ -12,6 +12,7 @@ from app.domain.models.tool_result import ToolResult
 from app.domain.services import vision_service
 from app.domain.utils.vision import build_image_content_part, is_image_mime
 from .base import BaseTool, tool
+from .capability_policy import WEB_READ
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class VisionGroundingTool(BaseTool):
             "prompt": {"type": "string", "description": "对裁剪区域的具体问题"},
         },
         required=["filepath", "x", "y", "width", "height"],
+        policy=WEB_READ,
     )
     async def inspect_image_region(
             self,

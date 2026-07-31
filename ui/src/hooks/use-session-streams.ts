@@ -1,12 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import { type MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { ApiError } from "@/lib/api";
 import { modelErrorMessage } from "@/lib/api/llm-status";
 import { sessionApi } from "@/lib/api/session";
 import type { ClarifyAnswer, SessionDetail, SSEEventData, TokenUsageSummary } from "@/lib/api/types";
+import {
+  reduceSessionStatusState,
+  type SessionStatusReductionState,
+} from "@/lib/session-events";
 
 function isSessionMissingError(err: unknown): boolean {
   if (err instanceof ApiError) {
@@ -31,7 +35,7 @@ function shouldMaintainEmptyStream(status?: SessionDetail["status"]): boolean {
 type StreamDeps = {
   sessionId: string | null;
   sessionStatus?: SessionDetail["status"];
-  appendEvent: (ev: SSEEventData) => void;
+  appendEvent: (ev: SSEEventData) => boolean;
   onSessionMissing: (err: unknown) => void;
   applySessionPatch: (patch: Partial<SessionDetail>) => void;
   setError: (err: Error | null) => void;
@@ -72,9 +76,13 @@ export function useSessionStreams({
   const isSendMessageRef = useRef(false);
   const startEmptyStreamRef = useRef<(() => void) | null>(null);
   const sessionStatusRef = useRef(sessionStatus);
+  const sessionStatusStateRef = useRef<SessionStatusReductionState>({
+    status: sessionStatus,
+  });
 
   useEffect(() => {
     sessionStatusRef.current = sessionStatus;
+    sessionStatusStateRef.current.status = sessionStatus;
   }, [sessionStatus]);
 
   const clearEmptyStreamRetryTimer = useCallback(() => {
@@ -99,7 +107,8 @@ export function useSessionStreams({
     (ev: SSEEventData) => {
       setStreamStatus("connected");
       setStreamError(null);
-      appendEvent(ev);
+      const accepted = appendEvent(ev);
+      if (!accepted) return;
 
       if (
         ev.type === "title" &&
@@ -110,7 +119,12 @@ export function useSessionStreams({
       }
 
       if (ev.type === "session_status") {
-        const status = (ev.data as { status?: SessionDetail["status"] }).status;
+        const state = reduceSessionStatusState(
+          [ev],
+          sessionStatusStateRef.current,
+        );
+        sessionStatusStateRef.current = state;
+        const status = state.status;
         if (status) {
           sessionStatusRef.current = status;
           applySessionPatch({ status });

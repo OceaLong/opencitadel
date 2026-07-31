@@ -9,7 +9,7 @@ from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
 from app.domain.services import vision_service
 from app.domain.services.tools.a2a import A2ATool
-from app.domain.services.tools.base import BaseTool
+from app.domain.services.tools.base import BaseTool, PolicyBoundTool
 from app.domain.services.tools.browser import BrowserTool
 from app.domain.services.tools.file import FileTool
 from app.domain.services.tools.mcp import MCPTool
@@ -18,6 +18,8 @@ from app.domain.services.tools.search import SearchTool
 from app.domain.services.tools.shell import ShellTool
 from app.domain.services.tools.vision import VisionTool
 from app.domain.services.tools.vision_grounding import VisionGroundingTool
+from app.domain.services.tools.capability_policy import CapabilityPolicy
+from app.domain.models.codebase import SessionMode
 
 
 class ToolRegistry:
@@ -33,6 +35,7 @@ class ToolRegistry:
             mcp_tool: MCPTool,
             a2a_tool: A2ATool,
             extra_tools: Optional[List[BaseTool]] = None,
+            policy: Optional[CapabilityPolicy] = None,
     ) -> List[BaseTool]:
         tools: List[BaseTool] = [
             FileTool(sandbox=sandbox),
@@ -50,7 +53,10 @@ class ToolRegistry:
             ])
         if extra_tools:
             tools.extend(extra_tools)
-        return tools
+        return ToolRegistry.build_tools(
+            policy=policy or CapabilityPolicy.for_mode(SessionMode.AGENT),
+            candidate_tools=tools,
+        )
 
     @staticmethod
     def build_ask_tools(
@@ -58,6 +64,7 @@ class ToolRegistry:
             mcp_tool: MCPTool,
             a2a_tool: A2ATool,
             extra_tools: Optional[List[BaseTool]] = None,
+            policy: Optional[CapabilityPolicy] = None,
     ) -> List[BaseTool]:
         """Assemble read-only tool packs for Ask-mode flows (no shell/file/browser)."""
         tools: List[BaseTool] = [
@@ -67,7 +74,10 @@ class ToolRegistry:
         ]
         if extra_tools:
             tools.extend(extra_tools)
-        return tools
+        return ToolRegistry.build_tools(
+            policy=policy or CapabilityPolicy.for_mode(SessionMode.ASK),
+            candidate_tools=tools,
+        )
 
     @staticmethod
     def collect_schemas(tools: List[BaseTool]) -> List[Dict]:
@@ -75,3 +85,15 @@ class ToolRegistry:
         for tool in tools:
             schemas.extend(tool.get_tools())
         return schemas
+    @staticmethod
+    def build_tools(
+            *,
+            policy: CapabilityPolicy,
+            candidate_tools: List[BaseTool],
+    ) -> List[BaseTool]:
+        return [
+            PolicyBoundTool(candidate, policy)
+            if isinstance(candidate, BaseTool)
+            else candidate
+            for candidate in candidate_tools
+        ]

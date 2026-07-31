@@ -140,6 +140,19 @@ class LazySandbox:
             filepath, start_line=start_line, end_line=end_line, sudo=sudo, max_length=max_length,
         )
 
+    async def read_files(
+            self,
+            filepaths: list[str],
+            *,
+            sudo: bool = False,
+            max_length: int = 10000,
+    ) -> list[ToolResult]:
+        return await (await self._resolve()).read_files(
+            filepaths,
+            sudo=sudo,
+            max_length=max_length,
+        )
+
     async def check_file_exists(self, filepath: str) -> ToolResult:
         return await (await self._resolve()).check_file_exists(filepath)
 

@@ -1,107 +1,155 @@
+# 代码库版本化分析、重建与证据
+
 [English](codebase-reindex.md)
 
-# Codebase 向量降级与重新索引
+本文是 Codebase 模块的权威参考：安全源码获取、不可变分析版本、
+Ask/Agent 绑定、混合检索、有证据的分析产物、重建恢复、兼容路由与
+保留策略。
 
-本文档是 **Codebase 模块**的权威说明：导入来源、Ask/Agent 模式、摄取管线、向量降级与手动重新索引。
+## 能力面
 
-## Codebase 模块概览
-
-| 能力 | 路由 / API | 说明 |
+| 能力 | 路由 / API | 契约 |
 |------|------------|------|
-| 列表 / 创建 | `/codebase`、`POST /api/codebases` | ZIP 上传或 Git URL 导入 |
-| 打开资源 | `/codebase/[id]` | 跳转到新建 Ask 会话（无独立详情页） |
-| Ask 模式 | 带 `codebase_id` + ASK 的会话 | `CodeAskFlow` — 基于符号的 RAG |
-| Agent 模式 | 带 `codebase_id` + AGENT 的会话 | 带代码库工具的 `PlannerReActFlow` |
-| 重新索引 | `POST /api/codebases/{id}/reanalyze` | embedding 恢复后重跑摄取 |
+| 列表 / 创建 | `/codebase`、`POST /api/codebases` | ZIP、文件集或 HTTPS Git 导入，进入任务前完成源码校验 |
+| 版本历史 | `GET /api/codebases/{id}/versions` | 返回 active version 与 candidate build 状态 |
+| 构建 | `POST /api/codebases/{id}/builds` | 幂等创建或返回一个 queued/running candidate |
+| 重试 / 取消 | `POST /api/codebases/{id}/builds/{build_id}/retry`、`/cancel` | 只允许同代码库 build/version 闭包 |
+| 版本源码 | `POST /api/codebases/{id}/versions/{version_id}/source` | 读取该已发布版本的不可变 snapshot |
+| 版本产物 | `GET /api/codebases/{id}/versions/{version_id}/artifacts` | 返回该版本有证据支撑的产物 |
+| 兼容重建 | `POST /api/codebases/{id}/reanalyze` | 一个版本窗口内作为 `POST /builds` 适配器 |
+| 兼容下载 | `GET /api/codebases/{id}/download` | 只读查询现有 active-version snapshot key |
 
-**上传限制：** Codebase ZIP 最大 **200 MB**（UI + nginx）。更大仓库请用 Git 导入。
+Ask 与 Agent 会话创建时都会携带明确的 `codebase_version_id`。已有会话在
+新版本发布后仍继续读取绑定版本。
 
-导入方式：
+## 源码获取与不可变快照
 
-- **ZIP 上传** — 在沙箱工作区解压归档
-- **Git clone** — 沙箱内浅克隆（`git clone --depth 1`）
-
-Agent 路由（`AgentTaskRunner`）：设置 `codebase_id` 且模式为 ASK → `CodeAskFlow`；否则使用带代码库工具的 Planner/ReAct。
-
-## 完整摄取管线
-
-Codebase 摄取由 `CodebaseIngestionRunner` 驱动，阶段与 SSE `step` 事件一一对应：
+每次导入或重建都会创建一个 candidate `codebase_version` 和一个共享的
+`resource_build`。
 
 ```mermaid
 flowchart TD
-  Start["Ingest triggered"] --> Materialize["Materialize workspace"]
-  Materialize --> Analyze["Static analysis"]
-  Analyze --> Index["Build vector chunks"]
-  Index --> EmbedOk{"embedding ok?"}
-  EmbedOk -->|"no"| Degraded["vector_degraded=true"]
-  EmbedOk -->|"yes"| Artifacts["Generate artifacts"]
+  Request["创建/重建请求"] --> Validate["校验源码参数"]
+  Validate --> Candidate["创建 candidate version + ResourceBuild"]
+  Candidate --> Materialize["物化到干净临时工作区"]
+  Materialize --> Snapshot["创建内容寻址源码快照"]
+  Snapshot --> Analyze["分析文件、符号、边、chunk"]
+  Analyze --> Lexical["构建强制 lexical 索引"]
+  Lexical --> Vector{"embedding 可用？"}
+  Vector -->|"是"| Hybrid["构建向量索引"]
+  Vector -->|"否"| Degraded["标记 vector_search=false 与原因"]
+  Hybrid --> Artifacts["生成有证据的产物"]
   Degraded --> Artifacts
-  Artifacts --> Ready["Codebase status READY"]
-  Ready --> Search["Semantic search available"]
-  Degraded --> SearchDegraded["Semantic search degraded"]
+  Artifacts --> ValidateClosure["验证 candidate 闭包"]
+  ValidateClosure --> Publish["CAS 发布 active_version_id"]
 ```
 
-| 阶段 | 实现 | 说明 |
-|------|------|------|
-| Materialize | sandbox clone / unzip / upload | 将源码放入沙箱工作区；命令输出经 `sandbox_result.py` 解析 |
-| Analyze | `StaticAnalyzer.analyze_tree()` | 提取文件、符号、依赖边 |
-| Index | `CodebaseIndexer.build_chunks()` | 按符号分块并嵌入向量 |
-| Artifacts | `ArtifactGenerator.generate_all()` | 生成架构图与文档 |
+边界安全规则：
 
-## 降级触发
+- ZIP 导入必须来自有权访问的上传文件，并拒绝绝对路径、`..`、符号链接、
+  过多 entry、过大解压体积和异常压缩比。
+- 文件集导入至少需要一个唯一且有权下载的文件。
+- Git 导入仅允许 HTTPS，拒绝凭据和非默认端口，解析所有地址并拒绝私有、
+  loopback、link-local、多播和 metadata 网段。
+- 每次 build 都从空工作区开始；旧分析残留文件不得进入新版本。
+- 不可变源码 snapshot 是读取和 Agent 工作区附着的事实来源；长期存在的
+  摄取沙箱不是权威来源。
 
-Embedding 不可用或 `memory.vector_enabled=false` 时，摄取流程跳过向量步骤，代码库仍标记为 `READY`，并设置 `vector_degraded=true`。
+## 构建状态与发布语义
 
-```mermaid
-flowchart TD
-  Start["Codebase 摄取开始"] --> StaticAnalysis["静态分析"]
-  StaticAnalysis --> VectorEnabled{"memory.vector_enabled"}
-  VectorEnabled -->|"false"| MarkDegraded["标记 vector_degraded=true"]
-  VectorEnabled -->|"true"| EmbeddingStatus{"embedding 可用?"}
-  EmbeddingStatus -->|"否"| MarkDegraded
-  EmbeddingStatus -->|"是"| BuildVector["构建向量索引"]
-  BuildVector --> Ready["标记 codebase READY"]
-  MarkDegraded --> Ready
-  Ready --> SearchRequest["语义检索请求"]
-  SearchRequest --> DegradedCheck{"vector_degraded?"}
-  DegradedCheck -->|"是"| EmptyResult["返回空结果 + 重建索引提示"]
-  DegradedCheck -->|"否"| VectorSearch["查询向量索引"]
+一个代码库最多存在一个 queued/running build。重复重建请求返回现有
+candidate，不会再次派发 worker 任务。
+
+发布是短事务 compare-and-swap：
+
+1. 校验 candidate 属于该代码库及其 build；
+2. 校验 candidate parent 仍等于当前 active version；
+3. 校验必需事实存在：非空源码集、源码 snapshot、源码 digest、lexical
+   索引和引用闭包；
+4. 原子更新 `codebases.active_version_id` 到 candidate；
+5. 保留旧版本行，供已绑定会话与历史读取。
+
+materialize、snapshot、analysis、lexical indexing、validation 或 publish
+核心失败时，candidate 标记为 failed，旧 active version 保持不变。向量或
+产物失败时，如果 lexical search 与 source read 仍有效，可以发布 degraded
+版本。
+
+## 会话绑定与 Agent 工作区复制
+
+创建会话时解析当前已发布版本并写入 `session_resource_bindings`。之后读取
+使用绑定，而不是读取当时最新的 active version。
+
+Agent 模式会把绑定版本源码 snapshot 复制到会话沙箱，并写入包含 codebase id、
+version id 与 source digest 的 sentinel。重复附着同一版本是幂等的。local
+edit upgrade 必须比较绑定版本与最新 active version 并显式展示冲突，不能
+静默替换用户工作区。
+
+## 检索与降级
+
+Lexical search 是强制能力。它使用由路径、符号名、qualified name、签名与
+内容组成的 identifier-aware `search_text`。
+
+Vector search 是可选能力。embedding 不可用或向量查询失败时，检索降级为
+lexical 结果，并返回可见降级信息：
+
+```json
+{
+  "capabilities": {
+    "lexical_search": true,
+    "vector_search": false
+  },
+  "degraded_reasons": ["EMBEDDING_UNAVAILABLE"]
+}
 ```
 
-## 恢复路径（手动）
+代码库检索在 lexical 与 vector 都有结果时使用 RRF 融合，并始终按精确
+`codebase_version_id` 过滤 chunks、files 与 symbols。
 
-1. 确认 `/api/llm/status` 中 embedding 可用
-2. 调用 `POST /api/codebases/{codebase_id}/reanalyze`
-3. UI 在 `vector_degraded=true` 时展示「语义检索不可用（向量索引已降级）」并提供「点此重建索引」
+## 静态分析、解析器与证据
 
-## 行为说明
+解析器适配器产出 qualified symbols、源码范围、confidence 和带证据的边。
+不同模块里的同名符号必须保留为不同符号。模糊调用记录为
+`resolution="ambiguous"` 且带 evidence，但不能伪造 `dst_symbol_id`。
 
-- 静态分析与 artifacts 在降级时仍正常完成
-- 当前语义检索工具未读取 `vector_degraded` 状态；向量不可用或无命中时返回「未找到相关代码」
+产物只在事实有证据时生成：
 
-## 检索栈（Codebase vs 知识库）
+- `overview` 来自实测数量和源码 refs；
+- `module_dir` 来自真实路径；
+- `architecture` 需要 import/dependency evidence；
+- `call_chain` 需要 call-edge evidence；
+- `data_flow` 在存在显式数据流事实前省略；
+- `flowchart` 在存在显式控制流事实前省略。
 
-代码库检索以**向量优先**，辅以静态分析产物；知识库检索额外包含 BM25、GraphRAG 与 LLM rerank。完整 KB 流水线见 [知识库摄取](knowledge-base-ingestion.zh-CN.md#检索栈kb-vs-codebase)。
+不支持的视图记录在版本 metrics 和 capabilities 中。UI 展示 unsupported
+reason，而不是渲染泛化模板图。
 
-```mermaid
-flowchart LR
-  Query["用户查询"] --> Embed["查询 embedding"]
-  Embed --> PGV["pgvector chunk 检索"]
-  PGV --> Tools["CodebaseTool.semantic_search"]
-  Static["StaticAnalyzer 符号"] --> Tools
-```
+## 兼容与恢复
 
-| 阶段 | 代码库 | 知识库（对比） |
-|------|--------|----------------|
-| 分块 | 符号感知 chunk | 父/子块 |
-| 全文 | 符号/名称查找 | BM25 + RRF |
-| 图 | 仅依赖边 | GraphRAG 实体扩展 |
-| Rerank | 无 | LLM rerank |
+一个版本窗口内保留兼容路由：
+
+- `/reanalyze` 创建或返回 build，然后返回 codebase 形状。
+- `/download` 读取现有 active-version snapshot key，不打包也不修改数据库。
+
+Worker reconciliation 可以把 stale candidate/build 标记失败，但除非
+candidate 通过发布 CAS，否则不得改变 active version。retry 会基于当前
+active version 创建新的 candidate。
+
+## 保留与 GC
+
+Codebase version GC 默认关闭，由以下配置限流：
+
+- `codebase.version_retention_count`
+- `codebase.version_retention_min_days`
+- `codebase.version_gc_batch_size`
+
+GC 保护 active versions、历史 session bindings、queued/running build
+versions、年龄窗口和保留窗口。它在事务内删除 version-scoped files、symbols、
+edges、chunks、artifacts、terminal build events/builds 和 version rows。
+源码 snapshot object 只有在没有其他版本引用该 key 后才会删除。
 
 ## 相关文档
 
-- [模型韧性设计](model-resilience.zh-CN.md)
-- [配置来源治理](config-source-governance.zh-CN.md)
-- [系统架构](overview.zh-CN.md)
-- [知识库摄取](knowledge-base-ingestion.zh-CN.md)
 - [安全模型](security-model.zh-CN.md)
+- [知识库摄取](knowledge-base-ingestion.zh-CN.md)
+- [事件](events.zh-CN.md)
+- [契约兼容](contract-compatibility.zh-CN.md)

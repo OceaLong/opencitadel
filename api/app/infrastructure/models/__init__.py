@@ -29,6 +29,7 @@ from .codebase import (
     CodebaseChunkModel,
     CodebaseArtifactModel,
 )
+from .codebase_version import CodebaseVersionORM
 from .knowledge_base import (
     KnowledgeBaseModel,
     KnowledgeDocumentModel,
@@ -37,10 +38,22 @@ from .knowledge_base import (
     KnowledgeRelationModel,
     KnowledgeEntityRefModel,
 )
+from .knowledge_version import (
+    KnowledgeBaseVersionORM,
+    KnowledgeDocumentRevisionORM,
+    KnowledgeVersionDocumentORM,
+)
 from .delivery_artifact import DeliveryArtifactModel
 from .scheduled_job import ScheduledJobModel
 from .notification import NotificationModel
 from .app_config import AppConfigModel
+from .resource_governance import (
+    ResourceBuildEventORM,
+    ResourceBuildORM,
+    SessionResourceBindingORM,
+    ToolApprovalBatchORM,
+    ToolApprovalCallORM,
+)
 
 __all__ = [
     "Base",
@@ -71,14 +84,23 @@ __all__ = [
     "CodebaseEdgeModel",
     "CodebaseChunkModel",
     "CodebaseArtifactModel",
+    "CodebaseVersionORM",
     "KnowledgeBaseModel",
     "KnowledgeDocumentModel",
     "KnowledgeChunkModel",
     "KnowledgeEntityModel",
     "KnowledgeRelationModel",
     "KnowledgeEntityRefModel",
+    "KnowledgeBaseVersionORM",
+    "KnowledgeDocumentRevisionORM",
+    "KnowledgeVersionDocumentORM",
     "DeliveryArtifactModel",
     "ScheduledJobModel",
     "NotificationModel",
     "AppConfigModel",
+    "ToolApprovalBatchORM",
+    "ToolApprovalCallORM",
+    "ResourceBuildORM",
+    "SessionResourceBindingORM",
+    "ResourceBuildEventORM",
 ]

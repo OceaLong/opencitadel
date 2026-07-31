@@ -25,6 +25,7 @@ from . import (
     artifact_routes,
     scheduling_routes,
     compliance_routes,
+    resource_governance_routes,
 )
 
 
@@ -52,6 +53,8 @@ def create_api_routes() -> APIRouter:
     authenticated_router.include_router(app_config_routes.router)
     authenticated_router.include_router(file_routes.router)
     authenticated_router.include_router(session_routes.router)
+    authenticated_router.include_router(resource_governance_routes.router)
+    authenticated_router.include_router(resource_governance_routes.build_router)
     authenticated_router.include_router(llm_endpoint_routes.router)
     authenticated_router.include_router(llm_model_routes.router)
     authenticated_router.include_router(skill_routes.router)

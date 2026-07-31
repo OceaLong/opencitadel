@@ -137,6 +137,11 @@ model_resilience:
 
 knowledge_base:
   vector_enabled: true
+  # Version GC is opt-in. Historical session bindings are permanent roots.
+  version_gc_enabled: false
+  version_retention_count: 10
+  version_retention_min_days: 30
+  version_gc_batch_size: 50
   chunk:
     parent_max_chars: 2000
     child_max_chars: 400
@@ -157,6 +162,10 @@ knowledge_base:
     enabled: true
     max_parent_chunks_per_doc: 200
     concurrency: 3
+    max_chunks: 10000
+    max_llm_calls: 10000
+    max_tokens: 1000000
+    deadline_seconds: 300
   ocr:
     mode: vision_llm
     max_pages: 50
@@ -168,6 +177,13 @@ knowledge_base:
     feishu_base_url: null
     url_allowlist: []
     url_denylist: []
+
+codebase:
+  # Version GC is opt-in. Historical session bindings are permanent roots.
+  version_gc_enabled: false
+  version_retention_count: 10
+  version_retention_min_days: 30
+  version_gc_batch_size: 50
 
 feature_flags:
   enable_agent_features: true

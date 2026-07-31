@@ -5,6 +5,7 @@ from typing import Optional
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
 from .base import BaseTool, tool
+from .capability_policy import CODE_READ, WORKSPACE_WRITE
 
 
 class FileTool(BaseTool):
@@ -42,6 +43,7 @@ class FileTool(BaseTool):
             }
         },
         required=["filepath"],
+        policy=CODE_READ,
     )
     async def read_file(
             self,
@@ -89,7 +91,8 @@ class FileTool(BaseTool):
                 "description": "(可选)是否使用 sudo 权限"
             }
         },
-        required=["filepath", "content"]
+        required=["filepath", "content"],
+        policy=WORKSPACE_WRITE,
     )
     async def write_file(
             self,
@@ -130,7 +133,8 @@ class FileTool(BaseTool):
                 "description": "(可选)是否使用 sudo 权限"
             }
         },
-        required=["filepath", "old_str", "new_str"]
+        required=["filepath", "old_str", "new_str"],
+        policy=WORKSPACE_WRITE,
     )
     async def replace_in_file(
             self,
@@ -163,7 +167,8 @@ class FileTool(BaseTool):
                 "description": "(可选)是否使用 sudo 权限"
             }
         },
-        required=["filepath", "regex"]
+        required=["filepath", "regex"],
+        policy=CODE_READ,
     )
     async def search_in_file(
             self,
@@ -190,7 +195,8 @@ class FileTool(BaseTool):
                 "description": "使用 glob 语法通配符的文件名模式"
             }
         },
-        required=["dir_path", "glob_pattern"]
+        required=["dir_path", "glob_pattern"],
+        policy=CODE_READ,
     )
     async def find_files(
             self,

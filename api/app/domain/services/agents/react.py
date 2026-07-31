@@ -19,6 +19,7 @@ from app.domain.models.event import (
     BaseEvent,
 )
 from app.domain.models.tool_result import ToolResult
+from app.domain.models.tool_approval import ApprovalStatus
 from app.domain.utils.hitl import TAKEOVER_PHASE, TOOL_APPROVAL_PHASE, merge_pending_metadata, parse_gate_action, preserve_session_tracking_metadata
 from app.domain.models.file import File
 from app.domain.models.message import Message, VisionAttachment
@@ -63,6 +64,7 @@ class ReActAgent(BaseAgent):
             self,
             step: Step,
             message: str,
+            citations=None,
     ) -> AsyncGenerator[BaseEvent, None]:
         internal = self._internal_prompts()
         max_repair_attempts = 2
@@ -102,7 +104,15 @@ class ReActAgent(BaseAgent):
         step.attachments = parsed.attachments
         yield StepEvent(step=step, status=StepEventStatus.COMPLETED)
         if step.result:
-            yield MessageEvent(role="assistant", message=step.result)
+            yield MessageEvent(
+                role="assistant",
+                message=step.result,
+                citations=(
+                    citations
+                    if citations is not None
+                    else self._trusted_knowledge_citations()
+                ),
+            )
 
     async def _complete_summary_from_message(
             self,
@@ -128,6 +138,7 @@ class ReActAgent(BaseAgent):
                     role="assistant",
                     message=summary_message.message,
                     attachments=attachments,
+                    citations=self._trusted_knowledge_citations(),
                 )
                 return
             except StructuredParseError as exc:
@@ -226,9 +237,14 @@ class ReActAgent(BaseAgent):
             return
 
         if session and session.pending_phase == TOOL_APPROVAL_PHASE:
+            waiting = False
             try:
                 async for ev in self._resume_tool_approval(session, message, step):
                     yield ev
+                    if isinstance(ev, WaitEvent):
+                        waiting = True
+                if waiting:
+                    return
                 if not step.error and step.status != ExecutionStatus.FAILED:
                     step.status = ExecutionStatus.COMPLETED
             finally:
@@ -300,7 +316,11 @@ class ReActAgent(BaseAgent):
             return
         if isinstance(event, MessageEvent):
             step.status = ExecutionStatus.COMPLETED
-            async for out in self._complete_step_from_message(step, event.message):
+            async for out in self._complete_step_from_message(
+                    step,
+                    event.message,
+                    event.citations,
+            ):
                 yield out
             return
         if isinstance(event, ErrorEvent):
@@ -315,6 +335,141 @@ class ReActAgent(BaseAgent):
         yield event
 
     async def _resume_tool_approval(self, session, message: Message, step: Step):
+        batch_id = (session.pending_metadata or {}).get(
+            "approval_batch_id"
+        )
+        if not batch_id:
+            async for event in self._resume_single_tool_approval(
+                    session,
+                    message,
+                    step,
+            ):
+                yield event
+            return
+
+        action, feedback = parse_gate_action(message.message)
+        if action == "unknown":
+            yield WaitEvent()
+            return
+        if action not in {"approve", "approve_same", "reject"}:
+            yield WaitEvent()
+            return
+
+        executor = self._get_tool_batch_executor()
+        pending = await executor.get_pending_approval_batch()
+        if pending is not None and pending.id != batch_id:
+            yield ErrorEvent(error="待审批工具批次已发生变化")
+            return
+
+        has_explicit_decision = pending is not None and any(
+            call.status != ApprovalStatus.PENDING
+            and call.decided_by not in {None, "policy"}
+            for call in pending.calls
+        )
+        approved_by_action: list[str] = []
+        if pending is not None and not has_explicit_decision:
+            decision = (
+                ApprovalStatus.REJECTED
+                if action == "reject"
+                else ApprovalStatus.APPROVED
+            )
+            actor_id = str(
+                getattr(session, "owner_user_id", None) or "session-owner"
+            )
+            for call in sorted(
+                    pending.calls,
+                    key=lambda item: item.ordinal,
+            ):
+                if call.status != ApprovalStatus.PENDING:
+                    continue
+                decided = await executor.decide_approval_call(
+                    call.tool_call_id,
+                    decision,
+                    actor_id=actor_id,
+                )
+                if (
+                    action == "approve_same"
+                    and decided is not None
+                    and decided.status == ApprovalStatus.APPROVED
+                ):
+                    approved_by_action.append(call.tool_name)
+
+        execution = await executor.resume(
+            batch_id,
+            actor_id=str(
+                getattr(session, "owner_user_id", None) or "session-owner"
+            ),
+        )
+        if execution.rejected_reason == "approval_pending":
+            yield WaitEvent()
+            return
+
+        async with self._uow_factory() as uow:
+            await uow.session.set_pending_phase(self._session_id, None)
+            tracking = preserve_session_tracking_metadata(
+                session.pending_metadata
+            )
+            if action == "approve_same" and approved_by_action:
+                approved = list((tracking or {}).get("approved_tools") or [])
+                for tool_name in approved_by_action:
+                    if tool_name not in approved:
+                        approved.append(tool_name)
+                tracking = merge_pending_metadata(
+                    tracking,
+                    {"approved_tools": approved},
+                )
+            await uow.session.set_pending_metadata(
+                self._session_id,
+                tracking,
+            )
+
+        if execution.rejected_reason:
+            approval_batch = execution.approval_batch or pending
+            if approval_batch is None:
+                yield ErrorEvent(error=execution.rejected_reason)
+                return
+            reason = {
+                "approval_expired": "工具审批已过期",
+                "approval_rejected": feedback or "用户拒绝了此操作",
+                "approval_consumed": "工具审批批次已消费",
+            }.get(
+                execution.rejected_reason,
+                execution.rejected_reason,
+            )
+            tool_messages = [
+                {
+                    "role": "tool",
+                    "tool_call_id": call.tool_call_id,
+                    "_function_name": call.tool_name,
+                    "content": ToolResult(
+                        success=False,
+                        message=reason,
+                    ).model_dump_json(),
+                }
+                for call in approval_batch.calls
+            ]
+        else:
+            tool_messages = []
+            async for tool_event, messages in self._project_batch_results(
+                    execution.prepared_calls,
+                    execution,
+            ):
+                yield tool_event
+                tool_messages.extend(messages)
+
+        async for event in self.continue_tool_iteration_loop(
+                inject_tool_messages=tool_messages,
+                emit_deltas=self._should_emit_deltas(),
+        ):
+            async for out in self._handle_execute_event(event, step):
+                yield out
+
+    async def _resume_single_tool_approval(
+            self,
+            session,
+            message: Message,
+            step: Step,
+    ):
         meta = session.pending_metadata or {}
         pending = meta.get("pending_tool_call") or {}
         action, feedback = parse_gate_action(message.message)
@@ -393,11 +548,18 @@ class ReActAgent(BaseAgent):
 
         try:
             tool = self._resolve_tool(tool_name)
-            result = await self._invoke_tool(tool, tool_name, tool_args)
+            result = await self._get_tool_batch_executor().invoke_preapproved({
+                "id": tool_call_id,
+                "function": {
+                    "name": tool_name,
+                    "arguments": tool_args,
+                },
+            })
             tool_label = tool.name
         except Exception as exc:
             result = ToolResult(success=False, message=str(exc))
             tool_label = "tool"
+        self._record_tool_result_citations(result)
         yield ToolEvent(
             tool_call_id=tool_call_id,
             tool_name=tool_label,

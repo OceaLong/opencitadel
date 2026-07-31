@@ -9,6 +9,7 @@ from app.application.services.app_config_service import AppConfigService
 from app.domain.models.app_config import AgentConfig, MCPConfig, MCPTransport
 from app.domain.models.app_config_scope import ALL_APP_CONFIG_SECTIONS, GLOBAL_ONLY_SECTIONS, USER_OVERRIDABLE_SECTIONS
 from app.domain.models.scope import WorkspaceContext
+from app.domain.models.tool_policy import ToolExecutionPolicy
 from app.interfaces.auth_dependencies import get_workspace_context, require_admin
 from app.interfaces.schemas.app_config import ListMCPServerResponse, ListA2AServerResponse
 from app.interfaces.schemas.base import Response
@@ -293,6 +294,7 @@ async def get_a2a_servers(
 )
 async def create_a2a_server(
         base_url: str = Body(..., embed=True),
+        tool_policies: Optional[Dict[str, ToolExecutionPolicy]] = Body(None, embed=True),
         ctx: WorkspaceContext = Depends(get_workspace_context),
         app_config_service: AppConfigService = Depends(get_app_config_service),
 ) -> Response[Optional[Dict]]:
@@ -301,6 +303,7 @@ async def create_a2a_server(
         scope=ctx.scope,
         actor_user_id=ctx.principal.user_id,
         is_admin=ctx.principal.is_admin,
+        tool_policies=tool_policies,
     )
     return Response.success()
 
