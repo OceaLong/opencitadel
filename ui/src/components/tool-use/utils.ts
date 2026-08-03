@@ -20,7 +20,7 @@ export function getArg(args: Record<string, unknown>, ...keys: string[]): string
   return "";
 }
 
-export function truncate(s: string, max: number): string {
+function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 

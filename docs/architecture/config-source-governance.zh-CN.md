@@ -11,6 +11,18 @@
 | 行为配置 | `AppConfig`，由 DB 承载，`config.yaml` / Helm `appConfig` 只做种子 | `model_resilience`, `feature_flags`, `worker`, `sandbox` |
 | 密钥/连接 | `Settings` 环境变量 | `EMBEDDING_API_KEY`, Postgres, Redis, COS, MinIO |
 
+### Ops Patrol 分层归属
+
+| 事项 | 权威来源 |
+|------|----------|
+| 产品/Fixture 开关 | DB 承载的全局 `feature_flags` AppConfig 段 |
+| 保留默认值 | 持久化 AppConfig 中的 `patrol_retention`，由 `api/config.yaml` / Helm `appConfig` 种子提供 |
+| Collector 连接与 Tool Policy | 持久化 MCP Server 实体 |
+| Collector 目标白名单、注册探针、限制与 Kubernetes 身份 | Collector 部署内的 `OPS_COLLECTOR_*` 加 ServiceAccount，不属于 API/Worker Settings |
+| 证据 HMAC | API/Worker `AUDIT_SIGNING_KEY` Settings 与 Key 轮换字段 |
+
+不得把 Kubernetes 凭据或原始探针目的地复制到 Pack。见 [Ops Patrol 架构](ops-patrol.zh-CN.md)与 [Collector README](../../ops-collector/README.zh-CN.md)。
+
 ## 对象存储 Provider
 
 | 配置 | 默认 | Compose 本地 | Helm 默认 |
@@ -123,3 +135,4 @@ flowchart TD
 - [系统架构](overview.zh-CN.md)
 - [模型韧性设计](model-resilience.zh-CN.md)
 - [API/SSE 协议兼容策略](contract-compatibility.zh-CN.md)
+- [Ops Patrol](ops-patrol.zh-CN.md)

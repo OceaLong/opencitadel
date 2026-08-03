@@ -255,13 +255,6 @@ class TeamService:
                 raise NotFoundError("团队不存在")
             await uow.team.delete_by_id(team_id)
 
-    async def admin_list_members(self, team_id: str) -> List[TeamMember]:
-        async with self._uow_factory() as uow:
-            team = await uow.team.get_by_id(team_id)
-            if not team:
-                raise NotFoundError("团队不存在")
-            return await uow.team.list_members(team_id)
-
     async def admin_list_member_details(self, team_id: str) -> List[TeamMemberDetailResponse]:
         async with self._uow_factory() as uow:
             team = await uow.team.get_by_id(team_id)

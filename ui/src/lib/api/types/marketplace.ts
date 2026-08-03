@@ -43,7 +43,7 @@ export type NutritionAnalysisParams = {
   goal?: "cut" | "bulk" | "maintain";
 };
 
-export type NutritionItem = {
+type NutritionItem = {
   name: string;
   grams: number;
   confidence: number;

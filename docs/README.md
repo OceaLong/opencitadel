@@ -13,6 +13,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 3. [MCP integrations](tutorials/03-mcp-integrations.md)
 4. [Governed Web Operator](tutorials/04-governed-web-operator.md)
 5. [Refund reconciliation & compliance](tutorials/05-refund-reconciliation-compliance.md)
+6. [Read-only daily Ops Patrol](tutorials/06-ops-patrol.md)
 
 ### Operations & deployment
 
@@ -20,6 +21,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 |----------|-------|
 | [README.md](../README.md) | Project overview and doc map |
 | [Production deployment](operations/deployment.md) | Docker Compose production deployment, cloud/local modes, backup, tuning |
+| [Ops Patrol operations](operations/ops-patrol.md) | Collector security boundary, deployment, recovery, evidence, troubleshooting |
 | [HTTPS & domain setup](operations/https-domain-setup.md) | Domain binding and HTTPS |
 | [Helm Chart](../deploy/helm/opencitadel/README.md) | Kubernetes / Helm install and values |
 
@@ -28,6 +30,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | Document | Scope |
 |----------|-------|
 | [Architecture overview](architecture/overview.md) | System design, process roles, sandbox lifecycle, deployment modes |
+| [Ops Patrol](architecture/ops-patrol.md) | Pack/Run lifecycle, Collector trust boundary, evidence, tenant isolation |
 | [Technical decisions](architecture/technical-decisions.md) | Technology choices and alternatives |
 | [LLM endpoints & models](architecture/llm-endpoints-and-models.md) | Endpoint/model split, encryption, UI flow |
 | [Frontend UI](architecture/frontend-ui.md) | Next.js shell, SSE projection, HITL components |
@@ -58,6 +61,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [UI](../ui/README.md) | Frontend stack and routes |
 | [Sandbox](../sandbox/README.md) | Isolated runtime |
 | [Nginx gateway](../nginx/README.md) | Edge proxy, SSE/WS, upload limits |
+| [Ops Collector](../ops-collector/README.md) | Fixed read-only MCP probes, configuration and deployment |
 | [OpsConsole demo](../demo/ops-console/README.md) | Web Operator ticket backend demo |
 | [E2E tests](../e2e/README.md) | Playwright smoke tests, OpsConsole demo |
 | [Repository scripts](../scripts/README.md) | `quickstart.sh`, `check-docs.sh` |

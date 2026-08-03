@@ -48,11 +48,6 @@ class AppConfigProvider:
         apply_runtime_settings(config)
         return config
 
-    def invalidate(self) -> None:
-        self._cache = None
-        invalidate_runtime_config()
-
-
 def _set_sync_cache(config: AppConfig) -> None:
     global _sync_cache
     _sync_cache = config

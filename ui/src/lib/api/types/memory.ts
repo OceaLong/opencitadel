@@ -1,7 +1,7 @@
 // ==================== 记忆管理 ====================
 
 export type MemoryScope = "global" | "session";
-export type MemorySource = "manual" | "auto_extracted" | "tool_save";
+type MemorySource = "manual" | "auto_extracted" | "tool_save";
 
 export type MemoryEntry = {
   id: string;

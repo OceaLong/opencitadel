@@ -1,0 +1,26 @@
+"""Collector CLI. Streamable HTTP is default; stdio must be explicitly enabled."""
+from __future__ import annotations
+
+import argparse
+
+from .config import CollectorSettings
+from .server import create_server
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="OpenCitadel read-only Ops Collector MCP")
+    parser.add_argument("--transport", choices=("streamable-http", "stdio"), default=None)
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    settings = CollectorSettings()
+    transport = args.transport or settings.transport
+    if transport == "stdio" and not settings.allow_stdio:
+        raise SystemExit("stdio transport is disabled; set OPS_COLLECTOR_ALLOW_STDIO=true for development")
+    create_server(settings).run(transport=transport)
+
+
+if __name__ == "__main__":
+    main()

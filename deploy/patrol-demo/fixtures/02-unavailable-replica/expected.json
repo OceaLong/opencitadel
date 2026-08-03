@@ -1,0 +1,1 @@
+{"case_id":"02-unavailable-replica","fault":"Deployment unavailable replica","injected_fault":true,"expected_results":[{"check_id":"k8s-workload-availability","status":"fail","severity":"critical","assertion_id":"no-unavailable-replicas"}],"required_evidence":["summary","resource_refs"],"expected_write_operations":0,"teardown":{"strategy":"reset-baseline"}}

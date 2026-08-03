@@ -37,6 +37,7 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [skills.md](architecture/skills.zh-CN.md) | Skill 模板、运行时 | primary | paired | mermaid | `skill_service.py` | low |
 | [artifacts-sharing.md](architecture/artifacts-sharing.zh-CN.md) | 交付物、公开分享 | primary | paired | mermaid | `artifact_routes.py` | low |
 | [automation-scheduler.md](architecture/automation-scheduler.zh-CN.md) | Cron、Webhook、Leader 选举 | primary | paired | mermaid | `scheduling_routes.py` | low |
+| [ops-patrol.md](architecture/ops-patrol.zh-CN.md) | Pack/Run 生命周期、Collector 边界与证据 | primary | paired | mermaid | `patrol_routes.py`、`patrol_run_service.py` | low |
 | [marketplace.md](architecture/marketplace.zh-CN.md) | 应用市场 | primary | paired | mermaid | `marketplace_routes.py` | low |
 | [config-source-governance.md](architecture/config-source-governance.zh-CN.md) | AppConfig 与 env 边界 | primary | paired | mermaid | `core/config.py` | medium |
 | [model-resilience.md](architecture/model-resilience.zh-CN.md) | 熔断、回退 | primary | paired | mermaid | `resilient_llm.py` | low |
@@ -54,12 +55,14 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | 路径 | 主题 | 权威性 | 双语 | 图示 | 代码锚点 | 过期风险 |
 |------|------|--------|------|------|----------|----------|
 | [operations/deployment.md](operations/deployment.zh-CN.md) | 生产部署 | primary | paired | mermaid | `docker-compose.yml` | low |
+| [operations/ops-patrol.md](operations/ops-patrol.zh-CN.md) | Patrol 启用、部署、证据与恢复 | primary | paired | none | `ops-collector/`、`deploy/helm/` | low |
 | [operations/https-domain-setup.md](operations/https-domain-setup.zh-CN.md) | HTTPS 与域名 | primary | paired | none | `.env.example` | low |
 | [tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.zh-CN.md) | 10 分钟自托管 | tutorial | paired | none | `scripts/quickstart.sh` | low |
 | [tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.zh-CN.md) | 知识库 RAG | tutorial | paired | mermaid | `knowledge-base-ingestion.md` | low |
 | [tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.md) | MCP 集成 | tutorial | paired | none | `app_config_routes.py` | low |
 | [tutorials/04-governed-web-operator.md](tutorials/04-governed-web-operator.zh-CN.md) | Web Operator 教程 | tutorial | paired | none | `operator-scope-dialog.tsx` | low |
 | [tutorials/05-refund-reconciliation-compliance.md](tutorials/05-refund-reconciliation-compliance.zh-CN.md) | 合规演示 | tutorial | paired | none | `compliance_routes.py` | low |
+| [tutorials/06-ops-patrol.md](tutorials/06-ops-patrol.zh-CN.md) | Kubernetes 只读巡检教程 | tutorial | paired | none | `ui/src/app/patrols/` | low |
 
 ## 模块 README
 
@@ -69,7 +72,9 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [ui/README.md](../ui/README.zh-CN.md) | 前端栈、路由 | module | paired | none | low |
 | [sandbox/README.md](../sandbox/README.zh-CN.md) | 沙箱服务 | module | paired | none | low |
 | [nginx/README.md](../nginx/README.zh-CN.md) | 网关、SSE/WS、上传限制 | module | paired | mermaid | low |
+| [ops-collector/README.md](../ops-collector/README.zh-CN.md) | 固定只读探针与配置 | module | paired | none | low |
 | [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.zh-CN.md) | Helm 安装 | module | paired | none | low |
+| [deploy/patrol-demo/README.md](../deploy/patrol-demo/README.zh-CN.md) | 一次性 Patrol 故障实验室 | module | paired | none | low |
 | [demo/ops-console/README.md](../demo/ops-console/README.zh-CN.md) | Web Operator 演示后端 | module | paired | none | low |
 | [e2e/README.md](../e2e/README.zh-CN.md) | Playwright E2E 冒烟测试 | module | paired | none | low |
 | [scripts/README.md](../scripts/README.zh-CN.md) | quickstart、check-docs | module | paired | none | low |

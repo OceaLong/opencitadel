@@ -157,33 +157,3 @@ def validate_json_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> Option
         if expected == "number" and not isinstance(value, (int, float)):
             return None
     return data
-
-
-async def analyze_images_with_llm(
-        llm: LLM,
-        images: List[tuple[bytes, str]],
-        prompt: str,
-        *,
-        schema: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """多图 vision 分析。"""
-    if not images:
-        raise ValueError("至少需要一张图片")
-    capabilities = vision_service.resolve_capabilities(llm)
-    parts: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
-    for image_bytes, mime_type in images[: capabilities.max_images_per_request]:
-        if len(image_bytes) > capabilities.max_image_bytes:
-            image_bytes = vision_service._compress_image_bytes(
-                image_bytes, mime_type, capabilities.max_image_bytes,
-            )
-        parts.append(build_image_content_part(image_bytes, mime_type))
-    response = await llm.invoke([{"role": "user", "content": parts}])
-    content = response.get("content") or response.get("reasoning_content") or ""
-    parser = RepairJSONParser()
-    parsed = await parser.invoke(content, default_value={})
-    if schema:
-        validated = validate_json_schema(parsed, schema)
-        if validated is None:
-            raise ValueError("JSON 结构校验失败")
-        return validated
-    return parsed

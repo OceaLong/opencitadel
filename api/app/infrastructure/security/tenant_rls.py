@@ -14,6 +14,7 @@ PRIVATE_ROOT_TABLES = {
     "files",
     "llm_token_usages",
     "scheduled_jobs",
+    "patrol_packs",
 }
 
 VISIBILITY_ROOT_TABLES = {
@@ -44,6 +45,9 @@ CHILD_TABLES = {
     "knowledge_chunks": ("knowledge_bases", "kb_id", "id"),
     "knowledge_entities": ("knowledge_bases", "kb_id", "id"),
     "knowledge_relations": ("knowledge_bases", "kb_id", "id"),
+    "patrol_runs": ("patrol_packs", "pack_id", "id"),
+    "patrol_check_results": ("patrol_runs", "run_id", "id"),
+    "patrol_findings": ("patrol_runs", "run_id", "id"),
 }
 
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")

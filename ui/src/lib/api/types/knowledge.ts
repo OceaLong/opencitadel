@@ -2,7 +2,7 @@ import type { SessionMode } from "./session";
 
 // ==================== 文档知识库 ====================
 
-export type KnowledgeBaseStatus =
+type KnowledgeBaseStatus =
   | "pending"
   | "parsing"
   | "chunking"
@@ -11,7 +11,7 @@ export type KnowledgeBaseStatus =
   | "ready"
   | "failed";
 
-export type KnowledgeDocumentStatus = "pending" | "parsing" | "ready" | "failed";
+type KnowledgeDocumentStatus = "pending" | "parsing" | "ready" | "failed";
 export type KnowledgeSourceType = "upload" | "zip" | "web" | "confluence" | "feishu";
 
 export type KnowledgeBase = {
@@ -89,7 +89,7 @@ export type ReadKnowledgeDocumentData = {
   truncated?: boolean;
 };
 
-export type KnowledgeBuildState =
+type KnowledgeBuildState =
   | "queued"
   | "running"
   | "succeeded"
@@ -97,7 +97,7 @@ export type KnowledgeBuildState =
   | "failed"
   | "cancelled";
 
-export type KnowledgeVersionState = "building" | "ready" | "degraded" | "failed";
+type KnowledgeVersionState = "building" | "ready" | "degraded" | "failed";
 
 export type KnowledgeBuild = {
   id: string;
@@ -147,7 +147,7 @@ export type KnowledgeVersionsData = {
   versions: KnowledgeVersion[];
 };
 
-export type KnowledgeCitation = {
+type KnowledgeCitation = {
   version_id: string;
   document_revision_id: string;
   doc_id: string;
@@ -155,14 +155,14 @@ export type KnowledgeCitation = {
   chunk_id?: string | null;
 };
 
-export type KnowledgeGraphNode = {
+type KnowledgeGraphNode = {
   id: string;
   name: string;
   type: string;
   description: string;
 };
 
-export type KnowledgeGraphEdge = {
+type KnowledgeGraphEdge = {
   id: string;
   source: string;
   target: string;

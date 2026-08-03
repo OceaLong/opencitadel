@@ -117,10 +117,10 @@ docker compose up -d
 | `UV_HTTP_TIMEOUT` | `300` | HTTP timeout (seconds) for `uv sync` wheel downloads |
 | `NPM_CONFIG_REGISTRY` | npmmirror | npm for sandbox / ui |
 
-Built application images are named: `opencitadel-api`, `opencitadel-worker`, `opencitadel-migrate`, `opencitadel-ui`, `opencitadel-sandbox`.
+Built application images are named: `opencitadel-api`, `opencitadel-worker`, `opencitadel-migrate`, `opencitadel-ui`, `opencitadel-sandbox`, and the optional `opencitadel-ops-collector`.
 
 > **CI/CD note**: [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
-> runs API, UI, and sandbox tests; builds and Trivy-scans all five images; and
+> runs API, UI, sandbox, and Ops Collector tests; builds and Trivy-scans all six images; and
 > validates Compose, Helm, Squid, and documentation on every PR and `main`
 > push. [`.github/workflows/security.yml`](../../.github/workflows/security.yml)
 > adds Gitleaks history scanning, dependency review/audits, CodeQL, and Trivy
@@ -478,10 +478,10 @@ Docker/PostgreSQL/Helm-backed CI:
 
 | Workflow | Required controls |
 |----------|-------------------|
-| `ci.yml` | Full API pytest against PostgreSQL/Redis, UI i18n/typecheck/lint/test/build, sandbox tests, five image builds with Trivy `HIGH,CRITICAL` blocking, Compose render, Squid parse, Helm lint/template, documentation checks |
+| `ci.yml` | Full API pytest against PostgreSQL/Redis, UI i18n/typecheck/lint/test/build, sandbox/Collector tests, six image builds with Trivy `HIGH,CRITICAL` blocking, Compose render, Squid parse, Helm/Kustomize checks, documentation checks |
 | `security.yml` | Gitleaks full-history scan; PR dependency review blocks `high` severity and GPL-3.0/AGPL-3.0; Python and production npm audits; CodeQL `security-extended` for Python and JavaScript/TypeScript; Trivy vulnerability/secret/IaC scan blocks `HIGH,CRITICAL` |
 | `dependabot.yml` | Weekly GitHub Actions, uv, npm, and Docker update groups |
-| `release.yml` | Full-SHA-pinned Actions; five `linux/amd64` + `linux/arm64` images; built-digest Trivy scan; SBOM; `provenance: mode=max`; registry attestations |
+| `release.yml` | Full-SHA-pinned Actions; six `linux/amd64` + `linux/arm64` images; built-digest Trivy scan; SBOM; `provenance: mode=max`; registry attestations |
 
 Run `./scripts/check-docs.sh`, Compose rendering, and shell/YAML parsing locally.
 Require the hosted checks before release because they also exercise clean
@@ -994,16 +994,19 @@ Full domain binding, certificate setup (Let's Encrypt or custom), verification, 
 
 ## ☸️ Kubernetes / Helm deployment
 
-Helm chart at `deploy/helm/opencitadel/` supports full-stack deploy (Postgres/Redis/UI/Ingress + API/Worker + K8s Pod sandbox driver).
+Helm chart at `deploy/helm/opencitadel/` supports full-stack deploy (Postgres/Redis/UI/Ingress + API/Worker + K8s Pod sandbox driver + optional read-only Ops Collector).
 
 ```bash
-# Build and push five images (api, worker, migrate reuses api image tag)
+# Build and push six images (api, worker, migrate reuses the api target)
 docker build --target api -t your-registry/opencitadel-api ./api
 docker build --target worker -t your-registry/opencitadel-worker ./api
 docker build --target api -t your-registry/opencitadel-migrate ./api
 docker build -t your-registry/opencitadel-ui ./ui
 docker build -t your-registry/opencitadel-sandbox ./sandbox
-docker push your-registry/opencitadel-api your-registry/opencitadel-worker your-registry/opencitadel-migrate your-registry/opencitadel-ui your-registry/opencitadel-sandbox
+docker build -t your-registry/opencitadel-ops-collector ./ops-collector
+for image in api worker migrate ui sandbox ops-collector; do
+  docker push "your-registry/opencitadel-${image}"
+done
 ```
 
 > **Helm note**: the migrate initContainer reuses `image.api` (same Dockerfile target). The separate `opencitadel-migrate` tag is used by Docker Compose one-off jobs and release publishing.
@@ -1018,10 +1021,14 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --set image.worker.repository=your-registry/opencitadel-worker \
   --set image.ui.repository=your-registry/opencitadel-ui \
   --set image.sandbox.repository=your-registry/opencitadel-sandbox \
+  --set opsCollector.enabled=true \
+  --set opsCollector.image.repository=your-registry/opencitadel-ops-collector \
   --set appConfig.sandbox.driver=kubernetes \
   --set ingress.enabled=true \
   --set replicaCount.worker=2
 ```
+
+Ops Patrol is optional and disabled by default. Before enabling it, configure the Collector allowlists/registered probes, fixed MCP tool policies, feature flag, and NetworkPolicy using the dedicated [Ops Patrol operations runbook](ops-patrol.md).
 
 `production-values.yaml` must override every required secret with a secret
 manager or protected values mechanism, keep the four application secrets

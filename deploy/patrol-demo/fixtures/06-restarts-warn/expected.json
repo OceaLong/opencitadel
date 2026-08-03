@@ -1,0 +1,1 @@
+{"case_id":"06-restarts-warn","fault":"four restarts in one hour","injected_fault":true,"expected_results":[{"check_id":"k8s-restart-spike","status":"warn","severity":"warning","assertion_id":"restart-warning-threshold"}],"required_evidence":["summary","resource_refs"],"expected_write_operations":0,"teardown":{"strategy":"reset-baseline"}}

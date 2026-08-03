@@ -1,5 +1,3 @@
-import type { PlanEvent } from "./session";
-
 // ==================== 通知 ====================
 
 export type Notification = {
@@ -19,8 +17,4 @@ export type Notification = {
 export type NotificationsData = {
   notifications: Notification[];
   unread_count: number;
-};
-
-export type PendingPlanUpdate = {
-  plan: PlanEvent;
 };

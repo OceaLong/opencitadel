@@ -54,7 +54,6 @@ from app.domain.external.connection_pool import A2AConnectionPoolPort, MCPConnec
 from app.domain.external.event_sequence import EventSequencePort
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
 from app.domain.external.observability import ObservabilityPort
-from app.domain.external.session_state import SessionStatePort
 from app.domain.external.task_state_port import TaskStatePort
 from app.application.services.config_provider import get_runtime_config
 
@@ -83,7 +82,6 @@ class AgentTaskRunner(TaskRunner):
             task_state_port: TaskStatePort,
             observability_port: ObservabilityPort,
             event_sequence_port: EventSequencePort,
-            session_state_port: SessionStatePort,
             runtime_settings: AgentRuntimeSettings,
             mcp_connection_pool: MCPConnectionPoolPort,
             a2a_connection_pool: A2AConnectionPoolPort,
@@ -117,7 +115,6 @@ class AgentTaskRunner(TaskRunner):
         self._on_complete_callback = on_complete_callback
         self._on_session_terminal_callback = on_session_terminal_callback
         self._runtime_settings = runtime_settings
-        self._session_state = session_state_port
         self._task_state_port = task_state_port
         self._observability = observability_port
         self._event_emitter = AgentEventEmitter(

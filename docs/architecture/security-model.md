@@ -378,8 +378,8 @@ export and alert routing.
 
 ### Security verification in CI
 
-- `.github/workflows/ci.yml` runs API/UI/sandbox tests, five image builds and
-  Trivy scans, Compose/Helm/Squid rendering, and this documentation checker.
+- `.github/workflows/ci.yml` runs API/UI/sandbox/Collector tests, six image
+  builds and Trivy scans, Compose/Helm/Kustomize/Squid rendering, and this documentation checker.
 - `.github/workflows/security.yml` runs Gitleaks history scanning, dependency
   review and lockfile audits, CodeQL, and Trivy filesystem/IaC scanning.
 - `.github/workflows/release.yml` builds two architectures with SBOM,
@@ -397,6 +397,7 @@ export and alert routing.
 | PostgreSQL / Redis | Internal only | Never expose to public internet |
 | MinIO | Internal; optional public endpoint variable | Keep internal unless LLM needs to fetch URLs |
 | Sandbox | Internal HTTP to Worker | Do not map host ports |
+| Ops Collector | Internal MCP to API/Worker | ClusterIP only; fixed read-only tools and registered destinations |
 | MCP / A2A servers | Worker/API egress | Allowlist targets |
 
 ---
@@ -407,3 +408,4 @@ export and alert routing.
 - [Production deployment](../operations/deployment.md) — Firewall, backup, HTTPS
 - [HTTPS & domain setup](../operations/https-domain-setup.md) — TLS and domain binding
 - [Configuration Source Governance](config-source-governance.md) — Boundary between secrets and behavioral config
+- [Ops Patrol](ops-patrol.md) — Collector trust boundary, assertion authority, evidence

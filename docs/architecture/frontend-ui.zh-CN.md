@@ -36,6 +36,7 @@ flowchart TB
 
 - **桌面**：Codebase、Knowledge、Marketplace、Automation 在 **顶栏工作区下拉**（`app-header.tsx`）。
 - **移动**：前四个模块在 `MobileBottomNav`；Automation、Teams、Settings、Admin 在 **更多** Sheet。
+- **Ops Patrol**：顶栏/移动导航受功能开关控制；`/patrols`、`/patrols/new`、`/patrols/[id]`、`/patrol-runs/[id]` 使用常规认证 Shell。Auditor 视图隐藏变更控件。
 - **会话工具栏**（模型、Skill、上下文）：桌面内联；移动端收入 `ChatOptionsSheet`。
 
 ## 设置弹窗（八 Tab）
@@ -125,6 +126,14 @@ Web Operator 归属：`operator-scope-dialog.tsx`（Skill 为 `web-operator` 时
 
 见 [检查点与 HITL](checkpoints-and-hitl.zh-CN.md)。
 
+## Ops Patrol 视图
+
+`useFeatureFlags` 读取全局 `feature_flags` AppConfig 后才显示 Patrol 导航。Pack 向导选择已持久化 Collector、Target Scope、检查项、IANA 时区与每日 Cron，不接受原始 Probe URL 或 PromQL。Pack 详情提供验证/激活/暂停/触发与 30 天指标；Run 详情渲染服务端计算的检查结果、Finding 决策和签名证据下载。
+
+`AUDITOR` 可以打开列表、详情、报告与证据，但不能创建、验证、激活、暂停、触发、取消、回放、删除或决策 Finding。即使客户端错误显示了过期控件，API Enforcement 仍是权威边界。
+
+客户端模块为 `lib/api/patrols.ts`、`lib/api/types/patrols.ts`，业务组件位于 `components/patrol/`。见 [Ops Patrol 架构](ops-patrol.zh-CN.md)。
+
 ## 会话上下文侧栏
 
 会话绑定代码库或知识库时，`SessionContextPanel` 展示：
@@ -162,3 +171,4 @@ Web Operator 归属：`operator-scope-dialog.tsx`（Skill 为 `web-operator` 时
 - [LLM 端点与模型](llm-endpoints-and-models.zh-CN.md)
 - [契约兼容](contract-compatibility.zh-CN.md)
 - [Skills](skills.zh-CN.md)
+- [Ops Patrol](ops-patrol.zh-CN.md)

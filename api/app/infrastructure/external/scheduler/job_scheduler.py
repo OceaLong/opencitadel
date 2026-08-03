@@ -14,6 +14,9 @@ from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.storage.redis import get_redis
 
 if TYPE_CHECKING:
+    from app.application.services.patrol_retention_service import (
+        PatrolRetentionService,
+    )
     from app.application.services.resource_version_gc_service import (
         ResourceVersionGCService,
     )
@@ -23,6 +26,7 @@ logger = logging.getLogger(__name__)
 SCHEDULER_LEADER_KEY = "scheduler:leader"
 KNOWLEDGE_VERSION_GC_LEASE_KEY = "scheduler:knowledge-version-gc"
 CODEBASE_VERSION_GC_LEASE_KEY = "scheduler:codebase-version-gc"
+PATROL_RETENTION_LEASE_KEY = "scheduler:patrol-retention"
 _WORKER_ID = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
 
 _RENEW_SCHEDULER_LEASE = """
@@ -255,6 +259,59 @@ async def run_codebase_version_gc_tick(
         )
 
 
+async def run_patrol_retention_tick(
+    service: "PatrolRetentionService",
+    *,
+    run_days: int,
+    finding_days: int,
+    evidence_days: int,
+    batch_size: int,
+    lease_seconds: float,
+    owner_token: str | None = None,
+):
+    """Run one Patrol retention batch under an independently renewed lease."""
+    token = owner_token or f"{_WORKER_ID}:{uuid.uuid4().hex}"
+    if not await acquire_scheduler_lease(
+        PATROL_RETENTION_LEASE_KEY,
+        token,
+        lease_seconds,
+    ):
+        return None
+    collection = asyncio.create_task(
+        service.cleanup(
+            run_days=run_days,
+            finding_days=finding_days,
+            evidence_days=evidence_days,
+            batch_size=batch_size,
+        )
+    )
+    keepalive = asyncio.create_task(
+        _keep_scheduler_lease_alive(
+            PATROL_RETENTION_LEASE_KEY,
+            token,
+            lease_seconds,
+        )
+    )
+    try:
+        done, _pending = await asyncio.wait(
+            {collection, keepalive},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if collection in done:
+            return await collection
+        collection.cancel()
+        await asyncio.gather(collection, return_exceptions=True)
+        await keepalive
+        raise RuntimeError("Patrol retention lease ended unexpectedly")
+    finally:
+        if not collection.done():
+            collection.cancel()
+            await asyncio.gather(collection, return_exceptions=True)
+        keepalive.cancel()
+        await asyncio.gather(keepalive, return_exceptions=True)
+        await release_scheduler_lease(PATROL_RETENTION_LEASE_KEY, token)
+
+
 async def run_scheduler_loop(
         uow_factory: Callable[[], IUnitOfWork],
         job_service: ScheduledJobService,
@@ -265,6 +322,7 @@ async def run_scheduler_loop(
         resource_version_gc_service: Optional[
             "ResourceVersionGCService"
         ] = None,
+        patrol_retention_service: Optional["PatrolRetentionService"] = None,
         stop_event: Optional[asyncio.Event] = None,
 ) -> None:
     """Worker background loop: poll due jobs and dispatch."""
@@ -328,6 +386,22 @@ async def run_scheduler_loop(
                     "Codebase-version GC tick failed: %s",
                     exc,
                 )
+
+        patrol_cfg = getattr(config, "patrol_retention", None)
+        if patrol_cfg is not None and patrol_retention_service is not None:
+            try:
+                result = await run_patrol_retention_tick(
+                    patrol_retention_service,
+                    run_days=patrol_cfg.run_days,
+                    finding_days=patrol_cfg.finding_days,
+                    evidence_days=patrol_cfg.collector_evidence_days,
+                    batch_size=patrol_cfg.cleanup_batch_size,
+                    lease_seconds=sched_cfg.leader_lease_seconds,
+                )
+                if result is not None and any(result.values()):
+                    logger.info("Patrol retention tick metrics=%s", result)
+            except Exception as exc:
+                logger.exception("Patrol retention tick failed: %s", exc)
 
         try:
             async with uow_factory() as uow:

@@ -384,6 +384,43 @@ services:
       retries: 5
       start_period: 30s
 
+  # Fixed, read-only MCP surface for Ops Patrol. Kubernetes deployments
+  # should use the Helm/Kustomize ServiceAccount instead of this local profile.
+  opencitadel-ops-collector:
+    profiles:
+      - patrol
+    build:
+      context: ./ops-collector
+      dockerfile: Dockerfile
+    image: opencitadel-ops-collector
+    container_name: opencitadel-ops-collector
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    mem_reservation: 128m
+    cpus: "0.50"
+    pids_limit: 128
+    environment:
+      OPS_COLLECTOR_TARGET_REF: ${OPS_COLLECTOR_TARGET_REF:-opencitadel-local}
+      OPS_COLLECTOR_ALLOWED_NAMESPACES: '${OPS_COLLECTOR_ALLOWED_NAMESPACES:-["opencitadel"]}'
+      OPS_COLLECTOR_TRANSPORT: streamable-http
+      OPS_COLLECTOR_ALLOW_STDIO: "false"
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
+    networks:
+      - opencitadel-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8090), 2).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   # ==================== Demo: OpsConsole 样板工单后台 ====================
 
   ops-console:

@@ -10,15 +10,8 @@ CONTENT_TYPE_TEXT = "text"
 CONTENT_TYPE_IMAGE_URL = "image_url"
 CONTENT_TYPE_IMAGE_REF = "image_ref"
 CONTENT_TYPE_AUDIO = "audio"
-CONTENT_TYPE_VIDEO = "video"
 
 IMAGE_PART_TYPES = frozenset({CONTENT_TYPE_IMAGE_URL, CONTENT_TYPE_IMAGE_REF})
-MEDIA_PART_TYPES = frozenset({
-    CONTENT_TYPE_IMAGE_URL,
-    CONTENT_TYPE_IMAGE_REF,
-    CONTENT_TYPE_AUDIO,
-    CONTENT_TYPE_VIDEO,
-})
 
 
 class MediaAttachment(BaseModel):
@@ -32,10 +25,6 @@ class MediaAttachment(BaseModel):
     transcript: str = ""
 
 
-def is_media_part(part: Dict[str, Any]) -> bool:
-    return isinstance(part, dict) and part.get("type") in MEDIA_PART_TYPES
-
-
 def is_image_part(part: Dict[str, Any]) -> bool:
     return isinstance(part, dict) and part.get("type") in IMAGE_PART_TYPES
 
@@ -46,7 +35,3 @@ def build_text_part(text: str) -> Dict[str, Any]:
 
 def build_audio_part(data_base64: str, mime_type: str = "audio/wav") -> Dict[str, Any]:
     return {"type": CONTENT_TYPE_AUDIO, "mime_type": mime_type, "data": data_base64}
-
-
-def build_video_part(ref_url: str, mime_type: str = "video/mp4") -> Dict[str, Any]:
-    return {"type": CONTENT_TYPE_VIDEO, "ref": ref_url, "mime_type": mime_type}

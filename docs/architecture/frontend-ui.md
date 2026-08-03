@@ -36,6 +36,7 @@ Implementation: `ui/src/components/app-shell.tsx`, `left-panel.tsx`, `app-header
 
 - **Desktop**: Codebase, Knowledge, Marketplace, and Automation live in the **header workspace dropdown** (`app-header.tsx`).
 - **Mobile**: the first four modules are in `MobileBottomNav`; Automation, Teams, Settings, and Admin are in the **More** sheet.
+- **Ops Patrol**: header/mobile navigation is feature-flagged; `/patrols`, `/patrols/new`, `/patrols/[id]`, and `/patrol-runs/[id]` use the normal authenticated shell. Auditor views omit mutation controls.
 - **Session toolbar** (model, Skill, context): inline on desktop; collapsed into `ChatOptionsSheet` on mobile.
 
 ## Settings modal (eight tabs)
@@ -125,6 +126,14 @@ Web Operator scope: `operator-scope-dialog.tsx` on home/session when Skill is `w
 
 See [Checkpoints & HITL](checkpoints-and-hitl.md).
 
+## Ops Patrol views
+
+`useFeatureFlags` reads the global `feature_flags` AppConfig section before showing Patrol navigation. The Pack wizard selects a persisted Collector, target scope, checks, IANA timezone, and daily cron; it never accepts raw probe URLs or PromQL. Pack detail exposes validation/activation/pause/trigger controls and 30-day metrics. Run detail renders server-computed check results, Finding decisions, and the signed evidence download.
+
+`AUDITOR` can open list/detail/report/evidence views but cannot create, validate, activate, pause, trigger, cancel, replay, delete, or decide a Finding. API enforcement remains authoritative even if a client renders stale controls.
+
+Client modules: `lib/api/patrols.ts`, `lib/api/types/patrols.ts`; business components live in `components/patrol/`. See [Ops Patrol architecture](ops-patrol.md).
+
 ## Session context panels
 
 When a session binds a codebase or knowledge base, `SessionContextPanel` shows:
@@ -162,3 +171,4 @@ Desktop: fixed side panel. Mobile: bottom sheet.
 - [LLM endpoints and models](llm-endpoints-and-models.md)
 - [Contract compatibility](contract-compatibility.md)
 - [Skills](skills.md)
+- [Ops Patrol](ops-patrol.md)

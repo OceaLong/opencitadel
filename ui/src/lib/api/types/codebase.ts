@@ -13,7 +13,7 @@ export type CodebaseStatus =
 
 export type CodebaseSourceType = "zip" | "git" | "files";
 
-export type ArtifactKind =
+type ArtifactKind =
   | "architecture"
   | "data_flow"
   | "module_dir"
@@ -125,7 +125,7 @@ export type DownloadCodebaseData = {
   download_url?: string;
 };
 
-export type CodebaseBuildState =
+type CodebaseBuildState =
   | "queued"
   | "running"
   | "succeeded"
@@ -133,7 +133,7 @@ export type CodebaseBuildState =
   | "failed"
   | "cancelled";
 
-export type CodebaseVersionState = "building" | "ready" | "degraded" | "failed";
+type CodebaseVersionState = "building" | "ready" | "degraded" | "failed";
 
 export type CodebaseBuild = {
   id: string;

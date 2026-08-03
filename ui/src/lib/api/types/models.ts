@@ -47,7 +47,7 @@ export type CreateLLMModelParams = {
   is_default?: boolean;
 };
 
-export type LLMEndpointModelSummary = {
+type LLMEndpointModelSummary = {
   id: string;
   display_name: string;
   model_name: string;

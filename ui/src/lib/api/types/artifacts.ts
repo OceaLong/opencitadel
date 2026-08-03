@@ -1,7 +1,7 @@
 // ==================== 交付物 ====================
 
-export type DeliveryArtifactKind = "doc" | "web";
-export type DeliveryArtifactStatus = "draft" | "updated" | "final";
+type DeliveryArtifactKind = "doc" | "web";
+type DeliveryArtifactStatus = "draft" | "updated" | "final";
 
 export type DeliveryArtifact = {
   id: string;

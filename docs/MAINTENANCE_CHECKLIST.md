@@ -22,6 +22,7 @@ Use this checklist when changing features, routes, configuration, deployment, or
 - [ ] KB/Codebase ingestion change → `knowledge-base-ingestion.md` (+ zh), `codebase-reindex.md` (+ zh), tutorial 02 (+ zh), `events.md` (+ zh)
 - [ ] Upload limit change → `nginx/README.md` (+ zh), `ui/src/lib/constants.ts`, `config-source-governance.md` (+ zh), `deployment.md` (+ zh)
 - [ ] Docker image name/count change → `deployment.md` (+ zh), Helm README (+ zh), `release.yml` comment if needed
+- [ ] Patrol Pack/Run/Collector change → `ops-patrol.md` architecture + operations + tutorial pairs, Collector README, API/UI READMEs, deployment examples
 
 ## Bilingual sync
 
@@ -46,6 +47,7 @@ Use this checklist when changing features, routes, configuration, deployment, or
 | KB ingest / OCR | `knowledge_base/ingestion_runner.py`, `worker/main.py`, `knowledge-base-ingestion.md` (+ zh) |
 | Service API Key | `X-Api-Key` header; inbound `/api/a2a` only |
 | Share links | Default TTL 168h; `/share/artifact/[token]` UI route |
+| Ops Patrol | `patrol_routes.py`, Pack/Run services, built-in template, `ops-collector/config.py`, Helm/Kustomize manifests |
 
 ## Automated check
 

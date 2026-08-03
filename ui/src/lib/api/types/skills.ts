@@ -1,6 +1,6 @@
 // ==================== Skill 管理 ====================
 
-export type SkillAgentParams = {
+type SkillAgentParams = {
   max_iterations?: number;
   max_retries?: number;
   max_search_results?: number;

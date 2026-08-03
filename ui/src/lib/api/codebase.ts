@@ -2,7 +2,6 @@ import { createIngestStream, get, post } from "./fetch";
 import { makeResourceClient } from "./resource-client";
 import type {
   Codebase,
-  CodebaseArtifact,
   CodebaseArtifactsData,
   CodebaseBuild,
   CodebasesData,
@@ -96,4 +95,4 @@ export const codebaseApi = {
   },
 };
 
-export type { Codebase, CodebaseArtifact };
+export type { Codebase };

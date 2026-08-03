@@ -1,0 +1,10 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fixture-deny-collector-egress
+  namespace: opencitadel-patrol-demo
+  labels: {opencitadel.io/patrol-fixture: "true"}
+spec:
+  podSelector: {matchLabels: {app: opencitadel-ops-collector}}
+  policyTypes: ["Egress"]
+  egress: []

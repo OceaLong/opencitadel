@@ -1,0 +1,15 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fixture-image-pull
+  namespace: opencitadel-patrol-demo
+  labels: {opencitadel.io/patrol-fixture: "true"}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: fixture-image-pull}}
+  template:
+    metadata: {labels: {app: fixture-image-pull, opencitadel.io/patrol-fixture: "true"}}
+    spec:
+      containers:
+        - name: app
+          image: invalid.invalid/opencitadel/does-not-exist:fixture

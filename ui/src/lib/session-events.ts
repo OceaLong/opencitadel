@@ -208,7 +208,7 @@ const TERMINAL_SESSION_STATUSES = new Set<SessionStatus>([
   "failed",
 ]);
 
-export function isTerminalSessionStatus(
+function isTerminalSessionStatus(
   status: SessionStatus | undefined,
 ): status is "waiting" | "completed" | "cancelled" | "failed" {
   return status !== undefined && TERMINAL_SESSION_STATUSES.has(status);
@@ -328,7 +328,7 @@ export function sessionFileToAttachment(f: SessionFile): AttachmentFile {
 }
 
 /** 从 ChatMessage.attachments 项转为 AttachmentFile（无 size 时用 0） */
-export function chatAttachmentToDisplay(a: {
+function chatAttachmentToDisplay(a: {
   file_id?: string;
   id?: string;
   filename: string;

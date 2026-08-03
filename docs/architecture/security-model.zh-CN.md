@@ -367,8 +367,8 @@ ENV=production
 
 ### CI 安全验证
 
-- `.github/workflows/ci.yml` 运行 API/UI/沙箱测试、五个镜像构建与
-  Trivy 扫描、Compose/Helm/Squid 渲染及本文档检查。
+- `.github/workflows/ci.yml` 运行 API/UI/沙箱/Collector 测试、六个镜像构建与
+  Trivy 扫描、Compose/Helm/Kustomize/Squid 渲染及本文档检查。
 - `.github/workflows/security.yml` 运行 Gitleaks 历史扫描、依赖评审与
   Lockfile 审计、CodeQL、Trivy 文件系统/IaC 扫描。
 - `.github/workflows/release.yml` 构建双架构镜像，并生成 SBOM、
@@ -386,6 +386,7 @@ ENV=production
 | PostgreSQL / Redis | 仅内网 | 切勿暴露到公网 |
 | MinIO | 内网；可选 public endpoint 变量 | 除非 LLM 需拉取 URL，否则保持内网 |
 | 沙箱 | 对 Worker 内网 HTTP | 不要映射宿主机端口 |
+| Ops Collector | 对 API/Worker 的内网 MCP | 仅 ClusterIP；固定只读工具与注册目的地 |
 | MCP / A2A 服务器 | Worker/API 出站 | 对目标做 allowlist |
 
 ---
@@ -396,3 +397,4 @@ ENV=production
 - [生产部署](../operations/deployment.zh-CN.md) — 防火墙、备份、HTTPS
 - [HTTPS 配置](../operations/https-domain-setup.zh-CN.md) — TLS 与域名绑定
 - [配置来源治理](config-source-governance.zh-CN.md) — 密钥与行为配置的边界
+- [Ops Patrol](ops-patrol.zh-CN.md) — Collector 信任边界、断言权威与证据

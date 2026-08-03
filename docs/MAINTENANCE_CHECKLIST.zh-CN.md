@@ -22,6 +22,7 @@
 - [ ] KB/Codebase 摄取变更 → `knowledge-base-ingestion.md`（+ 中文）、`codebase-reindex.md`（+ 中文）、教程 02（+ 中文）、`events.md`（+ 中文）
 - [ ] 上传限制变更 → `nginx/README.md`（+ 中文）、`ui/src/lib/constants.ts`、`config-source-governance.md`（+ 中文）、`deployment.md`（+ 中文）
 - [ ] Docker 镜像名/数量变更 → `deployment.md`（+ 中文）、Helm README（+ 中文），必要时 `release.yml` 注释
+- [ ] Patrol Pack/Run/Collector 变更 → Ops Patrol 架构/运维/教程双语文档、Collector README、API/UI README 与部署示例
 
 ## 双语同步
 
@@ -46,6 +47,7 @@
 | KB 摄取 / OCR | `knowledge_base/ingestion_runner.py`、`worker/main.py`、`knowledge-base-ingestion.md`（+ 中文） |
 | 服务 API Key | `X-Api-Key`；入站仅 `/api/a2a` |
 | 分享链接 | 默认 TTL 168h；UI 路由 `/share/artifact/[token]` |
+| Ops Patrol | `patrol_routes.py`、Pack/Run Service、内置 Template、`ops-collector/config.py`、Helm/Kustomize Manifest |
 
 ## 自动检查
 

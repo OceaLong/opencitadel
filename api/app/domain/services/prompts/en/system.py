@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # Shared system preset prompt for all agents
-PROMPT_VERSION = "1.1.0"
-
 FILE_RULES_PROSE = """<file_rules>
 - **Must** use file tools for read, write, append, and edit operations to avoid string escaping issues in shell commands
 - Proactively save intermediate results and store different types of reference information in separate files

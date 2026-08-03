@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export type SegmentedControlOption<T extends string> = {
+type SegmentedControlOption<T extends string> = {
   value: T;
   label: ReactNode;
   icon?: ReactNode;

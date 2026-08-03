@@ -11,6 +11,18 @@ This document is the authoritative reference for OpenCitadel configuration sourc
 | Behavioral config | `AppConfig`, backed by DB; `config.yaml` / Helm `appConfig` are seed only | `model_resilience`, `feature_flags`, `worker`, `sandbox` |
 | Secrets / connections | `Settings` environment variables | `EMBEDDING_API_KEY`, Postgres, Redis, COS, MinIO |
 
+### Ops Patrol split ownership
+
+| Concern | Source |
+|---------|--------|
+| Product/fixture flags | Global DB-backed `feature_flags` AppConfig section |
+| Retention defaults | `patrol_retention` in the persisted AppConfig seeded from `api/config.yaml` / Helm `appConfig` |
+| Collector connection and tool policies | Persisted MCP Server entity |
+| Collector target allowlists, registered probes, limits, Kubernetes identity | `OPS_COLLECTOR_*` plus its ServiceAccount in the Collector deployment, not API/Worker Settings |
+| Evidence HMAC | API/Worker `AUDIT_SIGNING_KEY` Settings and key-rotation fields |
+
+Do not copy Kubernetes credentials or raw probe destinations into a Pack. See [Ops Patrol architecture](ops-patrol.md) and the [Collector README](../../ops-collector/README.md).
+
 ## Object storage provider
 
 | Setting | Default | Compose local | Helm default |
@@ -123,3 +135,4 @@ When modifying `AppConfig` fields, sync: `app_config.py` schema, `config.yaml`, 
 - [Architecture Overview](overview.md)
 - [Model Resilience Design](model-resilience.md)
 - [API/SSE Protocol Compatibility](contract-compatibility.md)
+- [Ops Patrol](ops-patrol.md)

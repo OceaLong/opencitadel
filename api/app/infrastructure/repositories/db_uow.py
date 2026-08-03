@@ -38,6 +38,7 @@ from .db_scheduled_job_repository import DBScheduledJobRepository
 from .db_notification_repository import DBNotificationRepository
 from .db_user_repository import DBUserRepository
 from .db_resource_governance_repository import DBResourceGovernanceRepository
+from .db_patrol_repository import DBPatrolRepository
 from app.domain.repositories.resource_governance_repository import (
     ResourceGovernanceRepository,
 )
@@ -127,6 +128,7 @@ class DBUnitOfWork(IUnitOfWork):
         self.resource_governance = DBResourceGovernanceRepository(
             db_session=self.db_session
         )
+        self.patrol = DBPatrolRepository(db_session=self.db_session)
 
         return self
 

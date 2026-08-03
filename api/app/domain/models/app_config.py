@@ -252,6 +252,8 @@ class FeatureFlagsConfig(BaseModel):
     enable_artifacts: bool = True
     enable_hitl_gates: bool = True
     enable_skill_auto_recommend: bool = False
+    enable_ops_patrol: bool = False
+    enable_ops_patrol_fixture_replay: bool = False
 
 
 class GateProfileSettings(BaseModel):
@@ -380,6 +382,13 @@ class CodebaseConfig(BaseModel):
     version_gc_batch_size: int = Field(default=50, gt=0, le=500)
 
 
+class PatrolRetentionConfig(BaseModel):
+    run_days: int = Field(default=30, ge=1, le=90)
+    finding_days: int = Field(default=30, ge=1, le=90)
+    collector_evidence_days: int = Field(default=7, ge=1, le=90)
+    cleanup_batch_size: int = Field(default=100, ge=1, le=1000)
+
+
 class AppConfig(BaseModel):
     """应用运行时配置（config.yaml）"""
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -399,5 +408,6 @@ class AppConfig(BaseModel):
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     knowledge_base: KnowledgeBaseConfig = Field(default_factory=KnowledgeBaseConfig)
     codebase: CodebaseConfig = Field(default_factory=CodebaseConfig)
+    patrol_retention: PatrolRetentionConfig = Field(default_factory=PatrolRetentionConfig)
 
     model_config = ConfigDict(extra="allow")

@@ -181,6 +181,7 @@
     "knowledge": "Document knowledge base",
     "marketplace": "App marketplace",
     "automation": "Automation",
+    "patrol": "Ops Patrol",
     "modelStatus": "{status, select, unknown {Model status unknown} unavailable {Model unavailable} ok {Model OK} other {Model status}}",
     "workspaceMenu": "Workspace"
   },
@@ -1676,33 +1677,33 @@
     "title": "Document knowledge base"
   },
   "codebase": {
-  "readFailed": "Read failed",
-  "evidence": "Evidence",
-  "downloadSuccess": "Packaged: {key}",
-  "downloadFailed": "Download failed",
-  "reanalyze": "Re-analyze",
-  "viewBuild": "View build",
-  "versionStatusLoading": "Loading codebase versions",
-  "versionStatusLoadError": "Failed to load codebase versions",
-  "versionActionError": "Failed to update codebase build",
-  "activeVersion": "Active version: {version}",
-  "noActiveVersion": "No active version",
-  "versionCapabilities": "Capabilities: {capabilities}",
-  "capabilityAvailable": "available",
-  "capabilityUnavailable": "unavailable",
-  "noCapabilities": "none",
-  "versionDegraded": "Degraded: {reasons}",
-  "unsupportedViews": "Unsupported views: {views}",
-  "candidateBuild": "Candidate build {state} · {phase} · {progress}%",
-  "candidatePhasePending": "pending",
-  "candidateDegraded": "Candidate degraded: {reasons}",
-  "candidateHeartbeat": "Heartbeat: {heartbeat}",
-  "retryBuild": "Retry",
-  "cancelBuild": "Cancel",
-  "previousVersions": "Previous versions",
-  "viewHistoricalVersion": "View version {version}",
-  "viewingHistoricalVersion": "Viewing version: {version}",
-  "deleteTitle": "Delete codebase?",
+    "readFailed": "Read failed",
+    "evidence": "Evidence",
+    "downloadSuccess": "Packaged: {key}",
+    "downloadFailed": "Download failed",
+    "reanalyze": "Re-analyze",
+    "viewBuild": "View build",
+    "versionStatusLoading": "Loading codebase versions",
+    "versionStatusLoadError": "Failed to load codebase versions",
+    "versionActionError": "Failed to update codebase build",
+    "activeVersion": "Active version: {version}",
+    "noActiveVersion": "No active version",
+    "versionCapabilities": "Capabilities: {capabilities}",
+    "capabilityAvailable": "available",
+    "capabilityUnavailable": "unavailable",
+    "noCapabilities": "none",
+    "versionDegraded": "Degraded: {reasons}",
+    "unsupportedViews": "Unsupported views: {views}",
+    "candidateBuild": "Candidate build {state} · {phase} · {progress}%",
+    "candidatePhasePending": "pending",
+    "candidateDegraded": "Candidate degraded: {reasons}",
+    "candidateHeartbeat": "Heartbeat: {heartbeat}",
+    "retryBuild": "Retry",
+    "cancelBuild": "Cancel",
+    "previousVersions": "Previous versions",
+    "viewHistoricalVersion": "View version {version}",
+    "viewingHistoricalVersion": "Viewing version: {version}",
+    "deleteTitle": "Delete codebase?",
     "deleteDescription": "This will permanently delete the codebase and its index. This cannot be undone.",
     "deleteSuccess": "Deleted \"{name}\"",
     "deleteFailed": "Failed to delete codebase",
@@ -1774,6 +1775,7 @@
     "marketplace": "Apps",
     "more": "More",
     "automation": "Automation",
+    "patrol": "Patrol",
     "teams": "Teams"
   },
   "mermaid": {
@@ -1784,7 +1786,8 @@
     "refreshing": "Refreshing...",
     "title": "Notifications",
     "scheduledJobCompleted": "Scheduled job \"{jobName}\" completed",
-    "scheduledJobStarted": "Scheduled job \"{jobName}\" started"
+    "scheduledJobStarted": "Scheduled job \"{jobName}\" started",
+    "patrolCompleted": "Patrol \"{packName}\" completed with status {status}"
   },
   "toolUse": {
     "statusRunning": "running",
@@ -2023,6 +2026,180 @@
     "home": "Home",
     "title": "Shared artifact",
     "incompleteContentWarning": "Artifact content may be incomplete (truncated during storage or generation). Regenerate or compare with the sandbox attachment."
+  },
+  "patrol": {
+    "description": "Read-only, evidence-first health checks for self-hosted application stacks",
+    "evidencePercent": "Evidence {value}%",
+    "nextRun": "Next {value}",
+    "scheduleOff": "Schedule off",
+    "actions": {
+      "acknowledge": "Acknowledge",
+      "activate": "Activate",
+      "cancel": "Cancel",
+      "confirm": "Confirm",
+      "create": "Create patrol",
+      "downloadEvidence": "Download evidence package",
+      "falsePositive": "False positive",
+      "pause": "Pause",
+      "refresh": "Refresh",
+      "resolve": "Resolved",
+      "revalidate": "Revalidate",
+      "runNow": "Run now",
+      "view": "View"
+    },
+    "checks": {
+      "availability": "Workload availability",
+      "backup": "Backup freshness",
+      "dependency": "Dependency health",
+      "endpoint": "Endpoint health",
+      "events": "Warning events",
+      "http5xx": "Application 5xx",
+      "pending": "Pending Pods / failed Jobs",
+      "pressure": "Node / PVC pressure",
+      "restarts": "Container restarts",
+      "tls": "TLS expiry"
+    },
+    "decision": {
+      "falsePositiveReason": "False-positive reason (required)",
+      "notes": "Decision notes",
+      "title": "Record Finding decision"
+    },
+    "disabled": {
+      "description": "An administrator must first enable feature_flags.enable_ops_patrol.",
+      "title": "Ops Patrol is not enabled"
+    },
+    "empty": {
+      "description": "Connect a read-only Collector, run a dry run, then enable the daily schedule.",
+      "noRuns": "No runs yet.",
+      "title": "Create your first daily patrol"
+    },
+    "errors": {
+      "action": "Action failed",
+      "create": "Failed to create patrol",
+      "evidenceDownload": "Failed to download evidence",
+      "findingUpdate": "Failed to update Finding",
+      "load": "Failed to load patrols",
+      "runLoad": "Failed to load Run",
+      "trigger": "Failed to trigger patrol"
+    },
+    "findingStatus": {
+      "acknowledged": "Acknowledged",
+      "false_positive": "False positive",
+      "open": "Open",
+      "resolved": "Resolved"
+    },
+    "new": {
+      "description": "Configure the read-only Collector, scope, checks, and schedule in four steps",
+      "readOnly": "Auditors have read-only access and cannot create patrols.",
+      "title": "Create daily patrol"
+    },
+    "metrics": {
+      "falsePositives": "False positives",
+      "findings": "Findings",
+      "insufficient": "Insufficient data ({count}/7 runs). No trend is shown.",
+      "minutes": "{value} min",
+      "reviewTime": "Median review time",
+      "successRate": "Scheduled-run success rate",
+      "title": "30-day metrics"
+    },
+    "pack": {
+      "boundary": "10 checks; no remediation, Shell, browser, or arbitrary query capability.",
+      "capabilities": "Capabilities and permissions",
+      "environment": "Environment",
+      "needsValidation": "This Pack changed and must be revalidated before activation.",
+      "notValidated": "Not validated",
+      "nextRun": "Next run",
+      "recentRuns": "Recent runs",
+      "schedule": "Schedule",
+      "targetSchedule": "Target and schedule",
+      "validationErrors": "Validation errors",
+      "verifiedTools": "{count} verified read-only tools"
+    },
+    "run": {
+      "allChecks": "All check results",
+      "assertions": "Server-side assertions",
+      "evidenceCompleteness": "Evidence completeness",
+      "evidenceRefs": "Evidence refs and hashes",
+      "needsAttention": "Needs attention",
+      "noFindings": "No Findings.",
+      "observed": "Observed values (redacted)",
+      "title": "Patrol Run"
+    },
+    "severity": {
+      "critical": "Critical",
+      "info": "Info",
+      "warning": "Warning"
+    },
+    "status": {
+      "active": "Active",
+      "cancelled": "Cancelled",
+      "completed": "Completed",
+      "completed_with_findings": "Completed with findings",
+      "draft": "Draft",
+      "error": "Error",
+      "fail": "Fail",
+      "failed": "Failed",
+      "invalid": "Invalid",
+      "pass": "Pass",
+      "paused": "Paused",
+      "queued": "Queued",
+      "running": "Running",
+      "skipped": "Skipped",
+      "validating": "Validating",
+      "warn": "Warn"
+    },
+    "thresholds": {
+      "availability": "unavailable replicas = 0",
+      "backup": "WARN > 24h; FAIL > 48h",
+      "dependency": "all registered dependencies healthy",
+      "endpoint": "healthy response; WARN latency ≥ 2s",
+      "events": "no high-risk Warning events",
+      "http5xx": "WARN ≥ 1%; FAIL ≥ 5%",
+      "pending": "no Pending Pods, failed Jobs, or stale CronJobs",
+      "pressure": "no node pressure; PVC WARN ≥ 80%, FAIL ≥ 90%",
+      "restarts": "WARN > 3; FAIL > 10 per hour",
+      "tls": "WARN < 30d; FAIL < 7d"
+    },
+    "toast": {
+      "activated": "Dry-run validation passed and the patrol is active",
+      "paused": "Patrol paused",
+      "started": "Patrol started",
+      "validationFailed": "Validation failed; review and correct the errors"
+    },
+    "trigger": {
+      "manual": "Manual",
+      "replay": "Replay",
+      "schedule": "Schedule",
+      "webhook": "Webhook"
+    },
+    "wizard": {
+      "collector": "Read-only Ops Collector",
+      "collectorPlaceholder": "Select an enabled MCP Server",
+      "createAndDryRun": "Create and dry run",
+      "cronHint": "Only minute hour * * * is supported; creation starts with a dry run.",
+      "dailyCron": "Daily cron",
+      "defaultName": "OpenCitadel daily patrol",
+      "name": "Patrol name",
+      "next": "Next",
+      "notification": "Notification channel",
+      "notificationHint": "Run completion and Findings are sent to the in-app notification inbox.",
+      "permission": "Permission",
+      "previous": "Previous",
+      "readPermission": "fixed integration_read and Kubernetes get/list/watch only",
+      "readOnlyBoundary": "Only fixed read-only tools in the capability manifest are allowed. Shell, browser, arbitrary URLs, and arbitrary PromQL are never exposed.",
+      "steps": {
+        "checks": "Checks and thresholds",
+        "schedule": "Schedule and notification",
+        "scope": "Select scope",
+        "target": "Connect target"
+      },
+      "stepsAria": "Patrol creation steps",
+      "scheduleEnabled": "Enable daily schedule after validation",
+      "scheduleEnabledHint": "Activation enables this schedule only after capability scan and dry run pass.",
+      "source": "Source",
+      "threshold": "Threshold",
+      "timezone": "IANA timezone"
+    }
   },
   "workspaceContext": {
     "codebasePanelTitle": "Codebase context",

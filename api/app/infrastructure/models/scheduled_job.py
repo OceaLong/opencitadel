@@ -36,6 +36,9 @@ class ScheduledJobModel(Base):
     operator_domains: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     gate_profile: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, server_default="UTC")
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="generic")
+    source_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_run_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
@@ -65,6 +68,9 @@ class ScheduledJobModel(Base):
             "operator_domains": self.operator_domains or [],
             "gate_profile": self.gate_profile,
             "enabled": self.enabled,
+            "timezone": self.timezone,
+            "source_type": self.source_type,
+            "source_id": self.source_id,
             "next_run_at": self.next_run_at,
             "last_run_at": self.last_run_at,
             "last_run_status": self.last_run_status,

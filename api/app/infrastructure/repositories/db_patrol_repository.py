@@ -1,0 +1,139 @@
+"""PostgreSQL Patrol repository with workspace scoping."""
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.domain.models.patrol import PatrolCheckResult, PatrolFinding, PatrolPack, PatrolRun
+from app.domain.models.scope import OwnerScope, OwnerScopeType
+from app.domain.repositories.patrol_repository import PatrolRepository
+from app.infrastructure.models.patrol import PatrolCheckResultModel, PatrolFindingModel, PatrolPackModel, PatrolRunModel
+
+
+class DBPatrolRepository(PatrolRepository):
+    def __init__(self, db_session: AsyncSession) -> None:
+        self.db_session = db_session
+
+    @staticmethod
+    def _scope_pack(stmt, scope: OwnerScope | None):
+        if scope is None:
+            return stmt
+        if scope.type == OwnerScopeType.TEAM:
+            return stmt.where(PatrolPackModel.team_id == scope.team_id)
+        return stmt.where(PatrolPackModel.owner_user_id == scope.user_id, PatrolPackModel.team_id.is_(None))
+
+    def _scope_run(self, stmt, scope: OwnerScope | None):
+        if scope is None:
+            return stmt
+        return self._scope_pack(stmt.join(PatrolPackModel, PatrolPackModel.id == PatrolRunModel.pack_id), scope)
+
+    async def save_pack(self, pack: PatrolPack) -> PatrolPack:
+        current = await self.db_session.get(PatrolPackModel, pack.id)
+        if current is None:
+            current = PatrolPackModel.from_domain(pack)
+            self.db_session.add(current)
+        else:
+            current.update_from_domain(pack)
+        await self.db_session.flush()
+        return current.to_domain()
+
+    async def get_pack(self, pack_id: str, scope: OwnerScope | None = None, *, for_update: bool = False) -> PatrolPack | None:
+        stmt = self._scope_pack(select(PatrolPackModel).where(PatrolPackModel.id == pack_id, PatrolPackModel.deleted_at.is_(None)), scope)
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = (await self.db_session.execute(stmt)).scalar_one_or_none()
+        return row.to_domain() if row else None
+
+    async def list_packs(self, scope: OwnerScope, *, limit: int = 20, offset: int = 0) -> list[PatrolPack]:
+        stmt = self._scope_pack(select(PatrolPackModel).where(PatrolPackModel.deleted_at.is_(None)), scope).order_by(PatrolPackModel.updated_at.desc()).limit(min(max(limit, 1), 100)).offset(max(offset, 0))
+        return [row.to_domain() for row in (await self.db_session.execute(stmt)).scalars().all()]
+
+    async def save_run(self, run: PatrolRun) -> PatrolRun:
+        current = await self.db_session.get(PatrolRunModel, run.id)
+        if current is None:
+            current = PatrolRunModel.from_domain(run)
+            self.db_session.add(current)
+        else:
+            current.update_from_domain(run)
+        await self.db_session.flush()
+        return current.to_domain()
+
+    async def get_run(self, run_id: str, scope: OwnerScope | None = None, *, for_update: bool = False) -> PatrolRun | None:
+        stmt = self._scope_run(select(PatrolRunModel).where(PatrolRunModel.id == run_id), scope)
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = (await self.db_session.execute(stmt)).scalar_one_or_none()
+        return row.to_domain() if row else None
+
+    async def get_run_by_session_id(self, session_id: str) -> PatrolRun | None:
+        row = (await self.db_session.execute(select(PatrolRunModel).where(PatrolRunModel.session_id == session_id))).scalar_one_or_none()
+        return row.to_domain() if row else None
+
+    async def get_run_by_idempotency_key(self, key: str) -> PatrolRun | None:
+        row = (await self.db_session.execute(select(PatrolRunModel).where(PatrolRunModel.idempotency_key == key))).scalar_one_or_none()
+        return row.to_domain() if row else None
+
+    async def get_active_run_for_pack(self, pack_id: str) -> PatrolRun | None:
+        row = (await self.db_session.execute(select(PatrolRunModel).where(PatrolRunModel.pack_id == pack_id, PatrolRunModel.status.in_(("queued", "running"))))).scalar_one_or_none()
+        return row.to_domain() if row else None
+
+    async def list_runs(self, scope: OwnerScope, *, pack_id: str | None = None, status: str | None = None, created_from: datetime | None = None, created_to: datetime | None = None, limit: int = 20, offset: int = 0) -> list[PatrolRun]:
+        stmt = self._scope_run(select(PatrolRunModel), scope)
+        if pack_id:
+            stmt = stmt.where(PatrolRunModel.pack_id == pack_id)
+        if status:
+            stmt = stmt.where(PatrolRunModel.status == status)
+        if created_from:
+            stmt = stmt.where(PatrolRunModel.created_at >= created_from)
+        if created_to:
+            stmt = stmt.where(PatrolRunModel.created_at <= created_to)
+        stmt = stmt.order_by(PatrolRunModel.created_at.desc()).limit(min(max(limit, 1), 100)).offset(max(offset, 0))
+        return [row.to_domain() for row in (await self.db_session.execute(stmt)).scalars().all()]
+
+    async def save_check_results(self, items: list[PatrolCheckResult]) -> list[PatrolCheckResult]:
+        saved: list[PatrolCheckResult] = []
+        for item in items:
+            stmt = select(PatrolCheckResultModel).where(PatrolCheckResultModel.run_id == item.run_id, PatrolCheckResultModel.check_id == item.check_id)
+            current = (await self.db_session.execute(stmt)).scalar_one_or_none()
+            if current is None:
+                current = PatrolCheckResultModel.from_domain(item)
+                self.db_session.add(current)
+            saved.append(item)
+        await self.db_session.flush()
+        return saved
+
+    async def list_check_results(self, run_id: str, scope: OwnerScope | None = None) -> list[PatrolCheckResult]:
+        if scope is not None and await self.get_run(run_id, scope) is None:
+            return []
+        rows = (await self.db_session.execute(select(PatrolCheckResultModel).where(PatrolCheckResultModel.run_id == run_id).order_by(PatrolCheckResultModel.started_at.asc(), PatrolCheckResultModel.check_id.asc()))).scalars().all()
+        return [row.to_domain() for row in rows]
+
+    async def save_finding(self, finding: PatrolFinding) -> PatrolFinding:
+        current = await self.db_session.get(PatrolFindingModel, finding.id)
+        if current is None:
+            current = PatrolFindingModel.from_domain(finding)
+            self.db_session.add(current)
+        else:
+            current.update_from_domain(finding)
+        await self.db_session.flush()
+        return current.to_domain()
+
+    async def get_finding(self, finding_id: str, scope: OwnerScope | None = None, *, for_update: bool = False) -> PatrolFinding | None:
+        stmt = select(PatrolFindingModel).join(PatrolRunModel, PatrolRunModel.id == PatrolFindingModel.run_id)
+        stmt = self._scope_run(stmt, scope).where(PatrolFindingModel.id == finding_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = (await self.db_session.execute(stmt)).scalar_one_or_none()
+        return row.to_domain() if row else None
+
+    async def list_findings(self, run_id: str, scope: OwnerScope | None = None) -> list[PatrolFinding]:
+        if scope is not None and await self.get_run(run_id, scope) is None:
+            return []
+        rows = (await self.db_session.execute(select(PatrolFindingModel).where(PatrolFindingModel.run_id == run_id).order_by(PatrolFindingModel.severity.desc(), PatrolFindingModel.last_seen_at.desc()))).scalars().all()
+        return [row.to_domain() for row in rows]
+
+    async def get_open_finding_by_fingerprint(self, fingerprint: str) -> PatrolFinding | None:
+        row = (await self.db_session.execute(select(PatrolFindingModel).where(PatrolFindingModel.fingerprint == fingerprint, PatrolFindingModel.status.in_(("open", "acknowledged"))).order_by(PatrolFindingModel.last_seen_at.desc()).limit(1))).scalar_one_or_none()
+        return row.to_domain() if row else None

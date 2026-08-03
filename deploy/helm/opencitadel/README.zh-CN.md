@@ -21,7 +21,7 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --set image.worker.repository=your-registry/opencitadel-worker
 ```
 
-完整镜像构建/推送步骤与生产环境 `--set` 参数（五个镜像、ingress、sandbox
+完整镜像构建/推送步骤与生产环境 `--set` 参数（六个镜像，含可选 Ops Collector、ingress、sandbox
 driver）：见[部署指南](../../../docs/operations/deployment.zh-CN.md)的
 Kubernetes / Helm 部署一节。
 
@@ -51,6 +51,10 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
 | `postgresql.user` | opencitadel_app | 受 RLS 约束的非超级用户应用/迁移角色 |
 | `minio.enabled` | false | 集群内 MinIO（local 模式设为 true） |
 | `minio.storage` | 20Gi | MinIO PVC 大小 |
+| `opsCollector.enabled` | false | 部署可选的固定只读 Patrol Collector |
+| `opsCollector.image.*` | 见 values.yaml | Collector Repository、Tag 与 Pull Policy |
+| `opsCollector.allowedNamespaces` / `allowedWorkloads` | 受限默认值 | Kubernetes Scope 白名单 |
+| `opsCollector.registered*` | `{}` | 注册的 Prometheus/HTTP/TLS/备份/依赖目标 |
 | `env.STORAGE_PROVIDER` | cos | 对象存储后端：`cos` 或 `minio` |
 | `env` | 见 values.yaml | 非敏感环境变量（DB/Redis 主机、日志级别等） |
 | `secrets` | 见 values.yaml | 敏感配置，渲染为 Secret 并通过 `envFrom` 注入 |
@@ -177,7 +181,7 @@ kubectl -n opencitadel exec deployment/opencitadel-api -- \
 
 ## Release 镜像
 
-打 tag（`v*`）后，[`.github/workflows/release.yml`](../../../.github/workflows/release.yml) 会发布多架构镜像到 `ghcr.io/ocealong/opencitadel-{api,worker,migrate,ui,sandbox}`。通过 `image.*.repository` 与 `image.*.tag` 引用 release 构建。
+打 tag（`v*`）后，[`.github/workflows/release.yml`](../../../.github/workflows/release.yml) 会发布多架构镜像到 `ghcr.io/ocealong/opencitadel-{api,worker,migrate,ui,sandbox,ops-collector}`。通过 `image.*` 与 `opsCollector.image.*` 引用 Release 构建。
 
 ## 架构
 
@@ -208,5 +212,6 @@ kubectl scale deployment opencitadel-worker --replicas=4 -n opencitadel
 
 - 根目录 [README.md](../../../README.zh-CN.md) — 架构与配置说明
 - [生产部署指南](../../../docs/operations/deployment.zh-CN.md) — 生产部署指南
+- [Ops Patrol 运维](../../../docs/operations/ops-patrol.zh-CN.md) — Collector Values、Policy、验证与恢复
 - [架构演进指南](../../../docs/architecture/architecture-evolution.zh-CN.md) — 扩容与沙箱外置
 - [api/README.zh-CN.md](../../../api/README.zh-CN.md) — API / Worker 本地开发

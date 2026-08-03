@@ -28,18 +28,6 @@ TIMELINE_EVENT_TYPES = frozenset({
     "error",
 })
 
-NON_TIMELINE_UI_EVENT_TYPES = frozenset({
-    "title",
-    "plan",
-    "wait",
-    "done",
-    "usage",
-    "session_status",
-    "artifact",
-    "approval",
-})
-
-
 def should_persist_event(event: "BaseEvent") -> bool:
     """Whether an event should be appended to session_events table."""
     if event.type in TRANSIENT_EVENT_TYPES:
@@ -108,11 +96,6 @@ def project_events(
             include_internal=include_internal,
         )
     ]
-
-
-def filter_events_for_session_replay(events: list) -> list:
-    """Drop transient/internal events when replaying persisted session history."""
-    return project_events(events, include_transient=False)
 
 
 def _value(value):

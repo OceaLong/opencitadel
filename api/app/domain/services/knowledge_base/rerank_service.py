@@ -6,16 +6,12 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Protocol, TypeVar
+from typing import List, Optional, TypeVar
 
 from app.domain.external.llm import LLM
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
-
-
-class CandidateWithContent(Protocol):
-    content: str
 
 
 @dataclass

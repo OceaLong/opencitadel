@@ -316,9 +316,3 @@ class LazyBrowser:
 
     async def console_view(self, max_lines: Optional[int] = None) -> ToolResult:
         return await (await self._resolve()).console_view(max_lines)
-
-    async def invalidate(self) -> None:
-        """Drop cached browser connection after sandbox profile restore."""
-        if self._inner is not None:
-            await self._inner.cleanup()
-        self._inner = None

@@ -54,6 +54,12 @@ from .resource_governance import (
     ToolApprovalBatchORM,
     ToolApprovalCallORM,
 )
+from .patrol import (
+    PatrolCheckResultModel,
+    PatrolFindingModel,
+    PatrolPackModel,
+    PatrolRunModel,
+)
 
 __all__ = [
     "Base",
@@ -103,4 +109,8 @@ __all__ = [
     "ResourceBuildORM",
     "SessionResourceBindingORM",
     "ResourceBuildEventORM",
+    "PatrolPackModel",
+    "PatrolRunModel",
+    "PatrolCheckResultModel",
+    "PatrolFindingModel",
 ]

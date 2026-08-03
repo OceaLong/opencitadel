@@ -125,7 +125,6 @@ def _build_factory(sandbox_cls: MagicMock) -> TaskRunnerFactory:
         task_state_port=MagicMock(),
         observability_port=MagicMock(),
         event_sequence_port=MagicMock(),
-        session_state_factory=lambda: MagicMock(),
         mcp_connection_pool=MagicMock(),
         a2a_connection_pool=MagicMock(),
     )

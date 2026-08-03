@@ -89,9 +89,9 @@ Full design: [Architecture overview](docs/architecture/overview.md).
 | Audience | Start here |
 |----------|------------|
 | First run | [Self-host in 10 minutes](docs/tutorials/01-self-host-10-minutes.md) |
-| Ops / DevOps | [Deployment](docs/operations/deployment.md) · [HTTPS](docs/operations/https-domain-setup.md) · [Helm](deploy/helm/opencitadel/README.md) |
+| Ops / DevOps | [Deployment](docs/operations/deployment.md) · [Ops Patrol](docs/tutorials/06-ops-patrol.md) · [Patrol operations](docs/operations/ops-patrol.md) · [HTTPS](docs/operations/https-domain-setup.md) · [Helm](deploy/helm/opencitadel/README.md) |
 | Enterprise use cases | [Internal knowledge base](docs/tutorials/02-internal-knowledge-base.md) · [MCP integrations](docs/tutorials/03-mcp-integrations.md) · [Governed Web Operator](docs/tutorials/04-governed-web-operator.md) · [Refund reconciliation & compliance](docs/tutorials/05-refund-reconciliation-compliance.md) |
-| Platform engineers | [Docs index](docs/README.md) · [Security model](docs/architecture/security-model.md) · [Checkpoints & HITL](docs/architecture/checkpoints-and-hitl.md) · [Events](docs/architecture/events.md) |
+| Platform engineers | [Docs index](docs/README.md) · [Security model](docs/architecture/security-model.md) · [Ops Patrol architecture](docs/architecture/ops-patrol.md) · [Checkpoints & HITL](docs/architecture/checkpoints-and-hitl.md) · [Events](docs/architecture/events.md) |
 | Contributors | [Contributing](.github/CONTRIBUTING.md) · [Security](.github/SECURITY.md) |
 
 ## Local development

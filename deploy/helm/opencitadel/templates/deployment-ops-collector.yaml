@@ -1,0 +1,80 @@
+{{- if .Values.opsCollector.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-ops-collector
+  labels:
+    app.kubernetes.io/component: ops-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: ops-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: ops-collector
+    spec:
+      serviceAccountName: {{ if .Values.opsCollector.serviceAccount.create }}{{ include "opencitadel.fullname" . }}-ops-collector{{ else }}{{ required "opsCollector.serviceAccount.name is required when serviceAccount.create=false" .Values.opsCollector.serviceAccount.name }}{{ end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: collector
+          image: "{{ .Values.opsCollector.image.repository }}:{{ .Values.opsCollector.image.tag }}"
+          imagePullPolicy: {{ .Values.opsCollector.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: mcp
+              containerPort: 8090
+          env:
+            - name: OPS_COLLECTOR_TARGET_REF
+              value: {{ .Values.opsCollector.targetRef | quote }}
+            - name: OPS_COLLECTOR_ALLOWED_NAMESPACES
+              value: {{ .Values.opsCollector.allowedNamespaces | toJson | quote }}
+            - name: OPS_COLLECTOR_ALLOWED_WORKLOADS
+              value: {{ .Values.opsCollector.allowedWorkloads | toJson | quote }}
+            - name: OPS_COLLECTOR_PROMETHEUS_QUERIES
+              value: {{ .Values.opsCollector.registeredPrometheusQueries | toJson | quote }}
+            - name: OPS_COLLECTOR_HTTP_PROBES
+              value: {{ .Values.opsCollector.registeredHttpProbes | toJson | quote }}
+            - name: OPS_COLLECTOR_CERTIFICATE_PROBES
+              value: {{ .Values.opsCollector.registeredCertificateProbes | toJson | quote }}
+            - name: OPS_COLLECTOR_BACKUPS
+              value: {{ .Values.opsCollector.registeredBackups | toJson | quote }}
+            - name: OPS_COLLECTOR_DEPENDENCIES
+              value: {{ .Values.opsCollector.registeredDependencies | toJson | quote }}
+          readinessProbe:
+            tcpSocket: {port: mcp}
+          livenessProbe:
+            tcpSocket: {port: mcp}
+            initialDelaySeconds: 20
+          resources:
+            {{- toYaml .Values.opsCollector.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-ops-collector
+spec:
+  selector:
+    app.kubernetes.io/component: ops-collector
+  ports:
+    - name: mcp
+      port: 8090
+      targetPort: mcp
+{{- end }}

@@ -1,0 +1,1 @@
+{"case_id":"17-backup-warn","fault":"latest backup is 30 hours old","injected_fault":true,"expected_results":[{"check_id":"backup-freshness","status":"warn","severity":"warning","assertion_id":"backup-warning"}],"required_evidence":["backup_metadata"],"expected_write_operations":0,"teardown":{"strategy":"reset-baseline"}}

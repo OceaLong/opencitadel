@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from app.domain.models.message import MediaAttachment
 
@@ -61,20 +61,3 @@ async def extract_video_frames(
         return attachments
 
     return await asyncio.to_thread(_extract)
-
-
-async def extract_frames_from_file_path(
-        filepath: str,
-        sandbox,
-        *,
-        max_frames: int = 8,
-) -> List[MediaAttachment]:
-    """从沙箱视频文件路径抽帧。"""
-    try:
-        file_data = await sandbox.download_file(filepath)
-        video_bytes = file_data.read()
-    except Exception as exc:
-        logger.warning("读取视频文件失败 path=%s: %s", filepath, exc)
-        return []
-    mime = "video/mp4" if filepath.lower().endswith(".mp4") else "video/webm"
-    return await extract_video_frames(video_bytes, max_frames=max_frames, mime_type=mime)

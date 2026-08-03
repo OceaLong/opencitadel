@@ -44,6 +44,18 @@ npm test
 | `PLAYWRIGHT_BASE_URL` | `http://localhost:8088` | OpenCitadel UI 基址 |
 | `OPS_CONSOLE_URL` | `http://localhost:9099` | OpsConsole 演示后端 |
 
+## Ops Patrol 真实运行时路径
+
+`patrol.spec.ts` 需要正常运行且已配置工具调用模型的 Worker，以及预先完成配置的 Collector 环境。启用测试前必须持久化九个固定只读 MCP Tool Policy，并为十项 Baseline 检查提供健康输入（Kubernetes 访问及六个注册目标 ID）。Compose Profile 只提供传输，不提供 Kubernetes 凭据或注册探针后端，因此需要显式启用：
+
+```bash
+PATROL_E2E=1 npm test -- patrol.spec.ts
+```
+
+该场景经过真实 UI、任务运行时、MCP transport、Collector、服务端断言、证据下载、功能总开关和 390px 溢出检查，不通过 HTTP 捷径注入 fixture 结果。CI 仅在提供模型的受保护环境中通过仓库变量 `PATROL_E2E_ENABLED=1` 启用。
+
+测试只会启用/关闭已有 MCP 记录和产品开关，不会创建安全 Policy 或伪造 Probe 结果。受保护 E2E 环境准备流程见 [Ops Patrol 运维手册](../docs/operations/ops-patrol.zh-CN.md#注册-mcp-server)。
+
 有界面模式（调试）：
 
 ```bash
@@ -55,3 +67,5 @@ npm run test:headed
 - [受治理 Web Operator 教程](../docs/tutorials/04-governed-web-operator.zh-CN.md)
 - [Web Operator 架构](../docs/architecture/web-operator.zh-CN.md)
 - [OpsConsole 演示 README](../demo/ops-console/README.zh-CN.md)
+- [Ops Patrol 教程](../docs/tutorials/06-ops-patrol.zh-CN.md)
+- [Ops Patrol 运维](../docs/operations/ops-patrol.zh-CN.md)

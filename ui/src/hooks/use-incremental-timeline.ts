@@ -1,5 +1,5 @@
 "use client";
-/* eslint-disable react-hooks/refs, react-hooks/set-state-in-effect -- incremental timeline keeps prior state in refs */
+/* eslint-disable react-hooks/set-state-in-effect -- incremental timeline rebuilds derived state from event input */
 
 import { useEffect, useRef, useState } from "react";
 

@@ -69,7 +69,6 @@ from app.domain.services.prompts.loader import get_internal_prompts
 logger = logging.getLogger(__name__)
 
 BROWSER_VISION_TOOLS = frozenset({"browser_screenshot"})
-STATEFUL_TOOL_NAMES = frozenset({"browser", "shell"})
 
 # Tools whose large results may be offloaded to sandbox filesystem cache.
 _OFFLOAD_ELIGIBLE_TOOLS = frozenset({
@@ -203,15 +202,6 @@ class BaseAgent(ABC):
         if self._tool_cache_signature != signature:
             self._rebuild_tool_cache()
 
-    def _collect_registered_tool_names(self) -> List[str]:
-        names: List[str] = []
-        for tool in self._tools:
-            for schema in tool.get_tools():
-                name = schema.get("function", {}).get("name", "")
-                if name:
-                    names.append(name)
-        return names
-
     def _get_available_tools(self) -> List[Dict[str, Any]]:
         """获取Agent所有可用的工具列表参数声明/Schema"""
         self._ensure_tool_cache()
@@ -247,17 +237,6 @@ class BaseAgent(ABC):
 
     def set_locale(self, locale: str) -> None:
         self._prompt_locale = locale or "en"
-
-    def set_prompt_overrides(
-            self,
-            *,
-            writing_style_override: Optional[str] = None,
-            override_base_rules: Optional[bool] = None,
-    ) -> None:
-        if writing_style_override is not None:
-            self._writing_style_override = writing_style_override
-        if override_base_rules is not None:
-            self._override_base_rules = override_base_rules
 
     def _internal_prompts(self):
         return get_internal_prompts(self._prompt_locale)
@@ -1484,6 +1463,58 @@ class BaseAgent(ABC):
                 TOOL_APPROVAL_PHASE,
             )
 
+    async def _enter_tool_approval_gate(
+            self,
+            function_name: str,
+            function_args: Dict[str, Any],
+            tool_call_id: str,
+            events: List[BaseEvent],
+            extra_metadata: Optional[Dict[str, Any]] = None,
+            approval_note: Optional[str] = None,
+    ) -> bool:
+        """Project a legacy single-call approval request onto the batch flow."""
+        executor = self._get_tool_batch_executor()
+        batch = await executor.preflight([{
+            "id": tool_call_id,
+            "function": {
+                "name": function_name,
+                "arguments": function_args,
+            },
+        }])
+        execution = await executor.execute(batch)
+        if not execution.waiting:
+            return False
+        await self._enter_tool_approval_batch_gate(execution)
+        approval_batch = execution.approval_batch
+        payload = {
+            "approval_batch_id": approval_batch.id,
+            "tool_call_id": tool_call_id,
+            "tool_name": function_name,
+            "args": function_args,
+            "calls": [
+                {
+                    "tool_call_id": call.tool_call_id,
+                    "tool_name": call.tool_name,
+                    "args": call.normalized_args,
+                    "effect": call.effect.value,
+                    "approval": call.approval.value,
+                    "concurrency_group": call.concurrency_group,
+                }
+                for call in approval_batch.calls
+            ],
+        }
+        if extra_metadata:
+            payload.update(extra_metadata)
+        if approval_note:
+            payload["note"] = approval_note
+        events.append(ApprovalEvent(
+            approval_id=approval_batch.id,
+            kind="tool",
+            payload=payload,
+            options=["approve", "approve_same", "reject"],
+        ))
+        return True
+
     async def _project_batch_results(
             self,
             prepared_calls,
@@ -1533,140 +1564,3 @@ class BaseAgent(ABC):
             }]
             messages.extend(extra_messages)
             yield event, messages
-
-    async def _require_first_visit_domain_gate(
-            self,
-            function_name: str,
-            function_args: Dict[str, Any],
-            tool_call_id: str,
-            events: List[BaseEvent],
-    ) -> bool:
-        runtime = get_runtime_config()
-        if not runtime.feature_flags.enable_hitl_gates:
-            return False
-        if function_name != "browser_navigate":
-            return False
-        url = function_args.get("url")
-        if not url:
-            return False
-        domain = self._normalize_domain(str(url))
-        if not domain:
-            return False
-        async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(self._session_id)
-            if not session:
-                return False
-            if not session.operator_scope:
-                return False
-            whitelist = list(self._runtime_settings.operator_domains or session.operator_domains or [])
-            if domain_in_whitelist(domain, whitelist):
-                return False
-            meta = session.pending_metadata or {}
-            visited = set(meta.get("visited_domains") or [])
-            approved = set(meta.get("approved_domains") or [])
-            if domain in visited or domain in approved:
-                return False
-        if self._sandbox_lifecycle:
-            await self._sandbox_lifecycle.create_tool_checkpoint(function_name, tool_call_id)
-        return await self._enter_tool_approval_gate(
-            function_name=function_name,
-            function_args=function_args,
-            tool_call_id=tool_call_id,
-            events=events,
-            extra_metadata={"first_visit_domain": domain},
-            approval_note=f"首次访问域名: {domain}",
-        )
-
-    async def _require_tool_approval_gate(
-            self,
-            function_name: str,
-            function_args: Dict[str, Any],
-            tool_call_id: str,
-            events: List[BaseEvent],
-    ) -> bool:
-        if not self._tool_gate_call_level_enabled():
-            return False
-        runtime = get_runtime_config()
-        if not tool_matches_risk_list(function_name, runtime.hitl.tool_gate_risk_list):
-            return False
-        profile_settings = (
-            self._gate_profile_settings()
-            if self._runtime_settings.gate_profile
-            else None
-        )
-        if profile_settings and profile_settings.selective_critical_only:
-            if not matches_critical_action(
-                    function_name,
-                    function_args if isinstance(function_args, dict) else {},
-                    runtime.hitl.critical_action_patterns,
-            ):
-                return False
-        async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(self._session_id)
-            if not session:
-                return False
-            meta = session.pending_metadata or {}
-            approved = meta.get("approved_tools") or []
-            if any(tool_matches_risk_list(function_name, [item]) for item in approved):
-                return False
-            if not session.operator_scope:
-                return False
-        if self._sandbox_lifecycle:
-            await self._sandbox_lifecycle.create_tool_checkpoint(function_name, tool_call_id)
-        return await self._enter_tool_approval_gate(
-            function_name=function_name,
-            function_args=function_args,
-            tool_call_id=tool_call_id,
-            events=events,
-        )
-
-    async def _enter_tool_approval_gate(
-            self,
-            function_name: str,
-            function_args: Dict[str, Any],
-            tool_call_id: str,
-            events: List[BaseEvent],
-            extra_metadata: Optional[Dict[str, Any]] = None,
-            approval_note: Optional[str] = None,
-    ) -> bool:
-        executor = self._get_tool_batch_executor()
-        batch = await executor.preflight([{
-            "id": tool_call_id,
-            "function": {
-                "name": function_name,
-                "arguments": function_args,
-            },
-        }])
-        execution = await executor.execute(batch)
-        if not execution.waiting:
-            return False
-        await self._enter_tool_approval_batch_gate(execution)
-        approval_batch = execution.approval_batch
-        payload = {
-            "approval_batch_id": approval_batch.id,
-            "tool_call_id": tool_call_id,
-            "tool_name": function_name,
-            "args": function_args,
-            "calls": [
-                {
-                    "tool_call_id": call.tool_call_id,
-                    "tool_name": call.tool_name,
-                    "args": call.normalized_args,
-                    "effect": call.effect.value,
-                    "approval": call.approval.value,
-                    "concurrency_group": call.concurrency_group,
-                }
-                for call in approval_batch.calls
-            ],
-        }
-        if extra_metadata:
-            payload.update(extra_metadata)
-        if approval_note:
-            payload["note"] = approval_note
-        events.append(ApprovalEvent(
-            approval_id=approval_batch.id,
-            kind="tool",
-            payload=payload,
-            options=["approve", "approve_same", "reject"],
-        ))
-        return True

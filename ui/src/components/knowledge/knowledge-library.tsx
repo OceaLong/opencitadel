@@ -32,7 +32,7 @@ const TERMINAL_KB_STATUSES = new Set<KnowledgeBase["status"]>(["ready", "failed"
 const PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
 
-export async function startKnowledgeTask(
+async function startKnowledgeTask(
   kbId: string,
   versionId: string,
   mode: SessionMode,

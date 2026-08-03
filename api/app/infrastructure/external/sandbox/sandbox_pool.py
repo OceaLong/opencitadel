@@ -146,17 +146,5 @@ class SandboxPool:
         except Exception as exc:
             logger.debug("Failed to record sandbox activity for %s: %s", container_name, exc)
 
-    @staticmethod
-    async def get_last_active(container_name: str) -> Optional[int]:
-        try:
-            from app.infrastructure.storage.redis import get_redis
-
-            redis = get_redis().client
-            value = await redis.get(f"{_SANDBOX_ACTIVITY_PREFIX}{container_name}")
-            return int(value) if value else None
-        except Exception:
-            return None
-
-
 def get_sandbox_pool() -> SandboxPool:
     return SandboxPool.get_instance()

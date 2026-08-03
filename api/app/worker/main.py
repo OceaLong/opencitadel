@@ -961,6 +961,7 @@ async def main() -> None:
     from app.infrastructure.external.scheduler.job_scheduler import run_scheduler_loop
     from app.application.services.scheduled_job_service import ScheduledJobService
     from app.application.services.notification_service import NotificationService
+    from app.application.services.patrol_retention_service import PatrolRetentionService
     from app.application.services.resource_version_gc_service import (
         ResourceVersionGCService,
     )
@@ -971,7 +972,10 @@ async def main() -> None:
     scheduler_task = asyncio.create_task(
         run_scheduler_loop(
             get_uow,
-            ScheduledJobService(uow_factory=get_uow),
+            ScheduledJobService(
+                uow_factory=get_uow,
+                patrol_run_service=await container.patrol_run_service(),
+            ),
             notification_service=notification_service,
             mcp_pool=container.mcp_connection_pool(),
             app_config=app_config,
@@ -979,6 +983,7 @@ async def main() -> None:
                 uow_factory=get_uow,
                 object_storage=container.object_storage(),
             ),
+            patrol_retention_service=PatrolRetentionService(uow_factory=get_uow),
             stop_event=scheduler_stop,
         )
     )

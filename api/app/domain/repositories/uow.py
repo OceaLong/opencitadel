@@ -29,6 +29,7 @@ from .skill_repository import SkillRepository
 from .team_repository import TeamRepository
 from .user_repository import UserRepository
 from .resource_governance_repository import ResourceGovernanceRepository
+from .patrol_repository import PatrolRepository
 
 T = TypeVar("T", bound="IUnitOfWork")
 
@@ -62,6 +63,7 @@ class IUnitOfWork(ABC):
     scheduled_job: ScheduledJobRepository
     notification: NotificationRepository
     resource_governance: ResourceGovernanceRepository
+    patrol: PatrolRepository
 
     @abstractmethod
     async def commit(self):

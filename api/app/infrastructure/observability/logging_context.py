@@ -58,16 +58,6 @@ def _text_formatter() -> logging.Formatter:
 
 def get_request_id() -> Optional[str]:
     return request_id_var.get()
-
-
-def set_request_id(request_id: Optional[str]) -> None:
-    request_id_var.set(request_id)
-
-
-def set_session_context(session_id: Optional[str]) -> None:
-    session_id_var.set(session_id)
-
-
 @contextmanager
 def bind_context(
         *,

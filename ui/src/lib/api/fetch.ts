@@ -28,7 +28,7 @@ export class ApiError extends Error {
   }
 }
 
-export function resolveApiMessage(body: {
+function resolveApiMessage(body: {
   msg?: string;
   error_key?: string | null;
   error_params?: Record<string, string> | null;
@@ -77,7 +77,7 @@ async function refreshAuthOnce(): Promise<unknown> {
   return refreshPromise;
 }
 
-export function buildAuthHeaders(method: string = "GET", headers: HeadersInit = {}): HeadersInit {
+function buildAuthHeaders(method: string = "GET", headers: HeadersInit = {}): HeadersInit {
   const mergedHeaders: HeadersInit = {
     ...headers,
   };
@@ -209,7 +209,7 @@ function fetchWithTimeout(
 /**
  * 核心请求函数
  */
-export async function request<T = unknown>(
+async function request<T = unknown>(
   endpoint: string,
   options: RequestOptions = {},
 ): Promise<T> {
@@ -412,9 +412,9 @@ export async function createSSEStream(
     signal: externalSignal,
     skipAuthRefresh = false,
     skipAuthRedirect = false,
-    skipErrorHandler: _skipErrorHandler,
     ...fetchOptions
   } = options || {};
+  delete fetchOptions.skipErrorHandler;
 
   const mergedHeaders: HeadersInit = {
     "Content-Type": "application/json",

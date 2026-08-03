@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import type { SSEEventData, SSEEventHandler } from "@/lib/api/types";
 
 /** The `"error"` branch of the SSE event union, narrowed for message formatting. */
-export type IngestStreamErrorEvent = Extract<SSEEventData, { type: "error" }>;
+type IngestStreamErrorEvent = Extract<SSEEventData, { type: "error" }>;
 
 /**
  * The slice of a resource's API client the shared library state needs.

@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """Graded error codes for model / tool / infra failure domains."""
-from typing import Optional
-
 # Chat LLM domain
 MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
 MODEL_RATE_LIMITED = "MODEL_RATE_LIMITED"
@@ -22,15 +20,6 @@ SANDBOX_UNAVAILABLE = "SANDBOX_UNAVAILABLE"
 # Platform infra
 TASK_INFRA_FAILED = "TASK_INFRA_FAILED"
 
-MODEL_ERROR_CODES = frozenset({
-    MODEL_UNAVAILABLE,
-    MODEL_RATE_LIMITED,
-    MODEL_TIMEOUT,
-    MODEL_NOT_CONFIGURED,
-    MODEL_QUOTA_EXCEEDED,
-    MODEL_INVALID_REQUEST,
-})
-
 ALL_ERROR_CODES = frozenset({
     MODEL_UNAVAILABLE,
     MODEL_RATE_LIMITED,
@@ -44,7 +33,3 @@ ALL_ERROR_CODES = frozenset({
     SANDBOX_UNAVAILABLE,
     TASK_INFRA_FAILED,
 })
-
-
-def is_model_error_code(code: Optional[str]) -> bool:
-    return code in MODEL_ERROR_CODES if code else False

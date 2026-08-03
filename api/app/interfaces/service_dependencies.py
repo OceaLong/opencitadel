@@ -23,6 +23,9 @@ from app.application.services.llm_token_usage_service import LLMTokenUsageServic
 from app.application.services.marketplace_service import MarketplaceService
 from app.application.services.memory_service import MemoryService
 from app.application.services.quota_service import QuotaService
+from app.application.services.patrol_evidence_service import PatrolEvidenceService
+from app.application.services.patrol_pack_service import PatrolPackService
+from app.application.services.patrol_run_service import PatrolRunService
 from app.application.services.session_service import SessionService
 from app.application.services.resource_binding_service import ResourceBindingService
 from app.application.services.resource_build_service import ResourceBuildService
@@ -41,7 +44,6 @@ from app.infrastructure.external.resource_build_event_notifier import (
     RedisResourceBuildEventNotifier,
 )
 from app.infrastructure.security.cookie import AuthCookieManager
-from app.infrastructure.security.jwt_service import JwtService
 
 logger = logging.getLogger(__name__)
 
@@ -79,13 +81,6 @@ async def get_cookie_manager(
         manager: AuthCookieManager = Depends(Provide[ApiContainer.cookie_manager]),
 ) -> AuthCookieManager:
     return manager
-
-
-@inject
-async def get_jwt_service(
-        service: JwtService = Depends(Provide[ApiContainer.jwt_service]),
-) -> JwtService:
-    return service
 
 
 @inject
@@ -269,6 +264,27 @@ async def get_scheduled_job_service(
 async def get_evidence_service(
         service: EvidenceService = Depends(Provide[ApiContainer.evidence_service]),
 ) -> EvidenceService:
+    return service
+
+
+@inject
+async def get_patrol_pack_service(
+        service: PatrolPackService = Depends(Provide[ApiContainer.patrol_pack_service]),
+) -> PatrolPackService:
+    return service
+
+
+@inject
+async def get_patrol_run_service(
+        service: PatrolRunService = Depends(Provide[ApiContainer.patrol_run_service]),
+) -> PatrolRunService:
+    return service
+
+
+@inject
+async def get_patrol_evidence_service(
+        service: PatrolEvidenceService = Depends(Provide[ApiContainer.patrol_evidence_service]),
+) -> PatrolEvidenceService:
     return service
 
 

@@ -12,7 +12,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
-export type InlineOption = {
+type InlineOption = {
   id: string;
   title: string;
   description?: string;

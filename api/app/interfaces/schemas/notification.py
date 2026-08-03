@@ -23,7 +23,3 @@ class NotificationResponse(BaseModel):
 class NotificationListResponse(BaseModel):
     notifications: List[NotificationResponse]
     unread_count: int
-
-
-class PendingPlanUpdateRequest(BaseModel):
-    plan: dict

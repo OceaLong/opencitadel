@@ -117,11 +117,11 @@ docker compose up -d
 | `UV_HTTP_TIMEOUT` | `300` | `uv sync` 下载 wheel 的 HTTP 超时（秒） |
 | `NPM_CONFIG_REGISTRY` | npmmirror | sandbox / ui 的 npm |
 
-Compose 构建后的应用镜像统一命名为：`opencitadel-api`、`opencitadel-worker`、`opencitadel-migrate`、`opencitadel-ui`、`opencitadel-sandbox`。
+Compose 构建后的应用镜像统一命名为：`opencitadel-api`、`opencitadel-worker`、`opencitadel-migrate`、`opencitadel-ui`、`opencitadel-sandbox`，以及可选的 `opencitadel-ops-collector`。
 
 > **CI/CD 说明**：[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
-> 在每个 PR 与 `main` 推送中运行 API、UI、沙箱测试，构建并用 Trivy
-> 扫描五个镜像，同时校验 Compose、Helm、Squid 与文档。
+> 在每个 PR 与 `main` 推送中运行 API、UI、沙箱与 Ops Collector 测试，构建并用 Trivy
+> 扫描六个镜像，同时校验 Compose、Helm/Kustomize、Squid 与文档。
 > [`.github/workflows/security.yml`](../../.github/workflows/security.yml)
 > 增加 Gitleaks 历史扫描、依赖评审/审计、CodeQL 与 Trivy 文件系统/IaC
 > 扫描。Dependabot 覆盖 GitHub Actions、uv、npm、Docker。Tag Release
@@ -470,10 +470,10 @@ docker compose up -d opencitadel-api opencitadel-worker
 
 | Workflow | 必须通过的控制 |
 |----------|---------------|
-| `ci.yml` | PostgreSQL/Redis 上的完整 API pytest；UI i18n/typecheck/lint/test/build；沙箱测试；五个镜像构建及阻断 `HIGH,CRITICAL` 的 Trivy 扫描；Compose 渲染；Squid 解析；Helm lint/template；文档检查 |
+| `ci.yml` | PostgreSQL/Redis 上的完整 API pytest；UI i18n/typecheck/lint/test/build；沙箱/Collector 测试；六个镜像构建及阻断 `HIGH,CRITICAL` 的 Trivy 扫描；Compose 渲染；Squid 解析；Helm/Kustomize 检查；文档检查 |
 | `security.yml` | Gitleaks 全历史扫描；PR 依赖评审阻断 `high` 严重度与 GPL-3.0/AGPL-3.0；Python 与生产 npm 审计；Python、JavaScript/TypeScript 的 CodeQL `security-extended`；阻断 `HIGH,CRITICAL` 的 Trivy 漏洞/Secret/IaC 扫描 |
 | `dependabot.yml` | 每周更新 GitHub Actions、uv、npm、Docker |
-| `release.yml` | Actions 固定完整 SHA；五个 `linux/amd64` + `linux/arm64` 镜像；构建摘要 Trivy 扫描；SBOM；`provenance: mode=max`；Registry attestation |
+| `release.yml` | Actions 固定完整 SHA；六个 `linux/amd64` + `linux/arm64` 镜像；构建摘要 Trivy 扫描；SBOM；`provenance: mode=max`；Registry attestation |
 
 本地运行 `./scripts/check-docs.sh`、Compose 渲染、Shell/YAML 解析。Release
 前必须等待托管检查，因为它还覆盖干净依赖安装、镜像构建、PostgreSQL
@@ -979,16 +979,19 @@ docker compose up -d opencitadel-nginx
 
 ## ☸️ Kubernetes / Helm 部署
 
-Helm Chart 位于 `deploy/helm/opencitadel/`，支持全栈部署（Postgres/Redis/UI/Ingress + API/Worker + K8s Pod 沙箱 driver）。
+Helm Chart 位于 `deploy/helm/opencitadel/`，支持全栈部署（Postgres/Redis/UI/Ingress + API/Worker + K8s Pod 沙箱 Driver + 可选只读 Ops Collector）。
 
 ```bash
-# 构建并推送五镜像（api、worker、migrate 复用 api 镜像 tag）
+# 构建并推送六个镜像（api、worker、migrate 复用 api target）
 docker build --target api -t your-registry/opencitadel-api ./api
 docker build --target worker -t your-registry/opencitadel-worker ./api
 docker build --target api -t your-registry/opencitadel-migrate ./api
 docker build -t your-registry/opencitadel-ui ./ui
 docker build -t your-registry/opencitadel-sandbox ./sandbox
-docker push your-registry/opencitadel-api your-registry/opencitadel-worker your-registry/opencitadel-migrate your-registry/opencitadel-ui your-registry/opencitadel-sandbox
+docker build -t your-registry/opencitadel-ops-collector ./ops-collector
+for image in api worker migrate ui sandbox ops-collector; do
+  docker push "your-registry/opencitadel-${image}"
+done
 ```
 
 > **Helm 说明**：migrate initContainer 复用 `image.api`（同一 Dockerfile target）。独立的 `opencitadel-migrate` 标签供 Docker Compose 一次性任务与 release 发布使用。
@@ -1003,10 +1006,14 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --set image.worker.repository=your-registry/opencitadel-worker \
   --set image.ui.repository=your-registry/opencitadel-ui \
   --set image.sandbox.repository=your-registry/opencitadel-sandbox \
+  --set opsCollector.enabled=true \
+  --set opsCollector.image.repository=your-registry/opencitadel-ops-collector \
   --set appConfig.sandbox.driver=kubernetes \
   --set ingress.enabled=true \
   --set replicaCount.worker=2
 ```
+
+Ops Patrol 为可选能力，默认关闭。启用前应按 [Ops Patrol 运维手册](ops-patrol.zh-CN.md) 配置 Collector 白名单/注册探针、固定 MCP Tool Policy、功能开关与 NetworkPolicy。
 
 `production-values.yaml` 必须通过 Secret Manager 或受保护的 Values 机制
 覆盖所有必需 Secret，确保四个应用密钥互不相同、PostgreSQL 管理/应用

@@ -493,11 +493,6 @@ async def test_missing_input_does_not_open_a_running_epoch():
         ),
     )
     runner._pop_event = AsyncMock(return_value=None)
-    runner._session_state = SimpleNamespace(
-        transition=AsyncMock(
-            return_value=SessionStatusEvent(status="running")
-        )
-    )
     task.output_stream = _OutputStream()
     del runner._emit_session_status
     del runner._put_and_add_event

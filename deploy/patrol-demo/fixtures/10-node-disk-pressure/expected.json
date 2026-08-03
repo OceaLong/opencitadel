@@ -1,0 +1,1 @@
+{"case_id":"10-node-disk-pressure","fault":"Node DiskPressure","injected_fault":true,"expected_results":[{"check_id":"k8s-resource-pressure","status":"fail","severity":"critical","assertion_id":"no-node-pressure"}],"required_evidence":["summary","resource_refs"],"expected_write_operations":0,"teardown":{"strategy":"reset-baseline"}}

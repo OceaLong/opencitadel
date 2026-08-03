@@ -50,6 +50,7 @@ Worker responsibilities beyond task execution:
 - Task lease acquire/renew/release (`task_lease.py`) for crash-safe idempotency
 - Sandbox admission, warm pool, and orphan cleanup (`sandbox_maintenance.py`)
 - Stuck KB ingest reconciliation on startup and periodic loops
+- Ops Patrol execution plus leased retention cleanup for expired Runs, Findings, and evidence references
 - Optional DLQ replay when `model_resilience.dlq_replay_enabled=true`
 - MCP/A2A outbound connection pool release on shutdown
 
@@ -156,6 +157,7 @@ leaks.
 | GET/POST/DELETE | `/service-keys` | Service API key CRUD |
 | GET/POST/PATCH/DELETE | `/teams`, `/teams/{id}/*` | Team workspace APIs |
 | GET/POST/PATCH | `/sessions`, `/sessions/{id}/*` | Session CRUD, chat SSE, checkpoints, VNC |
+| GET/POST/PATCH/DELETE | `/patrol-packs`, `/patrol-packs/{id}/*`, `/patrol-runs/*`, `/patrol-findings/*` | Feature-flagged read-only Ops Patrol control plane |
 | GET/POST/PUT/DELETE | `/skills`, `/memories`, `/files` | Skills, long-term memory, files |
 | GET/POST | `/codebases`, `/knowledge-bases`, `/scheduled-jobs`, `/notifications` | Codebase, KB, automation, notifications |
 | GET/PUT/DELETE | `/app-config/*`, `/llm-endpoints`, `/llm-models` | AppConfig, LLM endpoints and models |
@@ -208,6 +210,22 @@ leaks.
 | GET/PUT | `/app-config/agent` | Agent config shortcut |
 | GET/POST/PUT/DELETE | `/app-config/mcp-servers`, `/app-config/mcp-servers/{name}/*` | MCP server CRUD |
 | GET/POST/DELETE | `/app-config/a2a-servers`, `/app-config/a2a-servers/{id}/*` | A2A server CRUD |
+
+### Ops Patrol (Developer Preview)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET/POST | `/patrol-packs` | List/create versioned Packs |
+| GET/PATCH/DELETE | `/patrol-packs/{id}` | Pack detail and lifecycle-safe updates |
+| POST | `/patrol-packs/{id}/{validate\|activate\|pause}` | Validate capabilities, activate, or pause |
+| POST | `/patrol-packs/{id}/trigger` | Manual Run; requires `Idempotency-Key` |
+| GET | `/patrol-packs/{id}/metrics` | 30-day scheduled success, Findings, review time |
+| GET | `/patrol-runs`, `/patrol-runs/{id}` | Filter Runs and read authoritative results |
+| POST | `/patrol-runs/{id}/{cancel\|replay}` | Cancel or replay a Run |
+| GET | `/patrol-runs/{id}/evidence` | Download signed evidence ZIP |
+| POST | `/patrol-findings/{id}/{acknowledge\|resolve\|false-positive}` | Record an audited decision |
+
+Patrol resources use the same personal/team `OwnerScope` and FORCE RLS controls as other tenant data. `AUDITOR` can read and download evidence but cannot mutate. See [Ops Patrol architecture](../docs/architecture/ops-patrol.md).
 
 ### LLM endpoints & models
 

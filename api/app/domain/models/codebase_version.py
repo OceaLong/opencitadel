@@ -16,17 +16,6 @@ class CodebaseVersionState(str, Enum):
     FAILED = "failed"
 
 
-class AnalysisCapability(str, Enum):
-    LEXICAL_SEARCH = "lexical_search"
-    VECTOR_SEARCH = "vector_search"
-    SOURCE_READ = "source_read"
-    ARTIFACT_GENERATION = "artifact_generation"
-    ARCHITECTURE = "architecture"
-    DATA_FLOW = "data_flow"
-    CALL_CHAIN = "call_chain"
-    FLOWCHART = "flowchart"
-
-
 class CodeEvidenceRef(BaseModel):
     """Exact source evidence for one code analysis fact."""
 

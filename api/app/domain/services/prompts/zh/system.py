@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # 定义所有Agent共用的系统预设Prompt
-PROMPT_VERSION = "1.1.0"
-
 FILE_RULES_PROSE = """<file_rules>
 - **必须**使用文件工具进行读取、写入、追加和编辑，以避免 Shell 命令中出现的字符串转义问题
 - 主动保存中间结果，并将不同类型的参考信息存储在单独的文件中

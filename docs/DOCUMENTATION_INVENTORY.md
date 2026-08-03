@@ -37,6 +37,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [skills.md](architecture/skills.md) | Skill templates, runtime | primary | paired | mermaid | `skill_service.py`, `task_runner_factory.py` | low |
 | [artifacts-sharing.md](architecture/artifacts-sharing.md) | Artifacts, public share | primary | paired | mermaid | `artifact_routes.py` | low |
 | [automation-scheduler.md](architecture/automation-scheduler.md) | Cron, webhooks, leader election | primary | paired | mermaid | `scheduling_routes.py`, `worker/main.py` | low |
+| [ops-patrol.md](architecture/ops-patrol.md) | Pack/Run lifecycle, Collector boundary, evidence | primary | paired | mermaid | `patrol_routes.py`, `patrol_run_service.py` | low |
 | [marketplace.md](architecture/marketplace.md) | Marketplace apps | primary | paired | mermaid | `marketplace_routes.py` | low |
 | [config-source-governance.md](architecture/config-source-governance.md) | AppConfig vs env boundaries | primary | paired | mermaid | `core/config.py`, `app_config_routes.py` | medium |
 | [model-resilience.md](architecture/model-resilience.md) | Circuit breaker, fallback | primary | paired | mermaid | `resilient_llm.py` | low |
@@ -54,12 +55,14 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
 |------|-------|-----------|-----------|----------|-------------|------------|
 | [operations/deployment.md](operations/deployment.md) | Production deployment | primary | paired | mermaid | `docker-compose.yml` | low |
+| [operations/ops-patrol.md](operations/ops-patrol.md) | Patrol enablement, deployment, evidence, recovery | primary | paired | none | `ops-collector/`, `deploy/helm/` | low |
 | [operations/https-domain-setup.md](operations/https-domain-setup.md) | HTTPS & domain | primary | paired | none | `.env.example` | low |
 | [tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.md) | Quick BYO key onboarding | tutorial | paired | none | `scripts/quickstart.sh` | low |
 | [tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.md) | Knowledge base RAG | tutorial | paired | mermaid | `knowledge-base-ingestion.md` | low |
 | [tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.md) | MCP setup | tutorial | paired | none | `app_config_routes.py` | low |
 | [tutorials/04-governed-web-operator.md](tutorials/04-governed-web-operator.md) | Web Operator runbook | tutorial | paired | none | `operator-scope-dialog.tsx` | low |
 | [tutorials/05-refund-reconciliation-compliance.md](tutorials/05-refund-reconciliation-compliance.md) | Compliance demo | tutorial | paired | none | `compliance_routes.py` | low |
+| [tutorials/06-ops-patrol.md](tutorials/06-ops-patrol.md) | Read-only Kubernetes Patrol walkthrough | tutorial | paired | none | `ui/src/app/patrols/` | low |
 
 ## Module READMEs
 
@@ -69,7 +72,9 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [ui/README.md](../ui/README.md) | Frontend stack, routes | module | paired | none | `ui/src/app/` | low |
 | [sandbox/README.md](../sandbox/README.md) | Sandbox service | module | paired | none | `sandbox/` | low |
 | [nginx/README.md](../nginx/README.md) | Gateway, SSE/WS, upload limits | module | paired | mermaid | `nginx/nginx.conf` | low |
+| [ops-collector/README.md](../ops-collector/README.md) | Fixed read-only probes and configuration | module | paired | none | `ops-collector/src/` | low |
 | [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.md) | Helm install | module | paired | none | `deploy/helm/` | low |
+| [deploy/patrol-demo/README.md](../deploy/patrol-demo/README.md) | Disposable Patrol fault lab | module | paired | none | `scripts/run-patrol-fixtures.sh` | low |
 | [demo/ops-console/README.md](../demo/ops-console/README.md) | Web Operator demo backend | module | paired | none | `demo/ops-console/` | low |
 | [e2e/README.md](../e2e/README.md) | Playwright E2E smoke tests | module | paired | none | `e2e/web-operator.spec.ts` | low |
 | [scripts/README.md](../scripts/README.md) | quickstart, check-docs | module | paired | none | `scripts/` | low |

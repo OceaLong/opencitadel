@@ -48,12 +48,6 @@ class TeamMemberDetailResponse(BaseModel):
     display_name: str = ""
     email: str = ""
     avatar_url: str = ""
-
-
-class ListTeamMembersResponse(BaseModel):
-    members: list[TeamMemberResponse]
-
-
 class ListTeamMemberDetailsResponse(BaseModel):
     members: list[TeamMemberDetailResponse]
 

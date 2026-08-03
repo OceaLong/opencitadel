@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -86,10 +86,3 @@ class SkillRecommenderService:
         except Exception as exc:
             logger.warning("Skill recommendation failed: %s", exc)
             return SkillRecommendResult(reason=str(exc))
-
-
-def build_skill_recommender(
-        llm_factory: Callable[[], LLM],
-        json_parser: JSONParser,
-) -> SkillRecommenderService:
-    return SkillRecommenderService(llm_factory(), json_parser)

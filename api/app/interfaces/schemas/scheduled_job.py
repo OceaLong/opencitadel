@@ -26,6 +26,7 @@ class CreateScheduledJobRequest(BaseModel):
     operator_domains: List[str] = Field(default_factory=list)
     gate_profile: Optional[str] = None
     enabled: bool = True
+    timezone: str = "UTC"
 
 
 class UpdateScheduledJobRequest(BaseModel):
@@ -42,6 +43,7 @@ class UpdateScheduledJobRequest(BaseModel):
     operator_domains: Optional[List[str]] = None
     gate_profile: Optional[str] = None
     enabled: Optional[bool] = None
+    timezone: Optional[str] = None
 
 
 class ScheduledJobResponse(BaseModel):
@@ -61,6 +63,9 @@ class ScheduledJobResponse(BaseModel):
     operator_domains: List[str] = Field(default_factory=list)
     gate_profile: Optional[str] = None
     enabled: bool
+    timezone: str = "UTC"
+    source_type: str = "generic"
+    source_id: Optional[str] = None
     next_run_at: Optional[datetime] = None
     last_run_at: Optional[datetime] = None
     last_run_status: Optional[str] = None

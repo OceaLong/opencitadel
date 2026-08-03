@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """One ownership/readiness gate for every resource-backed session."""
 from dataclasses import dataclass
-from collections.abc import Callable
 from typing import Optional
 
 from app.application.errors.exceptions import BadRequestError
@@ -13,7 +12,6 @@ from app.domain.models.resource_governance import (
     ResourceKind,
 )
 from app.domain.models.scope import OwnerScope
-from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.resource_version_provider import (
     ResourceVersionProvider,
     ResourceVersionProviderNotRegisteredError,
@@ -98,59 +96,3 @@ class ResourceGuardService:
         }:
             raise BadRequestError("resource version is not published")
         return resolved
-
-
-class LegacyV1ResourceVersionProvider:
-    """Compatibility provider for resources created before version tables.
-
-    A synthetic version is deliberately available only once the legacy
-    resource itself is ready.  It is not a fallback for a building/failed
-    resource and callers cannot invent a different version id.
-    """
-
-    def __init__(
-        self,
-        *,
-        kind: ResourceKind,
-        uow_factory: Callable[[], IUnitOfWork],
-    ) -> None:
-        self.kind = kind
-        self._uow_factory = uow_factory
-
-    async def resolve_published_version(
-        self,
-        resource_id: str,
-        requested_version_id: str | None,
-        scope: OwnerScope,
-    ) -> PublishedResourceVersion:
-        expected = f"legacy:{resource_id}"
-        if requested_version_id not in {None, expected}:
-            raise BadRequestError("requested resource version is not available")
-        async with self._uow_factory() as uow:
-            if self.kind is ResourceKind.CODEBASE:
-                resource = await uow.codebase.get_by_id(resource_id, scope=scope)
-            else:
-                resource = await uow.knowledge_base.get_kb(resource_id, scope=scope)
-        if resource is None:
-            raise BadRequestError("resource not found in owner scope")
-        if not getattr(resource, "legacy_v1_migrated", False):
-            raise BadRequestError("resource has no migrated legacy version")
-        if getattr(resource.status, "value", resource.status) != "ready":
-            raise BadRequestError("resource version is not published")
-        degraded = bool(getattr(resource, "vector_degraded", False))
-        return PublishedResourceVersion(
-            resource_kind=self.kind,
-            resource_id=resource_id,
-            version_id=expected,
-            state=BuildState.DEGRADED if degraded else BuildState.SUCCEEDED,
-            published=True,
-            degraded=degraded,
-        )
-
-    async def list_published_versions(
-        self, resource_id: str, scope: OwnerScope,
-    ) -> list[PublishedResourceVersion]:
-        try:
-            return [await self.resolve_published_version(resource_id, None, scope)]
-        except BadRequestError:
-            return []

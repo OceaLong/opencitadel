@@ -1,9 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { Stethoscope } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +14,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 
+import { useFeatureFlags } from "@/hooks/use-feature-flags";
 import {
   IconAdmin,
   IconAgent,
@@ -69,6 +71,7 @@ export function MobileBottomNav() {
   const { user } = useAuth();
   const { openSettings } = useSettingsDialog();
   const [moreOpen, setMoreOpen] = useState(false);
+  const { opsPatrolEnabled } = useFeatureFlags();
 
   const isAdmin = user?.global_role === "admin";
   const isAuditor = user?.global_role === "auditor";
@@ -115,6 +118,14 @@ export function MobileBottomNav() {
             <SheetTitle>{t("more")}</SheetTitle>
           </SheetHeader>
           <div className="mt-4 grid gap-2">
+            {opsPatrolEnabled && (
+              <Button variant="outline" className="h-11 justify-start" asChild>
+                <Link href="/patrols" onClick={() => setMoreOpen(false)}>
+                  <Stethoscope className="size-4" />
+                  {t("patrol")}
+                </Link>
+              </Button>
+            )}
             <Button variant="outline" className="h-11 justify-start" asChild>
               <Link href="/automation" onClick={() => setMoreOpen(false)}>
                 <IconAutomation className="size-4" />

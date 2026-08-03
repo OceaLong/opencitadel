@@ -50,6 +50,7 @@ Worker 是 Redis `task:dispatch` 的**长驻消费者**。任何 Agent、代码�
 - 任务租约获取/续期/释放（`task_lease.py`），崩溃后幂等
 - 沙箱准入、预热池与孤儿回收（`sandbox_maintenance.py`）
 - 启动与周期 reconcile 卡住的 KB 摄取
+- Ops Patrol 执行，以及带租约的过期 Run、Finding 与证据引用保留清理
 - 可选 DLQ 回放（`model_resilience.dlq_replay_enabled=true`）
 - 关闭时释放 MCP/A2A 出站连接池
 
@@ -153,6 +154,7 @@ Defense in Depth。Scope 外资源通常返回 404，避免泄露对象存在性
 | GET/POST/DELETE | `/service-keys` | 服务 API Key CRUD |
 | GET/POST/PATCH/DELETE | `/teams`、`/teams/{id}/*` | 团队工作区 API |
 | GET/POST/PATCH | `/sessions`、`/sessions/{id}/*` | 会话 CRUD、chat SSE、检查点、VNC |
+| GET/POST/PATCH/DELETE | `/patrol-packs`、`/patrol-packs/{id}/*`、`/patrol-runs/*`、`/patrol-findings/*` | 功能开关控制的只读 Ops Patrol 控制面 |
 | GET/POST/PUT/DELETE | `/skills`、`/memories`、`/files` | Skill、长期记忆、文件 |
 | GET/POST | `/codebases`、`/knowledge-bases`、`/scheduled-jobs`、`/notifications` | 代码库、知识库、自动化、通知 |
 | GET/PUT/DELETE | `/app-config/*`、`/llm-endpoints`、`/llm-models` | AppConfig、LLM 端点与模型 |
@@ -204,6 +206,22 @@ Defense in Depth。Scope 外资源通常返回 404，避免泄露对象存在性
 | GET/PUT | `/app-config/agent` | Agent 配置快捷入口 |
 | GET/POST/PUT/DELETE | `/app-config/mcp-servers`、`/app-config/mcp-servers/{name}/*` | MCP 服务 CRUD |
 | GET/POST/DELETE | `/app-config/a2a-servers`、`/app-config/a2a-servers/{id}/*` | A2A 服务 CRUD |
+
+### Ops Patrol（Developer Preview）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST | `/patrol-packs` | 列出/创建版本化 Pack |
+| GET/PATCH/DELETE | `/patrol-packs/{id}` | Pack 详情与生命周期安全更新 |
+| POST | `/patrol-packs/{id}/{validate\|activate\|pause}` | 能力验证、激活或暂停 |
+| POST | `/patrol-packs/{id}/trigger` | 手动 Run；必须有 `Idempotency-Key` |
+| GET | `/patrol-packs/{id}/metrics` | 30 天计划成功率、Finding 与复核时间 |
+| GET | `/patrol-runs`、`/patrol-runs/{id}` | 筛选 Run 并读取权威结果 |
+| POST | `/patrol-runs/{id}/{cancel\|replay}` | 取消或回放 Run |
+| GET | `/patrol-runs/{id}/evidence` | 下载签名证据 ZIP |
+| POST | `/patrol-findings/{id}/{acknowledge\|resolve\|false-positive}` | 记录可审计决策 |
+
+Patrol 资源使用与其他租户数据相同的个人/团队 `OwnerScope` 与 FORCE RLS 控制。`AUDITOR` 可以读取和下载证据，但不能变更。见 [Ops Patrol 架构](../docs/architecture/ops-patrol.zh-CN.md)。
 
 ### LLM 端点与模型
 

@@ -4,7 +4,7 @@ import base64
 import io
 import logging
 import uuid
-from typing import Any, Dict, List, Optional, Protocol, Union
+from typing import Any, Dict, List, Optional, Union
 
 from app.domain.external.file_storage import FileStorage, FileUploadPayload
 from app.domain.external.llm import LLM
@@ -42,16 +42,6 @@ def _coerce_query_text(text: Any) -> str:
 _IMAGE_REF_TYPE = CONTENT_TYPE_IMAGE_REF
 _FALLBACK_IMAGE_NOTE = "原始消息包含图片附件，因模型服务连接异常已省略图片内容。"
 PRESIGNED_URL_DEFAULT_EXPIRES_SECONDS = 604800  # 7 days (S3 signature max)
-
-
-class _SupportsCapabilities(Protocol):
-    @property
-    def capabilities(self) -> ModelCapabilities: ...
-
-    @property
-    def supports_multimodal(self) -> bool: ...
-
-
 def resolve_capabilities(llm: LLM) -> ModelCapabilities:
     caps = getattr(llm, "capabilities", None)
     if isinstance(caps, ModelCapabilities):

@@ -9,5 +9,6 @@ export * from "./types/marketplace";
 export * from "./types/memory";
 export * from "./types/models";
 export * from "./types/notifications";
+export * from "./types/patrols";
 export * from "./types/session";
 export * from "./types/skills";

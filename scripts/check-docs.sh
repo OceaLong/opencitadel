@@ -82,8 +82,9 @@ check_size_parity docs/tutorials 60
 
 echo "==> Checking module README bilingual pairs ..."
 for en in README.md api/README.md ui/README.md sandbox/README.md nginx/README.md \
+  ops-collector/README.md \
   deploy/helm/opencitadel/README.md demo/ops-console/README.md \
-  e2e/README.md scripts/README.md deploy/scripts/README.md; do
+  deploy/patrol-demo/README.md e2e/README.md scripts/README.md deploy/scripts/README.md; do
   check_pair "$en"
 done
 
@@ -98,6 +99,22 @@ for f in docs/README.md docs/README.zh-CN.md README.md README.zh-CN.md; do
   if ! grep -q '05-refund-reconciliation-compliance' "$f"; then
     fail "tutorial 05 not listed in $f"
   fi
+done
+
+echo "==> Checking Ops Patrol documentation chain ..."
+for f in docs/README.md docs/README.zh-CN.md README.md README.zh-CN.md; do
+  if ! grep -q 'ops-patrol' "$f"; then
+    fail "Ops Patrol not listed in $f"
+  fi
+done
+check_pair docs/architecture/ops-patrol.md
+check_pair docs/operations/ops-patrol.md
+check_pair docs/tutorials/06-ops-patrol.md
+check_pair ops-collector/README.md
+for f in docs/DOCUMENTATION_INVENTORY.md docs/DOCUMENTATION_INVENTORY.zh-CN.md; do
+  for marker in architecture/ops-patrol operations/ops-patrol tutorials/06-ops-patrol ops-collector/README; do
+    require_marker "$f" "$marker" "Ops Patrol inventory"
+  done
 done
 
 echo "==> Checking new architecture docs in indexes ..."
@@ -145,9 +162,10 @@ if rg -n '\| `/admin/usage` \|' docs/architecture/admin-auditor-compliance.md \
   fail "UI usage charts are on /admin overview, not /admin/usage"
 fi
 
-echo "==> Checking four-images Helm wording ..."
-if rg -n 'four images|四镜像' docs/operations/deployment.md docs/operations/deployment.zh-CN.md 2>/dev/null; then
-  fail "deployment docs still mention four images; should be five (api/worker/migrate/ui/sandbox)"
+echo "==> Checking stale application-image count wording ..."
+if rg -n 'four images|five images|all five images|四镜像|五镜像|五个镜像|扫描五个' \
+  docs deploy/helm/opencitadel/README.md deploy/helm/opencitadel/README.zh-CN.md 2>/dev/null; then
+  fail "documentation has a stale image count; releases publish six images including ops-collector"
 fi
 
 echo "==> Checking security architecture contracts ..."

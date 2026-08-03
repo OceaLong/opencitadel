@@ -253,28 +253,3 @@ def normalize_usage(raw: Optional[Dict[str, Any]]) -> Dict[str, int]:
         "cached_tokens": cached,
         "cache_write_tokens": cache_write,
     }
-
-
-async def invoke_to_stream_deltas(message: Dict[str, Any]):
-    """Convert a complete LLM message into stream deltas (fallback for non-native streaming)."""
-    content = message.get("content")
-    if content:
-        yield {"content": content}
-    reasoning = message.get("reasoning_content")
-    if reasoning:
-        yield {"reasoning_content": reasoning}
-    for idx, tool_call in enumerate(message.get("tool_calls") or []):
-        fn = tool_call.get("function") or {}
-        yield {
-            "tool_calls": [{
-                "index": idx,
-                "id": tool_call.get("id"),
-                "function": {
-                    "name": fn.get("name"),
-                    "arguments": fn.get("arguments") or "",
-                },
-            }]
-        }
-    usage = message.get("_usage")
-    if usage:
-        yield {"usage": normalize_usage(usage)}

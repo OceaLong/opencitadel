@@ -24,7 +24,7 @@ from app.application.services.marketplace.consumption_service import Consumption
 from app.application.services.marketplace.conversion_service import ConversionService
 from app.application.services.marketplace.nutrition_service import NutritionService
 from app.application.services.marketplace.watermark_service import WatermarkService
-from app.application.services.marketplace.utils import analyze_image_with_llm, analyze_images_with_llm
+from app.application.services.marketplace.utils import analyze_image_with_llm
 from app.domain.services.document_service import document_to_vision_attachments
 from app.domain.services.image_generation_service import edit_image
 from app.domain.utils.vision import build_image_content_part, is_image_mime

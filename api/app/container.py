@@ -38,13 +38,16 @@ from app.application.services.memory_service import MemoryService
 from app.application.services.quota_service import QuotaService
 from app.application.services.session_service import SessionService
 from app.domain.services.resource_version_provider import ResourceVersionProviderRegistry
-from app.application.services.session_state_service import SessionStateService
 from app.application.services.service_api_key_service import ServiceApiKeyService
 from app.application.services.skill_service import SkillService
 from app.application.services.team_service import TeamService
 from app.application.services.usage_stats_service import UsageStatsService
 from app.application.services.artifact_service import ArtifactService
 from app.application.services.notification_service import NotificationService
+from app.application.services.patrol_evidence_service import PatrolEvidenceService
+from app.application.services.patrol_collector_validator import MCPPatrolCollectorValidator
+from app.application.services.patrol_pack_service import PatrolPackService
+from app.application.services.patrol_run_service import PatrolRunService
 from app.application.services.scheduled_job_service import ScheduledJobService
 from app.application.services.task_runner_factory import TaskRunnerFactory
 from app.domain.repositories.uow import IUnitOfWork
@@ -97,35 +100,14 @@ def _uow_factory(postgres: Postgres) -> Callable[[], IUnitOfWork]:
     return factory
 
 
-def _session_state_factory(
-        uow_factory: Callable[[], IUnitOfWork],
-        session_list_notifier: RedisSessionListNotifierAdapter,
-) -> Callable[[], SessionStateService]:
-    def factory() -> SessionStateService:
-        return SessionStateService(
-            uow_factory=uow_factory,
-            session_list_notifier=session_list_notifier,
-        )
-
-    return factory
-
-
 async def _init_postgres(postgres: Postgres) -> Postgres:
     await postgres.init()
     return postgres
 
 
-async def _shutdown_postgres(postgres: Postgres) -> None:
-    await postgres.shutdown()
-
-
 async def _init_redis(redis: RedisClient) -> RedisClient:
     await redis.init()
     return redis
-
-
-async def _shutdown_redis(redis: RedisClient) -> None:
-    await redis.shutdown()
 
 
 @asynccontextmanager
@@ -286,12 +268,6 @@ class BaseContainer(containers.DeclarativeContainer):
         uow_factory=uow_factory,
     )
 
-    session_state_factory = providers.Callable(
-        _session_state_factory,
-        uow_factory=uow_factory,
-        session_list_notifier=session_list_notifier,
-    )
-
     checkpoint_service = providers.Singleton(
         CheckpointService,
         uow_factory=uow_factory,
@@ -436,7 +412,35 @@ class BaseContainer(containers.DeclarativeContainer):
         artifact_service=artifact_service,
     )
     notification_service = providers.Singleton(NotificationService, uow_factory=uow_factory)
-    scheduled_job_service = providers.Singleton(ScheduledJobService, uow_factory=uow_factory)
+    patrol_collector_validator = providers.Singleton(
+        MCPPatrolCollectorValidator,
+        connection_pool=mcp_connection_pool,
+    )
+    patrol_pack_service = providers.Singleton(
+        PatrolPackService,
+        uow_factory=uow_factory,
+        audit_service=audit_service,
+        collector_validator=patrol_collector_validator,
+    )
+    patrol_run_service = providers.Singleton(
+        PatrolRunService,
+        uow_factory=uow_factory,
+        audit_service=audit_service,
+        artifact_service=artifact_service,
+        notification_service=notification_service,
+        task_state_port=task_state_port,
+    )
+    patrol_evidence_service = providers.Singleton(
+        PatrolEvidenceService,
+        uow_factory=uow_factory,
+        evidence_service=evidence_service,
+        audit_service=audit_service,
+    )
+    scheduled_job_service = providers.Singleton(
+        ScheduledJobService,
+        uow_factory=uow_factory,
+        patrol_run_service=patrol_run_service,
+    )
 
     task_runner_factory = providers.Singleton(
         TaskRunnerFactory,
@@ -453,7 +457,6 @@ class BaseContainer(containers.DeclarativeContainer):
         task_state_port=task_state_port,
         observability_port=observability_port,
         event_sequence_port=event_sequence_port,
-        session_state_factory=session_state_factory,
         mcp_connection_pool=mcp_connection_pool,
         a2a_connection_pool=a2a_connection_pool,
         mcp_server_service=mcp_server_service,
@@ -462,6 +465,7 @@ class BaseContainer(containers.DeclarativeContainer):
         audit_service=audit_service,
         codebase_service=codebase_service,
         object_storage=object_storage,
+        patrol_run_service=patrol_run_service,
     )
 
     agent_service = providers.Singleton(

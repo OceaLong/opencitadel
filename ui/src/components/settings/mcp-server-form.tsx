@@ -83,7 +83,7 @@ function parseUrlToForm(url: string | null | undefined): {
   }
 }
 
-export function mcpConfigToForm(server: ListMCPServerItem): McpServerFormState {
+function mcpConfigToForm(server: ListMCPServerItem): McpServerFormState {
   const config = server.config ?? {};
   const transport = (config.transport ?? server.transport ?? "streamable_http") as MCPTransport;
   const { serviceUrl, urlParams, urlUndecryptable } = parseUrlToForm(config.url ?? null);
@@ -124,7 +124,7 @@ function buildUrl(serviceUrl: string, urlParams: KeyValueRow[]): string {
   return `${base}?${pairs.join("&")}`;
 }
 
-export function formToMcpConfig(form: McpServerFormState, enabled: boolean): MCPServerConfig {
+function formToMcpConfig(form: McpServerFormState, enabled: boolean): MCPServerConfig {
   const isHttp = HTTP_TRANSPORTS.includes(form.transport);
   const args = form.argsText
     .split("\n")

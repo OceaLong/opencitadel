@@ -87,27 +87,6 @@ def filter_valid_vision_attachments(
     return valid
 
 
-def build_multipart_user_content(
-        text: str,
-        vision_attachments: Optional[List[Union[VisionAttachment, MediaAttachment]]] = None,
-        *,
-        max_bytes: int = MAX_VISION_IMAGE_BYTES,
-) -> List[Dict[str, Any]]:
-    """将文本与图片附件组合为 multipart user content（内联 data_url）。"""
-    parts: List[Dict[str, Any]] = []
-    if text:
-        parts.append({"type": "text", "text": text})
-    for attachment in filter_valid_vision_attachments(vision_attachments, max_bytes=max_bytes):
-        if attachment.data_base64:
-            parts.append(
-                build_image_content_part_from_base64(
-                    attachment.data_base64,
-                    attachment.mime_type,
-                )
-            )
-    return parts
-
-
 def build_user_message(
         text: str,
         vision_attachments: Optional[List[Union[VisionAttachment, MediaAttachment]]] = None,

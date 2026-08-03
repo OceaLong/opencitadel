@@ -13,6 +13,7 @@
 3. [MCP 集成教程](tutorials/03-mcp-integrations.zh-CN.md)
 4. [受治理 Web Operator](tutorials/04-governed-web-operator.zh-CN.md)
 5. [退款对账与合规审计](tutorials/05-refund-reconciliation-compliance.zh-CN.md)
+6. [只读每日 Ops Patrol](tutorials/06-ops-patrol.zh-CN.md)
 
 ### 运维与部署
 
@@ -20,6 +21,7 @@
 |------|----------|
 | [README.zh-CN.md](../README.zh-CN.md) | 项目概览与文档地图 |
 | [生产部署](operations/deployment.zh-CN.md) | Docker Compose 生产部署、cloud/local 模式、备份与调优 |
+| [Ops Patrol 运维](operations/ops-patrol.zh-CN.md) | Collector 安全边界、部署、恢复、证据与排障 |
 | [域名与 HTTPS](operations/https-domain-setup.zh-CN.md) | 域名绑定与 HTTPS |
 | [Helm Chart](../deploy/helm/opencitadel/README.zh-CN.md) | Kubernetes / Helm 安装与 Values |
 
@@ -28,6 +30,7 @@
 | 文档 | 权威范围 |
 |------|----------|
 | [系统架构](architecture/overview.zh-CN.md) | 总体架构、进程职责、沙箱生命周期、部署形态 |
+| [Ops Patrol](architecture/ops-patrol.zh-CN.md) | Pack/Run 生命周期、Collector 信任边界、证据与租户隔离 |
 | [技术选型](architecture/technical-decisions.zh-CN.md) | 技术选择与替代方案对比 |
 | [LLM 端点与模型](architecture/llm-endpoints-and-models.zh-CN.md) | 端点/模型拆分、加密、UI 流程 |
 | [前端 UI](architecture/frontend-ui.zh-CN.md) | Next.js Shell、SSE 投影、HITL 组件 |
@@ -58,6 +61,7 @@
 | [UI](../ui/README.zh-CN.md) | 前端技术栈与路由 |
 | [Sandbox](../sandbox/README.zh-CN.md) | 隔离运行时 |
 | [Nginx 网关](../nginx/README.zh-CN.md) | 边缘代理、SSE/WS、上传限制 |
+| [Ops Collector](../ops-collector/README.zh-CN.md) | 固定只读 MCP 探针、配置与部署 |
 | [OpsConsole 演示](../demo/ops-console/README.zh-CN.md) | Web Operator 工单后台演示 |
 | [E2E 测试](../e2e/README.zh-CN.md) | Playwright 冒烟测试、OpsConsole 演示 |
 | [仓库脚本](../scripts/README.zh-CN.md) | `quickstart.sh`、`check-docs.sh` |

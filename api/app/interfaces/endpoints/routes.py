@@ -26,6 +26,7 @@ from . import (
     scheduling_routes,
     compliance_routes,
     resource_governance_routes,
+    patrol_routes,
 )
 
 
@@ -66,6 +67,7 @@ def create_api_routes() -> APIRouter:
     authenticated_router.include_router(scheduling_routes.scheduled_router)
     authenticated_router.include_router(scheduling_routes.notification_router)
     authenticated_router.include_router(compliance_routes.router)
+    authenticated_router.include_router(patrol_routes.router)
     api_router.include_router(scheduling_routes.webhook_router)
     api_router.include_router(artifact_routes.share_router)
     api_router.include_router(authenticated_router)

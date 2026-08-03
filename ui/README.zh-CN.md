@@ -25,6 +25,8 @@ ui/
 │   │   ├── knowledge/     # 文档知识库
 │   │   ├── marketplace/   # 应用市场
 │   │   ├── automation/    # 定时任务
+│   │   ├── patrols/       # Patrol 列表、创建向导、Pack 详情
+│   │   ├── patrol-runs/   # 权威 Run 报告与证据
 │   │   ├── teams/         # 团队工作区
 │   │   ├── admin/         # 管理后台
 │   │   ├── login/         # 登录
@@ -54,6 +56,8 @@ ui/
 | `/knowledge`、`/knowledge/[id]` | 文档知识库与 RAG | 侧栏 + 顶栏 |
 | `/marketplace` | LLM 小应用 | 侧栏 + 顶栏 |
 | `/automation` | Cron/Webhook 任务 | 侧栏 + 顶栏 |
+| `/patrols`、`/patrols/new`、`/patrols/[id]` | 功能开关控制的 Patrol 列表、向导与 Pack 生命周期 | 侧栏 + 顶栏 |
+| `/patrol-runs/[id]` | 检查结果、Finding 与签名证据下载 | 侧栏 + 顶栏 |
 | `/teams`、`/teams/[id]` | 团队管理 | 侧栏 + 顶栏 |
 | `/login`、`/register` | 认证 | 无 Shell |
 | `/admin` | 概览仪表盘（用量图表） | Admin 布局 |
@@ -70,6 +74,7 @@ ui/
 
 - **桌面**：左侧为会话列表；Codebase、Knowledge、Marketplace、Automation 在 **顶栏工作区下拉**（`app-header.tsx`）。
 - **移动**：`MobileBottomNav` 提供对话、代码库、知识库、应用市场；Automation、Teams、Settings、Admin 在 **更多** Sheet。
+- 仅在全局 `feature_flags.enable_ops_patrol` 启用时显示 Ops Patrol 导航；Auditor 只看到只读视图，不显示变更控件。
 - `/codebase/[id]`、`/knowledge/[id]` 会跳转到新建的 Ask 会话，**不是**独立详情页。
 
 ## 功能
@@ -123,6 +128,7 @@ ui/
 | `service-keys.ts`、`notifications.ts`、`compliance.ts` | 服务 API Key、通知、合规 |
 | `constants.ts` | 共享限制（`CODEBASE_ZIP_MAX_BYTES` = 200 MB，须与 nginx 一致） |
 | `artifacts.ts` | 交付物与分享 |
+| `patrols.ts` | Pack/Run/Finding 生命周期、指标与证据下载 |
 | `types.ts` | 共享 TypeScript 类型 |
 
 ## 本地开发
@@ -168,7 +174,7 @@ npm run start
 ## 测试
 
 - **单元测试**（Vitest）：`ui/src/**/*.test.ts` 覆盖逻辑层 — 安全重定向、会话事件、LLM 状态、知识库工具函数。无组件级 UI 回归套件。
-- **E2E**（Playwright）：`e2e/` 冒烟测试 — 仅首页加载与 OpsConsole 演示登录。见 [`../e2e/README.zh-CN.md`](../e2e/README.zh-CN.md)。
+- **E2E**（Playwright）：基础冒烟/OpsConsole 测试，以及需要工具调用模型和 Collector 的可选真实 Patrol 流程。见 [`../e2e/README.zh-CN.md`](../e2e/README.zh-CN.md)。
 
 请勿将 `npm run test` 理解为已覆盖完整 UI 流程。
 

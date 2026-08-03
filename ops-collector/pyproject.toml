@@ -1,0 +1,31 @@
+[project]
+name = "opencitadel-ops-collector"
+version = "0.1.0"
+description = "Bounded, read-only MCP probes for OpenCitadel Ops Patrol"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "httpx>=0.28.1",
+  "kubernetes>=31.0.0",
+  "mcp>=1.22.0,<2",
+  "pydantic>=2.11.7",
+  "pydantic-settings>=2.10.1",
+]
+
+[project.scripts]
+opencitadel-ops-collector = "opencitadel_ops_collector.main:main"
+
+[dependency-groups]
+dev = ["pytest>=8.4.1", "pytest-asyncio>=1.0.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/opencitadel_ops_collector"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = ["integration: requires an explicitly configured disposable environment"]

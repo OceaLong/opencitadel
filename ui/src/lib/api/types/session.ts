@@ -229,7 +229,7 @@ export type ToolEvent = {
   [key: string]: unknown;
 };
 
-export type ClarifyOption = {
+type ClarifyOption = {
   id: string;
   label: string;
 };
@@ -246,7 +246,7 @@ export type ClarifyQuestion = {
  * SSE 事件类型
  */
 export type EventVisibility = "user" | "internal" | "debug";
-export type EventChannel = "ui" | "debug" | "runtime";
+type EventChannel = "ui" | "debug" | "runtime";
 
 export type EventMeta = {
   event_id?: string;
@@ -368,7 +368,7 @@ export type SessionEventsPage = {
   has_earlier?: boolean;
 };
 
-export type CheckpointAnchorType = "user_message" | "step";
+type CheckpointAnchorType = "user_message" | "step";
 
 export type SessionCheckpoint = {
   id: string;

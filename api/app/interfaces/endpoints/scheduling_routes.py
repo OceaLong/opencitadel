@@ -76,6 +76,7 @@ async def create_job(
         operator_domains=body.operator_domains,
         gate_profile=body.gate_profile,
         enabled=body.enabled,
+        timezone=body.timezone,
         scope=ctx.scope,
     )
     return ApiResponse.success(CreateScheduledJobResponse(job=_job_response(job), webhook_secret=secret))
@@ -107,6 +108,7 @@ async def update_job(
         operator_domains=body.operator_domains,
         gate_profile=body.gate_profile,
         enabled=body.enabled,
+        timezone=body.timezone,
     )
     if not job:
         raise HTTPException(status_code=404, detail="任务不存在")

@@ -2,9 +2,9 @@ import type { SessionCheckpoint, SSEEventData } from "./session";
 
 // ==================== 自动化任务 ====================
 
-export type ScheduledJobTriggerType = "cron" | "interval" | "webhook";
+type ScheduledJobTriggerType = "cron" | "interval" | "webhook";
 
-export type NotifyChannel = {
+type NotifyChannel = {
   type: string;
   server_name: string;
   channel_arg: string;
@@ -26,6 +26,9 @@ export type ScheduledJob = {
   gate_profile?: "loose" | "standard" | "strict" | null;
   notify_channels: NotifyChannel[];
   enabled: boolean;
+  timezone: string;
+  source_type: "generic" | "patrol_pack";
+  source_id?: string | null;
   next_run_at?: string | null;
   last_run_at?: string | null;
   last_run_status?: string | null;
@@ -52,6 +55,7 @@ export type CreateScheduledJobParams = {
   operator_domains?: string[];
   gate_profile?: "loose" | "standard" | "strict" | null;
   enabled?: boolean;
+  timezone?: string;
 };
 
 export type UpdateScheduledJobParams = Partial<CreateScheduledJobParams>;
@@ -78,21 +82,5 @@ export type SessionFile = {
   extension: string;
   content_type: string;
   size: number;
-  [key: string]: unknown;
-};
-
-/**
- * 查看文件内容请求参数
- */
-export type ViewFileParams = {
-  filepath: string;
-  [key: string]: unknown;
-};
-
-/**
- * 查看 Shell 输出请求参数
- */
-export type ViewShellParams = {
-  shell_session_id: string;
   [key: string]: unknown;
 };

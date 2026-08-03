@@ -199,5 +199,3 @@ function BoundDocumentPager({
     </div>
   );
 }
-
-export { appendUniqueChunks };

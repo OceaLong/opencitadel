@@ -115,9 +115,3 @@ def classify_llm_error_code(error: Exception) -> str:
     if is_retriable_llm_error(error):
         return EC.MODEL_UNAVAILABLE
     return EC.MODEL_UNAVAILABLE
-
-
-def error_code_from_optional(code: Optional[str]) -> Optional[str]:
-    if code and code in EC.ALL_ERROR_CODES:
-        return code
-    return None

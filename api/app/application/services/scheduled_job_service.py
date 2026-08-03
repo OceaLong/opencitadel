@@ -12,6 +12,8 @@ from core.config import get_settings
 
 from app.application.errors.exceptions import BadRequestError
 from app.application.services.config_provider import get_runtime_config
+from app.application.services.patrol_run_service import PatrolRunService
+from app.domain.models.patrol import PatrolTriggerType
 from app.domain.models.scheduled_job import ScheduledJob, NotifyChannel
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.session import Session, SessionMode, SessionStatus
@@ -33,8 +35,9 @@ _TERMINAL_STATUS_MAP = {
 
 
 class ScheduledJobService:
-    def __init__(self, uow_factory: Callable[[], IUnitOfWork]) -> None:
+    def __init__(self, uow_factory: Callable[[], IUnitOfWork], patrol_run_service: PatrolRunService | None = None) -> None:
         self._uow_factory = uow_factory
+        self._patrol_run_service = patrol_run_service
 
     @staticmethod
     def _cipher() -> ApiKeyCipher:
@@ -105,6 +108,9 @@ class ScheduledJobService:
             operator_domains: Optional[List[str]] = None,
             gate_profile: Optional[str] = None,
             enabled: bool = True,
+            timezone: str = "UTC",
+            source_type: str = "generic",
+            source_id: Optional[str] = None,
             scope: Optional[OwnerScope] = None,
     ) -> tuple[ScheduledJob, Optional[str]]:
         webhook_secret: Optional[str] = None
@@ -124,6 +130,9 @@ class ScheduledJobService:
             operator_domains=list(operator_domains or []),
             gate_profile=gate_profile,
             enabled=enabled,
+            timezone=timezone,
+            source_type=source_type,  # type: ignore[arg-type]
+            source_id=source_id,
         )
         if trigger_type == "webhook":
             webhook_secret = secrets.token_urlsafe(32)
@@ -131,7 +140,7 @@ class ScheduledJobService:
             job.webhook_secret_hash = self._encrypt_webhook_secret(webhook_secret)
             job.next_run_at = None
         else:
-            job.next_run_at = compute_next_run(trigger_type, trigger_spec)
+            job.next_run_at = compute_next_run(trigger_type, trigger_spec, timezone_name=job.timezone)
 
         async with self._uow_factory() as uow:
             await self._validate_resource_access(
@@ -177,16 +186,6 @@ class ScheduledJobService:
             app_config=app_config,
         )
 
-    async def update_job(self, job: ScheduledJob) -> ScheduledJob:
-        if job.trigger_type != "webhook":
-            job.next_run_at = compute_next_run(job.trigger_type, job.trigger_spec)
-        job.updated_at = datetime.now()
-        async with self._uow_factory() as uow:
-            await self._validate_resource_access(uow, job, self._scope_for_job(job))
-            await uow.scheduled_job.save(job)
-            await uow.commit()
-        return job
-
     async def patch_job(
             self,
             job_id: str,
@@ -205,7 +204,7 @@ class ScheduledJobService:
                 else:
                     setattr(job, key, value)
             if job.trigger_type != "webhook":
-                job.next_run_at = compute_next_run(job.trigger_type, job.trigger_spec)
+                job.next_run_at = compute_next_run(job.trigger_type, job.trigger_spec, timezone_name=job.timezone)
             job.updated_at = datetime.now()
             await self._validate_resource_access(uow, job, scope)
             await uow.scheduled_job.save(job)
@@ -241,7 +240,7 @@ class ScheduledJobService:
         job.last_run_error = error[:2000] if error else None
         job.updated_at = datetime.now()
         if job.trigger_type != "webhook":
-            retry_at = compute_next_run(job.trigger_type, job.trigger_spec)
+            retry_at = compute_next_run(job.trigger_type, job.trigger_spec, timezone_name=job.timezone)
             if retry_at is None or retry_at <= datetime.now():
                 retry_at = datetime.now() + timedelta(seconds=60)
             job.next_run_at = retry_at
@@ -311,6 +310,27 @@ class ScheduledJobService:
                 logger.info("跳过仍在运行中的 job=%s", job.id)
                 return job.last_run_session_id
 
+        if job.source_type == "patrol_pack":
+            if not job.source_id or self._patrol_run_service is None:
+                raise BadRequestError("Patrol scheduled job binding is unavailable")
+            fire_time = job.next_run_at or datetime.now()
+            run = await self._patrol_run_service.trigger_pack(
+                job.source_id,
+                self._scope_for_job(job),
+                job.owner_user_id,
+                idempotency_key=f"schedule:{job.source_id}:{fire_time.isoformat()}",
+                trigger_type=PatrolTriggerType.SCHEDULE,
+            )
+            job.last_run_at = datetime.now()
+            job.last_run_status = "running"
+            job.last_run_session_id = run.session_id
+            job.last_run_error = None
+            if job.trigger_type != "webhook":
+                job.next_run_at = compute_next_run(job.trigger_type, job.trigger_spec, timezone_name=job.timezone)
+            async with self._uow_factory() as uow:
+                await uow.scheduled_job.save(job)
+            return run.session_id
+
         async with self._uow_factory() as uow:
             await self._validate_resource_access(uow, job, self._scope_for_job(job))
 
@@ -346,7 +366,7 @@ class ScheduledJobService:
         job.last_run_session_id = session.id
         job.last_run_error = None
         if job.trigger_type != "webhook":
-            job.next_run_at = compute_next_run(job.trigger_type, job.trigger_spec)
+            job.next_run_at = compute_next_run(job.trigger_type, job.trigger_spec, timezone_name=job.timezone)
         async with self._uow_factory() as uow:
             await uow.scheduled_job.save(job)
             await uow.commit()

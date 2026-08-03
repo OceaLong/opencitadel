@@ -21,7 +21,7 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --set image.worker.repository=your-registry/opencitadel-worker
 ```
 
-Full image build/push steps and the production `--set` flags (five images,
+Full image build/push steps and the production `--set` flags (six images including the optional Ops Collector,
 ingress, sandbox driver): see the Kubernetes / Helm section of the
 [deployment guide](../../../docs/operations/deployment.md).
 
@@ -51,6 +51,10 @@ When `minio.enabled=true`, the chart deploys a MinIO StatefulSet and sets `MINIO
 | `postgresql.user` | opencitadel_app | Non-superuser application/migration role subject to RLS |
 | `minio.enabled` | false | In-cluster MinIO (set true for local mode) |
 | `minio.storage` | 20Gi | MinIO PVC size |
+| `opsCollector.enabled` | false | Deploy the optional fixed read-only Patrol Collector |
+| `opsCollector.image.*` | see values.yaml | Collector repository, tag, and pull policy |
+| `opsCollector.allowedNamespaces` / `allowedWorkloads` | restricted defaults | Kubernetes scope allowlists |
+| `opsCollector.registered*` | `{}` | Registered Prometheus/HTTP/TLS/backup/dependency targets |
 | `env.STORAGE_PROVIDER` | cos | Object storage backend: `cos` or `minio` |
 | `env` | see values.yaml | Non-secret env vars (DB/Redis hosts, log level, etc.) |
 | `secrets` | see values.yaml | Sensitive values rendered as Secret and injected via `envFrom` |
@@ -182,7 +186,7 @@ guide](../../../docs/operations/deployment.md#credential-encryption-and-audit-si
 
 ## Release images
 
-Tagged releases (`v*`) publish multi-arch images to `ghcr.io/ocealong/opencitadel-{api,worker,migrate,ui,sandbox}` via [`.github/workflows/release.yml`](../../../.github/workflows/release.yml). Override `image.*.repository` and `image.*.tag` to consume release builds.
+Tagged releases (`v*`) publish multi-arch images to `ghcr.io/ocealong/opencitadel-{api,worker,migrate,ui,sandbox,ops-collector}` via [`.github/workflows/release.yml`](../../../.github/workflows/release.yml). Override `image.*` and `opsCollector.image.*` to consume release builds.
 
 ## Architecture
 
@@ -213,5 +217,6 @@ Recommended order:
 
 - Root [README.md](../../../README.md) — architecture and configuration
 - [Production deployment guide](../../../docs/operations/deployment.md) — production deployment guide
+- [Ops Patrol operations](../../../docs/operations/ops-patrol.md) — Collector values, policies, verification, and recovery
 - [Architecture evolution guide](../../../docs/architecture/architecture-evolution.md) — scale-out and external sandbox
 - [api/README.md](../../../api/README.md) — local API / Worker development

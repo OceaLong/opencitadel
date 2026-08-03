@@ -25,6 +25,8 @@ ui/
 │   │   ├── knowledge/     # Document knowledge base
 │   │   ├── marketplace/   # Marketplace mini-apps
 │   │   ├── automation/    # Scheduled jobs
+│   │   ├── patrols/       # Patrol list, create wizard, Pack detail
+│   │   ├── patrol-runs/   # Authoritative Run report and evidence
 │   │   ├── teams/         # Team workspaces
 │   │   ├── admin/         # Admin console
 │   │   ├── login/         # Login
@@ -55,6 +57,8 @@ ui/
 | `/knowledge`, `/knowledge/[id]` | Document KB and RAG | Sidebar + header |
 | `/marketplace` | LLM mini-apps | Sidebar + header |
 | `/automation` | Cron/webhook jobs | Sidebar + header |
+| `/patrols`, `/patrols/new`, `/patrols/[id]` | Feature-flagged Patrol list, wizard, Pack lifecycle | Sidebar + header |
+| `/patrol-runs/[id]` | Check results, Findings, signed evidence download | Sidebar + header |
 | `/teams`, `/teams/[id]` | Team management | Sidebar + header |
 | `/login`, `/register` | Auth | No shell |
 | `/admin` | Overview dashboard (usage charts) | Admin layout |
@@ -71,6 +75,7 @@ ui/
 
 - **Desktop**: Left panel holds session list; Codebase, Knowledge, Marketplace, and Automation are in the **header workspace dropdown** (`app-header.tsx`).
 - **Mobile**: `MobileBottomNav` exposes chat, codebase, knowledge, and marketplace; Automation, Teams, Settings, and Admin are in the **More** sheet.
+- Ops Patrol navigation appears only when global `feature_flags.enable_ops_patrol` is enabled; auditors receive read-only views and no mutation controls.
 - `/codebase/[id]` and `/knowledge/[id]` redirect to a new Ask session — they are not standalone detail pages.
 
 ## Features
@@ -124,6 +129,7 @@ Core fetch layer: `src/lib/api/fetch.ts` — cookie auth, CSRF, `X-Workspace-Id`
 | `service-keys.ts`, `notifications.ts`, `compliance.ts` | Service API keys, notifications, compliance |
 | `constants.ts` | Shared limits (`CODEBASE_ZIP_MAX_BYTES` = 200 MB, must match nginx) |
 | `artifacts.ts` | Artifacts and share |
+| `patrols.ts` | Pack/Run/Finding lifecycle, metrics, evidence download |
 | `types.ts` | Shared TypeScript types |
 
 ## Local Development
@@ -173,7 +179,7 @@ Build with `NEXT_PUBLIC_API_BASE_URL=/api` so Nginx proxies API requests.
 ## Testing
 
 - **Unit tests** (Vitest): logic-layer tests under `ui/src/**/*.test.ts` — safe redirect, session events, LLM status, knowledge utils. No component-level UI regression suite.
-- **E2E** (Playwright): smoke tests in `e2e/` — home page load and OpsConsole demo login only. See [`../e2e/README.md`](../e2e/README.md).
+- **E2E** (Playwright): base smoke/OpsConsole tests plus an opt-in real-runtime Patrol flow requiring a tool-capable model and Collector. See [`../e2e/README.md`](../e2e/README.md).
 
 Do not assume `npm run test` covers full UI flows.
 

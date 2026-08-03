@@ -19,7 +19,7 @@ const MODEL_DEPENDENCY: Record<string, ModelDependency> = {
   "watermark-tool": "optional",
 };
 
-export const APP_I18N_KEYS: Record<string, string> = {
+const APP_I18N_KEYS: Record<string, string> = {
   "nutrition-analysis": "nutritionAnalysis",
   "consumption-calculator": "consumptionCalculator",
   "smart-translation": "smartTranslation",
@@ -31,7 +31,7 @@ export const APP_I18N_KEYS: Record<string, string> = {
   "watermark-tool": "watermarkTool",
 };
 
-export const CATEGORY_I18N_KEYS = new Set([
+const CATEGORY_I18N_KEYS = new Set([
   "categoryHealth",
   "categoryLife",
   "categoryOffice",
@@ -107,12 +107,12 @@ const SecretGeneratorApp = lazy(() =>
 
 export type LaunchParams = Record<string, unknown>;
 
-export type MarketplaceAppEntry = {
+type MarketplaceAppEntry = {
   meta: MarketplaceApp;
   render: (params: LaunchParams) => ReactNode;
 };
 
-export const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
+const MARKETPLACE_REGISTRY: MarketplaceAppEntry[] = [
   {
     meta: {
       id: "nutrition-analysis",

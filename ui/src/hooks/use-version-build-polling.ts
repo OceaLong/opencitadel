@@ -32,7 +32,7 @@ export type VersionsDataLike<TVersion, TBuild> = {
   versions: TVersion[];
 };
 
-export type VersionBuildApi<TVersionsData> = {
+type VersionBuildApi<TVersionsData> = {
   listVersions: (resourceId: string) => Promise<TVersionsData>;
   retryBuild: (resourceId: string, buildId: string) => Promise<unknown>;
   cancelBuild: (resourceId: string, buildId: string) => Promise<unknown>;

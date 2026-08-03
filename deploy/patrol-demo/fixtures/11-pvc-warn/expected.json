@@ -1,0 +1,1 @@
+{"case_id":"11-pvc-warn","fault":"PVC utilization 85 percent","injected_fault":true,"expected_results":[{"check_id":"k8s-resource-pressure","status":"warn","severity":"warning","assertion_id":"pvc-warning-threshold"}],"required_evidence":["summary","resource_refs","metric_sample"],"expected_write_operations":0,"teardown":{"strategy":"reset-baseline"}}

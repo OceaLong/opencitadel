@@ -7,7 +7,7 @@ import { getCategoryLabel } from "@/components/marketplace/app-registry";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-import type { MarketplaceApp, ModelDependency } from "@/lib/api/types";
+import type { MarketplaceApp } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 const ACCENTS: Record<string, string> = {

@@ -23,8 +23,6 @@ function resolveKey(tree: MessageTree, key: string): string | undefined {
   return typeof current === "string" ? current : undefined;
 }
 
-export { getClientLocale };
-
 export function translate(
   key: string,
   values?: Record<string, string | number | boolean>,

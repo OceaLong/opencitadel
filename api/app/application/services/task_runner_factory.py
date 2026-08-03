@@ -14,6 +14,8 @@ from app.application.services.llm_model_service import LLMModelService
 from app.application.services.memory_extractor_service import MemoryExtractorService
 from app.application.services.notification_service import NotificationService
 from app.application.services.scheduled_job_service import ScheduledJobService
+from app.application.services.patrol_run_service import PatrolRunService
+from app.application.services.patrol_collector_validator import MCPPatrolCollectorValidator
 from app.application.services.memory_service import MemoryService
 from app.application.services.skill_service import SkillService
 from app.domain.external.connection_pool import A2AConnectionPoolPort, MCPConnectionPoolPort
@@ -24,7 +26,6 @@ from app.domain.external.json_parser import JSONParser
 from app.domain.external.observability import ObservabilityPort
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
-from app.domain.external.session_state import SessionStatePort
 from app.domain.external.task_state_port import TaskStatePort
 from app.domain.models.agent_runtime_settings import AgentMemoryRuntimeSettings, AgentRuntimeSettings
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig, ModelResilienceConfig
@@ -35,6 +36,7 @@ from app.domain.models.knowledge_version import KnowledgeVersionState
 from app.domain.models.resource_governance import ResourceKind
 from app.domain.models.session import Session, SessionStatus
 from app.domain.models.scope import OwnerScope
+from app.domain.models.patrol import PATROL_PROBE_TOOLS, PatrolPackConfig, PatrolPackStatus
 from app.domain.models.skill import Skill
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agent_task_runner import AgentTaskRunner
@@ -48,6 +50,7 @@ from app.domain.services.tools.knowledge_base_tools import KnowledgeBaseTool
 from app.domain.services.tools.artifact import ArtifactTool
 from app.domain.services.tools.memory import MemoryTool
 from app.domain.services.tools.mcp import MCPTool
+from app.domain.services.tools.patrol import PatrolTool
 from app.domain.services.tools.capability_policy import CapabilityPolicy
 from app.domain.services.session_flow_resolver import SessionFlowResolver
 from app.domain.services.subagent_factory import build_subagent_tool
@@ -103,7 +106,6 @@ class TaskRunnerFactory:
             task_state_port: TaskStatePort,
             observability_port: ObservabilityPort,
             event_sequence_port: EventSequencePort,
-            session_state_factory: Callable[[], SessionStatePort],
             mcp_connection_pool: MCPConnectionPoolPort,
             a2a_connection_pool: A2AConnectionPoolPort,
             mcp_server_service: Optional[MCPServerService] = None,
@@ -112,6 +114,7 @@ class TaskRunnerFactory:
             audit_service: Optional[AuditService] = None,
             codebase_service: Optional[CodebaseService] = None,
             object_storage: Optional[ObjectStoragePort] = None,
+            patrol_run_service: Optional[PatrolRunService] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm_model_service = llm_model_service
@@ -126,7 +129,6 @@ class TaskRunnerFactory:
         self._task_state_port = task_state_port
         self._observability_port = observability_port
         self._event_sequence_port = event_sequence_port
-        self._session_state_factory = session_state_factory
         self._mcp_connection_pool = mcp_connection_pool
         self._a2a_connection_pool = a2a_connection_pool
         self._mcp_server_service = mcp_server_service
@@ -135,6 +137,7 @@ class TaskRunnerFactory:
         self._audit_service = audit_service
         self._codebase_service = codebase_service
         self._object_storage = object_storage
+        self._patrol_run_service = patrol_run_service
         self._agent_config = AgentConfig()
         self._mcp_config = MCPConfig()
         self._a2a_config = A2AConfig()
@@ -378,6 +381,13 @@ class TaskRunnerFactory:
 
     async def create_runner(self, session: Session) -> AgentTaskRunner:
         session_scope = self._scope_for_session(session)
+        async with self._uow_factory() as uow:
+            patrol_repository = getattr(uow, "patrol", None)
+            patrol_run = (
+                await patrol_repository.get_run_by_session_id(session.id)
+                if patrol_repository is not None
+                else None
+            )
         (
             authorized_codebase,
             authorized_codebase_version_id,
@@ -391,6 +401,54 @@ class TaskRunnerFactory:
             session,
             latest_message,
         )
+        is_patrol = bool(skill and skill.slug == "ops-patrol")
+        patrol_server_name: str | None = None
+        if patrol_run is not None or is_patrol:
+            if patrol_run is None or not is_patrol:
+                raise NotFoundError("Patrol Session 缺少唯一的持久化 Run/Skill 绑定")
+            if self._patrol_run_service is None:
+                raise NotFoundError("Patrol runtime service unavailable")
+            async with self._uow_factory() as uow:
+                scoped_run = await uow.patrol.get_run(patrol_run.id, session_scope)
+                if scoped_run is None or scoped_run.session_id != session.id:
+                    raise NotFoundError("Patrol Run 不属于当前 Session OwnerScope")
+                pack = await uow.patrol.get_pack(scoped_run.pack_id, session_scope)
+                server_id = scoped_run.pack_snapshot.get("mcp_server_id")
+                server = await uow.mcp_server.get_by_id(str(server_id), scope=session_scope) if server_id else None
+            if pack is None or pack.status != PatrolPackStatus.ACTIVE:
+                raise NotFoundError("Patrol Pack 非 active，运行时绑定已拒绝")
+            if server is None or not server.enabled or server.id != pack.mcp_server_id:
+                raise NotFoundError("Pack-owned Collector 不存在、已禁用或作用域不匹配")
+            snapshot_hash = scoped_run.collector_capability_hash
+            try:
+                current_capabilities = await MCPPatrolCollectorValidator(
+                    self._mcp_connection_pool
+                ).get_capabilities(server)
+            except Exception as exc:
+                raise NotFoundError(
+                    f"Collector capability preflight failed: {str(exc)[:500]}"
+                ) from exc
+            current_hash = str(
+                current_capabilities.get("overall_capability_hash") or ""
+            )
+            if not current_hash or current_hash != snapshot_hash:
+                raise NotFoundError(
+                    "Collector capability drift detected; Pack 必须重新验证"
+                )
+            enabled_tools = set(scoped_run.pack_snapshot.get("enabled_tools") or [])
+            allowed_source_tools = set(PATROL_PROBE_TOOLS) | {"get_capabilities"}
+            if not enabled_tools or not enabled_tools.issubset(allowed_source_tools):
+                raise NotFoundError("Patrol capability snapshot 包含未授权工具")
+            configured_checks = PatrolPackConfig.model_validate(scoped_run.pack_snapshot["config"])
+            agent_config = agent_config.model_copy(
+                update={
+                    "max_run_seconds": configured_checks.defaults.run_timeout_seconds
+                }
+            )
+            required_tools = {item.probe.tool for item in configured_checks.checks if item.enabled}
+            if not required_tools.issubset(enabled_tools):
+                raise NotFoundError("Patrol runtime tools 超出验证快照")
+            patrol_server_name = server.name
         model_id = llm_model.id
         prompt_locale = detect_locale_from_text(latest_message)
 
@@ -437,10 +495,18 @@ class TaskRunnerFactory:
             )
             return {"id": entry.id}
 
-        extra_tools = [MemoryTool(save_fn=save_memory_fn, session_id=session.id)]
+        extra_tools = [] if is_patrol else [MemoryTool(save_fn=save_memory_fn, session_id=session.id)]
+        if is_patrol and patrol_run and self._patrol_run_service:
+            patrol_service = self._patrol_run_service
+
+            async def finalize_patrol(**kwargs):
+                finalized = await patrol_service.finalize_run(**kwargs)
+                return finalized.model_dump(mode="json")
+
+            extra_tools.append(PatrolTool(finalize_patrol, session_id=session.id))
 
         runtime = get_runtime_config()
-        if runtime.feature_flags.enable_artifacts and self._artifact_service:
+        if not is_patrol and runtime.feature_flags.enable_artifacts and self._artifact_service:
             artifact_service = self._artifact_service
 
             async def write_artifact(**kwargs):
@@ -535,7 +601,7 @@ class TaskRunnerFactory:
                 else knowledge_base_prompt
             )
         caps = llm_model.capabilities
-        if caps and caps.image_generation:
+        if not is_patrol and caps and caps.image_generation:
             extra_tools.append(
                 ImageGenerationTool(
                     llm=llm,
@@ -622,16 +688,19 @@ class TaskRunnerFactory:
             parent_policy=session_policy,
             **subagent_overrides,
         )
-        extra_tools = list(extra_tools) + [subagent_tool]
+        if not is_patrol:
+            extra_tools = list(extra_tools) + [subagent_tool]
 
         mcp_config = filter_mcp_config_by_refs(
             self._mcp_config,
-            skill.mcp_server_refs if skill else None,
+            [patrol_server_name] if is_patrol and patrol_server_name else (skill.mcp_server_refs if skill else None),
         )
         a2a_config = filter_a2a_config_by_refs(
-            self._a2a_config,
-            skill.a2a_server_refs if skill else None,
+            A2AConfig() if is_patrol else self._a2a_config,
+            [] if is_patrol else (skill.a2a_server_refs if skill else None),
         )
+        if is_patrol and len(mcp_config.mcpServers) != 1:
+            raise NotFoundError("Patrol Session 必须且只能绑定一个 Collector")
 
         async def on_complete(session_id: str) -> None:
             if self._auto_extract_memory:
@@ -643,6 +712,8 @@ class TaskRunnerFactory:
                 await extractor.extract_from_session(session_id)
 
         async def on_session_terminal(session_id: str, status) -> None:
+            if is_patrol and self._patrol_run_service:
+                await self._patrol_run_service.mark_run_failed(session_id)
             app_config = await self._config_provider.get()
             job_service = ScheduledJobService(uow_factory=self._uow_factory)
             notification_service = NotificationService(uow_factory=self._uow_factory)
@@ -698,7 +769,9 @@ class TaskRunnerFactory:
             skill_prompt=skill_prompt,
             long_term_memory_block=ltm_block,
             extra_tools=extra_tools,
-            on_complete_callback=on_complete if self._auto_extract_memory else None,
+            on_complete_callback=(
+                on_complete if self._auto_extract_memory and not is_patrol else None
+            ),
             on_session_terminal_callback=on_session_terminal,
             model_id=model_id,
             checkpoint_service=self._checkpoint_service,
@@ -708,7 +781,6 @@ class TaskRunnerFactory:
             task_state_port=self._task_state_port,
             observability_port=self._observability_port,
             event_sequence_port=self._event_sequence_port,
-            session_state_port=self._session_state_factory(),
             runtime_settings=agent_runtime_settings,
             mcp_connection_pool=self._mcp_connection_pool,
             a2a_connection_pool=self._a2a_connection_pool,

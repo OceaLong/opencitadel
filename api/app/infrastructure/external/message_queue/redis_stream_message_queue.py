@@ -193,13 +193,3 @@ class RedisStreamMessageQueue(MessageQueue):
                 yield message_id, message_data.get("data")
             except Exception:
                 continue
-
-    async def get_latest_id(self) -> str:
-        """获取消息队列中最新的id"""
-        # 1.取出倒序的消息列表，并且设置count=1
-        messages = await self._redis.client.xrevrange(self._stream_name, "+", "-", count=1)
-        if not messages:
-            return "0"
-
-        # 2.否则取出消息id并返回
-        return messages[0][0]

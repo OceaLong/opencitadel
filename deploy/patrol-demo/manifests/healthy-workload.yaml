@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthy-app
+  namespace: opencitadel-patrol-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: healthy-app}
+  template:
+    metadata:
+      labels: {app: healthy-app}
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.27-alpine
+          ports: [{containerPort: 80}]
+          readinessProbe:
+            httpGet: {path: /, port: 80}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: healthy-heartbeat
+  namespace: opencitadel-patrol-demo
+spec:
+  schedule: "*/5 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: heartbeat
+              image: busybox:1.36
+              command: ["sh", "-c", "date"]

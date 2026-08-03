@@ -3,7 +3,6 @@
 """Compliance report generation against 等保2.0 + ISO27001 control catalog."""
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -266,9 +265,6 @@ class ComplianceService:
     def _eval_crypto_controls(_m: dict, chain: dict) -> tuple[str, list[str]]:
         ok = chain.get("total", 0) == 0 or chain.get("ok", False)
         return ("pass" if ok else "gap", ["HMAC-SHA256 审计链", "API Key 加密"])
-
-    def render_json(self, report: dict[str, Any]) -> str:
-        return json.dumps(report, ensure_ascii=False, indent=2)
 
     def render_markdown(self, report: dict[str, Any]) -> str:
         lines = [

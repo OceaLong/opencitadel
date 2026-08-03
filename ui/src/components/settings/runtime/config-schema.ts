@@ -1,4 +1,4 @@
-export type ConfigFieldType = "boolean" | "number" | "string" | "enum" | "string[]";
+type ConfigFieldType = "boolean" | "number" | "string" | "enum" | "string[]";
 
 export type ConfigFieldSchema = {
   type: ConfigFieldType;
@@ -7,10 +7,6 @@ export type ConfigFieldSchema = {
   step?: number;
   options?: readonly string[];
   nullable?: boolean;
-};
-
-export type ConfigGroupSchema = {
-  fields: Record<string, ConfigFieldSchema>;
 };
 
 export function linesToList(text: string): string[] {

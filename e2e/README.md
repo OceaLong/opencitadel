@@ -44,6 +44,18 @@ Environment variables:
 | `PLAYWRIGHT_BASE_URL` | `http://localhost:8088` | OpenCitadel UI base URL |
 | `OPS_CONSOLE_URL` | `http://localhost:9099` | OpsConsole demo backend |
 
+## Ops Patrol real-runtime path
+
+`patrol.spec.ts` is opt-in because it requires a running Worker with a configured tool-capable model and a pre-provisioned Collector environment. Before enabling the test, persist all nine fixed read-only MCP Tool Policies and provide healthy inputs for all ten baseline checks (Kubernetes access plus the six registered target ids). The Compose profile alone supplies transport, not Kubernetes credentials or registered probe backends:
+
+```bash
+PATROL_E2E=1 npm test -- patrol.spec.ts
+```
+
+It uses the real UI, task runtime, MCP transport, Collector, server assertion engine, evidence download, kill switch, and 390px overflow check. It never inserts fixture results through an HTTP shortcut. CI enables it with the protected `PATROL_E2E_ENABLED=1` repository variable only in an environment that supplies a model.
+
+The test enables/disables the existing MCP record and product flag, but deliberately does not create security policies or fake probe results. Follow [Ops Patrol operations](../docs/operations/ops-patrol.md#register-the-mcp-server) when preparing the protected E2E environment.
+
 Headed mode (debugging):
 
 ```bash
@@ -55,3 +67,5 @@ npm run test:headed
 - [Governed Web Operator tutorial](../docs/tutorials/04-governed-web-operator.md)
 - [Web Operator architecture](../docs/architecture/web-operator.md)
 - [OpsConsole demo README](../demo/ops-console/README.md)
+- [Ops Patrol tutorial](../docs/tutorials/06-ops-patrol.md)
+- [Ops Patrol operations](../docs/operations/ops-patrol.md)

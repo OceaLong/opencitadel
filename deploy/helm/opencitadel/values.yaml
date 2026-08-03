@@ -23,6 +23,31 @@ image:
 ui:
   enabled: true
 
+opsCollector:
+  enabled: false
+  image:
+    repository: opencitadel-ops-collector
+    tag: latest
+    pullPolicy: IfNotPresent
+  targetRef: opencitadel-local
+  allowedNamespaces: [opencitadel]
+  allowedWorkloads: {}
+  registeredPrometheusQueries: {}
+  registeredHttpProbes: {}
+  registeredCertificateProbes: {}
+  registeredBackups: {}
+  registeredDependencies: {}
+  serviceAccount:
+    create: true
+    name: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
 rbac:
   create: true
 

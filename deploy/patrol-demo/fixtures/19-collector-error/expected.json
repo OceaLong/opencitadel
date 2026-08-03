@@ -1,0 +1,1 @@
+{"case_id":"19-collector-error","fault":"Collector timeout or permission denied","injected_fault":true,"expected_results":[{"check_id":"k8s-workload-availability","status":"error","severity":"warning","error_code":"UPSTREAM_TIMEOUT"}],"required_evidence":[],"expected_write_operations":0,"run_has_finding":true,"teardown":{"strategy":"reset-baseline"}}

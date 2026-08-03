@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { Stethoscope } from "lucide-react";
 import type { CSSProperties } from "react";
 
-import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { NotificationInbox } from "@/components/notification-inbox";
+import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
+import { useFeatureFlags } from "@/hooks/use-feature-flags";
 import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
 import type { LLMStatusData } from "@/lib/api/types";
 import {
@@ -29,8 +31,8 @@ import {
   IconSettings,
   IconWorkspace,
 } from "@/lib/icons";
-import { useSettingsDialog } from "@/providers/settings-dialog-provider";
 import { cn } from "@/lib/utils";
+import { useSettingsDialog } from "@/providers/settings-dialog-provider";
 
 function AppHeaderSidebarTrigger() {
   const { open, isMobile } = useSidebar();
@@ -46,6 +48,7 @@ export function AppHeader() {
   const tMeta = useTranslations("metadata");
   const { openSettings } = useSettingsDialog();
   const [llmStatus, setLlmStatus] = useState<LLMStatusData["status"]>("unknown");
+  const { opsPatrolEnabled } = useFeatureFlags();
 
   const modelStatusKey =
     llmStatus === "unknown"
@@ -123,6 +126,14 @@ export function AppHeader() {
                 {t("codebase")}
               </Link>
             </DropdownMenuItem>
+            {opsPatrolEnabled && (
+              <DropdownMenuItem asChild>
+                <Link href="/patrols" className="cursor-pointer">
+                  <Stethoscope className="size-4" />
+                  {t("patrol")}
+                </Link>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem asChild>
               <Link href="/knowledge" className="cursor-pointer">
                 <IconKnowledge className="size-4" />

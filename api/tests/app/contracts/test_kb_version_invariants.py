@@ -942,10 +942,10 @@ async def test_retry_cancel_and_reconcile_preserve_active_version():
     assert store.build.state is BuildState.FAILED
 
 
-def test_alembic_has_only_e9_head_and_d8_is_its_parent():
+def test_alembic_has_only_patrol_schedule_head_and_preserves_kb_parentage():
     script = ScriptDirectory.from_config(Config("alembic.ini"))
 
-    assert script.get_heads() == ["e9f0a1b2c3d4"]
-    assert script.get_revision("e9f0a1b2c3d4").down_revision == (
-        "d8e9f0a1b2c3"
-    )
+    assert script.get_heads() == ["f1a2b3c4d5e6"]
+    assert script.get_revision("f1a2b3c4d5e6").down_revision == "f0a1b2c3d4e5"
+    assert script.get_revision("f0a1b2c3d4e5").down_revision == "e9f0a1b2c3d4"
+    assert script.get_revision("e9f0a1b2c3d4").down_revision == "d8e9f0a1b2c3"

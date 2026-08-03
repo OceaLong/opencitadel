@@ -89,9 +89,9 @@ flowchart LR
 | 受众 | 推荐阅读 |
 |------|----------|
 | 首次体验 | [10 分钟自托管](docs/tutorials/01-self-host-10-minutes.zh-CN.md) |
-| 运维 / DevOps | [生产部署](docs/operations/deployment.zh-CN.md) · [HTTPS](docs/operations/https-domain-setup.zh-CN.md) · [Helm](deploy/helm/opencitadel/README.zh-CN.md) |
+| 运维 / DevOps | [生产部署](docs/operations/deployment.zh-CN.md) · [Ops Patrol 教程](docs/tutorials/06-ops-patrol.zh-CN.md) · [Patrol 运维](docs/operations/ops-patrol.zh-CN.md) · [HTTPS](docs/operations/https-domain-setup.zh-CN.md) · [Helm](deploy/helm/opencitadel/README.zh-CN.md) |
 | 企业场景 | [内部知识库](docs/tutorials/02-internal-knowledge-base.zh-CN.md) · [MCP 集成](docs/tutorials/03-mcp-integrations.zh-CN.md) · [受治理 Web Operator](docs/tutorials/04-governed-web-operator.zh-CN.md) · [退款对账与合规](docs/tutorials/05-refund-reconciliation-compliance.zh-CN.md) |
-| 平台 / 后端 | [文档中心](docs/README.zh-CN.md) · [安全模型](docs/architecture/security-model.zh-CN.md) · [检查点与 HITL](docs/architecture/checkpoints-and-hitl.zh-CN.md) · [事件系统](docs/architecture/events.zh-CN.md) |
+| 平台 / 后端 | [文档中心](docs/README.zh-CN.md) · [安全模型](docs/architecture/security-model.zh-CN.md) · [Ops Patrol 架构](docs/architecture/ops-patrol.zh-CN.md) · [检查点与 HITL](docs/architecture/checkpoints-and-hitl.zh-CN.md) · [事件系统](docs/architecture/events.zh-CN.md) |
 | 开源贡献 | [贡献指南](.github/CONTRIBUTING.zh-CN.md) · [安全政策](.github/SECURITY.zh-CN.md) |
 
 ## 本地开发

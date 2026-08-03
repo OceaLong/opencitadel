@@ -246,18 +246,6 @@ class SandboxQuota(AdmissionPolicy):
         except Exception as exc:
             logger.warning("quota reconcile failed: %s", exc)
 
-    async def list_holders(self) -> set[str]:
-        try:
-            redis = await self._redis()
-            pattern = f"{_HOLDER_PREFIX}{self._node_id}:*"
-            holders: set[str] = set()
-            async for key in redis.scan_iter(match=pattern, count=100):
-                holders.add(key.split(f"{self._node_id}:", 1)[-1])
-            return holders
-        except Exception:
-            return set()
-
-
 _quota_instance: Optional[SandboxQuota] = None
 
 

@@ -181,6 +181,7 @@
     "knowledge": "文档知识库",
     "marketplace": "应用市场",
     "automation": "自动化",
+    "patrol": "运维巡检",
     "modelStatus": "{status, select, unknown {模型状态未知} unavailable {模型不可用} ok {模型正常} other {模型状态}}",
     "workspaceMenu": "工作区"
   },
@@ -1663,33 +1664,33 @@
     "title": "文档知识库"
   },
   "codebase": {
-  "readFailed": "读取失败",
-  "evidence": "证据",
-  "downloadSuccess": "已打包: {key}",
-  "downloadFailed": "下载失败",
-  "reanalyze": "重新分析",
-  "viewBuild": "查看构建",
-  "versionStatusLoading": "正在加载代码库版本",
-  "versionStatusLoadError": "加载代码库版本失败",
-  "versionActionError": "更新代码库构建失败",
-  "activeVersion": "当前版本：{version}",
-  "noActiveVersion": "暂无当前版本",
-  "versionCapabilities": "能力：{capabilities}",
-  "capabilityAvailable": "可用",
-  "capabilityUnavailable": "不可用",
-  "noCapabilities": "无",
-  "versionDegraded": "降级：{reasons}",
-  "unsupportedViews": "暂不支持视图：{views}",
-  "candidateBuild": "候选构建 {state} · {phase} · {progress}%",
-  "candidatePhasePending": "等待中",
-  "candidateDegraded": "候选构建降级：{reasons}",
-  "candidateHeartbeat": "心跳：{heartbeat}",
-  "retryBuild": "重试",
-  "cancelBuild": "取消",
-  "previousVersions": "历史版本",
-  "viewHistoricalVersion": "查看版本 {version}",
-  "viewingHistoricalVersion": "正在查看版本：{version}",
-  "deleteTitle": "删除代码库？",
+    "readFailed": "读取失败",
+    "evidence": "证据",
+    "downloadSuccess": "已打包: {key}",
+    "downloadFailed": "下载失败",
+    "reanalyze": "重新分析",
+    "viewBuild": "查看构建",
+    "versionStatusLoading": "正在加载代码库版本",
+    "versionStatusLoadError": "加载代码库版本失败",
+    "versionActionError": "更新代码库构建失败",
+    "activeVersion": "当前版本：{version}",
+    "noActiveVersion": "暂无当前版本",
+    "versionCapabilities": "能力：{capabilities}",
+    "capabilityAvailable": "可用",
+    "capabilityUnavailable": "不可用",
+    "noCapabilities": "无",
+    "versionDegraded": "降级：{reasons}",
+    "unsupportedViews": "暂不支持视图：{views}",
+    "candidateBuild": "候选构建 {state} · {phase} · {progress}%",
+    "candidatePhasePending": "等待中",
+    "candidateDegraded": "候选构建降级：{reasons}",
+    "candidateHeartbeat": "心跳：{heartbeat}",
+    "retryBuild": "重试",
+    "cancelBuild": "取消",
+    "previousVersions": "历史版本",
+    "viewHistoricalVersion": "查看版本 {version}",
+    "viewingHistoricalVersion": "正在查看版本：{version}",
+    "deleteTitle": "删除代码库？",
     "deleteDescription": "将永久删除该代码库及其索引，此操作不可恢复。",
     "deleteSuccess": "已删除「{name}」",
     "deleteFailed": "删除代码库失败",
@@ -1761,6 +1762,7 @@
     "marketplace": "应用",
     "more": "更多",
     "automation": "自动化",
+    "patrol": "巡检",
     "teams": "团队"
   },
   "mermaid": {
@@ -1771,7 +1773,8 @@
     "refreshing": "刷新中...",
     "title": "通知",
     "scheduledJobCompleted": "定时任务「{jobName}」已完成",
-    "scheduledJobStarted": "定时任务「{jobName}」已开始执行"
+    "scheduledJobStarted": "定时任务「{jobName}」已开始执行",
+    "patrolCompleted": "巡检「{packName}」已完成，状态为 {status}"
   },
   "toolUse": {
     "statusRunning": "执行中",
@@ -2010,6 +2013,180 @@
     "home": "首页",
     "title": "分享的交付物",
     "incompleteContentWarning": "交付物内容可能不完整（存储或生成时被截断），建议重新生成或下载沙箱附件核对。"
+  },
+  "patrol": {
+    "description": "只读、证据优先的自托管应用栈巡检",
+    "evidencePercent": "证据 {value}%",
+    "nextRun": "下次 {value}",
+    "scheduleOff": "计划未启用",
+    "actions": {
+      "acknowledge": "确认",
+      "activate": "激活",
+      "cancel": "取消",
+      "confirm": "确认",
+      "create": "创建巡检",
+      "downloadEvidence": "下载证据包",
+      "falsePositive": "误报",
+      "pause": "暂停",
+      "refresh": "刷新",
+      "resolve": "已处理",
+      "revalidate": "重新验证",
+      "runNow": "立即运行",
+      "view": "查看"
+    },
+    "checks": {
+      "availability": "工作负载可用性",
+      "backup": "备份新鲜度",
+      "dependency": "依赖健康",
+      "endpoint": "端点健康",
+      "events": "Warning 事件",
+      "http5xx": "应用 5xx",
+      "pending": "Pending Pod / 失败 Job",
+      "pressure": "Node / PVC 压力",
+      "restarts": "容器重启",
+      "tls": "TLS 到期"
+    },
+    "decision": {
+      "falsePositiveReason": "误报原因（必填）",
+      "notes": "处理说明",
+      "title": "记录 Finding 决策"
+    },
+    "disabled": {
+      "description": "管理员需要先启用 feature_flags.enable_ops_patrol。",
+      "title": "Ops Patrol 未启用"
+    },
+    "empty": {
+      "description": "连接只读 Collector，先 dry-run，再启用每日计划。",
+      "noRuns": "尚无运行记录。",
+      "title": "创建第一个每日巡检"
+    },
+    "errors": {
+      "action": "操作失败",
+      "create": "创建巡检失败",
+      "evidenceDownload": "证据下载失败",
+      "findingUpdate": "Finding 更新失败",
+      "load": "巡检加载失败",
+      "runLoad": "Run 加载失败",
+      "trigger": "触发失败"
+    },
+    "findingStatus": {
+      "acknowledged": "已确认",
+      "false_positive": "误报",
+      "open": "待处理",
+      "resolved": "已解决"
+    },
+    "new": {
+      "description": "四步完成只读 Collector、范围、检查和计划配置",
+      "readOnly": "审计员只有只读权限，不能创建巡检。",
+      "title": "创建每日巡检"
+    },
+    "metrics": {
+      "falsePositives": "误报数",
+      "findings": "Finding 数",
+      "insufficient": "数据不足（{count}/7 次运行），不展示趋势。",
+      "minutes": "{value} 分钟",
+      "reviewTime": "复核时间中位数",
+      "successRate": "计划运行成功率",
+      "title": "30 天指标"
+    },
+    "pack": {
+      "boundary": "10 项检查；无修复、Shell、浏览器或任意查询能力。",
+      "capabilities": "能力与权限",
+      "environment": "环境",
+      "needsValidation": "Pack 已修改，需要重新验证当前版本后才能激活。",
+      "notValidated": "尚未验证",
+      "nextRun": "下次运行",
+      "recentRuns": "最近运行",
+      "schedule": "计划",
+      "targetSchedule": "目标与计划",
+      "validationErrors": "验证错误",
+      "verifiedTools": "{count} 个已验证只读工具"
+    },
+    "run": {
+      "allChecks": "全部检查结果",
+      "assertions": "服务端断言",
+      "evidenceCompleteness": "证据完整率",
+      "evidenceRefs": "Evidence Ref 与哈希",
+      "needsAttention": "需要处理",
+      "noFindings": "没有 Finding。",
+      "observed": "观测值（已脱敏）",
+      "title": "巡检 Run"
+    },
+    "severity": {
+      "critical": "严重",
+      "info": "信息",
+      "warning": "警告"
+    },
+    "status": {
+      "active": "已激活",
+      "cancelled": "已取消",
+      "completed": "已完成",
+      "completed_with_findings": "完成且有 Finding",
+      "draft": "草稿",
+      "error": "错误",
+      "fail": "失败",
+      "failed": "运行失败",
+      "invalid": "无效",
+      "pass": "通过",
+      "paused": "已暂停",
+      "queued": "排队中",
+      "running": "运行中",
+      "skipped": "已跳过",
+      "validating": "验证中",
+      "warn": "警告"
+    },
+    "thresholds": {
+      "availability": "不可用副本数 = 0",
+      "backup": "超过 24 小时 WARN；超过 48 小时 FAIL",
+      "dependency": "所有已注册依赖均健康",
+      "endpoint": "响应健康；延迟 ≥ 2 秒 WARN",
+      "events": "无高风险 Warning Event",
+      "http5xx": "≥ 1% WARN；≥ 5% FAIL",
+      "pending": "无 Pending Pod、失败 Job 或过期 CronJob",
+      "pressure": "无 Node 压力；PVC ≥ 80% WARN，≥ 90% FAIL",
+      "restarts": "每小时 > 3 WARN；> 10 FAIL",
+      "tls": "少于 30 天 WARN；少于 7 天 FAIL"
+    },
+    "toast": {
+      "activated": "Dry-run 验证通过，巡检已激活",
+      "paused": "巡检已暂停",
+      "started": "巡检已开始",
+      "validationFailed": "验证未通过，请查看错误并修正"
+    },
+    "trigger": {
+      "manual": "手动",
+      "replay": "回放",
+      "schedule": "计划",
+      "webhook": "Webhook"
+    },
+    "wizard": {
+      "collector": "只读 Ops Collector",
+      "collectorPlaceholder": "选择已启用 MCP Server",
+      "createAndDryRun": "创建并 dry-run",
+      "cronHint": "仅支持 minute hour * * *；创建时先 dry-run。",
+      "dailyCron": "每日 cron",
+      "defaultName": "OpenCitadel 每日巡检",
+      "name": "巡检名称",
+      "next": "下一步",
+      "notification": "通知渠道",
+      "notificationHint": "Run 完成和 Finding 会发送到应用内通知收件箱。",
+      "permission": "权限",
+      "previous": "上一步",
+      "readPermission": "固定 integration_read，Kubernetes 仅 get/list/watch",
+      "readOnlyBoundary": "只允许 capability manifest 中的固定只读工具。不会暴露 Shell、浏览器、任意 URL 或任意 PromQL。",
+      "steps": {
+        "checks": "检查与阈值",
+        "schedule": "计划与通知",
+        "scope": "选择范围",
+        "target": "连接目标"
+      },
+      "stepsAria": "创建巡检步骤",
+      "scheduleEnabled": "验证通过后启用每日计划",
+      "scheduleEnabledHint": "仅当能力扫描和 dry-run 通过后，激活操作才会启用此计划。",
+      "source": "数据来源",
+      "threshold": "阈值",
+      "timezone": "IANA 时区"
+    }
   },
   "workspaceContext": {
     "codebasePanelTitle": "代码库上下文",
