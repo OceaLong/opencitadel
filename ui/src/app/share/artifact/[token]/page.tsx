@@ -3,8 +3,8 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { ArrowLeft, Loader2 } from "lucide-react";
 
 import { MarkdownContent } from "@/components/markdown-content";
 import { Button } from "@/components/ui/button";

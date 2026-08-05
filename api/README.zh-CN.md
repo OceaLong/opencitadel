@@ -137,8 +137,6 @@ Defense in Depth。Scope 外资源通常返回 404，避免泄露对象存在性
 | GET | `/status` | 健康检查 |
 | GET | `/llm/status` | LLM 可用性摘要 |
 | GET | `/metrics` | Prometheus 指标 |
-| GET | `/marketplace/apps` | 应用市场目录 |
-| POST | `/marketplace/*` | 应用市场 mini-app 接口 |
 | POST | `/webhooks/{job_token}` | 自动化 Webhook 入口（路径含 token） |
 | GET | `/share/artifact/{token}` | 公开交付物分享（路径含 token） |
 | GET | `/invitations/{token}` | 团队邀请预览 |
@@ -154,7 +152,8 @@ Defense in Depth。Scope 外资源通常返回 404，避免泄露对象存在性
 | GET/POST/DELETE | `/service-keys` | 服务 API Key CRUD |
 | GET/POST/PATCH/DELETE | `/teams`、`/teams/{id}/*` | 团队工作区 API |
 | GET/POST/PATCH | `/sessions`、`/sessions/{id}/*` | 会话 CRUD、chat SSE、检查点、VNC |
-| GET/POST/PATCH/DELETE | `/patrol-packs`、`/patrol-packs/{id}/*`、`/patrol-runs/*`、`/patrol-findings/*` | 功能开关控制的只读 Ops Patrol 控制面 |
+| GET/POST/PATCH/DELETE | `/patrol-packs`、`/patrol-packs/{id}/*`、`/patrol-runs/*`、`/patrol-findings/*` | 功能开关控制的 Ops Patrol 控制面（发现结果只读；修复写路径单独开关） |
+| POST/GET | `/patrol-findings/{id}/remediations`、`/patrol-runs/{run_id}/remediations`、`/patrol-remediations/{id}` | 功能开关控制的 Patrol 修复提案、审批与执行 |
 | GET/POST/PUT/DELETE | `/skills`、`/memories`、`/files` | Skill、长期记忆、文件 |
 | GET/POST | `/codebases`、`/knowledge-bases`、`/scheduled-jobs`、`/notifications` | 代码库、知识库、自动化、通知 |
 | GET/PUT/DELETE | `/app-config/*`、`/llm-endpoints`、`/llm-models` | AppConfig、LLM 端点与模型 |
@@ -183,6 +182,7 @@ Defense in Depth。Scope 外资源通常返回 404，避免泄露对象存在性
 | GET | `/admin/audit/verify-chain`、`/admin/audit/verify-chain/sessions/{id}` | 审计链校验 |
 | GET | `/admin/evidence/sessions`、`/admin/evidence/sessions/{id}/package` | 合规证据包 |
 | GET | `/admin/compliance/report` | 合规报告导出 |
+| GET | `/admin/governance/sessions/{id}/profile` | 会话治理档案（能力收窄、审批批次、终态结果、审计链） |
 
 ### 团队与邀请
 
@@ -220,8 +220,11 @@ Defense in Depth。Scope 外资源通常返回 404，避免泄露对象存在性
 | POST | `/patrol-runs/{id}/{cancel\|replay}` | 取消或回放 Run |
 | GET | `/patrol-runs/{id}/evidence` | 下载签名证据 ZIP |
 | POST | `/patrol-findings/{id}/{acknowledge\|resolve\|false-positive}` | 记录可审计决策 |
+| POST | `/patrol-findings/{id}/remediations` | 为 Finding 提出修复动作 |
+| GET | `/patrol-runs/{run_id}/remediations` | 列出某 Run 下的修复记录 |
+| GET | `/patrol-remediations/{id}` | 修复详情（状态、审批、执行结果） |
 
-Patrol 资源使用与其他租户数据相同的个人/团队 `OwnerScope` 与 FORCE RLS 控制。`AUDITOR` 可以读取和下载证据，但不能变更。见 [Ops Patrol 架构](../docs/architecture/ops-patrol.zh-CN.md)。
+Patrol 资源使用与其他租户数据相同的个人/团队 `OwnerScope` 与 FORCE RLS 控制。`AUDITOR` 可以读取和下载证据，但不能变更。修复执行默认关闭（`enable_ops_patrol_remediation`），且始终走与 `approval=always` 工具相同的 `ToolApprovalBatch` 人工审批通道。见 [Ops Patrol 架构](../docs/architecture/ops-patrol.zh-CN.md)。
 
 ### LLM 端点与模型
 

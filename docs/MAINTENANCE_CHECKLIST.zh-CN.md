@@ -43,7 +43,7 @@
 | 沙箱边界 | Chromium 在沙箱；Worker 内 Playwright 经 CDP |
 | 集成 UI | 设置弹窗 → 集成 Tab（非 `/settings/integrations`） |
 | 对象存储 | `.env.example` 默认；quickstart 首次运行设置 `COMPOSE_PROFILES=local` + `STORAGE_PROVIDER=minio` |
-| 上传限制 | `nginx/nginx.conf`、`ui/src/lib/constants.ts`、AppConfig `knowledge_base.document.max_bytes`、`server.marketplace_max_upload_bytes` |
+| 上传限制 | `nginx/nginx.conf`、`ui/src/lib/constants.ts`、AppConfig `knowledge_base.document.max_bytes` |
 | KB 摄取 / OCR | `knowledge_base/ingestion_runner.py`、`worker/main.py`、`knowledge-base-ingestion.md`（+ 中文） |
 | 服务 API Key | `X-Api-Key`；入站仅 `/api/a2a` |
 | 分享链接 | 默认 TTL 168h；UI 路由 `/share/artifact/[token]` |

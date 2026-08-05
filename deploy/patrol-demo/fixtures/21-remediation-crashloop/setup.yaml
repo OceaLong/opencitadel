@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fixture-remediation-crashloop
+  namespace: opencitadel-patrol-demo
+  labels: {opencitadel.io/patrol-fixture: "true"}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: fixture-remediation-crashloop}}
+  template:
+    metadata: {labels: {app: fixture-remediation-crashloop, opencitadel.io/patrol-fixture: "true"}}
+    spec:
+      containers:
+        # Mirrors 03-crashloop's bounded crashers: the aggregate restart
+        # threshold is deterministic without waiting for kubelet's
+        # exponential backoff. The actuator's remediation restart() patches
+        # this same Deployment (spec.template annotations), not the crash
+        # command itself -- the recheck-pass expectation in expected.json
+        # models a successful redeploy of a fixed image, not a real self-
+        # heal of this literal crash loop.
+        - {name: crash-01, image: busybox:1.36, command: ["sh", "-c", "echo crash >&2; exit 1"]}
+        - {name: crash-02, image: busybox:1.36, command: ["sh", "-c", "echo crash >&2; exit 1"]}
+        - {name: crash-03, image: busybox:1.36, command: ["sh", "-c", "echo crash >&2; exit 1"]}
+        - {name: crash-04, image: busybox:1.36, command: ["sh", "-c", "echo crash >&2; exit 1"]}
+        - {name: crash-05, image: busybox:1.36, command: ["sh", "-c", "echo crash >&2; exit 1"]}
+        - {name: crash-06, image: busybox:1.36, command: ["sh", "-c", "echo crash >&2; exit 1"]}
+        - {name: crash-07, image: busybox:1.36, command: ["sh", "-c", "echo crash >&2; exit 1"]}
+        - {name: crash-08, image: busybox:1.36, command: ["sh", "-c", "echo crash >&2; exit 1"]}
+        - {name: crash-09, image: busybox:1.36, command: ["sh", "-c", "echo crash >&2; exit 1"]}
+        - {name: crash-10, image: busybox:1.36, command: ["sh", "-c", "echo crash >&2; exit 1"]}
+        - {name: crash-11, image: busybox:1.36, command: ["sh", "-c", "echo crash >&2; exit 1"]}

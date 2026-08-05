@@ -6,25 +6,25 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { ChatInput, type ChatInputRef } from "@/components/chat-input";
 import {
   ContextSelector,
   type SessionContextSelection,
 } from "@/components/context-selector";
+import { ChatInput, type ChatInputRef } from "@/components/session/chat-input";
 import {
   OperatorScopeDialog,
   type OperatorSessionConfig,
-} from "@/components/operator-scope-dialog";
+} from "@/components/session/operator-scope-dialog";
+import { SuggestedQuestions } from "@/components/session/suggested-questions";
+import { ThinkingToggle } from "@/components/session/thinking-toggle";
 import { SessionModelPicker } from "@/components/session-model-picker";
 import { SessionSkillPicker } from "@/components/session-skill-picker";
-import { SuggestedQuestions } from "@/components/suggested-questions";
-import { ThinkingToggle } from "@/components/thinking-toggle";
 
+import { useRequireAuth } from "@/hooks/use-require-auth";
 import { invalidateModelsCache, loadModels, resolveDefaultModelId } from "@/lib/api/models-cache";
 import { sessionApi } from "@/lib/api/session";
 import type { FileInfo, Skill } from "@/lib/api/types";
 import { IconSecurity } from "@/lib/icons";
-import { useRequireAuth } from "@/hooks/use-require-auth";
 
 export default function Page() {
   const router = useRouter();

@@ -10,6 +10,7 @@ fi
 kubectl --context "$context" delete namespace opencitadel-patrol-demo --ignore-not-found --wait=true
 kubectl --context "$context" apply -f "$root_dir/deploy/patrol-demo/manifests/namespace.yaml"
 kubectl --context "$context" apply -f "$root_dir/deploy/patrol-demo/manifests/collector-rbac.yaml"
+kubectl --context "$context" apply -f "$root_dir/deploy/patrol-demo/manifests/actuator-rbac.yaml"
 kubectl --context "$context" apply -f "$root_dir/deploy/patrol-demo/manifests/mock-services.yaml"
 kubectl --context "$context" apply -f "$root_dir/deploy/patrol-demo/manifests/prometheus.yaml"
 kubectl --context "$context" apply -f "$root_dir/deploy/patrol-demo/manifests/healthy-workload.yaml"

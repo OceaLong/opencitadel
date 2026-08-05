@@ -26,19 +26,19 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 
 | Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
 |------|-------|-----------|-----------|----------|-------------|------------|
-| [overview.md](architecture/overview.md) | System design, API/Worker, DI, sandbox | primary | paired | mermaid | `api/app/container.py`, `worker/main.py` | medium |
+| [overview.md](architecture/overview.md) | System design, API/Worker, DI, sandbox | primary | paired | mermaid | `api/app/container.py`, `worker/main.py`, `api/app/application/services/runner_bindings/` | medium |
+| [governance-plane.md](architecture/governance-plane.md) | Effect contracts, capability narrowing, batch approval, terminal latch, evidence | primary | paired | mermaid | `tool_policy.py`, `capability_policy.py`, `tool_batch_executor.py`, `governance_profile_service.py`, `evidence_service.py` | medium |
 | [security-model.md](architecture/security-model.md) | Trust boundaries, auth, secrets | primary | paired | mermaid | `api/app/infrastructure/security/` | medium |
 | [events.md](architecture/events.md) | Domain events, SSE, replay | primary | paired | mermaid | `domain/models/event.py` | medium |
-| [checkpoints-and-hitl.md](architecture/checkpoints-and-hitl.md) | HITL gates, checkpoints, Web Operator | primary | paired | mermaid | `checkpoint_service.py`, `session_routes.py` | medium |
+| [checkpoints-and-hitl.md](architecture/checkpoints-and-hitl.md) | HITL gates, checkpoints, Web Operator | primary | paired | mermaid | `checkpoint_service.py`, `session_routes.py`, `session/approval_routes.py` | medium |
 | [web-operator.md](architecture/web-operator.md) | Gate profiles, audit contract | primary | paired | mermaid | `domain/services/agents/` | low |
 | [teams-and-workspaces.md](architecture/teams-and-workspaces.md) | Teams, `X-Workspace-Id` | primary | paired | mermaid | `team_routes.py` | low |
 | [admin-auditor-compliance.md](architecture/admin-auditor-compliance.md) | Admin, auditor, compliance | primary | paired | mermaid | `admin_routes.py`, `ui/src/app/admin/` | medium |
 | [integrations-a2a-service-keys.md](architecture/integrations-a2a-service-keys.md) | A2A, service API keys | primary | paired | mermaid | `a2a_routes.py`, `service_api_key_routes.py` | low |
-| [skills.md](architecture/skills.md) | Skill templates, runtime | primary | paired | mermaid | `skill_service.py`, `task_runner_factory.py` | low |
+| [skills.md](architecture/skills.md) | Skill templates, runtime | primary | paired | mermaid | `skill_service.py`, `task_runner_factory.py`, `runner_bindings/` | low |
 | [artifacts-sharing.md](architecture/artifacts-sharing.md) | Artifacts, public share | primary | paired | mermaid | `artifact_routes.py` | low |
 | [automation-scheduler.md](architecture/automation-scheduler.md) | Cron, webhooks, leader election | primary | paired | mermaid | `scheduling_routes.py`, `worker/main.py` | low |
 | [ops-patrol.md](architecture/ops-patrol.md) | Pack/Run lifecycle, Collector boundary, evidence | primary | paired | mermaid | `patrol_routes.py`, `patrol_run_service.py` | low |
-| [marketplace.md](architecture/marketplace.md) | Marketplace apps | primary | paired | mermaid | `marketplace_routes.py` | low |
 | [config-source-governance.md](architecture/config-source-governance.md) | AppConfig vs env boundaries | primary | paired | mermaid | `core/config.py`, `app_config_routes.py` | medium |
 | [model-resilience.md](architecture/model-resilience.md) | Circuit breaker, fallback | primary | paired | mermaid | `resilient_llm.py` | low |
 | [contract-compatibility.md](architecture/contract-compatibility.md) | API/SSE compatibility window | primary | paired | mermaid | `event_upgrader.py` | low |
@@ -55,7 +55,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
 |------|-------|-----------|-----------|----------|-------------|------------|
 | [operations/deployment.md](operations/deployment.md) | Production deployment | primary | paired | mermaid | `docker-compose.yml` | low |
-| [operations/ops-patrol.md](operations/ops-patrol.md) | Patrol enablement, deployment, evidence, recovery | primary | paired | none | `ops-collector/`, `deploy/helm/` | low |
+| [operations/ops-patrol.md](operations/ops-patrol.md) | Patrol enablement, deployment, evidence, recovery | primary | paired | mermaid | `ops-collector/`, `ops-actuator/`, `deploy/helm/` | low |
 | [operations/https-domain-setup.md](operations/https-domain-setup.md) | HTTPS & domain | primary | paired | none | `.env.example` | low |
 | [tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.md) | Quick BYO key onboarding | tutorial | paired | none | `scripts/quickstart.sh` | low |
 | [tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.md) | Knowledge base RAG | tutorial | paired | mermaid | `knowledge-base-ingestion.md` | low |
@@ -63,6 +63,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [tutorials/04-governed-web-operator.md](tutorials/04-governed-web-operator.md) | Web Operator runbook | tutorial | paired | none | `operator-scope-dialog.tsx` | low |
 | [tutorials/05-refund-reconciliation-compliance.md](tutorials/05-refund-reconciliation-compliance.md) | Compliance demo | tutorial | paired | none | `compliance_routes.py` | low |
 | [tutorials/06-ops-patrol.md](tutorials/06-ops-patrol.md) | Read-only Kubernetes Patrol walkthrough | tutorial | paired | none | `ui/src/app/patrols/` | low |
+| [tutorials/07-approved-remediation.md](tutorials/07-approved-remediation.md) | Approved Ops Patrol remediation walkthrough | tutorial | paired | none | `ops-actuator/` | low |
 
 ## Module READMEs
 
@@ -73,6 +74,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [sandbox/README.md](../sandbox/README.md) | Sandbox service | module | paired | none | `sandbox/` | low |
 | [nginx/README.md](../nginx/README.md) | Gateway, SSE/WS, upload limits | module | paired | mermaid | `nginx/nginx.conf` | low |
 | [ops-collector/README.md](../ops-collector/README.md) | Fixed read-only probes and configuration | module | paired | none | `ops-collector/src/` | low |
+| [ops-actuator/README.md](../ops-actuator/README.md) | Fixed patch-only write probes and configuration | module | paired | none | `ops-actuator/src/` | low |
 | [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.md) | Helm install | module | paired | none | `deploy/helm/` | low |
 | [deploy/patrol-demo/README.md](../deploy/patrol-demo/README.md) | Disposable Patrol fault lab | module | paired | none | `scripts/run-patrol-fixtures.sh` | low |
 | [demo/ops-console/README.md](../demo/ops-console/README.md) | Web Operator demo backend | module | paired | none | `demo/ops-console/` | low |
@@ -94,6 +96,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
 |------|-------|-----------|-----------|----------|-------------|------------|
 | [2026-07-28-agent-kb-codebase-governance-audit.md](superpowers/audits/2026-07-28-agent-kb-codebase-governance-audit.md) | Superseded governance audit — resource versioning gap claim (see status banner) | historical | zh-only (exempt) | none | `api/app/application/services/*_version_service.py` | low |
+| [2026-08-04-governance-p0-reverification.md](superpowers/audits/2026-08-04-governance-p0-reverification.md) | Re-verification of 2026-07-28 governance audit P0 findings | historical | zh-only (exempt) | none | — | low |
 
 ## Deprecation candidates (resolved — kept for grep regression)
 

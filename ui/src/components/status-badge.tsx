@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
+
 import { cn } from "@/lib/utils";
 
 type StatusBadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning";
@@ -18,9 +19,15 @@ type StatusBadgeProps = {
   children: ReactNode;
   variant?: StatusBadgeVariant;
   className?: string;
+  "data-testid"?: string;
 };
 
-export function StatusBadge({ children, variant = "secondary", className }: StatusBadgeProps) {
+export function StatusBadge({
+  children,
+  variant = "secondary",
+  className,
+  ...rest
+}: StatusBadgeProps) {
   const semantic = variant === "success" || variant === "warning";
 
   if (semantic) {
@@ -31,6 +38,7 @@ export function StatusBadge({ children, variant = "secondary", className }: Stat
           variantClasses[variant],
           className,
         )}
+        {...rest}
       >
         {children}
       </span>
@@ -38,7 +46,7 @@ export function StatusBadge({ children, variant = "secondary", className }: Stat
   }
 
   return (
-    <Badge variant={variant} className={cn("text-2xs", className)}>
+    <Badge variant={variant} className={cn("text-2xs", className)} {...rest}>
       {children}
     </Badge>
   );

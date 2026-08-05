@@ -5,6 +5,7 @@ import glob
 import logging
 import os.path
 import re
+import shlex
 from typing import Optional
 
 from fastapi import UploadFile
@@ -29,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 SANDBOX_HOME_DIR = "/home/ubuntu"
 
+# 允许访问的根目录白名单，规范化后的路径必须落在其中之一才被放行。
+# 测试可通过 monkeypatch 收紧/替换该常量（例如指向临时目录），生产环境不应放宽。
+SANDBOX_ALLOWED_ROOTS = ("/home/ubuntu", "/tmp", "/workspace")
+
 
 class FileService:
     """文件沙箱服务"""
@@ -37,8 +42,21 @@ class FileService:
         pass
 
     @classmethod
+    def _is_within_allowed_roots(cls, resolved_path: str) -> bool:
+        """判断解析后的规范路径(realpath)是否落在允许根目录白名单内。"""
+        for root in SANDBOX_ALLOWED_ROOTS:
+            root_resolved = os.path.realpath(root)
+            try:
+                common = os.path.commonpath([resolved_path, root_resolved])
+            except ValueError:
+                continue
+            if common == root_resolved:
+                return True
+        return False
+
+    @classmethod
     def _normalize_filepath(cls, filepath: str) -> str:
-        """规范化文件路径，兼容相对路径并确保包含目录部分。"""
+        """规范化文件路径，兼容相对路径并确保包含目录部分，同时进行 containment 校验。"""
         normalized = (filepath or "").strip()
         if not normalized:
             raise BadRequestException("文件路径不能为空")
@@ -49,6 +67,37 @@ class FileService:
         directory = os.path.dirname(normalized)
         if not directory:
             raise BadRequestException(f"无效的文件路径: {filepath}")
+
+        # containment 校验：解析符号链接/`..`后的规范路径必须落在允许根目录之内，
+        # 参照 api 侧 source_validator.py 的 realpath + commonpath 手法。
+        resolved = os.path.realpath(normalized)
+        if not cls._is_within_allowed_roots(resolved):
+            raise BadRequestException("path outside sandbox allowed roots")
+
+        return normalized
+
+    @classmethod
+    def _normalize_dirpath(cls, dirpath: str) -> str:
+        """规范化目录路径，兼容相对路径/末尾斜杠/`.`，同时进行 containment 校验。
+
+        与 `_normalize_filepath` 的区别：目录场景下 `''`/`.`/`..` 均是合法的目录
+        basename（例如末尾带斜杠的 `sub/`、代表 home 的 `.`），不应像文件路径那样
+        直接拒绝——否则会误伤 LLM 高频写法（`'sub/'`、`'<home>/'`、`'.'`）。这里改用
+        `os.path.normpath` 收敛末尾斜杠/单点分量，逃逸（如 `'../'`）仍由下方的
+        realpath + containment 校验兜底拒绝，语义与 `_normalize_filepath` 一致。
+        """
+        normalized = (dirpath or "").strip()
+        if not normalized:
+            raise BadRequestException("目录路径不能为空")
+        if not normalized.startswith("/"):
+            normalized = f"{SANDBOX_HOME_DIR}/{normalized.lstrip('/')}"
+        normalized = os.path.normpath(normalized)
+
+        # containment 校验：与 _normalize_filepath 保持一致的 realpath + commonpath 手法。
+        resolved = os.path.realpath(normalized)
+        if not cls._is_within_allowed_roots(resolved):
+            raise BadRequestException("path outside sandbox allowed roots")
+
         return normalized
 
     @classmethod
@@ -74,8 +123,8 @@ class FileService:
 
             # 3.判断是否为sudo，如果是sudo系统则使用命令行的形式读取文件
             if sudo:
-                # 4.使用sudo cat命令读取文件内容
-                command = f"sudo cat '{filepath}'"
+                # 4.使用sudo cat命令读取文件内容（filepath经shlex.quote转义,防止shell注入）
+                command = f"sudo cat {shlex.quote(filepath)}"
                 process = await asyncio.create_subprocess_shell(
                     command,
                     stdout=asyncio.subprocess.PIPE,
@@ -144,9 +193,6 @@ class FileService:
 
             # 2.判断是否是sudo权限，如果是则使用命令行的形式先写入一个缓存文件，然后将缓存文件覆盖原始文件
             if sudo:
-                # 3.使用命令的方式先向临时文件写入数据，计算追加模式
-                mode = ">>" if append else ">"
-
                 # 4.创建一个临时文件
                 temp_file = f"/tmp/file_write_{os.getpid()}.tmp"
 
@@ -159,23 +205,31 @@ class FileService:
                 # 6.使用asyncio创建子线程并写入
                 bytes_written = await asyncio.to_thread(async_write_temp_file)
 
-                # 7.使用命令行将临时文件写入到目标哦文件中
-                command = f"sudo bash -c \"cat {temp_file} {mode} {filepath}\""
-                process = await asyncio.create_subprocess_shell(
-                    command,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
+                # 7.使用sudo tee将临时文件内容写入目标文件（filepath/temp_file均经shlex.quote转义,
+                #   避免像旧版"sudo bash -c \"...{filepath}...\""那样的嵌套引号被恶意路径逃逸）
+                # 临时文件的清理放入finally：即便子进程非0退出(抛异常)也不能残留临时文件(M4)。
+                try:
+                    tee_flag = " -a" if append else ""
+                    command = (
+                        f"sudo tee{tee_flag} {shlex.quote(filepath)} "
+                        f"< {shlex.quote(temp_file)} > /dev/null"
+                    )
+                    process = await asyncio.create_subprocess_shell(
+                        command,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
 
-                # 8.等待子进程执行完毕
-                stdout, stderr = await process.communicate()
+                    # 8.等待子进程执行完毕
+                    stdout, stderr = await process.communicate()
 
-                # 9.检测子进程是否正常执行
-                if process.returncode != 0:
-                    raise BadRequestException(f"文件内容写入失败: {stderr.decode()}")
-
-                # 10.清除下临时文件
-                os.unlink(temp_file)
+                    # 9.检测子进程是否正常执行
+                    if process.returncode != 0:
+                        raise BadRequestException(f"文件内容写入失败: {stderr.decode()}")
+                finally:
+                    # 10.清除下临时文件
+                    if os.path.exists(temp_file):
+                        os.unlink(temp_file)
             else:
                 # 11.非sudo使用Python方式写入，先确保文件路径存在
                 os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -237,6 +291,8 @@ class FileService:
             sudo: bool = False,
     ) -> FileSearchResult:
         """根据传递的文件路径+匹配规则查询文件内符合的内容"""
+        filepath = self._normalize_filepath(filepath)
+
         # 1.调用服务获取对应的文件内容
         file_read_result = await self.read_file(filepath=filepath, sudo=sudo, max_length=None)
         content = file_read_result.content
@@ -272,6 +328,9 @@ class FileService:
     @classmethod
     async def find_files(cls, dir_path: str, glob_pattern: str) -> FileFindResult:
         """根据传递的文件夹路径+glob规则查询文件列表"""
+        # 0.归一化目录路径并进行containment校验（走目录规则，而非文件路径的basename拒绝规则）
+        dir_path = cls._normalize_dirpath(dir_path)
+
         # 1.检测下传递进来的目录是否存在
         if not os.path.exists(dir_path):
             raise NotFoundException(f"当前文件夹不存在: {dir_path}")
@@ -325,12 +384,14 @@ class FileService:
     @classmethod
     async def ensure_file(cls, filepath: str) -> None:
         """传递filepath用于确保当前文件存在"""
+        filepath = cls._normalize_filepath(filepath)
         if not os.path.exists(filepath):
             raise NotFoundException(f"该文件不存在: {filepath}")
 
     @classmethod
     async def check_file_exists(cls, filepath: str) -> FileCheckResult:
         """根据传递的路径判断文件是否存在"""
+        filepath = cls._normalize_filepath(filepath)
         return FileCheckResult(
             filepath=filepath,
             exists=os.path.exists(filepath),
@@ -338,6 +399,9 @@ class FileService:
 
     async def delete_file(self, filepath: str) -> FileDeleteResult:
         """根据传递的路径+sudo删除指定文件"""
+        # 0.归一化路径并进行containment校验
+        filepath = self._normalize_filepath(filepath)
+
         # 1.判断文件是否存在
         await self.ensure_file(filepath)
 

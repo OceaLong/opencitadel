@@ -1,19 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import asyncio
-import logging
 from datetime import datetime
 from typing import Optional, Dict, AsyncGenerator
 
-import jwt
-import websockets
 from fastapi import APIRouter, Depends, Body, Query, Request
 from sse_starlette import EventSourceResponse, ServerSentEvent
-from starlette.websockets import WebSocket, WebSocketDisconnect
-from websockets import ConnectionClosed
 
-from app.application.errors.exceptions import BadRequestError, NotFoundError
-from app.application.services.config_provider import get_runtime_config
+from app.application.errors.exceptions import NotFoundError
 from app.application.services.agent_service import AgentService
 from app.application.services.session_service import SessionService
 from app.interfaces.client_ip import get_client_ip
@@ -23,35 +16,19 @@ from app.interfaces.schemas.session import (
     CreateSessionRequest,
     CreateSessionResponse,
     ListSessionResponse,
-    ListSessionItem,
     ChatRequest,
     GetSessionResponse,
-    GetSessionFilesResponse,
-    FileReadResponse,
-    FileReadRequest,
-    ShellReadResponse,
-    ShellReadRequest,
     UpdateSessionConfigRequest,
     GetSessionTokenUsageResponse,
     TokenUsageSummaryResponse,
     TokenUsageRecordResponse,
     GetSessionEventsResponse,
 )
-from app.interfaces.schemas.llm_model import LLMModelResponse
-from app.interfaces.schemas.skill import SkillSummaryResponse
-from app.interfaces.schemas.memory import SessionMemoryResponse, ClearMemoryRequest
-from app.interfaces.schemas.checkpoint import (
-    CheckpointItemResponse,
-    ListCheckpointsResponse,
-    RestoreCheckpointResponse,
-)
-from app.interfaces.endpoints.llm_model_routes import _to_response as llm_to_response
 from app.interfaces.service_dependencies import (
     get_session_service,
     get_agent_service,
     get_llm_model_service,
     get_skill_service,
-    get_memory_service,
     get_llm_token_usage_service,
     get_quota_service,
     get_audit_service,
@@ -59,401 +36,27 @@ from app.interfaces.service_dependencies import (
 from app.application.services.quota_service import QuotaService
 from app.application.services.audit_service import AuditService
 from app.domain.models.audit_log import AuditLog
-from app.domain.models.tool_approval import ApprovalStatus
-from app.domain.utils.hitl import (
-    PLAN_APPROVAL_PHASE,
-    TAKEOVER_PHASE,
-    TOOL_APPROVAL_PHASE,
-    parse_gate_action,
-)
 from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.skill_service import SkillService
-from app.application.services.memory_service import MemoryService
-from app.domain.models.session import Session
-from app.domain.models.scope import OwnerScope, OwnerScopeType, Principal, WorkspaceContext
-from app.domain.models.user import UserStatus
-from app.domain.models.event import BaseEvent
+from app.domain.models.scope import OwnerScopeType, Principal, WorkspaceContext
 from app.domain.models.event_policy import should_project_event
-from app.infrastructure.security.cookie import ACCESS_COOKIE
-from app.infrastructure.security.jwt_service import JwtService
-from app.infrastructure.storage.postgres import get_uow
-from core.config import get_settings
+from app.interfaces.endpoints.session import (
+    approval_routes,
+    checkpoint_routes,
+    memory_routes,
+    sandbox_routes,
+)
+from app.interfaces.endpoints.session._helpers import (
+    SESSION_SLEEP_INTERVAL,
+    _format_clarify_answers,
+    _record_gate_audit_if_needed,
+    _session_to_list_item,
+    build_get_session_response,
+)
 
-logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sessions", tags=["会话模块"])
-
-
-def _approval_batch_payload(batch) -> dict:
-    return batch.model_dump(mode="json")
-
-
-@router.get(
-    path="/{session_id}/tool-approval-batch",
-    response_model=Response[dict],
-    summary="获取待审批工具调用批次",
-)
-async def get_pending_tool_approval_batch(
-        session_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-) -> Response[dict]:
-    async with get_uow() as uow:
-        session = await uow.session.get_by_id(session_id, scope=ctx.scope)
-        if not session:
-            raise NotFoundError("会话不存在")
-        batch = (
-            await uow.resource_governance.get_pending_approval_batch(
-                session_id
-            )
-        )
-        if batch is None:
-            raise NotFoundError("没有待审批的工具调用批次")
-        return Response.success(_approval_batch_payload(batch))
-
-
-@router.post(
-    path="/{session_id}/tool-approval-batches/{batch_id}/decision",
-    response_model=Response[dict],
-    summary="审批工具调用批次",
-)
-async def decide_tool_approval_batch(
-        session_id: str,
-        batch_id: str,
-        body: dict = Body(...),
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard: Principal = Depends(require_non_auditor),
-) -> Response[dict]:
-    action = str(body.get("action") or "").lower()
-    if action in {"approve", "approve_same"}:
-        decision = ApprovalStatus.APPROVED
-    elif action == "reject":
-        decision = ApprovalStatus.REJECTED
-    else:
-        raise BadRequestError("审批动作必须是 approve 或 reject")
-
-    async with get_uow() as uow:
-        session = await uow.session.get_by_id(session_id, scope=ctx.scope)
-        if not session:
-            raise NotFoundError("会话不存在")
-        batch = (
-            await uow.resource_governance.get_pending_approval_batch(
-                session_id
-            )
-        )
-        if batch is None or batch.id != batch_id:
-            raise NotFoundError("待审批工具调用批次不存在")
-
-        requested_ids = body.get("tool_call_ids")
-        has_explicit_selection = requested_ids is not None
-        known_ids = {call.tool_call_id for call in batch.calls}
-        pending_ids = {
-            call.tool_call_id
-            for call in batch.calls
-            if call.status == ApprovalStatus.PENDING
-        }
-        has_explicit_decision = any(
-            call.status != ApprovalStatus.PENDING
-            and call.decided_by not in {None, "policy"}
-            for call in batch.calls
-        )
-        selected_ids = (
-            set(str(item) for item in requested_ids)
-            if has_explicit_selection
-            else (
-                set()
-                if has_explicit_decision
-                else pending_ids
-            )
-        )
-        unknown_ids = selected_ids - known_ids
-        if unknown_ids:
-            raise BadRequestError(
-                "审批批次包含未知调用: "
-                + ", ".join(sorted(unknown_ids))
-            )
-        if not selected_ids and has_explicit_selection:
-            raise BadRequestError("审批批次至少需要一个工具调用")
-        decision_ids = (
-            selected_ids
-            if has_explicit_selection
-            else selected_ids & pending_ids
-        )
-
-        decided_calls = {}
-        newly_approved_call_ids = set()
-        for call in sorted(batch.calls, key=lambda item: item.ordinal):
-            if call.tool_call_id not in decision_ids:
-                continue
-            decided = (
-                await uow.resource_governance.decide_approval_call(
-                    call.tool_call_id,
-                    decision,
-                    ctx.principal.user_id,
-                )
-            )
-            if decided is None:
-                raise NotFoundError(
-                    f"工具调用[{call.tool_call_id}]不存在"
-                )
-            decided_calls[call.tool_call_id] = decided
-            if (
-                call.status == ApprovalStatus.PENDING
-                and decided.status == ApprovalStatus.APPROVED
-            ):
-                newly_approved_call_ids.add(call.tool_call_id)
-
-        calls = [
-            decided_calls.get(call.tool_call_id, call)
-            for call in batch.calls
-        ]
-        if any(call.status == ApprovalStatus.PENDING for call in calls):
-            status = ApprovalStatus.PENDING
-        elif any(call.status == ApprovalStatus.REJECTED for call in calls):
-            status = ApprovalStatus.REJECTED
-        elif all(
-            call.status == ApprovalStatus.APPROVED for call in calls
-        ):
-            status = ApprovalStatus.APPROVED
-        else:
-            status = ApprovalStatus.PENDING
-        updated = batch.model_copy(
-            update={"calls": calls, "status": status}
-        )
-        if action == "approve_same":
-            meta = dict(getattr(session, "pending_metadata", None) or {})
-            approved_tools = list(meta.get("approved_tools") or [])
-            for call in calls:
-                if (
-                    call.tool_call_id in newly_approved_call_ids
-                    and call.tool_name not in approved_tools
-                ):
-                    approved_tools.append(call.tool_name)
-            meta["approved_tools"] = approved_tools
-            await uow.session.set_pending_metadata(session_id, meta)
-        return Response.success(_approval_batch_payload(updated))
-
-
-async def _record_gate_audit_if_needed(
-        *,
-        session: Session,
-        message: str,
-        ctx: WorkspaceContext,
-        audit_service: AuditService,
-        request: Request,
-) -> None:
-    if not session.pending_phase:
-        return
-    action, feedback = parse_gate_action(message or "")
-    if action == "unknown":
-        return
-    meta = session.pending_metadata or {}
-    pending = meta.get("pending_tool_call") or {}
-    approval_batch_id = meta.get("approval_batch_id")
-    audit_action = {
-        TOOL_APPROVAL_PHASE: {
-            "approve": "agent_tool_approve",
-            "approve_same": "agent_tool_approve",
-            "reject": "agent_tool_reject",
-        },
-        PLAN_APPROVAL_PHASE: {
-            "approve": "agent_plan_approve",
-            "approve_with_edits": "agent_plan_approve",
-            "reject": "agent_plan_reject",
-        },
-        TAKEOVER_PHASE: {
-            "takeover": "agent_takeover",
-            "skip": "agent_takeover_skip",
-        },
-    }.get(session.pending_phase, {}).get(action)
-    if not audit_action:
-        return
-    await audit_service.record(AuditLog(
-        actor_user_id=ctx.principal.user_id,
-        actor_ip=get_client_ip(request),
-        action=audit_action,
-        resource_type="session",
-        resource_id=session.id,
-        team_id=ctx.scope.team_id if ctx.scope.type == OwnerScopeType.TEAM else None,
-        metadata={
-            "decision": action,
-            "feedback": feedback,
-            "pending_phase": session.pending_phase,
-            "approval_batch_id": approval_batch_id,
-            "tool": pending.get("tool_name"),
-            "args": pending.get("args"),
-            "first_visit_domain": pending.get("first_visit_domain"),
-            "operator_scope": session.operator_scope,
-        },
-    ))
-
-
-async def _workspace_context_from_websocket(websocket: WebSocket) -> WorkspaceContext | None:
-    """WebSocket 不经过 AuthContextMiddleware，这里显式从 cookie 构造工作区上下文。"""
-    token = websocket.cookies.get(ACCESS_COOKIE)
-    if not token:
-        return None
-    settings = get_settings()
-    jwt_service = JwtService(
-        secret=settings.jwt_secret,
-        access_ttl_seconds=settings.access_token_ttl_seconds,
-        refresh_ttl_seconds=settings.refresh_token_ttl_seconds,
-    )
-    try:
-        claims = jwt_service.decode(token, expected_type="access")
-    except jwt.PyJWTError:
-        return None
-    user_id = str(claims.get("sub") or "")
-    if not user_id:
-        return None
-    async with get_uow() as uow:
-        user = await uow.user.get_by_id(user_id)
-        if not user or user.status != UserStatus.ACTIVE:
-            return None
-        if int(claims.get("ver", -1)) != user.token_version:
-            return None
-        teams = await uow.team.list_for_user(user_id)
-        team_roles = {}
-        for team in teams:
-            member = await uow.team.get_member(team.id, user_id)
-            if member:
-                team_roles[team.id] = member.role
-    principal = Principal(
-        user_id=user.id,
-        global_role=user.global_role,
-        token_version=user.token_version,
-        team_roles=team_roles,
-    )
-    workspace_id = (websocket.headers.get("x-workspace-id") or "").strip()
-    if workspace_id:
-        if workspace_id not in team_roles:
-            return None
-        return WorkspaceContext(principal=principal, scope=OwnerScope.team(user.id, workspace_id))
-    return WorkspaceContext(principal=principal, scope=OwnerScope.personal(user.id))
-
-
-def _format_clarify_answers(request: ChatRequest) -> Optional[str]:
-    """Build the model-facing text summary for structured clarify answers."""
-    if request.message:
-        return request.message
-    if not request.clarify_answers:
-        return None
-    lines = ["【澄清回复】"]
-    for answer in request.clarify_answers:
-        parts = list(answer.option_labels or [])
-        custom = (answer.custom_text or "").strip()
-        if custom:
-            parts.append(f"自定义: {custom}")
-        prompt = answer.prompt or answer.question_id
-        lines.append(f"- {prompt}: {'；'.join(parts)}")
-    return "\n".join(lines)
-
-
-def _session_to_list_item(session: Session) -> ListSessionItem:
-    return ListSessionItem(
-        session_id=session.id,
-        title=session.title,
-        latest_message=session.latest_message,
-        latest_message_at=session.latest_message_at,
-        status=session.status,
-        unread_message_count=session.unread_message_count,
-        codebase_id=session.codebase_id,
-        knowledge_base_id=session.knowledge_base_id,
-        mode=session.mode,
-        resource_bindings=session.resource_bindings,
-    )
-
-
-async def build_get_session_response(
-        session: Session,
-        llm_model_service: LLMModelService,
-        skill_service: SkillService,
-        scope: OwnerScope,
-        token_usage_service: Optional[LLMTokenUsageService] = None,
-        include_debug: bool = False,
-        event_records: Optional[list[tuple[int, BaseEvent]]] = None,
-        event_limit: int = 100,
-) -> GetSessionResponse:
-    """组装会话详情响应，避免在路由间直接调用 endpoint 函数"""
-    model_resp = None
-    skill_resp = None
-    if session.model_id:
-        try:
-            model_resp = llm_to_response(
-                await llm_model_service.get_model(session.model_id, scope=scope)
-            )
-        except Exception:
-            pass
-    if session.skill_id:
-        summary = await skill_service.get_summary(session.skill_id, scope=scope)
-        if summary:
-            skill_resp = SkillSummaryResponse(**summary.model_dump())
-    token_usage_resp = None
-    if token_usage_service:
-        try:
-            model_prices = {}
-            if session.model_id:
-                try:
-                    model = await llm_model_service.get_model(
-                        session.model_id,
-                        mask=False,
-                        scope=scope,
-                    )
-                    model_prices[model.id] = (
-                        model.input_price_per_million,
-                        model.output_price_per_million,
-                    )
-                    model_prices[model.model_name] = (
-                        model.input_price_per_million,
-                        model.output_price_per_million,
-                    )
-                except Exception:
-                    pass
-            summary = await token_usage_service.get_session_summary(
-                session.id,
-                model_prices=model_prices or None,
-            )
-            token_usage_resp = TokenUsageSummaryResponse(
-                prompt_tokens=summary.prompt_tokens,
-                completion_tokens=summary.completion_tokens,
-                total_tokens=summary.total_tokens,
-                estimated_cost_usd=summary.estimated_cost_usd,
-                call_count=summary.call_count,
-            )
-        except Exception as exc:
-            logger.debug("获取会话 token 汇总失败: %s", exc)
-
-    if event_records is None:
-        events = session.events
-        events_next_cursor = None
-    else:
-        events = [event for _, event in event_records]
-        events_next_cursor = event_records[-1][0] if len(event_records) == event_limit else None
-
-    return GetSessionResponse(
-        session_id=session.id,
-        title=session.title,
-        status=session.status,
-        events=EventMapper.events_to_sse_events(events, include_debug=include_debug),
-        events_next_cursor=events_next_cursor,
-        model_id=session.model_id,
-        skill_id=session.skill_id,
-        thinking_enabled=session.thinking_enabled,
-        model=model_resp,
-        skill=skill_resp,
-        token_usage=token_usage_resp,
-        operator_scope=session.operator_scope,
-        operator_domains=session.operator_domains or [],
-        gate_profile=session.gate_profile,
-        awaiting_human=bool((session.pending_metadata or {}).get("awaiting_human")),
-        codebase_id=session.codebase_id,
-        knowledge_base_id=session.knowledge_base_id,
-        mode=session.mode,
-        resource_bindings=session.resource_bindings,
-    )
-
-# 流式获取会话详情睡眠间隔（config.yaml server.sessions_stream_interval_seconds）
-SESSION_SLEEP_INTERVAL = max(5, get_runtime_config().server.sessions_stream_interval_seconds)
 
 
 @router.post(
@@ -842,143 +445,6 @@ async def patch_session(
     )
 
 
-@router.get(
-    path="/{session_id}/memory",
-    response_model=Response[SessionMemoryResponse],
-    summary="获取会话Agent内存",
-)
-async def get_session_memory(
-        session_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        session_service: SessionService = Depends(get_session_service),
-        memory_service: MemoryService = Depends(get_memory_service),
-) -> Response[SessionMemoryResponse]:
-    if not await session_service.get_session(session_id, scope=ctx.scope):
-        raise NotFoundError("该会话不存在，请核实后重试")
-    memories = await memory_service.get_session_memories(session_id)
-    return Response.success(data=SessionMemoryResponse(
-            planner=memories.get("planner", []),
-            react=memories.get("react", []),
-        )
-    )
-
-
-@router.post(
-    path="/{session_id}/memory/compact",
-    response_model=Response[Optional[Dict]],
-    summary="压缩会话Agent内存",
-)
-async def compact_session_memory(
-        session_id: str,
-        request: ClearMemoryRequest,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        session_service: SessionService = Depends(get_session_service),
-        memory_service: MemoryService = Depends(get_memory_service),
-) -> Response[Optional[Dict]]:
-    if not await session_service.get_session(session_id, scope=ctx.scope):
-        raise NotFoundError("该会话不存在，请核实后重试")
-    await memory_service.compact_session_memory(session_id, request.agent_name)
-    return Response.success()
-
-
-@router.post(
-    path="/{session_id}/memory/clear",
-    response_model=Response[Optional[Dict]],
-    summary="清空会话Agent内存",
-)
-async def clear_session_memory(
-        session_id: str,
-        request: ClearMemoryRequest,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        session_service: SessionService = Depends(get_session_service),
-        memory_service: MemoryService = Depends(get_memory_service),
-) -> Response[Optional[Dict]]:
-    if not await session_service.get_session(session_id, scope=ctx.scope):
-        raise NotFoundError("该会话不存在，请核实后重试")
-    await memory_service.clear_session_memory(session_id, request.agent_name)
-    return Response.success()
-
-
-@router.delete(
-    path="/{session_id}/memory/{agent_name}/messages/{index}",
-    response_model=Response[Optional[Dict]],
-    summary="删除会话内存中的指定消息",
-)
-async def delete_session_memory_message(
-        session_id: str,
-        agent_name: str,
-        index: int,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        session_service: SessionService = Depends(get_session_service),
-        memory_service: MemoryService = Depends(get_memory_service),
-) -> Response[Optional[Dict]]:
-    if not await session_service.get_session(session_id, scope=ctx.scope):
-        raise NotFoundError("该会话不存在，请核实后重试")
-    await memory_service.delete_session_memory_message(session_id, agent_name, index)
-    return Response.success()
-
-
-@router.get(
-    path="/{session_id}/checkpoints",
-    response_model=Response[ListCheckpointsResponse],
-    summary="获取会话还原点列表",
-)
-async def list_session_checkpoints(
-        session_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        session_service: SessionService = Depends(get_session_service),
-        agent_service: AgentService = Depends(get_agent_service),
-) -> Response[ListCheckpointsResponse]:
-    if not await session_service.get_session(session_id, scope=ctx.scope):
-        raise NotFoundError("该会话不存在，请核实后重试")
-    checkpoints = await agent_service.list_checkpoints(session_id)
-    return Response.success(data=ListCheckpointsResponse(
-            checkpoints=[
-                CheckpointItemResponse(
-                    id=item.id,
-                    session_id=item.session_id,
-                    anchor_type=item.anchor_type,
-                    anchor_event_id=item.anchor_event_id,
-                    label=item.label,
-                    created_at=item.created_at,
-                )
-                for item in checkpoints
-            ]
-        ),
-    )
-
-
-@router.post(
-    path="/{session_id}/checkpoints/{checkpoint_id}/restore",
-    response_model=Response[RestoreCheckpointResponse],
-    summary="回退到指定还原点",
-)
-async def restore_session_checkpoint(
-        session_id: str,
-        checkpoint_id: str,
-        http_request: Request,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        session_service: SessionService = Depends(get_session_service),
-        agent_service: AgentService = Depends(get_agent_service),
-        audit_service: AuditService = Depends(get_audit_service),
-) -> Response[RestoreCheckpointResponse]:
-    session = await session_service.get_session(session_id, scope=ctx.scope)
-    if not session:
-        raise NotFoundError("该会话不存在，请核实后重试")
-    await agent_service.restore_checkpoint(session_id, checkpoint_id)
-    await audit_service.record(AuditLog(
-        actor_user_id=ctx.principal.user_id,
-        actor_ip=get_client_ip(http_request),
-        action="agent_rollback",
-        resource_type="session",
-        resource_id=session_id,
-        team_id=ctx.scope.team_id if ctx.scope.type == OwnerScopeType.TEAM else None,
-        metadata={"checkpoint_id": checkpoint_id, "operator_scope": session.operator_scope},
-    ))
-    return Response.success(data=RestoreCheckpointResponse(),
-    )
-
-
 @router.post(
     path="/{session_id}/stop",
     response_model=Response[Optional[Dict]],
@@ -999,164 +465,12 @@ async def stop_session(
     return Response.success()
 
 
-@router.get(
-    path="/{session_id}/files",
-    response_model=Response[GetSessionFilesResponse],
-    summary="获取指定任务会话文件列表信息",
-    description="获取指定任务会话文件列表信息",
-)
-async def get_session_files(
-        session_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        session_service: SessionService = Depends(get_session_service),
-) -> Response[GetSessionFilesResponse]:
-    """获取指定任务会话文件列表信息"""
-    files = await session_service.get_session_files(session_id, scope=ctx.scope)
-    return Response.success(data=GetSessionFilesResponse(files=files))
-
-
-@router.post(
-    path="/{session_id}/file",
-    response_model=Response[FileReadResponse],
-    summary="查看会话沙箱中指定文件的内容",
-    description="根据传递的会话id+文件路径查看沙箱中文件的内容信息"
-)
-async def read_file(
-        session_id: str,
-        request: FileReadRequest,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        session_service: SessionService = Depends(get_session_service),
-) -> Response[FileReadResponse]:
-    """根据传递的会话id+文件路径查看沙箱中文件的内容信息"""
-    result = await session_service.read_file(session_id, request.filepath, scope=ctx.scope)
-    return Response.success(data=result
-    )
-
-
-@router.post(
-    path="/{session_id}/shell",
-    response_model=Response[ShellReadResponse],
-    summary="查看会话的shell内容输出",
-    description="传递指定会话id与shell会话标识，查看shell内容输出",
-)
-async def read_shell_output(
-        session_id: str,
-        request: ShellReadRequest,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        session_service: SessionService = Depends(get_session_service),
-) -> Response[ShellReadResponse]:
-    """查看会话的shell内容输出"""
-    result = await session_service.read_shell_output(session_id, request.session_id, scope=ctx.scope)
-    return Response.success(data=result,
-    )
-
-
-@router.websocket(
-    path="/{session_id}/vnc",
-)
-async def vnc_websocket(
-        websocket: WebSocket,
-        session_id: str,
-        session_service: SessionService = Depends(get_session_service),
-) -> None:
-    """VNC Websocket端点，用于建立与沙箱环境的vnc连接，并双向转发数据"""
-    ctx = await _workspace_context_from_websocket(websocket)
-    if ctx is None:
-        await websocket.close(code=1008, reason="Unauthorized")
-        return
-    from app.application.security.authorization_context import (
-        reset_authorization_context,
-        set_authorization_context,
-    )
-    from app.domain.models.authorization import AuthorizationContext
-
-    authorization_token = set_authorization_context(
-        AuthorizationContext.for_principal(ctx.principal, scope=ctx.scope)
-    )
-
-    # 1.从客户端noVNC接收子协议
-    protocols_str = websocket.headers.get("sec-websocket-protocol", "")
-    protocols = [p.strip() for p in protocols_str.split(",")]
-
-    # 2.判断使用不同协议(noVNC首选binary)
-    selected_protocol = None
-    if "binary" in protocols:
-        selected_protocol = "binary"
-    elif "base64" in protocols:
-        selected_protocol = "base64"
-
-    # 3.使用对应协议接收websocket连接
-    logger.info(f"为会话[{session_id}]开启WebSocket连接")
-    await websocket.accept(subprotocol=selected_protocol)
-
-    try:
-        # 4.获取对应会话的vnc链接
-        sandbox_vnc_url = await session_service.get_vnc_url(session_id, scope=ctx.scope)
-        logger.info(f"连接WebSocket VNC： {sandbox_vnc_url}")
-
-        # 5.创建上下文并连接到vnc
-        async with websockets.connect(sandbox_vnc_url) as sandbox_ws:
-            # 6.创建两个异步协程来完成数据的双向转发
-            async def forward_to_sandbox():
-                try:
-                    while True:
-                        # 接收来自客户端的数据
-                        data = await websocket.receive_bytes()
-                        await sandbox_ws.send(data)
-                except WebSocketDisconnect:
-                    logger.info(f"Web->VNC连接终端")
-                except Exception as forward_e:
-                    logger.error(f"forward_to_sandbox出错: {str(forward_e)}")
-
-            async def forward_from_sandbox():
-                try:
-                    while True:
-                        # 接收来自沙箱的数据并转发
-                        data = await sandbox_ws.recv()
-                        await websocket.send_bytes(data)
-                except ConnectionClosed:
-                    logger.info("VNC->Web连接关闭")
-                except Exception as forward_e:
-                    logger.error(f"forward_from_sandbox出错: {str(forward_e)}")
-
-            # 7.并行运行两个任务
-            forward_task1 = asyncio.create_task(forward_to_sandbox())
-            forward_task2 = asyncio.create_task(forward_from_sandbox())
-
-            # 8.等待任意任务结束意味WebSocket连接终端
-            done, pending = await asyncio.wait(
-                [forward_task1, forward_task2],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            logger.info("WebSocket连接已关闭")
-
-            # 9.如果任一任务完成则取消其他任务(关闭全部链接)
-            for task in pending:
-                task.cancel()
-    except ConnectionError as connection_e:
-        # 连接沙箱环境失败，关闭websocket
-        logger.error(f"连接沙箱环境失败: {str(connection_e)}")
-        await websocket.close(code=1011, reason=f"连接沙箱环境失败: {str(connection_e)}")
-    except Exception as e:
-        # 其他错误记录日志并关闭websocket
-        logger.error(f"WebSocket异常: {str(e)}")
-        await websocket.close(code=1011, reason=f"WebSocket异常: {str(e)}")
-    finally:
-        reset_authorization_context(authorization_token)
-
-
-@router.patch("/{session_id}/pending-plan", response_model=Response[dict])
-async def update_pending_plan(
-        session_id: str,
-        body: dict = Body(...),
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-):
-    async with get_uow() as uow:
-        session = await uow.session.get_by_id(session_id, scope=ctx.scope)
-        if not session:
-            raise NotFoundError("会话不存在")
-        meta = session.pending_metadata or {}
-        meta["edited_plan"] = body.get("plan", body)
-        await uow.session.set_pending_metadata(session_id, meta)
-        await uow.commit()
-    return Response.success({"updated": True})
+# 审批 / 记忆 / 还原点 / 沙箱(文件/终端/VNC) 路由拆分至 session 子包，行为保持逐字迁移。
+# 子路由自带 prefix="/sessions" 并直接拼接真实 route 对象（而非 include_router），
+# 因为当前 fastapi/starlette 版本下 include_router 会把整个子路由懒包装成
+# _IncludedRouter 代理对象，使 router.routes 直接遍历（如
+# test_remediation_governance_invariants.py 用 dependant/methods 校验网关依赖）看不到
+# 其内部真实的 APIRoute；直接拼接 .routes 列表可保留真实 route 对象与其依赖，
+# 同时对外层再次 include_router（真实 HTTP 分发）行为完全等价。
+for _sub_router_module in (approval_routes, memory_routes, checkpoint_routes, sandbox_routes):
+    router.routes.extend(_sub_router_module.router.routes)

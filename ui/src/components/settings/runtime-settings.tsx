@@ -1,20 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { configApi, type AppConfigSection } from "@/lib/api/config";
+
+import { type AppConfigSection,configApi } from "@/lib/api/config";
 import type { AppConfigRevision } from "@/lib/api/types";
 
+import { JsonObjectField } from "./runtime/json-object-field";
 import { KnowledgeBaseRuntimeForm } from "./runtime/knowledge-base-runtime-form";
 import { MemoryRuntimeForm } from "./runtime/memory-runtime-form";
-import { JsonObjectField } from "./runtime/json-object-field";
 
 type RuntimeSettingsProps = {
   isAdmin: boolean;
@@ -39,7 +40,6 @@ const SERVER_VISIBLE_KEYS = new Set([
   "rate_limit_enabled",
   "rate_limit_per_minute",
   "sessions_stream_interval_seconds",
-  "marketplace_max_upload_bytes",
 ]);
 
 const SERVER_READONLY_KEYS = new Set(["cors_origins"]);

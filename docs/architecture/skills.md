@@ -19,7 +19,7 @@ Skill templates shape Agent behavior: system prompt, allowed tools, MCP/A2A scop
 | `is_builtin` | Seeded built-in Skill; cannot be deleted |
 | `enabled` | Disabled Skills are skipped at runtime |
 
-Built-in Skills include `coding`, `research`, `web-operator`, `refund-reconciliation`, and others — see `api/app/application/services/skill_service.py`.
+Built-in Skills include `ops-patrol`, `ops-patrol-remediation`, `coding`, `research`, `data-analysis`, `writing`, `web-operator`, and `refund-reconciliation` — see `api/app/application/services/skill_service.py`.
 
 ## API
 
@@ -52,13 +52,17 @@ flowchart LR
 4. **ToolRegistry** respects `allowed_tools`; Ask flows use a read-only subset regardless of Skill.
 5. **Web Operator**: Skill `web-operator` triggers `operator-scope-dialog.tsx` on session create and enables stricter HITL defaults.
 
+### Governed single-tool sessions
+
+`ops-patrol` and `ops-patrol-remediation` sessions are **governed single-tool sessions**: `TaskRunnerFactory` derives `is_governed_single_tool_session = is_patrol or is_remediation` (`task_runner_factory.py:363`) and uses that single flag to suppress every generic capability the same way for both — MCP (`MCPConfig()`), A2A (`A2AConfig()`), the memory tool, the subagent tool, artifact delivery, and image generation are all disabled regardless of `mcp_server_refs`/`a2a_server_refs` on the Skill. Remediation sessions additionally force an empty MCP config even though the Actuator MCP server exists, because `PatrolRemediationService.execute()` calls the Actuator server-side — the LLM never sees an MCP tool for it. The model is left with exactly the Skill's `allowed_tools` (`patrol_submit_results` / `patrol_execute_remediation` + `message_notify_user`).
+
 ## UI
 
 | Surface | Component | Path |
 |---------|-----------|------|
 | Settings → Skills | `SkillsSettings` | `ui/src/components/settings/skills-settings.tsx` |
-| Home / session picker | model + Skill selectors | `ui/src/app/page.tsx`, `session-detail-view.tsx` |
-| Web Operator scope | `OperatorScopeDialog` | `ui/src/components/operator-scope-dialog.tsx` |
+| Home / session picker | model + Skill selectors | `ui/src/app/page.tsx`, `ui/src/components/session/session-detail-view.tsx` |
+| Web Operator scope | `OperatorScopeDialog` | `ui/src/components/session/operator-scope-dialog.tsx` |
 
 ## Configuration
 

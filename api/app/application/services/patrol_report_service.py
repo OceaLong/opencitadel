@@ -2,28 +2,14 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from app.domain.models.patrol import PatrolCheckResult, PatrolFinding, PatrolPackConfig, PatrolRun
-from app.domain.utils.audit_redaction import redact_value
-
-
-_SECRET_PATTERNS = (
-    re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+"),
-    re.compile(r"(?i)\b(password|passwd|token|api[_-]?key)\s*[:=]\s*[^\s,;]+"),
-    re.compile(r"(?i)([a-z][a-z0-9+.-]*://[^\s:/@]+:)[^\s@]+(@)"),
-    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
-)
+from app.domain.utils.audit_redaction import redact_value, scrub_secret_patterns
 
 
 def _text(value: Any) -> str:
-    rendered = str(value)
-    rendered = _SECRET_PATTERNS[0].sub(r"\1***REDACTED***", rendered)
-    rendered = _SECRET_PATTERNS[1].sub(r"\1=***REDACTED***", rendered)
-    rendered = _SECRET_PATTERNS[2].sub(r"\1***REDACTED***\2", rendered)
-    rendered = _SECRET_PATTERNS[3].sub("***REDACTED***", rendered)
-    return rendered
+    return scrub_secret_patterns(value)
 
 
 def _json(value: Any) -> str:

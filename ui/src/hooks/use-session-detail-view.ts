@@ -5,13 +5,12 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import type { ChatInputRef } from "@/components/chat-input";
+import type { ChatInputRef } from "@/components/session/chat-input";
 import { getToolKind } from "@/components/tool-use/utils";
 
 import { useIncrementalTimeline } from "@/hooks/use-incremental-timeline";
-import { useSessionDetail } from "@/hooks/use-session-detail";
 import { useRequireAuth } from "@/hooks/use-require-auth";
-import type { Locale } from "@/i18n/routing";
+import { useSessionDetail } from "@/hooks/use-session-detail";
 import { sessionApi } from "@/lib/api/session";
 import type {
   ApprovalEventData,
@@ -21,11 +20,13 @@ import type {
   SessionCheckpoint,
   SessionMode,
   Skill,
-  ToolEvent,
   SSEEventData,
+  ToolEvent,
 } from "@/lib/api/types";
 import type { AttachmentFile, TimelineItem } from "@/lib/session-events";
 import { getLatestPlanFromEvents, getTaskObservationSummary } from "@/lib/session-events";
+
+import type { Locale } from "@/i18n/routing";
 
 export type UseSessionDetailViewOptions = {
   sessionId: string;

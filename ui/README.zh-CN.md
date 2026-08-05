@@ -23,7 +23,6 @@ ui/
 │   │   ├── sessions/      # 会话详情
 │   │   ├── codebase/      # 代码知识库
 │   │   ├── knowledge/     # 文档知识库
-│   │   ├── marketplace/   # 应用市场
 │   │   ├── automation/    # 定时任务
 │   │   ├── patrols/       # Patrol 列表、创建向导、Pack 详情
 │   │   ├── patrol-runs/   # 权威 Run 报告与证据
@@ -33,10 +32,20 @@ ui/
 │   │   ├── register/      # 注册
 │   │   ├── invitations/   # 接受团队邀请
 │   │   └── share/         # 公开交付物分享
-│   ├── components/
+│   ├── components/        # UI 组件，按域分组
+│   │   ├── admin/         # 管理后台、治理档案视图
+│   │   ├── codebase/      # 代码库列表、导入、证据面板
+│   │   ├── knowledge/     # 知识库列表、文档、知识图谱
+│   │   ├── patrol/        # Pack 向导、Run 详情、修复对话框/状态
+│   │   ├── resource/      # 代码库/知识库构建候选与版本状态
+│   │   ├── session/       # 对话、HITL 条、VNC、检查点、Operator 范围
 │   │   ├── settings/      # 设置 Tab（模型、Skill、记忆...）
+│   │   ├── tool-use/      # 工具执行 UI
 │   │   ├── ui/            # Radix 基础组件
-│   │   └── tool-use/      # 工具执行 UI
+│   │   ├── workspace/     # 会话上下文面板（代码库/知识库）
+│   │   └── *.tsx          # 根级共享：app-shell、left-panel、app-header、
+│   │                      # mobile-bottom-nav、context-selector、markdown-content、
+│   │                      # mermaid-diagram、status-badge、workspace-switcher……
 │   ├── lib/api/           # API 客户端
 │   ├── hooks/
 │   ├── providers/
@@ -54,7 +63,6 @@ ui/
 | `/sessions/[id]` | 流式对话、HITL、VNC、交付物 | 侧栏 + 顶栏 |
 | `/codebase`、`/codebase/[id]` | 代码导入与 Ask/Agent | 侧栏 + 顶栏 |
 | `/knowledge`、`/knowledge/[id]` | 文档知识库与 RAG | 侧栏 + 顶栏 |
-| `/marketplace` | LLM 小应用 | 侧栏 + 顶栏 |
 | `/automation` | Cron/Webhook 任务 | 侧栏 + 顶栏 |
 | `/patrols`、`/patrols/new`、`/patrols/[id]` | 功能开关控制的 Patrol 列表、向导与 Pack 生命周期 | 侧栏 + 顶栏 |
 | `/patrol-runs/[id]` | 检查结果、Finding 与签名证据下载 | 侧栏 + 顶栏 |
@@ -67,13 +75,14 @@ ui/
 | `/admin/audit` | 审计日志 | Admin 布局 |
 | `/admin/compliance` | 证据中心 | Admin 布局 |
 | `/admin/compliance/report` | 合规报告导出 | Admin 布局 |
+| `/admin/compliance/sessions/[sessionId]` | 会话治理档案（`GovernanceProfileView`） | Admin 布局 |
 | `/invitations/[token]` | 接受邀请 | 无 Shell |
 | `/share/artifact/[token]` | 公开交付物 | 无 Shell |
 
 **导航**：
 
-- **桌面**：左侧为会话列表；Codebase、Knowledge、Marketplace、Automation 在 **顶栏工作区下拉**（`app-header.tsx`）。
-- **移动**：`MobileBottomNav` 提供对话、代码库、知识库、应用市场；Automation、Teams、Settings、Admin 在 **更多** Sheet。
+- **桌面**：左侧为会话列表；Codebase、Knowledge、Automation 在 **顶栏工作区下拉**（`app-header.tsx`）。
+- **移动**：`MobileBottomNav` 提供对话、代码库、知识库；Patrol（受 `opsPatrolEnabled` 门控）、Automation、Teams、Settings、Admin 在 **更多** Sheet。
 - 仅在全局 `feature_flags.enable_ops_patrol` 启用时显示 Ops Patrol 导航；Auditor 只看到只读视图，不显示变更控件。
 - `/codebase/[id]`、`/knowledge/[id]` 会跳转到新建的 Ask 会话，**不是**独立详情页。
 
@@ -100,7 +109,7 @@ ui/
 
 - **TypeScript 严格模式**；优先 `type` 而非 `interface`；路径别名 `@/*` → `./src/*`
 - **App Router**：默认服务端组件；仅在需要时加 `"use client"`；页面位于 `src/app/**/page.tsx`
-- **组件**：基础 UI 在 `@/components/ui/`（shadcn/Radix）；业务组件在 `@/components/`；使用 `cn()` 与 CVA 定义变体
+- **组件**：基础 UI 元件在 `@/components/ui/`（shadcn/Radix）；业务组件按域归类在 `@/components/{admin,codebase,knowledge,patrol,resource,session,settings,tool-use,workspace}/` 下；跨域共享组件（布局壳、`context-selector.tsx`、`markdown-content.tsx`、`mermaid-diagram.tsx`、`status-badge.tsx` 等）留在 `@/components/` 根目录；使用 `cn()` 与 CVA 定义变体
 - **Hooks**：复杂状态/副作用从大型页面下沉到 `src/hooks/`
 - **导入顺序**：React/Next → 第三方 → `@/components` → `@/lib`/`@/hooks` → 相对路径
 - **格式化**：Prettier（100 列、双引号）；PR 前运行 `npm run format:check`
@@ -125,10 +134,10 @@ ui/
 | `skills.ts`、`memory.ts` | Skill 与记忆 |
 | `admin.ts`、`team.ts` | 管理与团队 |
 | `knowledge.ts`、`codebase.ts`、`file.ts` | 知识库、代码库、文件 |
-| `service-keys.ts`、`notifications.ts`、`compliance.ts` | 服务 API Key、通知、合规 |
+| `service-keys.ts`、`notifications.ts`、`compliance.ts` | 服务 API Key、通知、合规 + 会话治理档案 |
 | `constants.ts` | 共享限制（`CODEBASE_ZIP_MAX_BYTES` = 200 MB，须与 nginx 一致） |
 | `artifacts.ts` | 交付物与分享 |
-| `patrols.ts` | Pack/Run/Finding 生命周期、指标与证据下载 |
+| `patrols.ts` | Pack/Run/Finding 生命周期、指标、证据下载、修复提案/列表/详情 |
 | `types.ts` | 共享 TypeScript 类型 |
 
 ## 本地开发

@@ -791,6 +791,42 @@ Worker 可选 `sandbox.pool_enabled` + `pool_size` 预热空闲沙箱；`Sandbox
 
 ---
 
+## 18. Ops Actuator 作为独立 MCP 服务，而非 Agent 直连 K8s 写权限
+
+### 要解决的问题
+
+Ops Patrol Remediation 需要在人工审批后执行一小组 Kubernetes 写动作（重启/扩缩容/回滚工作负载）。如果直接给 Worker 现有的 ServiceAccount（已持有 Pod 沙箱 RBAC）追加对 Deployment/StatefulSet 的 `patch` 权限，会让**每一个** Agent 会话（而不仅是受治理的修复会话）都隐式继承集群写权限，写能力也会变成模型恰好调用了哪个工具的隐式副产品。
+
+### 当前选择
+
+把写路径实现为一个独立、狭窄的 MCP 服务（`ops-actuator/`）：独立容器、独立 ServiceAccount、专属的仅 patch RBAC ClusterRole（对 Deployment/StatefulSet 为 `get/list/watch/patch`，对 ReplicaSet 为 `get/list`——见 `deploy/kustomize/ops-actuator/rbac.yaml`）。LLM 从不直接调用 Kubernetes：`patrol_execute_remediation`（`api/app/domain/services/tools/patrol_remediation.py`）是修复会话唯一暴露的工具，它委托给 `PatrolRemediationService.execute()`，后者仅在能力哈希基线校验与 `ToolApprovalBatch` 审批门控都通过后，才在服务端调用 Actuator。注册采用闭世界制：Actuator MCP 服务必须显式注册（`api/config.yaml` 中种子 `enabled: false`），且 `enable_ops_patrol_remediation` 功能开关必须打开，修复会话才能运行。
+
+### 优点
+
+- 爆炸半径由 RBAC 而非应用逻辑限定：即便 Agent 会话被完全攻破，也无法绕开 Actuator 自身的 RoleBinding 去 patch 工作负载。
+- NetworkPolicy 把入站限定为仅 API/Worker 可达 Actuator（`deploy/kustomize/ops-actuator/network-policy.yaml`），与只读 Collector 的 NetworkPolicy 相互独立。
+- 能力哈希基线把每次审批绑定到精确的 action/target/params 三元组；提案时刻与执行时刻之间的漂移会被拒绝（`CAPABILITY_DRIFT`），而不是被静默重新授权。
+- 与其他任何 `approval=always` 工具走同一套治理契约——无需维护定制门控（见 [检查点与 HITL — 持久化审批批次](checkpoints-and-hitl.zh-CN.md#持久化审批批次)）。
+
+### 缺点
+
+- 除只读 Collector 外，多了一个面向 Kubernetes 的服务需要构建、部署与维护（Dockerfile、Helm 模板、Kustomize 清单、RBAC 评审）。
+- 修复能力启用前的运维手册多了一个环节（注册 MCP 服务、开启功能开关、校验 NetworkPolicy）。
+
+### 替代方案
+
+| 替代 | 优点 | 缺点 |
+|------|------|------|
+| **给 Worker 现有 ServiceAccount 追加 patch RBAC** | 无需新部署服务 | 每个 Agent 会话都继承集群写权限；爆炸半径是整个 Worker 集群 |
+| **Agent 在沙箱内直接调用 `kubectl` / K8s API** | 代码路径最简单 | 没有闭世界注册、没有能力哈希基线、没有专属 NetworkPolicy——沙箱被攻破即等于集群被攻破 |
+
+### 何时重估
+
+- 修复动作从重启/扩缩容/回滚扩展为更广的写入面，需要按动作拆分 RBAC
+- 多集群修复要求 Actuator 持有多于一个目标集群的凭证
+
+---
+
 ## 决策评审流程
 
 新增依赖或替换核心组件时：

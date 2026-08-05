@@ -27,7 +27,6 @@ import {
   IconAutomation,
   IconCodebase,
   IconKnowledge,
-  IconMarketplace,
   IconSettings,
   IconWorkspace,
 } from "@/lib/icons";
@@ -120,12 +119,6 @@ export function AppHeader() {
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel>{t("workspaceMenu")}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <Link href="/codebase" className="cursor-pointer">
-                <IconCodebase className="size-4" />
-                {t("codebase")}
-              </Link>
-            </DropdownMenuItem>
             {opsPatrolEnabled && (
               <DropdownMenuItem asChild>
                 <Link href="/patrols" className="cursor-pointer">
@@ -135,21 +128,21 @@ export function AppHeader() {
               </DropdownMenuItem>
             )}
             <DropdownMenuItem asChild>
+              <Link href="/automation" className="cursor-pointer">
+                <IconAutomation className="size-4" />
+                {t("automation")}
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
               <Link href="/knowledge" className="cursor-pointer">
                 <IconKnowledge className="size-4" />
                 {t("knowledge")}
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href="/marketplace" className="cursor-pointer">
-                <IconMarketplace className="size-4" />
-                {t("marketplace")}
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href="/automation" className="cursor-pointer">
-                <IconAutomation className="size-4" />
-                {t("automation")}
+              <Link href="/codebase" className="cursor-pointer">
+                <IconCodebase className="size-4" />
+                {t("codebase")}
               </Link>
             </DropdownMenuItem>
           </DropdownMenuContent>

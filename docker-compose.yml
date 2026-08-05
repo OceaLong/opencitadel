@@ -421,6 +421,44 @@ services:
       retries: 5
       start_period: 15s
 
+  # Narrow, write-scoped MCP surface for Ops Patrol Remediation. Kubernetes
+  # deployments should use the Helm/Kustomize ServiceAccount instead of this
+  # local profile. Disabled by default (opt-in "actuator" profile).
+  opencitadel-ops-actuator:
+    profiles:
+      - actuator
+    build:
+      context: ./ops-actuator
+      dockerfile: Dockerfile
+    image: opencitadel-ops-actuator
+    container_name: opencitadel-ops-actuator
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    mem_reservation: 128m
+    cpus: "0.50"
+    pids_limit: 128
+    environment:
+      OPS_ACTUATOR_TARGET_REF: ${OPS_ACTUATOR_TARGET_REF:-opencitadel-local}
+      OPS_ACTUATOR_ALLOWED_NAMESPACES: '${OPS_ACTUATOR_ALLOWED_NAMESPACES:-["opencitadel"]}'
+      OPS_ACTUATOR_TRANSPORT: streamable-http
+      OPS_ACTUATOR_ALLOW_STDIO: "false"
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
+    networks:
+      - opencitadel-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8091), 2).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   # ==================== Demo: OpsConsole 样板工单后台 ====================
 
   ops-console:

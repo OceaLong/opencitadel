@@ -21,7 +21,6 @@ import {
   IconAutomation,
   IconCodebase,
   IconKnowledge,
-  IconMarketplace,
   IconMore,
   IconSettings,
   IconUsers,
@@ -32,7 +31,7 @@ import { useSettingsDialog } from "@/providers/settings-dialog-provider";
 
 type NavItem = {
   href: string;
-  labelKey: "chat" | "codebase" | "knowledge" | "marketplace";
+  labelKey: "chat" | "codebase" | "knowledge";
   icon: typeof IconAgent;
   match: (pathname: string) => boolean;
 };
@@ -56,12 +55,6 @@ const MAIN_NAV: NavItem[] = [
     icon: IconKnowledge,
     match: (pathname) => pathname.startsWith("/knowledge"),
   },
-  {
-    href: "/marketplace",
-    labelKey: "marketplace",
-    icon: IconMarketplace,
-    match: (pathname) => pathname.startsWith("/marketplace"),
-  },
 ];
 
 export function MobileBottomNav() {
@@ -82,7 +75,7 @@ export function MobileBottomNav() {
         className="border-border/70 bg-background/95 pb-safe fixed inset-x-0 bottom-0 z-50 border-t backdrop-blur md:hidden"
         aria-label={t("label")}
       >
-        <div className="grid h-14 grid-cols-5">
+        <div className="grid h-14 grid-cols-4">
           {MAIN_NAV.map(({ href, labelKey, icon: Icon, match }) => {
             const active = match(pathname);
             return (

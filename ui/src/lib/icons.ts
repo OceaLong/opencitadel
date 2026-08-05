@@ -7,22 +7,25 @@ import {
   Activity,
   ArrowLeft,
   BookOpen,
-  Boxes,
   Bot,
+  Boxes,
   Brain,
   CircuitBoard,
+  ClipboardList,
   Clock,
   Code2,
+  Coins,
+  Copy,
   Cpu,
   Download,
   FileSearch,
   FileText,
-  LayoutDashboard,
-  LayoutGrid,
   Layers,
+  LayoutDashboard,
   Loader2,
   MailPlus,
   MessageCircleQuestion,
+  MoreHorizontal,
   PhoneCall,
   Plug,
   Plus,
@@ -34,10 +37,6 @@ import {
   Users,
   Wand2,
   Wrench,
-  ClipboardList,
-  Coins,
-  Copy,
-  MoreHorizontal,
 } from "lucide-react";
 
 /** Code repository / codebase context */
@@ -46,8 +45,6 @@ export const IconCodebase: LucideIcon = Code2;
 export const IconKnowledge: LucideIcon = BookOpen;
 /** Scheduled / automation jobs */
 export const IconAutomation: LucideIcon = Clock;
-/** App marketplace */
-export const IconMarketplace: LucideIcon = LayoutGrid;
 /** Unified workspace menu trigger */
 export const IconWorkspace: LucideIcon = Boxes;
 /** System / quick settings */

@@ -1,7 +1,8 @@
-import { get } from "./fetch";
-import type { LLMStatusData } from "./types";
 import type { Locale } from "@/i18n/routing";
 import { translate } from "@/i18n/translate";
+
+import { get } from "./fetch";
+import type { LLMStatusData } from "./types";
 
 export const llmStatusApi = {
   getStatus: (): Promise<LLMStatusData> => get<LLMStatusData>("/llm/status"),

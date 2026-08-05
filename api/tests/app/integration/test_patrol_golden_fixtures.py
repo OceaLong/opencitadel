@@ -19,6 +19,27 @@ from app.domain.services.patrol_assertion_engine import PatrolAssertionEngine
 
 FIXTURES = Path(__file__).parents[4] / "deploy" / "patrol-demo" / "fixtures"
 
+# This suite replays PatrolAssertionEngine (a pure, read-only check
+# classifier) against synthesized observations and asserts the result
+# matches each fixture's expected.json -- it never simulates a write or a
+# before/after remediation transition. Fixtures that describe a remediation
+# scenario (identified by the presence of the "remediation" key in
+# expected.json, e.g. 21-remediation-crashloop) are out of scope for this
+# replay: their expected_write_operations is intentionally nonzero (an
+# actuator patch call), which conflicts with the zero-write invariant this
+# suite enforces for the read-only golden set, and the engine has no
+# representation of "the check goes from fail to pass because the actuator
+# patched the workload". test_golden_catalog_is_complete_and_zero_write still
+# requires every fixture directory (golden or remediation) to have a matched
+# setup.yaml/expected.json pair with a unique case_id, so a fixture added
+# without registering the pair -- or wrongly tagged/untagged for this
+# exclusion -- still fails loudly.
+GOLDEN_EXPECTED_PATHS = [
+    path
+    for path in sorted(FIXTURES.glob("*/expected.json"))
+    if "remediation" not in json.loads(path.read_text())
+]
+
 HEALTHY = {
     "k8s-workload-availability": {"unavailable_replicas": 0, "not_ready_workloads": []},
     "k8s-restart-spike": {"restart_count_1h": 0},
@@ -142,7 +163,7 @@ def score_fixture_catalog() -> dict:
     case_scores = []
     evidence_total = 0
     evidence_complete = 0
-    for expected_path in sorted(FIXTURES.glob("*/expected.json")):
+    for expected_path in GOLDEN_EXPECTED_PATHS:
         expected = json.loads(expected_path.read_text())
         started = perf_counter()
         results = _evaluate(expected["case_id"])
@@ -180,7 +201,7 @@ def score_fixture_catalog() -> dict:
     }
 
 
-@pytest.mark.parametrize("expected_path", sorted(FIXTURES.glob("*/expected.json")), ids=lambda path: path.parent.name)
+@pytest.mark.parametrize("expected_path", GOLDEN_EXPECTED_PATHS, ids=lambda path: path.parent.name)
 def test_golden_fixture_matches_server_authoritative_classification(expected_path: Path):
     expected = json.loads(expected_path.read_text())
     case_id = expected["case_id"]
@@ -202,13 +223,24 @@ def test_golden_fixture_matches_server_authoritative_classification(expected_pat
 
 
 def test_golden_catalog_is_complete_and_zero_write():
+    # Every fixture directory -- golden (read-only) or remediation -- must
+    # carry a matched expected.json/setup.yaml pair with a unique case_id.
+    # This catches "added a fixture directory but forgot one of the two
+    # files" (or duplicated a case_id) regardless of which category it's in.
     expected_files = sorted(FIXTURES.glob("*/expected.json"))
     setup_files = sorted(FIXTURES.glob("*/setup.yaml"))
-    assert len(expected_files) == len(setup_files) == 20
+    assert len(expected_files) == len(setup_files)
     payloads = [json.loads(path.read_text()) for path in expected_files]
-    assert len({item["case_id"] for item in payloads}) == 20
-    assert all(item["expected_write_operations"] == 0 for item in payloads)
-    prompt_case = next(item for item in payloads if item["case_id"] == "20-prompt-injection")
+    assert len({item["case_id"] for item in payloads}) == len(payloads)
+
+    # The read-only golden set's count is still hardcoded so that adding (or
+    # mis-tagging) a fixture forces a deliberate update here, same as before
+    # this suite learned to exclude remediation fixtures.
+    assert len(GOLDEN_EXPECTED_PATHS) == 20
+    golden_payloads = [json.loads(path.read_text()) for path in GOLDEN_EXPECTED_PATHS]
+    assert len({item["case_id"] for item in golden_payloads}) == 20
+    assert all(item["expected_write_operations"] == 0 for item in golden_payloads)
+    prompt_case = next(item for item in golden_payloads if item["case_id"] == "20-prompt-injection")
     assert {"delete", "patch", "create", "update"}.issubset(prompt_case["forbidden_tool_calls"])
 
 

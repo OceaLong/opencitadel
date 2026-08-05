@@ -11,7 +11,7 @@
 - 配置可改：模型 probe 与配置保存解耦。
 - 健康可见：`/api/status` 表示平台域健康，`/api/llm/status` 表示模型域健康。
 - 非模型功能可用：文件操作与不依赖 chat LLM 的目录类接口。
-- 模型入口快速失败：Agent、A2A、Marketplace LLM 以明确错误码终止，不堆积 Worker、沙箱或 Redis 资源。
+- 模型入口快速失败：Agent、A2A 以明确错误码终止，不堆积 Worker、沙箱或 Redis 资源。
 
 ### P0 范围
 
@@ -40,7 +40,7 @@
 ```mermaid
 flowchart LR
   TaskRunnerFactory["TaskRunnerFactory"] -->|"resolve LLM"| ResilientLLMClient["ResilientLLMClient"]
-  MarketplaceService["MarketplaceService"] -->|"resolve text or vision LLM"| ResilientLLMClient
+  KBIngestJob["AgentWorker._execute_kb_ingest_job"] -->|"resolve text or vision LLM"| ResilientLLMClient
   AgentRunner["AgentTaskRunner"] --> MemoryExtractorService["MemoryExtractorService"]
   AgentRunner --> VisionGroundingTool["VisionGroundingTool"]
   MemoryExtractorService --> ResilientLLMClient
@@ -58,7 +58,7 @@ flowchart LR
 | Agent 主链路 | `TaskRunnerFactory._resolve_llm_and_config` -> `create_resilient_llm` | chat LLM |
 | MemoryExtractorService | 继承 runner 注入的 `llm` | chat LLM |
 | VisionGroundingTool | 继承 Agent 注入的 `llm` | chat LLM |
-| Marketplace LLM | `_resolve_text_llm` / `_resolve_vision_llm` | chat LLM |
+| KB 摄取 LLM | `LLMModelService.resolve_model` / `resolve_vision_model` | chat LLM |
 | ImageGenerationTool / `generate_image()` | 图片生成 | 独立工具域，不经 chat LLM fallback |
 | `LLMModelService._run_vision_probe` | 用户主动探测 | 原始 `LLMFactory.create`，不经韧性层 |
 
@@ -194,7 +194,7 @@ stateDiagram-v2
 
 | 阶段 | 内容 |
 |------|------|
-| 短期，已落地 / 低风险 | DB 配置迁移、`AppConfig` schema、probe 解耦、健康拆分、`/api/llm/status`、`ErrorEvent.code`、Marketplace catalog `model_dependency`、Marketplace 懒解析 LLM |
+| 短期，已落地 / 低风险 | DB 配置迁移、`AppConfig` schema、probe 解耦、健康拆分、`/api/llm/status`、`ErrorEvent.code` |
 | 中期，核心韧性 | Redis 熔断 + half_open Lua、`ResilientLLMClient`、DLQ `error_code`、Worker 快速失败、reconcile 熔断联动、Embedding ingest 降级、A2A 入口治理 |
 | 长期，结构隔离 | `feature_flags` 路由分组、Worker runner registry、UI 全量可视化、Codebase reindex UI |
 
@@ -211,7 +211,6 @@ stateDiagram-v2
 | `test_status_routes.py` | `/api/status` |
 | `api/tests/app/infrastructure/external/llm/test_circuit_breaker.py` | Redis 熔断状态转换 |
 | `api/tests/app/domain/models/test_event_upgrader.py` | 旧事件 `ErrorEvent.code` 兼容 |
-| `test_marketplace_catalog.py` | `model_dependency` 字段校验 |
 
 ## 相关文档
 

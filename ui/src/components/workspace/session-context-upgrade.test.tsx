@@ -1,21 +1,22 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
-import { createRoot } from "react-dom/client";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sessionApi } from "@/lib/api/session";
 import type { SessionResourceBinding } from "@/lib/api/types";
 
+import { mockNextIntl } from "@/test-utils/mocks";
+import { renderComponent } from "@/test-utils/render";
+
 const mocks = vi.hoisted(() => ({ knowledgeProps: vi.fn() }));
 
-vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string, values?: Record<string, string>) =>
-    ({
-      upgradeContext: "Upgrade context",
-      confirmUpgrade: `Confirm ${values?.version ?? ""}`,
-    })[key] ?? key,
-}));
+vi.mock("next-intl", () =>
+  mockNextIntl({
+    upgradeContext: "Upgrade context",
+    confirmUpgrade: (values) => `Confirm ${values?.version ?? ""}`,
+  }),
+);
 vi.mock("@/lib/api/session", () => ({
   sessionApi: {
     getResourceBindings: vi.fn(),
@@ -42,12 +43,6 @@ vi.mock("@/components/ui/tabs", () => ({
 import { SessionContextPanel } from "./session-context-panel";
 
 describe("SessionContextPanel resource upgrade", () => {
-  beforeAll(() => {
-    (
-      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-    ).IS_REACT_ACT_ENVIRONMENT = true;
-  });
-
   afterEach(() => {
     vi.mocked(sessionApi.getResourceBindings).mockReset();
     vi.mocked(sessionApi.getAvailableResourceVersions).mockReset();
@@ -81,19 +76,13 @@ describe("SessionContextPanel resource upgrade", () => {
       current_version_id: bindingV2.version_id,
     });
 
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <SessionContextPanel
-          sessionId="session-1"
-          knowledgeBaseId="kb1"
-          resourceBindings={[bindingV1]}
-        />,
-      );
-      await Promise.resolve();
-    });
+    const { container, unmount } = await renderComponent(
+      <SessionContextPanel
+        sessionId="session-1"
+        knowledgeBaseId="kb1"
+        resourceBindings={[bindingV1]}
+      />,
+    );
     expect(mocks.knowledgeProps).toHaveBeenLastCalledWith(
       expect.objectContaining({ versionId: "v1" }),
     );
@@ -119,6 +108,6 @@ describe("SessionContextPanel resource upgrade", () => {
     expect(mocks.knowledgeProps).toHaveBeenLastCalledWith(
       expect.objectContaining({ versionId: "v2" }),
     );
-    await act(async () => root.unmount());
+    await unmount();
   });
 });

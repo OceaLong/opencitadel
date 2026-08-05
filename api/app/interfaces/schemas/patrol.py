@@ -12,6 +12,8 @@ from app.domain.models.patrol import (
     PatrolFindingStatus,
     PatrolPack,
     PatrolPackConfig,
+    PatrolRemediation,
+    PatrolRemediationAction,
     PatrolRun,
 )
 from app.domain.utils.schedule_utils import compute_next_run
@@ -162,10 +164,20 @@ class PatrolFindingResponse(BaseModel):
     decided_by: str | None
     decided_at: datetime | None
     decision_reason: str | None
+    # Computed, not persisted on the domain model: which remediation actions
+    # the Finding's originating Check's probe tool supports (source of truth
+    # is patrol_remediation_service._allowed_actions_for_probe_tool — see
+    # app/interfaces/endpoints/patrol_routes.py::_finding_allowed_actions for
+    # the assembly point). Lets the UI stop mirroring that rule client-side.
+    allowed_actions: list[str] = Field(default_factory=list)
 
     @classmethod
-    def from_domain(cls, finding: PatrolFinding) -> "PatrolFindingResponse":
-        return cls.model_validate(finding.model_dump(mode="json"))
+    def from_domain(
+        cls, finding: PatrolFinding, allowed_actions: list[str] | None = None
+    ) -> "PatrolFindingResponse":
+        payload = finding.model_dump(mode="json")
+        payload["allowed_actions"] = list(allowed_actions) if allowed_actions else []
+        return cls.model_validate(payload)
 
 
 class PatrolRunDetailResponse(PatrolRunResponse):
@@ -177,3 +189,49 @@ class PatrolRunListResponse(BaseModel):
     items: list[PatrolRunResponse]
     limit: int
     offset: int
+
+
+class ProposePatrolRemediationRequest(BaseModel):
+    action: PatrolRemediationAction
+    params: dict[str, Any] = Field(default_factory=dict)
+    # Optional override for the target workload name. The Check's probe.args
+    # rarely carries a "workload" key today (see Task 2 report §8.1), so the
+    # caller can supply it explicitly; must be a non-blank string when given.
+    workload: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class PatrolRemediationResponse(BaseModel):
+    id: str
+    pack_id: str
+    run_id: str
+    finding_id: str
+    check_result_id: str
+    fingerprint: str
+    session_id: str | None
+    action: str
+    target_namespace: str
+    target_workload: str
+    target_kind: str
+    params: dict[str, Any]
+    params_hash: str
+    impact_summary: str
+    rollback_hint: str
+    idempotency_key: str
+    actuator_capability_hash: str | None
+    status: str
+    before_observation: dict[str, Any] | None
+    after_observation: dict[str, Any] | None
+    recheck_run_id: str | None
+    error_code: str | None
+    error_message: str | None
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_domain(cls, remediation: PatrolRemediation) -> "PatrolRemediationResponse":
+        return cls.model_validate(remediation.model_dump(mode="json"))
+
+
+class PatrolRemediationListResponse(BaseModel):
+    items: list[PatrolRemediationResponse]

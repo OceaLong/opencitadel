@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Plus, Trash2, Upload } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { Loader2, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";

@@ -32,24 +32,10 @@ function walk(dir, out = []) {
 }
 
 /** Expand known dynamic t(`foo.${var}`) patterns used in the codebase. */
-// Keep marketplace app keys aligned with APP_I18N_KEYS in app-registry.tsx
-const MARKETPLACE_APP_I18N_KEYS = [
-  "nutritionAnalysis",
-  "consumptionCalculator",
-  "smartTranslation",
-  "promptLab",
-  "qrGenerator",
-  "devToolbox",
-  "secretGenerator",
-  "documentConverter",
-  "watermarkTool",
-];
-
 /** Keep aligned with api/app/domain/models/app_config.py and runtime-settings.tsx RUNTIME_SECTIONS. */
 const RUNTIME_CONFIG_FIELDS = {
   feature_flags: [
     "enable_agent_features",
-    "enable_marketplace_llm_apps",
     "enable_embeddings",
     "enable_parallel_step_execution",
     "enable_artifacts",
@@ -69,7 +55,6 @@ const RUNTIME_CONFIG_FIELDS = {
     "rate_limit_enabled",
     "rate_limit_per_minute",
     "sessions_stream_interval_seconds",
-    "marketplace_max_upload_bytes",
   ],
   sandbox: [
     "driver",
@@ -136,11 +121,7 @@ const DYNAMIC_EXPANSIONS = [
   { prefix: "operatorScope.gateProfile.", suffix: ".description", values: ["loose", "standard", "strict"] },
   { prefix: "settingsHitl.gateProfile.", values: ["loose", "standard", "strict"] },
   { prefix: "codebase.artifacts.", values: ["architecture", "dataFlow", "moduleDir", "callChain", "flowchart", "overview"] },
-  { prefix: "marketplaceApps.promptLab.styleHints.", values: ["agent", "analysis", "writing"] },
   { prefix: "sessionMemory.roles.", values: ["system", "user", "assistant", "tool", "unknown"] },
-  ...MARKETPLACE_APP_I18N_KEYS.flatMap((appKey) => [
-    { prefix: `marketplace.apps.${appKey}.`, values: ["name", "description", "tags", "examples"] },
-  ]),
   {
     prefix: "settingsRuntime.sections.",
     values: ["feature_flags", "scheduler", "server"],
@@ -156,7 +137,7 @@ const DYNAMIC_EXPANSIONS = [
   },
   {
     prefix: "mobileNav.",
-    values: ["chat", "codebase", "knowledge", "marketplace"],
+    values: ["chat", "codebase", "knowledge"],
   },
 ];
 
@@ -257,13 +238,7 @@ const knownDynamicPatterns = new Set([
   "operatorScope :: gateProfile.${profile}.title",
   "operatorScope :: gateProfile.${profile}.description",
   "codebase :: artifacts.${key}",
-  "marketplaceApps.promptLab :: styleHints.${style}",
   "sessionMemory :: roles.${role}",
-  "marketplace.apps :: ${appKey}.name",
-  "marketplace.apps :: ${appKey}.description",
-  "marketplace.apps :: ${appKey}.tags",
-  "marketplace.apps :: ${appKey}.examples",
-  "marketplace :: categoryAll",
   "settingsRuntime :: sections.${activeSection}",
   "settingsRuntime :: sections.${section}",
   "settingsRuntime :: fields.${section}.${key}",

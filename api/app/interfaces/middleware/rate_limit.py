@@ -175,8 +175,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def _path_bucket(path: str) -> str:
         if path.startswith("/api/auth/"):
             return "auth"
-        if path.startswith("/api/marketplace/"):
-            return "marketplace"
         if path.startswith("/api/files"):
             return "files"
         return "api"

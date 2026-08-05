@@ -11,7 +11,7 @@ When all models are unavailable, the platform must still satisfy:
 - Configurable: model probe is decoupled from config save.
 - Health visible: `/api/status` reflects platform domain health; `/api/llm/status` reflects model domain health.
 - Non-model features available: file operations and catalog endpoints that do not depend on chat LLM.
-- Model entry points fail fast: Agent, A2A, and Marketplace LLM terminate with explicit error codes, without accumulating Worker, sandbox, or Redis resources.
+- Model entry points fail fast: Agent and A2A terminate with explicit error codes, without accumulating Worker, sandbox, or Redis resources.
 
 ### P0 Scope
 
@@ -40,7 +40,7 @@ When all models are unavailable, the platform must still satisfy:
 ```mermaid
 flowchart LR
   TaskRunnerFactory["TaskRunnerFactory"] -->|"resolve LLM"| ResilientLLMClient["ResilientLLMClient"]
-  MarketplaceService["MarketplaceService"] -->|"resolve text or vision LLM"| ResilientLLMClient
+  KBIngestJob["AgentWorker._execute_kb_ingest_job"] -->|"resolve text or vision LLM"| ResilientLLMClient
   AgentRunner["AgentTaskRunner"] --> MemoryExtractorService["MemoryExtractorService"]
   AgentRunner --> VisionGroundingTool["VisionGroundingTool"]
   MemoryExtractorService --> ResilientLLMClient
@@ -58,7 +58,7 @@ flowchart LR
 | Agent main path | `TaskRunnerFactory._resolve_llm_and_config` -> `create_resilient_llm` | chat LLM |
 | MemoryExtractorService | Inherits runner-injected `llm` | chat LLM |
 | VisionGroundingTool | Inherits Agent-injected `llm` | chat LLM |
-| Marketplace LLM | `_resolve_text_llm` / `_resolve_vision_llm` | chat LLM |
+| KB ingestion LLM | `LLMModelService.resolve_model` / `resolve_vision_model` | chat LLM |
 | ImageGenerationTool / `generate_image()` | Image generation | Independent tool domain; no chat LLM fallback |
 | `LLMModelService._run_vision_probe` | User-initiated probe | Raw `LLMFactory.create`; bypasses resilience layer |
 
@@ -192,7 +192,7 @@ When models are unavailable, A2A JSON-RPC returns:
 
 | Phase | Content |
 |-------|---------|
-| Short-term, shipped / low risk | DB config migration, `AppConfig` schema, probe decoupling, health split, `/api/llm/status`, `ErrorEvent.code`, Marketplace catalog `model_dependency`, Marketplace lazy LLM resolution |
+| Short-term, shipped / low risk | DB config migration, `AppConfig` schema, probe decoupling, health split, `/api/llm/status`, `ErrorEvent.code` |
 | Mid-term, core resilience | Redis circuit + half_open Lua, `ResilientLLMClient`, DLQ `error_code`, Worker fast fail, reconcile circuit linkage, Embedding ingest degradation, A2A entry governance |
 | Long-term, structural isolation | `feature_flags` route grouping, Worker runner registry, full UI visualization, Codebase reindex UI |
 
@@ -209,7 +209,6 @@ When models are unavailable, A2A JSON-RPC returns:
 | `test_status_routes.py` | `/api/status` |
 | `api/tests/app/infrastructure/external/llm/test_circuit_breaker.py` | Redis circuit state transitions |
 | `api/tests/app/domain/models/test_event_upgrader.py` | Legacy event `ErrorEvent.code` compatibility |
-| `test_marketplace_catalog.py` | `model_dependency` field validation |
 
 ## Related Documentation
 

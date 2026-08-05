@@ -18,6 +18,7 @@ from app.domain.external.task import RecoverableTaskReconciliationRequired
 from app.domain.models.event import MessageEvent
 from app.domain.models.session import SessionStatus
 from app.domain.services.checkpoint_service import CheckpointService
+from app.domain.services.codebase.ingestion_runner import CodebaseIngestionRunner
 from app.domain.services.codebase.ingestion_task_runner import CodebaseIngestionTaskRunner
 from app.domain.services.knowledge_base.ingest_errors import NonRecoverableIngestError
 from app.domain.services.knowledge_base.ingestion_runner import (
@@ -156,6 +157,7 @@ class AgentWorker:
         admission = get_admission_runtime_settings()
         await self._reconcile_orphaned_tasks("startup")
         await self._reconcile_stale_kb_builds("startup")
+        await self._reconcile_stale_codebase_builds("startup")
         await self._reconcile_stuck_kb_ingests("startup")
         reconcile_task = asyncio.create_task(self._task_reconcile_loop())
         runtime = get_runtime_config()
@@ -234,6 +236,7 @@ class AgentWorker:
             await asyncio.sleep(TASK_RECONCILE_INTERVAL_SECONDS)
             await self._reconcile_orphaned_tasks("periodic")
             await self._reconcile_stale_kb_builds("periodic")
+            await self._reconcile_stale_codebase_builds("periodic")
             await self._reconcile_stuck_kb_ingests("periodic")
 
     async def _dlq_replay_loop(self) -> None:
@@ -412,6 +415,56 @@ class AgentWorker:
             except Exception as exc:
                 logger.exception(
                     "共享知识库构建对账失败 build=%s: %s",
+                    build.id,
+                    exc,
+                )
+
+    async def _reconcile_stale_codebase_builds(self, reason: str) -> None:
+        """Terminalize stale codebase candidate builds without touching the active pin."""
+        admission = get_admission_runtime_settings()
+        stale_seconds = max(
+            120.0,
+            admission.task_execution_lease_seconds * 2.0,
+        )
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            seconds=stale_seconds
+        )
+        try:
+            async with get_uow() as uow:
+                builds = await uow.resource_governance.list_stale_builds(
+                    ResourceKind.CODEBASE,
+                    stale_before=cutoff,
+                    limit=100,
+                )
+        except Exception as exc:
+            logger.warning(
+                "代码库候选构建对账查询失败 reason=%s: %s",
+                reason,
+                exc,
+            )
+            return
+
+        runner = CodebaseIngestionRunner(
+            uow_factory=get_uow,
+            sandbox_cls=getattr(self, "_sandbox_cls", None),
+            file_storage=getattr(self, "_file_storage", None),
+        )
+        for build in builds:
+            try:
+                lease_owner = await get_task_lease_owner(build.id)
+                if lease_owner:
+                    continue
+                error = "codebase build heartbeat expired"
+                await runner.reconcile_stale(build.id, error=error)
+                logger.warning(
+                    "代码库候选构建已对账: build=%s codebase=%s reason=%s",
+                    build.id,
+                    build.resource_id,
+                    reason,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "代码库候选构建对账失败 build=%s: %s",
                     build.id,
                     exc,
                 )

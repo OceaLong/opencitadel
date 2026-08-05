@@ -19,9 +19,11 @@ flowchart LR
   AgentRunner -->|"output events"| Redis
   Worker -->|"persist events"| Postgres
   Redis -->|"task output stream"| Api
+  Worker -->|"MCP calls, read-only"| Collector["Ops Collector 8090"]
+  Worker -->|"MCP calls, approval-gated write"| Actuator["Ops Actuator 8091"]
 ```
 
-运行时以 API 无状态、Worker 消费 Redis Streams、Postgres 持久化、沙箱隔离执行为核心边界。API 负责接入和投影，Worker 负责执行和资源治理，Migrate 负责 schema 与配置种子迁移。
+运行时以 API 无状态、Worker 消费 Redis Streams、Postgres 持久化、沙箱隔离执行为核心边界。API 负责接入和投影，Worker 负责执行和资源治理，Migrate 负责 schema 与配置种子迁移。Ops Patrol 与 Ops Patrol Remediation 增加了一个可选的、功能开关控制的 MCP 平面，仅从 Worker 可达：Ops Collector（8090）暴露固定的只读 Kubernetes/Prometheus 探针；Ops Actuator（8091）暴露一个狭窄的、仅支持 patch 的写入面，只有在持久化的 `ToolApprovalBatch` 被批准后才会执行。见 [Ops Patrol 架构](ops-patrol.zh-CN.md) 与 [安全模型](security-model.zh-CN.md#信任边界)。
 
 ### 代码分层
 
@@ -282,12 +284,14 @@ FastAPI 依赖注入通过 `ApiContainer` 解析；Worker 入口通过 `WorkerCo
 
 ## Memory 自动提取
 
-Agent 任务正常结束后，若 `memory.auto_extract_enabled=true`，`TaskRunnerFactory` 通过 `on_complete` 回调触发 `MemoryExtractorService.extract_from_session()`：
+Agent 任务正常结束后，若 `memory.auto_extract_enabled=true`，`TaskRunnerFactory` 通过 `on_complete` 回调触发 `MemoryExtractorService.extract_from_session()`——**受治理的单工具会话**（`ops-patrol` / `ops-patrol-remediation`）除外。只要 `is_governed_single_tool_session` 为真，`TaskRunnerFactory` 就会传入 `on_complete_callback=None`（`task_runner_factory.py:707-711`），与 `auto_extract_enabled` 无关，因为这类会话没有可供提取记忆的通用对话内容：
 
 ```mermaid
 flowchart TD
-  Done["Agent task completed"] --> Enabled{"auto_extract enabled?"}
-  Enabled -->|"no"| Skip["skip"]
+  Done["Agent task completed"] --> Governed{"governed single-tool session?"}
+  Governed -->|"yes: patrol / remediation"| Skip["skip, on_complete_callback=None"]
+  Governed -->|"no"| Enabled{"auto_extract enabled?"}
+  Enabled -->|"no"| Skip
   Enabled -->|"yes"| Load["Load last 30 session events"]
   Load --> LLM["LLM extract 3-10 facts JSON"]
   LLM --> Retry{"parse ok?"}
@@ -310,6 +314,8 @@ flowchart TD
 |------|------|--------|----------|
 | `api/` | uv | `uv.lock` | `uv sync --frozen` |
 | `sandbox/` | uv | `uv.lock` | `uv sync --frozen` |
+| `ops-collector/` | uv | `uv.lock` | `uv sync --frozen` |
+| `ops-actuator/` | uv | `uv.lock` | `uv sync --frozen` |
 | `ui/` | npm | `package-lock.json` | `npm ci` |
 
 Python 项目统一使用 `pyproject.toml` + `uv.lock`，不再维护 `requirements.txt`。
@@ -339,6 +345,8 @@ postgres/redis -> opencitadel-migrate -> opencitadel-api + opencitadel-worker ->
 
 > **动态沙箱镜像**：compose 中 `opencitadel-sandbox` 服务在 `fixed-sandbox` profile 下，**默认不启动**，但 Worker 动态创建的沙箱依赖该镜像。`make quickstart` 与 [部署指南](../operations/deployment.zh-CN.md) 会在启动栈之前显式执行 `docker compose build opencitadel-sandbox`。
 
+> **Ops Collector / Actuator 镜像**：`ops-collector/Dockerfile` 与 `ops-actuator/Dockerfile` 独立于 `api/Dockerfile` 构建 `opencitadel-ops-collector` 与 `opencitadel-ops-actuator` 镜像。两者均通过 Compose profile（`patrol` / `actuator`）可选启用，默认关闭；见 [Ops Patrol 运维](../operations/ops-patrol.zh-CN.md)。
+
 ### Kubernetes / Helm
 
 Chart 位于 `deploy/helm/opencitadel/`，提供全栈一键部署：
@@ -349,6 +357,7 @@ Chart 位于 `deploy/helm/opencitadel/`，提供全栈一键部署：
 - namespace ResourceQuota 限制沙箱 Pod 总量。
 - migrate initContainer 使用 API 镜像。
 - 默认 K8s 沙箱模式为 `sandbox.driver=kubernetes` 且 `sandbox.address` 为空；如接入远程沙箱网关，则改用 `sandbox.address`。
+- 可选的 Ops Collector / Actuator Deployment（`opsCollector.enabled` / `opsActuator.enabled`，默认均为 `false`），各自拥有独立 ServiceAccount、patch/read 范围受限的 RBAC ClusterRole，以及仅放行 API/Worker 入站的 NetworkPolicy。
 
 ## 代码锚点
 
@@ -359,8 +368,9 @@ Chart 位于 `deploy/helm/opencitadel/`，提供全栈一键部署：
 | DI / 进程角色 | `api/app/container.py`、`api/app/runtime_role.py` |
 | Worker 分发 | `api/app/worker/main.py`、`api/app/infrastructure/external/task/redis_stream_task.py` |
 | Agent Flow 路由 | `api/app/domain/services/agent_task_runner.py`、`api/app/domain/services/flows/` |
-| 任务装配 | `api/app/application/services/task_runner_factory.py` |
+| 任务装配 | `api/app/application/services/task_runner_factory.py`、`api/app/application/services/runner_bindings/` |
 | 工具注册表 | `api/app/domain/services/tools/tool_registry.py` |
+| 工具治理门控 | `api/app/domain/services/agents/tool_gate_policy.py` |
 | UI Shell | `ui/src/components/app-shell.tsx`、`ui/src/lib/api/fetch.ts` |
 | 工作区 scope | `ui/src/components/workspace-switcher.tsx`、`api/app/interfaces/auth_dependencies.py` |
 

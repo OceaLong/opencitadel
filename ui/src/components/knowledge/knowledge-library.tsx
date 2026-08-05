@@ -13,8 +13,8 @@ import {
   appendDocumentsPage,
   formatIngestStreamError,
 } from "@/components/knowledge/knowledge-utils";
-import { KnowledgeVersionStatus } from "@/components/knowledge/knowledge-version-status";
 import { PageHeader } from "@/components/page-header";
+import { ResourceVersionStatus } from "@/components/resource/resource-version-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -312,7 +312,12 @@ export function KnowledgeLibrary() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <KnowledgeVersionStatus knowledgeBaseId={kb.id} onBuildChanged={loadList} />
+                  <ResourceVersionStatus
+                    api={knowledgeApi}
+                    resourceId={kb.id}
+                    ns="knowledge"
+                    onBuildChanged={loadList}
+                  />
                   <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"

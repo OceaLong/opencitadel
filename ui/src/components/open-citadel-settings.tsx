@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Bot,
   LayoutGrid,
@@ -11,16 +12,6 @@ import {
   Shield,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useTranslations } from "next-intl";
-
-import {
-  IconDelete,
-  IconIntegration,
-  IconMemory,
-  IconModel,
-  IconSkill,
-  IconTool,
-} from "@/lib/icons";
 
 import { AgentSettings } from "@/components/settings/agent-settings";
 import { GeneralSettings } from "@/components/settings/general-settings";
@@ -52,14 +43,22 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
-import { type SettingTab, useOpenCitadelSettings } from "@/hooks/use-open-citadel-settings";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { type SettingTab, useOpenCitadelSettings } from "@/hooks/use-open-citadel-settings";
 import type { ListA2AServerItem, ListMCPServerItem, MCPServerConfig } from "@/lib/api";
+import {
+  IconDelete,
+  IconIntegration,
+  IconMemory,
+  IconModel,
+  IconSkill,
+  IconTool,
+} from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 

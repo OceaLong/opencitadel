@@ -42,7 +42,6 @@ These limits are **not** a single AppConfig field — sync docs when changing an
 | Gateway POST body | 200 MB | `nginx/nginx.conf` `client_max_body_size 200m` |
 | Codebase ZIP | 200 MB | `ui/src/lib/constants.ts` `CODEBASE_ZIP_MAX_BYTES` |
 | KB document | 50 MB default | `knowledge_base.document.max_bytes` |
-| Marketplace asset | 25 MB default | `server.marketplace_max_upload_bytes` |
 
 See [Nginx gateway](../../nginx/README.md) and [Knowledge base ingestion](knowledge-base-ingestion.md).
 

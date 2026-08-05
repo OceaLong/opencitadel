@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Download, ShieldCheck, ShieldX } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { Download, ShieldCheck, ShieldX } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
@@ -18,6 +18,7 @@ import { complianceApi, type EvidenceSessionItem } from "@/lib/api/compliance";
 
 export default function AdminCompliancePage() {
   const t = useTranslations("compliance");
+  const tGovernanceProfile = useTranslations("governanceProfile");
   const [sessions, setSessions] = useState<EvidenceSessionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [chainOk, setChainOk] = useState<boolean | null>(null);
@@ -146,6 +147,11 @@ export default function AdminCompliancePage() {
                               <Download className="mr-1 size-3.5" />
                               {t("downloadPackage")}
                             </a>
+                          </Button>
+                          <Button variant="outline" size="sm" asChild>
+                            <Link href={`/admin/compliance/sessions/${s.session_id}`}>
+                              {tGovernanceProfile("viewProfile")}
+                            </Link>
                           </Button>
                         </div>
                       </td>

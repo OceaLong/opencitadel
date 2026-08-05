@@ -23,6 +23,38 @@ Kubernetes RBAC is limited to `get`, `list`, and `watch`; Secrets, exec, attach,
 
 ## Deployment
 
+Ops Patrol has two independent MCP surfaces: the always-relevant, read-only Collector (checks) and the optional, write-scoped Actuator (approved remediation only — see [Approve a remediation](../tutorials/07-approved-remediation.md)). They are deployed, scoped, and network-restricted separately.
+
+```mermaid
+flowchart TB
+  subgraph app ["Application plane"]
+    UI["Patrol UI"]
+    API["API"]
+    Worker["Worker"]
+  end
+  subgraph mcpplane ["MCP plane — NetworkPolicy: ingress from api/worker only"]
+    Collector["Ops Collector :8090 — read-only RBAC (get/list/watch)"]
+    Actuator["Ops Actuator :8091 — patch-only RBAC (get/list/watch/patch)"]
+  end
+  subgraph data ["Data plane"]
+    PG["PostgreSQL"]
+    Redis["Redis"]
+  end
+  subgraph exec ["Kubernetes API"]
+    K8sRead["Workloads / events / logs / probes"]
+    K8sWrite["Deployments / StatefulSets — 3 registered actions"]
+  end
+  UI --> API
+  API --> PG
+  API --> Redis
+  Worker --> PG
+  Worker --> Redis
+  Worker -->|"probe reads"| Collector
+  Worker -->|"approval=always writes"| Actuator
+  Collector --> K8sRead
+  Actuator -->|"allowlisted namespace/workload only"| K8sWrite
+```
+
 ### Docker Compose
 
 ```bash
@@ -68,6 +100,50 @@ Treat the checked-in Kustomization as a base. Before applying it outside a dispo
 
 Keep the Collector Service internal (`ClusterIP`). Ingress should allow only API/Worker on TCP 8090. Egress should allow DNS, the Kubernetes API, and exact registered target ports. The registry remains the authoritative SSRF boundary because port-only NetworkPolicy cannot validate hostnames or URL paths.
 
+### Actuator (optional write path)
+
+Deploy the Actuator only if [Approve a remediation](../tutorials/07-approved-remediation.md) is in scope. It is a second, stricter MCP surface — never expose it to a model, and never broaden its RBAC beyond `get`/`list`/`watch`/`patch` on Deployments/StatefulSets and `get`/`list` on ReplicaSets.
+
+**Docker Compose**
+
+```bash
+docker compose --profile actuator up -d --build opencitadel-ops-actuator
+docker compose ps opencitadel-ops-actuator
+```
+
+This profile is disabled by default (opt-in `actuator` profile in `docker-compose.yml`) and, like the Collector, does not mount a host kubeconfig.
+
+**Helm**
+
+Build/pull the `opencitadel-ops-actuator` image, then:
+
+```bash
+helm upgrade --install opencitadel deploy/helm/opencitadel \
+  --namespace opencitadel --create-namespace \
+  --values production-values.yaml \
+  --set opsActuator.enabled=true \
+  --set opsActuator.image.repository=your-registry/opencitadel-ops-actuator \
+  --set opsActuator.image.tag=YOUR_RELEASE_TAG \
+  --set opsActuator.targetRef=cluster-a \
+  --set-json 'opsActuator.allowedNamespaces=["opencitadel"]' \
+  --set-json 'opsActuator.allowedWorkloads={"opencitadel":{"opencitadel-api":{"kind":"deployment","min_replicas":2,"max_replicas":10}}}'
+```
+
+This renders `templates/deployment-ops-actuator.yaml`, `templates/rbac-ops-actuator.yaml`, and `templates/networkpolicy-ops-actuator.yaml`. If `opsActuator.serviceAccount.create=false`, set `opsActuator.serviceAccount.name` to a pre-created account with equivalent least privilege — never Secret read/write or mutation verbs beyond the three registered actions.
+
+**Kustomize**
+
+```bash
+kubectl kustomize deploy/kustomize/ops-actuator >/dev/null
+kubectl apply -k deploy/kustomize/ops-actuator
+```
+
+Treat the checked-in Kustomization as a base, the same way as the Collector's: patch image/tag, target ref, allowlists, resource limits, namespace, and NetworkPolicy egress before applying it outside a disposable environment. `rbac.yaml` defines the write-scoped `ClusterRole`/`ClusterRoleBinding`.
+
+**Actuator network placement**
+
+Keep the Actuator Service internal (`ClusterIP`). Ingress should allow only API/Worker on TCP 8091. Unlike the Collector, egress should allow only DNS and the Kubernetes API — the Actuator never talks to PostgreSQL, Redis, MinIO, or Prometheus, so keeping those ports open on a write-scoped ServiceAccount's Pod would be a lateral-movement surface with no corresponding need.
+
 ## Register the MCP Server
 
 The Helm service URL is normally:
@@ -105,6 +181,18 @@ Normal UI connection edits omit `tool_policies`, so the service preserves the pe
 
 Pack validation fails closed if a required policy is missing/conservative, the Server is disabled, live capability discovery fails, a schema hash differs, a required tool is absent, or the read-only dry run fails.
 
+## Register the Actuator MCP Server
+
+Only needed if the Actuator is deployed. The Helm service URL is normally:
+
+```text
+http://opencitadel-ops-actuator:8091/mcp
+```
+
+`api/config.yaml` ships a disabled seed entry at `mcp_config.mcpServers.ops-actuator` with this exact URL; the DB-backed AppConfig does not pick up a config-file edit on an existing row, so enabling it must happen through the UI/API. In **Settings → Integrations**, register the URL as streamable HTTP, enable it, and name it exactly `ops-actuator` — the remediation execution service resolves the Server by this fixed name, unlike the Collector, which is bound per-Pack.
+
+Unlike the Collector, the Actuator's write tools (`get_capabilities`, `restart_workload`, `scale_workload`, `rollback_workload`) are never exposed to a model — the backend execution service calls them directly — so there is no separate Tool Policy payload to persist for this registration.
+
 ## Enablement order
 
 1. Deploy migrations and confirm API/Worker health.
@@ -114,6 +202,10 @@ Pack validation fails closed if a required policy is missing/conservative, the S
 5. Keep `enable_ops_patrol_fixture_replay=false`.
 6. Create a Pack and inspect its live preflight summary. The wizard auto-activates a successful validation; failed validation remains non-active until fixed, revalidated, and explicitly activated.
 7. Trigger one manual Run and verify results/evidence before enabling its schedule.
+8. **Optional, for approved remediation:** deploy and restrict the Actuator; verify its readiness and ServiceAccount.
+9. Register the Actuator MCP Server (`ops-actuator`) and enable it; no Tool Policy persistence step is required for this one.
+10. As an administrator, set `enable_ops_patrol_remediation=true` in **Settings → Runtime → feature_flags**. The built-in `ops-patrol-remediation` Skill is seeded automatically on API/Worker startup — no manual registration step.
+11. Propose one remediation end to end and verify the recheck Run before relying on the loop broadly.
 
 The Pack schedule uses a five-field daily cron and an IANA timezone. Configuration changes increment the Pack version, pause its ScheduledJob, and require validation/activation again.
 
@@ -123,13 +215,15 @@ The Pack schedule uses a five-field daily cron and an IANA timezone. Configurati
 |---------|---------------------|
 | `feature_flags.enable_ops_patrol` | Global DB-backed AppConfig kill switch |
 | `feature_flags.enable_ops_patrol_fixture_replay` | Test/demo only; false in production |
+| `feature_flags.enable_ops_patrol_remediation` | Global DB-backed AppConfig kill switch for the write path; `propose()` fails closed when false, before touching anything |
 | `patrol_retention.run_days` / `finding_days` | Default 30 days, clamped to 1–90 |
 | `patrol_retention.collector_evidence_days` | Default 7 days, clamped to 1–90 |
 | `patrol_retention.cleanup_batch_size` | Default 100, clamped to 1–1000 per tick |
 | `AUDIT_SIGNING_KEY` | HMAC key; rotate with audit key id and previous-key map |
 | `OPS_COLLECTOR_*` | Collector-only target, allowlists, registries, concurrency, and output caps |
+| `OPS_ACTUATOR_*` | Actuator-only target ref, namespace/workload allowlist, transport, and concurrency (write path, disabled by default) |
 
-Collector variables and its Kubernetes identity belong to its deployment, not Pack tool arguments. Do not add raw destinations to a Pack.
+Collector and Actuator variables and their Kubernetes identities belong to their own deployments, not Pack tool arguments. Do not add raw destinations to a Pack.
 
 ## Verification
 
@@ -138,7 +232,10 @@ make test-patrol
 helm lint deploy/helm/opencitadel
 helm template opencitadel deploy/helm/opencitadel \
   --set opsCollector.enabled=true >/dev/null
+helm template opencitadel deploy/helm/opencitadel \
+  --set opsActuator.enabled=true >/dev/null
 kubectl kustomize deploy/kustomize/ops-collector >/dev/null
+kubectl kustomize deploy/kustomize/ops-actuator >/dev/null
 docker compose --env-file .env.example config --quiet
 ```
 
@@ -201,5 +298,10 @@ Do not drop Patrol tables during rollback. To stop the feature safely, disable t
 | Run remains queued/running | Worker/Redis health, model availability, active-run lock, Pack timeout (default 15 min, max 30 min) |
 | Scheduled Runs absent | Pack active, schedule enabled, Scheduler enabled/leader, timezone/next run, feature flag still on |
 | Retention not progressing | Worker scheduler loop, leader lease, `patrol_retention` limits, cleanup logs |
+| `error_code=PARAMS_TAMPERED` | Recomputed `params_hash` at execution time no longer matches the value fixed at proposal; zero Actuator calls made |
+| `error_code=CAPABILITY_BASELINE_MISSING` / `CAPABILITY_DRIFT` | Actuator's capability hash was never captured, or no longer matches the baseline taken when the session was built; execution fails closed before any Actuator call |
+| `error_code=SESSION_TERMINATED` | Remediation session was rejected, abandoned, or hit an approval-batch expiry without a decision; still-`proposed` remediation is auto-cancelled, Actuator untouched |
+| `error_code=recheck_failed` | Recheck Run's matching check still fails or warns after an `executed` remediation; Finding stays open for a human decision |
+| `ACTUATOR_UNREACHABLE` / `ACTUATOR_FAILED` | Actuator MCP connectivity, NetworkPolicy egress from API/Worker on TCP 8091, Actuator readiness |
 
 Logs should include Run, Pack, Session, check, request, target identifiers and a status/error code, but never credentials or raw authorization headers.

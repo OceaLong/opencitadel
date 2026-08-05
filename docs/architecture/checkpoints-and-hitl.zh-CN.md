@@ -11,7 +11,9 @@ flowchart TD
   Agent["Agent 流程"] --> Gate{"pending_phase?"}
   Gate -->|clarify| Clarify["ClarifyAgent 澄清"]
   Gate -->|plan_approval| Plan["Plan + 风险工具"]
-  Gate -->|tool_approval| Tool["逐调用工具门控"]
+  Gate -->|tool_approval| Batch["持久化 ToolApprovalBatch，全部调用按 ordinal 排序"]
+  Batch --> Preflight["整批预检：policy-approved 调用标记，任一兄弟调用 pending 则整体不执行"]
+  Preflight --> Tool["逐调用工具门控 UI"]
   Gate -->|takeover| VNC["浏览器 VNC 接管"]
   Clarify --> Resume["用户恢复消息"]
   Plan --> Resume
@@ -112,6 +114,23 @@ Agent 模式。
 批次状态为 `pending`、`approved`、`rejected`、`expired` 或 `consumed`。
 仅首个消费事务可见的临时标志 `execution_claimed` 不进入 JSON，也不持久化。
 
+```mermaid
+stateDiagram-v2
+  [*] --> pending: 批次持久化，全部调用按 ordinal 排序
+  pending --> pending: 部分决策，仍有兄弟调用 pending — 不执行任何调用
+  pending --> approved: 守卫 — 全部调用 APPROVED 且无 REJECTED
+  pending --> rejected: 守卫 — 任一调用 REJECTED
+  pending --> expired: 守卫 — 恢复时 expires_at 已过期
+  approved --> consumed: 守卫 — 原子 claim；只有拿到 execution_claimed=true 的事务执行
+  rejected --> [*]
+  expired --> [*]
+  consumed --> [*]
+  note right of pending
+    跨会话恢复返回 approval_session_mismatch
+    不会改变持久化状态
+  end note
+```
+
 模型生成的完整调用列表会先按 ordinal 完成规范化、授权并持久化。无需人工
 审批的调用记录为 policy-approved；但只要任一兄弟调用仍为 pending，执行器
 不会执行任何调用（包括只读调用），因此审批前不可能发生副作用。
@@ -120,6 +139,10 @@ Agent 模式。
 |------|------|
 | `GET /api/sessions/{session_id}/tool-approval-batch` | 返回当前 owner scope 下的待审批批次 |
 | `POST /api/sessions/{session_id}/tool-approval-batches/{batch_id}/decision` | Body：`{"action":"approve|approve_same|reject","tool_call_ids":[...]?}` |
+
+> **内部端点**：首方 UI 不直接调用该路由。实际的人工审批决策以 chat 续跑
+> 消息（`approve` / `approve_same` / `reject:<feedback>`）经会话 chat 端点
+> 送达——详见[治理平面](governance-plane.zh-CN.md#整批预检与审批)。
 
 显式 `tool_call_ids` 支持部分决策；省略的 ID 不会扩张先前的部分决策，部分
 批次继续等待。`approve_same` 只会为本次从 pending 新变为 approved 的调用
@@ -131,6 +154,16 @@ Agent 模式。
 拿到临时执行 claim 的事务可以调用工具。重复恢复不会执行，因此幂等。
 `safe` 仅对明确的瞬态失败做有界重试；`idempotent_with_key` 仅在 schema 与
 callable 都接收同一个稳定 key 时重试；`non_idempotent` 与 `unknown` 只执行一次。
+
+**Ops Patrol Remediation 完全复用这套契约。** `patrol_execute_remediation`
+（`api/app/domain/services/tools/patrol_remediation.py`）声明
+`approval=ApprovalMode.ALWAYS` 与 `idempotency=IDEMPOTENT_WITH_KEY`，因此
+修复调用与其他 `approval=always` 工具一样进入同一个 `ToolApprovalBatch`，
+审批前绝不执行——没有独立的修复专属门控。到达 Actuator 的幂等 key 始终是
+批次执行器自身的稳定单调用 key（`session_id` + `tool_call_id` + `args_hash`），
+而非模型可选择的值。`api/tests/app/contracts/test_remediation_governance_invariants.py`
+是断言这些不变量的契约测试：审批前零 Actuator 调用、审批后恰好执行一次、
+提案哈希被篡改（`PARAMS_TAMPERED`）或能力漂移（`CAPABILITY_DRIFT`）时拒绝执行。
 
 ### 接管恢复
 
@@ -167,7 +200,7 @@ flowchart LR
 
 ## Web Operator 与 operator_scope
 
-Web Operator 是**内置 Skill**（`web-operator`），在沙箱内执行浏览器自动化——不是 Marketplace 应用。
+Web Operator 是**内置 Skill**（`web-operator`），在沙箱内执行浏览器自动化。
 
 | `operator_scope` | 含义 |
 |------------------|------|

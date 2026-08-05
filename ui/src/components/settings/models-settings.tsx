@@ -1,9 +1,9 @@
 "use client";
 
-import { Loader2, Plus, Star, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
 import { useTranslations } from "next-intl";
+import { Loader2, Plus, Star, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,12 +25,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+
+import { useEndpointsSettings } from "@/hooks/use-endpoints-settings";
 import {
   defaultCapabilities,
   SUPPORTED_PROVIDERS,
   useModelsSettings,
 } from "@/hooks/use-models-settings";
-import { useEndpointsSettings } from "@/hooks/use-endpoints-settings";
 import { configApi } from "@/lib/api/config";
 import type { LLMEndpoint, LLMModel, LLMProvider } from "@/lib/api/types";
 

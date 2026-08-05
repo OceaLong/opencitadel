@@ -14,6 +14,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 4. [Governed Web Operator](tutorials/04-governed-web-operator.md)
 5. [Refund reconciliation & compliance](tutorials/05-refund-reconciliation-compliance.md)
 6. [Read-only daily Ops Patrol](tutorials/06-ops-patrol.md)
+7. [Approve an Ops Patrol remediation](tutorials/07-approved-remediation.md)
 
 ### Operations & deployment
 
@@ -30,6 +31,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | Document | Scope |
 |----------|-------|
 | [Architecture overview](architecture/overview.md) | System design, process roles, sandbox lifecycle, deployment modes |
+| [Governance plane](architecture/governance-plane.md) | Effect contracts, capability narrowing, batch approval, terminal latch, evidence |
 | [Ops Patrol](architecture/ops-patrol.md) | Pack/Run lifecycle, Collector trust boundary, evidence, tenant isolation |
 | [Technical decisions](architecture/technical-decisions.md) | Technology choices and alternatives |
 | [LLM endpoints & models](architecture/llm-endpoints-and-models.md) | Endpoint/model split, encryption, UI flow |
@@ -45,7 +47,6 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [Skills](architecture/skills.md) | Skill templates, runtime overrides, MCP/A2A filtering |
 | [Artifacts & sharing](architecture/artifacts-sharing.md) | Session artifacts, public share links |
 | [Automation & scheduler](architecture/automation-scheduler.md) | Cron/webhook jobs, leader election, notifications |
-| [Marketplace](architecture/marketplace.md) | LLM mini-app catalog and contracts |
 | [Config source governance](architecture/config-source-governance.md) | AppConfig, config.yaml, env var boundaries |
 | [Model resilience](architecture/model-resilience.md) | Circuit breaking, fallback, SLO runbooks |
 | [Contract compatibility](architecture/contract-compatibility.md) | API/SSE compatibility window |
@@ -62,6 +63,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [Sandbox](../sandbox/README.md) | Isolated runtime |
 | [Nginx gateway](../nginx/README.md) | Edge proxy, SSE/WS, upload limits |
 | [Ops Collector](../ops-collector/README.md) | Fixed read-only MCP probes, configuration and deployment |
+| [Ops Actuator](../ops-actuator/README.md) | Fixed patch-only write MCP probes, configuration and deployment |
 | [OpsConsole demo](../demo/ops-console/README.md) | Web Operator ticket backend demo |
 | [E2E tests](../e2e/README.md) | Playwright smoke tests, OpsConsole demo |
 | [Repository scripts](../scripts/README.md) | `quickstart.sh`, `check-docs.sh` |
@@ -80,6 +82,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | Document | Scope |
 |----------|-------|
 | [2026-07-28 governance audit](superpowers/audits/2026-07-28-agent-kb-codebase-governance-audit.md) | Superseded audit snapshot (zh-only, see status banner) |
+| [2026-08-04 governance P0 re-verification](superpowers/audits/2026-08-04-governance-p0-reverification.md) | Re-verification of the 2026-07-28 audit's P0 findings (zh-only) |
 
 ## Maintenance rules
 

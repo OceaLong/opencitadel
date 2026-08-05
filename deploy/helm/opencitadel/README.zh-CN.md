@@ -21,7 +21,7 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --set image.worker.repository=your-registry/opencitadel-worker
 ```
 
-完整镜像构建/推送步骤与生产环境 `--set` 参数（六个镜像，含可选 Ops Collector、ingress、sandbox
+完整镜像构建/推送步骤与生产环境 `--set` 参数（七个镜像，含可选 Ops Collector、Ops Actuator、ingress、sandbox
 driver）：见[部署指南](../../../docs/operations/deployment.zh-CN.md)的
 Kubernetes / Helm 部署一节。
 
@@ -55,6 +55,13 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
 | `opsCollector.image.*` | 见 values.yaml | Collector Repository、Tag 与 Pull Policy |
 | `opsCollector.allowedNamespaces` / `allowedWorkloads` | 受限默认值 | Kubernetes Scope 白名单 |
 | `opsCollector.registered*` | `{}` | 注册的 Prometheus/HTTP/TLS/备份/依赖目标 |
+| `opsActuator.enabled` | false | 部署可选的写范围 Patrol Actuator（Ops Patrol Remediation） |
+| `opsActuator.image.*` | 见 values.yaml | Actuator Repository、Tag 与 Pull Policy |
+| `opsActuator.targetRef` | `opencitadel-local` | 发起修复的 Pack 匹配的稳定身份标识 |
+| `opsActuator.allowedNamespaces` | `[opencitadel]` | 门控每次写调用的非空 Namespace 白名单 |
+| `opsActuator.allowedWorkloads` | `{}` | Namespace → Workload id → `{kind, min_replicas, max_replicas}`；未列入的 Workload 不能被定位 |
+| `opsActuator.serviceAccount.create` / `.name` | `true` / `""` | 专用 Patch-only ServiceAccount；`create=false` 时使用预先创建的账户 |
+| `opsActuator.resources` | 见 values.yaml | CPU/内存 requests 与 limits |
 | `env.STORAGE_PROVIDER` | cos | 对象存储后端：`cos` 或 `minio` |
 | `env` | 见 values.yaml | 非敏感环境变量（DB/Redis 主机、日志级别等） |
 | `secrets` | 见 values.yaml | 敏感配置，渲染为 Secret 并通过 `envFrom` 注入 |
@@ -181,7 +188,7 @@ kubectl -n opencitadel exec deployment/opencitadel-api -- \
 
 ## Release 镜像
 
-打 tag（`v*`）后，[`.github/workflows/release.yml`](../../../.github/workflows/release.yml) 会发布多架构镜像到 `ghcr.io/ocealong/opencitadel-{api,worker,migrate,ui,sandbox,ops-collector}`。通过 `image.*` 与 `opsCollector.image.*` 引用 Release 构建。
+打 tag（`v*`）后，[`.github/workflows/release.yml`](../../../.github/workflows/release.yml) 会发布多架构镜像到 `ghcr.io/ocealong/opencitadel-{api,worker,migrate,ui,sandbox,ops-collector,ops-actuator}`。通过 `image.*`、`opsCollector.image.*` 与 `opsActuator.image.*` 引用 Release 构建。
 
 ## 架构
 

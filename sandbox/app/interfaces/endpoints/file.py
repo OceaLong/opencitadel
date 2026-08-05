@@ -171,15 +171,20 @@ async def download_file(
         file_service: FileService = Depends(get_file_service),
 ) -> FileResponse:
     """根据传递的filepath下载指定的文件"""
+    # 0.归一化路径(containment校验)，后续统一使用归一化后的路径，
+    #   避免"校验一个路径、实际服务另一个路径"的不一致(归一化后是绝对路径，
+    #   不再依赖进程cwd来解析调用方传入的相对路径)
+    normalized_filepath = FileService._normalize_filepath(filepath)
+
     # 1.确保下当前文件存在
-    await file_service.ensure_file(filepath)
+    await file_service.ensure_file(normalized_filepath)
 
     # 2.提取文件名字
-    filename = os.path.basename(filepath)
+    filename = os.path.basename(normalized_filepath)
 
     # 3.返回文件下载响应
     return FileResponse(
-        path=filepath,
+        path=normalized_filepath,
         filename=filename,
         media_type="application/octet-stream",
     )

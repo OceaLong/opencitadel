@@ -16,13 +16,17 @@
 
 ```mermaid
 flowchart TD
-  Login["Auditor login"] --> Admin["/admin/compliance"]
-  Admin --> Chain["Verify audit chain"]
-  Admin --> Evidence["Download evidence ZIP"]
+  Login["审计员登录"] --> Admin["/admin/compliance"]
+  Admin --> Chain["校验审计链"]
+  Admin --> Evidence["下载证据 ZIP"]
+  Admin --> Profile["打开会话治理档案"]
   Admin --> Report["/admin/compliance/report"]
-  Report --> Export["Export JSON / MD / PDF"]
-  Chain --> Integrity["Platform-wide HMAC integrity"]
-  Evidence --> SessionPkg["Per-session tool invoke records"]
+  Report --> Export["导出 JSON / MD / PDF"]
+  Chain --> Integrity["平台级 HMAC 完整性"]
+  Evidence --> SessionPkg["逐会话工具调用记录"]
+  Evidence --> SignedPkg["签名证据包：manifest.json + chain-signature.txt"]
+  Profile --> ProfileView["/admin/compliance/sessions/{sessionId}"]
+  ProfileView --> ProfileData["审批 + Gate 命中 + 检查点 + 终态"]
 ```
 
 ## 管理后台路由
@@ -35,6 +39,7 @@ flowchart TD
 | `/admin/invitations` | 平台邀请令牌 |
 | `/admin/audit` | 审计日志查看 |
 | `/admin/compliance` | 证据中心、链校验、合规报告 |
+| `/admin/compliance/sessions/[sessionId]` | 单会话治理档案：审批、Gate 命中、检查点、终态 |
 | `/admin/compliance/report` | 全页合规报告导出（JSON / MD / PDF） |
 
 Token 用量图表在 **`/admin` 概览页**展示（无独立 `/admin/usage` 页面）。后端用量 API 仍在 `/api/admin/usage/*`。
@@ -52,16 +57,69 @@ Token 用量图表在 **`/admin` 概览页**展示（无独立 `/admin/usage` �
 | GET | `/api/admin/evidence/sessions` | 列出可导出证据的会话 |
 | GET | `/api/admin/evidence/sessions/{id}/package` | 下载 ZIP 证据包 |
 | GET | `/api/admin/compliance/report` | 合规报告（`json` / `md` / `pdf`） |
+| GET | `/api/admin/governance/sessions/{id}/profile` | 单会话治理档案只读聚合（审批、Gate 命中、检查点、链校验、终态） |
 
 合规映射覆盖**等保2.0**与 **ISO27001** 控制项。设置 `gate_profile` 的 Web Operator 会话会写入带 HMAC 证据链字段的 `agent_tool_invoke` 记录。
 
 ## 证据包内容
 
-证据中心按会话导出的 ZIP 通常包含：
+证据中心按会话导出的 ZIP 包含：
 
-- `audit-report.md` / `audit-report.json`（会话交付物）
-- 脱敏参数的工具调用记录
+- `audit.json`、`audit-report.md` —— 结构化 JSON 与渲染后 Markdown 形式的审计轨迹
+- `checkpoints.json` —— 会话检查点索引
+- `governance-profile.json`、`governance-profile.md` —— 与上方 API 返回的同一份治理档案，经脱敏并确定性渲染
 - 可用时包含 `evidence-summary.pdf`
+- `manifest.json` —— 每个文件的 SHA-256 哈希与链校验结果
+- `chain-signature.txt` —— `HMAC-SHA256(AUDIT_SIGNING_KEY, manifest.json 字节)`
+
+会话产生浏览器截图或制品时会额外包含 `screenshots/*.png` 与 `reconciliation/*.md`/`.html`。
+
+## 治理档案
+
+治理档案是对治理执行链已记录数据——审计哈希链、检查点、会话状态——的只读聚合，汇总为一份面向审计员的文档。不新增表，也不新增写操作。
+
+```mermaid
+erDiagram
+  SESSION ||--o{ AUDIT_LOG : "链式工具调用与审批记录"
+  SESSION ||--o{ TOOL_APPROVAL_BATCH : "受门控的工具调用批次"
+  TOOL_APPROVAL_BATCH ||--o{ AUDIT_LOG : "批准 / 拒绝决策"
+  SESSION ||--o| RUN_OUTCOME : "终态（到达后才有）"
+  SESSION ||--|| GOVERNANCE_PROFILE : "聚合为"
+  GOVERNANCE_PROFILE ||--o{ EVIDENCE_PACKAGE : "按需导出为"
+
+  SESSION {
+    string id PK
+    string gate_profile
+    string operator_scope
+    string status
+  }
+  TOOL_APPROVAL_BATCH {
+    string id PK
+    string session_id FK
+    string status
+    datetime expires_at
+  }
+  AUDIT_LOG {
+    string id PK
+    string session_id FK
+    string action
+    int chain_seq
+    string prev_hash
+    string entry_hash
+  }
+  RUN_OUTCOME {
+    string status
+    string error_code
+  }
+  GOVERNANCE_PROFILE {
+    bool chain_verified
+    int checked_entries
+  }
+  EVIDENCE_PACKAGE {
+    string manifest_sha256
+    string pdf_status
+  }
+```
 
 ## 典型审计员工作流
 
@@ -69,7 +127,8 @@ Token 用量图表在 **`/admin` 概览页**展示（无独立 `/admin/usage` �
 2. 打开 **管理 → 合规**（`/admin/compliance`）
 3. 执行**校验审计链**确认平台完整性
 4. 筛选 Web Operator 会话并下载证据 ZIP
-5. 按审计周期导出合规报告（`framework=djbh2.0` 或 ISO）
+5. 打开某会话的治理档案（`/admin/compliance/sessions/{sessionId}`）查看审批/Gate/检查点细节
+6. 按审计周期导出合规报告（`framework=djbh2.0` 或 ISO）
 
 ## 相关文档
 

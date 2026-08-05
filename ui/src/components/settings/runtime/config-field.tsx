@@ -15,10 +15,10 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 import {
+  type ConfigFieldSchema,
   emptyToNull,
   linesToList,
   listToLines,
-  type ConfigFieldSchema,
 } from "./config-schema";
 
 type ConfigFieldProps = {

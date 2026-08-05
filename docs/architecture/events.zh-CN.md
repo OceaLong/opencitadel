@@ -66,6 +66,48 @@ flowchart TD
 
 `error` 事件可选携带 `code` 字段（如 `MODEL_UNAVAILABLE`、`EMBEDDING_UNAVAILABLE`、`DOCUMENT_PARSE_FAILED`），用于前端与运维区分错误类型。完整错误码列表见 [模型韧性设计](model-resilience.zh-CN.md) 与 `api/app/domain/models/error_codes.py`。前端应容忍缺失 `code` 并按 `error` 文本降级展示。
 
+## SSE 建立、审批等待与断线重连
+
+前端（`use-session-streams.ts`、`use-session-event-log.ts`）把 chat SSE 连接当作一次性资源，把已持久化的事件日志当作真相来源。`tool_approval` 等待并不是特殊的传输态——它只是一个普通的 `approval` 事件，之后流保持安静直到某个决定被发送；网络中断的处理方式与一轮正常结束时的流关闭（`SSE_STREAM_END`）完全相同，只是多了退避重试。审批决定本身就是一条普通的 chat 消息（`GateActionsBar` 走的是与任何其他回复相同的 `sendMessage`/`sessionApi.chat` 路径），而不是单独的 REST 调用。
+
+```mermaid
+sequenceDiagram
+  participant Client
+  participant API
+  participant Redis as "Redis task:output"
+  participant Worker
+  participant DB as "PostgreSQL"
+
+  Client->>API: POST /sessions/{id}/chat（SSE，可选 resume event_id）
+  API->>Redis: dispatch task:input
+  Redis->>Worker: claim task:dispatch
+  Worker->>Redis: XADD task:output（message_delta、tool 等）
+  API->>Redis: XREAD task:output
+  API-->>Client: SSE 实时事件
+  Worker->>DB: pending_phase=tool_approval，ToolApprovalBatch PENDING
+  API-->>Client: SSE "approval" 事件（批次待决）
+  Note over Client: 渲染审批批次卡片，流保持空闲
+  Client->>API: POST /sessions/{id}/chat "approve" / "reject:..."（门控续跑消息）
+  API->>DB: 记录 agent_tool_approve / agent_tool_reject（_record_gate_audit_if_needed）
+  API->>Redis: dispatch 续跑消息
+  Redis->>Worker: claim task:dispatch
+  Worker->>Worker: decide_approval_call，随后 resume() -> consume_approval_batch（原子 CAS）
+  Worker->>Redis: XADD task:output（工具结果、done）
+  API-->>Client: SSE 恢复（工具结果 -> done）
+
+  Note over Client,API: 连接结束（SSE_STREAM_END）：主动关闭、网络中断或代理超时
+  Client->>Client: 指数退避（1s、2s、4s……上限 30s）
+  Client->>API: GET /sessions/{id}/events?latest=true（按 before 游标向前分页）
+  API->>DB: 按 (session_id, seq) 分页重放
+  DB-->>API: 仅返回已持久化事件——transient 事件（message_delta/reasoning_delta/tool_args_delta）被丢弃
+  API-->>Client: 事件分页（prev_cursor、has_earlier）
+  Client->>API: POST /sessions/{id}/chat（空 body，resume event_id=最后 seq）
+  API->>Redis: 从续接偏移量 XREAD
+  API-->>Client: SSE 实时流恢复
+```
+
+审批决定这一步与重连这一步形状相同：API 都是先落定持久化事实（一条 `agent_tool_approve`/`agent_tool_reject` 审计记录，或一页补齐的事件），*之后*客户端才重新挂接实时尾部，顺序从不颠倒。`decide_approval_call` 与执行 `consume_approval_batch` 的 `resume()` 调用都运行在 Worker 的 Flow（`react.py`）内部，而不是 API 进程；API 在审批这一跳里唯一的职责是记审计并派发消息。重连时，客户端无条件先跑一次 `syncMissingEvents`（`GET .../events?latest=true`，向前分页直到到达已知的最后持久化序号）补齐断线期间可能产生的缺口，然后再用一个空 `POST /chat` 续接实时尾部——这不是「实时或重放」的二选一，每次重连都会依次做完这两步。重放调用只会返回写入过 `session_events` 的事件；三个真正 transient 的类型（`message_delta`、`reasoning_delta`、`tool_args_delta`）从不落表，因此一次重连最多丢失一段尚未完成的文本/思考增量，绝不会丢 `wait`/`tool`/`approval`/`done` 事件。`debug_item` 并不是 transient——它和其他事件一样会被持久化，只是在实时与重放两条路径上都由 `include_debug` 门控。连续两次重连失败后，UI 会把流状态报告为 `stale`，而不是无限静默重试。
+
 ## RunOutcome 与终态转换契约
 
 Flow 显式返回 `RunOutcome`；生成器结束和展示事件都不能隐式推断语义成功。

@@ -19,7 +19,6 @@ from . import (
     skill_routes,
     memory_routes,
     metrics_routes,
-    marketplace_routes,
     codebase_routes,
     knowledge_base_routes,
     artifact_routes,
@@ -43,7 +42,6 @@ def create_api_routes() -> APIRouter:
     api_router.include_router(status_routes.router)
     api_router.include_router(llm_status_routes.router)
     api_router.include_router(metrics_routes.router)
-    api_router.include_router(marketplace_routes.public_router)
     api_router.include_router(team_routes.public_invitation_router)
 
     # 3.默认鉴权模块：新增业务接口若无明确公开需求，应放在这里。
@@ -60,7 +58,6 @@ def create_api_routes() -> APIRouter:
     authenticated_router.include_router(llm_model_routes.router)
     authenticated_router.include_router(skill_routes.router)
     authenticated_router.include_router(memory_routes.memory_router)
-    authenticated_router.include_router(marketplace_routes.router)
     authenticated_router.include_router(codebase_routes.router)
     authenticated_router.include_router(knowledge_base_routes.router)
     authenticated_router.include_router(artifact_routes.router)

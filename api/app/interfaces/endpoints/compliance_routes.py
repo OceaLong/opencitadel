@@ -9,7 +9,9 @@ from starlette.responses import Response, StreamingResponse
 from app.application.services.audit_service import AuditService
 from app.application.services.compliance_service import ComplianceService
 from app.application.services.evidence_service import EvidenceService
-from app.interfaces.auth_dependencies import require_auditor_or_admin
+from app.application.services.governance_profile_service import GovernanceProfileService
+from app.domain.models.scope import WorkspaceContext
+from app.interfaces.auth_dependencies import get_workspace_context, require_auditor_or_admin
 from app.interfaces.schemas import Response as ApiResponse
 from app.interfaces.schemas.compliance import (
     ChainVerifyResponse,
@@ -21,6 +23,7 @@ from app.interfaces.service_dependencies import (
     get_audit_service,
     get_compliance_service,
     get_evidence_service,
+    get_governance_profile_service,
 )
 
 router = APIRouter(prefix="/admin", tags=["合规证据"])
@@ -113,3 +116,16 @@ async def get_compliance_report(
     if pdf is None:
         raise HTTPException(status_code=501, detail="PDF 渲染不可用，请使用 json 或 md 格式")
     return Response(content=pdf, media_type="application/pdf")
+
+
+@router.get(
+    "/governance/sessions/{session_id}/profile",
+    dependencies=[Depends(require_auditor_or_admin)],
+)
+async def get_governance_profile(
+    session_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service: GovernanceProfileService = Depends(get_governance_profile_service),
+):
+    profile = await service.build_profile(session_id, scope=ctx.scope)
+    return ApiResponse.success(data=profile)

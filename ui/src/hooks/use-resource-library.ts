@@ -20,9 +20,10 @@ export type ResourceLibraryApi<TItem, TVersionsData> = {
   list: () => Promise<TItem[]>;
   /**
    * Omit for resources whose version history isn't tracked at the library
-   * level — the knowledge library leaves this to `KnowledgeVersionStatus`,
-   * which self-fetches per card instead of being handed a controlled
-   * `history` prop the way `CodebaseVersionStatus` is.
+   * level — the knowledge library leaves this to `ResourceVersionStatus`
+   * (`ns="knowledge"`), which self-fetches per card instead of being handed
+   * a controlled `history` prop the way the codebase library's
+   * `ResourceVersionStatus` (`ns="codebase"`) is.
    */
   listVersions?: (id: string) => Promise<TVersionsData>;
   remove: (id: string) => Promise<void>;

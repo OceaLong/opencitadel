@@ -163,10 +163,13 @@ if rg -n '\| `/admin/usage` \|' docs/architecture/admin-auditor-compliance.md \
 fi
 
 echo "==> Checking stale application-image count wording ..."
-if rg -n 'four images|five images|all five images|四镜像|五镜像|五个镜像|扫描五个' \
+if rg -n 'four images|five images|six images|all five images|all six images|四镜像|五镜像|六镜像|五个镜像|六个镜像|扫描五个|扫描六个' \
   docs deploy/helm/opencitadel/README.md deploy/helm/opencitadel/README.zh-CN.md 2>/dev/null; then
-  fail "documentation has a stale image count; releases publish six images including ops-collector"
+  fail "documentation has a stale image count; releases publish seven images including ops-collector and ops-actuator"
 fi
+for f in docs/operations/deployment.md docs/operations/deployment.zh-CN.md; do
+  require_marker "$f" "ops-actuator" "seven-image release count"
+done
 
 echo "==> Checking security architecture contracts ..."
 for f in docs/architecture/security-model.md docs/architecture/security-model.zh-CN.md; do

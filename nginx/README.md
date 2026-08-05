@@ -41,7 +41,6 @@ This is the **gateway ceiling** for all POST bodies. Per-feature limits may be l
 |---------|-----------------|-------------|
 | Codebase ZIP | 200 MB | UI `CODEBASE_ZIP_MAX_BYTES` + nginx |
 | Knowledge base document | 50 MB default | AppConfig `knowledge_base.document.max_bytes` |
-| Marketplace upload | 25 MB default | AppConfig `server.marketplace_max_upload_bytes` |
 
 Keep UI constants, nginx, and AppConfig aligned when changing codebase upload limits.
 

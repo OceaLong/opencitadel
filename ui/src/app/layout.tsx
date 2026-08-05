@@ -6,8 +6,8 @@ import { getLocale, getMessages, getTranslations } from "next-intl/server";
 import { AppShell } from "@/components/app-shell";
 import { Toaster } from "@/components/ui/sonner";
 
-import { ThemeProvider } from "@/providers/theme-provider";
 import { AuthProvider } from "@/providers/auth-provider";
+import { ThemeProvider } from "@/providers/theme-provider";
 
 import "./globals.css";
 

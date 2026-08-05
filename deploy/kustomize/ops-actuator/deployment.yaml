@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opencitadel-ops-actuator
+  labels:
+    app.kubernetes.io/name: opencitadel-ops-actuator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opencitadel-ops-actuator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opencitadel-ops-actuator
+    spec:
+      serviceAccountName: opencitadel-ops-actuator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: actuator
+          image: opencitadel-ops-actuator:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: mcp
+              containerPort: 8091
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: OPS_ACTUATOR_TARGET_REF
+              value: opencitadel-local
+            - name: OPS_ACTUATOR_ALLOWED_NAMESPACES
+              value: '["opencitadel"]'
+            - name: OPS_ACTUATOR_TRANSPORT
+              value: streamable-http
+          readinessProbe:
+            tcpSocket:
+              port: mcp
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: mcp
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi

@@ -10,8 +10,18 @@ from app.application.errors.exceptions import BadRequestError
 from app.application.services.patrol_evidence_service import PatrolEvidenceService
 from app.application.patrol_templates import load_patrol_template
 from app.application.services.patrol_pack_service import PatrolPackService
+from app.application.services.patrol_remediation_service import (
+    PatrolRemediationService,
+    _allowed_actions_for_probe_tool,
+)
 from app.application.services.patrol_run_service import PatrolRunService
-from app.domain.models.patrol import PatrolFindingStatus, PatrolPackConfig
+from app.domain.models.patrol import (
+    PatrolCheckResult,
+    PatrolFinding,
+    PatrolFindingStatus,
+    PatrolPackConfig,
+    PatrolRun,
+)
 from app.domain.models.scope import WorkspaceContext
 from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
 from app.interfaces.schemas import Response as ApiResponse
@@ -23,19 +33,45 @@ from app.interfaces.schemas.patrol import (
     PatrolPackListResponse,
     PatrolPackMetricsResponse,
     PatrolPackResponse,
+    PatrolRemediationListResponse,
+    PatrolRemediationResponse,
     PatrolRunDetailResponse,
     PatrolRunListResponse,
     PatrolRunResponse,
+    ProposePatrolRemediationRequest,
     UpdatePatrolPackRequest,
 )
 from app.interfaces.service_dependencies import (
     get_patrol_evidence_service,
     get_patrol_pack_service,
+    get_patrol_remediation_service,
     get_patrol_run_service,
 )
 
 
 router = APIRouter(tags=["Ops Patrol"])
+
+
+def _finding_allowed_actions(
+    finding: PatrolFinding, check_results: list[PatrolCheckResult], run: PatrolRun
+) -> list[str]:
+    """Resolve which remediation actions a Finding's probe tool supports.
+
+    Assembly point for `PatrolFindingResponse.allowed_actions` — computed
+    here (not on the domain model) because it depends on the Run's pack
+    config snapshot, which isn't part of the Finding row. Reuses
+    `patrol_remediation_service._allowed_actions_for_probe_tool` so the
+    read-side classification never drifts from `propose()`'s write-side
+    enforcement of the same rule.
+    """
+    check_result = next((item for item in check_results if item.id == finding.check_result_id), None)
+    if check_result is None:
+        return []
+    config = PatrolPackConfig.model_validate(run.pack_snapshot["config"])
+    check = next((item for item in config.checks if item.id == check_result.check_id), None)
+    if check is None:
+        return []
+    return sorted(action.value for action in _allowed_actions_for_probe_tool(check.probe.tool))
 
 
 @router.get("/patrol-packs", response_model=ApiResponse[PatrolPackListResponse])
@@ -161,7 +197,10 @@ async def get_run(run_id: str, ctx: WorkspaceContext = Depends(get_workspace_con
     return ApiResponse.success(PatrolRunDetailResponse(
         **PatrolRunResponse.from_domain(run).model_dump(),
         check_results=[PatrolCheckResultResponse.from_domain(item) for item in results],
-        findings=[PatrolFindingResponse.from_domain(item) for item in findings],
+        findings=[
+            PatrolFindingResponse.from_domain(item, allowed_actions=_finding_allowed_actions(item, results, run))
+            for item in findings
+        ],
     ))
 
 
@@ -184,7 +223,9 @@ async def replay_run(run_id: str, ctx: WorkspaceContext = Depends(get_workspace_
 
 async def _decide(finding_id: str, status: PatrolFindingStatus, body: FindingDecisionRequest, ctx: WorkspaceContext, service: PatrolRunService):
     finding = await service.decide_finding(finding_id, ctx.scope, ctx.principal.user_id, status, body.reason)
-    return ApiResponse.success(PatrolFindingResponse.from_domain(finding))
+    run, results, _findings = await service.get_run_detail(finding.run_id, ctx.scope)
+    allowed_actions = _finding_allowed_actions(finding, results, run)
+    return ApiResponse.success(PatrolFindingResponse.from_domain(finding, allowed_actions=allowed_actions))
 
 
 @router.post("/patrol-findings/{finding_id}/acknowledge", response_model=ApiResponse[PatrolFindingResponse])
@@ -200,3 +241,34 @@ async def resolve_finding(finding_id: str, body: FindingDecisionRequest, ctx: Wo
 @router.post("/patrol-findings/{finding_id}/false-positive", response_model=ApiResponse[PatrolFindingResponse])
 async def false_positive_finding(finding_id: str, body: FindingDecisionRequest, ctx: WorkspaceContext = Depends(get_workspace_context), _write_guard=Depends(require_non_auditor), service: PatrolRunService = Depends(get_patrol_run_service)):
     return await _decide(finding_id, PatrolFindingStatus.FALSE_POSITIVE, body, ctx, service)
+
+
+@router.post("/patrol-findings/{finding_id}/remediations", response_model=ApiResponse[PatrolRemediationResponse])
+async def propose_remediation(
+    finding_id: str,
+    body: ProposePatrolRemediationRequest,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    _write_guard=Depends(require_non_auditor),
+    service: PatrolRemediationService = Depends(get_patrol_remediation_service),
+):
+    remediation = await service.propose(finding_id, body.action, body.params, ctx.scope, ctx.principal.user_id, workload=body.workload)
+    return ApiResponse.success(PatrolRemediationResponse.from_domain(remediation))
+
+
+@router.get("/patrol-runs/{run_id}/remediations", response_model=ApiResponse[PatrolRemediationListResponse])
+async def list_remediations(
+    run_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service: PatrolRemediationService = Depends(get_patrol_remediation_service),
+):
+    items = await service.list_for_run(run_id, ctx.scope)
+    return ApiResponse.success(PatrolRemediationListResponse(items=[PatrolRemediationResponse.from_domain(item) for item in items]))
+
+
+@router.get("/patrol-remediations/{remediation_id}", response_model=ApiResponse[PatrolRemediationResponse])
+async def get_remediation(
+    remediation_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service: PatrolRemediationService = Depends(get_patrol_remediation_service),
+):
+    return ApiResponse.success(PatrolRemediationResponse.from_domain(await service.get(remediation_id, ctx.scope)))

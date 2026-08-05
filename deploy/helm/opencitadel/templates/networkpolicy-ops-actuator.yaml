@@ -1,0 +1,37 @@
+{{- if and .Values.opsActuator.enabled .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-ops-actuator
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: ops-actuator
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: ["api", "worker"]
+      ports:
+        - {protocol: TCP, port: 8091}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # Only the Kubernetes API server -- the actuator never talks to
+    # Postgres/Redis/MinIO/Prometheus, unlike the read-only Collector.
+    # Keeping those ports open on a write-scoped ServiceAccount's pod would
+    # be a lateral-movement surface with no corresponding need.
+    - ports:
+        - {protocol: TCP, port: 443}
+{{- end }}

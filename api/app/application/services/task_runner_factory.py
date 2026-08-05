@@ -15,8 +15,19 @@ from app.application.services.memory_extractor_service import MemoryExtractorSer
 from app.application.services.notification_service import NotificationService
 from app.application.services.scheduled_job_service import ScheduledJobService
 from app.application.services.patrol_run_service import PatrolRunService
+# MCPPatrolCollectorValidator/MCPActuatorClient are no longer called directly
+# here (moved into runner_bindings.patrol / runner_bindings.remediation) but
+# stay imported so `patch("...task_runner_factory.MCPPatrolCollectorValidator...")`
+# / `MCPActuatorClient...` in existing tests keep resolving — patching a
+# classmethod through any module path that holds a reference to the same
+# class object patches it globally, so this keeps those tests green without
+# touching them.
 from app.application.services.patrol_collector_validator import MCPPatrolCollectorValidator
+from app.application.services.patrol_remediation_service import PatrolRemediationService
 from app.application.services.memory_service import MemoryService
+from app.application.services.runner_bindings.patrol import resolve_patrol_binding
+from app.application.services.runner_bindings.remediation import exclude_actuator_server, resolve_remediation_binding
+from app.application.services.runner_bindings.resource_authorizer import authorize_session_resources
 from app.application.services.skill_service import SkillService
 from app.domain.external.connection_pool import A2AConnectionPoolPort, MCPConnectionPoolPort
 from app.domain.external.event_sequence import EventSequencePort
@@ -30,13 +41,9 @@ from app.domain.external.task_state_port import TaskStatePort
 from app.domain.models.agent_runtime_settings import AgentMemoryRuntimeSettings, AgentRuntimeSettings
 from app.domain.models.app_config import AgentConfig, MCPConfig, A2AConfig, ModelResilienceConfig
 from app.domain.models.codebase import Codebase, SessionMode
-from app.domain.models.codebase_version import CodebaseVersionState
 from app.domain.models.knowledge_base import KnowledgeBase
-from app.domain.models.knowledge_version import KnowledgeVersionState
-from app.domain.models.resource_governance import ResourceKind
 from app.domain.models.session import Session, SessionStatus
 from app.domain.models.scope import OwnerScope
-from app.domain.models.patrol import PATROL_PROBE_TOOLS, PatrolPackConfig, PatrolPackStatus
 from app.domain.models.skill import Skill
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agent_task_runner import AgentTaskRunner
@@ -51,6 +58,8 @@ from app.domain.services.tools.artifact import ArtifactTool
 from app.domain.services.tools.memory import MemoryTool
 from app.domain.services.tools.mcp import MCPTool
 from app.domain.services.tools.patrol import PatrolTool
+from app.domain.services.tools.patrol_remediation import PatrolRemediationTool
+from app.infrastructure.external.actuator_client import MCPActuatorClient
 from app.domain.services.tools.capability_policy import CapabilityPolicy
 from app.domain.services.session_flow_resolver import SessionFlowResolver
 from app.domain.services.subagent_factory import build_subagent_tool
@@ -115,6 +124,7 @@ class TaskRunnerFactory:
             codebase_service: Optional[CodebaseService] = None,
             object_storage: Optional[ObjectStoragePort] = None,
             patrol_run_service: Optional[PatrolRunService] = None,
+            patrol_remediation_service: Optional[PatrolRemediationService] = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm_model_service = llm_model_service
@@ -138,6 +148,7 @@ class TaskRunnerFactory:
         self._codebase_service = codebase_service
         self._object_storage = object_storage
         self._patrol_run_service = patrol_run_service
+        self._patrol_remediation_service = patrol_remediation_service
         self._agent_config = AgentConfig()
         self._mcp_config = MCPConfig()
         self._a2a_config = A2AConfig()
@@ -157,95 +168,13 @@ class TaskRunnerFactory:
             session: Session,
             scope: OwnerScope,
     ) -> tuple[Optional[Codebase], Optional[str], Optional[KnowledgeBase], Optional[str]]:
-        codebase = None
-        codebase_version_id = None
-        knowledge_base = None
-        knowledge_base_version_id = None
-        async with self._uow_factory() as uow:
-            if session.codebase_id:
-                codebase = await uow.codebase.get_by_id(session.codebase_id, scope=scope)
-                if codebase is None:
-                    raise NotFoundError("会话关联代码库不存在或无权访问")
-                bindings = [
-                    binding
-                    for binding in session.resource_bindings
-                    if binding.resource_kind == ResourceKind.CODEBASE
-                ]
-                if (
-                    len(bindings) != 1
-                    or bindings[0].resource_id != session.codebase_id
-                ):
-                    raise NotFoundError(
-                        "会话代码库版本绑定缺失、重复或不匹配"
-                    )
-                binding = bindings[0]
-                version = await uow.codebase_version.get_version(
-                    binding.version_id,
-                    codebase_id=session.codebase_id,
-                )
-                if (
-                    version is None
-                    or version.id != binding.version_id
-                    or version.codebase_id != session.codebase_id
-                    or version.published_at is None
-                    or version.state not in {
-                        CodebaseVersionState.READY,
-                        CodebaseVersionState.DEGRADED,
-                    }
-                ):
-                    raise NotFoundError(
-                        "会话代码库版本不是可用的已发布版本"
-                    )
-                codebase_version_id = version.id
-            if session.knowledge_base_id:
-                knowledge_base = await uow.knowledge_base.get_kb(
-                    session.knowledge_base_id,
-                    scope=scope,
-                )
-                if knowledge_base is None:
-                    raise NotFoundError("会话关联知识库不存在或无权访问")
-                bindings = [
-                    binding
-                    for binding in session.resource_bindings
-                    if (
-                        binding.resource_kind
-                        == ResourceKind.KNOWLEDGE_BASE
-                    )
-                ]
-                if (
-                    len(bindings) != 1
-                    or bindings[0].resource_id
-                    != session.knowledge_base_id
-                ):
-                    raise NotFoundError(
-                        "会话知识库版本绑定缺失、重复或不匹配"
-                    )
-                binding = bindings[0]
-                version = await uow.knowledge_version.get_version(
-                    binding.version_id,
-                    knowledge_base_id=session.knowledge_base_id,
-                )
-                if (
-                    version is None
-                    or version.id != binding.version_id
-                    or version.knowledge_base_id
-                    != session.knowledge_base_id
-                    or version.published_at is None
-                    or version.state not in {
-                        KnowledgeVersionState.READY,
-                        KnowledgeVersionState.DEGRADED,
-                    }
-                ):
-                    raise NotFoundError(
-                        "会话知识库版本不是可用的已发布版本"
-                    )
-                knowledge_base_version_id = version.id
-        return (
-            codebase,
-            codebase_version_id,
-            knowledge_base,
-            knowledge_base_version_id,
-        )
+        # Thin delegate: logic lives in runner_bindings.resource_authorizer.
+        # Kept as a bound method (rather than inlining the module-function
+        # call at every call site) because several tests
+        # (test_kb_version_invariants / test_task_runner_factory_kb_binding /
+        # test_task_runner_factory_codebase_binding) call
+        # `factory._authorize_session_resources(...)` directly.
+        return await authorize_session_resources(self._uow_factory, session, scope)
 
     async def _build_versioned_code_source(
             self,
@@ -388,6 +317,11 @@ class TaskRunnerFactory:
                 if patrol_repository is not None
                 else None
             )
+            patrol_remediation = (
+                await patrol_repository.get_remediation_by_session_id(session.id)
+                if patrol_repository is not None
+                else None
+            )
         (
             authorized_codebase,
             authorized_codebase_version_id,
@@ -402,53 +336,33 @@ class TaskRunnerFactory:
             latest_message,
         )
         is_patrol = bool(skill and skill.slug == "ops-patrol")
-        patrol_server_name: str | None = None
-        if patrol_run is not None or is_patrol:
-            if patrol_run is None or not is_patrol:
-                raise NotFoundError("Patrol Session 缺少唯一的持久化 Run/Skill 绑定")
-            if self._patrol_run_service is None:
-                raise NotFoundError("Patrol runtime service unavailable")
-            async with self._uow_factory() as uow:
-                scoped_run = await uow.patrol.get_run(patrol_run.id, session_scope)
-                if scoped_run is None or scoped_run.session_id != session.id:
-                    raise NotFoundError("Patrol Run 不属于当前 Session OwnerScope")
-                pack = await uow.patrol.get_pack(scoped_run.pack_id, session_scope)
-                server_id = scoped_run.pack_snapshot.get("mcp_server_id")
-                server = await uow.mcp_server.get_by_id(str(server_id), scope=session_scope) if server_id else None
-            if pack is None or pack.status != PatrolPackStatus.ACTIVE:
-                raise NotFoundError("Patrol Pack 非 active，运行时绑定已拒绝")
-            if server is None or not server.enabled or server.id != pack.mcp_server_id:
-                raise NotFoundError("Pack-owned Collector 不存在、已禁用或作用域不匹配")
-            snapshot_hash = scoped_run.collector_capability_hash
-            try:
-                current_capabilities = await MCPPatrolCollectorValidator(
-                    self._mcp_connection_pool
-                ).get_capabilities(server)
-            except Exception as exc:
-                raise NotFoundError(
-                    f"Collector capability preflight failed: {str(exc)[:500]}"
-                ) from exc
-            current_hash = str(
-                current_capabilities.get("overall_capability_hash") or ""
-            )
-            if not current_hash or current_hash != snapshot_hash:
-                raise NotFoundError(
-                    "Collector capability drift detected; Pack 必须重新验证"
-                )
-            enabled_tools = set(scoped_run.pack_snapshot.get("enabled_tools") or [])
-            allowed_source_tools = set(PATROL_PROBE_TOOLS) | {"get_capabilities"}
-            if not enabled_tools or not enabled_tools.issubset(allowed_source_tools):
-                raise NotFoundError("Patrol capability snapshot 包含未授权工具")
-            configured_checks = PatrolPackConfig.model_validate(scoped_run.pack_snapshot["config"])
-            agent_config = agent_config.model_copy(
-                update={
-                    "max_run_seconds": configured_checks.defaults.run_timeout_seconds
-                }
-            )
-            required_tools = {item.probe.tool for item in configured_checks.checks if item.enabled}
-            if not required_tools.issubset(enabled_tools):
-                raise NotFoundError("Patrol runtime tools 超出验证快照")
-            patrol_server_name = server.name
+        patrol_server_name, agent_config = await resolve_patrol_binding(
+            self._uow_factory,
+            self._mcp_connection_pool,
+            session,
+            session_scope,
+            is_patrol,
+            patrol_run,
+            agent_config,
+            self._patrol_run_service is not None,
+        )
+
+        is_remediation, remediation_prompt_block = await resolve_remediation_binding(
+            self._uow_factory,
+            self._mcp_connection_pool,
+            session,
+            session_scope,
+            skill,
+            patrol_remediation,
+            self._patrol_remediation_service is not None,
+        )
+        # Single boolean for the many "this session is governed to exactly
+        # one bound tool" gates below (Ask/subagent/memory/artifact/image
+        # tools all get suppressed identically for both branches) — see
+        # task-3-report.md for the per-site convergence judgment.
+        is_governed_single_tool_session = is_patrol or is_remediation
+        if remediation_prompt_block:
+            skill_prompt = f"{skill_prompt}\n\n{remediation_prompt_block}".strip() if skill_prompt else remediation_prompt_block
         model_id = llm_model.id
         prompt_locale = detect_locale_from_text(latest_message)
 
@@ -495,7 +409,7 @@ class TaskRunnerFactory:
             )
             return {"id": entry.id}
 
-        extra_tools = [] if is_patrol else [MemoryTool(save_fn=save_memory_fn, session_id=session.id)]
+        extra_tools = [] if is_governed_single_tool_session else [MemoryTool(save_fn=save_memory_fn, session_id=session.id)]
         if is_patrol and patrol_run and self._patrol_run_service:
             patrol_service = self._patrol_run_service
 
@@ -504,9 +418,16 @@ class TaskRunnerFactory:
                 return finalized.model_dump(mode="json")
 
             extra_tools.append(PatrolTool(finalize_patrol, session_id=session.id))
+        if is_remediation and self._patrol_remediation_service:
+            remediation_service = self._patrol_remediation_service
+
+            async def execute_remediation(**kwargs):
+                return await remediation_service.execute(scope=session_scope, **kwargs)
+
+            extra_tools.append(PatrolRemediationTool(execute_remediation, session_id=session.id))
 
         runtime = get_runtime_config()
-        if not is_patrol and runtime.feature_flags.enable_artifacts and self._artifact_service:
+        if not is_governed_single_tool_session and runtime.feature_flags.enable_artifacts and self._artifact_service:
             artifact_service = self._artifact_service
 
             async def write_artifact(**kwargs):
@@ -601,7 +522,7 @@ class TaskRunnerFactory:
                 else knowledge_base_prompt
             )
         caps = llm_model.capabilities
-        if not is_patrol and caps and caps.image_generation:
+        if not is_governed_single_tool_session and caps and caps.image_generation:
             extra_tools.append(
                 ImageGenerationTool(
                     llm=llm,
@@ -688,16 +609,28 @@ class TaskRunnerFactory:
             parent_policy=session_policy,
             **subagent_overrides,
         )
-        if not is_patrol:
+        if not is_governed_single_tool_session:
             extra_tools = list(extra_tools) + [subagent_tool]
 
-        mcp_config = filter_mcp_config_by_refs(
-            self._mcp_config,
-            [patrol_server_name] if is_patrol and patrol_server_name else (skill.mcp_server_refs if skill else None),
+        # filter_mcp_config_by_refs([]) treats an empty ref list as "no
+        # filter" (falsy) and returns *every* enabled server — not what we
+        # want for is_remediation, which must expose zero MCP servers to the
+        # LLM (the Actuator is only ever called server-side, inside
+        # PatrolRemediationService.execute()). Build an explicit empty
+        # MCPConfig() instead of routing an empty list through the filter.
+        mcp_config = (
+            MCPConfig()
+            if is_remediation
+            else exclude_actuator_server(
+                filter_mcp_config_by_refs(
+                    self._mcp_config,
+                    [patrol_server_name] if is_patrol and patrol_server_name else (skill.mcp_server_refs if skill else None),
+                )
+            )
         )
         a2a_config = filter_a2a_config_by_refs(
-            A2AConfig() if is_patrol else self._a2a_config,
-            [] if is_patrol else (skill.a2a_server_refs if skill else None),
+            A2AConfig() if is_governed_single_tool_session else self._a2a_config,
+            [] if is_governed_single_tool_session else (skill.a2a_server_refs if skill else None),
         )
         if is_patrol and len(mcp_config.mcpServers) != 1:
             raise NotFoundError("Patrol Session 必须且只能绑定一个 Collector")
@@ -714,6 +647,8 @@ class TaskRunnerFactory:
         async def on_session_terminal(session_id: str, status) -> None:
             if is_patrol and self._patrol_run_service:
                 await self._patrol_run_service.mark_run_failed(session_id)
+            if is_remediation and self._patrol_remediation_service:
+                await self._patrol_remediation_service.cancel_if_pending(session_id)
             app_config = await self._config_provider.get()
             job_service = ScheduledJobService(uow_factory=self._uow_factory)
             notification_service = NotificationService(uow_factory=self._uow_factory)
@@ -770,7 +705,9 @@ class TaskRunnerFactory:
             long_term_memory_block=ltm_block,
             extra_tools=extra_tools,
             on_complete_callback=(
-                on_complete if self._auto_extract_memory and not is_patrol else None
+                on_complete
+                if self._auto_extract_memory and not is_governed_single_tool_session
+                else None
             ),
             on_session_terminal_callback=on_session_terminal,
             model_id=model_id,

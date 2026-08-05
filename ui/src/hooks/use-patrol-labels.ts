@@ -26,6 +26,7 @@ export function usePatrolLabels() {
     } as Record<string, string>,
     trigger: {
       manual: t("trigger.manual"),
+      remediation: t("trigger.remediation"),
       replay: t("trigger.replay"),
       schedule: t("trigger.schedule"),
       webhook: t("trigger.webhook"),
@@ -40,6 +41,19 @@ export function usePatrolLabels() {
       false_positive: t("findingStatus.false_positive"),
       open: t("findingStatus.open"),
       resolved: t("findingStatus.resolved"),
+    } as Record<string, string>,
+    remediationStatus: {
+      cancelled: t("remediation.status.cancelled"),
+      executed: t("remediation.status.executed"),
+      executing: t("remediation.status.executing"),
+      failed: t("remediation.status.failed"),
+      proposed: t("remediation.status.proposed"),
+      verified: t("remediation.status.verified"),
+    } as Record<string, string>,
+    remediationAction: {
+      restart_workload: t("remediation.action.restart_workload"),
+      rollback_workload: t("remediation.action.rollback_workload"),
+      scale_workload: t("remediation.action.scale_workload"),
     } as Record<string, string>,
   };
 }

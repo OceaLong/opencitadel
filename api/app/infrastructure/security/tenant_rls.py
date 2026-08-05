@@ -48,6 +48,7 @@ CHILD_TABLES = {
     "patrol_runs": ("patrol_packs", "pack_id", "id"),
     "patrol_check_results": ("patrol_runs", "run_id", "id"),
     "patrol_findings": ("patrol_runs", "run_id", "id"),
+    "patrol_remediations": ("patrol_runs", "run_id", "id"),
 }
 
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")

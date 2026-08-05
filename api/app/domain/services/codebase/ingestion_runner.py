@@ -69,6 +69,10 @@ _TERMINAL_BUILD_STATES = {
     BuildState.FAILED,
     BuildState.CANCELLED,
 }
+_PUBLISHED_CANDIDATE_STATES = {
+    CodebaseVersionState.READY,
+    CodebaseVersionState.DEGRADED,
+}
 
 
 @dataclass(frozen=True)
@@ -601,25 +605,99 @@ class CodebaseIngestionRunner:
                 ),
             )
 
+    async def reconcile_stale(
+            self,
+            build_id: str,
+            *,
+            error: str = "codebase build heartbeat expired",
+    ) -> BuildState | None:
+        """Terminate a stale candidate build left behind by a dead worker."""
+        async with self._uow_factory() as uow:
+            build = await uow.resource_governance.get_build(
+                build_id,
+                for_update=False,
+            )
+        if build is None:
+            return None
+        if build.resource_kind is not ResourceKind.CODEBASE:
+            return None
+        if build.state in _TERMINAL_BUILD_STATES:
+            return build.state
+        return await self._fail_build(
+            build,
+            error,
+            error_code="BUILD_STALE",
+        )
+
     async def _fail_build(
             self,
             build: ResourceBuild,
             error: str,
             *,
             error_code: str = "CODEBASE_BUILD_FAILED",
-    ) -> None:
+    ) -> BuildState | None:
         async with self._uow_factory() as uow:
             current_build = await uow.resource_governance.get_build(
                 build.id,
                 for_update=True,
             )
             if current_build is None:
-                return
+                return None
+            if current_build.state in _TERMINAL_BUILD_STATES:
+                # Already terminalized (e.g. a racing publish/reconcile
+                # already committed the only terminal event).
+                return current_build.state
             candidate = await uow.codebase_version.get_version(
                 current_build.version_id,
                 codebase_id=current_build.resource_id,
             )
             codebase = await uow.codebase.get_by_id(current_build.resource_id)
+
+            published = (
+                candidate is not None
+                and candidate.published_at is not None
+                and candidate.state in _PUBLISHED_CANDIDATE_STATES
+                and codebase is not None
+                and codebase.active_version_id == current_build.version_id
+            )
+            if published:
+                # Publishing is a two-phase commit: transaction A
+                # (publish_candidate + codebase made ready) has already
+                # committed, but transaction B (the terminal build event)
+                # has not run yet. If a stale-build reconciler lands in
+                # that window, it must not overwrite the successful
+                # publish with FAILED -- arbitrate the authoritative
+                # terminal success event instead, mirroring the KB
+                # runner's published-candidate rescue path.
+                terminal_state = (
+                    BuildState.DEGRADED
+                    if candidate.state is CodebaseVersionState.DEGRADED
+                    else BuildState.SUCCEEDED
+                )
+                append_event = getattr(
+                    uow.resource_governance, "append_event", None
+                )
+                if append_event is not None:
+                    await append_event(
+                        current_build.id,
+                        ResourceBuildEvent(
+                            build_id=current_build.id,
+                            seq=0,
+                            phase="publish",
+                            state=terminal_state,
+                            progress=1.0,
+                            payload={
+                                "capabilities": dict(candidate.capabilities),
+                                "degraded_reasons": list(
+                                    candidate.degraded_reasons
+                                ),
+                                "metrics": dict(candidate.metrics),
+                                "reconciled_after_publish": True,
+                            },
+                        ),
+                    )
+                return terminal_state
+
             if (
                 candidate is not None
                 and candidate.published_at is None
@@ -644,10 +722,7 @@ class CodebaseIngestionRunner:
                 codebase.updated_at = datetime.now()
                 await uow.codebase.save(codebase)
             append_event = getattr(uow.resource_governance, "append_event", None)
-            if (
-                append_event is not None
-                and current_build.state not in _TERMINAL_BUILD_STATES
-            ):
+            if append_event is not None:
                 await append_event(
                     current_build.id,
                     ResourceBuildEvent(
@@ -662,6 +737,7 @@ class CodebaseIngestionRunner:
                         },
                     ),
                 )
+            return BuildState.FAILED
 
     @staticmethod
     def _with_version_id(

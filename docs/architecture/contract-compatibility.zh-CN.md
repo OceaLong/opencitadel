@@ -22,14 +22,6 @@ flowchart LR
 | 前端 | 可读可忽略；优先用 `code` 驱动 UI，回退到 `error` 文案 |
 | 兼容窗口 | 至少 2 个 minor 版本 |
 
-## Marketplace model_dependency
-
-| 项 | 策略 |
-|----|------|
-| 取值 | `none | optional | required` |
-| 缺省 | 前端对缺失字段回落为 `optional`；catalog 接口保证全量下发 |
-| `FALLBACK_APPS` | 离线兜底同样携带 `model_dependency` |
-
 ## /api/llm/status
 
 | 项 | 策略 |

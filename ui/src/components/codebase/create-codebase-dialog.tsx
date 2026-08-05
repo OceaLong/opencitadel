@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { FolderArchive, GitBranch, Loader2, Upload } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { FolderArchive, GitBranch, Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -20,8 +20,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { codebaseApi } from "@/lib/api/codebase";
 import { fileApi } from "@/lib/api/file";
-import { CODEBASE_ZIP_MAX_BYTES } from "@/lib/constants";
 import type { Codebase, CodebaseSourceType } from "@/lib/api/types";
+import { CODEBASE_ZIP_MAX_BYTES } from "@/lib/constants";
 
 type CreateCodebaseDialogProps = {
   open: boolean;

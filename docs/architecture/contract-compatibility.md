@@ -22,14 +22,6 @@ flowchart LR
 | Frontend | Readable and ignorable; prefer `code` to drive UI, fall back to `error` text |
 | Compatibility window | At least 2 minor versions |
 
-## Marketplace model_dependency
-
-| Item | Policy |
-|------|--------|
-| Values | `none | optional | required` |
-| Default | Frontend falls back to `optional` when field is missing; catalog API guarantees full delivery |
-| `FALLBACK_APPS` | Offline fallback also carries `model_dependency` |
-
 ## /api/llm/status
 
 | Item | Policy |

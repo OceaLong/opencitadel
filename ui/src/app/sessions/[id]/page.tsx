@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 
-import { SessionDetailView } from "@/components/session-detail-view";
+import { SessionDetailView } from "@/components/session/session-detail-view";
 
 type PageProps = {
   params: Promise<{ id: string }>;

@@ -14,11 +14,166 @@ from typing import Any, Callable, Dict, List, Optional
 
 from app.application.services.artifact_service import ArtifactService
 from app.application.services.audit_service import AuditService
+from app.application.services.governance_profile_service import GovernanceProfileService
+from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
+from app.domain.services.audit_chain import canonical as canonical_json
+from app.domain.utils.audit_redaction import redact_value, scrub_secret_patterns
 from app.infrastructure.external.report.pdf_renderer import PdfUnavailableError, render_html_to_pdf
 from app.infrastructure.models.session import SessionModel
 from core.config import get_settings
 from sqlalchemy import func, or_, select
+
+
+def _md_value(key: str, value: Any) -> str:
+    """Redact then render a single profile field for Markdown, treating
+    None/missing uniformly as '-' (mirrors patrol_report_service's
+    deterministic-render-only-persisted-fields discipline).
+
+    Two-layer defense, same as PatrolReportService: ``redact_value`` masks
+    by field *name* (password/token/... keys) and known PII shapes
+    (email/phone); ``scrub_secret_patterns`` additionally regex-scans the
+    rendered text itself, so a credential pasted into a freeform field
+    (e.g. approval feedback) that isn't caught by the key check still gets
+    caught here.
+    """
+    if value is None:
+        return "-"
+    safe = redact_value(key, value)
+    text = scrub_secret_patterns(safe)
+    return text.replace("|", "\\|").replace("\n", " ") or "-"
+
+
+def _redact_profile_for_export(key: str, value: Any) -> Any:
+    """Recursively apply the same two-layer redaction as ``_md_value`` to a
+    governance profile before it is serialized to JSON, so
+    governance-profile.json gets the same free-text secret scrubbing as
+    governance-profile.md rather than only the key-based pass."""
+    if isinstance(value, str):
+        return scrub_secret_patterns(redact_value(key, value))
+    if isinstance(value, dict):
+        return {k: _redact_profile_for_export(k, v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_profile_for_export(key, item) for item in value]
+    return value
+
+
+def render_governance_profile_md(profile: Dict[str, Any]) -> bytes:
+    """Deterministic, LLM-free Markdown rendering of a governance profile.
+
+    Pure function: same input dict always yields the same bytes. All
+    string fields are redacted via ``redact_value`` before interpolation,
+    matching the defense-in-depth pattern used by PatrolReportService.
+    """
+    session = profile.get("session") or {}
+    chain = profile.get("chain") or {}
+    terminal = profile.get("terminal") or {}
+    approvals = profile.get("approvals") or []
+    gate_hits = profile.get("gate_hits") or []
+    checkpoints = profile.get("checkpoints") or []
+
+    lines: list[str] = [
+        f"# 治理档案: {_md_value('id', session.get('id'))}",
+        "",
+        "## Session 概要",
+        "",
+        f"- 标题: {_md_value('title', session.get('title'))}",
+        f"- 状态: {_md_value('status', session.get('status'))}",
+        f"- Gate Profile: {_md_value('gate_profile', session.get('gate_profile'))}",
+        f"- Operator Scope: {_md_value('operator_scope', session.get('operator_scope'))}",
+        f"- 创建时间: {_md_value('created_at', session.get('created_at'))}",
+        f"- 更新时间: {_md_value('updated_at', session.get('updated_at'))}",
+        f"- 审计链校验: {'通过' if chain.get('verified') else '异常'} (`{chain.get('checked_entries')}` 条)",
+        "",
+        "## 审批时间线",
+        "",
+        "| 时间 | 动作 | 决定 | 操作者 | 工具 | 阶段 | 批次 | 反馈 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    if approvals:
+        for row in approvals:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _md_value("created_at", row.get("created_at")),
+                        _md_value("action", row.get("action")),
+                        _md_value("decision", row.get("decision")),
+                        _md_value("actor_user_id", row.get("actor_user_id")),
+                        _md_value("tool", row.get("tool")),
+                        _md_value("pending_phase", row.get("pending_phase")),
+                        _md_value("approval_batch_id", row.get("approval_batch_id")),
+                        _md_value("feedback", row.get("feedback")),
+                    ]
+                )
+                + " |"
+            )
+    else:
+        lines.append("| - | - | - | - | - | - | - | - |")
+
+    lines.extend(
+        [
+            "",
+            "## Gate 命中",
+            "",
+            "| 时间 | 工具 | Gate Profile | Gated |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    if gate_hits:
+        for row in gate_hits:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _md_value("created_at", row.get("created_at")),
+                        _md_value("tool", row.get("tool")),
+                        _md_value("gate_profile", row.get("gate_profile")),
+                        _md_value("gated", row.get("gated")),
+                    ]
+                )
+                + " |"
+            )
+    else:
+        lines.append("| - | - | - | - |")
+
+    lines.extend(
+        [
+            "",
+            "## 检查点",
+            "",
+            "| 时间 | ID | 类型 | 标签 |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    if checkpoints:
+        for row in checkpoints:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _md_value("created_at", row.get("created_at")),
+                        _md_value("id", row.get("id")),
+                        _md_value("anchor_type", row.get("anchor_type")),
+                        _md_value("label", row.get("label")),
+                    ]
+                )
+                + " |"
+            )
+    else:
+        lines.append("| - | - | - | - |")
+
+    lines.extend(
+        [
+            "",
+            "## 终态",
+            "",
+            f"- 状态: {_md_value('status', terminal.get('status'))}",
+            f"- 到达时间: {_md_value('reached_at', terminal.get('reached_at'))}",
+            "",
+        ]
+    )
+    return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
 
 class EvidenceService:
@@ -27,10 +182,12 @@ class EvidenceService:
         uow_factory: Callable[[], IUnitOfWork],
         audit_service: AuditService,
         artifact_service: ArtifactService,
+        governance_profile_service: GovernanceProfileService,
     ) -> None:
         self._uow_factory = uow_factory
         self._audit_service = audit_service
         self._artifact_service = artifact_service
+        self._governance_profile_service = governance_profile_service
 
     async def list_evidence_sessions(
         self,
@@ -76,7 +233,9 @@ class EvidenceService:
             )
         return items
 
-    async def build_session_evidence_package(self, session_id: str) -> bytes:
+    async def build_session_evidence_package(
+        self, session_id: str, scope: Optional[OwnerScope] = None
+    ) -> bytes:
         chain = await self._audit_service.verify_session_chain(session_id)
         audit_json = await self._audit_service.build_session_audit_report_json(session_id)
         audit_md = await self._audit_service.build_session_audit_report(session_id)
@@ -129,6 +288,12 @@ class EvidenceService:
             for cp in checkpoints
         ]
 
+        profile = await self._governance_profile_service.build_profile(session_id, scope=scope)
+        governance_profile_json = canonical_json(
+            _redact_profile_for_export("", profile)
+        ).encode("utf-8")
+        governance_profile_md = render_governance_profile_md(profile)
+
         file_hashes: dict[str, str] = {}
         buffer = io.BytesIO()
         pdf_skipped = False
@@ -157,6 +322,8 @@ class EvidenceService:
             _add("audit.json", json.dumps(audit_json, ensure_ascii=False, indent=2).encode("utf-8"))
             _add("audit-report.md", audit_md.encode("utf-8"))
             _add("checkpoints.json", json.dumps(checkpoints_data, ensure_ascii=False, indent=2).encode("utf-8"))
+            _add("governance-profile.json", governance_profile_json)
+            _add("governance-profile.md", governance_profile_md)
             for name, data in screenshots.items():
                 _add(name, data)
             for name, data in artifact_files.items():

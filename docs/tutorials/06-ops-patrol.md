@@ -64,7 +64,7 @@ Changing the Pack later increments its version, pauses scheduling, and requires 
 5. Download the evidence ZIP and verify its SHA-256 manifest/HMAC according to the operations runbook.
 6. After the manual Run is trustworthy, enable the Pack schedule and confirm `next_run_at` uses the intended timezone.
 
-The Developer Preview deliberately has no repair button and never grants the Collector mutation rights.
+The Collector itself never gains mutation rights. A separate, narrowly-scoped Ops Actuator adds an approval-gated repair path on top of this Pack — see [Approve an Ops Patrol remediation](07-approved-remediation.md).
 
 ## Interpret results
 
@@ -82,3 +82,7 @@ The Pack detail shows 30-day scheduled-run success, Finding and false-positive c
 Set `feature_flags.enable_ops_patrol=false` in global Runtime settings. Navigation and new work disappear, schedules stop creating Runs, and existing authorized Runs/evidence remain readable. Re-enabling the flag does not discard configuration or history.
 
 See [Ops Patrol operations](../operations/ops-patrol.md) for deployment, permissions, evidence verification, backup/restore, recovery, and troubleshooting.
+
+## Next
+
+- [Approve an Ops Patrol remediation](07-approved-remediation.md)

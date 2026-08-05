@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bell } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import { Bell } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,8 +19,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { notificationsApi } from "@/lib/api/notifications";
 import type { Notification } from "@/lib/api/types";
-import { translate } from "@/i18n/translate";
 import { cn } from "@/lib/utils";
+
+import { translate } from "@/i18n/translate";
 
 function formatTime(value: string, locale: string): string {
   const date = new Date(value);

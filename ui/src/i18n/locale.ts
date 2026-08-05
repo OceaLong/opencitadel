@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 
-import { LOCALE_COOKIE_NAME, type Locale, locales } from "./routing";
+import { type Locale, LOCALE_COOKIE_NAME, locales } from "./routing";
 
 export async function setLocale(locale: Locale) {
   if (!locales.includes(locale)) {

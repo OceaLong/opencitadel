@@ -1,6 +1,5 @@
 import en from "../../messages/en.json";
 import zh from "../../messages/zh.json";
-
 import { getClientLocale } from "./detect-locale";
 import type { Locale } from "./routing";
 

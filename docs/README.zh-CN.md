@@ -14,6 +14,7 @@
 4. [受治理 Web Operator](tutorials/04-governed-web-operator.zh-CN.md)
 5. [退款对账与合规审计](tutorials/05-refund-reconciliation-compliance.zh-CN.md)
 6. [只读每日 Ops Patrol](tutorials/06-ops-patrol.zh-CN.md)
+7. [审批通过后执行 Ops Patrol 修复](tutorials/07-approved-remediation.zh-CN.md)
 
 ### 运维与部署
 
@@ -30,6 +31,7 @@
 | 文档 | 权威范围 |
 |------|----------|
 | [系统架构](architecture/overview.zh-CN.md) | 总体架构、进程职责、沙箱生命周期、部署形态 |
+| [治理平面](architecture/governance-plane.zh-CN.md) | 效果契约、能力收窄、整批审批、终态闩、证据 |
 | [Ops Patrol](architecture/ops-patrol.zh-CN.md) | Pack/Run 生命周期、Collector 信任边界、证据与租户隔离 |
 | [技术选型](architecture/technical-decisions.zh-CN.md) | 技术选择与替代方案对比 |
 | [LLM 端点与模型](architecture/llm-endpoints-and-models.zh-CN.md) | 端点/模型拆分、加密、UI 流程 |
@@ -45,7 +47,6 @@
 | [Skills](architecture/skills.zh-CN.md) | Skill 模板、运行时覆盖、MCP/A2A 过滤 |
 | [交付物与分享](architecture/artifacts-sharing.zh-CN.md) | 会话交付物、公开分享链接 |
 | [自动化与调度](architecture/automation-scheduler.zh-CN.md) | Cron/Webhook 任务、Leader 选举、通知 |
-| [应用市场](architecture/marketplace.zh-CN.md) | LLM 小应用目录与契约 |
 | [配置来源治理](architecture/config-source-governance.zh-CN.md) | AppConfig、config.yaml、环境变量边界 |
 | [模型韧性设计](architecture/model-resilience.zh-CN.md) | 熔断、fallback、SLO 与运行手册 |
 | [API/SSE 协议兼容策略](architecture/contract-compatibility.zh-CN.md) | 前后端契约兼容窗口 |
@@ -62,6 +63,7 @@
 | [Sandbox](../sandbox/README.zh-CN.md) | 隔离运行时 |
 | [Nginx 网关](../nginx/README.zh-CN.md) | 边缘代理、SSE/WS、上传限制 |
 | [Ops Collector](../ops-collector/README.zh-CN.md) | 固定只读 MCP 探针、配置与部署 |
+| [Ops Actuator](../ops-actuator/README.zh-CN.md) | 固定仅 patch 写 MCP 探针、配置与部署 |
 | [OpsConsole 演示](../demo/ops-console/README.zh-CN.md) | Web Operator 工单后台演示 |
 | [E2E 测试](../e2e/README.zh-CN.md) | Playwright 冒烟测试、OpsConsole 演示 |
 | [仓库脚本](../scripts/README.zh-CN.md) | `quickstart.sh`、`check-docs.sh` |
@@ -80,6 +82,7 @@
 | 文档 | 说明 |
 |------|------|
 | [2026-07-28 治理审计](superpowers/audits/2026-07-28-agent-kb-codebase-governance-audit.md) | 已过时的审计快照（仅中文，见文首状态块） |
+| [2026-08-04 治理 P0 复核](superpowers/audits/2026-08-04-governance-p0-reverification.md) | 对 2026-07-28 审计 P0 结论的复核（仅中文） |
 
 ## 维护规则
 

@@ -19,9 +19,11 @@ flowchart LR
   AgentRunner -->|"output events"| Redis
   Worker -->|"persist events"| Postgres
   Redis -->|"task output stream"| Api
+  Worker -->|"MCP calls, read-only"| Collector["Ops Collector 8090"]
+  Worker -->|"MCP calls, approval-gated write"| Actuator["Ops Actuator 8091"]
 ```
 
-At runtime, the core boundaries are: stateless API, Workers consuming Redis Streams, Postgres persistence, and sandbox-isolated execution. The API handles ingress and projection; Workers handle execution and resource governance; Migrate handles schema and configuration seed migrations.
+At runtime, the core boundaries are: stateless API, Workers consuming Redis Streams, Postgres persistence, and sandbox-isolated execution. The API handles ingress and projection; Workers handle execution and resource governance; Migrate handles schema and configuration seed migrations. Ops Patrol and Ops Patrol Remediation add an optional, feature-flagged MCP plane reached only from Worker: the Ops Collector (8090) exposes fixed read-only Kubernetes/Prometheus probes; the Ops Actuator (8091) exposes a narrow, patch-only write surface that only executes after a persisted `ToolApprovalBatch` is approved. See [Ops Patrol architecture](ops-patrol.md) and [Security model](security-model.md#trust-boundaries).
 
 ### Code layering
 
@@ -282,12 +284,14 @@ Production must use `USE_DB_APP_CONFIG=true`; Docker Compose does not enforce th
 
 ## Memory Auto-Extraction
 
-After an Agent task completes normally, if `memory.auto_extract_enabled=true`, `TaskRunnerFactory` triggers `MemoryExtractorService.extract_from_session()` via an `on_complete` callback:
+After an Agent task completes normally, if `memory.auto_extract_enabled=true`, `TaskRunnerFactory` triggers `MemoryExtractorService.extract_from_session()` via an `on_complete` callback — **except for governed single-tool sessions** (`ops-patrol` / `ops-patrol-remediation`). `TaskRunnerFactory` passes `on_complete_callback=None` whenever `is_governed_single_tool_session` is true (`task_runner_factory.py:707-711`), regardless of `auto_extract_enabled`, because those sessions carry no general-purpose conversational content to extract memory from:
 
 ```mermaid
 flowchart TD
-  Done["Agent task completed"] --> Enabled{"auto_extract enabled?"}
-  Enabled -->|"no"| Skip["skip"]
+  Done["Agent task completed"] --> Governed{"governed single-tool session?"}
+  Governed -->|"yes: patrol / remediation"| Skip["skip, on_complete_callback=None"]
+  Governed -->|"no"| Enabled{"auto_extract enabled?"}
+  Enabled -->|"no"| Skip
   Enabled -->|"yes"| Load["Load last 30 session events"]
   Load --> LLM["LLM extract 3-10 facts JSON"]
   LLM --> Retry{"parse ok?"}
@@ -310,6 +314,8 @@ flowchart TD
 |--------|------|-----------|-----------------|
 | `api/` | uv | `uv.lock` | `uv sync --frozen` |
 | `sandbox/` | uv | `uv.lock` | `uv sync --frozen` |
+| `ops-collector/` | uv | `uv.lock` | `uv sync --frozen` |
+| `ops-actuator/` | uv | `uv.lock` | `uv sync --frozen` |
 | `ui/` | npm | `package-lock.json` | `npm ci` |
 
 Python projects uniformly use `pyproject.toml` + `uv.lock`; `requirements.txt` is no longer maintained.
@@ -339,6 +345,8 @@ postgres/redis -> opencitadel-migrate -> opencitadel-api + opencitadel-worker ->
 
 > **Dynamic sandbox image**: The `opencitadel-sandbox` compose service is under the `fixed-sandbox` profile and is **not started by default**, but Worker-created sandboxes require the image. `make quickstart` and [deployment](../operations/deployment.md) run `docker compose build opencitadel-sandbox` explicitly before starting the stack.
 
+> **Ops Collector / Actuator images**: `ops-collector/Dockerfile` and `ops-actuator/Dockerfile` build the `opencitadel-ops-collector` and `opencitadel-ops-actuator` images independently of `api/Dockerfile`. Both are opt-in via Compose profiles (`patrol` / `actuator`) and disabled by default; see [Ops Patrol operations](../operations/ops-patrol.md).
+
 ### Kubernetes / Helm
 
 The Chart is located at `deploy/helm/opencitadel/` and provides full-stack one-click deployment:
@@ -349,6 +357,7 @@ The Chart is located at `deploy/helm/opencitadel/` and provides full-stack one-c
 - Namespace ResourceQuota limiting total sandbox Pods.
 - Migrate initContainer using the API image.
 - Default K8s sandbox mode is `sandbox.driver=kubernetes` with `sandbox.address` empty; use `sandbox.address` when connecting to a remote sandbox gateway.
+- Optional Ops Collector / Actuator Deployments (`opsCollector.enabled` / `opsActuator.enabled`, both `false` by default), each with its own ServiceAccount, patch/read-scoped RBAC ClusterRole, and NetworkPolicy restricting ingress to API/Worker only.
 
 ## Code anchors
 
@@ -359,8 +368,9 @@ Quick links to authoritative implementation files:
 | DI / process roles | `api/app/container.py`, `api/app/runtime_role.py` |
 | Worker dispatch | `api/app/worker/main.py`, `api/app/infrastructure/external/task/redis_stream_task.py` |
 | Agent flow routing | `api/app/domain/services/agent_task_runner.py`, `api/app/domain/services/flows/` |
-| Task assembly | `api/app/application/services/task_runner_factory.py` |
+| Task assembly | `api/app/application/services/task_runner_factory.py`, `api/app/application/services/runner_bindings/` |
 | Tool registry | `api/app/domain/services/tools/tool_registry.py` |
+| Tool governance gate | `api/app/domain/services/agents/tool_gate_policy.py` |
 | UI shell | `ui/src/components/app-shell.tsx`, `ui/src/lib/api/fetch.ts` |
 | Workspace scope | `ui/src/components/workspace-switcher.tsx`, `api/app/interfaces/auth_dependencies.py` |
 

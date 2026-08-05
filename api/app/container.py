@@ -24,6 +24,7 @@ from app.application.services.resource_guard_service import ResourceGuardService
 from app.application.services.compliance_service import ComplianceService
 from app.application.services.config_provider import AppConfigProvider, create_app_config_provider
 from app.application.services.evidence_service import EvidenceService
+from app.application.services.governance_profile_service import GovernanceProfileService
 from app.application.services.integration_server_service import A2AServerConfigService, MCPServerService
 from app.application.services.file_service import FileService
 from app.application.services.knowledge_base_service import KnowledgeBaseService
@@ -33,7 +34,6 @@ from app.application.services.knowledge_version_service import (
 from app.application.services.llm_endpoint_service import LLMEndpointService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
-from app.application.services.marketplace_service import MarketplaceService
 from app.application.services.memory_service import MemoryService
 from app.application.services.quota_service import QuotaService
 from app.application.services.session_service import SessionService
@@ -47,6 +47,7 @@ from app.application.services.notification_service import NotificationService
 from app.application.services.patrol_evidence_service import PatrolEvidenceService
 from app.application.services.patrol_collector_validator import MCPPatrolCollectorValidator
 from app.application.services.patrol_pack_service import PatrolPackService
+from app.application.services.patrol_remediation_service import PatrolRemediationService
 from app.application.services.patrol_run_service import PatrolRunService
 from app.application.services.scheduled_job_service import ScheduledJobService
 from app.application.services.task_runner_factory import TaskRunnerFactory
@@ -63,6 +64,7 @@ from app.infrastructure.adapters.domain_ports import (
     RedisTaskStateAdapter,
 )
 from app.infrastructure.adapters.object_storage import CosObjectStorageAdapter, MinioObjectStorageAdapter
+from app.infrastructure.external.actuator_client import MCPActuatorClient
 from app.infrastructure.external.file_storage.cos_file_storage import CosFileStorage
 from app.infrastructure.external.file_storage.minio_file_storage import MinioFileStorage
 from app.infrastructure.external.json_parser.repair_json_parser import RepairJSONParser
@@ -305,6 +307,12 @@ class BaseContainer(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         audit_service=audit_service,
     )
+    governance_profile_service = providers.Singleton(
+        GovernanceProfileService,
+        uow_factory=uow_factory,
+        audit_service=audit_service,
+        checkpoint_service=checkpoint_service,
+    )
     usage_stats_service = providers.Singleton(UsageStatsService, uow_factory=uow_factory)
     quota_service = providers.Singleton(QuotaService, uow_factory=uow_factory)
     llm_model_service = providers.Singleton(
@@ -376,12 +384,6 @@ class BaseContainer(containers.DeclarativeContainer):
         resource_guard=resource_guard,
         resource_binding_service=resource_binding_service,
     )
-    marketplace_service = providers.Factory(
-        MarketplaceService,
-        llm_model_service=llm_model_service,
-        file_service=file_service,
-        uow_factory=uow_factory,
-    )
     codebase_service = providers.Singleton(
         CodebaseService,
         uow_factory=uow_factory,
@@ -410,10 +412,15 @@ class BaseContainer(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         audit_service=audit_service,
         artifact_service=artifact_service,
+        governance_profile_service=governance_profile_service,
     )
     notification_service = providers.Singleton(NotificationService, uow_factory=uow_factory)
     patrol_collector_validator = providers.Singleton(
         MCPPatrolCollectorValidator,
+        connection_pool=mcp_connection_pool,
+    )
+    actuator_client = providers.Singleton(
+        MCPActuatorClient,
         connection_pool=mcp_connection_pool,
     )
     patrol_pack_service = providers.Singleton(
@@ -435,6 +442,13 @@ class BaseContainer(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         evidence_service=evidence_service,
         audit_service=audit_service,
+    )
+    patrol_remediation_service = providers.Singleton(
+        PatrolRemediationService,
+        uow_factory=uow_factory,
+        audit_service=audit_service,
+        actuator_client=actuator_client,
+        patrol_run_service=patrol_run_service,
     )
     scheduled_job_service = providers.Singleton(
         ScheduledJobService,
@@ -466,6 +480,7 @@ class BaseContainer(containers.DeclarativeContainer):
         codebase_service=codebase_service,
         object_storage=object_storage,
         patrol_run_service=patrol_run_service,
+        patrol_remediation_service=patrol_remediation_service,
     )
 
     agent_service = providers.Singleton(

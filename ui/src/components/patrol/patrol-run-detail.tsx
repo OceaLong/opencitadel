@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { AlertCircle, CheckCircle2, Download, Loader2, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 
+import { RemediationDialog } from "@/components/patrol/remediation-dialog";
+import { RemediationStatusList } from "@/components/patrol/remediation-status";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { usePatrolLabels } from "@/hooks/use-patrol-labels";
 import { patrolsApi } from "@/lib/api/patrols";
-import type { PatrolFinding, PatrolRunDetail } from "@/lib/api/types";
+import type { PatrolFinding, PatrolRemediation, PatrolRunDetail } from "@/lib/api/types";
 
 const statusVariant = (status: string) =>
   status === "pass" || status === "completed"
@@ -47,6 +49,20 @@ export function PatrolRunDetailView({
   } | null>(null);
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
+  const [remediations, setRemediations] = useState<PatrolRemediation[]>([]);
+  const [remediationTarget, setRemediationTarget] = useState<PatrolFinding | null>(null);
+  const loadRemediations = async () => {
+    try {
+      const list = await patrolsApi.listRemediations(run.id);
+      setRemediations(list.items);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("remediation.errors.listLoad"));
+    }
+  };
+  useEffect(() => {
+    void loadRemediations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.id]);
   const download = async () => {
     try {
       const blob = await patrolsApi.downloadEvidence(run.id);
@@ -163,6 +179,9 @@ export function PatrolRunDetailView({
                     >
                       {t("actions.falsePositive")}
                     </Button>
+                    <Button size="sm" onClick={() => setRemediationTarget(finding)}>
+                      {t("actions.remediate")}
+                    </Button>
                   </div>
                 )}
               </div>
@@ -170,6 +189,7 @@ export function PatrolRunDetailView({
           )}
         </CardContent>
       </Card>
+      <RemediationStatusList remediations={remediations} />
       <Card>
         <CardHeader>
           <CardTitle>{t("run.allChecks")}</CardTitle>
@@ -244,6 +264,19 @@ export function PatrolRunDetailView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {remediationTarget && (
+        <RemediationDialog
+          open={remediationTarget !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setRemediationTarget(null);
+              void loadRemediations();
+            }
+          }}
+          finding={remediationTarget}
+          run={run}
+        />
+      )}
     </div>
   );
 }

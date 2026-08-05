@@ -58,6 +58,7 @@ from .patrol import (
     PatrolCheckResultModel,
     PatrolFindingModel,
     PatrolPackModel,
+    PatrolRemediationModel,
     PatrolRunModel,
 )
 
@@ -113,4 +114,5 @@ __all__ = [
     "PatrolRunModel",
     "PatrolCheckResultModel",
     "PatrolFindingModel",
+    "PatrolRemediationModel",
 ]

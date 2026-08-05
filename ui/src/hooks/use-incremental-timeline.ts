@@ -3,10 +3,11 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type { Locale } from "@/i18n/routing";
 import type { SSEEventData } from "@/lib/api/types";
 import type { TimelineItem } from "@/lib/session-events";
 import { eventsToTimeline, patchTimelineForDeltaEvent } from "@/lib/session-events";
+
+import type { Locale } from "@/i18n/routing";
 
 const TRANSIENT_EVENT_TYPES = new Set(["message_delta", "reasoning_delta", "tool_args_delta"]);
 

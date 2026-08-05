@@ -38,6 +38,20 @@ Supervisor manages multiple processes:
 | POST | `/api/shell/read-shell-output` | Read Shell output |
 | GET | `/api/supervisor/status` | Process status |
 
+### Path containment and sudo escaping
+
+`FileService` normalizes every file/directory path against
+`SANDBOX_ALLOWED_ROOTS = ("/home/ubuntu", "/tmp", "/workspace")`
+(`app/services/file.py:35`). After resolving symlinks and `..` components
+with `os.path.realpath`, any path that lands outside those roots is rejected
+with `path outside sandbox allowed roots` (`app/services/file.py:75,99`) —
+the same `realpath` + `commonpath` technique the API side uses in
+`source_validator.py`. Sudo-elevated file reads/writes shell out through
+`sudo cat` / `sudo tee`, with both the target path and any temp file passed
+through `shlex.quote()` so a malicious path cannot break out of the command
+string via nested quoting. Covered by `tests/test_file_path_containment.py`,
+`tests/test_file_endpoints.py`, and `tests/test_shell_service.py`.
+
 ## Local Development
 
 ### Prerequisites

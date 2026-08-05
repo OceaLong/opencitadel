@@ -1,26 +1,13 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
-import { createRoot } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { mockSonner } from "@/test-utils/mocks";
+import { renderComponent } from "@/test-utils/render";
 
 import en from "../../../../messages/en.json";
 import zh from "../../../../messages/zh.json";
-
-const reactActEnvironment = globalThis as typeof globalThis & {
-  IS_REACT_ACT_ENVIRONMENT?: boolean;
-};
-const originalReactActEnvironment =
-  reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
 
 const mocks = vi.hoisted(() => ({
   getSection: vi.fn().mockResolvedValue({
@@ -40,9 +27,7 @@ vi.mock("@/lib/api/config", () => ({
     deleteUserOverride: vi.fn(),
   },
 }));
-vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
-}));
+vi.mock("sonner", () => mockSonner());
 vi.mock("./config-field", () => ({
   ConfigField: ({
     label,
@@ -55,21 +40,8 @@ vi.mock("./config-field", () => ({
 
 import { KnowledgeBaseRuntimeForm } from "./knowledge-base-runtime-form";
 
-beforeAll(() => {
-  reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
-});
-
 afterEach(() => {
   document.body.replaceChildren();
-});
-
-afterAll(() => {
-  if (originalReactActEnvironment === undefined) {
-    delete reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
-  } else {
-    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT =
-      originalReactActEnvironment;
-  }
 });
 
 describe.each([
@@ -94,18 +66,11 @@ describe.each([
     const labels = runtime.fields.knowledge_base as Record<string, string>;
     const descriptions = runtime.descriptions
       .knowledge_base as Record<string, string>;
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <NextIntlClientProvider locale={locale} messages={messages}>
-          <KnowledgeBaseRuntimeForm isAdmin />
-        </NextIntlClientProvider>,
-      );
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    const { container, unmount } = await renderComponent(
+      <NextIntlClientProvider locale={locale} messages={messages}>
+        <KnowledgeBaseRuntimeForm isAdmin />
+      </NextIntlClientProvider>,
+    );
 
     for (const key of [
       "max_chunks",
@@ -120,6 +85,6 @@ describe.each([
       );
       expect(container.textContent).not.toContain(`${key}|`);
     }
-    await act(async () => root.unmount());
+    await unmount();
   });
 });

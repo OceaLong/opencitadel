@@ -41,7 +41,6 @@ client_max_body_size 200m;
 |------|----------|--------------|
 | Codebase ZIP | 200 MB | UI `CODEBASE_ZIP_MAX_BYTES` + nginx |
 | 知识库文档 | 默认 50 MB | AppConfig `knowledge_base.document.max_bytes` |
-| 市场上传 | 默认 25 MB | AppConfig `server.marketplace_max_upload_bytes` |
 
 修改 Codebase 上传上限时需同步 UI 常量、nginx 与 AppConfig。
 

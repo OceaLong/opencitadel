@@ -1,22 +1,23 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
-import { createRoot } from "react-dom/client";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { mockNextIntl } from "@/test-utils/mocks";
+import { renderComponent } from "@/test-utils/render";
 
 const mocks = vi.hoisted(() => ({
   readDocumentPage: vi.fn(),
 }));
 
-vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string) =>
-    ({
-      documentPageLoadMore: "Load more source",
-      documentPageEmpty: "Empty",
-      documentPageError: "Read failed",
-      documentRevisionMismatch: "Revision mismatch",
-    })[key] ?? key,
-}));
+vi.mock("next-intl", () =>
+  mockNextIntl({
+    documentPageLoadMore: "Load more source",
+    documentPageEmpty: "Empty",
+    documentPageError: "Read failed",
+    documentRevisionMismatch: "Revision mismatch",
+  }),
+);
 vi.mock("@/lib/api/knowledge", () => ({
   knowledgeApi: { readDocumentPage: mocks.readDocumentPage },
 }));
@@ -38,31 +39,19 @@ const document = {
 };
 
 async function renderPager(props?: Partial<React.ComponentProps<typeof DocumentPager>>) {
-  const container = documentGlobal.createElement("div");
-  documentGlobal.body.append(container);
-  const root = createRoot(container);
   const merged = {
     knowledgeBaseId: "kb1",
     versionId: "v1",
     documentId: "doc1",
     ...props,
   };
-  await act(async () => {
-    root.render(<DocumentPager {...merged} />);
-    await Promise.resolve();
-  });
-  return { container, root, merged };
+  const { container, root, unmount } = await renderComponent(<DocumentPager {...merged} />);
+  return { container, root, unmount, merged };
 }
 
 const documentGlobal = globalThis.document;
 
 describe("DocumentPager", () => {
-  beforeAll(() => {
-    (
-      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-    ).IS_REACT_ACT_ENVIRONMENT = true;
-  });
-
   afterEach(() => {
     mocks.readDocumentPage.mockReset();
     documentGlobal.body.replaceChildren();
@@ -86,7 +75,7 @@ describe("DocumentPager", () => {
             resolveNext = resolve;
           }),
       );
-    const { container, root } = await renderPager();
+    const { container, unmount } = await renderPager();
     const button = container.querySelector("button") as HTMLButtonElement;
 
     act(() => {
@@ -112,7 +101,7 @@ describe("DocumentPager", () => {
     expect(container.textContent).toContain("one");
     expect(container.textContent).toContain("three");
     expect(container.querySelector("button")).toBeNull();
-    await act(async () => root.unmount());
+    await unmount();
   });
 
   it("keeps loaded content and cursor when a next-page request fails", async () => {
@@ -124,7 +113,7 @@ describe("DocumentPager", () => {
         next_cursor: "retry-cursor",
       })
       .mockRejectedValueOnce(new Error("network down"));
-    const { container, root } = await renderPager();
+    const { container, unmount } = await renderPager();
 
     await act(async () => {
       (container.querySelector("button") as HTMLButtonElement).click();
@@ -134,7 +123,7 @@ describe("DocumentPager", () => {
     expect(container.textContent).toContain("stable");
     expect(container.textContent).toContain("network down");
     expect(container.querySelector("button")).not.toBeNull();
-    await act(async () => root.unmount());
+    await unmount();
   });
 
   it("resets on identity change and ignores the old response", async () => {
@@ -152,7 +141,7 @@ describe("DocumentPager", () => {
         items: [{ id: "new", heading_path: "", ordinal: 0, content: "new content" }],
         next_cursor: null,
       });
-    const { container, root, merged } = await renderPager();
+    const { container, root, unmount, merged } = await renderPager();
 
     await act(async () => {
       root.render(<DocumentPager {...merged} documentId="doc2" />);
@@ -170,6 +159,6 @@ describe("DocumentPager", () => {
 
     expect(container.textContent).toContain("new content");
     expect(container.textContent).not.toContain("old content");
-    await act(async () => root.unmount());
+    await unmount();
   });
 });

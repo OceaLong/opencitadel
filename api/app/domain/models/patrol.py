@@ -93,6 +93,7 @@ class PatrolTriggerType(str, Enum):
     MANUAL = "manual"
     SCHEDULE = "schedule"
     REPLAY = "replay"
+    REMEDIATION = "remediation"  # Auto-triggered recheck run after a remediation executes.
 
 
 class PatrolProbeStatus(str, Enum):
@@ -422,4 +423,78 @@ class PatrolFinding(BaseModel):
 
 def patrol_fingerprint(*parts: str) -> str:
     canonical = json.dumps(list(parts), ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+class PatrolRemediationAction(str, Enum):
+    RESTART_WORKLOAD = "restart_workload"
+    SCALE_WORKLOAD = "scale_workload"
+    ROLLBACK_WORKLOAD = "rollback_workload"
+
+
+class PatrolRemediationStatus(str, Enum):
+    PROPOSED = "proposed"  # 提案已建，修复会话未批
+    EXECUTING = "executing"  # 审批通过，执行中
+    EXECUTED = "executed"  # actuator 已应用，待复检
+    VERIFIED = "verified"  # 复检通过，Finding 已 resolved
+    FAILED = "failed"  # 执行失败或复检未过
+    CANCELLED = "cancelled"  # 会话被拒/取消
+
+
+# Remediations in these statuses are done: a Finding may accept a new proposal.
+# Every other status is treated as "in flight" and blocks a second concurrent
+# proposal for the same Finding (enforced by both the service and a DB partial
+# unique index — see alembic revision that creates patrol_remediations).
+PATROL_REMEDIATION_TERMINAL_STATUSES = frozenset(
+    {
+        PatrolRemediationStatus.VERIFIED,
+        PatrolRemediationStatus.FAILED,
+        PatrolRemediationStatus.CANCELLED,
+    }
+)
+
+
+class PatrolRemediation(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    pack_id: str
+    run_id: str
+    finding_id: str
+    check_result_id: str
+    fingerprint: str
+    session_id: str | None = None
+    action: PatrolRemediationAction
+    target_namespace: str = Field(min_length=1, max_length=255)
+    target_workload: str = Field(default="", max_length=255)
+    target_kind: str = Field(default="Deployment", max_length=64)
+    params: dict[str, JsonValue] = Field(default_factory=dict)
+    params_hash: str
+    impact_summary: str = Field(default="", max_length=2000)
+    rollback_hint: str = Field(default="", max_length=2000)
+    idempotency_key: str = Field(min_length=1, max_length=255)
+    actuator_capability_hash: str | None = None
+    status: PatrolRemediationStatus = PatrolRemediationStatus.PROPOSED
+    before_observation: dict[str, JsonValue] | None = None
+    after_observation: dict[str, JsonValue] | None = None
+    recheck_run_id: str | None = None
+    error_code: str | None = Field(default=None, max_length=128)
+    error_message: str | None = Field(default=None, max_length=2000)
+    created_by: str
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+def patrol_remediation_params_hash(
+    action: str,
+    namespace: str,
+    workload: str,
+    kind: str,
+    params: dict[str, JsonValue],
+) -> str:
+    canonical = json.dumps(
+        {"action": action, "namespace": namespace, "workload": workload, "kind": kind, "params": params},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

@@ -1,0 +1,180 @@
+"""RBAC and cross-tenant IDOR coverage for Ops Patrol Remediation.
+
+Construction mirrors test_patrol_idor.py (in-memory repo + service call,
+NotFoundError for cross-tenant access) and test_resource_mutation_rbac.py
+(static route-matrix assertion that every mutating route carries the
+require_non_auditor guard).
+"""
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from app.application.errors.exceptions import ForbiddenError, NotFoundError
+from app.application.patrol_templates import load_patrol_template
+from app.application.services.patrol_remediation_service import PatrolRemediationService
+from app.domain.models.app_config import AppConfig
+from app.domain.models.patrol import (
+    PatrolCheckResult,
+    PatrolCheckStatus,
+    PatrolFinding,
+    PatrolFindingSeverity,
+    PatrolPack,
+    PatrolPackStatus,
+    PatrolRemediationAction,
+    PatrolRun,
+    PatrolTriggerType,
+)
+from app.domain.models.scope import OwnerScope, Principal
+from app.domain.models.user import GlobalRole
+from app.interfaces.auth_dependencies import require_non_auditor
+from app.interfaces.endpoints.patrol_routes import router as patrol_router
+
+
+class Repo:
+    def __init__(self):
+        config = load_patrol_template("kubernetes-baseline-v1")
+        self.pack = PatrolPack(
+            owner_user_id="owner-a", name="Daily", slug="daily", status=PatrolPackStatus.ACTIVE,
+            config=config, mcp_server_id="server-1", skill_id="skill-1",
+        )
+        self.run = PatrolRun(
+            pack_id=self.pack.id, pack_version=1,
+            pack_snapshot={"config": config.model_dump(mode="json")},
+            trigger_type=PatrolTriggerType.MANUAL, idempotency_key="key-1",
+        )
+        self.check_result = PatrolCheckResult(
+            run_id=self.run.id, check_id="k8s-workload-availability",
+            status=PatrolCheckStatus.FAIL, severity=PatrolFindingSeverity.CRITICAL,
+            fingerprint="f" * 64,
+        )
+        self.finding = PatrolFinding(
+            run_id=self.run.id, check_result_id=self.check_result.id,
+            fingerprint=self.check_result.fingerprint, severity=PatrolFindingSeverity.CRITICAL,
+            title="k8s workload unavailable", summary="unavailable replicas",
+        )
+        self.remediations: dict[str, object] = {}
+
+    def _owned(self, scope):
+        return scope is None or scope.user_id == self.pack.owner_user_id
+
+    async def get_finding(self, finding_id, scope=None, for_update=False):
+        return self.finding if finding_id == self.finding.id and self._owned(scope) else None
+
+    async def get_run(self, run_id, scope=None, for_update=False):
+        return self.run if run_id == self.run.id and self._owned(scope) else None
+
+    async def list_check_results(self, run_id, scope=None):
+        return [self.check_result]
+
+    async def get_active_remediation_for_finding(self, finding_id):
+        return None
+
+    async def save_remediation(self, remediation):
+        self.remediations[remediation.id] = remediation
+        return remediation
+
+    async def get_remediation(self, remediation_id, scope=None, for_update=False):
+        remediation = self.remediations.get(remediation_id)
+        if remediation is None or not self._owned(scope):
+            return None
+        return remediation
+
+    async def list_remediations_for_run(self, run_id, scope=None):
+        if not self._owned(scope):
+            return []
+        return [item for item in self.remediations.values() if item.run_id == run_id]
+
+
+class SkillRepo:
+    """Fake skill repository: the remediation Skill is registered by default
+    so these RBAC/IDOR tests exercise scope handling, not the skill gate
+    (that gate has its own dedicated coverage in
+    test_patrol_remediation_service.py)."""
+
+    async def get_by_slug(self, slug):
+        if slug == "ops-patrol-remediation":
+            return SimpleNamespace(id="skill-remediation-1", slug="ops-patrol-remediation")
+        return None
+
+
+class Uow:
+    def __init__(self, repo):
+        self.patrol = repo
+        self.session = SimpleNamespace(save=AsyncMock(), update_status=AsyncMock())
+        self.skill = SkillRepo()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+
+def feature_config() -> AppConfig:
+    cfg = AppConfig()
+    cfg.feature_flags.enable_ops_patrol_remediation = True
+    return cfg
+
+
+@pytest.mark.asyncio
+async def test_attacker_scope_get_remediation_is_indistinguishable_from_missing():
+    repo = Repo()
+    service = PatrolRemediationService(lambda: Uow(repo))
+    owner_scope = OwnerScope.personal("owner-a")
+
+    with patch("app.application.services.patrol_remediation_service.get_runtime_config", return_value=feature_config()):
+        remediation = await service.propose(
+            repo.finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, owner_scope, "owner-a", dispatch=False,
+        )
+
+    attacker_scope = OwnerScope.personal("attacker-b")
+    with pytest.raises(NotFoundError):
+        await service.get(remediation.id, attacker_scope)
+
+    # A non-existent id and another tenant's real id must raise the same error.
+    with pytest.raises(NotFoundError):
+        await service.get("does-not-exist", attacker_scope)
+
+
+@pytest.mark.asyncio
+async def test_attacker_scope_propose_against_foreign_finding_returns_not_found():
+    repo = Repo()
+    service = PatrolRemediationService(lambda: Uow(repo))
+    attacker_scope = OwnerScope.personal("attacker-b")
+
+    with patch("app.application.services.patrol_remediation_service.get_runtime_config", return_value=feature_config()):
+        with pytest.raises(NotFoundError):
+            await service.propose(
+                repo.finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, attacker_scope, "attacker-b", dispatch=False,
+            )
+
+
+def _make_auditor_principal() -> Principal:
+    return Principal(user_id="auditor-1", global_role=GlobalRole.AUDITOR, token_version=0)
+
+
+@pytest.mark.asyncio
+async def test_auditor_cannot_pass_the_propose_route_write_guard():
+    with patch(
+        "app.interfaces.auth_dependencies.get_current_principal",
+        new=AsyncMock(return_value=_make_auditor_principal()),
+    ):
+        with pytest.raises(ForbiddenError):
+            await require_non_auditor()
+
+
+def _write_dependencies():
+    return {
+        f"{next(iter(route.methods))}:{route.path}": {dependency.call for dependency in route.dependant.dependencies}
+        for route in patrol_router.routes
+        if hasattr(route, "dependant")
+    }
+
+
+def test_remediation_routes_require_non_auditor_except_reads():
+    routes = _write_dependencies()
+
+    assert require_non_auditor in routes["POST:/patrol-findings/{finding_id}/remediations"]
+    assert require_non_auditor not in routes["GET:/patrol-runs/{run_id}/remediations"]
+    assert require_non_auditor not in routes["GET:/patrol-remediations/{remediation_id}"]

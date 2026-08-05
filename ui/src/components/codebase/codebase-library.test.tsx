@@ -1,13 +1,10 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-const reactActEnvironment = globalThis as typeof globalThis & {
-  IS_REACT_ACT_ENVIRONMENT?: boolean;
-};
-const originalReactActEnvironment = reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
+import { mockAuth, mockNavigation, mockNextIntl, mockSonner } from "@/test-utils/mocks";
+import { renderComponent } from "@/test-utils/render";
 
 const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
@@ -18,31 +15,28 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
 }));
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push }) }));
-vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
-    ({
-      create: "New codebase",
-      deleteDescription: "Delete codebase",
-      deleteTitle: "Delete?",
-      download: "Download",
-      empty: "Empty",
-      librarySubtitle: "Library",
-      loadError: "Load failed",
-      reanalyze: "Re-analyze",
-      startAgent: "Agent",
-      startAsk: "Ask",
-      startTaskFailed: "Start failed",
-      title: "Codebase",
-      viewBuild: "View build",
-      "status.ready": "Ready",
-      statusFileCount: `${values?.status ?? ""} · ${values?.count ?? 0} files`,
-    })[key] ?? key,
-}));
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
-vi.mock("@/providers/auth-provider", () => ({
-  useAuth: () => ({ user: { id: "user-1" } }),
-}));
+vi.mock("next/navigation", () => mockNavigation({ push: mocks.push }));
+vi.mock("next-intl", () =>
+  mockNextIntl({
+    create: "New codebase",
+    deleteDescription: "Delete codebase",
+    deleteTitle: "Delete?",
+    download: "Download",
+    empty: "Empty",
+    librarySubtitle: "Library",
+    loadError: "Load failed",
+    reanalyze: "Re-analyze",
+    startAgent: "Agent",
+    startAsk: "Ask",
+    startTaskFailed: "Start failed",
+    title: "Codebase",
+    viewBuild: "View build",
+    "status.ready": "Ready",
+    statusFileCount: (values) => `${values?.status ?? ""} · ${values?.count ?? 0} files`,
+  }),
+);
+vi.mock("sonner", () => mockSonner());
+vi.mock("@/providers/auth-provider", () => mockAuth());
 vi.mock("@/lib/api/codebase", () => ({
   codebaseApi: {
     list: mocks.listCodebases,
@@ -103,25 +97,15 @@ function findButton(container: HTMLDivElement, label: string): HTMLButtonElement
   return button as HTMLButtonElement;
 }
 
-async function renderLibrary(): Promise<{ container: HTMLDivElement; root: Root }> {
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-  act(() => {
-    root.render(<CodebaseLibrary />);
-  });
-  await Promise.resolve();
+async function renderLibrary() {
+  const { container, root, unmount } = await renderComponent(<CodebaseLibrary />);
   await Promise.resolve();
   await Promise.resolve();
   await new Promise((resolve) => window.setTimeout(resolve, 0));
-  return { container, root };
+  return { container, root, unmount };
 }
 
 describe("codebase library versions", () => {
-  beforeAll(() => {
-    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
-  });
-
   afterEach(() => {
     mocks.createSession.mockReset();
     mocks.createBuild.mockReset();
@@ -131,14 +115,6 @@ describe("codebase library versions", () => {
     mocks.push.mockReset();
     vi.useRealTimers();
     document.body.replaceChildren();
-  });
-
-  afterAll(() => {
-    if (originalReactActEnvironment === undefined) {
-      delete reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
-    } else {
-      reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = originalReactActEnvironment;
-    }
   });
 
   it("keeps Ask and Agent enabled during candidate rebuilds and starts with displayed active version", async () => {

@@ -38,6 +38,19 @@
 | POST | `/api/shell/read-shell-output` | 读取 Shell 输出 |
 | GET | `/api/supervisor/status` | 获取进程状态 |
 
+### 路径 containment 与 sudo 转义
+
+`FileService` 会将每个文件/目录路径与
+`SANDBOX_ALLOWED_ROOTS = ("/home/ubuntu", "/tmp", "/workspace")`
+（`app/services/file.py:35`）做校验。用 `os.path.realpath` 解析符号链接与
+`..` 分量后，任何落在这些根目录之外的路径都会被拒绝，返回
+`path outside sandbox allowed roots`（`app/services/file.py:75,99`）——与
+API 侧 `source_validator.py` 相同的 `realpath` + `commonpath` 手法。
+sudo 提权的文件读写通过 `sudo cat` / `sudo tee` 走 Shell，目标路径与任何
+临时文件都经过 `shlex.quote()` 转义，避免恶意路径通过嵌套引号从命令字符串
+中逃逸。相关测试见 `tests/test_file_path_containment.py`、
+`tests/test_file_endpoints.py`、`tests/test_shell_service.py`。
+
 ## 本地开发
 
 ### 环境准备

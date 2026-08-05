@@ -25,6 +25,10 @@ flowchart TB
   subgraph exec ["Execution layer — isolated"]
     Sandbox["Sandbox container / Pod"]
   end
+  subgraph mcpplane ["MCP plane — Ops Patrol, ingress from API/Worker only"]
+    Collector["Ops Collector :8090 — read-only RBAC"]
+    Actuator["Ops Actuator :8091 — patch-only RBAC"]
+  end
   Browser --> Nginx
   Nginx --> UI
   Nginx --> API
@@ -36,6 +40,10 @@ flowchart TB
   Worker --> Storage
   Worker -->|"create/mount by scope"| Sandbox
   Sandbox -->|"egress by policy"| Internet["External network"]
+  Worker -->|"read-only probes"| Collector
+  Worker -->|"approval=always writes"| Actuator
+  Collector -->|"get/list/watch"| K8s["Kubernetes API"]
+  Actuator -->|"patch, allowlisted only"| K8s
 ```
 
 **Principles**
@@ -44,6 +52,7 @@ flowchart TB
 2. PostgreSQL, Redis, API, Worker, and UI communicate on the internal Docker network (`opencitadel-network`) or cluster NetworkPolicy.
 3. Agent code, shell commands, and browser automation run inside sandboxes—not in API/Worker processes.
 4. Secrets must not appear in logs; LLM provider keys are encrypted at the storage layer.
+5. The Ops Actuator is the only application-layer service with Kubernetes write (`patch`) RBAC; its Service is reachable only from API/Worker (NetworkPolicy on TCP 8091) and is never exposed publicly. The Ops Collector is read-only (`get`/`list`/`watch` on TCP 8090) and carries no write RBAC at all.
 
 ---
 
@@ -70,6 +79,8 @@ The Worker orchestrates sandboxes and drives browser automation via **Playwright
 | **Admission** | `SandboxQuota` + host memory probe | Fail-closed when Redis unavailable; tasks queue rather than over-provision |
 | **Lifecycle** | Idle reclamation, low-memory reclamation, orphan cleanup | Single-active coordination via Redis lease |
 | **Permissions** | UID 1000, all capabilities dropped, read-only root, no-new-privileges | Enforced by the runtime policy |
+| **Filesystem containment** | `SANDBOX_ALLOWED_ROOTS` allowlist (`/home/ubuntu`, `/tmp`, `/workspace`) | Every file operation resolves the target to a `realpath` and checks `commonpath` against the allowlist before touching disk; paths outside it are rejected |
+| **Privilege escalation input** | `shlex.quote` on every `sudo cat` / `sudo tee` argument | The resolved filepath (and, for writes, the staged temp file) is shell-quoted before interpolation into the `sudo` command, closing shell-injection via crafted filenames |
 
 ### Sandbox Drivers
 
@@ -114,28 +125,35 @@ For admission state machine and quota keys, see [Architecture Overview](overview
 ```mermaid
 sequenceDiagram
   participant C as Client
-  participant N as Nginx
   participant A as API
   participant R as Redis
   participant W as Worker
-  participant S as Sandbox
-  participant L as LLM provider
+  participant Gov as Governance layer (CapabilityPolicy + ToolBatchExecutor)
+  participant H as Human approver
+  participant S as Sandbox / Actuator
   participant D as PostgreSQL
 
-  C->>N: HTTPS + JWT Cookie
-  N->>A: Proxy /api/*
+  C->>A: HTTPS + JWT Cookie (via Nginx)
   A->>A: Resolve Principal
   A->>D: Persist session / message
   A->>R: task:input + dispatch
   W->>R: claim task:dispatch
-  W->>S: Tool execution HTTP
-  S-->>W: stdout / browser / files
-  W->>L: LLM API (keys from encrypted DB)
+  Note over W: LLM proposes a tool call
+  W->>Gov: Narrow to session tool_gate_policy
+  Gov->>Gov: strict gate check
+  Gov->>D: ToolApprovalBatch PENDING (whole batch preflighted)
+  Gov->>H: Tool action requires approval
+  H->>Gov: Approve / Reject
+  Gov->>Gov: Re-verify params_hash + capability baseline
+  Gov->>S: Idempotent execution (persisted idempotency key)
+  S-->>Gov: Result
+  Gov->>D: RunOutcome latch + audit hash-chain entry
   W->>R: task:output events
-  W->>D: session_events append
   A->>R: XREAD task:output
   A->>C: SSE stream
 ```
+
+Not every tool call reaches the human-approval hop: it only fires for calls whose persisted `ToolExecutionPolicy` declares `approval=always` (or a call-level gate elevates it), such as Ops Patrol Remediation's `patrol_execute_remediation`. Lower-risk, `read_only`/`safe` tools flow straight from `Gov`'s gate check to execution. See [Checkpoints & HITL](checkpoints-and-hitl.md) for the full gate/approval-batch state machine.
 
 ### Data Classification
 
@@ -378,7 +396,7 @@ export and alert routing.
 
 ### Security verification in CI
 
-- `.github/workflows/ci.yml` runs API/UI/sandbox/Collector tests, six image
+- `.github/workflows/ci.yml` runs API/UI/sandbox/Collector/Actuator tests, seven image
   builds and Trivy scans, Compose/Helm/Kustomize/Squid rendering, and this documentation checker.
 - `.github/workflows/security.yml` runs Gitleaks history scanning, dependency
   review and lockfile audits, CodeQL, and Trivy filesystem/IaC scanning.
@@ -398,6 +416,7 @@ export and alert routing.
 | MinIO | Internal; optional public endpoint variable | Keep internal unless LLM needs to fetch URLs |
 | Sandbox | Internal HTTP to Worker | Do not map host ports |
 | Ops Collector | Internal MCP to API/Worker | ClusterIP only; fixed read-only tools and registered destinations |
+| Ops Actuator | Internal MCP to API/Worker | ClusterIP only; UID/GID 10001, read-only rootfs, all capabilities dropped; patch-only RBAC limited to 3 registered actions on an explicit namespace/workload allowlist; disabled by default |
 | MCP / A2A servers | Worker/API egress | Allowlist targets |
 
 ---

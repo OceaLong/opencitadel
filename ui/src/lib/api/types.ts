@@ -5,7 +5,6 @@ export * from "./types/common";
 export * from "./types/config";
 export * from "./types/files";
 export * from "./types/knowledge";
-export * from "./types/marketplace";
 export * from "./types/memory";
 export * from "./types/models";
 export * from "./types/notifications";

@@ -1,9 +1,9 @@
 "use client";
 
-import { Languages, SunMoon } from "lucide-react";
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
+import { Languages, SunMoon } from "lucide-react";
 
 import {
   Item,
@@ -19,9 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
+import { type ThemePreference, useTheme } from "@/providers/theme-provider";
+
 import { setLocale } from "@/i18n/locale";
 import { type Locale, locales } from "@/i18n/routing";
-import { type ThemePreference, useTheme } from "@/providers/theme-provider";
 
 export function GeneralSettings() {
   const locale = useLocale() as Locale;

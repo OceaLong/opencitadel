@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**完全私有化部署 · Agent + 知识库 + 代码库 · MCP / A2A 集成 · 沙箱隔离执行**
+**完全私有化部署 · 每个工具调用可声明、可审批、可回滚、可举证 · MCP / A2A · 沙箱隔离执行**
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12+-green.svg)](https://www.python.org/)
@@ -16,14 +16,16 @@
 
 ---
 
-OpenCitadel 是面向**企业私有化部署**的开源 AI Agent **平台**（非单一浏览器 SDK）。数据、模型调用与文件存储均可留在自有网络内，通过 **MCP** 与 **A2A** 连接内部系统，在隔离沙箱中执行浏览器、Shell 与文件操作。
+OpenCitadel 是**受治理的私有化 AI Agent 平台**。数据、模型调用与文件存储留在自有网络内；Agent 在隔离沙箱中执行浏览器、Shell 与文件操作，通过 MCP 与 A2A 连接内部系统。与「先自治、后补审计」的 Agent 框架不同，OpenCitadel 把治理作为运行时的一等公民：**每个工具调用都可声明（效果契约）、可审批（HITL 队列）、可回滚（含浏览器状态的检查点）、可举证（哈希链审计与签名证据包）**。
 
-**差异化**：平台级治理层——Plan 审批、逐工具门控、VNC 接管、含浏览器 Profile 的检查点回滚、API 层审计——覆盖浏览器/Shell/MCP/A2A 全工具链。
+现有 Agent 治理方案多为单点工具，OpenCitadel 提供一体化平台：
 
-| 对比 | Skyvern | OpenHands | Onyx | OpenCitadel |
-|------|---------|-----------|------|-------------|
-| 定位 | 浏览器自动化 SDK (AGPL) | 代码 Agent | 检索/RAG | 私有化 Agent 平台 + 全链路治理 |
-| HITL | 浏览器任务 | 有限 | — | Plan + 逐工具 + 接管 + 回滚 + 审计 |
+| 能力 | MCP 网关类 | Agent 防火墙/Guardrails | 只读诊断类（k8sgpt 等） | OpenCitadel |
+|------|-----------|------------------------|------------------------|-------------|
+| 治理范围 | 仅 MCP 流量 | 策略拦截单点 | 只读、无执行 | 浏览器 / Shell / 文件 / MCP / A2A 全工具链 |
+| 人工介入 | — | 审批单点 | — | Plan 审批 + 逐工具门控 + VNC 接管 + 检查点回滚 |
+| 证据 | 访问日志 | 日志 | — | API 层哈希链审计 + 可验签证据包 |
+| 部署形态 | 网关 | Sidecar/SDK | CLI | 完整私有化平台（Compose / Helm） |
 
 > Web Operator 场景限定于**企业自有/自建系统**；第三方 SaaS 需声明归属并留痕，不构成法律风险消除。
 
@@ -39,13 +41,12 @@ OpenCitadel 是面向**企业私有化部署**的开源 AI Agent **平台**（�
 
 | 模块 | 入口 | 说明 |
 |------|------|------|
-| **Agent 对话** | `/`、`/sessions/[id]` | 监管级自主执行：Planner → ReAct、逐工具审批、VNC、检查点（含浏览器状态） |
-| **代码知识库** | `/codebase` | ZIP / Git 导入、符号检索、架构图、Ask / Agent 改码 |
-| **文档知识库** | `/knowledge` | 企业文档上传与连接器导入、检索问答、GraphRAG 与 reindex |
-| **应用市场** | `/marketplace` | LLM 小应用（营养分析、翻译、工具箱等） |
+| **Agent 对话** | `/`、`/sessions/[id]` | 监管级自主执行：Planner → ReAct、逐工具审批、VNC 接管、检查点（含浏览器状态） |
+| **Ops Patrol 巡检** | `/patrols` | 只读基础设施巡检，含审批制修复闭环：闭世界采集器、服务端断言引擎、签名证据包 |
 | **自动化** | `/automation` | 定时任务、Webhook、通知 |
+| **受治理的上下文源** | `/knowledge`、`/codebase` | 文档与代码知识库：版本化、原子发布、会话版本绑定、检索问答 |
 | **协议集成** | 设置弹窗 → 集成 | MCP（stdio / SSE / streamable HTTP）与 A2A 远程 Agent |
-| **管理后台** | `/admin/*` | 用户、配额、审计、用量、**合规证据** |
+| **管理后台** | `/admin/*` | 用户、配额、审计、用量、合规证据 |
 
 ## 快速开始
 
@@ -71,15 +72,19 @@ make quickstart
 flowchart LR
   UI["Next.js UI"] -->|"HTTP / SSE"| API["FastAPI API"]
   API --> Redis["Redis Streams"]
-  API --> PG["PostgresSQL + pgvector"]
+  API --> PG["PostgreSQL + pgvector"]
+  API --> Storage["MinIO / COS Storage"]
   Redis --> Worker["Agent Worker"]
   Worker --> Sandbox["Sandbox Runtime"]
   Worker --> LLM["LLM Providers"]
   Worker --> MCP["MCP / A2A"]
+  Worker -->|"read-only probes"| Collector["ops-collector :8090"]
+  Worker -->|"approval-gated writes"| Actuator["ops-actuator :8091"]
 ```
 
 - **API / Worker 分离**：API 无状态处理 SSE 与事件重放，Worker 消费任务队列执行 Agent
 - **沙箱隔离**：Docker 或 Kubernetes 中按需创建沙箱，支持浏览器自动化与 VNC
+- **受治理写平面**：`ops-collector`（8090）只读；`ops-actuator`（8091）仅接受三个注册制写动作，且必须经人工审批后才可达——见[治理平面](docs/architecture/governance-plane.zh-CN.md)
 - **部署形态**：Docker Compose（单节点）或 Helm / Kubernetes（水平扩展）
 
 完整设计说明见 [系统架构（中文）](docs/architecture/overview.zh-CN.md)。
@@ -89,7 +94,7 @@ flowchart LR
 | 受众 | 推荐阅读 |
 |------|----------|
 | 首次体验 | [10 分钟自托管](docs/tutorials/01-self-host-10-minutes.zh-CN.md) |
-| 运维 / DevOps | [生产部署](docs/operations/deployment.zh-CN.md) · [Ops Patrol 教程](docs/tutorials/06-ops-patrol.zh-CN.md) · [Patrol 运维](docs/operations/ops-patrol.zh-CN.md) · [HTTPS](docs/operations/https-domain-setup.zh-CN.md) · [Helm](deploy/helm/opencitadel/README.zh-CN.md) |
+| 运维 / DevOps | [生产部署](docs/operations/deployment.zh-CN.md) · [Ops Patrol 教程](docs/tutorials/06-ops-patrol.zh-CN.md) · [已批准的修复教程](docs/tutorials/07-approved-remediation.zh-CN.md) · [Patrol 运维](docs/operations/ops-patrol.zh-CN.md) · [HTTPS](docs/operations/https-domain-setup.zh-CN.md) · [Helm](deploy/helm/opencitadel/README.zh-CN.md) |
 | 企业场景 | [内部知识库](docs/tutorials/02-internal-knowledge-base.zh-CN.md) · [MCP 集成](docs/tutorials/03-mcp-integrations.zh-CN.md) · [受治理 Web Operator](docs/tutorials/04-governed-web-operator.zh-CN.md) · [退款对账与合规](docs/tutorials/05-refund-reconciliation-compliance.zh-CN.md) |
 | 平台 / 后端 | [文档中心](docs/README.zh-CN.md) · [安全模型](docs/architecture/security-model.zh-CN.md) · [Ops Patrol 架构](docs/architecture/ops-patrol.zh-CN.md) · [检查点与 HITL](docs/architecture/checkpoints-and-hitl.zh-CN.md) · [事件系统](docs/architecture/events.zh-CN.md) |
 | 开源贡献 | [贡献指南](.github/CONTRIBUTING.zh-CN.md) · [安全政策](.github/SECURITY.zh-CN.md) |

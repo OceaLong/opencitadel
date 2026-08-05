@@ -64,7 +64,7 @@ Compose Profile 不会挂载宿主机 kubeconfig。真实 Kubernetes 观察应�
 5. 下载证据 ZIP，按运维手册验证 SHA-256 Manifest 与 HMAC。
 6. 确认手动 Run 可信后再启用 Pack 计划，并核对 `next_run_at` 使用预期时区。
 
-Developer Preview 有意不提供修复按钮，也不会授予 Collector 变更权限。
+Collector 本身不会获得任何变更权限。一个范围收窄、独立部署的 Ops Actuator 在这个 Pack 之上提供了需审批的修复通道——参见 [审批通过后执行 Ops Patrol 修复](07-approved-remediation.zh-CN.md)。
 
 ## 理解结果
 
@@ -82,3 +82,7 @@ Pack 详情显示 30 天计划运行成功率、Finding/误报数与复核时间
 在全局运行时设置中设 `feature_flags.enable_ops_patrol=false`。导航与新工作会隐藏，计划停止创建 Run，但已有且有权访问的 Run/证据仍可读取。重新启用不会丢失配置和历史。
 
 部署、权限、证据验证、备份恢复与排障参见 [Ops Patrol 运维手册](../operations/ops-patrol.zh-CN.md)。
+
+## 下一步
+
+- [审批通过后执行 Ops Patrol 修复](07-approved-remediation.zh-CN.md)

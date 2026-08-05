@@ -5,6 +5,8 @@
 > (见 `api/app/application/services/*_version_service.py` 与迁移 e9f0a1b2c3d4)。
 > 保留本文作为审计轨迹,勿据此判断当前实现状态。
 > 注:文中引用的审计基线 spec 按本项目惯例不入库,存于本地。
+>
+> 2026-08-04 复核：全部 P0 已闭环，见 2026-08-04-governance-p0-reverification.md
 
 - 日期：2026-07-28
 - 审计基线：`docs/superpowers/specs/2026-07-28-agent-kb-codebase-governance-design.md`

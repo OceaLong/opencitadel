@@ -17,6 +17,9 @@ from app.domain.models.patrol import (
     PatrolPack,
     PatrolPackConfig,
     PatrolPackStatus,
+    PatrolRemediation,
+    PatrolRemediationAction,
+    PatrolRemediationStatus,
     PatrolRun,
     PatrolRunStatus,
     PatrolTriggerType,
@@ -303,6 +306,97 @@ class PatrolFindingModel(Base):
 
     def update_from_domain(self, finding: PatrolFinding) -> None:
         replacement = self.from_domain(finding)
+        for column in self.__table__.columns:
+            if column.name != "id":
+                setattr(self, column.name, getattr(replacement, column.name))
+
+
+# Kept in sync with PATROL_REMEDIATION_TERMINAL_STATUSES in app.domain.models.patrol;
+# used only for the raw-SQL partial-unique-index predicate below.
+_NON_TERMINAL_REMEDIATION_STATUSES_SQL = "status NOT IN ('verified', 'failed', 'cancelled')"
+
+
+class PatrolRemediationModel(Base):
+    __tablename__ = "patrol_remediations"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_patrol_remediations_idempotency_key"),
+        Index(
+            "uq_patrol_remediations_active_finding",
+            "finding_id",
+            unique=True,
+            postgresql_where=text(_NON_TERMINAL_REMEDIATION_STATUSES_SQL),
+        ),
+        Index("ix_patrol_remediations_fingerprint", "fingerprint"),
+        Index("ix_patrol_remediations_run_id", "run_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    pack_id: Mapped[str] = mapped_column(String(36), ForeignKey("patrol_packs.id", ondelete="RESTRICT"), nullable=False)
+    run_id: Mapped[str] = mapped_column(String(36), ForeignKey("patrol_runs.id", ondelete="CASCADE"), nullable=False)
+    finding_id: Mapped[str] = mapped_column(String(36), ForeignKey("patrol_findings.id", ondelete="CASCADE"), nullable=False)
+    check_result_id: Mapped[str] = mapped_column(String(36), ForeignKey("patrol_check_results.id", ondelete="CASCADE"), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_id: Mapped[str | None] = mapped_column(String(255), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_namespace: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_workload: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
+    target_kind: Mapped[str] = mapped_column(String(64), nullable=False, server_default="Deployment")
+    params: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    params_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    impact_summary: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    rollback_hint: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    actuator_capability_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="proposed")
+    before_observation: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    after_observation: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    recheck_run_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("patrol_runs.id", ondelete="SET NULL"), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(255), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+    def to_domain(self) -> PatrolRemediation:
+        return PatrolRemediation(
+            id=self.id,
+            pack_id=self.pack_id,
+            run_id=self.run_id,
+            finding_id=self.finding_id,
+            check_result_id=self.check_result_id,
+            fingerprint=self.fingerprint,
+            session_id=self.session_id,
+            action=PatrolRemediationAction(self.action),
+            target_namespace=self.target_namespace,
+            target_workload=self.target_workload,
+            target_kind=self.target_kind,
+            params=dict(self.params or {}),
+            params_hash=self.params_hash,
+            impact_summary=self.impact_summary,
+            rollback_hint=self.rollback_hint,
+            idempotency_key=self.idempotency_key,
+            actuator_capability_hash=self.actuator_capability_hash,
+            status=PatrolRemediationStatus(self.status),
+            before_observation=dict(self.before_observation) if self.before_observation is not None else None,
+            after_observation=dict(self.after_observation) if self.after_observation is not None else None,
+            recheck_run_id=self.recheck_run_id,
+            error_code=self.error_code,
+            error_message=self.error_message,
+            created_by=self.created_by,
+            created_at=_utc(self.created_at),
+            updated_at=_utc(self.updated_at),
+        )
+
+    @classmethod
+    def from_domain(cls, remediation: PatrolRemediation) -> "PatrolRemediationModel":
+        return cls(**{
+            **remediation.model_dump(mode="python"),
+            "action": remediation.action.value,
+            "status": remediation.status.value,
+        })
+
+    def update_from_domain(self, remediation: PatrolRemediation) -> None:
+        replacement = self.from_domain(remediation)
         for column in self.__table__.columns:
             if column.name != "id":
                 setattr(self, column.name, getattr(replacement, column.name))

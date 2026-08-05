@@ -10,14 +10,14 @@ This document describes the Next.js UI shell, settings modal, API client, SSE ev
 flowchart TB
   subgraph desktop ["Desktop md+"]
     LP["LeftPanel — session list + workspace switcher"]
-    HDR["AppHeader — workspace dropdown, notifications, settings gear"]
+    HDR["AppHeader — workspace dropdown (patrol, automation, knowledge, codebase), notifications, settings gear"]
     MAIN["Page content"]
   end
   subgraph mobile ["Mobile"]
     LPm["LeftPanel — sidebar sheet"]
     MAINm["Page content — pb-mobile-nav"]
-    NAV["MobileBottomNav — chat, codebase, knowledge, apps, more"]
-    MORE["More sheet — automation, teams, settings, admin"]
+    NAV["MobileBottomNav — chat, codebase, knowledge, more"]
+    MORE["More sheet — patrol, automation, teams, settings, admin"]
   end
   subgraph noShell ["Routes without sidebar"]
     AUTH["/login /register"]
@@ -32,12 +32,67 @@ flowchart TB
 
 Implementation: `ui/src/components/app-shell.tsx`, `left-panel.tsx`, `app-header.tsx`, `mobile-bottom-nav.tsx`.
 
+`MobileBottomNav` renders exactly 3 fixed tabs (chat, codebase, knowledge) plus a "more" button; there is no "apps" tab. Patrol only appears — in both the desktop header dropdown and the mobile "more" sheet — when `useFeatureFlags().opsPatrolEnabled` is true.
+
 **Navigation split**
 
-- **Desktop**: Codebase, Knowledge, Marketplace, and Automation live in the **header workspace dropdown** (`app-header.tsx`).
-- **Mobile**: the first four modules are in `MobileBottomNav`; Automation, Teams, Settings, and Admin are in the **More** sheet.
+- **Desktop**: Codebase, Knowledge, and Automation live in the **header workspace dropdown** (`app-header.tsx`); Patrol joins the same dropdown when feature-flagged.
+- **Mobile**: `MobileBottomNav` has 3 fixed tabs — chat, codebase, knowledge; Patrol (when feature-flagged), Automation, Teams, Settings, and Admin are in the **More** sheet behind the 4th tab.
 - **Ops Patrol**: header/mobile navigation is feature-flagged; `/patrols`, `/patrols/new`, `/patrols/[id]`, and `/patrol-runs/[id]` use the normal authenticated shell. Auditor views omit mutation controls.
 - **Session toolbar** (model, Skill, context): inline on desktop; collapsed into `ChatOptionsSheet` on mobile.
+
+## Component domains
+
+`ui/src/components/` is organized into ten domains plus root-level shared components (see [UI README — Project Structure](../../ui/README.md#project-structure) for the full directory tree):
+
+```mermaid
+mindmap
+  root((ui/src/components))
+    admin
+      admin-layout-shell
+      governance-profile-view
+      usage-charts
+    codebase
+      codebase-library
+      code-evidence-panel
+    knowledge
+      knowledge-library
+      knowledge-graph
+    patrol
+      pack-wizard
+      remediation-dialog
+      remediation-status
+    resource
+      build-candidate-panel
+      resource-version-status
+    session
+      chat-input
+      approval-bar
+      gate-actions-bar
+      vnc-overlay
+    settings
+      hitl-settings
+      runtime-settings
+    tool-use
+      bash-tool
+      browser-tool
+      mcp-tool
+    ui
+      button
+      dialog
+      sidebar
+    workspace
+      session-context-panel
+      codebase-context-panel
+    root-level shared
+      app-shell
+      left-panel
+      mobile-bottom-nav
+      context-selector
+      markdown-content
+      mermaid-diagram
+      status-badge
+```
 
 ## Settings modal (eight tabs)
 
@@ -87,6 +142,8 @@ flowchart LR
   Replay["GET /sessions/{id}/events"] --> Merge
 ```
 
+`session-events.ts` delegates to `lib/session-events/{normalize,format,debug}.ts` for event-shape normalization, timeline formatting, and debug-sheet payload shaping respectively.
+
 | SSE event | UI component / behavior |
 |-----------|-------------------------|
 | `clarify` | `clarify-questions.tsx` |
@@ -101,14 +158,23 @@ Domain event catalog: [Events](events.md).
 
 ## HITL component map
 
+`pending_phase` is **not** a linear chain — the four values are mutually exclusive, independently reachable gates on `running`. Only `tool_approval` (a persisted `ToolApprovalBatch`) has distinct `rejected`/`expired` terminal outcomes; `clarify`/`plan_approval`/`takeover` always clear back to `running` regardless of the user's answer (a plan `reject` re-plans; it does not end the session). See [Checkpoints & HITL — Persistent approval batches](checkpoints-and-hitl.md#persistent-approval-batches).
+
 ```mermaid
 stateDiagram-v2
-  [*] --> clarify
-  clarify --> plan_approval
-  plan_approval --> tool_approval
-  tool_approval --> takeover
-  takeover --> running
-  running --> [*]
+  [*] --> running
+  running --> clarify: pending_phase=clarify
+  running --> plan_approval: pending_phase=plan_approval
+  running --> tool_approval: pending_phase=tool_approval
+  running --> takeover: pending_phase=takeover
+  clarify --> running: user answer
+  plan_approval --> running: approve / approve_with_edits / reject
+  tool_approval --> running: approve / approve_same
+  tool_approval --> rejected: reject
+  tool_approval --> expired: batch expires_at elapsed
+  rejected --> running: failed ToolResult injected, loop continues
+  expired --> running: failed ToolResult injected, loop continues
+  takeover --> running: takeover / skip
 ```
 
 | `pending_phase` | UI | Resume prefixes |
@@ -123,6 +189,10 @@ Session-level HITL defaults and overrides: `hitl-settings.tsx` (Settings → HIT
 Checkpoint restore: `checkpoint-restore-dialog.tsx` → `POST /api/sessions/{id}/checkpoints/{id}/restore`.
 
 Web Operator scope: `operator-scope-dialog.tsx` on home/session when Skill is `web-operator`.
+
+Patrol remediation reuses the same `tool_approval` gate and `gate-actions-bar.tsx` for its human approval step: `remediation-dialog.tsx` composes the proposal, `remediation-status.tsx` renders the resulting `PatrolRemediationStatus` (`proposed`/`executing`/`executed`/`verified`/`failed`/`cancelled` — see [Ops Patrol architecture](ops-patrol.md)). Session-level governance summaries (capability narrowing, approval batches, run outcome, audit chain) render via `admin/governance-profile-view.tsx` at `/admin/compliance/sessions/[sessionId]`.
+
+All HITL and remediation components above live under `ui/src/components/session/` (session-scoped) or `ui/src/components/patrol/` (remediation-specific), respectively — not the package root.
 
 See [Checkpoints & HITL](checkpoints-and-hitl.md).
 
@@ -162,7 +232,7 @@ Desktop: fixed side panel. Mobile: bottom sheet.
 ## LLM status UI
 
 - Polls `GET /api/llm/status` (`llm-status.ts`)
-- Badge in AppHeader; also surfaced on Marketplace when providers degraded
+- Badge in AppHeader when providers degraded
 
 ## Related documentation
 

@@ -2,8 +2,8 @@ import { get, post } from "./fetch";
 import type {
   DeliveryArtifact,
   DeliveryArtifactContent,
-  DeliveryArtifactShare,
   DeliveryArtifactsData,
+  DeliveryArtifactShare,
 } from "./types";
 
 export const artifactsApi = {

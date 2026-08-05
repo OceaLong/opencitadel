@@ -64,7 +64,7 @@ export type PatrolRun = {
   pack_version: number;
   session_id?: string | null;
   status: PatrolRunStatus;
-  trigger_type: "manual" | "schedule" | "replay";
+  trigger_type: "manual" | "schedule" | "replay" | "webhook" | "remediation";
   started_at?: string | null;
   finished_at?: string | null;
   first_reviewed_at?: string | null;
@@ -76,7 +76,7 @@ export type PatrolRun = {
   created_at: string;
 };
 
-type PatrolCheckResult = {
+export type PatrolCheckResult = {
   id: string;
   run_id: string;
   check_id: string;
@@ -108,6 +108,15 @@ export type PatrolFinding = {
   decided_by?: string | null;
   decided_at?: string | null;
   decision_reason?: string | null;
+  /**
+   * Which remediation actions this Finding's originating Check's probe tool
+   * supports, computed server-side (see
+   * app/interfaces/endpoints/patrol_routes.py::_finding_allowed_actions).
+   * Optional for backward compatibility with cached/stale responses that
+   * predate this field -- `RemediationDialog` falls back to a local mirror
+   * of the same rule when it's absent.
+   */
+  allowed_actions?: PatrolRemediationAction[];
 };
 
 export type PatrolRunDetail = PatrolRun & {
@@ -125,3 +134,44 @@ export type PatrolPackMetrics = {
 };
 export type PatrolPackList = { items: PatrolPack[]; limit: number; offset: number };
 export type PatrolRunList = { items: PatrolRun[]; limit: number; offset: number };
+
+export type PatrolRemediationAction = "restart_workload" | "scale_workload" | "rollback_workload";
+
+export type PatrolRemediationStatus =
+  | "proposed"
+  | "executing"
+  | "executed"
+  | "verified"
+  | "failed"
+  | "cancelled";
+
+export type PatrolRemediation = {
+  id: string;
+  pack_id: string;
+  run_id: string;
+  finding_id: string;
+  check_result_id: string;
+  fingerprint: string;
+  session_id?: string | null;
+  action: PatrolRemediationAction;
+  target_namespace: string;
+  target_workload: string;
+  target_kind: string;
+  params: Record<string, unknown>;
+  params_hash: string;
+  impact_summary: string;
+  rollback_hint: string;
+  idempotency_key: string;
+  actuator_capability_hash?: string | null;
+  status: PatrolRemediationStatus;
+  before_observation?: Record<string, unknown> | null;
+  after_observation?: Record<string, unknown> | null;
+  recheck_run_id?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PatrolRemediationList = { items: PatrolRemediation[] };

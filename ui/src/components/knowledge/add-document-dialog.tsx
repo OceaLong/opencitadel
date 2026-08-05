@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { FileUp, Globe, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { FileUp, Globe, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { inferSourceType } from "@/components/knowledge/knowledge-utils";

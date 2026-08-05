@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { FieldDescription, FieldGroup, FieldLegend, FieldSet } from "@/components/ui/field";
+
 import { configApi } from "@/lib/api/config";
 
 import { ConfigField } from "./config-field";

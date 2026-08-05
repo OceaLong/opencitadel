@@ -26,19 +26,19 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 
 | 路径 | 主题 | 权威性 | 双语 | 图示 | 代码锚点 | 过期风险 |
 |------|------|--------|------|------|----------|----------|
-| [overview.md](architecture/overview.zh-CN.md) | 系统设计、API/Worker、DI、沙箱 | primary | paired | mermaid | `api/app/container.py` | medium |
+| [overview.md](architecture/overview.zh-CN.md) | 系统设计、API/Worker、DI、沙箱 | primary | paired | mermaid | `api/app/container.py`、`runner_bindings/` | medium |
+| [governance-plane.md](architecture/governance-plane.zh-CN.md) | 效果契约、能力收窄、整批审批、终态闩、证据 | primary | paired | mermaid | `tool_policy.py`、`capability_policy.py`、`tool_batch_executor.py`、`governance_profile_service.py`、`evidence_service.py` | medium |
 | [security-model.md](architecture/security-model.zh-CN.md) | 信任边界、认证、密钥 | primary | paired | mermaid | `infrastructure/security/` | medium |
 | [events.md](architecture/events.zh-CN.md) | 领域事件、SSE、回放 | primary | paired | mermaid | `domain/models/event.py` | medium |
-| [checkpoints-and-hitl.md](architecture/checkpoints-and-hitl.zh-CN.md) | HITL 门控、检查点、Web Operator | primary | paired | mermaid | `checkpoint_service.py` | medium |
+| [checkpoints-and-hitl.md](architecture/checkpoints-and-hitl.zh-CN.md) | HITL 门控、检查点、Web Operator | primary | paired | mermaid | `checkpoint_service.py`、`session/approval_routes.py` | medium |
 | [web-operator.md](architecture/web-operator.zh-CN.md) | 门控档位、审计契约 | primary | paired | mermaid | `domain/services/agents/` | low |
 | [teams-and-workspaces.md](architecture/teams-and-workspaces.zh-CN.md) | 团队、`X-Workspace-Id` | primary | paired | mermaid | `team_routes.py` | low |
 | [admin-auditor-compliance.md](architecture/admin-auditor-compliance.zh-CN.md) | 管理、审计、合规 | primary | paired | mermaid | `admin_routes.py` | medium |
 | [integrations-a2a-service-keys.md](architecture/integrations-a2a-service-keys.zh-CN.md) | A2A、服务 API Key | primary | paired | mermaid | `a2a_routes.py` | low |
-| [skills.md](architecture/skills.zh-CN.md) | Skill 模板、运行时 | primary | paired | mermaid | `skill_service.py` | low |
+| [skills.md](architecture/skills.zh-CN.md) | Skill 模板、运行时 | primary | paired | mermaid | `skill_service.py`、`runner_bindings/` | low |
 | [artifacts-sharing.md](architecture/artifacts-sharing.zh-CN.md) | 交付物、公开分享 | primary | paired | mermaid | `artifact_routes.py` | low |
 | [automation-scheduler.md](architecture/automation-scheduler.zh-CN.md) | Cron、Webhook、Leader 选举 | primary | paired | mermaid | `scheduling_routes.py` | low |
 | [ops-patrol.md](architecture/ops-patrol.zh-CN.md) | Pack/Run 生命周期、Collector 边界与证据 | primary | paired | mermaid | `patrol_routes.py`、`patrol_run_service.py` | low |
-| [marketplace.md](architecture/marketplace.zh-CN.md) | 应用市场 | primary | paired | mermaid | `marketplace_routes.py` | low |
 | [config-source-governance.md](architecture/config-source-governance.zh-CN.md) | AppConfig 与 env 边界 | primary | paired | mermaid | `core/config.py` | medium |
 | [model-resilience.md](architecture/model-resilience.zh-CN.md) | 熔断、回退 | primary | paired | mermaid | `resilient_llm.py` | low |
 | [contract-compatibility.md](architecture/contract-compatibility.zh-CN.md) | API/SSE 兼容窗口 | primary | paired | mermaid | `event_upgrader.py` | low |
@@ -55,7 +55,7 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | 路径 | 主题 | 权威性 | 双语 | 图示 | 代码锚点 | 过期风险 |
 |------|------|--------|------|------|----------|----------|
 | [operations/deployment.md](operations/deployment.zh-CN.md) | 生产部署 | primary | paired | mermaid | `docker-compose.yml` | low |
-| [operations/ops-patrol.md](operations/ops-patrol.zh-CN.md) | Patrol 启用、部署、证据与恢复 | primary | paired | none | `ops-collector/`、`deploy/helm/` | low |
+| [operations/ops-patrol.md](operations/ops-patrol.zh-CN.md) | Patrol 启用、部署、证据与恢复 | primary | paired | mermaid | `ops-collector/`、`ops-actuator/`、`deploy/helm/` | low |
 | [operations/https-domain-setup.md](operations/https-domain-setup.zh-CN.md) | HTTPS 与域名 | primary | paired | none | `.env.example` | low |
 | [tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.zh-CN.md) | 10 分钟自托管 | tutorial | paired | none | `scripts/quickstart.sh` | low |
 | [tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.zh-CN.md) | 知识库 RAG | tutorial | paired | mermaid | `knowledge-base-ingestion.md` | low |
@@ -63,6 +63,7 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [tutorials/04-governed-web-operator.md](tutorials/04-governed-web-operator.zh-CN.md) | Web Operator 教程 | tutorial | paired | none | `operator-scope-dialog.tsx` | low |
 | [tutorials/05-refund-reconciliation-compliance.md](tutorials/05-refund-reconciliation-compliance.zh-CN.md) | 合规演示 | tutorial | paired | none | `compliance_routes.py` | low |
 | [tutorials/06-ops-patrol.md](tutorials/06-ops-patrol.zh-CN.md) | Kubernetes 只读巡检教程 | tutorial | paired | none | `ui/src/app/patrols/` | low |
+| [tutorials/07-approved-remediation.md](tutorials/07-approved-remediation.zh-CN.md) | 已批准的 Ops Patrol 修复教程 | tutorial | paired | none | `ops-actuator/` | low |
 
 ## 模块 README
 
@@ -73,6 +74,7 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [sandbox/README.md](../sandbox/README.zh-CN.md) | 沙箱服务 | module | paired | none | low |
 | [nginx/README.md](../nginx/README.zh-CN.md) | 网关、SSE/WS、上传限制 | module | paired | mermaid | low |
 | [ops-collector/README.md](../ops-collector/README.zh-CN.md) | 固定只读探针与配置 | module | paired | none | low |
+| [ops-actuator/README.md](../ops-actuator/README.zh-CN.md) | 固定仅 patch 的写探针与配置 | module | paired | none | low |
 | [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.zh-CN.md) | Helm 安装 | module | paired | none | low |
 | [deploy/patrol-demo/README.md](../deploy/patrol-demo/README.zh-CN.md) | 一次性 Patrol 故障实验室 | module | paired | none | low |
 | [demo/ops-console/README.md](../demo/ops-console/README.zh-CN.md) | Web Operator 演示后端 | module | paired | none | low |
@@ -94,6 +96,7 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | 路径 | 主题 | 权威性 | 双语 | 图示 | 代码锚点 | 过期风险 |
 |------|------|--------|------|------|----------|----------|
 | [2026-07-28-agent-kb-codebase-governance-audit.md](superpowers/audits/2026-07-28-agent-kb-codebase-governance-audit.md) | 已过时的治理审计 — 资源版本化缺口结论（见文首状态块） | historical | zh-only (exempt) | none | `api/app/application/services/*_version_service.py` | low |
+| [2026-08-04-governance-p0-reverification.md](superpowers/audits/2026-08-04-governance-p0-reverification.md) | 对 2026-07-28 治理审计 P0 结论的复核 | historical | zh-only (exempt) | none | — | low |
 
 ## 废弃候选（已处理 — 保留供 grep 回归）
 

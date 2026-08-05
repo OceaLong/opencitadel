@@ -23,6 +23,38 @@ Kubernetes RBAC 仅允许 `get`、`list`、`watch`，排除 Secret、exec、atta
 
 ## 部署
 
+Ops Patrol 有两个独立的 MCP 面：始终相关的只读 Collector（检查）和可选的写范围 Actuator（仅用于已审批的修复——见 [审批通过后执行 Ops Patrol 修复](../tutorials/07-approved-remediation.zh-CN.md)）。二者分别部署、限定 Scope 并做网络隔离。
+
+```mermaid
+flowchart TB
+  subgraph app ["应用层"]
+    UI["Patrol UI"]
+    API["API"]
+    Worker["Worker"]
+  end
+  subgraph mcpplane ["MCP 平面 — NetworkPolicy：仅 api/worker 可访问"]
+    Collector["Ops Collector :8090 — 只读 RBAC（get/list/watch）"]
+    Actuator["Ops Actuator :8091 — Patch-only RBAC（get/list/watch/patch）"]
+  end
+  subgraph data ["数据层"]
+    PG["PostgreSQL"]
+    Redis["Redis"]
+  end
+  subgraph exec ["Kubernetes API"]
+    K8sRead["工作负载 / 事件 / 日志 / 探针"]
+    K8sWrite["Deployment / StatefulSet — 3 个注册制动作"]
+  end
+  UI --> API
+  API --> PG
+  API --> Redis
+  Worker --> PG
+  Worker --> Redis
+  Worker -->|"探针读取"| Collector
+  Worker -->|"approval=always 写入"| Actuator
+  Collector --> K8sRead
+  Actuator -->|"仅白名单 Namespace/Workload"| K8sWrite
+```
+
 ### Docker Compose
 
 ```bash
@@ -68,6 +100,50 @@ kubectl apply -k deploy/kustomize/ops-collector
 
 Collector Service 保持内部 `ClusterIP`，Ingress 仅允许 API/Worker 访问 TCP 8090。Egress 仅允许 DNS、Kubernetes API 和注册目标的准确端口。仅按端口限制的 NetworkPolicy 无法验证主机名或 URL Path，因此注册表仍是 SSRF 权威边界。
 
+### Actuator（可选写路径）
+
+仅当 [审批通过后执行 Ops Patrol 修复](../tutorials/07-approved-remediation.zh-CN.md) 在范围内时才需要部署 Actuator。它是第二个、要求更严格的 MCP 面——绝不能暴露给模型，RBAC 也绝不能超出对 Deployment/StatefulSet 的 `get`/`list`/`watch`/`patch` 与对 ReplicaSet 的 `get`/`list`。
+
+**Docker Compose**
+
+```bash
+docker compose --profile actuator up -d --build opencitadel-ops-actuator
+docker compose ps opencitadel-ops-actuator
+```
+
+该 Profile 默认关闭（`docker-compose.yml` 中的 opt-in `actuator` Profile），与 Collector 一样不会挂载宿主机 kubeconfig。
+
+**Helm**
+
+构建或拉取 `opencitadel-ops-actuator` 镜像后：
+
+```bash
+helm upgrade --install opencitadel deploy/helm/opencitadel \
+  --namespace opencitadel --create-namespace \
+  --values production-values.yaml \
+  --set opsActuator.enabled=true \
+  --set opsActuator.image.repository=your-registry/opencitadel-ops-actuator \
+  --set opsActuator.image.tag=YOUR_RELEASE_TAG \
+  --set opsActuator.targetRef=cluster-a \
+  --set-json 'opsActuator.allowedNamespaces=["opencitadel"]' \
+  --set-json 'opsActuator.allowedWorkloads={"opencitadel":{"opencitadel-api":{"kind":"deployment","min_replicas":2,"max_replicas":10}}}'
+```
+
+该命令会渲染 `templates/deployment-ops-actuator.yaml`、`templates/rbac-ops-actuator.yaml` 与 `templates/networkpolicy-ops-actuator.yaml`。若 `opsActuator.serviceAccount.create=false`，须设置 `opsActuator.serviceAccount.name` 并预先授予等价最小权限——绝不能授予 Secret 读写或超出三个注册动作的变更动词。
+
+**Kustomize**
+
+```bash
+kubectl kustomize deploy/kustomize/ops-actuator >/dev/null
+kubectl apply -k deploy/kustomize/ops-actuator
+```
+
+仓库内 Kustomization 应作为 Base，与 Collector 相同的处理方式：用于非一次性环境前，必须 Patch 镜像/Tag、Target Ref、白名单、资源限制、Namespace 和 NetworkPolicy Egress。`rbac.yaml` 定义了写范围的 `ClusterRole`/`ClusterRoleBinding`。
+
+**Actuator 网络位置**
+
+Actuator Service 保持内部 `ClusterIP`，Ingress 仅允许 API/Worker 访问 TCP 8091。与 Collector 不同，Egress 仅允许 DNS 和 Kubernetes API——Actuator 从不连接 PostgreSQL、Redis、MinIO 或 Prometheus，在写范围 ServiceAccount 的 Pod 上放开这些端口只会增加横向移动面，没有对应必要性。
+
 ## 注册 MCP Server
 
 Helm Service URL 通常为：
@@ -105,6 +181,18 @@ http://opencitadel-ops-collector:8090/mcp
 
 任一必需 Policy 缺失或保守化、Server 未启用、实时能力发现失败、Schema Hash 不同、缺少必需工具或只读 dry-run 失败，Pack 验证都会 Fail Closed。
 
+## 注册 Actuator MCP Server
+
+仅当部署了 Actuator 时才需要。Helm Service URL 通常为：
+
+```text
+http://opencitadel-ops-actuator:8091/mcp
+```
+
+`api/config.yaml` 在 `mcp_config.mcpServers.ops-actuator` 下提供一条禁用状态的种子记录，URL 完全一致；DB 承载的 AppConfig 不会因编辑配置文件而更新已有行，因此启用必须通过 UI/API 完成。在 **设置 → 集成** 中把该 URL 注册为 Streamable HTTP、启用，并严格命名为 `ops-actuator`——修复执行服务按这个固定名称解析 Server，这与按 Pack 绑定的 Collector 不同。
+
+与 Collector 不同，Actuator 的写工具（`get_capabilities`、`restart_workload`、`scale_workload`、`rollback_workload`）从不暴露给模型——后端执行服务直接调用它们——因此这次注册不需要额外持久化 Tool Policy Payload。
+
 ## 启用顺序
 
 1. 部署 Migration 并确认 API/Worker 健康。
@@ -114,6 +202,10 @@ http://opencitadel-ops-collector:8090/mcp
 5. 保持 `enable_ops_patrol_fixture_replay=false`。
 6. 创建 Pack 并检查实时 Preflight 摘要。向导会自动激活验证成功的 Pack；失败时保持非 Active，修复并重新验证后再显式激活。
 7. 触发一次手动 Run，核验证据后再启用计划。
+8. **可选，用于已审批修复：** 部署并限制 Actuator，验证其 Readiness 与 ServiceAccount。
+9. 注册 Actuator MCP Server（`ops-actuator`）并启用；这次注册不需要持久化 Tool Policy。
+10. 管理员在 **设置 → 运行时 → feature_flags** 中将 `enable_ops_patrol_remediation` 设为 `true`。内置 `ops-patrol-remediation` Skill 在 API/Worker 启动时自动 Seed，无需手工注册。
+11. 端到端发起一次修复并核验复检 Run，再大范围依赖该闭环。
 
 Pack 计划使用五段每日 Cron 与 IANA 时区。配置变更会增加 Pack Version、暂停其 ScheduledJob，并要求重新验证/激活。
 
@@ -123,13 +215,15 @@ Pack 计划使用五段每日 Cron 与 IANA 时区。配置变更会增加 Pack 
 |------|------------|
 | `feature_flags.enable_ops_patrol` | DB 承载的全局 AppConfig 总开关 |
 | `feature_flags.enable_ops_patrol_fixture_replay` | 仅测试/演示；生产保持 false |
+| `feature_flags.enable_ops_patrol_remediation` | 写路径的 DB 承载全局 AppConfig 总开关；关闭时 `propose()` 在触碰任何数据前就 Fail Closed |
 | `patrol_retention.run_days` / `finding_days` | 默认 30 天，收敛到 1–90 |
 | `patrol_retention.collector_evidence_days` | 默认 7 天，收敛到 1–90 |
 | `patrol_retention.cleanup_batch_size` | 默认 100，每 Tick 收敛到 1–1000 |
 | `AUDIT_SIGNING_KEY` | HMAC Key；随审计 Key ID 与历史 Key Map 轮换 |
 | `OPS_COLLECTOR_*` | Collector 独有目标、白名单、注册表、并发与输出上限 |
+| `OPS_ACTUATOR_*` | Actuator 独有 Target Ref、Namespace/Workload 白名单、传输与并发（写路径，默认关闭） |
 
-Collector 变量与 Kubernetes 身份属于其部署，不属于 Pack Tool 参数；不得向 Pack 增加原始目的地。
+Collector 与 Actuator 的变量及其各自 Kubernetes 身份都属于各自的部署，不属于 Pack Tool 参数；不得向 Pack 增加原始目的地。
 
 ## 验证
 
@@ -138,7 +232,10 @@ make test-patrol
 helm lint deploy/helm/opencitadel
 helm template opencitadel deploy/helm/opencitadel \
   --set opsCollector.enabled=true >/dev/null
+helm template opencitadel deploy/helm/opencitadel \
+  --set opsActuator.enabled=true >/dev/null
 kubectl kustomize deploy/kustomize/ops-collector >/dev/null
+kubectl kustomize deploy/kustomize/ops-actuator >/dev/null
 docker compose --env-file .env.example config --quiet
 ```
 
@@ -201,5 +298,10 @@ PostgreSQL 与对象存储备份遵循主[生产部署手册](deployment.zh-CN.m
 | Run 长期 queued/running | Worker/Redis、模型可用性、活动 Run 锁、Pack Timeout（默认 15 分钟，最大 30 分钟） |
 | 无计划 Run | Pack Active、计划 Enabled、Scheduler Enabled/Leader、时区/Next Run、总开关仍开启 |
 | 保留任务不前进 | Worker Scheduler Loop、Leader Lease、`patrol_retention` 限制与 Cleanup Log |
+| `error_code=PARAMS_TAMPERED` | 执行时重新计算的 `params_hash` 与提案时固定的值不一致；未产生任何 Actuator 调用 |
+| `error_code=CAPABILITY_BASELINE_MISSING` / `CAPABILITY_DRIFT` | Actuator 的 Capability Hash 从未被捕获，或与会话构建时的基线不一致；执行在调用 Actuator 前 Fail Closed |
+| `error_code=SESSION_TERMINATED` | 修复会话被拒绝、放弃，或审批批次未决策即过期；仍处于 `proposed` 的修复记录自动转为 `cancelled`，Actuator 未被触碰 |
+| `error_code=recheck_failed` | `executed` 状态修复触发的复检 Run 中对应检查项仍失败或告警；Finding 保持开放，等待人工决策 |
+| `ACTUATOR_UNREACHABLE` / `ACTUATOR_FAILED` | Actuator MCP 连通性、API/Worker 到 TCP 8091 的 NetworkPolicy Egress、Actuator Readiness |
 
 日志应包含 Run、Pack、Session、Check、Request、Target 标识和状态/错误码，但不能包含凭据或原始 Authorization Header。

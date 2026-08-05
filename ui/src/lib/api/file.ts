@@ -1,6 +1,8 @@
-import { API_CONFIG, authenticatedFetch, get, post } from "./fetch";
-import { translate } from "@/i18n/translate";
 import { FILE_UPLOAD_TIMEOUT_MS } from "@/lib/constants";
+
+import { translate } from "@/i18n/translate";
+
+import { API_CONFIG, authenticatedFetch, get, post } from "./fetch";
 import type { FileInfo, FileUploadParams } from "./types";
 
 /**

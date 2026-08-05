@@ -1,21 +1,21 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { mockNextIntl } from "@/test-utils/mocks";
+import { renderComponent } from "@/test-utils/render";
 
 const mocks = vi.hoisted(() => ({ getGraph: vi.fn() }));
 
-vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string) =>
-    ({
-      graphLoading: "Loading",
-      graphLoadError: "Load failed",
-      graphUnavailable: "Graph unavailable",
-      graphEmpty: "Graph empty",
-      graphRelations: "Relations",
-    })[key] ?? key,
-}));
+vi.mock("next-intl", () =>
+  mockNextIntl({
+    graphLoading: "Loading",
+    graphLoadError: "Load failed",
+    graphUnavailable: "Graph unavailable",
+    graphEmpty: "Graph empty",
+    graphRelations: "Relations",
+  }),
+);
 vi.mock("@/lib/api/knowledge", () => ({
   knowledgeApi: { getGraph: mocks.getGraph },
 }));
@@ -24,22 +24,10 @@ vi.mock("@/lib/icons", () => ({ IconLoading: () => <span>loading</span> }));
 import { KnowledgeGraph } from "./knowledge-graph";
 
 async function renderGraph() {
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root: Root = createRoot(container);
-  await act(async () => {
-    root.render(<KnowledgeGraph knowledgeBaseId="kb1" versionId="v1" />);
-    await Promise.resolve();
-  });
-  return { container, root };
+  return renderComponent(<KnowledgeGraph knowledgeBaseId="kb1" versionId="v1" />);
 }
 
 describe("KnowledgeGraph", () => {
-  beforeAll(() => {
-    (
-      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-    ).IS_REACT_ACT_ENVIRONMENT = true;
-  });
   afterEach(() => {
     mocks.getGraph.mockReset();
     document.body.replaceChildren();
@@ -73,7 +61,7 @@ describe("KnowledgeGraph", () => {
       ],
       next_cursor: null,
     });
-    const { container, root } = await renderGraph();
+    const { container, unmount } = await renderGraph();
 
     expect(
       container.querySelector(`[data-testid='knowledge-node-${aliceId}']`)?.textContent,
@@ -86,7 +74,7 @@ describe("KnowledgeGraph", () => {
     expect(edge?.textContent).not.toContain(projectId);
     const evidence = edge?.querySelector("[data-document='doc1']");
     expect(evidence?.getAttribute("data-revision")).toBe("r1");
-    await act(async () => root.unmount());
+    await unmount();
   });
 
   it.each([
@@ -94,17 +82,17 @@ describe("KnowledgeGraph", () => {
     [{ capability: true, nodes: [], edges: [] }, "Graph empty"],
   ])("renders honest capability and empty states", async (response, expected) => {
     mocks.getGraph.mockResolvedValue(response);
-    const { container, root } = await renderGraph();
+    const { container, unmount } = await renderGraph();
     expect(container.textContent).toContain(expected);
     expect(container.querySelector("[data-testid^='knowledge-node-']")).toBeNull();
-    await act(async () => root.unmount());
+    await unmount();
   });
 
   it("renders an API error without synthesizing a graph", async () => {
     mocks.getGraph.mockRejectedValue(new Error("graph backend down"));
-    const { container, root } = await renderGraph();
+    const { container, unmount } = await renderGraph();
     expect(container.textContent).toContain("graph backend down");
     expect(container.querySelector("[data-testid^='knowledge-node-']")).toBeNull();
-    await act(async () => root.unmount());
+    await unmount();
   });
 });

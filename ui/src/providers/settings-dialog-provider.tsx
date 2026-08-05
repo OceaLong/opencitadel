@@ -1,7 +1,7 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 
 import type { SettingTab } from "@/hooks/use-open-citadel-settings";
 

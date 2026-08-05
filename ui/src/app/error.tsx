@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { AlertCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { AlertCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 

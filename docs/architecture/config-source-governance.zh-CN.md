@@ -42,7 +42,6 @@
 | 网关 POST body | 200 MB | `nginx/nginx.conf` `client_max_body_size 200m` |
 | Codebase ZIP | 200 MB | `ui/src/lib/constants.ts` `CODEBASE_ZIP_MAX_BYTES` |
 | KB 文档 | 默认 50 MB | `knowledge_base.document.max_bytes` |
-| 市场资源 | 默认 25 MB | `server.marketplace_max_upload_bytes` |
 
 见 [Nginx 网关](../../nginx/README.zh-CN.md) 与 [知识库摄取](knowledge-base-ingestion.zh-CN.md)。
 

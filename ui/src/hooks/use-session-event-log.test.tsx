@@ -1,17 +1,12 @@
 // @vitest-environment jsdom
 
 import { act, useEffect } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SSEEventData } from "@/lib/api/types";
 import { reduceSessionStatusEvents } from "@/lib/session-events";
 
-const reactActEnvironment = globalThis as typeof globalThis & {
-  IS_REACT_ACT_ENVIRONMENT?: boolean;
-};
-const originalReactActEnvironment =
-  reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
+import { renderComponent } from "@/test-utils/render";
 
 const mocks = vi.hoisted(() => ({
   getSessionEvents: vi.fn(),
@@ -39,14 +34,9 @@ function Harness() {
   return null;
 }
 
-async function renderHookHarness(): Promise<Root> {
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-  await act(async () => {
-    root.render(<Harness />);
-  });
-  return root;
+async function renderHookHarness() {
+  const { unmount } = await renderComponent(<Harness />);
+  return unmount;
 }
 
 function statusEvent(
@@ -84,23 +74,10 @@ function messageEvent(eventId: string): SSEEventData {
 }
 
 describe("useSessionEventLog late persisted events", () => {
-  beforeAll(() => {
-    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
-  });
-
   afterEach(() => {
     mocks.getSessionEvents.mockReset();
     currentLog = null;
     document.body.replaceChildren();
-  });
-
-  afterAll(() => {
-    if (originalReactActEnvironment === undefined) {
-      delete reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
-    } else {
-      reactActEnvironment.IS_REACT_ACT_ENVIRONMENT =
-        originalReactActEnvironment;
-    }
   });
 
   it("recovers and orders a lower terminal published after a higher ordinary event", async () => {
@@ -126,7 +103,7 @@ describe("useSessionEventLog late persisted events", () => {
         };
       },
     );
-    const root = await renderHookHarness();
+    const unmount = await renderHookHarness();
 
     await act(async () => {
       currentLog?.appendEvent(running);
@@ -143,7 +120,7 @@ describe("useSessionEventLog late persisted events", () => {
     expect(reduceSessionStatusEvents(currentLog?.events ?? [])).toBe(
       "failed",
     );
-    await act(async () => root.unmount());
+    await unmount();
   });
 
   it("walks reconnect pages back to the pre-live cursor for a delayed terminal", async () => {
@@ -186,7 +163,7 @@ describe("useSessionEventLog late persisted events", () => {
         throw new Error(`unexpected cursor ${params.before}`);
       },
     );
-    const root = await renderHookHarness();
+    const unmount = await renderHookHarness();
 
     await act(async () => {
       currentLog?.appendEvent(running);
@@ -205,6 +182,6 @@ describe("useSessionEventLog late persisted events", () => {
     expect(reduceSessionStatusEvents(currentLog?.events ?? [])).toBe(
       "failed",
     );
-    await act(async () => root.unmount());
+    await unmount();
   });
 });

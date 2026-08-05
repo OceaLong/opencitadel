@@ -66,6 +66,48 @@ Current `EVENT_SCHEMA_VERSION=3`. Legacy payloads are upgraded via `event_upgrad
 
 The `error` event may optionally carry a `code` field (e.g. `MODEL_UNAVAILABLE`, `EMBEDDING_UNAVAILABLE`, `DOCUMENT_PARSE_FAILED`) for frontend and ops to distinguish error types. See [Model Resilience Design](model-resilience.md) and `api/app/domain/models/error_codes.py` for the full error code list. Frontends should tolerate missing `code` and fall back to displaying the `error` text.
 
+## SSE connect, approval wait, and reconnect
+
+The frontend (`use-session-streams.ts`, `use-session-event-log.ts`) treats the chat SSE connection as disposable and the persisted event log as the source of truth. A `tool_approval` wait is not a special transport state — it is an ordinary `approval` event followed by the stream going quiet until a decision is sent; a network drop is handled the same way as a normal end-of-turn stream close (`SSE_STREAM_END`), just with backoff. The approval decision itself is an ordinary chat message (`GateActionsBar` calls the same `sendMessage`/`sessionApi.chat` path as any other reply), not a separate REST call.
+
+```mermaid
+sequenceDiagram
+  participant Client
+  participant API
+  participant Redis as "Redis task:output"
+  participant Worker
+  participant DB as "PostgreSQL"
+
+  Client->>API: POST /sessions/{id}/chat (SSE, resume event_id?)
+  API->>Redis: dispatch task:input
+  Redis->>Worker: claim task:dispatch
+  Worker->>Redis: XADD task:output (message_delta, tool, ...)
+  API->>Redis: XREAD task:output
+  API-->>Client: SSE live events
+  Worker->>DB: pending_phase=tool_approval, ToolApprovalBatch PENDING
+  API-->>Client: SSE "approval" event (batch pending)
+  Note over Client: render approval batch card, stream idle
+  Client->>API: POST /sessions/{id}/chat "approve" / "reject:..." (gate resume message)
+  API->>DB: record agent_tool_approve / agent_tool_reject (_record_gate_audit_if_needed)
+  API->>Redis: dispatch resume message
+  Redis->>Worker: claim task:dispatch
+  Worker->>Worker: decide_approval_call, then resume() -> consume_approval_batch (atomic CAS)
+  Worker->>Redis: XADD task:output (tool result, done)
+  API-->>Client: SSE resumes (tool result -> done)
+
+  Note over Client,API: connection ends (SSE_STREAM_END): explicit close, network drop, or proxy timeout
+  Client->>Client: exponential backoff (1s, 2s, 4s ... capped 30s)
+  Client->>API: GET /sessions/{id}/events?latest=true (paginate backward by before cursor)
+  API->>DB: paginated replay by (session_id, seq)
+  DB-->>API: persisted events only - transient (message_delta/reasoning_delta/tool_args_delta) dropped
+  API-->>Client: events page (prev_cursor, has_earlier)
+  Client->>API: POST /sessions/{id}/chat (empty body, resume event_id=last seq)
+  API->>Redis: XREAD from resume offset
+  API-->>Client: SSE live stream resumes
+```
+
+The decision-approval step and the reconnect step share the same shape: the API records the durable fact (an `agent_tool_approve`/`agent_tool_reject` audit row, or a caught-up event page) *before* the client re-attaches to the live tail, never after. `decide_approval_call` and the `resume()` call that performs `consume_approval_batch` both run inside the Worker's flow (`react.py`), not the API process — the API's only role in the approval hop is to audit the decision and dispatch it. On reconnect, the client unconditionally runs `syncMissingEvents` (`GET .../events?latest=true`, paginating backward until it reaches the last known persisted sequence) before resuming the live tail with an empty `POST /chat` — this is not a live-vs-replay choice, every reconnect does both steps in that order. The replay call only ever returns events written to `session_events`; the three truly transient types (`message_delta`, `reasoning_delta`, `tool_args_delta`) never reach that table, so a reconnect can lose at most an in-progress text/reasoning delta, never a `wait`/`tool`/`approval`/`done` event. `debug_item` is not transient — it is persisted like any other event and is simply gated behind `include_debug` on both the live and replay paths. After two failed reconnect attempts the UI reports the stream as `stale` rather than retrying silently forever.
+
 ## RunOutcome and terminal transition contract
 
 Flows return an explicit `RunOutcome`; generator exhaustion and presentation

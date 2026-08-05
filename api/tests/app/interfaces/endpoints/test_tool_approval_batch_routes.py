@@ -11,7 +11,7 @@ from app.domain.models.tool_approval import (
     ToolApprovalBatch,
 )
 from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
-from app.interfaces.endpoints import session_routes
+from app.interfaces.endpoints.session import approval_routes
 
 
 class _GovernanceRepository:
@@ -119,9 +119,9 @@ async def test_pending_approval_route_returns_complete_ordered_batch(
     ctx,
 ):
     uow = _Uow(approval_batch)
-    monkeypatch.setattr(session_routes, "get_uow", lambda: uow)
+    monkeypatch.setattr(approval_routes, "get_uow", lambda: uow)
 
-    response = await session_routes.get_pending_tool_approval_batch(
+    response = await approval_routes.get_pending_tool_approval_batch(
         "s1",
         ctx,
     )
@@ -140,9 +140,9 @@ async def test_batch_decision_route_approves_every_pending_call_in_order(
     ctx,
 ):
     uow = _Uow(approval_batch)
-    monkeypatch.setattr(session_routes, "get_uow", lambda: uow)
+    monkeypatch.setattr(approval_routes, "get_uow", lambda: uow)
 
-    response = await session_routes.decide_tool_approval_batch(
+    response = await approval_routes.decide_tool_approval_batch(
         "s1",
         approval_batch.id,
         {"action": "approve"},
@@ -164,9 +164,9 @@ async def test_batch_route_approve_same_updates_session_tool_allowance(
     ctx,
 ):
     uow = _Uow(approval_batch)
-    monkeypatch.setattr(session_routes, "get_uow", lambda: uow)
+    monkeypatch.setattr(approval_routes, "get_uow", lambda: uow)
 
-    await session_routes.decide_tool_approval_batch(
+    await approval_routes.decide_tool_approval_batch(
         "s1",
         approval_batch.id,
         {"action": "approve_same", "tool_call_ids": ["tc2"]},
@@ -186,8 +186,8 @@ async def test_generic_approve_does_not_expand_an_explicit_partial_decision(
     ctx,
 ):
     uow = _Uow(approval_batch)
-    monkeypatch.setattr(session_routes, "get_uow", lambda: uow)
-    await session_routes.decide_tool_approval_batch(
+    monkeypatch.setattr(approval_routes, "get_uow", lambda: uow)
+    await approval_routes.decide_tool_approval_batch(
         "s1",
         approval_batch.id,
         {"action": "approve", "tool_call_ids": ["tc1"]},
@@ -195,7 +195,7 @@ async def test_generic_approve_does_not_expand_an_explicit_partial_decision(
         ctx.principal,
     )
 
-    response = await session_routes.decide_tool_approval_batch(
+    response = await approval_routes.decide_tool_approval_batch(
         "s1",
         approval_batch.id,
         {"action": "approve"},
@@ -217,8 +217,8 @@ async def test_explicit_identical_retry_preserves_original_decision_metadata(
     ctx,
 ):
     uow = _Uow(approval_batch)
-    monkeypatch.setattr(session_routes, "get_uow", lambda: uow)
-    first_response = await session_routes.decide_tool_approval_batch(
+    monkeypatch.setattr(approval_routes, "get_uow", lambda: uow)
+    first_response = await approval_routes.decide_tool_approval_batch(
         "s1",
         approval_batch.id,
         {"action": "approve", "tool_call_ids": ["tc1"]},
@@ -227,7 +227,7 @@ async def test_explicit_identical_retry_preserves_original_decision_metadata(
     )
     original = first_response.data["calls"][0]
 
-    response = await session_routes.decide_tool_approval_batch(
+    response = await approval_routes.decide_tool_approval_batch(
         "s1",
         approval_batch.id,
         {"action": "approve", "tool_call_ids": ["tc1"]},
@@ -251,8 +251,8 @@ async def test_explicit_conflicting_retry_surfaces_immutable_decision_conflict(
     ctx,
 ):
     uow = _Uow(approval_batch)
-    monkeypatch.setattr(session_routes, "get_uow", lambda: uow)
-    await session_routes.decide_tool_approval_batch(
+    monkeypatch.setattr(approval_routes, "get_uow", lambda: uow)
+    await approval_routes.decide_tool_approval_batch(
         "s1",
         approval_batch.id,
         {"action": "approve", "tool_call_ids": ["tc1"]},
@@ -261,7 +261,7 @@ async def test_explicit_conflicting_retry_surfaces_immutable_decision_conflict(
     )
 
     with pytest.raises(ValueError, match="already decided"):
-        await session_routes.decide_tool_approval_batch(
+        await approval_routes.decide_tool_approval_batch(
             "s1",
             approval_batch.id,
             {"action": "reject", "tool_call_ids": ["tc1"]},
@@ -286,8 +286,8 @@ async def test_explicit_approve_same_retry_does_not_grant_new_allowance(
     ctx,
 ):
     uow = _Uow(approval_batch)
-    monkeypatch.setattr(session_routes, "get_uow", lambda: uow)
-    await session_routes.decide_tool_approval_batch(
+    monkeypatch.setattr(approval_routes, "get_uow", lambda: uow)
+    await approval_routes.decide_tool_approval_batch(
         "s1",
         approval_batch.id,
         {"action": "approve", "tool_call_ids": ["tc1"]},
@@ -295,7 +295,7 @@ async def test_explicit_approve_same_retry_does_not_grant_new_allowance(
         ctx.principal,
     )
 
-    await session_routes.decide_tool_approval_batch(
+    await approval_routes.decide_tool_approval_batch(
         "s1",
         approval_batch.id,
         {"action": "approve_same", "tool_call_ids": ["tc1"]},
@@ -329,9 +329,9 @@ async def test_whole_batch_reject_only_decides_pending_mixed_batch_calls(
         update={"calls": [policy_call, approval_batch.calls[1]]}
     )
     uow = _Uow(mixed_batch)
-    monkeypatch.setattr(session_routes, "get_uow", lambda: uow)
+    monkeypatch.setattr(approval_routes, "get_uow", lambda: uow)
 
-    response = await session_routes.decide_tool_approval_batch(
+    response = await approval_routes.decide_tool_approval_batch(
         "s1",
         mixed_batch.id,
         {"action": "reject"},
@@ -364,9 +364,9 @@ async def test_approve_same_only_allows_calls_explicitly_approved_by_action(
         update={"calls": [policy_call, approval_batch.calls[1]]}
     )
     uow = _Uow(mixed_batch)
-    monkeypatch.setattr(session_routes, "get_uow", lambda: uow)
+    monkeypatch.setattr(approval_routes, "get_uow", lambda: uow)
 
-    await session_routes.decide_tool_approval_batch(
+    await approval_routes.decide_tool_approval_batch(
         "s1",
         mixed_batch.id,
         {"action": "approve_same"},

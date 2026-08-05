@@ -1,18 +1,17 @@
 // @vitest-environment jsdom
 
 import { act, createRef } from "react";
-import { createRoot } from "react-dom/client";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { mockNextIntl } from "@/test-utils/mocks";
+import { renderComponent } from "@/test-utils/render";
 
 const mocks = vi.hoisted(() => ({
   graphProps: vi.fn(),
   pagerProps: vi.fn(),
 }));
 
-vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string, values?: Record<string, string>) =>
-    values ? `${key}:${values.version}` : key,
-}));
+vi.mock("next-intl", () => mockNextIntl());
 vi.mock("@/components/knowledge/knowledge-graph", () => ({
   KnowledgeGraph: (props: unknown) => {
     mocks.graphProps(props);
@@ -35,11 +34,6 @@ vi.mock("@/components/ui/tabs", () => ({
 import { KnowledgeContextPanel } from "./knowledge-context-panel";
 
 describe("KnowledgeContextPanel", () => {
-  beforeAll(() => {
-    (
-      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-    ).IS_REACT_ACT_ENVIRONMENT = true;
-  });
   afterEach(() => {
     mocks.graphProps.mockReset();
     mocks.pagerProps.mockReset();
@@ -48,15 +42,9 @@ describe("KnowledgeContextPanel", () => {
 
   it("uses the bound version for graph and preserves citation version/revision for paging", async () => {
     const sourceRef = createRef<((value: string) => void) | null>();
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <KnowledgeContextPanel knowledgeBaseId="kb1" versionId="v7" onSourceClickRef={sourceRef} />,
-      );
-      await Promise.resolve();
-    });
+    const { container, unmount } = await renderComponent(
+      <KnowledgeContextPanel knowledgeBaseId="kb1" versionId="v7" onSourceClickRef={sourceRef} />,
+    );
 
     expect(mocks.graphProps).toHaveBeenCalledWith({
       knowledgeBaseId: "kb1",
@@ -85,6 +73,6 @@ describe("KnowledgeContextPanel", () => {
       page: 3,
       expectedRevisionId: "r9",
     });
-    await act(async () => root.unmount());
+    await unmount();
   });
 });

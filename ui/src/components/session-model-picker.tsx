@@ -1,20 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Cpu } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { Cpu } from "lucide-react";
 
-import { InlineOptionPicker } from "@/components/inline-option-picker";
+import { InlineOptionPicker } from "@/components/session/inline-option-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
+import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
 import {
   filterSupportedModels,
   loadModels,
   onModelsCacheInvalidated,
   resolveDefaultModelId,
 } from "@/lib/api/models-cache";
-import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
 import type { LLMModel } from "@/lib/api/types";
 import { useAuth } from "@/providers/auth-provider";
 import { useLoginPrompt } from "@/providers/login-prompt-provider";

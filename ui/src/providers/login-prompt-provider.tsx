@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { LoginDialog } from "@/components/login-dialog";
+
 import { AUTH_REQUIRED_EVENT } from "@/lib/auth-events";
 
 type LoginPromptContextValue = {

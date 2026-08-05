@@ -53,10 +53,11 @@ class SupervisorService:
     """Supervisor服务"""
 
     def __init__(self) -> None:
-        """构造函数，完成supervisor服务链接"""
-        # 1.连接supervisor配置
+        """构造函数，完成supervisor服务初始化（rpc连接惰性化，首次调用时才真正连接）"""
+        # 1.连接supervisor配置（惰性：此处只记录socket路径，不在构造时连接，
+        #   使得没有supervisor.sock的环境（如CI）也能实例化该服务）
         self.rpc_url = "/tmp/supervisor.sock"
-        self._connect_rpc()
+        self.server = None
 
         # 2.supervisor超时配置
         settings = get_settings()
@@ -123,11 +124,25 @@ class SupervisorService:
             logger.error(f"连接Supervisor服务失败: {str(e)}")
             raise BadRequestException(f"连接Supervisor服务失败: {str(e)}")
 
-    @classmethod
-    async def _call_rpc(cls, method, *args) -> Any:
-        """根据传递的方法+参数调用rpc方法"""
+    async def _call_rpc(self, method_name: str, *args) -> Any:
+        """根据传递的方法名(如'supervisor.getAllProcessInfo')+参数调用rpc方法。
+
+        惰性连接：首次调用时才真正建立到 supervisor.sock 的RPC连接，
+        使得没有该socket文件的环境（如CI）也能实例化SupervisorService；
+        连不上时行为不变，仍抛出BadRequestException，只是触发时点从构造函数
+        挪到了首次调用本方法。
+        """
         try:
+            if self.server is None:
+                self._connect_rpc()
+
+            method = self.server
+            for part in method_name.split("."):
+                method = getattr(method, part)
+
             return await asyncio.to_thread(method, *args)
+        except BadRequestException:
+            raise
         except Exception as e:
             logger.error(f"RPC方法调用失败: {str(e)}")
             raise BadRequestException(f"RPC方法调用失败: {str(e)}")
@@ -135,7 +150,7 @@ class SupervisorService:
     async def get_all_processes(self) -> List[ProcessInfo]:
         """获取当前supervisor管理的所有进程信息"""
         try:
-            processes = await self._call_rpc(self.server.supervisor.getAllProcessInfo)
+            processes = await self._call_rpc("supervisor.getAllProcessInfo")
             return [ProcessInfo(**process) for process in processes]
         except Exception as e:
             logger.error(f"获取进程信息失败: {str(e)}")
@@ -144,7 +159,7 @@ class SupervisorService:
     async def stop_all_processes(self) -> SupervisorActionResult:
         """停止supervisor管理的所有进程"""
         try:
-            result = await self._call_rpc(self.server.supervisor.stopAllProcesses)
+            result = await self._call_rpc("supervisor.stopAllProcesses")
             return SupervisorActionResult(status="stopped", result=result)
         except Exception as e:
             logger.error(f"停止supervisor所有进程服务失败: {str(e)}")
@@ -153,7 +168,7 @@ class SupervisorService:
     async def shutdown(self) -> SupervisorActionResult:
         """关闭supervisord服务"""
         try:
-            shutdown_result = await self._call_rpc(self.server.supervisor.shutdown)
+            shutdown_result = await self._call_rpc("supervisor.shutdown")
             return SupervisorActionResult(status="shutdown", shutdown_result=shutdown_result)
         except Exception as e:
             logger.error(f"关闭supervisord服务失败: {str(e)}")
@@ -162,8 +177,8 @@ class SupervisorService:
     async def restart(self) -> SupervisorActionResult:
         """重启Supervisor管理的进程"""
         try:
-            stop_result = await self._call_rpc(self.server.supervisor.stopAllProcesses)
-            start_result = await self._call_rpc(self.server.supervisor.startAllProcesses)
+            stop_result = await self._call_rpc("supervisor.stopAllProcesses")
+            start_result = await self._call_rpc("supervisor.startAllProcesses")
             return SupervisorActionResult(
                 status="restarted",
                 stop_result=stop_result,
@@ -266,7 +281,7 @@ class SupervisorService:
     async def stop_process(self, name: str) -> SupervisorActionResult:
         """Stop a single supervisor-managed process."""
         try:
-            result = await self._call_rpc(self.server.supervisor.stopProcess, name)
+            result = await self._call_rpc("supervisor.stopProcess", name)
             return SupervisorActionResult(status="stopped", result=result, process=name)
         except Exception as e:
             logger.error("停止进程[%s]失败: %s", name, e)
@@ -275,7 +290,7 @@ class SupervisorService:
     async def start_process(self, name: str) -> SupervisorActionResult:
         """Start a single supervisor-managed process."""
         try:
-            result = await self._call_rpc(self.server.supervisor.startProcess, name)
+            result = await self._call_rpc("supervisor.startProcess", name)
             return SupervisorActionResult(status="started", result=result, process=name)
         except Exception as e:
             logger.error("启动进程[%s]失败: %s", name, e)

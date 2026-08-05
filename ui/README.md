@@ -23,7 +23,6 @@ ui/
 │   │   ├── sessions/      # Session detail
 │   │   ├── codebase/      # Code knowledge base
 │   │   ├── knowledge/     # Document knowledge base
-│   │   ├── marketplace/   # Marketplace mini-apps
 │   │   ├── automation/    # Scheduled jobs
 │   │   ├── patrols/       # Patrol list, create wizard, Pack detail
 │   │   ├── patrol-runs/   # Authoritative Run report and evidence
@@ -33,10 +32,20 @@ ui/
 │   │   ├── register/      # Registration
 │   │   ├── invitations/   # Team invitation accept
 │   │   └── share/         # Public artifact share
-│   ├── components/        # UI components
+│   ├── components/        # UI components, grouped by domain
+│   │   ├── admin/         # Admin dashboard, governance profile view
+│   │   ├── codebase/      # Codebase library, import, evidence panel
+│   │   ├── knowledge/     # Knowledge base library, documents, graph
+│   │   ├── patrol/        # Pack wizard, Run detail, remediation dialog/status
+│   │   ├── resource/      # Codebase/KB build candidate + version status
+│   │   ├── session/       # Chat, HITL bars, VNC, checkpoints, operator scope
 │   │   ├── settings/      # Settings tabs (models, skills, memory...)
+│   │   ├── tool-use/      # Tool execution UI
 │   │   ├── ui/            # Base Radix UI primitives
-│   │   └── tool-use/      # Tool execution UI
+│   │   ├── workspace/     # Session context panels (codebase/knowledge)
+│   │   └── *.tsx          # Root-level shared: app-shell, left-panel, app-header,
+│   │                      # mobile-bottom-nav, context-selector, markdown-content,
+│   │                      # mermaid-diagram, status-badge, workspace-switcher...
 │   ├── lib/
 │   │   └── api/           # API client modules
 │   ├── hooks/             # Custom hooks
@@ -55,7 +64,6 @@ ui/
 | `/sessions/[id]` | Streaming chat, HITL, VNC, artifacts | Sidebar + header |
 | `/codebase`, `/codebase/[id]` | Code import and Ask/Agent | Sidebar + header |
 | `/knowledge`, `/knowledge/[id]` | Document KB and RAG | Sidebar + header |
-| `/marketplace` | LLM mini-apps | Sidebar + header |
 | `/automation` | Cron/webhook jobs | Sidebar + header |
 | `/patrols`, `/patrols/new`, `/patrols/[id]` | Feature-flagged Patrol list, wizard, Pack lifecycle | Sidebar + header |
 | `/patrol-runs/[id]` | Check results, Findings, signed evidence download | Sidebar + header |
@@ -68,13 +76,14 @@ ui/
 | `/admin/audit` | Audit log viewer | Admin layout |
 | `/admin/compliance` | Evidence center | Admin layout |
 | `/admin/compliance/report` | Compliance report export | Admin layout |
+| `/admin/compliance/sessions/[sessionId]` | Session governance profile (`GovernanceProfileView`) | Admin layout |
 | `/invitations/[token]` | Accept invitation | No shell |
 | `/share/artifact/[token]` | Public artifact view | No shell |
 
 **Navigation**:
 
-- **Desktop**: Left panel holds session list; Codebase, Knowledge, Marketplace, and Automation are in the **header workspace dropdown** (`app-header.tsx`).
-- **Mobile**: `MobileBottomNav` exposes chat, codebase, knowledge, and marketplace; Automation, Teams, Settings, and Admin are in the **More** sheet.
+- **Desktop**: Left panel holds session list; Codebase, Knowledge, and Automation are in the **header workspace dropdown** (`app-header.tsx`).
+- **Mobile**: `MobileBottomNav` exposes chat, codebase, and knowledge; Patrol (when `opsPatrolEnabled`), Automation, Teams, Settings, and Admin are in the **More** sheet.
 - Ops Patrol navigation appears only when global `feature_flags.enable_ops_patrol` is enabled; auditors receive read-only views and no mutation controls.
 - `/codebase/[id]` and `/knowledge/[id]` redirect to a new Ask session — they are not standalone detail pages.
 
@@ -101,7 +110,7 @@ Contributors should follow these conventions (also enforced in `ui/.cursor/rules
 
 - **TypeScript strict mode**; prefer `type` over `interface`; path alias `@/*` → `./src/*`
 - **App Router**: server components by default; add `"use client"` only when needed; pages in `src/app/**/page.tsx`
-- **Components**: base UI in `@/components/ui/` (shadcn/Radix); business components in `@/components/`; use `cn()` and CVA for variants
+- **Components**: base UI primitives in `@/components/ui/` (shadcn/Radix); business components grouped by domain under `@/components/{admin,codebase,knowledge,patrol,resource,session,settings,tool-use,workspace}/`; cross-domain shared components (layout shell, `context-selector.tsx`, `markdown-content.tsx`, `mermaid-diagram.tsx`, `status-badge.tsx`, etc.) stay at the `@/components/` root; use `cn()` and CVA for variants
 - **Hooks**: extract complex state/effects from large pages into `src/hooks/`
 - **Imports**: React/Next → third-party → `@/components` → `@/lib`/`@/hooks` → relative
 - **Formatting**: Prettier (100 cols, double quotes); run `npm run format:check` before PR
@@ -126,10 +135,10 @@ Core fetch layer: `src/lib/api/fetch.ts` — cookie auth, CSRF, `X-Workspace-Id`
 | `skills.ts`, `memory.ts` | Skills and memory |
 | `admin.ts`, `team.ts` | Admin and teams |
 | `knowledge.ts`, `codebase.ts`, `file.ts` | Knowledge bases, codebases, files |
-| `service-keys.ts`, `notifications.ts`, `compliance.ts` | Service API keys, notifications, compliance |
+| `service-keys.ts`, `notifications.ts`, `compliance.ts` | Service API keys, notifications, compliance + session governance profile |
 | `constants.ts` | Shared limits (`CODEBASE_ZIP_MAX_BYTES` = 200 MB, must match nginx) |
 | `artifacts.ts` | Artifacts and share |
-| `patrols.ts` | Pack/Run/Finding lifecycle, metrics, evidence download |
+| `patrols.ts` | Pack/Run/Finding lifecycle, metrics, evidence download, remediation propose/list/get |
 | `types.ts` | Shared TypeScript types |
 
 ## Local Development

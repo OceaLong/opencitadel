@@ -48,6 +48,26 @@ opsCollector:
       cpu: 500m
       memory: 256Mi
 
+opsActuator:
+  enabled: false
+  image:
+    repository: opencitadel-ops-actuator
+    tag: latest
+    pullPolicy: IfNotPresent
+  targetRef: opencitadel-local
+  allowedNamespaces: [opencitadel]
+  allowedWorkloads: {}
+  serviceAccount:
+    create: true
+    name: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
 rbac:
   create: true
 
@@ -201,7 +221,6 @@ appConfig:
     rate_limit_enabled: true
     rate_limit_per_minute: 120
     sessions_stream_interval_seconds: 15
-    marketplace_max_upload_bytes: 26214400
   agent_config:
     max_iterations: 100
     max_retries: 3
@@ -312,7 +331,6 @@ appConfig:
     dlq_replay_interval_seconds: 5
   feature_flags:
     enable_agent_features: true
-    enable_marketplace_llm_apps: true
     enable_embeddings: true
     enable_image_generation: true
     enable_parallel_step_execution: false

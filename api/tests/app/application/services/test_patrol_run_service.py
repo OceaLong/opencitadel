@@ -10,6 +10,7 @@ from app.application.patrol_templates import load_patrol_template
 from app.application.services.patrol_run_service import PatrolRunService
 from app.domain.models.app_config import AppConfig
 from app.domain.models.patrol import (
+    PATROL_REMEDIATION_TERMINAL_STATUSES,
     PatrolEvidenceRef,
     PatrolFinding,
     PatrolFindingSeverity,
@@ -17,9 +18,13 @@ from app.domain.models.patrol import (
     PatrolObservationSubmission,
     PatrolPack,
     PatrolPackStatus,
+    PatrolRemediation,
+    PatrolRemediationAction,
+    PatrolRemediationStatus,
     PatrolRun,
     PatrolRunStatus,
     PatrolTriggerType,
+    patrol_remediation_params_hash,
 )
 from app.domain.models.scope import OwnerScope
 
@@ -30,17 +35,25 @@ class PatrolRepo:
         self.runs = {}
         self.results = {}
         self.findings = {}
+        self.remediations = {}
     async def get_pack(self, pack_id, scope=None, for_update=False): return self.pack if pack_id == self.pack.id else None
     async def save_run(self, run): self.runs[run.id] = run; return run
     async def get_run(self, run_id, scope=None, for_update=False): return self.runs.get(run_id)
     async def get_run_by_idempotency_key(self, key): return next((r for r in self.runs.values() if r.idempotency_key == key), None)
     async def get_active_run_for_pack(self, pack_id): return next((r for r in self.runs.values() if r.pack_id == pack_id and r.status.value in {"queued", "running"}), None)
-    async def save_check_results(self, items): self.results.update({i.check_id: i for i in items}); return items
+    async def save_check_results(self, items):
+        for item in items:
+            self.results[item.id] = item
+        return items
     async def list_check_results(self, run_id, scope=None): return [v for v in self.results.values() if v.run_id == run_id]
     async def get_open_finding_by_fingerprint(self, fingerprint): return next((f for f in self.findings.values() if f.fingerprint == fingerprint and f.status.value in {"open", "acknowledged"}), None)
     async def save_finding(self, finding): self.findings[finding.id] = finding; return finding
+    async def get_finding(self, finding_id, scope=None, for_update=False): return self.findings.get(finding_id)
     async def list_findings(self, run_id, scope=None): return [v for v in self.findings.values() if v.run_id == run_id]
     async def get_run_by_session_id(self, session_id): return next((r for r in self.runs.values() if r.session_id == session_id), None)
+    async def get_remediation_by_session_id(self, session_id): return next((r for r in self.remediations.values() if r.session_id == session_id), None)
+    async def get_remediation_by_recheck_run_id(self, run_id): return next((r for r in self.remediations.values() if r.recheck_run_id == run_id), None)
+    async def save_remediation(self, remediation): self.remediations[remediation.id] = remediation; return remediation
     async def list_runs(self, scope=None, **filters):
         items = [run for run in self.runs.values() if not filters.get("pack_id") or run.pack_id == filters["pack_id"]]
         return sorted(items, key=lambda run: run.created_at, reverse=True)[: filters.get("limit", 20)]
@@ -258,3 +271,252 @@ async def test_cancel_requests_cooperative_task_stop():
     )
     assert cancelled.status == PatrolRunStatus.CANCELLED
     task_state.request_cancel.assert_awaited_once_with("task-1")
+
+
+def _k8s_evidence(observation: dict, target_ref: str) -> list[PatrolEvidenceRef]:
+    digest = hashlib.sha256(json.dumps(observation, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return [
+        PatrolEvidenceRef(type="summary", ref="collector://evidence/1/summary", sha256=digest, target_ref=target_ref),
+        PatrolEvidenceRef(type="resource_refs", ref="collector://evidence/1/resources", sha256=digest, target_ref=target_ref),
+    ]
+
+
+async def _finalize_original_failure(repo, service, scope) -> tuple[PatrolRun, PatrolFinding, str]:
+    """Trigger + finalize a MANUAL run whose k8s-workload-availability check
+    FAILs, producing one open Finding. Returns (run, finding, check_result_id)
+    for the caller to build a PatrolRemediation against."""
+    with patch("app.application.services.patrol_run_service.get_runtime_config", return_value=feature_config()):
+        run = await service.trigger_pack(repo.pack.id, scope, "user-1", idempotency_key="orig-1", dispatch=False)
+    observation = {"unavailable_replicas": 1, "not_ready_workloads": ["deployment/api"]}
+    submission = PatrolObservationSubmission(
+        check_id="k8s-workload-availability",
+        observation=observation,
+        evidence_refs=_k8s_evidence(observation, repo.pack.config.target_ref),
+    )
+    finalized = await service.finalize_run(
+        run_id=run.id, session_id=run.session_id, idempotency_key=run.submission_idempotency_key,
+        collector_capability_hash=run.collector_capability_hash, submissions=[submission],
+    )
+    assert finalized.fail_count == 1
+    finding = next(iter(repo.findings.values()))
+    check_result = next(iter(v for v in repo.results.values() if v.run_id == run.id))
+    return run, finding, check_result.id
+
+
+def _remediation_for(run: PatrolRun, finding: PatrolFinding, check_result_id: str) -> PatrolRemediation:
+    action, namespace, workload, kind, params = (
+        PatrolRemediationAction.RESTART_WORKLOAD, "opencitadel", "deployment/api", "Deployment", {},
+    )
+    return PatrolRemediation(
+        pack_id=run.pack_id, run_id=run.id, finding_id=finding.id, check_result_id=check_result_id,
+        fingerprint=finding.fingerprint, action=action, target_namespace=namespace, target_workload=workload,
+        target_kind=kind, params=params, params_hash=patrol_remediation_params_hash(action.value, namespace, workload, kind, params),
+        idempotency_key="rem:1", status=PatrolRemediationStatus.EXECUTED, created_by="user-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_remediation_run_pass_resolves_finding_and_verifies_remediation():
+    """finalize_run(trigger_type=REMEDIATION): the recheck run's check now
+    PASSes -> the original open Finding is auto-resolved (decided_by =
+    "system:remediation", reason references the remediation) and the
+    remediation itself moves to VERIFIED."""
+    repo = PatrolRepo(make_pack())
+    service = PatrolRunService(lambda: Uow(repo))
+    scope = OwnerScope.personal("user-1")
+    run, finding, check_result_id = await _finalize_original_failure(repo, service, scope)
+
+    remediation = _remediation_for(run, finding, check_result_id)
+    repo.remediations[remediation.id] = remediation
+
+    with patch("app.application.services.patrol_run_service.get_runtime_config", return_value=feature_config()):
+        recheck_run = await service.trigger_pack(
+            repo.pack.id, scope, "user-1", idempotency_key="recheck-1",
+            trigger_type=PatrolTriggerType.REMEDIATION, dispatch=False,
+        )
+    remediation.recheck_run_id = recheck_run.id
+    repo.remediations[remediation.id] = remediation
+
+    pass_observation = {"unavailable_replicas": 0, "not_ready_workloads": []}
+    pass_submission = PatrolObservationSubmission(
+        check_id="k8s-workload-availability",
+        observation=pass_observation,
+        evidence_refs=_k8s_evidence(pass_observation, repo.pack.config.target_ref),
+    )
+    result = await service.finalize_run(
+        run_id=recheck_run.id, session_id=recheck_run.session_id, idempotency_key=recheck_run.submission_idempotency_key,
+        collector_capability_hash=recheck_run.collector_capability_hash, submissions=[pass_submission],
+    )
+
+    assert result.pass_count == 1
+    resolved_finding = repo.findings[finding.id]
+    assert resolved_finding.status == PatrolFindingStatus.RESOLVED
+    assert resolved_finding.decided_by == "system:remediation"
+    assert remediation.id in (resolved_finding.decision_reason or "")
+    assert repo.remediations[remediation.id].status == PatrolRemediationStatus.VERIFIED
+
+
+@pytest.mark.asyncio
+async def test_remediation_run_still_failing_marks_remediation_failed():
+    """finalize_run(trigger_type=REMEDIATION): the recheck run's check still
+    FAILs -> the remediation moves to FAILED(error_code="recheck_failed");
+    the Finding is left exactly as the normal WARN/FAIL/ERROR dedup path
+    already handles it (still open, occurrence_count incremented)."""
+    repo = PatrolRepo(make_pack())
+    service = PatrolRunService(lambda: Uow(repo))
+    scope = OwnerScope.personal("user-1")
+    run, finding, check_result_id = await _finalize_original_failure(repo, service, scope)
+
+    remediation = _remediation_for(run, finding, check_result_id)
+    repo.remediations[remediation.id] = remediation
+
+    with patch("app.application.services.patrol_run_service.get_runtime_config", return_value=feature_config()):
+        recheck_run = await service.trigger_pack(
+            repo.pack.id, scope, "user-1", idempotency_key="recheck-2",
+            trigger_type=PatrolTriggerType.REMEDIATION, dispatch=False,
+        )
+    remediation.recheck_run_id = recheck_run.id
+    repo.remediations[remediation.id] = remediation
+
+    still_failing_observation = {"unavailable_replicas": 1, "not_ready_workloads": ["deployment/api"]}
+    fail_submission = PatrolObservationSubmission(
+        check_id="k8s-workload-availability",
+        observation=still_failing_observation,
+        evidence_refs=_k8s_evidence(still_failing_observation, repo.pack.config.target_ref),
+    )
+    result = await service.finalize_run(
+        run_id=recheck_run.id, session_id=recheck_run.session_id, idempotency_key=recheck_run.submission_idempotency_key,
+        collector_capability_hash=recheck_run.collector_capability_hash, submissions=[fail_submission],
+    )
+
+    assert result.fail_count == 1
+    assert repo.findings[finding.id].status == PatrolFindingStatus.OPEN
+    updated = repo.remediations[remediation.id]
+    assert updated.status == PatrolRemediationStatus.FAILED
+    assert updated.error_code == "recheck_failed"
+
+
+@pytest.mark.asyncio
+async def test_normal_run_pass_does_not_touch_open_findings():
+    """A non-REMEDIATION run's PASS must never auto-resolve an open Finding
+    with a matching fingerprint — existing semantics (an operator must
+    explicitly decide_finding) are unchanged for MANUAL/SCHEDULE/REPLAY runs."""
+    repo = PatrolRepo(make_pack())
+    service = PatrolRunService(lambda: Uow(repo))
+    scope = OwnerScope.personal("user-1")
+    _run, finding, _check_result_id = await _finalize_original_failure(repo, service, scope)
+
+    with patch("app.application.services.patrol_run_service.get_runtime_config", return_value=feature_config()):
+        second_run = await service.trigger_pack(
+            repo.pack.id, scope, "user-1", idempotency_key="manual-2", dispatch=False,
+        )
+    pass_observation = {"unavailable_replicas": 0, "not_ready_workloads": []}
+    pass_submission = PatrolObservationSubmission(
+        check_id="k8s-workload-availability",
+        observation=pass_observation,
+        evidence_refs=_k8s_evidence(pass_observation, repo.pack.config.target_ref),
+    )
+    result = await service.finalize_run(
+        run_id=second_run.id, session_id=second_run.session_id, idempotency_key=second_run.submission_idempotency_key,
+        collector_capability_hash=second_run.collector_capability_hash, submissions=[pass_submission],
+    )
+
+    assert result.pass_count == 1
+    assert repo.findings[finding.id].status == PatrolFindingStatus.OPEN
+    assert repo.findings[finding.id].decided_by is None
+
+
+@pytest.mark.asyncio
+async def test_mark_run_failed_aborts_executed_remediation_when_recheck_run_times_out():
+    """Final-review finding I2 (part 2): a REMEDIATION-triggered recheck Run
+    that never reaches finalize_run's normal completion (here: it times out
+    while the Agent session is still QUEUED/RUNNING, so mark_run_failed is
+    what terminates it) must not leave the remediation that dispatched it
+    stuck in EXECUTED forever. Only finalize_run's recheck closure normally
+    decides EXECUTED -> VERIFIED/FAILED(recheck_failed); if the recheck run
+    itself never gets there, mark_run_failed must abort the remediation to
+    FAILED(recheck_aborted) so the Finding can accept a new proposal (EXECUTED
+    is not in PATROL_REMEDIATION_TERMINAL_STATUSES, so a stuck EXECUTED row
+    would otherwise block it forever, same as a stuck PROPOSED row)."""
+    repo = PatrolRepo(make_pack())
+    service = PatrolRunService(lambda: Uow(repo))
+    scope = OwnerScope.personal("user-1")
+    run, finding, check_result_id = await _finalize_original_failure(repo, service, scope)
+
+    remediation = _remediation_for(run, finding, check_result_id)
+    assert remediation.status == PatrolRemediationStatus.EXECUTED
+    repo.remediations[remediation.id] = remediation
+
+    with patch("app.application.services.patrol_run_service.get_runtime_config", return_value=feature_config()):
+        recheck_run = await service.trigger_pack(
+            repo.pack.id, scope, "user-1", idempotency_key="recheck-abort-1",
+            trigger_type=PatrolTriggerType.REMEDIATION, dispatch=False,
+        )
+    remediation.recheck_run_id = recheck_run.id
+    repo.remediations[remediation.id] = remediation
+
+    failed = await service.mark_run_failed(
+        recheck_run.session_id,
+        error_code="RUN_TIMEOUT",
+        error_message="Patrol exceeded 900 seconds",
+    )
+
+    assert failed.status == PatrolRunStatus.FAILED
+    aborted = repo.remediations[remediation.id]
+    assert aborted.status == PatrolRemediationStatus.FAILED
+    assert aborted.error_code == "recheck_aborted"
+    # This is the exact condition get_active_remediation_for_finding (and the
+    # DB partial unique index behind it) use to decide the Finding is free
+    # for a new proposal — FAILED must be terminal for that to hold.
+    assert aborted.status in PATROL_REMEDIATION_TERMINAL_STATUSES
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_aborts_executed_remediation_for_cancelled_recheck_run():
+    """Same as the mark_run_failed case above, but for an operator explicitly
+    cancelling a still-queued/running REMEDIATION recheck run via cancel_run
+    instead of it timing out."""
+    repo = PatrolRepo(make_pack())
+    service = PatrolRunService(lambda: Uow(repo))
+    scope = OwnerScope.personal("user-1")
+    run, finding, check_result_id = await _finalize_original_failure(repo, service, scope)
+
+    remediation = _remediation_for(run, finding, check_result_id)
+    repo.remediations[remediation.id] = remediation
+
+    with patch("app.application.services.patrol_run_service.get_runtime_config", return_value=feature_config()):
+        recheck_run = await service.trigger_pack(
+            repo.pack.id, scope, "user-1", idempotency_key="recheck-abort-2",
+            trigger_type=PatrolTriggerType.REMEDIATION, dispatch=False,
+        )
+    remediation.recheck_run_id = recheck_run.id
+    repo.remediations[remediation.id] = remediation
+
+    cancelled = await service.cancel_run(recheck_run.id, scope, "user-1")
+
+    assert cancelled.status == PatrolRunStatus.CANCELLED
+    aborted = repo.remediations[remediation.id]
+    assert aborted.status == PatrolRemediationStatus.FAILED
+    assert aborted.error_code == "recheck_aborted"
+    assert aborted.status in PATROL_REMEDIATION_TERMINAL_STATUSES
+
+
+@pytest.mark.asyncio
+async def test_mark_run_failed_does_not_touch_remediation_for_non_remediation_run():
+    """A MANUAL run timing out must never touch any remediation row — the
+    recheck-abort hook is scoped strictly to trigger_type == REMEDIATION."""
+    repo = PatrolRepo(make_pack())
+    service = PatrolRunService(lambda: Uow(repo))
+    scope = OwnerScope.personal("user-1")
+    run, finding, check_result_id = await _finalize_original_failure(repo, service, scope)
+    remediation = _remediation_for(run, finding, check_result_id)
+    repo.remediations[remediation.id] = remediation
+
+    with patch("app.application.services.patrol_run_service.get_runtime_config", return_value=feature_config()):
+        second_run = await service.trigger_pack(
+            repo.pack.id, scope, "user-1", idempotency_key="manual-timeout-1", dispatch=False,
+        )
+    await service.mark_run_failed(second_run.session_id, error_code="RUN_TIMEOUT", error_message="timeout")
+
+    assert repo.remediations[remediation.id].status == PatrolRemediationStatus.EXECUTED
+    assert repo.remediations[remediation.id].error_code is None

@@ -3,8 +3,8 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
+import type { ReactNode } from "react";
 
 import { AppHeader } from "@/components/app-header";
 import { LeftPanel } from "@/components/left-panel";
@@ -13,8 +13,8 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 
 import { useAuth } from "@/providers/auth-provider";
 import { LoginPromptProvider } from "@/providers/login-prompt-provider";
-import { SettingsDialogProvider } from "@/providers/settings-dialog-provider";
 import { SessionsProvider } from "@/providers/sessions-provider";
+import { SettingsDialogProvider } from "@/providers/settings-dialog-provider";
 
 const AUTH_PREFIXES = ["/login", "/register"];
 const SHELLLESS_PREFIXES = ["/share/artifact", "/admin", "/invitations"];

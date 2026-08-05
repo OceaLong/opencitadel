@@ -37,6 +37,13 @@ trap cleanup EXIT
 
 "$repo_dir/deploy/patrol-demo/scripts/reset-fixture.sh"
 "$repo_dir/deploy/patrol-demo/scripts/assert-read-only.sh"
+"$repo_dir/deploy/patrol-demo/scripts/assert-actuator-write-scope.sh"
+
+# Fixture 21 exercises the ops-actuator remediation flow (fail -> restart ->
+# recheck pass) and is not part of the 20-case read-only replay this script
+# otherwise drives. Off by default; opt in once an actuator wiring is
+# available to execute against.
+run_remediation_fixture=${PATROL_RUN_REMEDIATION_FIXTURE:-false}
 
 start_seconds=$SECONDS
 baseline_signature() {
@@ -60,6 +67,9 @@ verified_resets=0
 verified_live_cases=0
 for fixture in "$repo_dir"/deploy/patrol-demo/fixtures/*; do
   case_id=$(basename "$fixture")
+  if [[ "$case_id" == 21-* && "$run_remediation_fixture" != true ]]; then
+    continue
+  fi
   "$repo_dir/deploy/patrol-demo/scripts/apply-fixture.sh" "$case_id"
   case "$case_id" in
     01-*|02-*|03-*|04-*|05-*|06-*|07-*|08-*|09-*|20-*)

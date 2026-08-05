@@ -10,14 +10,14 @@
 flowchart TB
   subgraph desktop ["桌面 md+"]
     LP["LeftPanel — 会话列表 + 工作区切换"]
-    HDR["AppHeader — 工作区下拉、通知、设置齿轮"]
+    HDR["AppHeader — 工作区下拉（patrol、automation、knowledge、codebase）、通知、设置齿轮"]
     MAIN["页面内容"]
   end
   subgraph mobile ["移动端"]
     LPm["LeftPanel — 侧栏 Sheet"]
     MAINm["页面内容 — pb-mobile-nav"]
-    NAV["MobileBottomNav — 对话、代码库、知识库、应用、更多"]
-    MORE["更多 Sheet — 自动化、团队、设置、Admin"]
+    NAV["MobileBottomNav — 对话、代码库、知识库、更多"]
+    MORE["更多 Sheet — patrol、自动化、团队、设置、Admin"]
   end
   subgraph noShell ["无侧栏路由"]
     AUTH["/login /register"]
@@ -32,12 +32,67 @@ flowchart TB
 
 实现：`ui/src/components/app-shell.tsx`、`left-panel.tsx`、`app-header.tsx`、`mobile-bottom-nav.tsx`。
 
+`MobileBottomNav` 固定渲染 3 个 Tab（对话、代码库、知识库）加一个「更多」按钮；不存在「应用」Tab。Patrol 仅在 `useFeatureFlags().opsPatrolEnabled` 为真时出现——无论桌面顶栏下拉还是移动端「更多」Sheet。
+
 **导航分工**
 
-- **桌面**：Codebase、Knowledge、Marketplace、Automation 在 **顶栏工作区下拉**（`app-header.tsx`）。
-- **移动**：前四个模块在 `MobileBottomNav`；Automation、Teams、Settings、Admin 在 **更多** Sheet。
+- **桌面**：Codebase、Knowledge、Automation 在 **顶栏工作区下拉**（`app-header.tsx`）；功能开关开启时 Patrol 同样加入该下拉。
+- **移动**：`MobileBottomNav` 固定 3 个 Tab——对话、代码库、知识库；Patrol（功能开关开启时）、Automation、Teams、Settings、Admin 在第 4 个 Tab 背后的 **更多** Sheet。
 - **Ops Patrol**：顶栏/移动导航受功能开关控制；`/patrols`、`/patrols/new`、`/patrols/[id]`、`/patrol-runs/[id]` 使用常规认证 Shell。Auditor 视图隐藏变更控件。
 - **会话工具栏**（模型、Skill、上下文）：桌面内联；移动端收入 `ChatOptionsSheet`。
+
+## 组件域
+
+`ui/src/components/` 划分为十个域，加上根级共享组件（完整目录树见 [UI README — 项目结构](../../ui/README.zh-CN.md#项目结构)）：
+
+```mermaid
+mindmap
+  root((ui/src/components))
+    admin
+      admin-layout-shell
+      governance-profile-view
+      usage-charts
+    codebase
+      codebase-library
+      code-evidence-panel
+    knowledge
+      knowledge-library
+      knowledge-graph
+    patrol
+      pack-wizard
+      remediation-dialog
+      remediation-status
+    resource
+      build-candidate-panel
+      resource-version-status
+    session
+      chat-input
+      approval-bar
+      gate-actions-bar
+      vnc-overlay
+    settings
+      hitl-settings
+      runtime-settings
+    tool-use
+      bash-tool
+      browser-tool
+      mcp-tool
+    ui
+      button
+      dialog
+      sidebar
+    workspace
+      session-context-panel
+      codebase-context-panel
+    根级共享
+      app-shell
+      left-panel
+      mobile-bottom-nav
+      context-selector
+      markdown-content
+      mermaid-diagram
+      status-badge
+```
 
 ## 设置弹窗（八 Tab）
 
@@ -87,6 +142,8 @@ flowchart LR
   Replay["GET /sessions/{id}/events"] --> Merge
 ```
 
+`session-events.ts` 将事件形态归一化、时间线格式化、Debug 面板载荷整形分别委托给 `lib/session-events/{normalize,format,debug}.ts`。
+
 | SSE 事件 | UI 组件 / 行为 |
 |----------|----------------|
 | `clarify` | `clarify-questions.tsx` |
@@ -101,14 +158,23 @@ flowchart LR
 
 ## HITL 组件映射
 
+`pending_phase` **不是**线性链——四个取值是 `running` 之上互斥、可独立到达的门控。只有 `tool_approval`（持久化的 `ToolApprovalBatch`）拥有独立的 `rejected`/`expired` 终态；`clarify`/`plan_approval`/`takeover` 无论用户如何回应都会清空回到 `running`（计划 `reject` 会重新规划，不会结束会话）。见 [检查点与 HITL — 持久化审批批次](checkpoints-and-hitl.zh-CN.md#持久化审批批次)。
+
 ```mermaid
 stateDiagram-v2
-  [*] --> clarify
-  clarify --> plan_approval
-  plan_approval --> tool_approval
-  tool_approval --> takeover
-  takeover --> running
-  running --> [*]
+  [*] --> running
+  running --> clarify: pending_phase=clarify
+  running --> plan_approval: pending_phase=plan_approval
+  running --> tool_approval: pending_phase=tool_approval
+  running --> takeover: pending_phase=takeover
+  clarify --> running: 用户回答
+  plan_approval --> running: approve / approve_with_edits / reject
+  tool_approval --> running: approve / approve_same
+  tool_approval --> rejected: reject
+  tool_approval --> expired: batch expires_at elapsed
+  rejected --> running: 注入失败 ToolResult，循环继续
+  expired --> running: 注入失败 ToolResult，循环继续
+  takeover --> running: takeover / skip
 ```
 
 | `pending_phase` | UI | 恢复前缀 |
@@ -123,6 +189,10 @@ stateDiagram-v2
 检查点恢复：`checkpoint-restore-dialog.tsx` → `POST /api/sessions/{id}/checkpoints/{id}/restore`。
 
 Web Operator 归属：`operator-scope-dialog.tsx`（Skill 为 `web-operator` 时）。
+
+Patrol 修复复用同一个 `tool_approval` 门控与 `gate-actions-bar.tsx` 完成人工审批：`remediation-dialog.tsx` 组装提案，`remediation-status.tsx` 渲染最终的 `PatrolRemediationStatus`（`proposed`/`executing`/`executed`/`verified`/`failed`/`cancelled`——见 [Ops Patrol 架构](ops-patrol.zh-CN.md)）。会话级治理摘要（能力收窄、审批批次、终态结果、审计链）通过 `admin/governance-profile-view.tsx` 在 `/admin/compliance/sessions/[sessionId]` 渲染。
+
+以上 HITL 与修复相关组件均位于 `ui/src/components/session/`（会话域）或 `ui/src/components/patrol/`（修复专属），而非包根目录。
 
 见 [检查点与 HITL](checkpoints-and-hitl.zh-CN.md)。
 
@@ -162,7 +232,7 @@ Web Operator 归属：`operator-scope-dialog.tsx`（Skill 为 `web-operator` 时
 ## LLM 状态 UI
 
 - 轮询 `GET /api/llm/status`（`llm-status.ts`）
-- AppHeader Badge；Marketplace 在 Provider 降级时展示
+- AppHeader Badge；Provider 降级时展示
 
 ## 相关文档
 

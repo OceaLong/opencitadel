@@ -1,17 +1,15 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
-import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sessionApi } from "@/lib/api/session";
 import type { SessionResourceBinding } from "@/lib/api/types";
 
-import { SessionResourceVersion } from "./session-resource-version";
+import { mockNextIntl } from "@/test-utils/mocks";
+import { renderComponent } from "@/test-utils/render";
 
-(
-  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-).IS_REACT_ACT_ENVIRONMENT = true;
+import { SessionResourceVersion } from "./session-resource-version";
 
 vi.mock("@/lib/api/session", () => ({
   sessionApi: {
@@ -24,13 +22,12 @@ vi.mock("@/lib/api/session", () => ({
     }),
   },
 }));
-vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string, values?: Record<string, string>) =>
-    ({
-      upgradeContext: "升级上下文",
-      confirmUpgrade: `确认升级到 ${values?.version ?? ""}`,
-    })[key] ?? key,
-}));
+vi.mock("next-intl", () =>
+  mockNextIntl({
+    upgradeContext: "升级上下文",
+    confirmUpgrade: (values) => `确认升级到 ${values?.version ?? ""}`,
+  }),
+);
 
 describe("SessionResourceVersion", () => {
   beforeEach(() => {
@@ -59,36 +56,30 @@ describe("SessionResourceVersion", () => {
       .mockResolvedValueOnce([bindingV2]);
     vi.mocked(sessionApi.getAvailableResourceVersions).mockResolvedValue([bindingV1, bindingV2]);
     const onBindingsChanged = vi.fn();
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <SessionResourceVersion
-          sessionId="s1"
-          bindings={[bindingV1]}
-          versions={[
-            { resource_kind: "knowledge_base", version_id: "v1" },
-            { resource_kind: "knowledge_base", version_id: "v2" },
-          ]}
-          onBindingsChanged={onBindingsChanged}
-          historicalMessages={[
-            {
-              id: "old",
-              resource_bindings: [
-                {
-                  binding_id: "b0",
-                  resource_kind: "knowledge_base",
-                  resource_id: "kb1",
-                  version_id: "v1",
-                },
-              ],
-            },
-          ]}
-        />,
-      );
-      await Promise.resolve();
-    });
+    const { container, unmount } = await renderComponent(
+      <SessionResourceVersion
+        sessionId="s1"
+        bindings={[bindingV1]}
+        versions={[
+          { resource_kind: "knowledge_base", version_id: "v1" },
+          { resource_kind: "knowledge_base", version_id: "v2" },
+        ]}
+        onBindingsChanged={onBindingsChanged}
+        historicalMessages={[
+          {
+            id: "old",
+            resource_bindings: [
+              {
+                binding_id: "b0",
+                resource_kind: "knowledge_base",
+                resource_id: "kb1",
+                version_id: "v1",
+              },
+            ],
+          },
+        ]}
+      />,
+    );
 
     expect(container.textContent).toContain("v1");
     await act(async () => {
@@ -108,7 +99,7 @@ describe("SessionResourceVersion", () => {
     expect(onBindingsChanged).toHaveBeenLastCalledWith([bindingV2]);
     expect(container.textContent).toContain("knowledge_base: v2");
     expect(container.querySelector("[data-testid=message-old]")?.textContent).toContain("v1");
-    await act(async () => root.unmount());
+    await unmount();
     document.body.replaceChildren();
   });
 });

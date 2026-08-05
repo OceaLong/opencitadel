@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { IconLoading } from "@/lib/icons";
 import { sessionApi } from "@/lib/api/session";
+import { IconLoading } from "@/lib/icons";
 
 export function CodebaseDetailRedirect({ codebaseId }: { codebaseId: string }) {
   const router = useRouter();

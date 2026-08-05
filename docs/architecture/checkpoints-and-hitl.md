@@ -11,7 +11,9 @@ flowchart TD
   Agent["Agent flow"] --> Gate{"pending_phase?"}
   Gate -->|clarify| Clarify["ClarifyAgent question"]
   Gate -->|plan_approval| Plan["Plan + risk tools"]
-  Gate -->|tool_approval| Tool["Per-call tool gate"]
+  Gate -->|tool_approval| Batch["Persist ToolApprovalBatch, all calls in ordinal order"]
+  Batch --> Preflight["Preflight: policy-approved calls marked; any pending sibling blocks all execution"]
+  Preflight --> Tool["Per-call tool gate UI"]
   Gate -->|takeover| VNC["Browser VNC takeover"]
   Clarify --> Resume["User resume message"]
   Plan --> Resume
@@ -117,6 +119,23 @@ Batch status is `pending`, `approved`, `rejected`, `expired`, or `consumed`.
 The transient first-consumer marker `execution_claimed` is deliberately
 excluded from JSON and persistence.
 
+```mermaid
+stateDiagram-v2
+  [*] --> pending: batch persisted, all calls in ordinal order
+  pending --> pending: partial decision, sibling still pending — no call executes
+  pending --> approved: guard — every call APPROVED, none REJECTED
+  pending --> rejected: guard — any call REJECTED
+  pending --> expired: guard — expires_at elapsed at resume
+  approved --> consumed: guard — atomic claim; only the transaction that receives execution_claimed=true executes
+  rejected --> [*]
+  expired --> [*]
+  consumed --> [*]
+  note right of pending
+    Cross-session resume returns approval_session_mismatch
+    without mutating the persisted status
+  end note
+```
+
 The complete model-produced call list is normalized, authorized, and persisted
 in ordinal order before execution. Calls not requiring a human decision are
 recorded as policy-approved, but if any sibling remains pending the executor
@@ -127,6 +146,11 @@ can run before approval.
 |-------|----------|
 | `GET /api/sessions/{session_id}/tool-approval-batch` | Return the current owner-scoped pending batch |
 | `POST /api/sessions/{session_id}/tool-approval-batches/{batch_id}/decision` | Body: `{"action":"approve|approve_same|reject","tool_call_ids":[...]?}` |
+
+> **Internal endpoint**: the first-party UI does not call this route directly.
+> The actual human decision arrives as an ordinary chat resume message
+> (`approve` / `approve_same` / `reject:<feedback>`) through the session chat
+> endpoint — see [Governance plane](governance-plane.md#whole-batch-preflight-and-approval).
 
 An explicit `tool_call_ids` selection supports partial decisions; omitted IDs
 do not expand an earlier partial decision. A partial batch stays waiting.
@@ -142,6 +166,19 @@ may invoke it. Repeated resume is non-executing and therefore idempotent.
 `safe` calls may retry bounded transient failures;
 `idempotent_with_key` may retry only when the schema and callable accept the
 same stable key; `non_idempotent` and `unknown` run once.
+
+**Ops Patrol Remediation reuses this exact contract.** `patrol_execute_remediation`
+(`api/app/domain/services/tools/patrol_remediation.py`) declares
+`approval=ApprovalMode.ALWAYS` and `idempotency=IDEMPOTENT_WITH_KEY`, so a
+remediation call is queued into the same `ToolApprovalBatch` as any other
+`approval=always` tool and never executes before an operator decision — there
+is no separate remediation-specific gate. The idempotency key that reaches
+the Actuator is always the batch executor's own stable per-call key
+(`session_id` + `tool_call_id` + `args_hash`), not one the model can choose.
+`api/tests/app/contracts/test_remediation_governance_invariants.py` is the
+contract test asserting these invariants: zero Actuator calls before
+approval, exactly-once execution on approval, rejection on a tampered
+proposal hash (`PARAMS_TAMPERED`) or capability drift (`CAPABILITY_DRIFT`).
 
 ### Takeover resume
 
@@ -178,7 +215,7 @@ Rollback restores file and memory state, then re-imports the browser profile tar
 
 ## Web Operator and operator_scope
 
-Web Operator is a **built-in Skill** (`web-operator`) for browser automation inside sandboxes—not a Marketplace app.
+Web Operator is a **built-in Skill** (`web-operator`) for browser automation inside sandboxes.
 
 | `operator_scope` | Meaning |
 |------------------|---------|

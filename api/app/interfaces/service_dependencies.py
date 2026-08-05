@@ -14,17 +14,18 @@ from app.application.services.audit_service import AuditService
 from app.application.services.compliance_service import ComplianceService
 from app.application.services.codebase_service import CodebaseService
 from app.application.services.evidence_service import EvidenceService
+from app.application.services.governance_profile_service import GovernanceProfileService
 from app.application.services.file_service import FileService
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.application.services.llm_status_service import LLMStatusService
 from app.application.services.llm_endpoint_service import LLMEndpointService
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
-from app.application.services.marketplace_service import MarketplaceService
 from app.application.services.memory_service import MemoryService
 from app.application.services.quota_service import QuotaService
 from app.application.services.patrol_evidence_service import PatrolEvidenceService
 from app.application.services.patrol_pack_service import PatrolPackService
+from app.application.services.patrol_remediation_service import PatrolRemediationService
 from app.application.services.patrol_run_service import PatrolRunService
 from app.application.services.session_service import SessionService
 from app.application.services.resource_binding_service import ResourceBindingService
@@ -205,13 +206,6 @@ async def get_resource_build_event_notifier(
 
 
 @inject
-async def get_marketplace_service(
-        service: MarketplaceService = Depends(Provide[ApiContainer.marketplace_service]),
-) -> MarketplaceService:
-    return service
-
-
-@inject
 async def get_agent_service(
         service: AgentService = Depends(Provide[ApiContainer.agent_service]),
 ) -> AgentService:
@@ -289,7 +283,23 @@ async def get_patrol_evidence_service(
 
 
 @inject
+async def get_patrol_remediation_service(
+        service: PatrolRemediationService = Depends(Provide[ApiContainer.patrol_remediation_service]),
+) -> PatrolRemediationService:
+    return service
+
+
+@inject
 async def get_compliance_service(
         service: ComplianceService = Depends(Provide[ApiContainer.compliance_service]),
 ) -> ComplianceService:
+    return service
+
+
+@inject
+async def get_governance_profile_service(
+        service: GovernanceProfileService = Depends(
+            Provide[ApiContainer.governance_profile_service]
+        ),
+) -> GovernanceProfileService:
     return service

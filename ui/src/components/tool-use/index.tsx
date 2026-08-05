@@ -1,7 +1,7 @@
 "use client";
 
-import type { ComponentType } from "react";
 import { useTranslations } from "next-intl";
+import type { ComponentType } from "react";
 
 import type { ToolEvent } from "@/lib/api/types";
 import { cn } from "@/lib/utils";

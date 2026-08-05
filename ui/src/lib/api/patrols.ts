@@ -5,10 +5,19 @@ import type {
   PatrolPackConfig,
   PatrolPackList,
   PatrolPackMetrics,
+  PatrolRemediation,
+  PatrolRemediationAction,
+  PatrolRemediationList,
   PatrolRun,
   PatrolRunDetail,
   PatrolRunList,
 } from "./types";
+
+export type ProposePatrolRemediation = {
+  action: PatrolRemediationAction;
+  params?: Record<string, unknown>;
+  workload?: string;
+};
 
 export type CreatePatrolPack = {
   name: string;
@@ -62,6 +71,12 @@ export const patrolsApi = {
     action: "acknowledge" | "resolve" | "false-positive",
     reason: string,
   ): Promise<PatrolFinding> => post(`/patrol-findings/${id}/${action}`, { reason }),
+  proposeRemediation: (
+    findingId: string,
+    params: ProposePatrolRemediation,
+  ): Promise<PatrolRemediation> => post(`/patrol-findings/${findingId}/remediations`, params),
+  listRemediations: (runId: string): Promise<PatrolRemediationList> =>
+    get<PatrolRemediationList>(`/patrol-runs/${runId}/remediations`),
   downloadEvidence: async (id: string): Promise<Blob> => {
     const response = await authenticatedFetch(`/patrol-runs/${id}/evidence`);
     if (!response.ok) throw new Error(`Evidence download failed (${response.status})`);

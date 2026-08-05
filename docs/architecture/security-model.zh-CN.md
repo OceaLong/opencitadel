@@ -25,6 +25,10 @@ flowchart TB
   subgraph exec ["执行层 — 隔离"]
     Sandbox["沙箱容器 / Pod"]
   end
+  subgraph mcpplane ["MCP 平面 — Ops Patrol，仅 API/Worker 可入站"]
+    Collector["Ops Collector :8090 — 只读 RBAC"]
+    Actuator["Ops Actuator :8091 — Patch-only RBAC"]
+  end
   Browser --> Nginx
   Nginx --> UI
   Nginx --> API
@@ -36,6 +40,10 @@ flowchart TB
   Worker --> Storage
   Worker -->|"按 scope 创建/挂载"| Sandbox
   Sandbox -->|"按策略出站"| Internet["外部网络"]
+  Worker -->|"只读探针"| Collector
+  Worker -->|"approval=always 写操作"| Actuator
+  Collector -->|"get/list/watch"| K8s["Kubernetes API"]
+  Actuator -->|"patch，仅白名单"| K8s
 ```
 
 **原则**
@@ -44,6 +52,7 @@ flowchart TB
 2. PostgreSQL、Redis、API、Worker、UI 在内部 Docker 网络（`opencitadel-network`）或集群 NetworkPolicy 内通信。
 3. Agent 代码、Shell 命令、浏览器自动化在沙箱内运行——不在 API/Worker 进程中执行。
 4. 密钥不得出现在日志中；LLM 提供商 Key 在存储层加密。
+5. Ops Actuator 是应用层唯一具备 Kubernetes 写（`patch`）RBAC 的服务；其 Service 仅 API/Worker 可达（NetworkPolicy 限制 TCP 8091），绝不公网暴露。Ops Collector 只读（TCP 8090 上的 `get`/`list`/`watch`），不携带任何写 RBAC。
 
 ---
 
@@ -70,6 +79,8 @@ Worker 编排沙箱，并通过 **Worker 进程内的 Playwright** 经 CDP 连�
 | **准入** | `SandboxQuota` + 宿主机内存探测 | Redis 不可用时 fail-closed；任务排队而非超配 |
 | **生命周期** | 空闲回收、低内存回收、孤儿清理 | 通过 Redis lease 单活协调 |
 | **权限** | UID 1000、drop 全部 capability、只读根文件系统、no-new-privileges | 由运行时策略强制执行 |
+| **文件路径 containment** | `SANDBOX_ALLOWED_ROOTS` 白名单（`/home/ubuntu`、`/tmp`、`/workspace`） | 每次文件操作先对目标求 `realpath`，再用 `commonpath` 校验是否落在白名单内；越界路径一律拒绝 |
+| **提权命令输入转义** | 每次 `sudo cat` / `sudo tee` 参数经 `shlex.quote` | 解析后的文件路径（写入时还包括暂存临时文件）在拼入 `sudo` 命令前先做 Shell 转义，堵住构造文件名导致的 Shell 注入 |
 
 ### 沙箱 Driver
 
@@ -114,28 +125,35 @@ user: "1000:1000"
 ```mermaid
 sequenceDiagram
   participant C as 客户端
-  participant N as Nginx
   participant A as API
   participant R as Redis
   participant W as Worker
-  participant S as 沙箱
-  participant L as LLM 提供商
+  participant Gov as 治理层（CapabilityPolicy + ToolBatchExecutor）
+  participant H as 人工审批人
+  participant S as 沙箱 / Actuator
   participant D as PostgreSQL
 
-  C->>N: HTTPS + JWT Cookie
-  N->>A: 代理 /api/*
+  C->>A: HTTPS + JWT Cookie（经 Nginx）
   A->>A: 解析 Principal
   A->>D: 持久化 session / message
   A->>R: task:input + dispatch
   W->>R: claim task:dispatch
-  W->>S: 工具执行 HTTP
-  S-->>W: stdout / browser / files
-  W->>L: LLM API（密钥来自加密 DB）
+  Note over W: LLM 提议一次工具调用
+  W->>Gov: 收窄到会话 tool_gate_policy
+  Gov->>Gov: strict gate 校验
+  Gov->>D: ToolApprovalBatch PENDING（整批预检）
+  Gov->>H: 工具操作需要审批
+  H->>Gov: 批准 / 拒绝
+  Gov->>Gov: 重新校验 params_hash + Capability 基线
+  Gov->>S: 幂等执行（持久化幂等键）
+  S-->>Gov: 结果
+  Gov->>D: RunOutcome 落定 + 审计哈希链条目
   W->>R: task:output events
-  W->>D: session_events 追加
   A->>R: XREAD task:output
   A->>C: SSE 流
 ```
+
+并非每次工具调用都会走到人工审批这一跳：只有持久化的 `ToolExecutionPolicy` 声明 `approval=always`（或被 Call 级 Gate 提升）的调用才会触发，例如 Ops Patrol Remediation 的 `patrol_execute_remediation`。风险更低、`read_only`/`safe` 的工具会从 `Gov` 的 Gate 校验直接进入执行。完整的 Gate/审批批次状态机见 [检查点与 HITL](checkpoints-and-hitl.zh-CN.md)。
 
 ### 数据分类
 
@@ -367,7 +385,7 @@ ENV=production
 
 ### CI 安全验证
 
-- `.github/workflows/ci.yml` 运行 API/UI/沙箱/Collector 测试、六个镜像构建与
+- `.github/workflows/ci.yml` 运行 API/UI/沙箱/Collector/Actuator 测试、七个镜像构建与
   Trivy 扫描、Compose/Helm/Kustomize/Squid 渲染及本文档检查。
 - `.github/workflows/security.yml` 运行 Gitleaks 历史扫描、依赖评审与
   Lockfile 审计、CodeQL、Trivy 文件系统/IaC 扫描。
@@ -387,6 +405,7 @@ ENV=production
 | MinIO | 内网；可选 public endpoint 变量 | 除非 LLM 需拉取 URL，否则保持内网 |
 | 沙箱 | 对 Worker 内网 HTTP | 不要映射宿主机端口 |
 | Ops Collector | 对 API/Worker 的内网 MCP | 仅 ClusterIP；固定只读工具与注册目的地 |
+| Ops Actuator | 对 API/Worker 的内网 MCP | 仅 ClusterIP；UID/GID 10001、只读根文件系统、drop 全部 capability；Patch-only RBAC 限定 3 个注册动作，且受显式 Namespace/Workload 白名单约束；默认关闭 |
 | MCP / A2A 服务器 | Worker/API 出站 | 对目标做 allowlist |
 
 ---

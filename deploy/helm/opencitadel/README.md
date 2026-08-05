@@ -21,7 +21,7 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --set image.worker.repository=your-registry/opencitadel-worker
 ```
 
-Full image build/push steps and the production `--set` flags (six images including the optional Ops Collector,
+Full image build/push steps and the production `--set` flags (seven images including the optional Ops Collector and Ops Actuator,
 ingress, sandbox driver): see the Kubernetes / Helm section of the
 [deployment guide](../../../docs/operations/deployment.md).
 
@@ -55,6 +55,13 @@ When `minio.enabled=true`, the chart deploys a MinIO StatefulSet and sets `MINIO
 | `opsCollector.image.*` | see values.yaml | Collector repository, tag, and pull policy |
 | `opsCollector.allowedNamespaces` / `allowedWorkloads` | restricted defaults | Kubernetes scope allowlists |
 | `opsCollector.registered*` | `{}` | Registered Prometheus/HTTP/TLS/backup/dependency targets |
+| `opsActuator.enabled` | false | Deploy the optional write-scoped Patrol Actuator (Ops Patrol Remediation) |
+| `opsActuator.image.*` | see values.yaml | Actuator repository, tag, and pull policy |
+| `opsActuator.targetRef` | `opencitadel-local` | Stable identity matched by the Pack that proposes remediations |
+| `opsActuator.allowedNamespaces` | `[opencitadel]` | Non-empty namespace allowlist gating every write call |
+| `opsActuator.allowedWorkloads` | `{}` | Namespace → workload id → `{kind, min_replicas, max_replicas}`; a workload not listed here cannot be targeted |
+| `opsActuator.serviceAccount.create` / `.name` | `true` / `""` | Dedicated patch-only ServiceAccount, or a pre-created one when `create=false` |
+| `opsActuator.resources` | see values.yaml | CPU/memory requests and limits |
 | `env.STORAGE_PROVIDER` | cos | Object storage backend: `cos` or `minio` |
 | `env` | see values.yaml | Non-secret env vars (DB/Redis hosts, log level, etc.) |
 | `secrets` | see values.yaml | Sensitive values rendered as Secret and injected via `envFrom` |
@@ -186,7 +193,7 @@ guide](../../../docs/operations/deployment.md#credential-encryption-and-audit-si
 
 ## Release images
 
-Tagged releases (`v*`) publish multi-arch images to `ghcr.io/ocealong/opencitadel-{api,worker,migrate,ui,sandbox,ops-collector}` via [`.github/workflows/release.yml`](../../../.github/workflows/release.yml). Override `image.*` and `opsCollector.image.*` to consume release builds.
+Tagged releases (`v*`) publish multi-arch images to `ghcr.io/ocealong/opencitadel-{api,worker,migrate,ui,sandbox,ops-collector,ops-actuator}` via [`.github/workflows/release.yml`](../../../.github/workflows/release.yml). Override `image.*`, `opsCollector.image.*`, and `opsActuator.image.*` to consume release builds.
 
 ## Architecture
 

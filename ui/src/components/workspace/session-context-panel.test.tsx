@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
-import { createRoot } from "react-dom/client";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionResourceBinding } from "@/lib/api/types";
+
+import { mockNextIntl } from "@/test-utils/mocks";
+import { renderComponent } from "@/test-utils/render";
 
 type ResourceVersionProps = {
   onBindingsChanged?: (bindings: SessionResourceBinding[]) => void;
@@ -15,9 +17,7 @@ const mocks = vi.hoisted(() => ({
   resourceVersionProps: vi.fn(),
 }));
 
-vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}));
+vi.mock("next-intl", () => mockNextIntl());
 vi.mock("@/components/workspace/knowledge-context-panel", () => ({
   KnowledgeContextPanel: (props: unknown) => {
     mocks.knowledgeProps(props);
@@ -43,11 +43,6 @@ vi.mock("@/components/ui/tabs", () => ({
 import { SessionContextPanel } from "./session-context-panel";
 
 describe("SessionContextPanel", () => {
-  beforeAll(() => {
-    (
-      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-    ).IS_REACT_ACT_ENVIRONMENT = true;
-  });
   afterEach(() => {
     mocks.knowledgeProps.mockReset();
     mocks.resourceVersionProps.mockReset();
@@ -55,33 +50,27 @@ describe("SessionContextPanel", () => {
   });
 
   it("passes the current same-resource session binding to knowledge context", async () => {
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <SessionContextPanel
-          knowledgeBaseId="kb1"
-          resourceBindings={[
-            {
-              binding_id: "old",
-              resource_kind: "knowledge_base",
-              resource_id: "kb1",
-              version_id: "v-old",
-              is_current: false,
-            },
-            {
-              binding_id: "current",
-              resource_kind: "knowledge_base",
-              resource_id: "kb1",
-              version_id: "v-bound",
-              is_current: true,
-            },
-          ]}
-        />,
-      );
-      await Promise.resolve();
-    });
+    const { unmount } = await renderComponent(
+      <SessionContextPanel
+        knowledgeBaseId="kb1"
+        resourceBindings={[
+          {
+            binding_id: "old",
+            resource_kind: "knowledge_base",
+            resource_id: "kb1",
+            version_id: "v-old",
+            is_current: false,
+          },
+          {
+            binding_id: "current",
+            resource_kind: "knowledge_base",
+            resource_id: "kb1",
+            version_id: "v-bound",
+            is_current: true,
+          },
+        ]}
+      />,
+    );
 
     expect(mocks.knowledgeProps).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -89,30 +78,25 @@ describe("SessionContextPanel", () => {
         versionId: "v-bound",
       }),
     );
-    await act(async () => root.unmount());
+    await unmount();
   });
 
   it("switches knowledge context when the current binding refreshes", async () => {
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <SessionContextPanel
-          sessionId="session-1"
-          knowledgeBaseId="kb1"
-          resourceBindings={[
-            {
-              binding_id: "binding-v1",
-              resource_kind: "knowledge_base",
-              resource_id: "kb1",
-              version_id: "v1",
-              is_current: true,
-            },
-          ]}
-        />,
-      );
-    });
+    const { unmount } = await renderComponent(
+      <SessionContextPanel
+        sessionId="session-1"
+        knowledgeBaseId="kb1"
+        resourceBindings={[
+          {
+            binding_id: "binding-v1",
+            resource_kind: "knowledge_base",
+            resource_id: "kb1",
+            version_id: "v1",
+            is_current: true,
+          },
+        ]}
+      />,
+    );
 
     expect(mocks.knowledgeProps).toHaveBeenLastCalledWith(
       expect.objectContaining({ versionId: "v1" }),
@@ -137,6 +121,6 @@ describe("SessionContextPanel", () => {
     expect(mocks.knowledgeProps).toHaveBeenLastCalledWith(
       expect.objectContaining({ versionId: "v2" }),
     );
-    await act(async () => root.unmount());
+    await unmount();
   });
 });

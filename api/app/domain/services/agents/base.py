@@ -7,7 +7,6 @@ import uuid
 from hashlib import sha256
 from abc import ABC
 from typing import Optional, List, AsyncGenerator, Dict, Any, Callable, Type
-from urllib.parse import urlparse
 
 from app.domain.external.observability import ObservabilityPort
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
@@ -30,6 +29,14 @@ from app.domain.models.knowledge_citation import (
 from app.domain.models.tool_policy import ApprovalMode
 from app.domain.services import vision_service
 from app.domain.repositories.uow import IUnitOfWork
+from app.domain.services.agents.message_normalizer import (
+    assistant_message_from_llm_response,
+    coerce_user_content,
+    messages_for_llm,
+    normalize_message_for_llm,
+)
+from app.domain.services.agents.tool_audit_recorder import ToolAuditRecorder
+from app.domain.services.agents.tool_gate_policy import ToolGatePolicy
 from app.domain.services.agents.token_accountant import TokenAccountant
 from app.domain.services.agents.retry_budget import LLMRetryBudget, RetryBudgetExceeded
 from app.domain.services.agents.tool_batch_executor import (
@@ -51,15 +58,8 @@ from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError
 from app.application.services.config_provider import get_runtime_config
 from app.domain.utils.hitl import (
     TOOL_APPROVAL_PHASE,
-    merge_pending_metadata,
     preserve_session_tracking_metadata,
-    tool_matches_risk_list,
-    domain_in_whitelist,
-    matches_critical_action,
-    resolve_gate_profile_settings,
 )
-from app.domain.utils.audit_redaction import redact_tool_args, summarize_tool_result
-from app.domain.models.audit_log import AuditLog
 from app.domain.services.agent.sandbox_lifecycle import SandboxLifecycleCoordinator
 from app.infrastructure.external.llm.structured_output import schema_payload
 from pydantic import BaseModel
@@ -141,6 +141,18 @@ class BaseAgent(ABC):
         self._current_step: str = "default"
         self._last_prompt_tokens: int = 0
         self._runtime_settings = runtime_settings
+        self._gate_policy = ToolGatePolicy(
+            runtime_settings=runtime_settings,
+            session_id=session_id,
+            uow_factory=uow_factory,
+            allowed_tool_names=self._allowed_tool_names,
+        )
+        self._audit_recorder = ToolAuditRecorder(
+            uow_factory=uow_factory,
+            session_id=session_id,
+            runtime_settings=runtime_settings,
+            gate_policy=self._gate_policy,
+        )
         self._token_accountant = TokenAccountant(
             uow_factory=uow_factory,
             session_id=session_id,
@@ -241,102 +253,12 @@ class BaseAgent(ABC):
     def _internal_prompts(self):
         return get_internal_prompts(self._prompt_locale)
 
-    @staticmethod
-    def _coerce_user_content(content: Any) -> Any:
-        """Coerce mistaken Message/dict payloads into provider-safe user content."""
-        if isinstance(content, (str, list)) or content is None:
-            return content
-        if isinstance(content, Message):
-            return content.message
-        if isinstance(content, dict) and "message" in content:
-            msg = content.get("message")
-            return msg if isinstance(msg, str) else str(msg)
-        return str(content)
-
-    @staticmethod
-    def _normalize_message_for_llm(message: Dict[str, Any]) -> Dict[str, Any]:
-        """Ensure provider-safe message shape (no null content, reasoning fallback)."""
-        normalized = dict(message)
-        role = normalized.get("role")
-        content = normalized.get("content")
-        reasoning = normalized.get("reasoning_content")
-        tool_calls = normalized.get("tool_calls")
-
-        if role == "assistant":
-            if (content is None or (isinstance(content, str) and not content.strip())) and reasoning:
-                if not tool_calls:
-                    normalized["content"] = reasoning if isinstance(reasoning, str) else str(reasoning)
-            if normalized.get("content") is None:
-                normalized["content"] = ""
-            if tool_calls and isinstance(normalized.get("content"), str) and not normalized["content"]:
-                normalized["content"] = ""
-        elif role in {"user", "system"} and "content" in normalized:
-            if normalized["content"] is None:
-                normalized["content"] = ""
-            elif not isinstance(normalized["content"], (str, list)):
-                normalized["content"] = BaseAgent._coerce_user_content(normalized["content"])
-
-        if role != "assistant" and "reasoning_content" in normalized:
-            del normalized["reasoning_content"]
-
-        return normalized
-
-    @classmethod
-    @staticmethod
-    def _messages_for_llm(
-            messages: List[Dict[str, Any]],
-            llm: Optional[LLM] = None,
-            *,
-            strip_images: bool = False,
-    ) -> List[Dict[str, Any]]:
-        """发送给 LLM 前移除内部字段，并将 image_ref 还原为 provider 可识别格式。"""
-        sanitized: List[Dict[str, Any]] = []
-        for message in messages:
-            if message.get("role") == "tool":
-                sanitized.append({
-                    "role": "tool",
-                    "tool_call_id": message.get("tool_call_id"),
-                    "content": message.get("content"),
-                })
-            else:
-                cleaned = {k: v for k, v in message.items() if not k.startswith("_")}
-                sanitized.append(BaseAgent._normalize_message_for_llm(cleaned))
-        inflated = vision_service.inflate_messages_for_llm(sanitized, llm)
-        if strip_images or (llm is not None and not vision_service.vision_enabled(llm)):
-            return vision_service.strip_images_for_tool_call(inflated)
-        return inflated
-
-    @staticmethod
-    def _assistant_message_from_llm_response(
-            *,
-            content: Optional[str],
-            reasoning_content: Optional[str],
-            tool_calls: Optional[List[Dict[str, Any]]],
-            stream_id: str,
-    ) -> Dict[str, Any]:
-        """Build assistant memory entry; never persist content=null."""
-        effective_content = content.strip() if isinstance(content, str) and content.strip() else ""
-        effective_reasoning = (
-            reasoning_content.strip()
-            if isinstance(reasoning_content, str) and reasoning_content.strip()
-            else ""
-        )
-        if not effective_content and not tool_calls and effective_reasoning:
-            logger.warning(
-                "LLM仅返回reasoning_content，回退为content写入记忆"
-            )
-            effective_content = effective_reasoning
-
-        filtered_message: Dict[str, Any] = {
-            "role": "assistant",
-            "content": effective_content,
-        }
-        if effective_reasoning and effective_reasoning != effective_content:
-            filtered_message["reasoning_content"] = effective_reasoning
-        if tool_calls:
-            filtered_message["tool_calls"] = tool_calls
-            filtered_message["stream_id"] = stream_id
-        return filtered_message
+    # 消息归一化：已搬迁至 message_normalizer.py，此处保留原方法名的薄委托
+    # 别名，供 subagent_factory.py / openai_llm.py / 测试通过 BaseAgent._xxx 调用。
+    _coerce_user_content = staticmethod(coerce_user_content)
+    _normalize_message_for_llm = staticmethod(normalize_message_for_llm)
+    _messages_for_llm = staticmethod(messages_for_llm)
+    _assistant_message_from_llm_response = staticmethod(assistant_message_from_llm_response)
 
     async def _build_browser_tool_payload(
             self,
@@ -1198,56 +1120,25 @@ class BaseAgent(ABC):
         else:
             yield ErrorEvent(error="Agent未能生成有效回复内容", code=MODEL_UNAVAILABLE)
 
-    @staticmethod
-    def _normalize_domain(url: str) -> str:
-        parsed = urlparse(url if "://" in url else f"https://{url}")
-        return (parsed.hostname or "").lower()
+    # 工具门禁判定：已搬迁至 tool_gate_policy.ToolGatePolicy；审计日志/已访问域名
+    # 写库已搬迁至 tool_audit_recorder.ToolAuditRecorder。此处保留原方法名的薄
+    # 委托，供内部调用方与测试通过 self._xxx / BaseAgent._xxx 访问，行为保持不变。
+    _normalize_domain = staticmethod(ToolGatePolicy.normalize_domain)
 
     def _effective_gate_profile(self) -> str:
-        return (self._runtime_settings.gate_profile or "standard").lower()
+        return self._gate_policy.effective_gate_profile()
 
     def _gate_profile_settings(self):
-        runtime = get_runtime_config()
-        return resolve_gate_profile_settings(self._effective_gate_profile(), runtime.hitl)
+        return self._gate_policy.gate_profile_settings()
 
     def _tool_gate_call_level_enabled(self) -> bool:
-        runtime = get_runtime_config()
-        if not runtime.feature_flags.enable_hitl_gates:
-            return False
-        override = self._runtime_settings.tool_gate_call_level_enabled
-        if override is not None:
-            return bool(override)
-        if self._runtime_settings.gate_profile:
-            return bool(self._gate_profile_settings().tool_gate_call_level_enabled)
-        return runtime.hitl.tool_gate_call_level_enabled
+        return self._gate_policy.tool_gate_call_level_enabled()
 
     def _should_audit_tool(self, tool_name: str) -> bool:
-        if not self._runtime_settings.gate_profile:
-            return False
-        lowered = tool_name.lower()
-        if lowered.startswith("browser_"):
-            return True
-        if lowered in {"shell_execute", "a2a"}:
-            return True
-        if lowered.startswith("mcp_") or tool_name == "mcp":
-            return True
-        return False
+        return self._gate_policy.should_audit(tool_name)
 
     def _compute_tool_gated_flag(self, tool_name: str, arguments: Dict[str, Any]) -> bool:
-        """Whether this tool call would match per-call gate rules (risk list / critical action)."""
-        if not self._runtime_settings.gate_profile:
-            return False
-        runtime = get_runtime_config()
-        if not tool_matches_risk_list(tool_name, runtime.hitl.tool_gate_risk_list):
-            return False
-        profile_settings = self._gate_profile_settings()
-        if profile_settings.selective_critical_only:
-            return matches_critical_action(
-                tool_name,
-                arguments,
-                runtime.hitl.critical_action_patterns,
-            )
-        return self._tool_gate_call_level_enabled()
+        return self._gate_policy.compute_gated_flag(tool_name, arguments)
 
     async def _maybe_record_tool_audit(
             self,
@@ -1257,19 +1148,12 @@ class BaseAgent(ABC):
             result: ToolResult,
             started: float,
     ) -> None:
-        if not self._should_audit_tool(tool_name):
-            return
-        duration_ms = int((time.monotonic() - started) * 1000)
-        try:
-            await self._record_tool_audit(
-                tool_name=tool_name,
-                arguments=arguments,
-                result=result,
-                duration_ms=duration_ms,
-                gated=self._compute_tool_gated_flag(tool_name, arguments),
-            )
-        except Exception:
-            logger.exception("写入工具审计失败 session=%s tool=%s", self._session_id, tool_name)
+        await self._audit_recorder.maybe_record_tool_audit(
+            tool_name=tool_name,
+            arguments=arguments,
+            result=result,
+            started=started,
+        )
 
     async def _record_tool_audit(
             self,
@@ -1280,53 +1164,16 @@ class BaseAgent(ABC):
             duration_ms: int,
             gated: bool = False,
     ) -> None:
-        if not self._should_audit_tool(tool_name):
-            return
-        async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(self._session_id)
-            await uow.audit.add(AuditLog(
-                actor_user_id=session.owner_user_id if session else None,
-                action="agent_tool_invoke",
-                resource_type="session",
-                resource_id=self._session_id,
-                team_id=session.team_id if session else None,
-                metadata={
-                    "tool": tool_name,
-                    "args": redact_tool_args(arguments if isinstance(arguments, dict) else {}),
-                    "success": result.success,
-                    "execution_status": (
-                        result.status.value if result.status is not None else None
-                    ),
-                    "attempts": [
-                        attempt.model_dump(mode="json")
-                        for attempt in result.attempts
-                    ],
-                    "result_summary": summarize_tool_result(result),
-                    "duration_ms": duration_ms,
-                    "gate_profile": self._runtime_settings.gate_profile,
-                    "gated": gated,
-                },
-            ))
-            await uow.commit()
+        await self._audit_recorder.record_tool_audit(
+            tool_name=tool_name,
+            arguments=arguments,
+            result=result,
+            duration_ms=duration_ms,
+            gated=gated,
+        )
 
     async def _record_visited_domain(self, function_args: Dict[str, Any]) -> None:
-        url = function_args.get("url") if isinstance(function_args, dict) else None
-        domain = self._normalize_domain(str(url or ""))
-        if not domain:
-            return
-        async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(self._session_id)
-            if not session:
-                return
-            meta = session.pending_metadata or {}
-            visited = list(meta.get("visited_domains") or [])
-            if domain in visited:
-                return
-            visited.append(domain)
-            await uow.session.set_pending_metadata(
-                self._session_id,
-                merge_pending_metadata(meta, {"visited_domains": visited}),
-            )
+        await self._audit_recorder.record_visited_domain(function_args)
 
     def _get_tool_batch_executor(self) -> ToolBatchExecutor:
         if self._batch_executor is None:
@@ -1357,80 +1204,13 @@ class BaseAgent(ABC):
             self,
             call: PreparedToolCall,
     ) -> bool:
-        return (
-            self._allowed_tool_names is None
-            or is_tool_allowed(call.function_name, self._allowed_tool_names)
-        )
+        return await self._gate_policy.authorizes_tool(call)
 
     async def _preflight_requires_policy_approval(
             self,
             call: PreparedToolCall,
     ) -> bool:
-        if call.policy.approval != ApprovalMode.POLICY:
-            return call.policy.approval == ApprovalMode.ALWAYS
-        runtime = get_runtime_config()
-        function_name = call.function_name
-        function_args = call.normalized_args
-
-        first_visit_domain = None
-        if function_name == "browser_navigate":
-            url = function_args.get("url")
-            domain = self._normalize_domain(str(url or ""))
-            if domain:
-                first_visit_domain = domain
-
-        risk_gated = (
-            self._tool_gate_call_level_enabled()
-            and tool_matches_risk_list(
-                function_name,
-                runtime.hitl.tool_gate_risk_list,
-            )
-        )
-        profile_settings = (
-            self._gate_profile_settings()
-            if self._runtime_settings.gate_profile
-            else None
-        )
-        if (
-            risk_gated
-            and profile_settings
-            and profile_settings.selective_critical_only
-            and not matches_critical_action(
-                function_name,
-                function_args,
-                runtime.hitl.critical_action_patterns,
-            )
-        ):
-            risk_gated = False
-
-        async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(self._session_id)
-            if not session or not getattr(session, "operator_scope", None):
-                return False
-            meta = session.pending_metadata or {}
-            if risk_gated:
-                approved = meta.get("approved_tools") or []
-                if any(
-                    tool_matches_risk_list(function_name, [item])
-                    for item in approved
-                ):
-                    risk_gated = False
-            if first_visit_domain:
-                whitelist = list(
-                    self._runtime_settings.operator_domains
-                    or getattr(session, "operator_domains", None)
-                    or []
-                )
-                already_allowed = (
-                    domain_in_whitelist(first_visit_domain, whitelist)
-                    or first_visit_domain
-                    in set(meta.get("visited_domains") or [])
-                    or first_visit_domain
-                    in set(meta.get("approved_domains") or [])
-                )
-                if not already_allowed:
-                    return True
-        return risk_gated
+        return await self._gate_policy.requires_policy_approval(call)
 
     async def _enter_tool_approval_batch_gate(
             self,

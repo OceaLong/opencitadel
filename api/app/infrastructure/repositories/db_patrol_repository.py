@@ -6,10 +6,23 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models.patrol import PatrolCheckResult, PatrolFinding, PatrolPack, PatrolRun
+from app.domain.models.patrol import (
+    PATROL_REMEDIATION_TERMINAL_STATUSES,
+    PatrolCheckResult,
+    PatrolFinding,
+    PatrolPack,
+    PatrolRemediation,
+    PatrolRun,
+)
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.patrol_repository import PatrolRepository
-from app.infrastructure.models.patrol import PatrolCheckResultModel, PatrolFindingModel, PatrolPackModel, PatrolRunModel
+from app.infrastructure.models.patrol import (
+    PatrolCheckResultModel,
+    PatrolFindingModel,
+    PatrolPackModel,
+    PatrolRemediationModel,
+    PatrolRunModel,
+)
 
 
 class DBPatrolRepository(PatrolRepository):
@@ -136,4 +149,47 @@ class DBPatrolRepository(PatrolRepository):
 
     async def get_open_finding_by_fingerprint(self, fingerprint: str) -> PatrolFinding | None:
         row = (await self.db_session.execute(select(PatrolFindingModel).where(PatrolFindingModel.fingerprint == fingerprint, PatrolFindingModel.status.in_(("open", "acknowledged"))).order_by(PatrolFindingModel.last_seen_at.desc()).limit(1))).scalar_one_or_none()
+        return row.to_domain() if row else None
+
+    async def save_remediation(self, remediation: PatrolRemediation) -> PatrolRemediation:
+        current = await self.db_session.get(PatrolRemediationModel, remediation.id)
+        if current is None:
+            current = PatrolRemediationModel.from_domain(remediation)
+            self.db_session.add(current)
+        else:
+            current.update_from_domain(remediation)
+        await self.db_session.flush()
+        return current.to_domain()
+
+    async def get_remediation(self, remediation_id: str, scope: OwnerScope | None = None, *, for_update: bool = False) -> PatrolRemediation | None:
+        stmt = select(PatrolRemediationModel).join(PatrolRunModel, PatrolRunModel.id == PatrolRemediationModel.run_id)
+        stmt = self._scope_run(stmt, scope).where(PatrolRemediationModel.id == remediation_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = (await self.db_session.execute(stmt)).scalar_one_or_none()
+        return row.to_domain() if row else None
+
+    async def list_remediations_for_run(self, run_id: str, scope: OwnerScope | None = None) -> list[PatrolRemediation]:
+        if scope is not None and await self.get_run(run_id, scope) is None:
+            return []
+        rows = (await self.db_session.execute(select(PatrolRemediationModel).where(PatrolRemediationModel.run_id == run_id).order_by(PatrolRemediationModel.created_at.desc()))).scalars().all()
+        return [row.to_domain() for row in rows]
+
+    async def get_active_remediation_for_finding(self, finding_id: str) -> PatrolRemediation | None:
+        terminal_values = tuple(status.value for status in PATROL_REMEDIATION_TERMINAL_STATUSES)
+        stmt = (
+            select(PatrolRemediationModel)
+            .where(PatrolRemediationModel.finding_id == finding_id, PatrolRemediationModel.status.notin_(terminal_values))
+            .order_by(PatrolRemediationModel.created_at.desc())
+            .limit(1)
+        )
+        row = (await self.db_session.execute(stmt)).scalar_one_or_none()
+        return row.to_domain() if row else None
+
+    async def get_remediation_by_session_id(self, session_id: str) -> PatrolRemediation | None:
+        row = (await self.db_session.execute(select(PatrolRemediationModel).where(PatrolRemediationModel.session_id == session_id))).scalar_one_or_none()
+        return row.to_domain() if row else None
+
+    async def get_remediation_by_recheck_run_id(self, run_id: str) -> PatrolRemediation | None:
+        row = (await self.db_session.execute(select(PatrolRemediationModel).where(PatrolRemediationModel.recheck_run_id == run_id))).scalar_one_or_none()
         return row.to_domain() if row else None

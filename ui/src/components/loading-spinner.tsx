@@ -1,5 +1,5 @@
-import { cn } from "@/lib/utils";
 import { IconLoading } from "@/lib/icons";
+import { cn } from "@/lib/utils";
 
 type LoadingSpinnerProps = {
   className?: string;

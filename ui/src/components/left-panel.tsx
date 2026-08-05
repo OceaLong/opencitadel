@@ -3,15 +3,16 @@
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
-import { SessionList } from "@/components/session-list";
 import { AccountMenu } from "@/components/account-menu";
+import { SessionList } from "@/components/session/session-list";
 import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarTrigger } from "@/components/ui/sidebar";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
-import { useLoginPrompt } from "@/providers/login-prompt-provider";
-import { useAuth } from "@/providers/auth-provider";
+
 import { IconAdd } from "@/lib/icons";
+import { useAuth } from "@/providers/auth-provider";
+import { useLoginPrompt } from "@/providers/login-prompt-provider";
 
 export function LeftPanel() {
   const router = useRouter();

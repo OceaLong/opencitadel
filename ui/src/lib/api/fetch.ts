@@ -1,8 +1,10 @@
-import type { ApiResponse, SSEEventData, SSEEventHandler } from "./types";
-import { dispatchAuthRequired } from "../auth-events";
 import { ACTIVE_WORKSPACE_KEY, LEGACY_ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
 import { readLocalStorageKey } from "@/lib/storage-migration";
+
 import { translate } from "@/i18n/translate";
+
+import { dispatchAuthRequired } from "../auth-events";
+import type { ApiResponse, SSEEventData, SSEEventHandler } from "./types";
 
 /**
  * API 配置

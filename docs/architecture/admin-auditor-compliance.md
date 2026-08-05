@@ -19,10 +19,14 @@ flowchart TD
   Login["Auditor login"] --> Admin["/admin/compliance"]
   Admin --> Chain["Verify audit chain"]
   Admin --> Evidence["Download evidence ZIP"]
+  Admin --> Profile["Open session governance profile"]
   Admin --> Report["/admin/compliance/report"]
   Report --> Export["Export JSON / MD / PDF"]
   Chain --> Integrity["Platform-wide HMAC integrity"]
   Evidence --> SessionPkg["Per-session tool invoke records"]
+  Evidence --> SignedPkg["Signed package: manifest.json + chain-signature.txt"]
+  Profile --> ProfileView["/admin/compliance/sessions/{sessionId}"]
+  ProfileView --> ProfileData["Approvals + gate hits + checkpoints + terminal state"]
 ```
 
 ## Admin UI routes
@@ -35,6 +39,7 @@ flowchart TD
 | `/admin/invitations` | Platform invitation tokens |
 | `/admin/audit` | Audit log viewer |
 | `/admin/compliance` | Evidence center, chain verification, compliance reports |
+| `/admin/compliance/sessions/[sessionId]` | Per-session governance profile: approvals, gate hits, checkpoints, terminal state |
 | `/admin/compliance/report` | Full-page compliance report export (JSON / MD / PDF) |
 
 Usage charts and token statistics appear on the **`/admin` overview dashboard** (not a separate `/admin/usage` page). Backend usage APIs remain under `/api/admin/usage/*`.
@@ -52,16 +57,69 @@ All routes require `require_auditor_or_admin` (prefix `/api/admin`):
 | GET | `/api/admin/evidence/sessions` | List sessions with evidence packages |
 | GET | `/api/admin/evidence/sessions/{id}/package` | Download ZIP evidence package |
 | GET | `/api/admin/compliance/report` | Compliance report (`json` / `md` / `pdf`) |
+| GET | `/api/admin/governance/sessions/{id}/profile` | Per-session governance profile read-model (approvals, gate hits, checkpoints, chain verification, terminal state) |
 
 Compliance mapping covers **等保2.0** and **ISO27001** control items. Web Operator sessions with `gate_profile` produce `agent_tool_invoke` rows with HMAC evidence chain fields.
 
 ## Evidence package contents
 
-Per-session ZIP from the Evidence center typically includes:
+Per-session ZIP from the Evidence center contains:
 
-- `audit-report.md` / `audit-report.json` (session artifacts)
-- Tool invocation records with redacted args
+- `audit.json`, `audit-report.md` — audit trail as structured JSON and rendered Markdown
+- `checkpoints.json` — session checkpoint index
+- `governance-profile.json`, `governance-profile.md` — the same governance profile served by the API above, redacted and rendered deterministically
 - `evidence-summary.pdf` when PDF rendering is available
+- `manifest.json` — per-file SHA-256 hashes plus the chain verification result
+- `chain-signature.txt` — `HMAC-SHA256(AUDIT_SIGNING_KEY, manifest.json bytes)`
+
+`screenshots/*.png` and `reconciliation/*.md`/`.html` are added when the session produced browser screenshots or artifacts.
+
+## Governance profile
+
+The governance profile is a read-only aggregation of data the governance execution chain already records — the audit hash chain, checkpoints, and session state — into one auditor-facing document. It adds no new tables and no new writes.
+
+```mermaid
+erDiagram
+  SESSION ||--o{ AUDIT_LOG : "chained tool-invoke + approval rows"
+  SESSION ||--o{ TOOL_APPROVAL_BATCH : "gated tool-call batches"
+  TOOL_APPROVAL_BATCH ||--o{ AUDIT_LOG : "approve / reject decisions"
+  SESSION ||--o| RUN_OUTCOME : "terminal status, once reached"
+  SESSION ||--|| GOVERNANCE_PROFILE : "aggregates"
+  GOVERNANCE_PROFILE ||--o{ EVIDENCE_PACKAGE : "exported as, on demand"
+
+  SESSION {
+    string id PK
+    string gate_profile
+    string operator_scope
+    string status
+  }
+  TOOL_APPROVAL_BATCH {
+    string id PK
+    string session_id FK
+    string status
+    datetime expires_at
+  }
+  AUDIT_LOG {
+    string id PK
+    string session_id FK
+    string action
+    int chain_seq
+    string prev_hash
+    string entry_hash
+  }
+  RUN_OUTCOME {
+    string status
+    string error_code
+  }
+  GOVERNANCE_PROFILE {
+    bool chain_verified
+    int checked_entries
+  }
+  EVIDENCE_PACKAGE {
+    string manifest_sha256
+    string pdf_status
+  }
+```
 
 ## Typical auditor workflow
 
@@ -69,7 +127,8 @@ Per-session ZIP from the Evidence center typically includes:
 2. Open **Admin → Compliance** (`/admin/compliance`)
 3. Run **Verify audit chain** for platform-wide integrity
 4. Filter Web Operator sessions and download evidence ZIP
-5. Export compliance report (`framework=djbh2.0` or ISO) for audit period
+5. Open a session's governance profile (`/admin/compliance/sessions/{sessionId}`) for its approval/gate/checkpoint detail
+6. Export compliance report (`framework=djbh2.0` or ISO) for audit period
 
 ## Related documentation
 

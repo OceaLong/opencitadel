@@ -85,3 +85,19 @@ export type MultimodalProbeResult = {
   message?: string;
   error_code?: string | null;
 };
+
+export type LLMStatusData = {
+  status: "not_configured" | "configured" | "ok" | "degraded" | "unknown";
+  default_model?: {
+    model_id: string;
+    display_name: string;
+    provider: string;
+    base_url_configured: boolean;
+    api_key_configured: boolean;
+  } | null;
+  embedding: {
+    api_key_configured: boolean;
+    vector_enabled: boolean;
+    enabled: boolean;
+  };
+};

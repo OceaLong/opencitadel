@@ -35,7 +35,6 @@ class ServerConfig(BaseModel):
     rate_limit_enabled: bool = True
     rate_limit_per_minute: int = 120
     sessions_stream_interval_seconds: int = 15
-    marketplace_max_upload_bytes: int = 25 * 1024 * 1024
 
 
 class EmbeddingConfig(BaseModel):
@@ -246,7 +245,6 @@ class PromptConfig(BaseModel):
 class FeatureFlagsConfig(BaseModel):
     """Static feature gates — route visibility, not runtime health."""
     enable_agent_features: bool = True
-    enable_marketplace_llm_apps: bool = True
     enable_embeddings: bool = True
     enable_parallel_step_execution: bool = False
     enable_artifacts: bool = True
@@ -254,6 +252,7 @@ class FeatureFlagsConfig(BaseModel):
     enable_skill_auto_recommend: bool = False
     enable_ops_patrol: bool = False
     enable_ops_patrol_fixture_replay: bool = False
+    enable_ops_patrol_remediation: bool = False
 
 
 class GateProfileSettings(BaseModel):

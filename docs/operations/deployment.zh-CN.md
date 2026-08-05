@@ -117,11 +117,11 @@ docker compose up -d
 | `UV_HTTP_TIMEOUT` | `300` | `uv sync` 下载 wheel 的 HTTP 超时（秒） |
 | `NPM_CONFIG_REGISTRY` | npmmirror | sandbox / ui 的 npm |
 
-Compose 构建后的应用镜像统一命名为：`opencitadel-api`、`opencitadel-worker`、`opencitadel-migrate`、`opencitadel-ui`、`opencitadel-sandbox`，以及可选的 `opencitadel-ops-collector`。
+Compose 构建后的应用镜像统一命名为：`opencitadel-api`、`opencitadel-worker`、`opencitadel-migrate`、`opencitadel-ui`、`opencitadel-sandbox`，以及可选的 `opencitadel-ops-collector` 与 `opencitadel-ops-actuator`。
 
 > **CI/CD 说明**：[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
-> 在每个 PR 与 `main` 推送中运行 API、UI、沙箱与 Ops Collector 测试，构建并用 Trivy
-> 扫描六个镜像，同时校验 Compose、Helm/Kustomize、Squid 与文档。
+> 在每个 PR 与 `main` 推送中运行 API、UI、沙箱、Ops Collector 与 Ops Actuator 测试，构建并用 Trivy
+> 扫描七个镜像，同时校验 Compose、Helm/Kustomize、Squid 与文档。
 > [`.github/workflows/security.yml`](../../.github/workflows/security.yml)
 > 增加 Gitleaks 历史扫描、依赖评审/审计、CodeQL 与 Trivy 文件系统/IaC
 > 扫描。Dependabot 覆盖 GitHub Actions、uv、npm、Docker。Tag Release
@@ -140,23 +140,31 @@ Compose 构建后的应用镜像统一命名为：`opencitadel-api`、`opencitad
 ```mermaid
 flowchart TD
   Start["选择部署模式"] --> Profile{"COMPOSE_PROFILES"}
-  Profile -->|"留空"| Cloud["cloud 模式"]
-  Profile -->|"local"| Local["local 模式"]
-  Cloud --> Cos["STORAGE_PROVIDER=cos"]
-  Local --> Minio["STORAGE_PROVIDER=minio"]
-  Cos --> CosCreds["配置 COS_* 凭证"]
-  Minio --> MinioUp["local profile 启动 MinIO"]
+  Profile -->|"留空"| Cloud["cloud 模式：STORAGE_PROVIDER=cos + COS_* 凭证"]
+  Profile -->|"local"| Local["local 模式：STORAGE_PROVIDER=minio，经 local profile 启动"]
   Start --> SandboxDriver{"sandbox.driver"}
   SandboxDriver -->|"auto/docker"| Broker["API/Worker 调用认证 broker"]
   SandboxDriver -->|"kubernetes"| K8sRBAC["Worker SA 创建 Pod"]
   Broker --> DockerSock["仅 broker 挂载 docker.sock"]
   DockerSock --> BuildImg["构建 opencitadel-sandbox 镜像"]
+  Start --> OpsPatrol{"可选 Ops Patrol profile"}
+  OpsPatrol -->|"+patrol"| Collector["Ops Collector 8090 只读，注册 MCP 服务"]
+  OpsPatrol -->|"+actuator"| Actuator["Ops Actuator 8091 写入（默认关闭），注册 MCP 服务 + enable_ops_patrol_remediation"]
 ```
 
 | 模式 | `COMPOSE_PROFILES` | `STORAGE_PROVIDER` | 需填写 |
 |------|-------------------|-------------------|--------|
 | **cloud**（默认） | 留空 | `cos` | `COS_*` 凭证 |
 | **local** | `local` | `minio` | MinIO 默认值开箱可用 |
+
+可选 profile 可叠加使用，通过逗号分隔的 `COMPOSE_PROFILES` 与 `local`/cloud 组合（如 `COMPOSE_PROFILES=local,patrol`）：
+
+| Profile | 新增 | 用途 |
+|---------|------|------|
+| `fixed-sandbox` | `opencitadel-sandbox` 服务 | 常驻沙箱容器，替代 Worker 动态创建的沙箱 |
+| `patrol` | `opencitadel-ops-collector`（8090） | Ops Patrol 只读 MCP 探针；见 [Ops Patrol 运维](ops-patrol.zh-CN.md) |
+| `actuator` | `opencitadel-ops-actuator`（8091） | Ops Patrol Remediation 的审批门控写 MCP；默认关闭 |
+| `demo` | `ops-console` | Web Operator / 修复教程使用的样板工单后台 |
 
 ### cloud 模式配置
 
@@ -300,7 +308,6 @@ NGINX_PORT=8088
 | Nginx 网关 | 200 MB | `nginx/nginx.conf` → `client_max_body_size 200m` |
 | Codebase ZIP | 200 MB | `ui/src/lib/constants.ts` → `CODEBASE_ZIP_MAX_BYTES` |
 | 知识库文档 | 默认 50 MB | AppConfig `knowledge_base.document.max_bytes` |
-| 市场资源 | 默认 25 MB | AppConfig `server.marketplace_max_upload_bytes` |
 
 见 [Nginx 网关](../../nginx/README.zh-CN.md)、[配置来源治理](../architecture/config-source-governance.zh-CN.md)、[知识库摄取](../architecture/knowledge-base-ingestion.zh-CN.md)。
 
@@ -470,10 +477,10 @@ docker compose up -d opencitadel-api opencitadel-worker
 
 | Workflow | 必须通过的控制 |
 |----------|---------------|
-| `ci.yml` | PostgreSQL/Redis 上的完整 API pytest；UI i18n/typecheck/lint/test/build；沙箱/Collector 测试；六个镜像构建及阻断 `HIGH,CRITICAL` 的 Trivy 扫描；Compose 渲染；Squid 解析；Helm/Kustomize 检查；文档检查 |
+| `ci.yml` | PostgreSQL/Redis 上的完整 API pytest；UI i18n/typecheck/lint/test/build；沙箱/Collector/Actuator 测试；七个镜像构建及阻断 `HIGH,CRITICAL` 的 Trivy 扫描；Compose 渲染；Squid 解析；Helm/Kustomize 检查；文档检查 |
 | `security.yml` | Gitleaks 全历史扫描；PR 依赖评审阻断 `high` 严重度与 GPL-3.0/AGPL-3.0；Python 与生产 npm 审计；Python、JavaScript/TypeScript 的 CodeQL `security-extended`；阻断 `HIGH,CRITICAL` 的 Trivy 漏洞/Secret/IaC 扫描 |
 | `dependabot.yml` | 每周更新 GitHub Actions、uv、npm、Docker |
-| `release.yml` | Actions 固定完整 SHA；六个 `linux/amd64` + `linux/arm64` 镜像；构建摘要 Trivy 扫描；SBOM；`provenance: mode=max`；Registry attestation |
+| `release.yml` | Actions 固定完整 SHA；七个 `linux/amd64` + `linux/arm64` 镜像；构建摘要 Trivy 扫描；SBOM；`provenance: mode=max`；Registry attestation |
 
 本地运行 `./scripts/check-docs.sh`、Compose 渲染、Shell/YAML 解析。Release
 前必须等待托管检查，因为它还覆盖干净依赖安装、镜像构建、PostgreSQL
@@ -979,17 +986,19 @@ docker compose up -d opencitadel-nginx
 
 ## ☸️ Kubernetes / Helm 部署
 
-Helm Chart 位于 `deploy/helm/opencitadel/`，支持全栈部署（Postgres/Redis/UI/Ingress + API/Worker + K8s Pod 沙箱 Driver + 可选只读 Ops Collector）。
+Helm Chart 位于 `deploy/helm/opencitadel/`，支持全栈部署（Postgres/Redis/UI/Ingress + API/Worker + K8s Pod 沙箱 Driver + 可选只读 Ops Collector + 可选写能力 Ops Actuator）。
 
 ```bash
-# 构建并推送六个镜像（api、worker、migrate 复用 api target）
+# 构建并推送镜像（api、worker、migrate 复用 api target；
+# ops-collector 与 ops-actuator 为可选镜像，仅 Ops Patrol 需要）
 docker build --target api -t your-registry/opencitadel-api ./api
 docker build --target worker -t your-registry/opencitadel-worker ./api
 docker build --target api -t your-registry/opencitadel-migrate ./api
 docker build -t your-registry/opencitadel-ui ./ui
 docker build -t your-registry/opencitadel-sandbox ./sandbox
 docker build -t your-registry/opencitadel-ops-collector ./ops-collector
-for image in api worker migrate ui sandbox ops-collector; do
+docker build -t your-registry/opencitadel-ops-actuator ./ops-actuator
+for image in api worker migrate ui sandbox ops-collector ops-actuator; do
   docker push "your-registry/opencitadel-${image}"
 done
 ```
@@ -1008,12 +1017,14 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --set image.sandbox.repository=your-registry/opencitadel-sandbox \
   --set opsCollector.enabled=true \
   --set opsCollector.image.repository=your-registry/opencitadel-ops-collector \
+  --set opsActuator.enabled=true \
+  --set opsActuator.image.repository=your-registry/opencitadel-ops-actuator \
   --set appConfig.sandbox.driver=kubernetes \
   --set ingress.enabled=true \
   --set replicaCount.worker=2
 ```
 
-Ops Patrol 为可选能力，默认关闭。启用前应按 [Ops Patrol 运维手册](ops-patrol.zh-CN.md) 配置 Collector 白名单/注册探针、固定 MCP Tool Policy、功能开关与 NetworkPolicy。
+Ops Patrol 与 Ops Patrol Remediation 均为可选能力，默认关闭。启用只读 Collector 或写能力 Actuator 前，应按 [Ops Patrol 运维手册](ops-patrol.zh-CN.md) 配置白名单/注册探针、固定 MCP Tool Policy、`enable_ops_patrol` / `enable_ops_patrol_remediation` 功能开关与 NetworkPolicy。
 
 `production-values.yaml` 必须通过 Secret Manager 或受保护的 Values 机制
 覆盖所有必需 Secret，确保四个应用密钥互不相同、PostgreSQL 管理/应用

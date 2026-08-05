@@ -793,6 +793,42 @@ Optional `sandbox.pool_enabled` + `pool_size` warm idle sandboxes in Worker; `Sa
 
 ---
 
+## 18. Ops Actuator as an independent MCP service, not direct K8s write access from the Agent
+
+### Problem
+
+Ops Patrol Remediation needs to execute a small set of Kubernetes write actions (restart / scale / rollback a workload) after human approval. Granting the Worker's own ServiceAccount — which already holds Pod-sandbox RBAC — additional `patch` permissions on Deployments/StatefulSets would let every Agent session, not just governed remediation sessions, inherit write access to the cluster, and would make write capability implicit in whatever tool the model happens to call.
+
+### Decision
+
+Ship the write path as a separate, narrow MCP server (`ops-actuator/`) with its own container, its own ServiceAccount, and a dedicated patch-only RBAC ClusterRole (`get/list/watch/patch` on Deployments/StatefulSets, `get/list` on ReplicaSets — see `deploy/kustomize/ops-actuator/rbac.yaml`). The LLM never calls Kubernetes directly: `patrol_execute_remediation` (`api/app/domain/services/tools/patrol_remediation.py`) is the only tool exposed to a remediation session, and it delegates to `PatrolRemediationService.execute()`, which calls the Actuator server-side only after capability-hash baseline verification and the `ToolApprovalBatch` approval gate. Registration is closed-world: the Actuator MCP server must be explicitly registered (seeded `enabled: false` in `api/config.yaml`) and the `enable_ops_patrol_remediation` feature flag must be turned on before any remediation session can run.
+
+### Pros
+
+- Blast radius is capped by RBAC, not application logic: even a fully compromised Agent session cannot patch a workload without going through the Actuator's own RoleBindings.
+- NetworkPolicy scopes ingress to the Actuator to API/Worker only (`deploy/kustomize/ops-actuator/network-policy.yaml`), separate from the read-only Collector's NetworkPolicy.
+- A capability-hash baseline binds each approval to the exact action/target/params triple; drift between proposal time and execution time is rejected (`CAPABILITY_DRIFT`), not silently re-authorized.
+- Same governance contract as every other `approval=always` tool — no bespoke gate to maintain (see [Checkpoints & HITL — Persistent approval batches](checkpoints-and-hitl.md#persistent-approval-batches)).
+
+### Cons
+
+- A second Kubernetes-facing service to build, deploy, and patch (Dockerfile, Helm templates, Kustomize manifests, RBAC review) beyond the read-only Collector.
+- One more moving part in the enablement runbook (register MCP server, flip feature flag, verify NetworkPolicy) before remediation can run at all.
+
+### Alternatives
+
+| Alternative | Pros | Cons |
+|-------------|------|------|
+| **Grant the Worker's existing ServiceAccount `patch` RBAC** | No new service to deploy | Every Agent session inherits cluster write access; blast radius is the whole Worker fleet |
+| **Agent calls `kubectl` / the K8s API directly from the sandbox** | Simplest code path | No closed-world registration, no capability-hash baseline, no dedicated NetworkPolicy — sandbox compromise becomes cluster compromise |
+
+### Revisit when
+
+- Remediation actions grow beyond restart/scale/rollback into a broader write surface that needs per-action RBAC splitting
+- Multi-cluster remediation requires the Actuator to hold credentials for more than one target cluster
+
+---
+
 ## Decision review process
 
 When adding a new dependency or replacing a core component:

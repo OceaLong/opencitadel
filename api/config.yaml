@@ -4,7 +4,6 @@ server:
   rate_limit_enabled: true
   rate_limit_per_minute: 120
   sessions_stream_interval_seconds: 15
-  marketplace_max_upload_bytes: 26214400
 
 agent_config:
   max_iterations: 100
@@ -103,6 +102,15 @@ mcp_config:
       args: null
       url: http://opencitadel-ops-collector:8090/mcp
       headers: null
+    ops-actuator:
+      transport: streamable_http
+      enabled: false
+      description: Narrow write-scoped MCP surface for Ops Patrol Remediation
+      env: null
+      command: null
+      args: null
+      url: http://opencitadel-ops-actuator:8091/mcp
+      headers: null
     amap-maps-streamableHTTP:
       transport: streamable_http
       enabled: false
@@ -196,7 +204,6 @@ codebase:
 
 feature_flags:
   enable_agent_features: true
-  enable_marketplace_llm_apps: true
   enable_embeddings: true
   enable_parallel_step_execution: false
   enable_artifacts: true
@@ -206,6 +213,9 @@ feature_flags:
   enable_ops_patrol: false
   # Test/demo fixture replay only. Keep disabled in production.
   enable_ops_patrol_fixture_replay: false
+  # Remediation proposal layer on top of Ops Patrol. Execution channel (Task 3)
+  # is a separate concern; this only gates propose/get/list.
+  enable_ops_patrol_remediation: false
 
 patrol_retention:
   run_days: 30

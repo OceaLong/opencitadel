@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 
-import { InlineOptionPicker } from "@/components/inline-option-picker";
+import { InlineOptionPicker } from "@/components/session/inline-option-picker";
 
 import { skillsApi } from "@/lib/api/skills";
 import type { Skill, SkillSummary } from "@/lib/api/types";

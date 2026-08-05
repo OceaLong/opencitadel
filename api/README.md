@@ -140,8 +140,6 @@ leaks.
 | GET | `/status` | Health check |
 | GET | `/llm/status` | LLM provider availability summary |
 | GET | `/metrics` | Prometheus metrics |
-| GET | `/marketplace/apps` | Marketplace catalog |
-| POST | `/marketplace/*` | Marketplace mini-app endpoints |
 | POST | `/webhooks/{job_token}` | Automation webhook ingress (token in path) |
 | GET | `/share/artifact/{token}` | Public artifact share (token in path) |
 | GET | `/invitations/{token}` | Team invitation preview |
@@ -157,7 +155,8 @@ leaks.
 | GET/POST/DELETE | `/service-keys` | Service API key CRUD |
 | GET/POST/PATCH/DELETE | `/teams`, `/teams/{id}/*` | Team workspace APIs |
 | GET/POST/PATCH | `/sessions`, `/sessions/{id}/*` | Session CRUD, chat SSE, checkpoints, VNC |
-| GET/POST/PATCH/DELETE | `/patrol-packs`, `/patrol-packs/{id}/*`, `/patrol-runs/*`, `/patrol-findings/*` | Feature-flagged read-only Ops Patrol control plane |
+| GET/POST/PATCH/DELETE | `/patrol-packs`, `/patrol-packs/{id}/*`, `/patrol-runs/*`, `/patrol-findings/*` | Feature-flagged Ops Patrol control plane (read-only findings; remediation writes gated separately) |
+| POST/GET | `/patrol-findings/{id}/remediations`, `/patrol-runs/{run_id}/remediations`, `/patrol-remediations/{id}` | Feature-flagged Patrol remediation proposals, approval, and execution |
 | GET/POST/PUT/DELETE | `/skills`, `/memories`, `/files` | Skills, long-term memory, files |
 | GET/POST | `/codebases`, `/knowledge-bases`, `/scheduled-jobs`, `/notifications` | Codebase, KB, automation, notifications |
 | GET/PUT/DELETE | `/app-config/*`, `/llm-endpoints`, `/llm-models` | AppConfig, LLM endpoints and models |
@@ -187,6 +186,7 @@ leaks.
 | GET | `/admin/audit/verify-chain`, `/admin/audit/verify-chain/sessions/{id}` | Audit chain verification |
 | GET | `/admin/evidence/sessions`, `/admin/evidence/sessions/{id}/package` | Compliance evidence |
 | GET | `/admin/compliance/report` | Compliance report export |
+| GET | `/admin/governance/sessions/{id}/profile` | Session governance profile (capability narrowing, approval batches, run outcome, audit chain) |
 
 ### Teams & invitations
 
@@ -224,8 +224,11 @@ leaks.
 | POST | `/patrol-runs/{id}/{cancel\|replay}` | Cancel or replay a Run |
 | GET | `/patrol-runs/{id}/evidence` | Download signed evidence ZIP |
 | POST | `/patrol-findings/{id}/{acknowledge\|resolve\|false-positive}` | Record an audited decision |
+| POST | `/patrol-findings/{id}/remediations` | Propose a remediation action for a Finding |
+| GET | `/patrol-runs/{run_id}/remediations` | List remediations for a Run |
+| GET | `/patrol-remediations/{id}` | Remediation detail (status, approval, execution result) |
 
-Patrol resources use the same personal/team `OwnerScope` and FORCE RLS controls as other tenant data. `AUDITOR` can read and download evidence but cannot mutate. See [Ops Patrol architecture](../docs/architecture/ops-patrol.md).
+Patrol resources use the same personal/team `OwnerScope` and FORCE RLS controls as other tenant data. `AUDITOR` can read and download evidence but cannot mutate. Remediation execution is disabled by default (`enable_ops_patrol_remediation`) and always routes through the same `ToolApprovalBatch` human-approval gate as any `approval=always` tool. See [Ops Patrol architecture](../docs/architecture/ops-patrol.md).
 
 ### LLM endpoints & models
 

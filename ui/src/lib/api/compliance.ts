@@ -42,6 +42,56 @@ export type ComplianceReport = {
   }>;
 };
 
+export type GovernanceProfileSession = {
+  id: string;
+  title: string;
+  status: string;
+  gate_profile?: string | null;
+  operator_scope?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GovernanceApprovalRow = {
+  action: string;
+  decision?: string | null;
+  actor_user_id?: string | null;
+  created_at: string;
+  pending_phase?: string | null;
+  tool?: string | null;
+  approval_batch_id?: string | null;
+  feedback?: string | null;
+};
+
+export type GovernanceGateHitRow = {
+  tool?: string | null;
+  gated?: boolean | null;
+  gate_profile?: string | null;
+  created_at: string;
+};
+
+export type GovernanceCheckpointRow = {
+  id: string;
+  anchor_type: string;
+  label?: string | null;
+  created_at: string;
+};
+
+export type GovernanceProfile = {
+  session: GovernanceProfileSession;
+  chain: {
+    verified: boolean;
+    checked_entries?: number | null;
+  };
+  approvals: GovernanceApprovalRow[];
+  gate_hits: GovernanceGateHitRow[];
+  checkpoints: GovernanceCheckpointRow[];
+  terminal: {
+    status: string;
+    reached_at: string;
+  };
+};
+
 export const complianceApi = {
   verifyChain: () => get<ChainVerifyResult>("/admin/audit/verify-chain"),
 
@@ -60,6 +110,9 @@ export const complianceApi = {
 
   evidencePackageUrl: (sessionId: string) =>
     `/api/admin/evidence/sessions/${sessionId}/package`,
+
+  getGovernanceProfile: (sessionId: string) =>
+    get<GovernanceProfile>(`/admin/governance/sessions/${sessionId}/profile`),
 
   getComplianceReport: (params?: {
     framework?: string;

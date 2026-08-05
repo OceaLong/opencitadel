@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { CodebaseVersionStatus } from "@/components/codebase/codebase-version-status";
 import { CreateCodebaseDialog } from "@/components/codebase/create-codebase-dialog";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { ResourceVersionStatus } from "@/components/resource/resource-version-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -197,9 +197,11 @@ export function CodebaseLibrary() {
                 </CardHeader>
                 <CardContent className="flex flex-wrap gap-2">
                   <div className="basis-full">
-                    <CodebaseVersionStatus
-                      codebaseId={cb.id}
-                      history={history}
+                    <ResourceVersionStatus
+                      api={codebaseApi}
+                      resourceId={cb.id}
+                      ns="codebase"
+                      controlledHistory={history}
                       onBuildChanged={loadCodebases}
                     />
                   </div>

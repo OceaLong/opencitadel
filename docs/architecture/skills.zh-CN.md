@@ -19,7 +19,7 @@ Skill 模板塑造 Agent 行为：系统提示词、允许工具、MCP/A2A 范�
 | `is_builtin` | 内置 Skill，不可删除 |
 | `enabled` | 禁用的 Skill 在运行时被跳过 |
 
-内置 Skill 含 `coding`、`research`、`web-operator`、`refund-reconciliation` 等 — 见 `api/app/application/services/skill_service.py`。
+内置 Skill 含 `ops-patrol`、`ops-patrol-remediation`、`coding`、`research`、`data-analysis`、`writing`、`web-operator`、`refund-reconciliation` — 见 `api/app/application/services/skill_service.py`。
 
 ## API
 
@@ -52,13 +52,17 @@ flowchart LR
 4. **ToolRegistry** 遵守 `allowed_tools`；Ask 流程无论 Skill 如何均使用只读工具子集。
 5. **Web Operator**：Skill `web-operator` 在创建会话时触发 `operator-scope-dialog.tsx`，并启用更严格的 HITL 默认。
 
+### 受治理的单工具会话
+
+`ops-patrol` 与 `ops-patrol-remediation` 会话是**受治理的单工具会话**：`TaskRunnerFactory` 推导出单一标志 `is_governed_single_tool_session = is_patrol or is_remediation`（`task_runner_factory.py:363`），并用它统一压制两种会话的所有通用能力——MCP（改用空 `MCPConfig()`）、A2A（改用空 `A2AConfig()`）、记忆工具、子代理工具、Artifact 交付、图像生成，均与 Skill 上的 `mcp_server_refs`/`a2a_server_refs` 设置无关地被禁用。修复会话进一步强制清空 MCP 配置——即便 Actuator MCP 服务本身存在，因为 `PatrolRemediationService.execute()` 是在服务端直接调用 Actuator，模型侧从未看到对应的 MCP 工具。模型最终只保留 Skill 自身的 `allowed_tools`（`patrol_submit_results` / `patrol_execute_remediation` + `message_notify_user`）。
+
 ## UI
 
 | 入口 | 组件 | 路径 |
 |------|------|------|
 | 设置 → Skill | `SkillsSettings` | `ui/src/components/settings/skills-settings.tsx` |
-| 首页 / 会话选择 | 模型 + Skill 选择器 | `ui/src/app/page.tsx`、`session-detail-view.tsx` |
-| Web Operator 范围 | `OperatorScopeDialog` | `ui/src/components/operator-scope-dialog.tsx` |
+| 首页 / 会话选择 | 模型 + Skill 选择器 | `ui/src/app/page.tsx`、`ui/src/components/session/session-detail-view.tsx` |
+| Web Operator 范围 | `OperatorScopeDialog` | `ui/src/components/session/operator-scope-dialog.tsx` |
 
 ## 配置
 

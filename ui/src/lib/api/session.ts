@@ -1,17 +1,18 @@
-import { createSSEStream, get, parseSSEStream, patch, post } from "./fetch";
 import { translate } from "@/i18n/translate";
+
+import { createSSEStream, get, parseSSEStream, patch, post } from "./fetch";
 import type {
   ChatParams,
   CreateSessionParams,
+  ResourceBindingUpgrade,
   Session,
   SessionCheckpointsData,
   SessionDetail,
   SessionEventsPage,
   SessionFile,
+  SessionResourceBinding,
   SessionsData,
   SessionTokenUsageData,
-  SessionResourceBinding,
-  ResourceBindingUpgrade,
   SSEEventData,
   SSEEventHandler,
   UpdateSessionConfigParams,

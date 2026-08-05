@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
-import { createRoot } from "react-dom/client";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { mockNavigation, mockNextIntl, mockSonner } from "@/test-utils/mocks";
+import { renderComponent } from "@/test-utils/render";
 
 const mocks = vi.hoisted(() => ({
   getKnowledgeBase: vi.fn(),
@@ -10,13 +12,9 @@ const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: mocks.replace }),
-}));
-vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}));
-vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
+vi.mock("next/navigation", () => mockNavigation({ replace: mocks.replace }));
+vi.mock("next-intl", () => mockNextIntl());
+vi.mock("sonner", () => mockSonner());
 vi.mock("@/lib/api/knowledge", () => ({
   knowledgeApi: { get: mocks.getKnowledgeBase },
 }));
@@ -28,11 +26,6 @@ vi.mock("@/lib/icons", () => ({ IconLoading: () => null }));
 import { KnowledgeDetailRedirect } from "./knowledge-detail-redirect";
 
 describe("KnowledgeDetailRedirect", () => {
-  beforeAll(() => {
-    (
-      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
-    ).IS_REACT_ACT_ENVIRONMENT = true;
-  });
   afterEach(() => {
     mocks.getKnowledgeBase.mockReset();
     mocks.createSession.mockReset();
@@ -46,13 +39,9 @@ describe("KnowledgeDetailRedirect", () => {
       active_version_id: "v-active",
     });
     mocks.createSession.mockResolvedValue({ session_id: "s1" });
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
 
+    const { unmount } = await renderComponent(<KnowledgeDetailRedirect knowledgeBaseId="kb1" />);
     await act(async () => {
-      root.render(<KnowledgeDetailRedirect knowledgeBaseId="kb1" />);
-      await Promise.resolve();
       await Promise.resolve();
     });
 
@@ -62,6 +51,6 @@ describe("KnowledgeDetailRedirect", () => {
       mode: "ask",
     });
     expect(mocks.replace).toHaveBeenCalledWith("/sessions/s1");
-    await act(async () => root.unmount());
+    await unmount();
   });
 });

@@ -117,10 +117,10 @@ docker compose up -d
 | `UV_HTTP_TIMEOUT` | `300` | HTTP timeout (seconds) for `uv sync` wheel downloads |
 | `NPM_CONFIG_REGISTRY` | npmmirror | npm for sandbox / ui |
 
-Built application images are named: `opencitadel-api`, `opencitadel-worker`, `opencitadel-migrate`, `opencitadel-ui`, `opencitadel-sandbox`, and the optional `opencitadel-ops-collector`.
+Built application images are named: `opencitadel-api`, `opencitadel-worker`, `opencitadel-migrate`, `opencitadel-ui`, `opencitadel-sandbox`, and the optional `opencitadel-ops-collector` and `opencitadel-ops-actuator`.
 
 > **CI/CD note**: [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
-> runs API, UI, sandbox, and Ops Collector tests; builds and Trivy-scans all six images; and
+> runs API, UI, sandbox, Ops Collector, and Ops Actuator tests; builds and Trivy-scans all seven images; and
 > validates Compose, Helm, Squid, and documentation on every PR and `main`
 > push. [`.github/workflows/security.yml`](../../.github/workflows/security.yml)
 > adds Gitleaks history scanning, dependency review/audits, CodeQL, and Trivy
@@ -141,23 +141,31 @@ Choose the deployment mode with two variables at the top of `.env`:
 ```mermaid
 flowchart TD
   Start["Choose deployment mode"] --> Profile{"COMPOSE_PROFILES"}
-  Profile -->|"empty"| Cloud["cloud mode"]
-  Profile -->|"local"| Local["local mode"]
-  Cloud --> Cos["STORAGE_PROVIDER=cos"]
-  Local --> Minio["STORAGE_PROVIDER=minio"]
-  Cos --> CosCreds["Set COS_* credentials"]
-  Minio --> MinioUp["MinIO via local profile"]
+  Profile -->|"empty"| Cloud["cloud mode: STORAGE_PROVIDER=cos + COS_* credentials"]
+  Profile -->|"local"| Local["local mode: STORAGE_PROVIDER=minio via local profile"]
   Start --> SandboxDriver{"sandbox.driver"}
   SandboxDriver -->|"auto/docker"| Broker["API/Worker call authenticated broker"]
   SandboxDriver -->|"kubernetes"| K8sRBAC["Worker SA creates Pods"]
   Broker --> DockerSock["Broker-only docker.sock"]
   DockerSock --> BuildImg["Build opencitadel-sandbox image"]
+  Start --> OpsPatrol{"optional Ops Patrol profiles"}
+  OpsPatrol -->|"+patrol"| Collector["Ops Collector 8090 read-only, register MCP server"]
+  OpsPatrol -->|"+actuator"| Actuator["Ops Actuator 8091 write opt-in, register MCP server + enable_ops_patrol_remediation"]
 ```
 
 | Mode | `COMPOSE_PROFILES` | `STORAGE_PROVIDER` | Required |
 |------|-------------------|-------------------|----------|
 | **cloud** (default) | empty | `cos` | `COS_*` credentials |
 | **local** | `local` | `minio` | MinIO defaults work out of the box |
+
+Optional profiles are additive — combine with `local`/cloud via a comma-separated `COMPOSE_PROFILES` (e.g. `COMPOSE_PROFILES=local,patrol`):
+
+| Profile | Adds | Purpose |
+|---------|------|---------|
+| `fixed-sandbox` | `opencitadel-sandbox` service | Persistent sandbox container instead of Worker-created dynamic sandboxes |
+| `patrol` | `opencitadel-ops-collector` (8090) | Read-only MCP probes for Ops Patrol; see [Ops Patrol operations](ops-patrol.md) |
+| `actuator` | `opencitadel-ops-actuator` (8091) | Approval-gated write MCP for Ops Patrol Remediation; disabled by default |
+| `demo` | `ops-console` | Sample ticketing backend for the Web Operator / remediation tutorials |
 
 ### cloud mode
 
@@ -303,7 +311,6 @@ Do not assume a single global upload cap. Align all layers when changing limits:
 | Nginx gateway | 200 MB | `nginx/nginx.conf` → `client_max_body_size 200m` |
 | Codebase ZIP | 200 MB | `ui/src/lib/constants.ts` → `CODEBASE_ZIP_MAX_BYTES` |
 | Knowledge base document | 50 MB default | AppConfig `knowledge_base.document.max_bytes` |
-| Marketplace asset | 25 MB default | AppConfig `server.marketplace_max_upload_bytes` |
 
 See [Nginx gateway](../../nginx/README.md), [Config source governance](../architecture/config-source-governance.md), and [Knowledge base ingestion](../architecture/knowledge-base-ingestion.md).
 
@@ -478,10 +485,10 @@ Docker/PostgreSQL/Helm-backed CI:
 
 | Workflow | Required controls |
 |----------|-------------------|
-| `ci.yml` | Full API pytest against PostgreSQL/Redis, UI i18n/typecheck/lint/test/build, sandbox/Collector tests, six image builds with Trivy `HIGH,CRITICAL` blocking, Compose render, Squid parse, Helm/Kustomize checks, documentation checks |
+| `ci.yml` | Full API pytest against PostgreSQL/Redis, UI i18n/typecheck/lint/test/build, sandbox/Collector/Actuator tests, seven image builds with Trivy `HIGH,CRITICAL` blocking, Compose render, Squid parse, Helm/Kustomize checks, documentation checks |
 | `security.yml` | Gitleaks full-history scan; PR dependency review blocks `high` severity and GPL-3.0/AGPL-3.0; Python and production npm audits; CodeQL `security-extended` for Python and JavaScript/TypeScript; Trivy vulnerability/secret/IaC scan blocks `HIGH,CRITICAL` |
 | `dependabot.yml` | Weekly GitHub Actions, uv, npm, and Docker update groups |
-| `release.yml` | Full-SHA-pinned Actions; six `linux/amd64` + `linux/arm64` images; built-digest Trivy scan; SBOM; `provenance: mode=max`; registry attestations |
+| `release.yml` | Full-SHA-pinned Actions; seven `linux/amd64` + `linux/arm64` images; built-digest Trivy scan; SBOM; `provenance: mode=max`; registry attestations |
 
 Run `./scripts/check-docs.sh`, Compose rendering, and shell/YAML parsing locally.
 Require the hosted checks before release because they also exercise clean
@@ -994,17 +1001,19 @@ Full domain binding, certificate setup (Let's Encrypt or custom), verification, 
 
 ## ☸️ Kubernetes / Helm deployment
 
-Helm chart at `deploy/helm/opencitadel/` supports full-stack deploy (Postgres/Redis/UI/Ingress + API/Worker + K8s Pod sandbox driver + optional read-only Ops Collector).
+Helm chart at `deploy/helm/opencitadel/` supports full-stack deploy (Postgres/Redis/UI/Ingress + API/Worker + K8s Pod sandbox driver + optional read-only Ops Collector + optional write-capable Ops Actuator).
 
 ```bash
-# Build and push six images (api, worker, migrate reuses the api target)
+# Build and push images (api, worker, migrate reuses the api target;
+# ops-collector and ops-actuator are optional, only needed for Ops Patrol)
 docker build --target api -t your-registry/opencitadel-api ./api
 docker build --target worker -t your-registry/opencitadel-worker ./api
 docker build --target api -t your-registry/opencitadel-migrate ./api
 docker build -t your-registry/opencitadel-ui ./ui
 docker build -t your-registry/opencitadel-sandbox ./sandbox
 docker build -t your-registry/opencitadel-ops-collector ./ops-collector
-for image in api worker migrate ui sandbox ops-collector; do
+docker build -t your-registry/opencitadel-ops-actuator ./ops-actuator
+for image in api worker migrate ui sandbox ops-collector ops-actuator; do
   docker push "your-registry/opencitadel-${image}"
 done
 ```
@@ -1023,12 +1032,14 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
   --set image.sandbox.repository=your-registry/opencitadel-sandbox \
   --set opsCollector.enabled=true \
   --set opsCollector.image.repository=your-registry/opencitadel-ops-collector \
+  --set opsActuator.enabled=true \
+  --set opsActuator.image.repository=your-registry/opencitadel-ops-actuator \
   --set appConfig.sandbox.driver=kubernetes \
   --set ingress.enabled=true \
   --set replicaCount.worker=2
 ```
 
-Ops Patrol is optional and disabled by default. Before enabling it, configure the Collector allowlists/registered probes, fixed MCP tool policies, feature flag, and NetworkPolicy using the dedicated [Ops Patrol operations runbook](ops-patrol.md).
+Ops Patrol and Ops Patrol Remediation are optional and disabled by default. Before enabling the read-only Collector or the write-capable Actuator, configure allowlists/registered probes, fixed MCP tool policies, the `enable_ops_patrol` / `enable_ops_patrol_remediation` feature flags, and NetworkPolicy using the dedicated [Ops Patrol operations runbook](ops-patrol.md).
 
 `production-values.yaml` must override every required secret with a secret
 manager or protected values mechanism, keep the four application secrets

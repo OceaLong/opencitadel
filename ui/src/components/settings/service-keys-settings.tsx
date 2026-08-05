@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Copy, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { Copy, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -18,8 +18,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-import { serviceKeysApi, type CreatedServiceApiKey, type ServiceApiKey } from "@/lib/api/service-keys";
 import { formatDateTime } from "@/lib/admin-utils";
+import { type CreatedServiceApiKey, type ServiceApiKey,serviceKeysApi } from "@/lib/api/service-keys";
 
 export function ServiceKeysSettings() {
   const t = useTranslations("settingsServiceKeys");

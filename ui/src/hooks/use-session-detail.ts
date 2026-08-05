@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { useSessionEventLog } from "@/hooks/use-session-event-log";
 import { useSessionMeta } from "@/hooks/use-session-meta";
-import { useSessionStreams, type SessionStreamStatus } from "@/hooks/use-session-streams";
+import { type SessionStreamStatus,useSessionStreams } from "@/hooks/use-session-streams";
 import type {
   ClarifyAnswer,
   SessionCheckpoint,

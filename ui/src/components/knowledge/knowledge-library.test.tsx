@@ -1,13 +1,10 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-const reactActEnvironment = globalThis as typeof globalThis & {
-  IS_REACT_ACT_ENVIRONMENT?: boolean;
-};
-const originalReactActEnvironment = reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
+import { mockAuth, mockNavigation, mockNextIntl, mockSonner } from "@/test-utils/mocks";
+import { renderComponent } from "@/test-utils/render";
 
 const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
@@ -18,18 +15,17 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
 }));
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push }) }));
-vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string) =>
-    ({
-      startAsk: "Ask",
-      startAgent: "Agent",
-      reindex: "Re-index",
-      viewBuild: "View build",
-    })[key] ?? key,
-}));
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
-vi.mock("@/providers/auth-provider", () => ({ useAuth: () => ({ user: { id: "user-1" } }) }));
+vi.mock("next/navigation", () => mockNavigation({ push: mocks.push }));
+vi.mock("next-intl", () =>
+  mockNextIntl({
+    startAsk: "Ask",
+    startAgent: "Agent",
+    reindex: "Re-index",
+    viewBuild: "View build",
+  }),
+);
+vi.mock("sonner", () => mockSonner());
+vi.mock("@/providers/auth-provider", () => mockAuth());
 vi.mock("@/lib/api/knowledge", () => ({
   knowledgeApi: {
     list: mocks.listKnowledgeBases,
@@ -85,22 +81,11 @@ function findButton(container: HTMLDivElement, label: string): HTMLButtonElement
   return button as HTMLButtonElement;
 }
 
-async function renderLibrary(): Promise<{ container: HTMLDivElement; root: Root }> {
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-  await act(async () => {
-    root.render(<KnowledgeLibrary />);
-    await Promise.resolve();
-  });
-  return { container, root };
+async function renderLibrary() {
+  return renderComponent(<KnowledgeLibrary />);
 }
 
 describe("knowledge task starts", () => {
-  beforeAll(() => {
-    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
-  });
-
   afterEach(() => {
     mocks.createSession.mockReset();
     mocks.createBuild.mockReset();
@@ -109,14 +94,6 @@ describe("knowledge task starts", () => {
     mocks.listVersions.mockReset();
     mocks.push.mockReset();
     document.body.replaceChildren();
-  });
-
-  afterAll(() => {
-    if (originalReactActEnvironment === undefined) {
-      delete reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
-    } else {
-      reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = originalReactActEnvironment;
-    }
   });
 
   it("starts sessions with the mode selected by the rendered Ask and Agent buttons", async () => {
@@ -141,7 +118,7 @@ describe("knowledge task starts", () => {
     mocks.createSession
       .mockResolvedValueOnce({ session_id: "session-ask" })
       .mockResolvedValueOnce({ session_id: "session-agent" });
-    const { container, root } = await renderLibrary();
+    const { container, unmount } = await renderLibrary();
 
     await act(async () => {
       findButton(container, "Ask").click();
@@ -162,7 +139,7 @@ describe("knowledge task starts", () => {
       knowledge_base_version_id: "version-published",
       mode: "agent",
     });
-    await act(async () => root.unmount());
+    await unmount();
   });
 
   it("uses the build command and disables duplicate creation while a build is active", async () => {
@@ -229,7 +206,7 @@ describe("knowledge task starts", () => {
       is_candidate: true,
     });
 
-    const { container, root } = await renderLibrary();
+    const { container, unmount } = await renderLibrary();
     await act(async () => {
       findButton(container, "Re-index").click();
       await Promise.resolve();
@@ -239,6 +216,6 @@ describe("knowledge task starts", () => {
     expect(mocks.createBuild).toHaveBeenCalledWith("kb-1");
     expect(mocks.legacyReindex).not.toHaveBeenCalled();
     expect(findButton(container, "View build").disabled).toBe(true);
-    await act(async () => root.unmount());
+    await unmount();
   });
 });
