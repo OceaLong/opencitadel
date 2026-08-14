@@ -58,11 +58,11 @@ jobs:
         language: [python, javascript-typescript]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: github/codeql-action/init@4187e74d05793876e9989daffde9c3e66b4acd07 # v3
+      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v3
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
-      - uses: github/codeql-action/analyze@4187e74d05793876e9989daffde9c3e66b4acd07 # v3
+      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v3
         with:
           category: /language:${{ matrix.language }}
 
@@ -99,7 +99,7 @@ jobs:
           output: trivy-full.sarif
       - name: Upload full scan results to Security tab
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        uses: github/codeql-action/upload-sarif@4187e74d05793876e9989daffde9c3e66b4acd07 # v3
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v3
         with:
           sarif_file: trivy-full.sarif
           category: trivy-weekly-full
