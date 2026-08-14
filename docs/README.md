@@ -15,6 +15,7 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 5. [Refund reconciliation & compliance](tutorials/05-refund-reconciliation-compliance.md)
 6. [Read-only daily Ops Patrol](tutorials/06-ops-patrol.md)
 7. [Approve an Ops Patrol remediation](tutorials/07-approved-remediation.md)
+8. [The 10-minute governance demo loop](tutorials/08-ten-minute-governance-demo.md)
 
 ### Operations & deployment
 

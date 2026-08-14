@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from prometheus_client import REGISTRY
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
@@ -150,6 +151,85 @@ async def test_approval_decision_is_idempotent(repo):
     assert second is not None
     assert first.decided_at == second.decided_at
     assert second.decided_by == "u1"
+
+
+def _counter_value(name: str, labels: dict) -> float:
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+@pytest.mark.asyncio
+async def test_batch_reaching_approved_records_metric_exactly_once(repo):
+    """Task 2 (coordinator addendum A): the single persistence point where a
+    batch's status flips to APPROVED — the last pending call's decision in
+    DBResourceGovernanceRepository.decide_approval_call — must record
+    governance_approval_batches_total{outcome="approved"} exactly once, even
+    though decide_approval_call is safe to call again afterwards (retries /
+    the two approval entry points) for the same already-decided call."""
+    batch = ToolApprovalBatch.for_calls(
+        "s1", [ApprovalCallInput("tc1", "browser_click", {}, 0)]
+    )
+    await repo.save_approval_batch(batch)
+    before = _counter_value(
+        "governance_approval_batches_total", {"outcome": "approved"}
+    )
+
+    decided = await repo.decide_approval_call("tc1", ApprovalStatus.APPROVED, "u1")
+    # Idempotent retry of the very same decision must not double-count.
+    retried = await repo.decide_approval_call("tc1", ApprovalStatus.APPROVED, "u1")
+
+    after = _counter_value(
+        "governance_approval_batches_total", {"outcome": "approved"}
+    )
+    assert decided is not None
+    assert retried is not None
+    assert after - before == 1.0
+
+
+@pytest.mark.asyncio
+async def test_batch_reaching_rejected_does_not_record_approved_metric(repo):
+    batch = ToolApprovalBatch.for_calls(
+        "s1", [ApprovalCallInput("tc1", "browser_click", {}, 0)]
+    )
+    await repo.save_approval_batch(batch)
+    before = _counter_value(
+        "governance_approval_batches_total", {"outcome": "approved"}
+    )
+
+    await repo.decide_approval_call("tc1", ApprovalStatus.REJECTED, "u1")
+
+    after = _counter_value(
+        "governance_approval_batches_total", {"outcome": "approved"}
+    )
+    assert after - before == 0.0
+
+
+@pytest.mark.asyncio
+async def test_multi_call_batch_records_approved_metric_only_on_final_decision(repo):
+    """A batch only reaches APPROVED once every call has cleared PENDING —
+    deciding the first of two calls must not fire the metric early."""
+    batch = ToolApprovalBatch.for_calls(
+        "s1",
+        [
+            ApprovalCallInput("tc1", "browser_click", {}, 0),
+            ApprovalCallInput("tc2", "send_message", {}, 1),
+        ],
+    )
+    await repo.save_approval_batch(batch)
+    before = _counter_value(
+        "governance_approval_batches_total", {"outcome": "approved"}
+    )
+
+    await repo.decide_approval_call("tc1", ApprovalStatus.APPROVED, "u1")
+    mid = _counter_value(
+        "governance_approval_batches_total", {"outcome": "approved"}
+    )
+    await repo.decide_approval_call("tc2", ApprovalStatus.APPROVED, "u1")
+    after = _counter_value(
+        "governance_approval_batches_total", {"outcome": "approved"}
+    )
+
+    assert mid - before == 0.0
+    assert after - before == 1.0
 
 
 @pytest.mark.asyncio

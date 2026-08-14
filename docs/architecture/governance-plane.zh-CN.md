@@ -101,7 +101,7 @@ sequenceDiagram
 
 ## 档案与证据
 
-`GovernanceProfileService.build_profile()`（`api/app/application/services/governance_profile_service.py`）是对上述链路已经写下的数据做的只读聚合：它通过 `AuditService.verify_session_chain` 校验会话的哈希链审计日志，并把审批、Gate 命中与检查点投影为一份面向审计人员的文档——不新建表，不产生新写入。`EvidenceService.build_session_evidence_package()`（`api/app/application/services/evidence_service.py`）把该档案、完整审计报告、检查点、交付物与浏览器截图打包为一个 ZIP：
+`GovernanceProfileService.build_profile()`（`api/app/application/services/governance_profile_service.py`）是对上述链路已经写下的数据做的只读聚合：它通过 `AuditService.verify_session_chain` 校验会话的哈希链审计日志，并把审批、Gate 命中、检查点与策略拒绝投影为一份面向审计人员的文档——不新建表，不产生新写入。策略拒绝即该会话所有 `agent_tool_denied` 审计行：前一节三层收窄（`assembly`/`exposure`/`execution`）中任意一层的能力策略拒绝，每条携带 `tool`、`layer` 与脱敏后的 `reason`。`EvidenceService.build_session_evidence_package()`（`api/app/application/services/evidence_service.py`）把该档案、完整审计报告、检查点、交付物与浏览器截图打包为一个 ZIP：
 
 | 包内文件 | 内容 |
 |----------|------|
@@ -113,6 +113,23 @@ sequenceDiagram
 | `chain-signature.txt` | `HMAC-SHA256(AUDIT_SIGNING_KEY, manifest.json bytes)`——使用唯一的当前签名密钥，并附带其 `AUDIT_SIGNING_KEY_ID` 标签，使密钥轮换前签发的证据包仍可用对应的历史密钥独立验证 |
 
 由于签名覆盖的是 `manifest.json` 里的文件哈希表而非 ZIP 本身的字节，证据包在被重新压缩或部分解压后依然可验证。
+
+## 可观测性
+
+上述流程的每一步都会同时递增 `api/app/infrastructure/observability/governance_metrics.py` 中的一个 Prometheus 计数器/直方图，由执行该步骤的进程（API 或 Worker）记录：
+
+| 指标 | 类型 | 标签 | 记录时机 |
+|------|------|------|----------|
+| `governance_approval_batches_total` | Counter | `outcome`（`approved`/`rejected`/`expired`/`consumed`） | `ToolApprovalBatch` 到达终态 |
+| `governance_approval_decision_seconds` | Histogram | — | 从批次创建到决策的耗时 |
+| `governance_gate_hits_total` | Counter | `gate` | 工具调用被 HITL 门控策略标记 |
+| `governance_policy_denials_total` | Counter | `layer`（`assembly`/`exposure`/`execution`）、`tool` | `CapabilityPolicy` 在三层收窄中任意一层拒绝调用 |
+| `governance_tool_executions_total` | Counter | `tool`、`status`（`ok`/`error`/`denied`） | 受治理的工具调用执行尝试完成 |
+| `governance_tool_execution_seconds` | Histogram | `tool` | 受治理工具调用的执行耗时 |
+| `governance_remediation_transitions_total` | Counter | `to_status` | Ops Patrol 修复状态发生迁移 |
+| `governance_audit_chain_verifications_total` | Counter | `result`（`intact`/`broken`） | 一次审计哈希链校验完成 |
+
+从 `/api/metrics`（API 进程，Bearer token 鉴权）与 Worker 独立的仅内网 metrics 端口抓取——各自的鉴权/网络语义详见[安全模型 § 可观测性](security-model.zh-CN.md#可观测性)。每次能力策略拒绝在计数器之外还会留下一条 `agent_tool_denied` 审计行（见上文[档案与证据](#档案与证据)），因此一次拒绝既能在 Prometheus 中即时可见，也能在证据链中被持久地归因到具体会话。
 
 ## 相关文档
 

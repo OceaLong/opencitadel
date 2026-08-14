@@ -39,8 +39,9 @@ flowchart TD
 | `/admin/invitations` | 平台邀请令牌 |
 | `/admin/audit` | 审计日志查看 |
 | `/admin/compliance` | 证据中心、链校验、合规报告 |
-| `/admin/compliance/sessions/[sessionId]` | 单会话治理档案：审批、Gate 命中、检查点、终态 |
+| `/admin/compliance/sessions/[sessionId]` | 单会话治理档案：审批、Gate 命中、策略拒绝、检查点、终态 |
 | `/admin/compliance/report` | 全页合规报告导出（JSON / MD / PDF） |
+| `/admin/governance` | 平台级治理概览：审批结果统计、按日拦截趋势（审批决策 + 策略拒绝）、Ops Patrol 趋势、修复结果分布、审计链状态 |
 
 Token 用量图表在 **`/admin` 概览页**展示（无独立 `/admin/usage` 页面）。后端用量 API 仍在 `/api/admin/usage/*`。
 
@@ -57,9 +58,12 @@ Token 用量图表在 **`/admin` 概览页**展示（无独立 `/admin/usage` �
 | GET | `/api/admin/evidence/sessions` | 列出可导出证据的会话 |
 | GET | `/api/admin/evidence/sessions/{id}/package` | 下载 ZIP 证据包 |
 | GET | `/api/admin/compliance/report` | 合规报告（`json` / `md` / `pdf`） |
-| GET | `/api/admin/governance/sessions/{id}/profile` | 单会话治理档案只读聚合（审批、Gate 命中、检查点、链校验、终态） |
+| GET | `/api/admin/governance/sessions/{id}/profile` | 单会话治理档案只读聚合（审批、Gate 命中、策略拒绝、检查点、链校验、终态） |
+| GET | `/api/admin/governance/overview?days=30` | 平台级治理概览只读聚合（审批批次结果、按日审批决策/策略拒绝拦截趋势、Ops Patrol 运行/问题趋势、修复状态分布、审计链状态）——同样受 `require_auditor_or_admin` 保护，`days` 取值 1–365 |
 
 合规映射覆盖**等保2.0**与 **ISO27001** 控制项。设置 `gate_profile` 的 Web Operator 会话会写入带 HMAC 证据链字段的 `agent_tool_invoke` 记录。
+
+每个控制项最终判定为五种状态之一：`pass`（有证据证明控制项已落实）、`gap`（有证据证明控制项缺失或配置不当）、`attention`（能力存在但有需要关注的保留意见——例如能力已具备但在报告窗口内从未被实际触发）、`not_verified`（窗口内无数据可供判断，例如窗口期间无 Agent 会话运行）、`na`（控制项对本部署不适用）。报告摘要携带各状态计数；每个控制项由真实评估器读取窗口内实际审计/配置数据后判定，而非静态的"全部通过"默认值。
 
 ## 证据包内容
 
@@ -76,7 +80,7 @@ Token 用量图表在 **`/admin` 概览页**展示（无独立 `/admin/usage` �
 
 ## 治理档案
 
-治理档案是对治理执行链已记录数据——审计哈希链、检查点、会话状态——的只读聚合，汇总为一份面向审计员的文档。不新增表，也不新增写操作。
+治理档案是对治理执行链已记录数据——审计哈希链、检查点、会话状态——的只读聚合，汇总为一份面向审计员的文档。不新增表，也不新增写操作。它有七个顶层字段：`session`、`chain`、`approvals`、`gate_hits`、`checkpoints`、`terminal`、`denials`——最后一个字段投影该会话所有 `agent_tool_denied` 审计行（assembly/exposure/execution 层的能力策略拒绝），每条含 `tool`、`layer`、`reason`、`created_at`。证据 ZIP 中的 `governance-profile.md` 将其渲染为「策略拒绝」表。
 
 ```mermaid
 erDiagram

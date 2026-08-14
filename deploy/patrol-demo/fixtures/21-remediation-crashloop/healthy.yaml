@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fixture-remediation-crashloop
+  namespace: opencitadel-patrol-demo
+  labels: {opencitadel.io/patrol-fixture: "true"}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: fixture-remediation-crashloop}}
+  template:
+    metadata: {labels: {app: fixture-remediation-crashloop, opencitadel.io/patrol-fixture: "true"}}
+    spec:
+      # Applied by scripts/drive_remediation_fixture.py after the restart_workload
+      # remediation and its idempotent replay are both verified. This models "the
+      # on-call engineer redeploys a fixed image after the actuator's restart alone
+      # didn't clear a genuine CrashLoopBackOff" -- see setup.yaml's comment for why
+      # restart_workload's own patch can never repair this fixture's literal crash
+      # loop. Same name/namespace/labels/selector as setup.yaml so this replaces the
+      # 11 crashing containers in place: the Deployment rolls a brand-new ReplicaSet
+      # (different pod template), so the resulting Pod's restartCount starts at 0.
+      containers:
+        - {name: app, image: busybox:1.36, command: ["sh", "-c", "sleep 3600"]}

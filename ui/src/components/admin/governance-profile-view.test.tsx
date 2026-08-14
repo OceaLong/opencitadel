@@ -46,6 +46,14 @@ const profile: GovernanceProfile = {
     { id: "c1", anchor_type: "step", label: "before-shell", created_at: "2026-08-04T00:28:00Z" },
   ],
   terminal: { status: "failed", reached_at: "2026-08-04T01:00:00Z" },
+  denials: [
+    {
+      tool: "write_file",
+      layer: "execution",
+      reason: "当前会话策略禁止工具[write_file]",
+      created_at: "2026-08-04T00:27:00Z",
+    },
+  ],
 };
 
 describe("GovernanceProfileView", () => {
@@ -63,6 +71,18 @@ describe("GovernanceProfileView", () => {
     expect(text.toLowerCase()).toContain("reject");
     expect(text).toContain("before-shell");
     expect(text.toLowerCase()).toContain("failed");
+    await unmount();
+  });
+
+  it("renders policy denials with tool, layer and reason", async () => {
+    const { container, unmount } = await renderComponent(
+      <GovernanceProfileView profile={profile} />,
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("write_file");
+    expect(text).toContain("execution");
+    expect(text).toContain("当前会话策略禁止工具[write_file]");
     await unmount();
   });
 
@@ -102,6 +122,7 @@ describe("GovernanceProfileView", () => {
       approvals: [],
       gate_hits: [],
       checkpoints: [],
+      denials: [],
     };
     const { container, unmount } = await renderComponent(
       <GovernanceProfileView profile={emptyProfile} />,

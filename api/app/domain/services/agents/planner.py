@@ -4,7 +4,7 @@ import logging
 import json
 from typing import Optional, AsyncGenerator
 
-from app.application.services.config_provider import get_runtime_config
+from app.domain.config_port import get_runtime_config
 from app.domain.models.event import BaseEvent, MessageEvent, PlanEvent, PlanEventStatus
 from app.domain.models.message import Message
 from app.domain.models.plan import Plan, Step

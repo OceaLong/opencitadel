@@ -253,7 +253,14 @@ kubectl auth can-i get secrets \
 
 The first command should succeed, while both permission checks for `create pods` and `get secrets` must print `no`.
 
-The destructive fixture suite must be run only with `./scripts/run-patrol-fixtures.sh`. It creates its own `kind-opencitadel-patrol-*` cluster, verifies reset baselines and write denial, scores all 20 cases, then deletes the cluster unless `PATROL_KEEP_DEMO_CLUSTER=true` is explicitly set.
+The destructive fixture suite must be run only with `./scripts/run-patrol-fixtures.sh`. It creates its own `kind-opencitadel-patrol-*` cluster, verifies reset baselines and write denial, scores all 21 cases, then deletes the cluster unless `PATROL_KEEP_DEMO_CLUSTER=true` is explicitly set.
+
+Case 21 (`21-remediation-crashloop`) is the only one that exercises the write path (restart/scale/rollback via a real Actuator) rather than a read-only Collector replay; it only runs when `PATROL_RUN_REMEDIATION_FIXTURE=true`, since it needs to build and `kind load` a real `opencitadel-ops-actuator` image first. Locally that variable still defaults to `false` (the other 20 read-only cases need no Actuator at all), but CI's `patrol-kind-fixtures` job now sets it `true` unconditionally, so case 21 runs on every push/PR, not as an opt-in extra. When it runs, the loop is verified deterministically by two independent, LLM-free layers:
+
+- **kind layer** (`scripts/drive_remediation_fixture.py`, driven from the `patrol-kind-fixtures` job): drives the real Ops Actuator MCP server over streamable-HTTP against the disposable cluster — pre-fail Collector read, `restart_workload` with a fresh idempotency key, a same-key replay asserting `skipped_idempotent`, a healthy-image redeploy, and a post-heal Collector read — cross-checking every step against `kubectl`, not just the Actuator's own envelope.
+- **In-process layer** (`api/tests/app/integration/test_remediation_fixture_replay.py`, part of the ordinary `api-test` job's `pytest` run, no cluster involved): replays the same fixture's `expected.json` `remediation` block (`expected_status_sequence`, `recheck_expected_results`) directly against `PatrolRemediationService`/`PatrolRunService`, asserting the propose → execute → auto-recheck → finalize state machine end to end.
+
+Both layers run on every CI invocation, independently of each other; a regression in either the Actuator-facing write path or the server-side remediation state machine fails the corresponding job.
 
 ## Evidence verification
 

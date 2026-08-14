@@ -78,15 +78,25 @@ async def test_ask_denies_direct_invocation_of_filtered_write_tool():
         candidate_tools=[_MixedTool()],
     )[0]
 
-    with pytest.raises(CapabilityDeniedError):
+    with pytest.raises(CapabilityDeniedError) as exc_info:
         await tool_pack.invoke("write_file")
+
+    # BaseTool.invoke's denial (tools/base.py) is an execution-layer
+    # rejection — the request cleared assembly/exposure and was denied only
+    # when actually invoked.
+    assert exc_info.value.layer == "execution"
+    assert exc_info.value.tool_name == "write_file"
 
 
 def test_ask_child_policy_cannot_expand_parent_policy():
     parent = CapabilityPolicy.for_mode(SessionMode.ASK)
 
-    with pytest.raises(CapabilityDeniedError):
+    with pytest.raises(CapabilityDeniedError) as exc_info:
         parent.for_child(requested_tool_names=["shell_execute"])
+
+    # Ask sub-agents with no explicit allowlist yet: denial happens while
+    # assembling the child's capability policy, before any tool is exposed.
+    assert exc_info.value.layer == "assembly"
 
 
 def test_unknown_mcp_function_is_hidden_from_ask():
@@ -168,6 +178,21 @@ def test_agent_policy_respects_tool_allowlist():
     assert not policy.allows(WRITE, tool_name="write_file")
 
 
+def test_agent_child_policy_cannot_expand_beyond_allowlist():
+    parent = CapabilityPolicy.for_mode(
+        SessionMode.AGENT,
+        allowed_tool_names=["kb_search"],
+    )
+
+    with pytest.raises(CapabilityDeniedError) as exc_info:
+        parent.for_child(requested_tool_names=["shell_execute"])
+
+    # Parent already has an explicit allowlist: denial happens because the
+    # child requested a tool that would be *exposed* beyond what the parent
+    # granted, distinct from the "no allowlist at all" assembly case above.
+    assert exc_info.value.layer == "exposure"
+
+
 @pytest.mark.asyncio
 async def test_policy_binding_is_isolated_for_shared_tool_pack():
     shared = _MixedTool()
@@ -184,10 +209,13 @@ async def test_policy_binding_is_isolated_for_shared_tool_pack():
     )[0]
 
     parent_result = await parent.invoke("write_file")
-    with pytest.raises(CapabilityDeniedError):
+    with pytest.raises(CapabilityDeniedError) as exc_info:
         await child.invoke("write_file")
 
     assert parent_result.success is True
+    # PolicyBoundTool.invoke's denial (tools/base.py) is execution-layer too.
+    assert exc_info.value.layer == "execution"
+    assert exc_info.value.tool_name == "write_file"
     assert {item["function"]["name"] for item in parent.get_tools()} == {
         "kb_search",
         "search_web",

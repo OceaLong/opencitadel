@@ -7,7 +7,7 @@ from app.application.services.integration_server_service import (
     _merge_url_secrets,
     _should_keep,
 )
-from app.application.errors.exceptions import ForbiddenError
+from app.application.errors.exceptions import BadRequestError, ForbiddenError
 from app.domain.models.app_config import MCPTransport
 from app.domain.models.integration_server import MCPServerRecord
 from app.domain.models.llm_model import ResourceVisibility
@@ -206,6 +206,71 @@ async def test_tenant_update_omitting_tool_policies_preserves_admin_declarations
 
     assert result.tool_policies == {"lookup_ticket": INTEGRATION_READ}
     assert repo.saved.tool_policies == {"lookup_ticket": INTEGRATION_READ}
+
+
+@pytest.mark.asyncio
+async def test_update_server_accepts_bundled_collector_default_port():
+    """F1 (task-2-report.md): update_server()'s outbound-URL revalidation must
+    not unconditionally reject the bundled Ops Patrol Collector's port
+    (docker-compose.yml deploys opencitadel-ops-collector on 8090) -- see
+    core/config.py Settings.outbound_allowed_ports' default, which now
+    includes 8090/8091 for exactly this reason. This is the exact update the
+    documented admin flow (docs/operations/ops-patrol.md "Register the MCP
+    Server") and api/app/seed_demo.py both perform."""
+    existing = MCPServerRecord(
+        id="mcp-1",
+        name="ops-collector",
+        transport=MCPTransport.STREAMABLE_HTTP,
+        url="http://opencitadel-ops-collector:8090/mcp",
+        visibility=ResourceVisibility.GLOBAL,
+    )
+    repo = _MCPRepo(existing)
+    service = MCPServerService(
+        uow_factory=lambda: _MCPUow(repo),
+        cipher=ApiKeyCipher("test-secret-key-for-unit-tests-only"),
+    )
+    update = MCPServerRecord(
+        id="ignored",
+        name="ops-collector",
+        transport=MCPTransport.STREAMABLE_HTTP,
+        url="http://opencitadel-ops-collector:8090/mcp",
+        visibility=ResourceVisibility.GLOBAL,
+        enabled=True,
+        tool_policies={"get_capabilities": INTEGRATION_READ},
+    )
+
+    result = await service.update_server("mcp-1", update, is_admin=True)
+
+    assert result.enabled is True
+    assert repo.saved is not None
+    assert repo.saved.url == "http://opencitadel-ops-collector:8090/mcp"
+
+
+@pytest.mark.asyncio
+async def test_update_server_still_rejects_port_outside_allowlist():
+    existing = MCPServerRecord(
+        id="mcp-1",
+        name="tickets",
+        transport=MCPTransport.STREAMABLE_HTTP,
+        url="https://mcp.example.test:9999/mcp",
+        visibility=ResourceVisibility.GLOBAL,
+    )
+    repo = _MCPRepo(existing)
+    service = MCPServerService(
+        uow_factory=lambda: _MCPUow(repo),
+        cipher=ApiKeyCipher("test-secret-key-for-unit-tests-only"),
+    )
+    update = MCPServerRecord(
+        id="ignored",
+        name="tickets",
+        transport=MCPTransport.STREAMABLE_HTTP,
+        url="https://mcp.example.test:9999/mcp",
+        visibility=ResourceVisibility.GLOBAL,
+        enabled=True,
+    )
+
+    with pytest.raises(BadRequestError, match="端口未获批准"):
+        await service.update_server("mcp-1", update, is_admin=True)
 
 
 @pytest.mark.asyncio

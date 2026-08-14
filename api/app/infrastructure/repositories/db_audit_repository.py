@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -139,3 +139,80 @@ class DBAuditRepository(AuditRepository):
             stmt = stmt.where(AuditLogORM.created_at <= end_at)
         result = await self.db_session.execute(stmt)
         return int(result.scalar_one() or 0)
+
+    async def count_by_actions(
+        self,
+        actions: List[str],
+        *,
+        start_at: Optional[datetime] = None,
+        end_at: Optional[datetime] = None,
+    ) -> int:
+        if not actions:
+            return 0
+        stmt = select(func.count()).select_from(AuditLogORM).where(
+            AuditLogORM.action.in_(actions)
+        )
+        if start_at:
+            stmt = stmt.where(AuditLogORM.created_at >= start_at)
+        if end_at:
+            stmt = stmt.where(AuditLogORM.created_at <= end_at)
+        result = await self.db_session.execute(stmt)
+        return int(result.scalar_one() or 0)
+
+    async def count_by_action_prefix(
+        self,
+        prefix: str,
+        *,
+        start_at: Optional[datetime] = None,
+        end_at: Optional[datetime] = None,
+    ) -> int:
+        if not prefix:
+            return 0
+        stmt = select(func.count()).select_from(AuditLogORM).where(
+            AuditLogORM.action.like(f"{prefix}%")
+        )
+        if start_at:
+            stmt = stmt.where(AuditLogORM.created_at >= start_at)
+        if end_at:
+            stmt = stmt.where(AuditLogORM.created_at <= end_at)
+        result = await self.db_session.execute(stmt)
+        return int(result.scalar_one() or 0)
+
+    async def list_recent_chained(self, limit: int = 20) -> List[AuditLog]:
+        # Same ordering key as the tail lookup in add() above (chain_seq
+        # desc) -- chain_seq is the tamper-evident write-order sequence,
+        # not created_at, so this sample is fit for checking whether
+        # created_at tracks chain order rather than trivially agreeing with
+        # itself. DESC + limit at the DB level (index-friendly), then
+        # reverse in Python to hand callers ascending chain order.
+        stmt = (
+            select(AuditLogORM)
+            .where(AuditLogORM.chain_seq.isnot(None))
+            .order_by(AuditLogORM.chain_seq.desc())
+            .limit(max(1, limit))
+        )
+        result = await self.db_session.execute(stmt)
+        records = list(reversed(result.scalars().all()))
+        return [record.to_domain() for record in records]
+
+    async def daily_action_counts(
+        self,
+        actions: List[str],
+        *,
+        since: Optional[datetime] = None,
+    ) -> List[Dict[str, Any]]:
+        if not actions:
+            return []
+        date_col = func.date(AuditLogORM.created_at)
+        stmt = (
+            select(date_col.label("date"), AuditLogORM.action, func.count())
+            .where(AuditLogORM.action.in_(actions))
+        )
+        if since is not None:
+            stmt = stmt.where(AuditLogORM.created_at >= since)
+        stmt = stmt.group_by(date_col, AuditLogORM.action).order_by(date_col.asc())
+        result = await self.db_session.execute(stmt)
+        return [
+            {"date": str(date_value), "action": action, "count": int(count)}
+            for date_value, action, count in result.all()
+        ]

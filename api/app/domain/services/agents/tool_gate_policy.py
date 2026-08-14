@@ -10,7 +10,7 @@
 from typing import Any, Callable, Dict, Optional
 from urllib.parse import urlparse
 
-from app.application.services.config_provider import get_runtime_config
+from app.domain.config_port import get_runtime_config
 from app.domain.models.agent_runtime_settings import AgentRuntimeSettings
 from app.domain.models.tool_policy import ApprovalMode
 from app.domain.repositories.uow import IUnitOfWork

@@ -23,6 +23,12 @@ image:
 ui:
   enabled: true
 
+worker:
+  # Port the worker's Prometheus metrics HTTP server binds to (in-cluster
+  # only; no token, gate scrape access via NetworkPolicy). Must match
+  # WORKER_METRICS_PORT / Settings.worker_metrics_port; 0 disables it.
+  metricsPort: 9108
+
 opsCollector:
   enabled: false
   image:
@@ -213,6 +219,9 @@ secrets:
   embeddingApiKey: ""
   langfusePublicKey: ""
   langfuseSecretKey: ""
+  # /api/metrics 的 Bearer token；留空表示该端点 fail-closed 关闭（404）。
+  # 启用 Prometheus 抓取前需设置为强随机值。
+  metricsToken: ""
 
 # 应用行为配置（渲染为 ConfigMap，挂载为 /app/config.yaml）
 appConfig:

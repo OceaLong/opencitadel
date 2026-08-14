@@ -99,6 +99,8 @@ jobs:
         run: pip install uv==0.11.19
       - name: Install dependencies
         run: uv sync --frozen --all-groups
+      - name: Import contracts (lint-imports)
+        run: uv run lint-imports
       - name: Prepare non-superuser application database role
         env:
           POSTGRES_ADMIN_PASSWORD: postgres
@@ -241,10 +243,24 @@ jobs:
           kubectl kustomize deploy/kustomize/ops-actuator > /dev/null
 
   patrol-kind-fixtures:
-    name: Ops Patrol disposable-cluster fixtures
+    # 20 read-only golden cases replayed against a disposable kind cluster,
+    # plus fixture 21 (ops-actuator remediation: fail -> restart -> idempotent
+    # replay -> heal -> recheck pass, driven by
+    # scripts/drive_remediation_fixture.py). Docker is preinstalled on
+    # ubuntu-latest runners, so `docker build` for the ops-actuator image
+    # (built and `kind load`-ed by run-patrol-fixtures.sh itself, mirroring
+    # the nginx/busybox/python fixture images) needs no extra buildx setup.
+    name: Ops Patrol disposable-cluster fixtures (20 read-only + fixture 21 remediation)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Bumped from 25 -> 30: fixture 21 (ops-actuator remediation) added a
+    # Docker build + kind-load of the ops-actuator image plus the extra
+    # fail -> restart -> idempotent-replay -> heal -> recheck drive on top
+    # of the original 20 read-only cases. Revisit after the first few real
+    # CI runs show a stable observed duration.
+    timeout-minutes: 30
     needs: [patrol-collector-test, api-test]
+    env:
+      PATROL_RUN_REMEDIATION_FIXTURE: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -258,7 +274,7 @@ jobs:
         run: |
           (cd ops-collector && uv sync --frozen)
           (cd api && uv sync --frozen --all-groups)
-      - name: Run guarded 20-case fixture score
+      - name: Run guarded fixture score (20 read-only cases + fixture 21 remediation)
         run: ./scripts/run-patrol-fixtures.sh
       - name: Upload fixture score
         if: always()
@@ -294,6 +310,12 @@ jobs:
           cache-dependency-path: e2e/package-lock.json
       - name: Resolve docker socket gid
         run: echo "DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)" >> "$GITHUB_ENV"
+      - name: Generate e2e admin password
+        run: |
+          password=$(openssl rand -hex 10)
+          echo "::add-mask::${password}"
+          sed -i "s/^BOOTSTRAP_ADMIN_PASSWORD=.*/BOOTSTRAP_ADMIN_PASSWORD=${password}/" .env.e2e
+          echo "PATROL_E2E_PASSWORD=${password}" >> "$GITHUB_ENV"
       - name: Start platform and demo stack
         run: >-
           docker compose --env-file .env.e2e
@@ -305,13 +327,13 @@ jobs:
       - name: Wait for services to become healthy
         run: |
           for i in $(seq 1 60); do
-            unhealthy=$(docker compose --env-file .env.e2e --profile local --profile demo ps --format json \
+            unhealthy=$(docker compose --env-file .env.e2e --profile local --profile demo --profile patrol ps --format json \
               | python3 -c "import json,sys; rows=[json.loads(l) for l in sys.stdin if l.strip()]; print(sum(1 for r in rows if r.get('Health') not in ('healthy','') or r.get('State')!='running'))")
             [ "$unhealthy" = "0" ] && exit 0
             sleep 10
           done
-          docker compose --env-file .env.e2e --profile local --profile demo ps
-          docker compose --env-file .env.e2e --profile local --profile demo logs --tail 100
+          docker compose --env-file .env.e2e --profile local --profile demo --profile patrol ps
+          docker compose --env-file .env.e2e --profile local --profile demo --profile patrol logs --tail 100
           exit 1
       - name: Install e2e dependencies
         working-directory: e2e
@@ -322,7 +344,13 @@ jobs:
         working-directory: e2e
         run: npm test
         env:
+          # PATROL_E2E stays gated behind vars.PATROL_E2E_ENABLED rather than
+          # being unconditionally on: patrol.spec needs a tool-capable LLM
+          # behind Worker/Collector, which CI does not have, so enabling it
+          # here would always fail. Enable only in protected environments
+          # that have a real model configured.
           PATROL_E2E: ${{ vars.PATROL_E2E_ENABLED }}
+          PATROL_E2E_PASSWORD: ${{ env.PATROL_E2E_PASSWORD }}
       - name: Upload playwright traces on failure
         if: failure()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -332,4 +360,4 @@ jobs:
           if-no-files-found: ignore
       - name: Tear down stack
         if: always()
-        run: docker compose --env-file .env.e2e --profile local --profile demo down -v
+        run: docker compose --env-file .env.e2e --profile local --profile demo --profile patrol down -v

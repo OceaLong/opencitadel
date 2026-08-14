@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Optional, Protocol
+from typing import Any, Dict, Optional, Protocol
 
 from app.domain.models.tool_approval import (
     ApprovalStatus,
@@ -145,5 +145,16 @@ class ResourceGovernanceRepository(Protocol):
 
         Only the winning transition returns ``execution_claimed=True``;
         repeated calls return the persisted consumed batch without a claim.
+        """
+        ...
+
+    async def approval_batch_stats(self, since: datetime) -> Dict[str, Any]:
+        """Aggregate ``ToolApprovalBatch`` outcomes created since ``since``.
+
+        Returns ``{"pending_count": int, "outcomes": {"approved": int,
+        "rejected": int, "expired": int, "consumed": int},
+        "avg_decision_seconds": float | None}``. ``avg_decision_seconds`` is
+        the mean of ``decided_at - created_at`` across decided batches in the
+        window, or ``None`` when no batch in the window has been decided yet.
         """
         ...

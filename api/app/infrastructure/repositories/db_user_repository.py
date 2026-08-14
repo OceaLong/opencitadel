@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,6 +48,11 @@ class DBUserRepository(UserRepository):
     async def count(self) -> int:
         result = await self.db_session.execute(select(func.count()).select_from(UserORM))
         return int(result.scalar_one() or 0)
+
+    async def count_by_role(self) -> Dict[str, int]:
+        stmt = select(UserORM.global_role, func.count()).group_by(UserORM.global_role)
+        result = await self.db_session.execute(stmt)
+        return {role: int(count) for role, count in result.all()}
 
     async def save(self, user: User) -> None:
         user.email = user.email.lower()

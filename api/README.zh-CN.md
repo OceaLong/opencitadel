@@ -182,7 +182,8 @@ Defense in Depth。Scope 外资源通常返回 404，避免泄露对象存在性
 | GET | `/admin/audit/verify-chain`、`/admin/audit/verify-chain/sessions/{id}` | 审计链校验 |
 | GET | `/admin/evidence/sessions`、`/admin/evidence/sessions/{id}/package` | 合规证据包 |
 | GET | `/admin/compliance/report` | 合规报告导出 |
-| GET | `/admin/governance/sessions/{id}/profile` | 会话治理档案（能力收窄、审批批次、终态结果、审计链） |
+| GET | `/admin/governance/sessions/{id}/profile` | 会话治理档案（能力收窄、审批批次、策略拒绝、终态结果、审计链） |
+| GET | `/admin/governance/overview?days=30` | 平台级治理概览（审批结果统计、按日拦截趋势、Ops Patrol 趋势、修复结果、审计链状态） |
 
 ### 团队与邀请
 

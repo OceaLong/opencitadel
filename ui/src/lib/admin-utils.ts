@@ -12,6 +12,14 @@ export function getAdminDateRange(range: AdminTimeRange): { start_at?: string; e
   };
 }
 
+/** Maps the shared admin time-range picker to a `?days=` query value. `"all"`
+ * is capped at 365 -- the widest window the governance overview endpoint
+ * accepts (`Query(30, ge=1, le=365)` in compliance_routes.py). */
+export function getAdminDays(range: AdminTimeRange): number {
+  if (range === "all") return 365;
+  return range === "7d" ? 7 : range === "30d" ? 30 : 90;
+}
+
 export function formatCompactNumber(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;

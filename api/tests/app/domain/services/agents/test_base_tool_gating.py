@@ -21,7 +21,7 @@ from app.domain.models.tool_policy import (
 from app.domain.services.agents.base import BaseAgent
 from app.domain.services.agents.react import ReActAgent
 from app.domain.services.agents.tool_batch_executor import ToolBatchExecutor
-from app.domain.services.tools.base import BaseTool, tool
+from app.domain.services.tools.base import BaseTool, PolicyBoundTool, tool
 from tests.app.domain.services.agents.conftest import (
     agent_test_observability_port,
     agent_test_runtime_settings,
@@ -227,6 +227,8 @@ class _SessionRepository:
     def __init__(self):
         self.session = SimpleNamespace(
             id="s1",
+            owner_user_id="u1",
+            team_id=None,
             pending_metadata={"visited_domains": ["example.com"]},
             pending_phase=None,
         )
@@ -241,16 +243,28 @@ class _SessionRepository:
         self.session.pending_phase = phase
 
 
+class _AuditRepository:
+    def __init__(self):
+        self.items = []
+
+    async def add(self, log):
+        self.items.append(log)
+
+
 class _Uow:
     def __init__(self):
         self.resource_governance = _GovernanceRepository()
         self.session = _SessionRepository()
+        self.audit = _AuditRepository()
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
+
+    async def commit(self):
+        return None
 
 
 class _LLM:
@@ -344,6 +358,71 @@ async def test_base_agent_preflights_whole_batch_before_gated_execution():
         == uow.resource_governance.batch.id
     )
     assert "pending_tool_call" not in uow.session.session.pending_metadata
+
+
+@pytest.mark.asyncio
+async def test_preflight_capability_denial_records_audit_and_metric_once():
+    """Task 2: when preflight() raises CapabilityDeniedError (e.g. a policy-
+    filtered PolicyBoundTool reports has_tool() == False for a requested
+    call), the tool-iteration loop must record exactly one
+    ``agent_tool_denied`` audit entry + one policy-denial metric tick, while
+    leaving the existing "whole batch blocked" failure semantics unchanged
+    (still one failed ToolEvent per requested call, no WaitEvent/approval)."""
+    from prometheus_client import REGISTRY
+
+    from app.domain.models.codebase import SessionMode
+    from app.domain.services.tools.capability_policy import CapabilityPolicy
+
+    def _counter_value(name, labels):
+        return REGISTRY.get_sample_value(name, labels) or 0.0
+
+    uow = _Uow()
+    # ASK mode filters out WORKSPACE_WRITE-effect tools, so this pack's
+    # has_tool("write_file") is False -> _resolve_tool_and_policy raises
+    # CapabilityDeniedError(layer="execution", tool_name="write_file").
+    policy_bound_tool = PolicyBoundTool(_Tool(), CapabilityPolicy.for_mode(SessionMode.ASK))
+    agent = _Agent(
+        uow_factory=lambda: uow,
+        session_id="s1",
+        agent_config=SimpleNamespace(
+            max_retries=1,
+            max_iterations=1,
+            tool_result_max_chars=8000,
+        ),
+        llm=_LLM(),
+        json_parser=_Parser(),
+        tools=[policy_bound_tool],
+        observability_port=agent_test_observability_port(),
+        runtime_settings=agent_test_runtime_settings(gate_profile="strict"),
+    )
+    message = {"tool_calls": [_tool_call("tc1", "write_file", {"path": "one"})]}
+    before = _counter_value(
+        "governance_policy_denials_total",
+        {"layer": "execution", "tool": "write_file"},
+    )
+
+    events = [
+        event
+        async for event in agent._run_tool_iteration_loop(
+            message, None, emit_deltas=False, response_schema=None,
+        )
+    ]
+
+    after = _counter_value(
+        "governance_policy_denials_total",
+        {"layer": "execution", "tool": "write_file"},
+    )
+    assert after - before == 1.0
+    assert not any(isinstance(event, ApprovalEvent) for event in events)
+    tool_events = [event for event in events if isinstance(event, ToolEvent)]
+    assert len(tool_events) == 1
+    assert tool_events[0].function_result.success is False
+    assert len(uow.audit.items) == 1
+    denial_log = uow.audit.items[0]
+    assert denial_log.action == "agent_tool_denied"
+    assert denial_log.metadata["tool"] == "write_file"
+    assert denial_log.metadata["layer"] == "execution"
+    assert denial_log.metadata["gate_profile"] == "strict"
 
 
 @pytest.mark.asyncio

@@ -999,6 +999,17 @@ async def main() -> None:
     setup_logging()
     configure_structured_logging()
     container = await init_worker_container()
+
+    settings = get_settings()
+    if settings.worker_metrics_port:
+        from prometheus_client import start_http_server
+
+        start_http_server(settings.worker_metrics_port)
+        logger.info(
+            "Worker Prometheus metrics server listening on :%s",
+            settings.worker_metrics_port,
+        )
+
     from app.application.services.skill_service import SkillService
 
     await bootstrap_data(

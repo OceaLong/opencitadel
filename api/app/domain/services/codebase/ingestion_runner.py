@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import AsyncGenerator, Callable, List, Optional, Tuple, Type
 from urllib.parse import urlparse
 
-from app.application.errors.exceptions import (
+from app.domain.errors import (
     BadRequestError,
     ConflictError,
     NotFoundError,

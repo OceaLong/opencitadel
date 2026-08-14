@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.checkpoint import Checkpoint, CheckpointAnchorType
@@ -71,3 +71,16 @@ class DBCheckpointRepository(CheckpointRepository):
     async def delete_by_session(self, session_id: str) -> None:
         stmt = delete(SessionCheckpointModel).where(SessionCheckpointModel.session_id == session_id)
         await self.db_session.execute(stmt)
+
+    async def count_created_between(
+        self,
+        start_at: Optional[datetime] = None,
+        end_at: Optional[datetime] = None,
+    ) -> int:
+        stmt = select(func.count()).select_from(SessionCheckpointModel)
+        if start_at:
+            stmt = stmt.where(SessionCheckpointModel.created_at >= start_at)
+        if end_at:
+            stmt = stmt.where(SessionCheckpointModel.created_at <= end_at)
+        result = await self.db_session.execute(stmt)
+        return int(result.scalar_one() or 0)

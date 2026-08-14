@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime
 from typing import List, Optional
+from urllib.parse import urlparse
 
 from sqlalchemy import or_, select, delete, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +53,19 @@ class DBLLMEndpointRepository(LLMEndpointRepository):
             r.to_domain(self._resolve_api_key(r.api_key, r.api_key_encryption))
             for r in result.scalars().all()
         ]
+
+    async def list_hosts(self, scope: Optional[OwnerScope] = None) -> List[str]:
+        stmt = self._apply_scope(select(LLMEndpointORM.base_url), scope)
+        result = await self.db_session.execute(stmt)
+        hosts: List[str] = []
+        for (base_url,) in result.all():
+            if not base_url:
+                continue
+            candidate = base_url if "://" in base_url else f"//{base_url}"
+            host = (urlparse(candidate).hostname or "").lower()
+            if host:
+                hosts.append(host)
+        return hosts
 
     async def get_by_id(self, endpoint_id: str, scope: Optional[OwnerScope] = None) -> Optional[LLMEndpoint]:
         stmt = self._apply_scope(

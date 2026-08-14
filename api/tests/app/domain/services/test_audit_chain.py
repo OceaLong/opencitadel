@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 
 import pytest
+from prometheus_client import REGISTRY
 
 from app.domain.models.audit_log import AuditLog
 from app.domain.services.audit_chain import (
@@ -11,6 +12,10 @@ from app.domain.services.audit_chain import (
     compute_entry_hash,
     entry_fields,
 )
+
+
+def _counter_value(name: str, labels: dict) -> float:
+    return REGISTRY.get_sample_value(name, labels) or 0.0
 
 
 def test_compute_entry_hash_deterministic():
@@ -99,15 +104,22 @@ async def test_verify_chain_detects_tamper_and_emits_critical_alert(caplog):
         api_key_previous_secrets = {}
 
     audit_mod.get_settings = lambda: _Settings()  # type: ignore[assignment]
+    before = _counter_value(
+        "governance_audit_chain_verifications_total", {"result": "broken"}
+    )
     try:
         with caplog.at_level(logging.CRITICAL):
             result = await service.verify_chain()
     finally:
         audit_mod.get_settings = original
 
+    after = _counter_value(
+        "governance_audit_chain_verifications_total", {"result": "broken"}
+    )
     assert result["ok"] is False
     assert result["first_broken_seq"] == 2
     assert "AUDIT_CHAIN_INTEGRITY_FAILURE" in caplog.text
+    assert after - before == 1.0
 
 
 @pytest.mark.asyncio
@@ -177,8 +189,18 @@ async def test_session_verification_uses_global_chain_not_invalid_filtered_subse
         lambda: _Settings(),
     )
 
+    before = _counter_value(
+        "governance_audit_chain_verifications_total", {"result": "intact"}
+    )
+
     result = await AuditService(lambda: _Uow()).verify_session_chain("session-1")
 
+    after = _counter_value(
+        "governance_audit_chain_verifications_total", {"result": "intact"}
+    )
     assert result["ok"] is True
     assert result["session_ok"] is True
     assert result["session_entries"] == 1
+    # verify_session_chain delegates its actual verification to verify_chain()
+    # exactly once — it must not double-record the outcome.
+    assert after - before == 1.0

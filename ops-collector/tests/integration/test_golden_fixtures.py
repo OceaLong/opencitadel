@@ -21,8 +21,14 @@ RBAC_FILES = [
 
 
 def test_exact_twenty_case_contract_is_machine_readable():
+    # 20 read-only golden cases plus fixture 21, the ops-actuator remediation
+    # fixture (fail -> restart -> heal -> recheck pass) driven by
+    # scripts/drive_remediation_fixture.py instead of this suite's read-only
+    # replay -- see api/tests/app/integration/test_patrol_golden_fixtures.py's
+    # GOLDEN_EXPECTED_PATHS filter, which excludes it from the zero-write
+    # golden set the same way.
     directories = sorted(path for path in FIXTURES.iterdir() if path.is_dir())
-    assert len(directories) == 20
+    assert len(directories) == 21
     for directory in directories:
         expected = json.loads((directory / "expected.json").read_text())
         assert expected["case_id"] == directory.name

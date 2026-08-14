@@ -26,7 +26,7 @@ function terminalStatusVariant(status: string): "success" | "destructive" | "sec
 
 export function GovernanceProfileView({ profile }: GovernanceProfileViewProps) {
   const t = useTranslations("governanceProfile");
-  const { session, chain, approvals, gate_hits: gateHits, checkpoints, terminal } = profile;
+  const { session, chain, approvals, gate_hits: gateHits, checkpoints, terminal, denials } = profile;
 
   return (
     <div className="space-y-6">
@@ -155,6 +155,49 @@ export function GovernanceProfileView({ profile }: GovernanceProfileViewProps) {
                         )}
                       </td>
                       <td className="py-2 text-muted-foreground">{formatDateTime(hit.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{t("denials")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {denials.length === 0 ? (
+            <EmptyState title={t("noData")} className="py-8" />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("tool")}</th>
+                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("layer")}</th>
+                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("reason")}</th>
+                    <th className="text-muted-foreground pb-2 font-medium">{t("time")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {denials.map((denial, index) => (
+                    <tr
+                      key={`${denial.tool}-${denial.created_at}-${index}`}
+                      className="border-border/50 border-b"
+                    >
+                      <td className="py-2 pr-4">{denial.tool ?? "—"}</td>
+                      <td className="py-2 pr-4">
+                        {denial.layer ? (
+                          <StatusBadge variant="destructive">{denial.layer}</StatusBadge>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="py-2 pr-4">{denial.reason ?? "—"}</td>
+                      <td className="py-2 text-muted-foreground">{formatDateTime(denial.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>

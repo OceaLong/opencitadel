@@ -76,6 +76,7 @@ ui/
 | `/admin/compliance` | 证据中心 | Admin 布局 |
 | `/admin/compliance/report` | 合规报告导出 | Admin 布局 |
 | `/admin/compliance/sessions/[sessionId]` | 会话治理档案（`GovernanceProfileView`） | Admin 布局 |
+| `/admin/governance` | 平台级治理概览（审批、拦截趋势、Ops Patrol 趋势、修复结果） | Admin 布局 |
 | `/invitations/[token]` | 接受邀请 | 无 Shell |
 | `/share/artifact/[token]` | 公开交付物 | 无 Shell |
 

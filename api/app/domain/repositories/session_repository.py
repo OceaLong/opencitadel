@@ -25,6 +25,17 @@ class SessionRepository(Protocol):
         """Count all sessions platform-wide."""
         ...
 
+    async def count_created_between(
+            self,
+            start_at: Optional[datetime] = None,
+            end_at: Optional[datetime] = None,
+    ) -> int:
+        """Count *Agent-mode* sessions created within the given window
+        (governance-window activity check). Ask-mode sessions are excluded --
+        they never plan or invoke gated tools, so they cannot be evidence of
+        a governance gate being triggered or not."""
+        ...
+
     async def list_recoverable_running(
             self,
             limit: int = 100,

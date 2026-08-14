@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-worker-metrics
+  labels:
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/component: worker
+  ports:
+    - port: {{ .Values.worker.metricsPort }}
+      targetPort: metrics
+      name: metrics

@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """Embedding service for knowledge-base chunks."""
-from app.application.services.config_provider import get_runtime_config
-from app.application.services.vector_memory_service import get_vector_memory_service
+from app.domain.config_port import get_runtime_config
+from app.domain.vector_port import get_vector_memory
 
 
 class KBVectorService:
     def __init__(self) -> None:
-        self._vector = get_vector_memory_service()
+        self._vector = get_vector_memory()
         runtime = get_runtime_config()
         self.enabled = (
             runtime.knowledge_base.vector_enabled

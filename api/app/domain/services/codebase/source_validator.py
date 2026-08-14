@@ -14,7 +14,7 @@ from pathlib import PurePosixPath
 from typing import Callable, Iterable, Optional
 from urllib.parse import urlparse
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.domain.models.codebase import CodebaseSourceType
 from app.domain.models.scope import OwnerScope
 

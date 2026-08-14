@@ -16,6 +16,16 @@ def test_settings_derives_database_uri_from_postgres_fields():
     )
 
 
+def test_settings_metrics_defaults_are_fail_closed():
+    """metrics_token empty -> /api/metrics stays 404 (see metrics_routes.py);
+    worker_metrics_port 9108 -> worker binds a Prometheus scrape port by
+    default (see worker/main.py:main)."""
+    settings = Settings()
+
+    assert settings.metrics_token == ""
+    assert settings.worker_metrics_port == 9108
+
+
 def test_settings_keeps_explicit_database_uri():
     explicit = "postgresql+asyncpg://custom:custom@db.example.com:5432/custom"
     settings = Settings(sqlalchemy_database_uri=explicit)

@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import TypeAdapter
 
+from app.domain.models.codebase import SessionMode
 from app.domain.models.event import BaseEvent, Event, SessionStatusEvent
 from app.domain.models.event_upgrader import upgrade_event_payload
 from app.domain.models.file import File
@@ -43,6 +44,26 @@ class DBSessionRepository(SessionRepository):
         if scope.type == OwnerScopeType.TEAM:
             return stmt.where(SessionModel.team_id == scope.team_id)
         return stmt.where(SessionModel.owner_user_id == scope.user_id, SessionModel.team_id.is_(None))
+
+    async def count_created_between(
+            self,
+            start_at: Optional[datetime] = None,
+            end_at: Optional[datetime] = None,
+    ) -> int:
+        """Count *Agent-mode* sessions created within the window. Ask-mode
+        (quick Q&A, no planning/tool-gating) sessions are excluded because
+        this method backs compliance's ``agent_session_count`` -- it must
+        answer "were there Agent sessions whose governance gates could have
+        fired", not "was the product used at all"."""
+        stmt = select(func.count()).select_from(SessionModel).where(
+            SessionModel.mode == SessionMode.AGENT.value
+        )
+        if start_at:
+            stmt = stmt.where(SessionModel.created_at >= start_at)
+        if end_at:
+            stmt = stmt.where(SessionModel.created_at <= end_at)
+        result = await self.db_session.execute(stmt)
+        return int(result.scalar_one() or 0)
 
     async def _load_memories(self, session_id: str) -> Dict[str, Memory]:
         stmt = select(SessionAgentMemoryModel).where(

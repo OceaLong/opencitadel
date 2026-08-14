@@ -30,3 +30,18 @@ class PatrolRepository(Protocol):
     async def get_active_remediation_for_finding(self, finding_id: str) -> PatrolRemediation | None: ...
     async def get_remediation_by_session_id(self, session_id: str) -> PatrolRemediation | None: ...
     async def get_remediation_by_recheck_run_id(self, run_id: str) -> PatrolRemediation | None: ...
+    async def daily_run_finding_counts(self, since: datetime) -> list[dict]:
+        """Per-day run and (newly first-seen) finding counts since ``since``.
+
+        Returns one row per date that has at least one run or finding, e.g.
+        ``[{"date": "2026-08-01", "runs": 3, "findings": 1}]``, ascending by
+        date. Dates with only runs or only findings still appear with the
+        other counter at 0 -- gaps for dates with neither are left for the
+        caller to fill.
+        """
+        ...
+
+    async def remediation_status_counts(self, since: datetime) -> dict[str, int]:
+        """Count of ``PatrolRemediation`` rows created since ``since``, grouped
+        by ``status``. Statuses with zero rows in the window are omitted."""
+        ...

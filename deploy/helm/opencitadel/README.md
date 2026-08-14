@@ -62,6 +62,7 @@ When `minio.enabled=true`, the chart deploys a MinIO StatefulSet and sets `MINIO
 | `opsActuator.allowedWorkloads` | `{}` | Namespace → workload id → `{kind, min_replicas, max_replicas}`; a workload not listed here cannot be targeted |
 | `opsActuator.serviceAccount.create` / `.name` | `true` / `""` | Dedicated patch-only ServiceAccount, or a pre-created one when `create=false` |
 | `opsActuator.resources` | see values.yaml | CPU/memory requests and limits |
+| `worker.metricsPort` | 9108 | Worker Prometheus metrics port (in-cluster only, no auth) |
 | `env.STORAGE_PROVIDER` | cos | Object storage backend: `cos` or `minio` |
 | `env` | see values.yaml | Non-secret env vars (DB/Redis hosts, log level, etc.) |
 | `secrets` | see values.yaml | Sensitive values rendered as Secret and injected via `envFrom` |

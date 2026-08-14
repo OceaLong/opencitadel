@@ -186,7 +186,8 @@ leaks.
 | GET | `/admin/audit/verify-chain`, `/admin/audit/verify-chain/sessions/{id}` | Audit chain verification |
 | GET | `/admin/evidence/sessions`, `/admin/evidence/sessions/{id}/package` | Compliance evidence |
 | GET | `/admin/compliance/report` | Compliance report export |
-| GET | `/admin/governance/sessions/{id}/profile` | Session governance profile (capability narrowing, approval batches, run outcome, audit chain) |
+| GET | `/admin/governance/sessions/{id}/profile` | Session governance profile (capability narrowing, approval batches, denials, run outcome, audit chain) |
+| GET | `/admin/governance/overview?days=30` | Platform-wide governance overview (approval outcomes, daily interceptions, Ops Patrol trend, remediation outcomes, audit chain status) |
 
 ### Teams & invitations
 

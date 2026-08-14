@@ -13,6 +13,12 @@ class LLMEndpointRepository(ABC):
         ...
 
     @abstractmethod
+    async def list_hosts(self, scope: Optional[OwnerScope] = None) -> List[str]:
+        """List lowercase hostnames parsed from configured endpoint base_urls,
+        without decrypting API keys (least-privilege read for compliance checks)."""
+        ...
+
+    @abstractmethod
     async def get_by_id(self, endpoint_id: str, scope: Optional[OwnerScope] = None) -> Optional[LLMEndpoint]:
         ...
 

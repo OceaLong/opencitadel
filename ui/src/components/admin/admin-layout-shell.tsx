@@ -19,6 +19,7 @@ import {
   IconAudit,
   IconBack,
   IconInvitation,
+  IconSecurity,
   IconUsers,
 } from "@/lib/icons";
 import { cn } from "@/lib/utils";
@@ -43,6 +44,7 @@ const NAV: NavItem[] = [
     adminOnly: true,
   },
   { href: "/admin/audit", labelKey: "audit", icon: IconAudit },
+  { href: "/admin/governance", labelKey: "governance", icon: IconSecurity },
   { href: "/admin/compliance", labelKey: "evidence", icon: IconAudit, exact: true },
   { href: "/admin/compliance/report", labelKey: "complianceReport", icon: IconAudit },
 ];

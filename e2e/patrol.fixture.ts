@@ -6,10 +6,14 @@ type PatrolFixtures = {
 
 export const test = base.extend<PatrolFixtures>({
   operatorPage: async ({ page }, use) => {
+    const password = process.env.PATROL_E2E_PASSWORD;
+    if (!password) {
+      throw new Error("PATROL_E2E_PASSWORD required");
+    }
     await page.goto("/login");
     const inputs = page.locator("form input");
     await inputs.nth(0).fill(process.env.PATROL_E2E_OPERATOR ?? "admin@example.com");
-    await inputs.nth(1).fill(process.env.PATROL_E2E_PASSWORD ?? "bb7efabe9dcdf7f1b634");
+    await inputs.nth(1).fill(password);
     await page.locator("form button").first().click();
     await expect(page).not.toHaveURL(/\/login/);
     await use(page);

@@ -4,7 +4,7 @@
 from typing import Callable, Optional
 from urllib.parse import urlencode
 
-from app.application.services.config_provider import get_runtime_config
+from app.domain.config_port import get_runtime_config
 from app.domain.external.llm import LLM
 from app.domain.models.knowledge_citation import (
     KnowledgeCitation,

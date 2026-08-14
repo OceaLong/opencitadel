@@ -66,7 +66,33 @@ _ASK_CAPABILITIES = frozenset({
 
 
 class CapabilityDeniedError(PermissionError):
-    """Raised when a tool request exceeds the active capability policy."""
+    """Raised when a tool request exceeds the active capability policy.
+
+    ``layer`` identifies which enforcement layer produced the denial, for
+    governance observability (Phase A / Task 2):
+      - ``assembly``: denied while assembling a (sub-)agent's capability
+        policy, before any tool set was exposed (e.g. an Ask sub-agent with
+        no explicit allowlist requesting tools at all).
+      - ``exposure``: denied because the request would expose a tool beyond
+        what the parent policy already granted.
+      - ``execution`` (default): denied at the point of actually invoking a
+        tool whose descriptor policy the active ``CapabilityPolicy`` rejects.
+    ``tool_name`` carries the concrete tool name being denied when the
+    raise site has one in hand; ``None`` when the denial concerns a set of
+    requested tools rather than a single call (e.g. ``for_child``'s
+    no-allowlist-at-all case).
+    """
+
+    def __init__(
+            self,
+            message: str,
+            *,
+            layer: str = "execution",
+            tool_name: Optional[str] = None,
+    ) -> None:
+        super().__init__(message)
+        self.layer = layer
+        self.tool_name = tool_name
 
 
 @dataclass(frozen=True)
@@ -121,7 +147,8 @@ class CapabilityPolicy:
         requested = frozenset(requested_tool_names)
         if self.mode == SessionMode.ASK and self.allowed_tool_names is None and requested:
             raise CapabilityDeniedError(
-                "Ask 子 Agent 不得请求未由父策略显式授予的工具"
+                "Ask 子 Agent 不得请求未由父策略显式授予的工具",
+                layer="assembly",
             )
         if self.allowed_tool_names is not None:
             expanded = [
@@ -130,6 +157,8 @@ class CapabilityPolicy:
             ]
             if expanded:
                 raise CapabilityDeniedError(
-                    f"子 Agent 工具请求超出父策略: {', '.join(sorted(expanded))}"
+                    f"子 Agent 工具请求超出父策略: {', '.join(sorted(expanded))}",
+                    layer="exposure",
+                    tool_name=", ".join(sorted(expanded)),
                 )
         return CapabilityPolicy(mode=self.mode, allowed_tool_names=requested)

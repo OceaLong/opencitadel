@@ -9,6 +9,7 @@ from starlette.responses import Response, StreamingResponse
 from app.application.services.audit_service import AuditService
 from app.application.services.compliance_service import ComplianceService
 from app.application.services.evidence_service import EvidenceService
+from app.application.services.governance_overview_service import GovernanceOverviewService
 from app.application.services.governance_profile_service import GovernanceProfileService
 from app.domain.models.scope import WorkspaceContext
 from app.interfaces.auth_dependencies import get_workspace_context, require_auditor_or_admin
@@ -18,11 +19,13 @@ from app.interfaces.schemas.compliance import (
     ComplianceReportResponse,
     EvidenceSessionItem,
     EvidenceSessionListResponse,
+    GovernanceOverviewResponse,
 )
 from app.interfaces.service_dependencies import (
     get_audit_service,
     get_compliance_service,
     get_evidence_service,
+    get_governance_overview_service,
     get_governance_profile_service,
 )
 
@@ -129,3 +132,16 @@ async def get_governance_profile(
 ):
     profile = await service.build_profile(session_id, scope=ctx.scope)
     return ApiResponse.success(data=profile)
+
+
+@router.get(
+    "/governance/overview",
+    response_model=ApiResponse[GovernanceOverviewResponse],
+    dependencies=[Depends(require_auditor_or_admin)],
+)
+async def get_governance_overview(
+    days: int = Query(30, ge=1, le=365),
+    service: GovernanceOverviewService = Depends(get_governance_overview_service),
+):
+    overview = await service.build_overview(days=days)
+    return ApiResponse.success(data=GovernanceOverviewResponse(**overview))

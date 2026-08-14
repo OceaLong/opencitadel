@@ -575,8 +575,12 @@ docker stats
 # API 健康检查
 curl http://localhost:8088/api/status
 
-# Prometheus 指标
-curl http://localhost:8088/api/metrics
+# Prometheus 指标——fail-closed：.env 未配置 METRICS_TOKEN 时返回 404，
+# 配置后需带 bearer token（见 .env.example 的 "Prometheus /api/metrics" 说明）
+curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8088/api/metrics
+
+# Worker 指标——独立端口，仅内网，不做鉴权（WORKER_METRICS_PORT，默认 9108）
+docker compose exec opencitadel-worker curl -s http://localhost:9108/metrics | head
 
 # 前端访问测试
 curl -I http://localhost:8088
@@ -1029,7 +1033,9 @@ Ops Patrol 与 Ops Patrol Remediation 均为可选能力，默认关闭。启用
 `production-values.yaml` 必须通过 Secret Manager 或受保护的 Values 机制
 覆盖所有必需 Secret，确保四个应用密钥互不相同、PostgreSQL 管理/应用
 密码不同、Redis 启用认证、`networkPolicy.enabled=true`，并把
-`env.TRUSTED_PROXY_CIDRS` 收窄到实际 Ingress Controller。
+`env.TRUSTED_PROXY_CIDRS` 收窄到实际 Ingress Controller。如需启用
+Prometheus 抓取的 `/api/metrics` 端点，还需将 `secrets.metricsToken`
+设置为强随机值——该值为空时端点按 fail-closed 关闭（404）。
 
 ### 已有 Chart 托管 PostgreSQL PVC
 
@@ -1114,6 +1120,7 @@ Chart 特性：
 - Worker **ServiceAccount + RBAC**（pods create/delete/get/list）供 K8s 沙箱 driver
 - kubernetes driver 下 **不挂载 docker.sock**
 - 准入/回收逻辑与单机 compose **同一套 Redis 节点配额**
+- `*-worker-metrics` **Service**（`ClusterIP`，端口为 `worker.metricsPort`，默认 9108）在集群内暴露 Worker 无鉴权的 Prometheus 端点，仅集群内可访问
 
 ---
 

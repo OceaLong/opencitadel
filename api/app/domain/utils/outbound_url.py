@@ -12,6 +12,17 @@ from urllib.parse import urlparse
 Resolver = Callable[..., Sequence[tuple]]
 
 DEFAULT_OUTBOUND_PORTS = frozenset({80, 443, 8080, 8443})
+
+
+def parse_allowed_ports(value: str) -> frozenset[int]:
+    """Parse Settings.outbound_allowed_ports ("80,443,...") into a port set.
+
+    Shared by every caller that wants the *configured* allowlist instead of
+    this module's own conservative DEFAULT_OUTBOUND_PORTS fallback (mirrors
+    the inline set-comprehension previously duplicated in
+    llm_endpoint_service.py's _validate_endpoint()).
+    """
+    return frozenset(int(item.strip()) for item in value.split(",") if item.strip())
 _ALWAYS_BLOCKED_HOSTS = frozenset(
     {
         "instance-data",

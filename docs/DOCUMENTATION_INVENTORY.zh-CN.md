@@ -64,6 +64,7 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [tutorials/05-refund-reconciliation-compliance.md](tutorials/05-refund-reconciliation-compliance.zh-CN.md) | 合规演示 | tutorial | paired | none | `compliance_routes.py` | low |
 | [tutorials/06-ops-patrol.md](tutorials/06-ops-patrol.zh-CN.md) | Kubernetes 只读巡检教程 | tutorial | paired | none | `ui/src/app/patrols/` | low |
 | [tutorials/07-approved-remediation.md](tutorials/07-approved-remediation.zh-CN.md) | 已批准的 Ops Patrol 修复教程 | tutorial | paired | none | `ops-actuator/` | low |
+| [tutorials/08-ten-minute-governance-demo.md](tutorials/08-ten-minute-governance-demo.zh-CN.md) | 纯 Compose 端到端治理演示闭环 | tutorial | paired | none | `scripts/quickstart.sh`、`app/seed_demo.py` | low |
 
 ## 模块 README
 

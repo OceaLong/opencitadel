@@ -229,3 +229,49 @@ async def test_gate_hit_without_approval_is_not_an_approval(gov_env):
 
     assert profile["approvals"] == []
     assert len(profile["gate_hits"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_profile_surfaces_policy_denials_as_their_own_section(gov_env):
+    """Task 2: agent_tool_denied audit rows get their own `denials` key —
+    distinct from approvals/gate_hits, which only cover the HITL approval
+    and gate-policy paths, not outright capability-policy rejections."""
+    sid = await gov_env.create_session(status="failed", gate_profile="strict")
+    await gov_env.write_audit(
+        sid,
+        action="agent_tool_denied",
+        metadata={
+            "tool": "write_file",
+            "layer": "execution",
+            "reason": "当前会话策略禁止工具[write_file]",
+            "gate_profile": "strict",
+        },
+    )
+    await gov_env.write_audit(
+        sid,
+        action="agent_tool_invoke",
+        metadata={"tool": "shell_exec", "gated": True, "gate_profile": "strict"},
+    )
+
+    profile = await gov_env.service.build_profile(sid, scope=gov_env.scope)
+
+    assert len(profile["denials"]) == 1
+    denial = profile["denials"][0]
+    assert denial["tool"] == "write_file"
+    assert denial["layer"] == "execution"
+    assert denial["reason"] == "当前会话策略禁止工具[write_file]"
+    assert "created_at" in denial
+    # A denial is not a gate hit or an approval — it must not leak into
+    # either of those sections (the unrelated gated shell_exec invoke is
+    # still exactly one gate hit, proving the sections stay independent).
+    assert len(profile["gate_hits"]) == 1
+    assert profile["approvals"] == []
+
+
+@pytest.mark.asyncio
+async def test_profile_denials_defaults_to_empty_list(gov_env):
+    sid = await gov_env.create_session(status="completed")
+
+    profile = await gov_env.service.build_profile(sid, scope=gov_env.scope)
+
+    assert profile["denials"] == []

@@ -6,7 +6,7 @@ from typing import AsyncGenerator, Optional, List
 
 from datetime import datetime
 
-from app.application.services.config_provider import get_runtime_config
+from app.domain.config_port import get_runtime_config
 from app.domain.models.event import (
     StepEventStatus,
     StepEvent,

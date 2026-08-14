@@ -8,6 +8,7 @@ import asyncio
 from alembic import command
 from alembic.config import Config
 
+import app.application.services.config_provider  # noqa: F401  注册域端口
 from app.infrastructure.logging import setup_logging
 from app.migrate_llm_api_keys import migrate_legacy_plaintext_api_keys
 from app.migrate_llm_api_key_rotation import rotate_llm_endpoint_api_keys

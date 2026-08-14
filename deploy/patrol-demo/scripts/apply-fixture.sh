@@ -24,9 +24,9 @@ fi
 kubectl --context "$context" -n opencitadel-patrol-demo delete deployment,job,cronjob,pod,event,networkpolicy -l opencitadel.io/patrol-fixture=true --ignore-not-found
 kubectl --context "$context" apply -f "$fixture_dir/setup.yaml"
 
-if [[ "$case_id" == "03-crashloop" || "$case_id" == "06-restarts-warn" || "$case_id" == "07-restarts-fail" ]]; then
+if [[ "$case_id" == "03-crashloop" || "$case_id" == "06-restarts-warn" || "$case_id" == "07-restarts-fail" || "$case_id" == "21-remediation-crashloop" ]]; then
   target=4
-  [[ "$case_id" == "03-crashloop" || "$case_id" == "07-restarts-fail" ]] && target=11
+  [[ "$case_id" == "03-crashloop" || "$case_id" == "07-restarts-fail" || "$case_id" == "21-remediation-crashloop" ]] && target=11
   deadline=$((SECONDS + 180))
   while (( SECONDS < deadline )); do
     count=$(kubectl --context "$context" -n opencitadel-patrol-demo get pod -l "app=fixture-${case_id#??-}" -o json 2>/dev/null \

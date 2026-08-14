@@ -40,6 +40,7 @@ from app.domain.repositories.uow import IUnitOfWork
 from app.domain.external.task_state_port import TaskStatePort
 from app.domain.services.patrol_assertion_engine import PatrolAssertionEngine
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
+from app.infrastructure.observability.governance_metrics import record_remediation_transition
 
 
 logger = logging.getLogger(__name__)
@@ -390,6 +391,13 @@ class PatrolRunService:
                             remediation_for_recheck.status = PatrolRemediationStatus.VERIFIED
                             await uow.patrol.save_remediation(remediation_for_recheck)
                             remediation_recheck_outcome = "verified"
+                            # Governance observability (Phase A / Task 2
+                            # addendum B): this is the only place a
+                            # remediation reaches VERIFIED — Task 1 only
+                            # instrumented patrol_remediation_service.py's
+                            # own transitions, which never include this
+                            # REMEDIATION-recheck closure.
+                            record_remediation_transition("verified")
                         else:
                             remediation_for_recheck.status = PatrolRemediationStatus.FAILED
                             remediation_for_recheck.error_code = "recheck_failed"
@@ -398,6 +406,15 @@ class PatrolRunService:
                             )
                             await uow.patrol.save_remediation(remediation_for_recheck)
                             remediation_recheck_outcome = "failed"
+                            # Governance observability (Phase A / Task 2 fix
+                            # round 1 #2, coordinator-approved addendum):
+                            # same reasoning as the VERIFIED branch above —
+                            # this REMEDIATION-recheck-triggered FAILED
+                            # write is a distinct code path from
+                            # patrol_remediation_service.py's own 9
+                            # instrumented transitions, so it needs its own
+                            # metric call.
+                            record_remediation_transition("failed")
 
             for result in check_results:
                 if result.status not in {PatrolCheckStatus.WARN, PatrolCheckStatus.FAIL, PatrolCheckStatus.ERROR}:

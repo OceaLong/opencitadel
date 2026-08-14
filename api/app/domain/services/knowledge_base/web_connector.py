@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.domain.services.knowledge_base.url_guard import validate_public_url
 from app.infrastructure.security.outbound_http import (
     create_ssrf_safe_async_client,

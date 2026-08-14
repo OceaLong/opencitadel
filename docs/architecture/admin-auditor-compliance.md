@@ -39,8 +39,9 @@ flowchart TD
 | `/admin/invitations` | Platform invitation tokens |
 | `/admin/audit` | Audit log viewer |
 | `/admin/compliance` | Evidence center, chain verification, compliance reports |
-| `/admin/compliance/sessions/[sessionId]` | Per-session governance profile: approvals, gate hits, checkpoints, terminal state |
+| `/admin/compliance/sessions/[sessionId]` | Per-session governance profile: approvals, gate hits, denials, checkpoints, terminal state |
 | `/admin/compliance/report` | Full-page compliance report export (JSON / MD / PDF) |
+| `/admin/governance` | Platform-wide governance overview: approval outcomes, interceptions (approval decisions + policy denials) by day, Ops Patrol trend, remediation outcomes, audit chain status |
 
 Usage charts and token statistics appear on the **`/admin` overview dashboard** (not a separate `/admin/usage` page). Backend usage APIs remain under `/api/admin/usage/*`.
 
@@ -57,9 +58,12 @@ All routes require `require_auditor_or_admin` (prefix `/api/admin`):
 | GET | `/api/admin/evidence/sessions` | List sessions with evidence packages |
 | GET | `/api/admin/evidence/sessions/{id}/package` | Download ZIP evidence package |
 | GET | `/api/admin/compliance/report` | Compliance report (`json` / `md` / `pdf`) |
-| GET | `/api/admin/governance/sessions/{id}/profile` | Per-session governance profile read-model (approvals, gate hits, checkpoints, chain verification, terminal state) |
+| GET | `/api/admin/governance/sessions/{id}/profile` | Per-session governance profile read-model (approvals, gate hits, denials, checkpoints, chain verification, terminal state) |
+| GET | `/api/admin/governance/overview?days=30` | Platform-wide governance overview read-model (approval batch outcomes, daily approval-decision/denial interceptions, Ops Patrol run/finding trend, remediation status distribution, audit chain status) — same `require_auditor_or_admin` guard, `days` ranges 1–365 |
 
 Compliance mapping covers **等保2.0** and **ISO27001** control items. Web Operator sessions with `gate_profile` produce `agent_tool_invoke` rows with HMAC evidence chain fields.
+
+Each control resolves to one of five statuses: `pass` (evidence confirms the control), `gap` (evidence confirms the control is absent or misconfigured), `attention` (present but with a caveat — e.g. a capability exists but was never exercised in the reporting window), `not_verified` (the window contains no data to judge the control either way, e.g. no Agent sessions ran), or `na` (control not applicable to this deployment). The report summary carries a count per status; controls are judged by real evaluators reading the window's actual audit/config data, not by a static "all pass" default.
 
 ## Evidence package contents
 
@@ -76,7 +80,7 @@ Per-session ZIP from the Evidence center contains:
 
 ## Governance profile
 
-The governance profile is a read-only aggregation of data the governance execution chain already records — the audit hash chain, checkpoints, and session state — into one auditor-facing document. It adds no new tables and no new writes.
+The governance profile is a read-only aggregation of data the governance execution chain already records — the audit hash chain, checkpoints, and session state — into one auditor-facing document. It adds no new tables and no new writes. Its seven top-level fields are `session`, `chain`, `approvals`, `gate_hits`, `checkpoints`, `terminal`, and `denials` — the last one projects every `agent_tool_denied` audit row (capability-policy rejections at the assembly/exposure/execution layer) for the session, each with `tool`, `layer`, `reason`, and `created_at`. The evidence ZIP's `governance-profile.md` renders this as a "策略拒绝" (Policy denials) table.
 
 ```mermaid
 erDiagram

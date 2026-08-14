@@ -17,7 +17,7 @@ from app.domain.models.app_config import AgentConfig
 from app.domain.models.codebase import SessionMode
 from app.domain.models.event import ErrorEvent, MessageEvent
 from app.domain.models.knowledge_citation import deduplicate_citations
-from app.application.services.config_provider import get_runtime_config
+from app.domain.config_port import get_runtime_config
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.agents.base import BaseAgent
 from app.domain.services.agents.subagent import SubAgentAgent

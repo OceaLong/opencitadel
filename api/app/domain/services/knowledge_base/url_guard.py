@@ -3,8 +3,8 @@
 """SSRF-safe URL validation for knowledge-base web ingestion."""
 from typing import Optional
 
-from app.application.errors.exceptions import BadRequestError
-from app.application.services.config_provider import get_runtime_config
+from app.domain.errors import BadRequestError
+from app.domain.config_port import get_runtime_config
 from app.domain.utils.outbound_url import (
     OutboundURLRejected,
     resolve_outbound_url,

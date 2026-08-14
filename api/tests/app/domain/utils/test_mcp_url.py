@@ -49,3 +49,16 @@ def test_validate_mcp_http_url_rejects_private_dns():
                 (2, 1, 6, "", ("10.0.0.8", 443)),
             ],
         )
+
+
+def test_validate_mcp_http_url_rejects_nonstandard_port_by_default():
+    with pytest.raises(ValueError, match="端口未获批准"):
+        validate_mcp_http_url("http://opencitadel-ops-collector:8090/mcp", resolve_dns=False)
+
+
+def test_validate_mcp_http_url_accepts_nonstandard_port_when_allowlisted():
+    validate_mcp_http_url(
+        "http://opencitadel-ops-collector:8090/mcp",
+        resolve_dns=False,
+        allowed_ports={8090},
+    )

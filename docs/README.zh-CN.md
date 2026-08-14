@@ -15,6 +15,7 @@
 5. [退款对账与合规审计](tutorials/05-refund-reconciliation-compliance.zh-CN.md)
 6. [只读每日 Ops Patrol](tutorials/06-ops-patrol.zh-CN.md)
 7. [审批通过后执行 Ops Patrol 修复](tutorials/07-approved-remediation.zh-CN.md)
+8. [10 分钟治理演示闭环](tutorials/08-ten-minute-governance-demo.zh-CN.md)
 
 ### 运维与部署
 

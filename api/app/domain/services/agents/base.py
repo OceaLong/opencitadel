@@ -46,6 +46,7 @@ from app.domain.services.agents.tool_batch_executor import (
     UowApprovalRepository,
 )
 from app.domain.services.tools.base import BaseTool
+from app.domain.services.tools.capability_policy import CapabilityDeniedError
 from app.domain.services.tools.tool_names import (
     is_tool_allowed,
     normalize_allowed_tool_names,
@@ -55,7 +56,7 @@ from app.domain.utils.vision_tokens import estimate_messages_tokens
 from app.domain.models.error_codes import MODEL_UNAVAILABLE, TASK_INFRA_FAILED
 from app.domain.utils.llm_retry import is_retriable_llm_error
 from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError
-from app.application.services.config_provider import get_runtime_config
+from app.domain.config_port import get_runtime_config
 from app.domain.utils.hitl import (
     TOOL_APPROVAL_PHASE,
     preserve_session_tracking_metadata,
@@ -988,6 +989,48 @@ class BaseAgent(ABC):
         ):
             yield event
 
+    async def _yield_preflight_blocked_events(
+            self,
+            tool_calls: List[Dict[str, Any]],
+            exc: Exception,
+            tool_messages: List[Dict[str, Any]],
+    ) -> AsyncGenerator[BaseEvent, None]:
+        """Project every requested call in a batch that failed preflight()
+        as one failed ToolEvent each, appending matching tool messages for
+        the next LLM turn. Shared by both the CapabilityDeniedError branch
+        and the generic-failure branch of ``_run_tool_iteration_loop`` so
+        the two stay behaviorally identical."""
+        for ordinal, raw_call in enumerate(tool_calls):
+            function = raw_call.get("function") or {}
+            tool_call_id = str(
+                raw_call.get("id") or f"preflight-{ordinal}"
+            )
+            function_name = normalize_tool_name(
+                str(function.get("name") or "")
+            )
+            raw_args = function.get("arguments")
+            function_args = (
+                raw_args if isinstance(raw_args, dict) else {}
+            )
+            result = ToolResult(
+                success=False,
+                message=f"工具批次预检失败: {_format_agent_error(exc)}",
+            )
+            yield ToolEvent(
+                tool_call_id=tool_call_id,
+                tool_name="blocked",
+                function_name=function_name,
+                function_args=function_args,
+                function_result=result,
+                status=ToolEventStatus.CALLED,
+            )
+            tool_messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "_function_name": function_name,
+                "content": result.model_dump_json(),
+            })
+
     async def _run_tool_iteration_loop(
             self,
             message: Optional[Dict[str, Any]],
@@ -1009,42 +1052,38 @@ class BaseAgent(ABC):
             executor = self._get_tool_batch_executor()
             try:
                 batch = await executor.preflight(tool_calls)
+            except CapabilityDeniedError as exc:
+                logger.warning(
+                    "会话[%s] 工具批次预检失败: %s",
+                    self._session_id,
+                    exc,
+                )
+                # Governance observability (Phase A / Task 2): a capability
+                # denial surfacing here means preflight() itself rejected
+                # the whole batch (e.g. a policy-filtered tool pack), as
+                # opposed to the per-call denial handled inside
+                # ToolBatchExecutor._execute_call. Record it before falling
+                # through to the same "whole batch blocked" projection the
+                # generic except below uses — failure semantics unchanged.
+                await self._record_tool_denied(
+                    tool_name=exc.tool_name or "unknown",
+                    layer=exc.layer,
+                    reason=str(exc),
+                )
+                async for event in self._yield_preflight_blocked_events(
+                        tool_calls, exc, tool_messages,
+                ):
+                    yield event
             except Exception as exc:
                 logger.warning(
                     "会话[%s] 工具批次预检失败: %s",
                     self._session_id,
                     exc,
                 )
-                for ordinal, raw_call in enumerate(tool_calls):
-                    function = raw_call.get("function") or {}
-                    tool_call_id = str(
-                        raw_call.get("id") or f"preflight-{ordinal}"
-                    )
-                    function_name = normalize_tool_name(
-                        str(function.get("name") or "")
-                    )
-                    raw_args = function.get("arguments")
-                    function_args = (
-                        raw_args if isinstance(raw_args, dict) else {}
-                    )
-                    result = ToolResult(
-                        success=False,
-                        message=f"工具批次预检失败: {_format_agent_error(exc)}",
-                    )
-                    yield ToolEvent(
-                        tool_call_id=tool_call_id,
-                        tool_name="blocked",
-                        function_name=function_name,
-                        function_args=function_args,
-                        function_result=result,
-                        status=ToolEventStatus.CALLED,
-                    )
-                    tool_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "_function_name": function_name,
-                        "content": result.model_dump_json(),
-                    })
+                async for event in self._yield_preflight_blocked_events(
+                        tool_calls, exc, tool_messages,
+                ):
+                    yield event
             else:
                 execution = await executor.execute(batch)
                 if execution.waiting:
@@ -1175,6 +1214,19 @@ class BaseAgent(ABC):
     async def _record_visited_domain(self, function_args: Dict[str, Any]) -> None:
         await self._audit_recorder.record_visited_domain(function_args)
 
+    async def _record_tool_denied(
+            self,
+            *,
+            tool_name: str,
+            layer: str,
+            reason: str,
+    ) -> None:
+        await self._audit_recorder.record_tool_denied(
+            tool_name=tool_name,
+            layer=layer,
+            reason=reason,
+        )
+
     def _get_tool_batch_executor(self) -> ToolBatchExecutor:
         if self._batch_executor is None:
             self._batch_executor = ToolBatchExecutor(
@@ -1191,6 +1243,13 @@ class BaseAgent(ABC):
                         arguments=arguments,
                         result=result,
                         started=started,
+                    )
+                ),
+                denial_audit_call=lambda tool_name, layer, reason: (
+                    self._record_tool_denied(
+                        tool_name=tool_name,
+                        layer=layer,
+                        reason=reason,
                     )
                 ),
                 stateful_tool_lock=self._stateful_tool_lock,

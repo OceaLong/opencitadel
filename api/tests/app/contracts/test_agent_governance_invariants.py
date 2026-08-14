@@ -215,11 +215,14 @@ async def test_ask_has_zero_side_effects_across_delegation_and_integration():
             "delegate_subtask",
             goal="create a file",
         )
-    with pytest.raises(CapabilityDeniedError):
+    with pytest.raises(CapabilityDeniedError) as mcp_exc_info:
         await governed_by_name["mcp"].invoke(
             "create_ticket",
             title="external write",
         )
+    # MCPTool.invoke's denial (tools/mcp.py) is an execution-layer rejection.
+    assert mcp_exc_info.value.layer == "execution"
+    assert mcp_exc_info.value.tool_name == "create_ticket"
     assert side_effects == []
 
 

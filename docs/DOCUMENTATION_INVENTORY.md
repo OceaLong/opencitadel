@@ -64,6 +64,7 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [tutorials/05-refund-reconciliation-compliance.md](tutorials/05-refund-reconciliation-compliance.md) | Compliance demo | tutorial | paired | none | `compliance_routes.py` | low |
 | [tutorials/06-ops-patrol.md](tutorials/06-ops-patrol.md) | Read-only Kubernetes Patrol walkthrough | tutorial | paired | none | `ui/src/app/patrols/` | low |
 | [tutorials/07-approved-remediation.md](tutorials/07-approved-remediation.md) | Approved Ops Patrol remediation walkthrough | tutorial | paired | none | `ops-actuator/` | low |
+| [tutorials/08-ten-minute-governance-demo.md](tutorials/08-ten-minute-governance-demo.md) | Compose-only end-to-end governance demo loop | tutorial | paired | none | `scripts/quickstart.sh`, `app/seed_demo.py` | low |
 
 ## Module READMEs
 

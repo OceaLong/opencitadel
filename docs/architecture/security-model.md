@@ -203,7 +203,8 @@ than mutable sandbox state.
 
 ### Observability
 
-- `/api/metrics` exposes Prometheus metrics (no secrets).
+- `/api/metrics` (API process) is fail-closed: empty `METRICS_TOKEN` returns `404` (feature disabled, hidden from unauthenticated probing); a configured token requires `Authorization: Bearer <token>` (`401` on missing/wrong token, `200` on match) and is no longer rate-limit-exempt. The Worker process exposes a second, separate metrics HTTP server (`WORKER_METRICS_PORT`, default `9108`, `0` disables it) with no token — it is a plaintext `prometheus_client` endpoint that must stay internal-only (Docker network / Helm `ClusterIP` Service, never routed through Nginx).
+- Eight `governance_*` metric families (`api/app/infrastructure/observability/governance_metrics.py`) — approval batch outcomes/latency, gate hits, policy denials by layer, tool execution outcomes/latency, Ops Patrol remediation transitions, and audit chain verification results — are recorded by both the API and Worker processes and scraped from their respective endpoints above.
 - Optional OpenTelemetry export—configure collector access separately.
 - Structured logs include `session_id` for correlation; must not log API keys or tokens.
 
@@ -412,6 +413,8 @@ export and alert routing.
 |---------|------------------|----------------|
 | Nginx | Host `NGINX_PORT` (8088), optional 443 | Sole public entry point |
 | API / UI / Worker | Internal only | Do not publish ports |
+| API `/api/metrics` | Routed through Nginx like any other API path | Fail-closed: `404` unless `METRICS_TOKEN` is set, then Bearer-authenticated (`401`/`200`) |
+| Worker metrics (`WORKER_METRICS_PORT`, default 9108) | Internal only — Helm `*-worker-metrics` Service (`ClusterIP`) | No token; restrict via network/NetworkPolicy, never publish |
 | PostgreSQL / Redis | Internal only | Never expose to public internet |
 | MinIO | Internal; optional public endpoint variable | Keep internal unless LLM needs to fetch URLs |
 | Sandbox | Internal HTTP to Worker | Do not map host ports |

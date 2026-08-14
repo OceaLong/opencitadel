@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
 
-from app.application.errors.exceptions import ConflictError, NotFoundError
+from app.domain.errors import ConflictError, NotFoundError
 from app.domain.models.knowledge_base import (
     DocStatus,
     KBSourceType,

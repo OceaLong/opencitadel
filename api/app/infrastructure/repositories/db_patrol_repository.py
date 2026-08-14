@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.patrol import (
@@ -193,3 +193,51 @@ class DBPatrolRepository(PatrolRepository):
     async def get_remediation_by_recheck_run_id(self, run_id: str) -> PatrolRemediation | None:
         row = (await self.db_session.execute(select(PatrolRemediationModel).where(PatrolRemediationModel.recheck_run_id == run_id))).scalar_one_or_none()
         return row.to_domain() if row else None
+
+    async def daily_run_finding_counts(self, since: datetime) -> list[dict]:
+        run_date_col = func.date(PatrolRunModel.created_at)
+        runs_stmt = (
+            select(run_date_col.label("date"), func.count())
+            .where(PatrolRunModel.created_at >= since)
+            .group_by(run_date_col)
+        )
+        runs_by_date = {
+            str(date_value): int(count)
+            for date_value, count in (await self.db_session.execute(runs_stmt)).all()
+        }
+
+        # "findings" counts new findings by first_seen_at (when a fingerprint
+        # is first observed), not by their owning run's created_at -- a run
+        # started on one day can still be evaluated (and its findings
+        # recorded) after midnight for long-running packs.
+        finding_date_col = func.date(PatrolFindingModel.first_seen_at)
+        findings_stmt = (
+            select(finding_date_col.label("date"), func.count())
+            .where(PatrolFindingModel.first_seen_at >= since)
+            .group_by(finding_date_col)
+        )
+        findings_by_date = {
+            str(date_value): int(count)
+            for date_value, count in (await self.db_session.execute(findings_stmt)).all()
+        }
+
+        dates = sorted(set(runs_by_date) | set(findings_by_date))
+        return [
+            {
+                "date": date,
+                "runs": runs_by_date.get(date, 0),
+                "findings": findings_by_date.get(date, 0),
+            }
+            for date in dates
+        ]
+
+    async def remediation_status_counts(self, since: datetime) -> dict[str, int]:
+        stmt = (
+            select(PatrolRemediationModel.status, func.count())
+            .where(PatrolRemediationModel.created_at >= since)
+            .group_by(PatrolRemediationModel.status)
+        )
+        return {
+            status: int(count)
+            for status, count in (await self.db_session.execute(stmt)).all()
+        }

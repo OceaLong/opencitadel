@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """Embedding service for codebase chunks."""
-from app.application.services.vector_memory_service import get_vector_memory_service
+from app.domain.vector_port import get_vector_memory
 
 
 class CodebaseVectorService:
     """Reuse the existing OpenAI-compatible embedding client."""
 
     def __init__(self) -> None:
-        self._vector = get_vector_memory_service()
+        self._vector = get_vector_memory()
 
     @property
     def enabled(self) -> bool:

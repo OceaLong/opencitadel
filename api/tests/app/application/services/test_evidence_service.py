@@ -112,6 +112,14 @@ def _governance_profile(session_id: str) -> dict:
             }
         ],
         "terminal": {"status": "completed", "reached_at": "2026-08-01T01:00:00"},
+        "denials": [
+            {
+                "tool": "write_file",
+                "layer": "execution",
+                "reason": "当前会话策略禁止工具[write_file]",
+                "created_at": "2026-08-01T00:12:00",
+            }
+        ],
     }
 
 
@@ -225,6 +233,35 @@ async def test_governance_profile_md_renders_deterministic_sections(evidence_env
     assert "agent_tool_approve" in md
     assert "before-shell" in md
     assert "completed" in md
+
+
+@pytest.mark.asyncio
+async def test_governance_profile_md_renders_denials_section(evidence_env):
+    """Task 2 fix round 1 (#3): the Markdown export must carry a Denials
+    section (mirroring the Approvals/Gate 命中 table rendering) — the
+    `denials` key has been in the profile dict since Task 2's `denials`
+    section, but the .md renderer never surfaced it until now (the .json
+    export already did, since it just serializes the whole profile dict)."""
+    sid = await evidence_env.create_session_with_governance_data()
+    package = await evidence_env.service.build_session_evidence_package(sid, scope=evidence_env.scope)
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        md = archive.read("governance-profile.md").decode("utf-8")
+
+    assert "write_file" in md
+    assert "execution" in md
+    assert "当前会话策略禁止工具[write_file]" in md
+
+
+@pytest.mark.asyncio
+async def test_governance_profile_md_renders_denials_empty_state(evidence_env):
+    sid = await evidence_env.create_session_with_governance_data()
+    evidence_env.governance_profile_service._profile["denials"] = []
+
+    package = await evidence_env.service.build_session_evidence_package(sid, scope=evidence_env.scope)
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        md = archive.read("governance-profile.md").decode("utf-8")
+
+    assert "write_file" not in md
 
 
 @pytest.mark.asyncio

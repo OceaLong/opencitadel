@@ -77,6 +77,7 @@ ui/
 | `/admin/compliance` | Evidence center | Admin layout |
 | `/admin/compliance/report` | Compliance report export | Admin layout |
 | `/admin/compliance/sessions/[sessionId]` | Session governance profile (`GovernanceProfileView`) | Admin layout |
+| `/admin/governance` | Platform-wide governance overview (approvals, interceptions, Ops Patrol trend, remediation outcomes) | Admin layout |
 | `/invitations/[token]` | Accept invitation | No shell |
 | `/share/artifact/[token]` | Public artifact view | No shell |
 

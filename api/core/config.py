@@ -39,7 +39,9 @@ class Settings(BaseSettings):
     session_secret: str = "opencitadel-session-secret-change-in-production"
     sandbox_broker_url: str = ""
     sandbox_broker_token: str = ""
-    outbound_allowed_ports: str = "80,443,8080,8443,11434"
+    # 8090/8091: bundled Ops Patrol Collector/Actuator (docker-compose.yml), the
+    # only registered-MCP-server ports outside the plain HTTP/HTTPS defaults.
+    outbound_allowed_ports: str = "80,443,8080,8443,8090,8091,11434"
     outbound_private_host_allowlist: str = ""
     trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128"
     access_token_ttl_seconds: int = 900
@@ -95,6 +97,11 @@ class Settings(BaseSettings):
     embedding_api_key: str = ""
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
+
+    # Prometheus 指标：metrics_token 为空表示 /api/metrics 关闭（404，fail-closed）；
+    # worker_metrics_port 为 0 表示 worker 侧 metrics HTTP server 关闭。
+    metrics_token: str = ""
+    worker_metrics_port: int = 9108
 
     # 应用配置存储：false=本地 config.yaml，true=PostgreSQL app_configs 表
     use_db_app_config: bool = True

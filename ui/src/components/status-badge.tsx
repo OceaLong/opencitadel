@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 
 import { cn } from "@/lib/utils";
 
-type StatusBadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning";
+export type StatusBadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning";
 
 const variantClasses: Record<StatusBadgeVariant, string> = {
   default: "",

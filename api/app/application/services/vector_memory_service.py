@@ -6,12 +6,15 @@ from collections import OrderedDict
 from typing import List, Optional
 
 from openai import AsyncOpenAI
-from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.services.config_provider import get_runtime_config
-from app.domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
-from app.infrastructure.models.memory_entry import MemoryEntryORM
+from app.domain.models.memory_entry import MemoryEntry
+from app.domain.vector_port import register_vector_memory_provider
+from app.infrastructure.repositories.db_memory_entry_repository import (
+    DBMemoryEntryRepository,
+    open_standalone_memory_session,
+)
 from core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -109,20 +112,11 @@ class VectorMemoryService:
         vector = await self.embed(f"{content}")
         if not vector:
             return
-        stmt = (
-            update(MemoryEntryORM)
-            .where(MemoryEntryORM.id == entry_id)
-            .values(embedding=vector)
-        )
         if db_session is not None:
-            await db_session.execute(stmt)
+            await DBMemoryEntryRepository(db_session).update_embedding(entry_id, vector)
             return
-        from app.infrastructure.storage.postgres import get_postgres
-        from app.infrastructure.security.db_authorization import configure_session_authorization
-        postgres = get_postgres()
-        async with postgres.session_factory() as session:
-            await configure_session_authorization(session)
-            await session.execute(stmt)
+        async with open_standalone_memory_session() as session:
+            await DBMemoryEntryRepository(session).update_embedding(entry_id, vector)
             await session.commit()
 
     async def search_similar(
@@ -138,69 +132,14 @@ class VectorMemoryService:
         if not query_vector:
             return []
 
-        # 向量距离检索仍使用 pgvector 运算符（ORM 不直接支持 <=>）
-        stmt = text("""
-            SELECT id, scope, session_id, title, content, tags, owner_user_id,
-                   team_id, source, last_used_at, use_count, created_at, updated_at,
-                   embedding <=> :query_vec::vector AS distance
-            FROM memory_entries
-            WHERE embedding IS NOT NULL
-              AND EXISTS (
-                SELECT 1
-                FROM sessions s
-                WHERE s.id = :session_id
-                  AND (
-                    (s.team_id IS NOT NULL AND memory_entries.team_id = s.team_id)
-                    OR (
-                      s.team_id IS NULL
-                      AND memory_entries.team_id IS NULL
-                      AND memory_entries.owner_user_id = s.owner_user_id
-                    )
-                  )
-              )
-              AND (
-                scope = 'global'
-                OR (scope = 'session' AND session_id = :session_id)
-              )
-            ORDER BY embedding <=> :query_vec::vector
-            LIMIT :limit
-        """)
-        params = {
-            "session_id": session_id,
-            "query_vec": "[" + ",".join(str(v) for v in query_vector) + "]",
-            "limit": limit,
-        }
         if db_session is not None:
-            result = await db_session.execute(stmt, params)
-            rows = result.fetchall()
-        else:
-            from app.infrastructure.storage.postgres import get_postgres
-            from app.infrastructure.security.db_authorization import configure_session_authorization
-            postgres = get_postgres()
-            async with postgres.session_factory() as session:
-                await configure_session_authorization(session)
-                result = await session.execute(stmt, params)
-                rows = result.fetchall()
-
-        entries: List[MemoryEntry] = []
-        for row in rows:
-            entries.append(MemoryEntry(
-                id=row.id,
-                scope=MemoryScope(row.scope),
-                session_id=row.session_id,
-                title=row.title,
-                content=row.content,
-                tags=row.tags or [],
-                owner_user_id=row.owner_user_id,
-                team_id=row.team_id,
-                source=MemorySource(row.source),
-                last_used_at=row.last_used_at,
-                use_count=row.use_count,
-                vector_score=max(0.0, 1.0 - float(row.distance or 0.0)),
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            ))
-        return entries
+            return await DBMemoryEntryRepository(db_session).vector_search_entries(
+                query_vector, session_id=session_id, limit=limit
+            )
+        async with open_standalone_memory_session() as session:
+            return await DBMemoryEntryRepository(session).vector_search_entries(
+                query_vector, session_id=session_id, limit=limit
+            )
 
 
 def get_vector_memory_service() -> VectorMemoryService:
@@ -208,3 +147,9 @@ def get_vector_memory_service() -> VectorMemoryService:
     if _vector_memory_service is None:
         _vector_memory_service = VectorMemoryService()
     return _vector_memory_service
+
+
+# Register this module's accessor with the domain-level vector-memory port
+# so domain services can depend on app.domain.vector_port instead of
+# reaching into the application layer directly.
+register_vector_memory_provider(get_vector_memory_service)

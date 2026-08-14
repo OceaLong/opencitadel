@@ -197,7 +197,8 @@ sequenceDiagram
 
 ### 可观测性
 
-- `/api/metrics` 暴露 Prometheus 指标（不含密钥）。
+- `/api/metrics`（API 进程）fail-closed：`METRICS_TOKEN` 未配置时返回 `404`（功能关闭，对未鉴权探测隐藏）；配置后需带 `Authorization: Bearer <token>`（token 缺失/错误返回 `401`，匹配返回 `200`），且不再豁免限流。Worker 进程另有一个独立的 metrics HTTP server（`WORKER_METRICS_PORT`，默认 `9108`，`0` 表示关闭），不做鉴权——是明文的 `prometheus_client` 端点，必须仅限内网访问（Docker network / Helm `ClusterIP` Service），绝不能经 Nginx 对外暴露。
+- 8 个 `governance_*` 指标族（`api/app/infrastructure/observability/governance_metrics.py`）——审批批次结果/耗时、门控命中、按层级分类的策略拒绝、工具执行结果/耗时、Ops Patrol 修复状态迁移、审计链校验结果——由 API 与 Worker 两个进程分别记录，并从各自上面的端点抓取。
 - 可选 OpenTelemetry 导出——单独配置 collector 访问。
 - 结构化日志含 `session_id` 便于关联；不得记录 API Key 与 Token。
 
@@ -401,6 +402,8 @@ ENV=production
 |------|----------|------|
 | Nginx | 宿主机 `NGINX_PORT`（8088），可选 443 | 唯一公网入口 |
 | API / UI / Worker | 仅内网 | 不要 publish ports |
+| API `/api/metrics` | 与其它 API 路径一样经 Nginx 路由 | Fail-closed：未配置 `METRICS_TOKEN` 返回 `404`；配置后走 Bearer 鉴权（`401`/`200`） |
+| Worker metrics（`WORKER_METRICS_PORT`，默认 9108） | 仅内网——Helm `*-worker-metrics` Service（ClusterIP） | 不做鉴权；靠网络/NetworkPolicy 限制，绝不对外发布 |
 | PostgreSQL / Redis | 仅内网 | 切勿暴露到公网 |
 | MinIO | 内网；可选 public endpoint 变量 | 除非 LLM 需拉取 URL，否则保持内网 |
 | 沙箱 | 对 Worker 内网 HTTP | 不要映射宿主机端口 |

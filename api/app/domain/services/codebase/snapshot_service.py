@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import BinaryIO, Mapping, Optional
 
-from app.application.errors.exceptions import BadRequestError, NotFoundError
+from app.domain.errors import BadRequestError, NotFoundError
 from app.domain.external.object_storage import ObjectStoragePort
 from app.domain.services.codebase.source_validator import normalize_contained_path
 

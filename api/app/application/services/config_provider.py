@@ -8,6 +8,7 @@ from typing import Optional
 from app.application.services.app_config_repository_factory import create_app_config_repository
 from app.application.services.owner_config_resolver import resolve_config_for_owner
 from app.application.services.runtime_settings_apply import apply_runtime_settings
+from app.domain.config_port import register_runtime_config_provider
 from app.domain.models.app_config import AppConfig
 from app.domain.models.scope import OwnerScope
 from app.domain.repositories.app_config_repository import AppConfigRepository
@@ -83,3 +84,9 @@ def get_runtime_config() -> AppConfig:
         return _sync_cache
     logger.warning("Runtime config cache cold; using AppConfig defaults until warmup completes")
     return AppConfig()
+
+
+# Register this module's synchronous accessor with the domain-level config
+# port so domain services can depend on app.domain.config_port instead of
+# reaching into the application layer directly.
+register_runtime_config_provider(get_runtime_config)

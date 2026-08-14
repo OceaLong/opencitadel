@@ -14,6 +14,7 @@ from app.application.services.audit_service import AuditService
 from app.application.services.compliance_service import ComplianceService
 from app.application.services.codebase_service import CodebaseService
 from app.application.services.evidence_service import EvidenceService
+from app.application.services.governance_overview_service import GovernanceOverviewService
 from app.application.services.governance_profile_service import GovernanceProfileService
 from app.application.services.file_service import FileService
 from app.application.services.knowledge_base_service import KnowledgeBaseService
@@ -302,4 +303,13 @@ async def get_governance_profile_service(
             Provide[ApiContainer.governance_profile_service]
         ),
 ) -> GovernanceProfileService:
+    return service
+
+
+@inject
+async def get_governance_overview_service(
+        service: GovernanceOverviewService = Depends(
+            Provide[ApiContainer.governance_overview_service]
+        ),
+) -> GovernanceOverviewService:
     return service

@@ -64,6 +64,10 @@ class GovernanceProfileService:
             self._gate_row(log) for log in ordered_logs
             if log.action == "agent_tool_invoke" and (log.metadata or {}).get("gated")
         ]
+        denials = [
+            self._denial_row(log) for log in ordered_logs
+            if log.action == "agent_tool_denied"
+        ]
 
         return {
             "session": self._session_row(session),
@@ -78,6 +82,7 @@ class GovernanceProfileService:
                 "status": session.status.value,
                 "reached_at": session.updated_at.isoformat(),
             },
+            "denials": denials,
         }
 
     @staticmethod
@@ -113,6 +118,16 @@ class GovernanceProfileService:
             "tool": meta.get("tool"),
             "gated": meta.get("gated"),
             "gate_profile": meta.get("gate_profile"),
+            "created_at": log.created_at.isoformat(),
+        }
+
+    @staticmethod
+    def _denial_row(log: AuditLog) -> Dict[str, Any]:
+        meta = sanitize_audit_metadata(log.metadata or {})
+        return {
+            "tool": meta.get("tool"),
+            "layer": meta.get("layer"),
+            "reason": meta.get("reason"),
             "created_at": log.created_at.isoformat(),
         }
 

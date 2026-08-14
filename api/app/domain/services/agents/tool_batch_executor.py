@@ -40,6 +40,11 @@ from app.domain.services.tools.capability_policy import (
 )
 from app.domain.services.tools.tool_names import normalize_tool_name
 from app.domain.utils.audit_redaction import summarize_tool_result
+from app.infrastructure.observability.governance_metrics import (
+    observe_approval_decision_seconds,
+    record_approval_batch_outcome,
+    record_tool_execution,
+)
 
 
 ApprovalResolver = Callable[
@@ -58,6 +63,9 @@ ToolAuditRecorder = Callable[
     [str, dict[str, Any], ToolResult, float],
     Awaitable[None],
 ]
+# (tool_name, layer, reason) -> None; wired to
+# ToolAuditRecorder.record_tool_denied by BaseAgent (Phase A / Task 2).
+DenialAuditRecorder = Callable[[str, str, str], Awaitable[None]]
 UnitOfWorkFactory = Callable[[], IUnitOfWork]
 STATEFUL_CONCURRENCY_GROUPS = frozenset({"browser", "shell"})
 RETRYABLE_TRANSPORT_ERRNOS = frozenset({
@@ -170,6 +178,7 @@ class ToolBatchExecutor:
         authorization_resolver: Optional[AuthorizationResolver] = None,
         invoke_call: Optional[ToolInvoker] = None,
         audit_call: Optional[ToolAuditRecorder] = None,
+        denial_audit_call: Optional[DenialAuditRecorder] = None,
         stateful_tool_lock: Optional[asyncio.Lock] = None,
         max_attempts: int = 3,
         timeout_seconds: float = 120,
@@ -184,6 +193,7 @@ class ToolBatchExecutor:
         self._authorization_resolver = authorization_resolver
         self._invoke_call = invoke_call
         self._audit_call = audit_call
+        self._denial_audit_call = denial_audit_call
         self._stateful_tool_lock = stateful_tool_lock
         self._max_attempts = max(1, max_attempts)
         self._timeout_seconds = max(0.001, timeout_seconds)
@@ -400,13 +410,31 @@ class ToolBatchExecutor:
             ),
         )
 
+    @staticmethod
+    def _record_batch_terminal_outcome(
+        batch: Optional[ToolApprovalBatch],
+        outcome: str,
+    ) -> None:
+        """Record a batch's first transition into a terminal outcome.
+
+        Call this only at the point where THIS method observed/caused the
+        transition (see resume()'s call sites) — never from the in-memory
+        `_resumed_batch_ids` guard or from a failed consume-claim, both of
+        which just re-observe a state some earlier call already recorded.
+        """
+        record_approval_batch_outcome(outcome)
+        if batch is not None and batch.decided_at and batch.created_at:
+            observe_approval_decision_seconds(
+                (batch.decided_at - batch.created_at).total_seconds()
+            )
+
     async def resume(
         self,
         batch_id: str,
         *,
         actor_id: str,
     ) -> ToolBatchExecutionResult:
-        del actor_id  # Decisions are persisted by the approval endpoint.
+        del actor_id  # Decisions are persisted upstream by decide_approval_call (chat resume path).
         if batch_id in self._resumed_batch_ids:
             return ToolBatchExecutionResult(rejected_reason="approval_consumed")
 
@@ -421,6 +449,7 @@ class ToolBatchExecutor:
                 rejected_reason="approval_session_mismatch",
             )
         if approval_batch.status == ApprovalStatus.EXPIRED:
+            self._record_batch_terminal_outcome(approval_batch, "expired")
             return ToolBatchExecutionResult(
                 approval_batch=approval_batch,
                 rejected_reason="approval_expired",
@@ -434,6 +463,9 @@ class ToolBatchExecutor:
             expired = await self._approval_repository.consume_approval_batch(
                 batch_id
             )
+            self._record_batch_terminal_outcome(
+                expired or approval_batch, "expired"
+            )
             return ToolBatchExecutionResult(
                 approval_batch=expired or approval_batch,
                 rejected_reason="approval_expired",
@@ -442,6 +474,7 @@ class ToolBatchExecutor:
             call.status == ApprovalStatus.REJECTED
             for call in approval_batch.calls
         ):
+            self._record_batch_terminal_outcome(approval_batch, "rejected")
             return ToolBatchExecutionResult(
                 approval_batch=approval_batch,
                 rejected_reason="approval_rejected",
@@ -479,11 +512,13 @@ class ToolBatchExecutor:
                 rejected_reason="approval_session_mismatch",
             )
         if claimed_batch.status == ApprovalStatus.EXPIRED:
+            self._record_batch_terminal_outcome(claimed_batch, "expired")
             return ToolBatchExecutionResult(
                 approval_batch=claimed_batch,
                 rejected_reason="approval_expired",
             )
         if claimed_batch.status == ApprovalStatus.REJECTED:
+            self._record_batch_terminal_outcome(claimed_batch, "rejected")
             return ToolBatchExecutionResult(
                 approval_batch=claimed_batch,
                 rejected_reason="approval_rejected",
@@ -497,11 +532,21 @@ class ToolBatchExecutor:
             claimed_batch.status != ApprovalStatus.CONSUMED
             or not claimed_batch.execution_claimed
         ):
+            # Someone else already consumed this batch (race) — not this
+            # call's own atomic transition, so it is deliberately NOT
+            # recorded here (see consumed handling below and the note on
+            # _record_batch_terminal_outcome).
             return ToolBatchExecutionResult(
                 approval_batch=claimed_batch,
                 rejected_reason="approval_consumed",
             )
 
+        # This is the one place a batch can genuinely, atomically become
+        # CONSUMED — `consume_approval_batch` only sets execution_claimed on
+        # the transaction that flips APPROVED -> CONSUMED. Every other
+        # "consumed" observation above is a re-read of that fact and must
+        # not double-count the outcome.
+        self._record_batch_terminal_outcome(claimed_batch, "consumed")
         self._resumed_batch_ids.add(batch_id)
         result = await self.execute_approved(prepared.calls)
         return ToolBatchExecutionResult(
@@ -559,7 +604,9 @@ class ToolBatchExecutor:
             return tool_pack, descriptor.policy
         if denied_policy is not None:
             raise CapabilityDeniedError(
-                f"当前会话策略禁止工具[{function_name}]"
+                f"当前会话策略禁止工具[{function_name}]",
+                layer="execution",
+                tool_name=function_name,
             )
         raise ValueError(f"工具[{function_name}]未找到")
 
@@ -644,10 +691,13 @@ class ToolBatchExecutor:
         attempt_limit = self._attempt_limit(call.policy, key_contract_supported)
         attempts: list[ToolExecutionAttempt] = []
         result = ToolResult(success=False, message="tool call did not execute")
+        denied = False
+        denial_layer = "execution"
         for attempt_number in range(1, attempt_limit + 1):
             attempt_started_at = datetime.now(timezone.utc)
             attempt_started = time.monotonic()
             timed_out = False
+            denied = False
             try:
                 if self._invoke_call is None:
                     raw_result = await asyncio.wait_for(
@@ -670,6 +720,14 @@ class ToolBatchExecutor:
                     success=False,
                     message=f"tool call timed out after {self._timeout_seconds:g}s",
                     failure_kind="timeout",
+                )
+            except CapabilityDeniedError as exc:
+                denied = True
+                denial_layer = getattr(exc, "layer", None) or "execution"
+                result = ToolResult(
+                    success=False,
+                    message=str(exc),
+                    failure_kind=self._failure_kind(exc),
                 )
             except Exception as exc:
                 result = ToolResult(
@@ -703,6 +761,20 @@ class ToolBatchExecutor:
         result = result.model_copy(
             update={"status": terminal_status, "attempts": attempts}
         )
+        if denied:
+            record_tool_execution(call.function_name, "denied", None)
+            if self._denial_audit_call is not None:
+                await self._denial_audit_call(
+                    call.function_name,
+                    denial_layer,
+                    result.message or "",
+                )
+        else:
+            record_tool_execution(
+                call.function_name,
+                "ok" if result.success else "error",
+                time.monotonic() - started,
+            )
         if self._audit_call is not None:
             await self._audit_call(
                 call.function_name,

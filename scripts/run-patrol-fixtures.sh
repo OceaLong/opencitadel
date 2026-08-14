@@ -40,10 +40,51 @@ trap cleanup EXIT
 "$repo_dir/deploy/patrol-demo/scripts/assert-actuator-write-scope.sh"
 
 # Fixture 21 exercises the ops-actuator remediation flow (fail -> restart ->
-# recheck pass) and is not part of the 20-case read-only replay this script
-# otherwise drives. Off by default; opt in once an actuator wiring is
-# available to execute against.
+# idempotent replay -> heal -> recheck pass) and is not part of the 20-case
+# read-only replay this script otherwise drives. Off by default; opt in to
+# build+load a real ops-actuator image and drive it through
+# scripts/drive_remediation_fixture.py.
 run_remediation_fixture=${PATROL_RUN_REMEDIATION_FIXTURE:-false}
+
+deploy_ops_actuator() {
+  # Built and loaded here (not via the docker-build CI job) so this script
+  # stays runnable standalone, same as the nginx/busybox/python images above.
+  mkdir -p "$repo_dir/tmp"
+  echo "building opencitadel-ops-actuator:latest (log: tmp/ops-actuator-build.log)" >&2
+  if ! docker build -t opencitadel-ops-actuator:latest "$repo_dir/ops-actuator" \
+      > "$repo_dir/tmp/ops-actuator-build.log" 2>&1; then
+    echo "opencitadel-ops-actuator image build failed; see tmp/ops-actuator-build.log" >&2
+    tail -n 100 "$repo_dir/tmp/ops-actuator-build.log" >&2
+    exit 1
+  fi
+  kind load docker-image --name "$cluster_name" opencitadel-ops-actuator:latest
+
+  # Deployed into its own `opencitadel` namespace -- kept out of
+  # opencitadel-patrol-demo on purpose so baseline_signature() (scoped to
+  # opencitadel-patrol-demo only, see below) never observes it, and so the
+  # actuator survives every per-fixture reset-fixture.sh namespace recreate.
+  kubectl --context "$PATROL_DEMO_CONTEXT" create namespace opencitadel --dry-run=client -o yaml \
+    | kubectl --context "$PATROL_DEMO_CONTEXT" apply -f -
+  kubectl --context "$PATROL_DEMO_CONTEXT" apply -k "$repo_dir/deploy/kustomize/ops-actuator"
+
+  # Kustomize's base env targets the production `opencitadel` namespace;
+  # narrow it to the disposable fixture namespace and register the one
+  # workload this demo is allowed to write, without a second overlay.
+  kubectl --context "$PATROL_DEMO_CONTEXT" -n opencitadel set env deployment/opencitadel-ops-actuator \
+    OPS_ACTUATOR_ALLOWED_NAMESPACES='["opencitadel-patrol-demo"]' \
+    OPS_ACTUATOR_ALLOWED_WORKLOADS='{"opencitadel-patrol-demo":{"fixture-remediation-crashloop":{"kind":"deployment","min_replicas":0,"max_replicas":3}}}'
+  kubectl --context "$PATROL_DEMO_CONTEXT" -n opencitadel rollout status deployment/opencitadel-ops-actuator --timeout=120s
+
+  # No NetworkPolicy change needed: scripts/drive_remediation_fixture.py
+  # reaches the actuator via `kubectl port-forward`, which tunnels through
+  # the kubelet directly into the pod's network namespace rather than the
+  # CNI's pod-to-pod path that NetworkPolicy governs, so the actuator's
+  # production-shaped ingress policy (api/worker pods only) stays intact.
+}
+
+if [[ "$run_remediation_fixture" == true ]]; then
+  deploy_ops_actuator
+fi
 
 start_seconds=$SECONDS
 baseline_signature() {
@@ -79,6 +120,19 @@ for fixture in "$repo_dir"/deploy/patrol-demo/fixtures/*; do
           UV_CACHE_DIR=${UV_CACHE_DIR:-/tmp/opencitadel-uv-cache} \
           uv run --no-sync pytest -q \
             tests/integration/test_golden_fixtures.py::test_real_collector_observes_selected_live_fixture
+      )
+      verified_live_cases=$((verified_live_cases + 1))
+      ;;
+    21-*)
+      # apply-fixture.sh already waited for the aggregate restartCount>=11
+      # threshold above; drive_remediation_fixture.py owns every remaining
+      # deterministic assertion (collector fail-state, restart_workload,
+      # idempotent replay, heal, collector pass-state).
+      (
+        cd "$repo_dir/ops-collector"
+        PATROL_DEMO_CONTEXT="$PATROL_DEMO_CONTEXT" \
+          UV_CACHE_DIR=${UV_CACHE_DIR:-/tmp/opencitadel-uv-cache} \
+          uv run --no-sync python "$repo_dir/scripts/drive_remediation_fixture.py"
       )
       verified_live_cases=$((verified_live_cases + 1))
       ;;

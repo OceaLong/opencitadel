@@ -71,6 +71,7 @@ def render_governance_profile_md(profile: Dict[str, Any]) -> bytes:
     approvals = profile.get("approvals") or []
     gate_hits = profile.get("gate_hits") or []
     checkpoints = profile.get("checkpoints") or []
+    denials = profile.get("denials") or []
 
     lines: list[str] = [
         f"# 治理档案: {_md_value('id', session.get('id'))}",
@@ -130,6 +131,32 @@ def render_governance_profile_md(profile: Dict[str, Any]) -> bytes:
                         _md_value("tool", row.get("tool")),
                         _md_value("gate_profile", row.get("gate_profile")),
                         _md_value("gated", row.get("gated")),
+                    ]
+                )
+                + " |"
+            )
+    else:
+        lines.append("| - | - | - | - |")
+
+    lines.extend(
+        [
+            "",
+            "## 策略拒绝",
+            "",
+            "| 时间 | 工具 | 层级 | 原因 |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    if denials:
+        for row in denials:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _md_value("created_at", row.get("created_at")),
+                        _md_value("tool", row.get("tool")),
+                        _md_value("layer", row.get("layer")),
+                        _md_value("reason", row.get("reason")),
                     ]
                 )
                 + " |"

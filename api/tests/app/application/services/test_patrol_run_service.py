@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from prometheus_client import REGISTRY
 
 from app.application.patrol_templates import load_patrol_template
 from app.application.services.patrol_run_service import PatrolRunService
@@ -343,10 +344,16 @@ async def test_remediation_run_pass_resolves_finding_and_verifies_remediation():
         observation=pass_observation,
         evidence_refs=_k8s_evidence(pass_observation, repo.pack.config.target_ref),
     )
+    before = REGISTRY.get_sample_value(
+        "governance_remediation_transitions_total", {"to_status": "verified"}
+    ) or 0.0
     result = await service.finalize_run(
         run_id=recheck_run.id, session_id=recheck_run.session_id, idempotency_key=recheck_run.submission_idempotency_key,
         collector_capability_hash=recheck_run.collector_capability_hash, submissions=[pass_submission],
     )
+    after = REGISTRY.get_sample_value(
+        "governance_remediation_transitions_total", {"to_status": "verified"}
+    ) or 0.0
 
     assert result.pass_count == 1
     resolved_finding = repo.findings[finding.id]
@@ -354,6 +361,11 @@ async def test_remediation_run_pass_resolves_finding_and_verifies_remediation():
     assert resolved_finding.decided_by == "system:remediation"
     assert remediation.id in (resolved_finding.decision_reason or "")
     assert repo.remediations[remediation.id].status == PatrolRemediationStatus.VERIFIED
+    # Governance observability (Phase A / Task 2 addendum B): this
+    # REMEDIATION-recheck-triggered VERIFIED write is a distinct code path
+    # from patrol_remediation_service.py's own transitions (Task 1 already
+    # instruments those); it must record the metric too, exactly once.
+    assert after - before == 1.0
 
 
 @pytest.mark.asyncio
@@ -384,16 +396,27 @@ async def test_remediation_run_still_failing_marks_remediation_failed():
         observation=still_failing_observation,
         evidence_refs=_k8s_evidence(still_failing_observation, repo.pack.config.target_ref),
     )
+    before = REGISTRY.get_sample_value(
+        "governance_remediation_transitions_total", {"to_status": "failed"}
+    ) or 0.0
     result = await service.finalize_run(
         run_id=recheck_run.id, session_id=recheck_run.session_id, idempotency_key=recheck_run.submission_idempotency_key,
         collector_capability_hash=recheck_run.collector_capability_hash, submissions=[fail_submission],
     )
+    after = REGISTRY.get_sample_value(
+        "governance_remediation_transitions_total", {"to_status": "failed"}
+    ) or 0.0
 
     assert result.fail_count == 1
     assert repo.findings[finding.id].status == PatrolFindingStatus.OPEN
     updated = repo.remediations[remediation.id]
     assert updated.status == PatrolRemediationStatus.FAILED
     assert updated.error_code == "recheck_failed"
+    # Governance observability (Phase A / Task 2 fix round 1 #2): this is a
+    # distinct FAILED-write code path from patrol_remediation_service.py's
+    # own 9 instrumented transitions (Task 1) — same reasoning as the
+    # VERIFIED branch above, it must record the metric too, exactly once.
+    assert after - before == 1.0
 
 
 @pytest.mark.asyncio

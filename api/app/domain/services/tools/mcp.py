@@ -12,8 +12,8 @@ from contextlib import AsyncExitStack
 from datetime import timedelta
 from typing import Optional, Dict, List, Any, Tuple, TYPE_CHECKING
 
-from app.application.errors.exceptions import NotFoundError
-from app.application.services.config_provider import get_runtime_config
+from app.domain.errors import NotFoundError
+from app.domain.config_port import get_runtime_config
 from app.domain.external.connection_pool import MCPConnectionPoolPort
 from app.domain.models.app_config import MCPConfig, MCPServerConfig, MCPTransport
 from app.domain.models.tool_result import ToolResult
@@ -24,7 +24,9 @@ from app.domain.models.tool_policy import (
 )
 from app.domain.utils.app_config_filter import filter_enabled_mcp_config
 from app.domain.utils.mcp_url import validate_mcp_http_url
+from app.domain.utils.outbound_url import parse_allowed_ports
 from app.infrastructure.security.outbound_http import create_ssrf_safe_mcp_client
+from core.config import get_settings
 from .base import BaseTool
 from app.domain.services.tools.capability_policy import (
     CapabilityDeniedError,
@@ -269,7 +271,11 @@ class MCPClientManager:
         url = server_config.url
         if not url:
             raise ValueError("连接sse-mcp服务器需要配置url")
-        validate_mcp_http_url(url, context=f"MCP 服务[{server_name}] URL")
+        validate_mcp_http_url(
+            url,
+            context=f"MCP 服务[{server_name}] URL",
+            allowed_ports=parse_allowed_ports(get_settings().outbound_allowed_ports),
+        )
 
         try:
             sse_transport = await self._exit_stack.enter_async_context(
@@ -313,7 +319,11 @@ class MCPClientManager:
         url = server_config.url
         if not url:
             raise ValueError("连接streamable-http-mcp服务器需要配置url")
-        validate_mcp_http_url(url, context=f"MCP 服务[{server_name}] URL")
+        validate_mcp_http_url(
+            url,
+            context=f"MCP 服务[{server_name}] URL",
+            allowed_ports=parse_allowed_ports(get_settings().outbound_allowed_ports),
+        )
 
         try:
             streamable_http_transport = await self._exit_stack.enter_async_context(
@@ -609,7 +619,11 @@ class MCPTool(BaseTool):
                 tool_name=tool_name,
             )
         ):
-            raise CapabilityDeniedError(f"当前会话策略禁止工具[{tool_name}]")
+            raise CapabilityDeniedError(
+                f"当前会话策略禁止工具[{tool_name}]",
+                layer="execution",
+                tool_name=tool_name,
+            )
         if self._manager is None:
             return ToolResult(success=False, message="MCP工具未初始化")
         return await self._manager.invoke(tool_name, kwargs)

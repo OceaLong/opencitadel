@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import AsyncGenerator, Callable, List, Optional
 
-from app.application.services.config_provider import get_runtime_config
+from app.domain.config_port import get_runtime_config
 from app.domain.external.browser import Browser
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM

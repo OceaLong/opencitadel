@@ -289,6 +289,7 @@ services:
     environment:
       SANDBOX_BROKER_URL: http://opencitadel-sandbox-broker:8090
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -338,6 +339,8 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./api/config.yaml:/app/config.yaml:ro
+    expose:
+      - "9108"
     depends_on:
       opencitadel-redis:
         condition: service_healthy
@@ -410,6 +413,10 @@ services:
       OPS_COLLECTOR_ALLOWED_NAMESPACES: '${OPS_COLLECTOR_ALLOWED_NAMESPACES:-["opencitadel"]}'
       OPS_COLLECTOR_TRANSPORT: streamable-http
       OPS_COLLECTOR_ALLOW_STDIO: "false"
+      OPS_COLLECTOR_HTTP_PROBES: >-
+        ${OPS_COLLECTOR_HTTP_PROBES:-{"primary-endpoint":{"url":"http://opencitadel-api:8000/api/status","expected_statuses":[200]},"demo-console":{"url":"http://ops-console:9099/health","expected_statuses":[200]}}}
+      OPS_COLLECTOR_DEPENDENCIES: >-
+        ${OPS_COLLECTOR_DEPENDENCIES:-{"primary-dependencies":{"kind":"postgres","host":"opencitadel-postgres","port":5432},"demo-console-tcp":{"kind":"tcp","host":"ops-console","port":9099}}}
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=32m,mode=1777
     networks:

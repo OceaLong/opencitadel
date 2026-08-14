@@ -21,6 +21,14 @@ class CheckpointRepository(Protocol):
         """List checkpoints for a session ordered by creation time."""
         ...
 
+    async def count_created_between(
+        self,
+        start_at: Optional[datetime] = None,
+        end_at: Optional[datetime] = None,
+    ) -> int:
+        """Count checkpoints (platform-wide) created within the given window."""
+        ...
+
     async def delete_from(self, session_id: str, from_created_at: datetime, inclusive: bool = True) -> None:
         """Delete checkpoints from the given timestamp onward."""
         ...

@@ -5,7 +5,7 @@ from typing import AsyncGenerator, Optional, Callable, List
 import asyncio
 import uuid
 
-from app.application.services.config_provider import get_runtime_config
+from app.domain.config_port import get_runtime_config
 from app.domain.external.browser import Browser
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.json_parser import JSONParser
@@ -14,7 +14,6 @@ from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
 from app.domain.models.app_config import AgentConfig
 from app.domain.models.skill import Skill
-from app.application.services.config_provider import get_runtime_config
 from app.domain.models.event import (
     BaseEvent,
     ClarifyEvent,

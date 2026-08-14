@@ -145,12 +145,15 @@ can run before approval.
 | Route | Contract |
 |-------|----------|
 | `GET /api/sessions/{session_id}/tool-approval-batch` | Return the current owner-scoped pending batch |
-| `POST /api/sessions/{session_id}/tool-approval-batches/{batch_id}/decision` | Body: `{"action":"approve|approve_same|reject","tool_call_ids":[...]?}` |
 
-> **Internal endpoint**: the first-party UI does not call this route directly.
-> The actual human decision arrives as an ordinary chat resume message
-> (`approve` / `approve_same` / `reject:<feedback>`) through the session chat
-> endpoint — see [Governance plane](governance-plane.md#whole-batch-preflight-and-approval).
+> **Approval has a single write path**: there is no REST endpoint for
+> submitting an approval decision. The human decision arrives exclusively as
+> an ordinary chat resume message (`approve` / `approve_same` /
+> `reject:<feedback>`) through the session chat endpoint, which
+> `ToolBatchExecutor.decide_approval_call` records — see
+> [Governance plane](governance-plane.md#whole-batch-preflight-and-approval).
+> A REST decision endpoint existed previously and has been removed; its
+> non-existence is enforced by a contract test.
 
 An explicit `tool_call_ids` selection supports partial decisions; omitted IDs
 do not expand an earlier partial decision. A partial batch stays waiting.

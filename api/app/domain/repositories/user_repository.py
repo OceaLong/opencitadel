@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from app.domain.models.user import User
 
@@ -29,6 +29,11 @@ class UserRepository(ABC):
 
     @abstractmethod
     async def count(self) -> int:
+        ...
+
+    @abstractmethod
+    async def count_by_role(self) -> Dict[str, int]:
+        """Count users grouped by global_role (e.g. {'admin': 1, 'user': 3})."""
         ...
 
     @abstractmethod

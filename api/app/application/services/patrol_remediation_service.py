@@ -30,6 +30,7 @@ from app.domain.models.session import Session, SessionMode, SessionStatus
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.external.actuator_client import ACTUATOR_MCP_SERVER_NAME, MCPActuatorClient
 from app.infrastructure.external.task.redis_stream_task import RedisStreamTask
+from app.infrastructure.observability.governance_metrics import record_remediation_transition
 
 if TYPE_CHECKING:
     from app.application.services.patrol_run_service import PatrolRunService
@@ -246,6 +247,7 @@ class PatrolRemediationService:
             remediation.session_id = session.id
             await uow.session.save(session)
             await uow.patrol.save_remediation(remediation)
+            record_remediation_transition(remediation.status.value)
 
         await self._audit(
             "patrol_remediation_proposed",
@@ -286,6 +288,7 @@ class PatrolRemediationService:
                 async with self._uow_factory() as uow:
                     await uow.patrol.save_remediation(remediation)
                     await uow.session.update_status(session.id, SessionStatus.FAILED)
+                record_remediation_transition(remediation.status.value)
                 await self._audit("patrol_remediation_dispatch_failed", remediation, actor_user_id, {"error_code": remediation.error_code})
                 raise
         return remediation
@@ -341,6 +344,7 @@ class PatrolRemediationService:
                 remediation.error_code = "PARAMS_TAMPERED"
                 remediation.error_message = "Persisted remediation no longer matches the approved proposal hash"
                 await uow.patrol.save_remediation(remediation)
+                record_remediation_transition(remediation.status.value)
                 await self._audit("patrol_remediation_params_tampered", remediation, scope.user_id, {})
                 raise ConflictError("修复提案参数已变更，拒绝执行", error_key="patrolRemediation.paramsTampered")
 
@@ -366,6 +370,7 @@ class PatrolRemediationService:
                 remediation.error_code = "CAPABILITY_BASELINE_MISSING"
                 remediation.error_message = "No capability baseline was persisted before this session was approved"
                 await uow.patrol.save_remediation(remediation)
+                record_remediation_transition(remediation.status.value)
                 await self._audit("patrol_remediation_capability_baseline_missing", remediation, scope.user_id, {})
                 raise ConflictError("缺少执行前 capability 基线，拒绝执行", error_key="patrolRemediation.capabilityBaselineMissing")
 
@@ -375,6 +380,7 @@ class PatrolRemediationService:
 
             remediation.status = PatrolRemediationStatus.EXECUTING
             await uow.patrol.save_remediation(remediation)
+        record_remediation_transition(remediation.status.value)
         await self._audit("patrol_remediation_executing", remediation, scope.user_id, {})
 
         kind = _ACTUATOR_KIND_ALIASES.get(remediation.target_kind, remediation.target_kind.lower())
@@ -406,6 +412,7 @@ class PatrolRemediationService:
                     # stays the historical, pre-approval baseline for audit;
                     # the observed drifted value lives in error_message only.
                     await uow.patrol.save_remediation(remediation)
+                record_remediation_transition(remediation.status.value)
                 await self._audit("patrol_remediation_capability_drift", remediation, scope.user_id, {"baseline": baseline_hash, "live": live_hash})
                 raise ConflictError("Actuator capability 已漂移，拒绝执行", error_key="patrolRemediation.capabilityDrift")
 
@@ -418,6 +425,7 @@ class PatrolRemediationService:
                 remediation.error_code = "ACTUATOR_UNREACHABLE"
                 remediation.error_message = str(exc)[:2000]
                 await uow.patrol.save_remediation(remediation)
+            record_remediation_transition(remediation.status.value)
             await self._audit("patrol_remediation_executed", remediation, scope.user_id, {"outcome": "actuator_unreachable"})
             raise
 
@@ -436,6 +444,7 @@ class PatrolRemediationService:
             remediation.status = PatrolRemediationStatus.EXECUTED
         async with self._uow_factory() as uow:
             await uow.patrol.save_remediation(remediation)
+        record_remediation_transition(remediation.status.value)
         await self._audit("patrol_remediation_executed", remediation, scope.user_id, {"outcome": outcome})
 
         # 6. EXECUTED -> auto-dispatch a recheck Patrol run so finalize_run can
@@ -511,6 +520,7 @@ class PatrolRemediationService:
             else:
                 return
             await uow.patrol.save_remediation(remediation)
+        record_remediation_transition(remediation.status.value)
         action = (
             "patrol_remediation_cancelled"
             if remediation.status == PatrolRemediationStatus.CANCELLED

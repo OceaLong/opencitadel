@@ -20,10 +20,12 @@ from app.domain.utils.integration_config_builder import a2a_records_to_config, m
 from app.domain.utils.mcp_url import validate_mcp_http_url
 from app.domain.utils.outbound_url import (
     OutboundURLRejected,
+    parse_allowed_ports,
     resolve_outbound_url,
 )
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.security.secret_dict_cipher import encrypt_secret_dict, encrypt_url
+from core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,11 @@ def _ensure_valid_mcp_record(record: MCPServerRecord) -> None:
         and record.url
     ):
         try:
-            validate_mcp_http_url(record.url, resolve_dns=False)
+            validate_mcp_http_url(
+                record.url,
+                resolve_dns=False,
+                allowed_ports=parse_allowed_ports(get_settings().outbound_allowed_ports),
+            )
         except ValueError as exc:
             raise BadRequestError(str(exc)) from exc
 

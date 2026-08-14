@@ -154,7 +154,11 @@ class BaseTool:
                 tool_name=descriptor.name,
             )
         ):
-            raise CapabilityDeniedError(f"当前会话策略禁止工具[{tool_name}]")
+            raise CapabilityDeniedError(
+                f"当前会话策略禁止工具[{tool_name}]",
+                layer="execution",
+                tool_name=tool_name,
+            )
         # 1.循环遍历工具集的所有方法
         method = self._get_tool_methods().get(tool_name)
         if method is not None:
@@ -212,7 +216,11 @@ class PolicyBoundTool(BaseTool):
     async def invoke(self, tool_name: str, **kwargs) -> ToolResult:
         descriptor = self._wrapped.get_tool_descriptor(tool_name)
         if not self._allows(descriptor):
-            raise CapabilityDeniedError(f"当前会话策略禁止工具[{tool_name}]")
+            raise CapabilityDeniedError(
+                f"当前会话策略禁止工具[{tool_name}]",
+                layer="execution",
+                tool_name=tool_name,
+            )
         return await self._wrapped.invoke(tool_name, **kwargs)
 
     def __getattr__(self, name: str):

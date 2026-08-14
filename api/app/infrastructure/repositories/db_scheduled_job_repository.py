@@ -35,6 +35,18 @@ class DBScheduledJobRepository(ScheduledJobRepository):
             model.update_from_domain(job)
             model.id = job.id
             self.db_session.add(model)
+            # Sessions in this codebase are created with autoflush=False (see
+            # infrastructure/storage/postgres.py), and ScheduledJobModel has no
+            # ORM `relationship()` wiring to PatrolPackModel (only a Column-level
+            # ForeignKey), so SQLAlchemy's flush-time insert ordering has no
+            # dependency information to place this insert before a caller's
+            # later, unrelated insert that references it (e.g.
+            # PatrolPackService.create_pack() calling this then
+            # DBPatrolRepository.save_pack() in the same transaction) if both
+            # end up flushed together. Flushing here immediately makes this
+            # write visible to any subsequent statement in the same
+            # transaction regardless of add() order elsewhere.
+            await self.db_session.flush()
 
     async def get_by_id(
         self,

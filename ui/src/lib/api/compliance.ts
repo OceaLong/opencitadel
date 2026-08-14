@@ -29,7 +29,14 @@ export type ComplianceReport = {
   end_at?: string | null;
   frameworks: string[];
   chain_verification: ChainVerifyResult;
-  summary: { pass: number; gap: number; na: number; total: number };
+  summary: {
+    pass: number;
+    gap: number;
+    attention: number;
+    not_verified: number;
+    na: number;
+    total: number;
+  };
   controls: Array<{
     framework: string;
     control_id: string;
@@ -77,6 +84,13 @@ export type GovernanceCheckpointRow = {
   created_at: string;
 };
 
+export type GovernanceDenialRow = {
+  tool?: string | null;
+  layer?: string | null;
+  reason?: string | null;
+  created_at: string;
+};
+
 export type GovernanceProfile = {
   session: GovernanceProfileSession;
   chain: {
@@ -90,6 +104,50 @@ export type GovernanceProfile = {
     status: string;
     reached_at: string;
   };
+  denials: GovernanceDenialRow[];
+};
+
+export type ApprovalStats = {
+  pending_count: number;
+  avg_decision_seconds?: number | null;
+  outcomes: {
+    approved: number;
+    rejected: number;
+    expired: number;
+    consumed: number;
+  };
+};
+
+export type GovernanceDailyCount = {
+  date: string;
+  approval_decisions: number;
+  denials: number;
+};
+
+export type GovernanceDailyPatrolStat = {
+  date: string;
+  runs: number;
+  findings: number;
+};
+
+export type RemediationStats = {
+  by_status: {
+    proposed: number;
+    executing: number;
+    executed: number;
+    verified: number;
+    failed: number;
+    cancelled: number;
+  };
+  success_rate?: number | null;
+};
+
+export type GovernanceOverview = {
+  approvals: ApprovalStats;
+  interceptions: GovernanceDailyCount[];
+  patrol: GovernanceDailyPatrolStat[];
+  remediation: RemediationStats;
+  chain: ChainVerifyResult;
 };
 
 export const complianceApi = {
@@ -113,6 +171,13 @@ export const complianceApi = {
 
   getGovernanceProfile: (sessionId: string) =>
     get<GovernanceProfile>(`/admin/governance/sessions/${sessionId}/profile`),
+
+  getGovernanceOverview: (params?: { days?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.days != null) qs.set("days", String(params.days));
+    const q = qs.toString();
+    return get<GovernanceOverview>(`/admin/governance/overview${q ? `?${q}` : ""}`);
+  },
 
   getComplianceReport: (params?: {
     framework?: string;

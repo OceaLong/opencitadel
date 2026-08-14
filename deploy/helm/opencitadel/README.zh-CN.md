@@ -62,6 +62,7 @@ helm upgrade --install opencitadel ./deploy/helm/opencitadel \
 | `opsActuator.allowedWorkloads` | `{}` | Namespace → Workload id → `{kind, min_replicas, max_replicas}`；未列入的 Workload 不能被定位 |
 | `opsActuator.serviceAccount.create` / `.name` | `true` / `""` | 专用 Patch-only ServiceAccount；`create=false` 时使用预先创建的账户 |
 | `opsActuator.resources` | 见 values.yaml | CPU/内存 requests 与 limits |
+| `worker.metricsPort` | 9108 | Worker Prometheus 指标端口（仅集群内可达，无鉴权） |
 | `env.STORAGE_PROVIDER` | cos | 对象存储后端：`cos` 或 `minio` |
 | `env` | 见 values.yaml | 非敏感环境变量（DB/Redis 主机、日志级别等） |
 | `secrets` | 见 values.yaml | 敏感配置，渲染为 Secret 并通过 `envFrom` 注入 |

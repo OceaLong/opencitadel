@@ -24,6 +24,7 @@ from app.application.services.resource_guard_service import ResourceGuardService
 from app.application.services.compliance_service import ComplianceService
 from app.application.services.config_provider import AppConfigProvider, create_app_config_provider
 from app.application.services.evidence_service import EvidenceService
+from app.application.services.governance_overview_service import GovernanceOverviewService
 from app.application.services.governance_profile_service import GovernanceProfileService
 from app.application.services.integration_server_service import A2AServerConfigService, MCPServerService
 from app.application.services.file_service import FileService
@@ -36,6 +37,11 @@ from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.memory_service import MemoryService
 from app.application.services.quota_service import QuotaService
+# Vector-memory service self-registers with app.domain.vector_port on
+# import; eagerly imported here (composition root, wired into both the API
+# and worker processes) so domain-layer vector consumers (KB/codebase vector
+# services) can resolve the port before it is otherwise reached.
+from app.application.services.vector_memory_service import get_vector_memory_service  # noqa: F401
 from app.application.services.session_service import SessionService
 from app.domain.services.resource_version_provider import ResourceVersionProviderRegistry
 from app.application.services.service_api_key_service import ServiceApiKeyService
@@ -312,6 +318,11 @@ class BaseContainer(containers.DeclarativeContainer):
         uow_factory=uow_factory,
         audit_service=audit_service,
         checkpoint_service=checkpoint_service,
+    )
+    governance_overview_service = providers.Singleton(
+        GovernanceOverviewService,
+        uow_factory=uow_factory,
+        audit_service=audit_service,
     )
     usage_stats_service = providers.Singleton(UsageStatsService, uow_factory=uow_factory)
     quota_service = providers.Singleton(QuotaService, uow_factory=uow_factory)

@@ -102,12 +102,19 @@ def test_all_business_api_paths_and_service_credentials_are_limited():
     assert "service-secret-value" not in keys[1]
 
 
-def test_health_and_metrics_paths_do_not_consume_business_rate_limit():
+def test_health_path_does_not_consume_business_rate_limit():
     middleware = RateLimitMiddleware(Starlette())
 
     assert middleware._is_limited_path("/api/status") is False
-    assert middleware._is_limited_path("/api/metrics") is False
     assert middleware._is_limited_path("/api/status/private") is True
+
+
+def test_metrics_path_is_no_longer_rate_limit_exempt():
+    """/api/metrics now requires a bearer token (see metrics_routes.py), so it
+    must not skip the rate limiter like the truly public /api/status probe."""
+    middleware = RateLimitMiddleware(Starlette())
+
+    assert middleware._is_limited_path("/api/metrics") is True
     assert middleware._is_limited_path("/api/metrics/export") is True
 
 

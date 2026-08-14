@@ -253,7 +253,14 @@ kubectl auth can-i get secrets \
 
 `get pods` 应成功，`create pods` 与 `get secrets` 必须输出 `no`。
 
-破坏性 Fixture 仅能用 `./scripts/run-patrol-fixtures.sh` 运行。它会创建专用 `kind-opencitadel-patrol-*` 集群、校验每次重置基线与写权限拒绝、评分全部 20 案例，并在结束时删除集群；仅显式设置 `PATROL_KEEP_DEMO_CLUSTER=true` 才保留。
+破坏性 Fixture 仅能用 `./scripts/run-patrol-fixtures.sh` 运行。它会创建专用 `kind-opencitadel-patrol-*` 集群、校验每次重置基线与写权限拒绝、评分全部 21 案例，并在结束时删除集群；仅显式设置 `PATROL_KEEP_DEMO_CLUSTER=true` 才保留。
+
+案例 21（`21-remediation-crashloop`）是唯一走写路径（经真实 Actuator 重启/扩缩容/回滚）而非只读 Collector 回放的案例；它只在 `PATROL_RUN_REMEDIATION_FIXTURE=true` 时运行，因为需要先构建并 `kind load` 一个真实的 `opencitadel-ops-actuator` 镜像。本地这个变量仍然默认 `false`（其余 20 个只读案例完全不需要 Actuator），但 CI 的 `patrol-kind-fixtures` job 现在无条件将其设为 `true`，所以案例 21 在每次 push/PR 都会运行，而不是一个可选的额外项。运行时，这条闭环由两个相互独立、都不依赖 LLM 的验证层确定性核验：
+
+- **kind 层**（`scripts/drive_remediation_fixture.py`，由 `patrol-kind-fixtures` job 驱动）：以 streamable-HTTP 驱动真实的 Ops Actuator MCP Server，作用于一次性集群——前置失败态的 Collector 读取、用新的幂等键调用 `restart_workload`、用同一个键重放并断言 `skipped_idempotent`、重新部署健康镜像、修复后的 Collector 读取——每一步都拿 `kubectl` 回读结果交叉校验，而不只信任 Actuator 自己的信封。
+- **进程内层**（`api/tests/app/integration/test_remediation_fixture_replay.py`，属于普通 `api-test` job 的 `pytest` 运行的一部分，不涉及任何集群）：直接针对同一个 Fixture 的 `expected.json` 里的 `remediation` 区块（`expected_status_sequence`、`recheck_expected_results`），对 `PatrolRemediationService`/`PatrolRunService` 做端到端回放，断言提案 → 执行 → 自动复检 → 收尾的整条状态机。
+
+两层在每次 CI 触发时都会运行，彼此独立；无论是面向 Actuator 的写路径退化，还是服务端修复状态机本身退化，都会让对应的 job 失败。
 
 ## 证据验证
 

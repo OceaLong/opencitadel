@@ -586,8 +586,12 @@ docker stats
 # API health
 curl http://localhost:8088/api/status
 
-# Prometheus metrics
-curl http://localhost:8088/api/metrics
+# Prometheus metrics — fail-closed: 404 unless METRICS_TOKEN is set in .env,
+# then requires the bearer token (see "Prometheus /api/metrics" in .env.example)
+curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8088/api/metrics
+
+# Worker metrics — separate, internal-only, no token (WORKER_METRICS_PORT, default 9108)
+docker compose exec opencitadel-worker curl -s http://localhost:9108/metrics | head
 
 # Frontend
 curl -I http://localhost:8088
@@ -1045,7 +1049,10 @@ Ops Patrol and Ops Patrol Remediation are optional and disabled by default. Befo
 manager or protected values mechanism, keep the four application secrets
 distinct, use separate PostgreSQL admin/application passwords, enable Redis
 authentication, set `networkPolicy.enabled=true`, and narrow
-`env.TRUSTED_PROXY_CIDRS` to the ingress controller.
+`env.TRUSTED_PROXY_CIDRS` to the ingress controller. To enable the
+Prometheus-scraped `/api/metrics` endpoint, also set `secrets.metricsToken`
+to a strong random value — the endpoint is fail-closed (404) while it is
+empty.
 
 ### Existing chart-managed PostgreSQL PVC
 
@@ -1132,6 +1139,7 @@ Chart features:
 - Worker **ServiceAccount + RBAC** (pods create/delete/get/list) for K8s sandbox driver
 - **No docker.sock mount** under kubernetes driver
 - Same admission/reclaim logic as single-node compose via **Redis node quota**
+- `*-worker-metrics` **Service** (`ClusterIP`, port `worker.metricsPort` = 9108 by default) exposes the Worker's unauthenticated Prometheus endpoint in-cluster only
 
 Details: [Helm chart README](../../deploy/helm/opencitadel/README.md).
 

@@ -95,7 +95,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def _is_limited_path(self, path: str) -> bool:
         excluded_paths = {
             "/api/status",
-            "/api/metrics",
         }
         return path.startswith("/api/") and path not in excluded_paths
 

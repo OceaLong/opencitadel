@@ -360,12 +360,14 @@ def _route_dependencies(router) -> dict[str, set]:
 
 
 def test_auditor_cannot_create_or_approve():
-    """AUDITOR 全拒: neither the propose route nor the generic tool-approval
-    decision route (which governs approving a remediation's
-    patrol_execute_remediation call, exactly like any other gated tool call)
-    may be reached by an AUDITOR principal."""
+    """AUDITOR 全拒: the propose route may not be reached by an AUDITOR
+    principal. Approving a remediation's patrol_execute_remediation call is
+    now governed exclusively by the chat resume path (react.py ->
+    ToolBatchExecutor.decide_approval_call), which is covered by its own
+    AUDITOR-gating tests — not by a REST route."""
     patrol_routes = _route_dependencies(patrol_router)
     assert require_non_auditor in patrol_routes["POST:/patrol-findings/{finding_id}/remediations"]
 
     session_routes = _route_dependencies(session_router)
-    assert require_non_auditor in session_routes["POST:/sessions/{session_id}/tool-approval-batches/{batch_id}/decision"]
+    # 无审计留痕的第二条审批写路径已删除；断言路由表中不存在该端点，防复活。
+    assert "POST:/sessions/{session_id}/tool-approval-batches/{batch_id}/decision" not in session_routes

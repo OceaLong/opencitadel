@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any
 
 import httpx
 
-from app.application.errors.exceptions import ServerRequestsError
+from app.domain.errors import ServerRequestsError
 from app.domain.external.connection_pool import A2AConnectionPoolPort
 from app.domain.models.app_config import A2AConfig
 from app.domain.models.tool_result import ToolResult

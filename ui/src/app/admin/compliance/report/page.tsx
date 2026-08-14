@@ -21,13 +21,7 @@ import {
 import { type AdminTimeRange, getAdminDateRange } from "@/lib/admin-utils";
 import { complianceApi, type ComplianceReport } from "@/lib/api/compliance";
 
-function controlStatusVariant(
-  status: string,
-): "success" | "destructive" | "secondary" {
-  if (status === "pass") return "success";
-  if (status === "gap") return "destructive";
-  return "secondary";
-}
+import { controlStatusVariant } from "./compliance-status";
 
 export default function AdminComplianceReportPage() {
   const t = useTranslations("compliance");
@@ -121,6 +115,12 @@ export default function AdminComplianceReportPage() {
               </StatusBadge>
               <StatusBadge variant="destructive">
                 {t("gapCount")}: {report.summary.gap}
+              </StatusBadge>
+              <StatusBadge variant="warning">
+                {t("attentionCount")}: {report.summary.attention}
+              </StatusBadge>
+              <StatusBadge variant="secondary">
+                {t("notVerifiedCount")}: {report.summary.not_verified}
               </StatusBadge>
               <StatusBadge variant="secondary">
                 {t("naCount")}: {report.summary.na}

@@ -101,7 +101,7 @@ This is what lets two workers race on the same recovered task — after a crash,
 
 ## Profile and evidence
 
-`GovernanceProfileService.build_profile()` (`api/app/application/services/governance_profile_service.py`) is a read-only aggregation over data the chain above already wrote: it verifies the session's hash-chained audit log via `AuditService.verify_session_chain`, and projects approvals, gate hits, and checkpoints into one auditor-facing document — no new tables, no new writes. `EvidenceService.build_session_evidence_package()` (`api/app/application/services/evidence_service.py`) wraps that profile, the full audit report, checkpoints, artifacts, and browser screenshots into one ZIP:
+`GovernanceProfileService.build_profile()` (`api/app/application/services/governance_profile_service.py`) is a read-only aggregation over data the chain above already wrote: it verifies the session's hash-chained audit log via `AuditService.verify_session_chain`, and projects approvals, gate hits, checkpoints, and denials into one auditor-facing document — no new tables, no new writes. Denials are every `agent_tool_denied` audit row for the session: a capability-policy rejection at one of the three narrowing layers in the previous section (`assembly`/`exposure`/`execution`), each carrying `tool`, `layer`, and a redacted `reason`. `EvidenceService.build_session_evidence_package()` (`api/app/application/services/evidence_service.py`) wraps that profile, the full audit report, checkpoints, artifacts, and browser screenshots into one ZIP:
 
 | File in the package | Content |
 |----------------------|---------|
@@ -113,6 +113,23 @@ This is what lets two workers race on the same recovered task — after a crash,
 | `chain-signature.txt` | `HMAC-SHA256(AUDIT_SIGNING_KEY, manifest.json bytes)`, using the single active signing key tagged with its `AUDIT_SIGNING_KEY_ID` label so a package signed before a key rotation stays independently verifiable against the matching previous key |
 
 Because the signature covers `manifest.json`'s file-hash table rather than the ZIP bytes themselves, the package stays verifiable even after re-compression or selective extraction.
+
+## Observability
+
+Every stage of the flow above also increments a Prometheus counter/histogram from `api/app/infrastructure/observability/governance_metrics.py`, recorded by whichever process (API or Worker) runs that step:
+
+| Metric | Type | Labels | Recorded when |
+|--------|------|--------|----------------|
+| `governance_approval_batches_total` | Counter | `outcome` (`approved`/`rejected`/`expired`/`consumed`) | A `ToolApprovalBatch` reaches a terminal outcome |
+| `governance_approval_decision_seconds` | Histogram | — | Time from batch creation to decision |
+| `governance_gate_hits_total` | Counter | `gate` | A tool call is flagged by the HITL gate policy |
+| `governance_policy_denials_total` | Counter | `layer` (`assembly`/`exposure`/`execution`), `tool` | `CapabilityPolicy` rejects a call at any of the three narrowing layers |
+| `governance_tool_executions_total` | Counter | `tool`, `status` (`ok`/`error`/`denied`) | A governed tool call's execution attempt completes |
+| `governance_tool_execution_seconds` | Histogram | `tool` | Governed tool call execution latency |
+| `governance_remediation_transitions_total` | Counter | `to_status` | An Ops Patrol remediation changes state |
+| `governance_audit_chain_verifications_total` | Counter | `result` (`intact`/`broken`) | An audit hash-chain verification run completes |
+
+Scrape them from `/api/metrics` (API process, Bearer-token gated) and the Worker's separate internal-only metrics port — see [Security model § Observability](security-model.md#observability) for the exact auth/network semantics of each. Every capability-policy denial also leaves an `agent_tool_denied` audit row (see [Profile and evidence](#profile-and-evidence) above) alongside the counter, so a denial is both instantly visible in Prometheus and durably attributable to a session in the evidence chain.
 
 ## Related documentation
 

@@ -4,7 +4,7 @@
 import logging
 from typing import Callable, Optional
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.codebase import ArtifactKind
 from app.domain.repositories.uow import IUnitOfWork

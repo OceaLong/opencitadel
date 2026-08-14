@@ -13,6 +13,7 @@ from app.domain.models.audit_log import AuditLog
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.audit_chain import GENESIS, compute_entry_hash, entry_fields
 from app.infrastructure.models.audit_log import AuditLogORM
+from app.infrastructure.observability.governance_metrics import record_chain_verification
 from core.config import get_settings
 
 _AUDIT_SECRET_KEY_HINTS = (
@@ -160,6 +161,7 @@ class AuditService:
         async with self._uow_factory() as uow:
             logs = await uow.audit.list_chained(limit=limit)
         result = self._verify_logs(logs, self._verification_keys(settings))
+        record_chain_verification("intact" if result["ok"] else "broken")
         if not result["ok"]:
             logger.critical(
                 "AUDIT_CHAIN_INTEGRITY_FAILURE first_broken_seq=%s total=%s",

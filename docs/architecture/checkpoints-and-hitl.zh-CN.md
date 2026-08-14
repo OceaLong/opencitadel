@@ -138,11 +138,12 @@ stateDiagram-v2
 | 路由 | 契约 |
 |------|------|
 | `GET /api/sessions/{session_id}/tool-approval-batch` | 返回当前 owner scope 下的待审批批次 |
-| `POST /api/sessions/{session_id}/tool-approval-batches/{batch_id}/decision` | Body：`{"action":"approve|approve_same|reject","tool_call_ids":[...]?}` |
 
-> **内部端点**：首方 UI 不直接调用该路由。实际的人工审批决策以 chat 续跑
-> 消息（`approve` / `approve_same` / `reject:<feedback>`）经会话 chat 端点
-> 送达——详见[治理平面](governance-plane.zh-CN.md#整批预检与审批)。
+> **审批只有一条写路径**：不存在用于提交审批决策的 REST 端点。人工审批决策
+> 唯一经由 chat 续跑消息（`approve` / `approve_same` / `reject:<feedback>`）
+> 从会话 chat 端点送达，并由 `ToolBatchExecutor.decide_approval_call` 记录
+> ——详见[治理平面](governance-plane.zh-CN.md#整批预检与审批)。此前存在的
+> REST 审批决策端点已删除，其不存在由契约测试强制保证。
 
 显式 `tool_call_ids` 支持部分决策；省略的 ID 不会扩张先前的部分决策，部分
 批次继续等待。`approve_same` 只会为本次从 pending 新变为 approved 的调用

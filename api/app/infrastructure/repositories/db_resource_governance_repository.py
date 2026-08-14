@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,9 @@ from app.domain.models.resource_governance import (
 )
 from app.domain.repositories.resource_governance_repository import (
     ResourceGovernanceRepository,
+)
+from app.infrastructure.observability.governance_metrics import (
+    record_approval_batch_outcome,
 )
 from app.infrastructure.models.resource_governance import (
     ResourceBuildEventORM,
@@ -455,15 +458,26 @@ class DBResourceGovernanceRepository(ResourceGovernanceRepository):
         if all(
             call.status != ApprovalStatus.PENDING.value for call in batch.calls
         ):
+            batch_approved = not any(
+                call.status == ApprovalStatus.REJECTED.value
+                for call in batch.calls
+            )
             batch.status = (
-                ApprovalStatus.REJECTED.value
-                if any(
-                    call.status == ApprovalStatus.REJECTED.value
-                    for call in batch.calls
-                )
-                else ApprovalStatus.APPROVED.value
+                ApprovalStatus.APPROVED.value
+                if batch_approved
+                else ApprovalStatus.REJECTED.value
             )
             batch.decided_at = now
+            if batch_approved:
+                # This branch is reached at most once per batch: every call
+                # can only leave PENDING here (guarded by the "already
+                # decided" checks above), so the "all calls non-pending"
+                # condition flips false -> true exactly once. Governance
+                # observability (Phase A / Task 2 addendum A) — the chat
+                # approval path (react.py -> ToolBatchExecutor) is the sole
+                # caller of this repository method, so instrumenting here
+                # covers it without double-counting.
+                record_approval_batch_outcome("approved")
         await self.db_session.flush()
         return record.to_domain()
 
@@ -500,6 +514,62 @@ class DBResourceGovernanceRepository(ResourceGovernanceRepository):
         return record.to_domain().model_copy(
             update={"execution_claimed": True}
         )
+
+    async def approval_batch_stats(self, since: datetime) -> Dict[str, Any]:
+        pending_stmt = (
+            select(func.count())
+            .select_from(ToolApprovalBatchORM)
+            .where(
+                ToolApprovalBatchORM.created_at >= since,
+                ToolApprovalBatchORM.status == ApprovalStatus.PENDING.value,
+            )
+        )
+        pending_count = int((await self.db_session.execute(pending_stmt)).scalar_one() or 0)
+
+        outcomes = {
+            ApprovalStatus.APPROVED.value: 0,
+            ApprovalStatus.REJECTED.value: 0,
+            ApprovalStatus.EXPIRED.value: 0,
+            ApprovalStatus.CONSUMED.value: 0,
+        }
+        outcomes_stmt = (
+            select(ToolApprovalBatchORM.status, func.count())
+            .where(
+                ToolApprovalBatchORM.created_at >= since,
+                ToolApprovalBatchORM.status.in_(tuple(outcomes)),
+            )
+            .group_by(ToolApprovalBatchORM.status)
+        )
+        for status, count in (await self.db_session.execute(outcomes_stmt)).all():
+            outcomes[status] = int(count)
+
+        # Computed in Python rather than a DB-side epoch/interval expression:
+        # timestamp subtraction to a portable "seconds" scalar has no common
+        # SQL dialect between Postgres (EXTRACT(EPOCH FROM ...)) and SQLite
+        # (used by this repository's real-SQL test fixture) -- see
+        # test_compliance_metrics_repositories.py's module docstring for the
+        # same tradeoff on other aggregates in this file's neighborhood.
+        decided_stmt = select(
+            ToolApprovalBatchORM.created_at, ToolApprovalBatchORM.decided_at
+        ).where(
+            ToolApprovalBatchORM.created_at >= since,
+            ToolApprovalBatchORM.decided_at.isnot(None),
+        )
+        decided_rows = (await self.db_session.execute(decided_stmt)).all()
+        if decided_rows:
+            deltas = [
+                (decided_at - created_at).total_seconds()
+                for created_at, decided_at in decided_rows
+            ]
+            avg_decision_seconds: Optional[float] = sum(deltas) / len(deltas)
+        else:
+            avg_decision_seconds = None
+
+        return {
+            "pending_count": pending_count,
+            "outcomes": outcomes,
+            "avg_decision_seconds": avg_decision_seconds,
+        }
 
 
 def _is_expired(expires_at: datetime, now: datetime) -> bool:

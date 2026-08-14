@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from prometheus_client import REGISTRY
 
 from app.application.errors.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.application.patrol_templates import load_patrol_template
@@ -500,3 +501,51 @@ async def test_cancel_if_pending_is_noop_for_already_terminal_remediation():
 
     assert repo.remediations[remediation.id].status == PatrolRemediationStatus.VERIFIED
     assert repo.remediations[remediation.id].error_code is None
+
+
+def _counter_value(name: str, labels: dict) -> float:
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+@pytest.mark.asyncio
+async def test_propose_records_proposed_remediation_transition():
+    repo = Repo()
+    service = PatrolRemediationService(lambda: Uow(repo))
+    scope = OwnerScope.personal("user-1")
+    before = _counter_value(
+        "governance_remediation_transitions_total", {"to_status": "proposed"}
+    )
+
+    with _patched():
+        remediation = await service.propose(
+            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
+        )
+
+    after = _counter_value(
+        "governance_remediation_transitions_total", {"to_status": "proposed"}
+    )
+    assert remediation.status == PatrolRemediationStatus.PROPOSED
+    assert after - before == 1.0
+
+
+@pytest.mark.asyncio
+async def test_cancel_if_pending_records_cancelled_remediation_transition():
+    repo = Repo()
+    service = PatrolRemediationService(lambda: Uow(repo))
+    scope = OwnerScope.personal("user-1")
+
+    with _patched():
+        remediation = await service.propose(
+            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
+        )
+    before = _counter_value(
+        "governance_remediation_transitions_total", {"to_status": "cancelled"}
+    )
+
+    await service.cancel_if_pending(remediation.session_id)
+
+    after = _counter_value(
+        "governance_remediation_transitions_total", {"to_status": "cancelled"}
+    )
+    assert repo.remediations[remediation.id].status == PatrolRemediationStatus.CANCELLED
+    assert after - before == 1.0
