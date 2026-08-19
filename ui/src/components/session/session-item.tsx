@@ -90,7 +90,7 @@ export const SessionItem = memo(function SessionItem({
     <Item
       className={cn(
         "hover:bg-muted/70 cursor-pointer items-start gap-2 rounded-xl p-2 transition-colors",
-        isActive && "bg-card shadow-[var(--shadow-card)]",
+        isActive && "bg-card shadow-card",
       )}
       onClick={handleClick}
     >

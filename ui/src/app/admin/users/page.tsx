@@ -5,6 +5,8 @@ import { useTranslations } from "next-intl";
 import { Loader2, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +32,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 import { formatDateTime } from "@/lib/admin-utils";
 import { adminApi, type AdminUser, type Quota } from "@/lib/api/admin";
@@ -53,17 +63,22 @@ export default function AdminUsersPage() {
   const [deleteStrategy, setDeleteStrategy] = useState<"anonymize" | "cascade" | "transfer_to_team">("anonymize");
   const [deleting, setDeleting] = useState(false);
 
-  const loadUsers = useCallback(async (nextOffset: number) => {
-    setLoading(true);
-    try {
-      const data = await adminApi.users({ limit: PAGE_SIZE, offset: nextOffset });
-      setUsers(data.users);
-      setTotal(data.total);
-      setOffset(nextOffset);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadUsers = useCallback(
+    async (nextOffset: number) => {
+      setLoading(true);
+      try {
+        const data = await adminApi.users({ limit: PAGE_SIZE, offset: nextOffset });
+        setUsers(data.users);
+        setTotal(data.total);
+        setOffset(nextOffset);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : tCommon("loadFailed"));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [tCommon],
+  );
 
   useEffect(() => {
     void loadUsers(0);
@@ -157,18 +172,18 @@ export default function AdminUsersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">{t("usersTitle")}</h2>
-          <p className="text-muted-foreground mt-1 text-sm">{t("usersSubtitle")}</p>
-        </div>
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder={t("searchUsersPlaceholder")}
-          className="max-w-xs"
-        />
-      </div>
+      <PageHeader
+        title={t("usersTitle")}
+        description={t("usersSubtitle")}
+        actions={
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={t("searchUsersPlaceholder")}
+            className="max-w-xs"
+          />
+        }
+      />
 
       <Card>
         <CardHeader>
@@ -180,64 +195,88 @@ export default function AdminUsersPage() {
             <div className="flex justify-center py-12">
               <Loader2 className="size-6 animate-spin" />
             </div>
+          ) : filteredUsers.length === 0 ? (
+            <EmptyState
+              title={t("noUsersFound")}
+              description={search.trim() ? t("searchCurrentPageHint") : undefined}
+              className="py-10"
+            />
           ) : (
-            <div className="space-y-2">
-              {filteredUsers.map((user) => (
-                <div key={user.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{user.display_name || user.username}</span>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("columnUser")}</TableHead>
+                  <TableHead>{t("role")}</TableHead>
+                  <TableHead>{t("status")}</TableHead>
+                  <TableHead>{t("columnLastLogin")}</TableHead>
+                  <TableHead className="text-right">{t("columnActions")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredUsers.map((user) => (
+                  <TableRow key={user.id}>
+                    <TableCell className="max-w-xs min-w-48 whitespace-normal">
+                      <div className="font-medium">{user.display_name || user.username}</div>
+                      <div className="text-muted-foreground mt-0.5 text-xs">{user.email}</div>
+                    </TableCell>
+                    <TableCell>
                       <Badge variant={user.global_role === "admin" ? "default" : user.global_role === "auditor" ? "outline" : "secondary"}>
                         {user.global_role}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
                       <Badge variant={user.status === "active" ? "outline" : "destructive"}>{user.status}</Badge>
-                    </div>
-                    <div className="text-muted-foreground mt-1 text-xs">
-                      {user.email} · {t("lastLogin", { time: formatDateTime(user.last_login_at) })}
-                    </div>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon">
-                        <MoreHorizontal className="size-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => setEditing({ ...user })}>{tCommon("edit")}</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => void openQuota(user)}>{t("quota")}</DropdownMenuItem>
-                      {user.status === "active" ? (
-                        <DropdownMenuItem variant="destructive" onClick={() => void disableUser(user)}>
-                          {t("disableUser")}
-                        </DropdownMenuItem>
-                      ) : null}
-                      <DropdownMenuItem variant="destructive" onClick={() => setDeleteTarget(user)}>
-                        {t("deleteUser")}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              ))}
-            </div>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-xs">
+                      {formatDateTime(user.last_login_at)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <MoreHorizontal className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setEditing({ ...user })}>{tCommon("edit")}</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => void openQuota(user)}>{t("quota")}</DropdownMenuItem>
+                          {user.status === "active" ? (
+                            <DropdownMenuItem variant="destructive" onClick={() => void disableUser(user)}>
+                              {t("disableUser")}
+                            </DropdownMenuItem>
+                          ) : null}
+                          <DropdownMenuItem variant="destructive" onClick={() => setDeleteTarget(user)}>
+                            {t("deleteUser")}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
 
-          <div className="mt-4 flex items-center justify-between">
-            <span className="text-muted-foreground text-sm">
-              {tCommon("pageOf", { current: currentPage, total: totalPages })}
-            </span>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => void loadUsers(Math.max(0, offset - PAGE_SIZE))}>
-                {tCommon("previousPage")}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={offset + PAGE_SIZE >= total}
-                onClick={() => void loadUsers(offset + PAGE_SIZE)}
-              >
-                {tCommon("nextPage")}
-              </Button>
+          {search.trim() ? null : (
+            <div className="mt-4 flex items-center justify-between">
+              <span className="text-muted-foreground text-sm">
+                {tCommon("pageOf", { current: currentPage, total: totalPages })}
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => void loadUsers(Math.max(0, offset - PAGE_SIZE))}>
+                  {tCommon("previousPage")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={offset + PAGE_SIZE >= total}
+                  onClick={() => void loadUsers(offset + PAGE_SIZE)}
+                >
+                  {tCommon("nextPage")}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
         </CardContent>
       </Card>
 

@@ -45,6 +45,36 @@ import type { AttachmentFile, TaskObservationSummary } from "@/lib/session-event
 import { formatDuration, sessionFileToAttachment } from "@/lib/session-events";
 import { formatFileSize } from "@/lib/utils";
 
+type HeaderPillProps = {
+  children: React.ReactNode;
+  onClick?: () => void;
+  title?: string;
+  className?: string;
+};
+
+function HeaderPill({ children, onClick, title, className }: HeaderPillProps) {
+  const baseClassName =
+    "border-border/70 bg-card text-muted-foreground inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs";
+  const clickableClassName = "hover:bg-muted/70 cursor-pointer transition-colors";
+  const classNames = [baseClassName, onClick ? clickableClassName : null, className]
+    .filter(Boolean)
+    .join(" ");
+
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={classNames} title={title}>
+        {children}
+      </button>
+    );
+  }
+
+  return (
+    <div className={classNames} title={title}>
+      {children}
+    </div>
+  );
+}
+
 export type SessionHeaderProps = {
   /** 此任务下的文件列表（用于「此任务中所有文件」弹窗） */
   files?: SessionFile[];
@@ -188,42 +218,44 @@ export const SessionHeader = memo(function SessionHeader({
   const showTokenPill = Boolean(tokenUsage && tokenUsage.total_tokens > 0);
 
   const observationPill = showObservationPill ? (
-    <div
-      className="border-border/70 bg-card text-muted-foreground hidden items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)] sm:flex"
+    <HeaderPill
+      className="hidden shadow-card sm:flex"
       title={t("observationTitle", {
         tools: observationSummary!.toolCount,
+        errors: observationSummary!.errorCount,
         waits: observationSummary!.waitCount,
       })}
     >
       <IconActivity className="size-3.5 shrink-0" />
-      <span>{observationSummary!.toolCount} tools</span>
+      <span className="font-mono">{observationSummary!.toolCount}</span>
+      <span>tools</span>
       {observationSummary!.durationMs !== undefined && (
         <span className="text-muted-foreground/70">
-          · {formatDuration(observationSummary!.durationMs)}
+          · <span className="font-mono">{formatDuration(observationSummary!.durationMs)}</span>
         </span>
       )}
-    </div>
+    </HeaderPill>
   ) : null;
 
   const tokenPill = showTokenPill ? (
-    <button
-      type="button"
+    <HeaderPill
       onClick={handleOpenTokenDetail}
-      className="border-border/70 bg-card text-muted-foreground hover:bg-muted/70 hidden cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)] transition-colors sm:flex"
+      className="hidden shadow-card sm:flex"
       title={t("tokenUsageTitle", {
         prompt: tokenUsage!.prompt_tokens.toLocaleString(),
         completion: tokenUsage!.completion_tokens.toLocaleString(),
         calls: tokenUsage!.call_count,
       })}
     >
-      <IconCoins className="size-3.5 shrink-0 text-amber-600" />
-      <span>{tokenUsage!.total_tokens.toLocaleString()} tok</span>
+      <IconCoins className="size-3.5 shrink-0 text-muted-foreground" />
+      <span className="font-mono">{tokenUsage!.total_tokens.toLocaleString()}</span>
+      <span>tok</span>
       {tokenUsage!.estimated_cost_usd > 0 && (
         <span className="text-muted-foreground/70">
-          · ${tokenUsage!.estimated_cost_usd.toFixed(4)}
+          · <span className="font-mono">${tokenUsage!.estimated_cost_usd.toFixed(4)}</span>
         </span>
       )}
-    </button>
+    </HeaderPill>
   ) : null;
 
   return (
@@ -242,19 +274,28 @@ export const SessionHeader = memo(function SessionHeader({
                 <DropdownMenuItem className="flex flex-col items-start gap-0.5">
                   <span className="text-xs font-medium">{t("observationTitle", {
                     tools: observationSummary!.toolCount,
+                    errors: observationSummary!.errorCount,
                     waits: observationSummary!.waitCount,
                   })}</span>
                   <span className="text-muted-foreground text-xs">
-                    {observationSummary!.toolCount} tools
-                    {observationSummary!.durationMs !== undefined
-                      ? ` · ${formatDuration(observationSummary!.durationMs)}`
-                      : ""}
+                    <span className="font-mono">{observationSummary!.toolCount}</span> tools
+                    {observationSummary!.durationMs !== undefined ? (
+                      <>
+                        {" · "}
+                        <span className="font-mono">
+                          {formatDuration(observationSummary!.durationMs)}
+                        </span>
+                      </>
+                    ) : (
+                      ""
+                    )}
                   </span>
                 </DropdownMenuItem>
               )}
               {showTokenPill && (
                 <DropdownMenuItem onClick={handleOpenTokenDetail}>
-                  {tokenUsage!.total_tokens.toLocaleString()} tok
+                  <span className="font-mono">{tokenUsage!.total_tokens.toLocaleString()}</span>{" "}
+                  tok
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
@@ -351,11 +392,14 @@ export const SessionHeader = memo(function SessionHeader({
                       >
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-medium">{record.agent || record.call_type}</span>
-                          <span className="text-muted-foreground">{record.total_tokens} tok</span>
+                          <span className="text-muted-foreground">
+                            <span className="font-mono">{record.total_tokens}</span> tok
+                          </span>
                         </div>
                         <div className="text-muted-foreground mt-1">
-                          {record.model_name} · prompt {record.prompt_tokens} · completion{" "}
-                          {record.completion_tokens}
+                          {record.model_name} · prompt{" "}
+                          <span className="font-mono">{record.prompt_tokens}</span> · completion{" "}
+                          <span className="font-mono">{record.completion_tokens}</span>
                         </div>
                       </div>
                     ))}

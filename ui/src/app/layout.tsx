@@ -9,6 +9,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/providers/auth-provider";
 import { ThemeProvider } from "@/providers/theme-provider";
 
+import { plexMono, plexSans } from "@/fonts";
+
 import "./globals.css";
 
 const themeInitScript = `(function(){try{var t=localStorage.getItem("opencitadel-theme")||localStorage.getItem("my-manus-theme");var dark=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(dark)document.documentElement.classList.add("dark");}catch(e){}})();`;
@@ -44,11 +46,15 @@ export default async function RootLayout({
   const messages = await getMessages();
 
   return (
-    <html lang={locale === "zh" ? "zh-CN" : "en"} suppressHydrationWarning>
+    <html
+      lang={locale === "zh" ? "zh-CN" : "en"}
+      className={`${plexSans.variable} ${plexMono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="h-screen overflow-hidden">
+      <body className="h-screen overflow-hidden font-sans">
         <NextIntlClientProvider locale={locale} messages={messages}>
           <ThemeProvider>
             <AuthProvider>

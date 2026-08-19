@@ -30,10 +30,10 @@ export function SuggestedQuestions({ className, onQuestionClick }: SuggestedQues
       ).map((question, index) => (
         <Button
           key={index}
-            variant="outline"
-            className="cursor-pointer text-xs break-words whitespace-normal sm:text-sm"
-            onClick={() => handleClick(question)}
-          >
+          variant="outline"
+          className="cursor-pointer text-xs break-words whitespace-normal sm:text-sm"
+          onClick={() => handleClick(question)}
+        >
           {question}
         </Button>
       ))}

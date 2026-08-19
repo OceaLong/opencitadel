@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Download, FileText, Globe, Link2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
 import { MarkdownContent } from "@/components/markdown-content";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -144,11 +145,7 @@ export function ArtifactWorkbench({
   }, [selectedId, t]);
 
   if (sortedArtifacts.length === 0) {
-    return (
-      <div className={cn("text-muted-foreground flex h-full items-center justify-center text-sm", className)}>
-        {t("empty")}
-      </div>
-    );
+    return <EmptyState title={t("empty")} className={cn("h-full justify-center", className)} />;
   }
 
   return (
@@ -218,7 +215,7 @@ export function ArtifactWorkbench({
           </div>
         )}
         {contentIncomplete && !loading && (
-          <div className="border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 border-b px-4 py-2 text-sm">
+          <div className="border-warning/40 text-warning border-b px-4 py-2 text-sm">
             {t("incompleteContentWarning")}
           </div>
         )}

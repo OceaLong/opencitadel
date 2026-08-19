@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
 import { DeleteSessionDialog } from "@/components/session/delete-session-dialog";
 import { SessionItem } from "@/components/session/session-item";
 import { Button } from "@/components/ui/button";
@@ -116,9 +117,7 @@ export function SessionList() {
       </div>
 
       {filteredSessions.length === 0 ? (
-        <div className="text-muted-foreground py-8 text-center text-sm">
-          {sessions.length === 0 ? t("empty") : t("filterEmpty")}
-        </div>
+        <EmptyState title={sessions.length === 0 ? t("empty") : t("filterEmpty")} className="py-8" />
       ) : (
         <ItemGroup className="gap-1">
           {filteredSessions.map((session) => (

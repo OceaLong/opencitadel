@@ -4,12 +4,22 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { InvitationStatusBadge } from "@/components/admin/invitation-status-badge";
+import { AdminStatCard } from "@/components/admin/stat-card";
+import { EmptyState } from "@/components/empty-state";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 import { formatDateTime } from "@/lib/admin-utils";
 import { adminApi, type PlatformInvitation } from "@/lib/api/admin";
@@ -17,6 +27,7 @@ import { IconCopy, IconInvitation } from "@/lib/icons";
 
 export default function AdminInvitationsPage() {
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const [invitations, setInvitations] = useState<PlatformInvitation[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -59,8 +70,12 @@ export default function AdminInvitationsPage() {
   }
 
   async function copyUrl(url: string) {
-    await navigator.clipboard.writeText(url);
-    toast.success(t("inviteLinkCopied"));
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success(t("inviteLinkCopied"));
+    } catch {
+      toast.error(tCommon("copyFailed"));
+    }
   }
 
   const pending = invitations.filter((item) => item.status === "pending").length;
@@ -70,15 +85,14 @@ export default function AdminInvitationsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        bordered={false}
         title={t("platformInvite")}
         description={t("invitationsSubtitle")}
       />
 
       <div className="grid gap-3 md:grid-cols-3">
-        <SummaryCard label={t("summaryPending")} value={pending} />
-        <SummaryCard label={t("summaryAccepted")} value={accepted} />
-        <SummaryCard label={t("summaryExpired")} value={expired} />
+        <AdminStatCard label={t("summaryPending")} value={pending} />
+        <AdminStatCard label={t("summaryAccepted")} value={accepted} />
+        <AdminStatCard label={t("summaryExpired")} value={expired} />
       </div>
 
       <Card>
@@ -120,43 +134,39 @@ export default function AdminInvitationsPage() {
               <LoadingSpinner />
             </div>
           ) : invitations.length === 0 ? (
-            <div className="text-muted-foreground py-10 text-center text-sm">{t("noInvitationRecords")}</div>
+            <EmptyState title={t("noInvitationRecords")} className="py-10" />
           ) : (
-            <div className="space-y-2">
-              {invitations.map((item) => (
-                <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-3">
-                  <div className="min-w-0">
-                    <div className="truncate font-medium">{item.email || t("noEmailSpecified")}</div>
-                    <div className="text-muted-foreground mt-1 text-xs">
-                      {t("createdAt", { time: formatDateTime(item.created_at) })} · {t("expiresAt", { time: formatDateTime(item.expires_at) })}
-                    </div>
-                  </div>
-                  <StatusBadge status={item.status} />
-                </div>
-              ))}
-            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("columnEmail")}</TableHead>
+                  <TableHead>{t("columnCreatedAt")}</TableHead>
+                  <TableHead>{t("columnExpiresAt")}</TableHead>
+                  <TableHead className="text-right">{t("status")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {invitations.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell className="max-w-56 truncate font-medium">
+                      {item.email || t("noEmailSpecified")}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-xs">
+                      {formatDateTime(item.created_at)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-xs">
+                      {formatDateTime(item.expires_at)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <InvitationStatusBadge status={item.status} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
     </div>
   );
-}
-
-function SummaryCard({ label, value }: { label: string; value: number }) {
-  return (
-    <Card className="gap-0 py-4">
-      <CardContent>
-        <div className="text-muted-foreground text-sm">{label}</div>
-        <div className="mt-1 text-2xl font-semibold">{value}</div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function StatusBadge({ status }: { status: PlatformInvitation["status"] }) {
-  const t = useTranslations("admin");
-  const label =
-    status === "accepted" ? t("inviteAccepted") : status === "pending" ? t("invitePending") : t("inviteExpired");
-  const variant = status === "accepted" ? "secondary" : status === "pending" ? "outline" : "destructive";
-  return <Badge variant={variant}>{label}</Badge>;
 }

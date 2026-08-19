@@ -9,6 +9,12 @@ import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { AttachmentsMessage } from "@/components/session/attachments-message";
 import { ClarifyQuestions } from "@/components/session/clarify-questions";
 import { ClarifyReplySummary } from "@/components/session/clarify-reply-summary";
+import {
+  GovernanceRail,
+  GovernanceRailItem,
+  RailCheckpointButton,
+  toolEventRailState,
+} from "@/components/session/governance-rail";
 import { PlanStepStatusIcon } from "@/components/session/plan-step-status-icon";
 import { ToolUse } from "@/components/tool-use";
 
@@ -68,7 +74,7 @@ function ToolRow({ className, timeLabel, children }: ToolRowProps) {
   const [hovered, setHovered] = useState(false);
   return (
     <div
-      className={cn("mt-3 flex w-full min-w-0 items-center justify-between gap-2", className)}
+      className={cn("flex w-full min-w-0 items-center justify-between gap-2", className)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -119,7 +125,7 @@ function ChatMessageComponent({
           {hasClarifyReply ? (
             <ClarifyReplySummary answers={clarifyAnswers} />
           ) : (
-            <div className="border-border/70 bg-card text-foreground relative flex items-center overflow-hidden rounded-2xl border px-3.5 py-2.5 text-sm leading-relaxed shadow-[var(--shadow-card)]">
+            <div className="border-border/70 bg-card text-foreground relative flex items-center overflow-hidden rounded-2xl border px-3.5 py-2.5 text-sm leading-relaxed shadow-card">
               {displayMessage}
             </div>
           )}
@@ -168,7 +174,7 @@ function ChatMessageComponent({
 
   if (item.kind === "tool") {
     return (
-      <ToolRow className={className} timeLabel={item.timeLabel}>
+      <ToolRow className={cn("mt-3", className)} timeLabel={item.timeLabel}>
         <ToolUse
           data={item.data}
           onClick={onToolClick ? () => onToolClick(item.data) : undefined}
@@ -192,7 +198,7 @@ function ChatMessageComponent({
           {item.data.result_preview ? (
             <div className="text-muted-foreground mt-2 text-xs">{item.data.result_preview}</div>
           ) : null}
-          {item.data.error ? <div className="mt-1 text-xs text-red-600">{item.data.error}</div> : null}
+          {item.data.error ? <div className="text-destructive mt-1 text-xs">{item.data.error}</div> : null}
         </div>
       </div>
     );
@@ -240,13 +246,13 @@ function ChatMessageComponent({
     return (
       <div className={cn("group mt-3 flex w-full flex-col gap-2", className)}>
         <div className="group flex h-7 items-center justify-between">
-          <div className="flex items-center justify-center gap-1 text-red-600">
+          <div className="text-destructive flex items-center justify-center gap-1">
             <OpenCitadelIcon variant="icon" />
           </div>
         </div>
-        <div className="m-0 max-w-none p-0 text-red-600">
+        <div className="text-destructive m-0 max-w-none p-0">
           {item.contextLabel && (
-            <div className="mb-1 flex items-center gap-1 text-xs text-red-500">
+            <div className="text-destructive mb-1 flex items-center gap-1 text-xs">
               <AlertCircle className="size-3.5" />
               <span>{t("errorAfter", { context: item.contextLabel })}</span>
             </div>
@@ -286,6 +292,8 @@ function itemSignature(item: TimelineItem): string {
       return `${item.kind}:${item.id}:${toolSignature(item.data)}`;
     case "step":
       return `${item.kind}:${item.id}:${item.data.status}:${item.tools.length}:${item.tools.map(toolSignature).join("|")}`;
+    case "subagent":
+      return `${item.kind}:${item.id}:${item.data.status}:${item.data.goal ?? ""}:${item.data.result_preview ?? ""}:${item.data.error ?? ""}`;
     case "attachments":
       return `${item.kind}:${item.id}:${item.role}:${item.files.map((file) => file.id).join("|")}`;
     case "wait":
@@ -329,20 +337,27 @@ function StepBlock({
   restoringCheckpoint?: boolean;
   sessionStatus?: SessionStatus;
 }) {
+  const t = useTranslations("chatMessage");
   const [expanded, setExpanded] = useState(true);
   const { data, tools } = stepItem;
+  const railDisabled = restoringCheckpoint || sessionStatus === "running";
+  // The rail head only exists once the tools rail itself renders. When the
+  // step is collapsed or has no tools yet (streaming / plain description
+  // step), fall back to a standalone header-level checkpoint button so
+  // restore stays reachable instead of silently disappearing.
+  const showRailHead = expanded && tools.length > 0;
 
   return (
     <div className={cn("mt-3 flex flex-col", className)}>
-      {checkpoint && (
+      {checkpoint && onRestoreCheckpoint && !showRailHead ? (
         <div className="mb-1 flex justify-start">
-          <RestoreCheckpointButton
-            checkpoint={checkpoint}
-            onRestore={onRestoreCheckpoint}
-            disabled={restoringCheckpoint || sessionStatus === "running"}
+          <RailCheckpointButton
+            title={t("restoreTitle")}
+            onClick={() => onRestoreCheckpoint(checkpoint)}
+            disabled={railDisabled}
           />
         </div>
-      )}
+      ) : null}
       <div
         role="button"
         tabIndex={0}
@@ -368,20 +383,29 @@ function StepBlock({
           />
         </div>
       </div>
-      {expanded && tools.length > 0 && (
-        <div className="flex">
-          <div className="relative w-6 flex-shrink-0">
-            <div className="border-border absolute top-2 bottom-0 left-[7px] w-[1px] border-l border-dashed" />
-          </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-hidden pt-2 transition-[max-height,opacity] duration-150 ease-in-out">
-            {tools.map((tool, idx) => (
-              <ToolRow key={`${data.id}-tool-${idx}`} timeLabel={getToolTimeLabel(tool)}>
+      {showRailHead ? (
+        <GovernanceRail
+          className="mt-1"
+          checkpointTitle={checkpoint ? t("restoreTitle") : undefined}
+          onRestoreCheckpoint={checkpoint && onRestoreCheckpoint ? () => onRestoreCheckpoint(checkpoint) : undefined}
+          restoreDisabled={railDisabled}
+          lineState={
+            tools.some((tool) => tool.status === "error")
+              ? "failed"
+              : tools.every((tool) => tool.status === "called")
+                ? "completed"
+                : "default"
+          }
+        >
+          {tools.map((tool, idx) => (
+            <GovernanceRailItem key={`${data.id}-tool-${idx}`} state={toolEventRailState(tool.status)}>
+              <ToolRow timeLabel={getToolTimeLabel(tool)}>
                 <ToolUse data={tool} onClick={onToolClick ? () => onToolClick(tool) : undefined} />
               </ToolRow>
-            ))}
-          </div>
-        </div>
-      )}
+            </GovernanceRailItem>
+          ))}
+        </GovernanceRail>
+      ) : null}
     </div>
   );
 }

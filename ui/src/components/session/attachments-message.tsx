@@ -33,7 +33,7 @@ function FileCard({
   return (
     <div
       className={cn(
-        "border-border/70 bg-card hover:bg-muted/50 flex flex-shrink-0 cursor-pointer items-center gap-3 rounded-xl border p-3 shadow-[var(--shadow-card)] transition-colors",
+        "border-border/70 bg-card hover:bg-muted/50 flex flex-shrink-0 cursor-pointer items-center gap-3 rounded-xl border p-3 shadow-card transition-colors",
         role === "user" && "bg-card",
       )}
       style={{ width: CARD_WIDTH, height: CARD_HEIGHT }}
@@ -47,7 +47,7 @@ function FileCard({
         }
       }}
     >
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-100 text-blue-600">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-info/15 text-info">
         <FileText size={18} />
       </div>
       <div className="min-w-0 flex-1">
@@ -104,7 +104,7 @@ export function AttachmentsMessage({
           <Button
             variant="outline"
             size="sm"
-            className="border-border/70 bg-card hover:bg-muted/50 text-muted-foreground shrink-0 cursor-pointer gap-2 rounded-xl border px-3 py-2 shadow-[var(--shadow-card)]"
+            className="border-border/70 bg-card hover:bg-muted/50 text-muted-foreground shrink-0 cursor-pointer gap-2 rounded-xl border px-3 py-2 shadow-card"
             style={{ width: CARD_WIDTH, height: CARD_HEIGHT }}
             onClick={onViewAllFiles}
           >

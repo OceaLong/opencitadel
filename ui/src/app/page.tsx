@@ -24,7 +24,6 @@ import { useRequireAuth } from "@/hooks/use-require-auth";
 import { invalidateModelsCache, loadModels, resolveDefaultModelId } from "@/lib/api/models-cache";
 import { sessionApi } from "@/lib/api/session";
 import type { FileInfo, Skill } from "@/lib/api/types";
-import { IconSecurity } from "@/lib/icons";
 
 export default function Page() {
   const router = useRouter();
@@ -137,12 +136,9 @@ export default function Page() {
       />
       <div className="flex flex-1 items-center justify-center px-4 py-6 sm:py-8">
         <div className="mx-auto w-full max-w-full sm:max-w-content sm:min-w-[390px]">
-          <div className="mb-4 text-center text-2xl font-bold tracking-tight sm:mb-6 sm:text-left sm:text-3xl">
-            <div className="text-foreground flex items-center justify-center gap-2 sm:justify-start">
-              <IconSecurity className="text-primary hidden size-7 sm:inline" />
-              {t("title")}
-            </div>
-            <div className="text-muted-foreground mt-1 text-base font-normal sm:text-lg">
+          <div className="text-foreground mb-6 text-center text-2xl font-semibold tracking-tight sm:mb-8 sm:text-left sm:text-3xl">
+            {t("title")}
+            <div className="text-muted-foreground mt-2 text-sm font-normal sm:text-base">
               {t("subtitle")}
             </div>
           </div>
@@ -175,16 +171,23 @@ export default function Page() {
               </>
             }
           />
-          <div className="text-muted-foreground mb-4 flex flex-wrap gap-2 text-xs sm:mb-6">
-            <Link href="/codebase" className="hover:text-foreground underline-offset-4 hover:underline">
-              {t("manageCodebase")}
-            </Link>
-            <span>·</span>
-            <Link href="/knowledge" className="hover:text-foreground underline-offset-4 hover:underline">
-              {t("manageKnowledge")}
-            </Link>
+          <div className="space-y-3">
+            <nav aria-label={t("secondaryNav")} className="flex flex-wrap gap-4">
+              <Link
+                href="/codebase"
+                className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/40 rounded-sm text-xs underline-offset-4 hover:underline focus-visible:ring-2"
+              >
+                {t("manageCodebase")}
+              </Link>
+              <Link
+                href="/knowledge"
+                className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/40 rounded-sm text-xs underline-offset-4 hover:underline focus-visible:ring-2"
+              >
+                {t("manageKnowledge")}
+              </Link>
+            </nav>
+            <SuggestedQuestions onQuestionClick={handleQuestionClick} />
           </div>
-          <SuggestedQuestions onQuestionClick={handleQuestionClick} />
         </div>
       </div>
     </div>

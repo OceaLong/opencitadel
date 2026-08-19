@@ -4,7 +4,9 @@ import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { Globe, Play, Sparkles } from "lucide-react";
 
+import { EmptyState } from "@/components/empty-state";
 import { MarkdownContent } from "@/components/markdown-content";
+import { TerminalSurface } from "@/components/session/terminal-surface";
 import type { ToolKind } from "@/components/tool-use/utils";
 import { getArg } from "@/components/tool-use/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -30,7 +32,7 @@ export function JumpToLatestButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="bg-card/90 text-foreground hover:bg-card border-border/70 inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm shadow-[var(--shadow-card)] backdrop-blur transition-colors"
+      className="bg-card/90 text-foreground hover:bg-card border-border/70 inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm shadow-card backdrop-blur transition-colors"
     >
       <Play size={12} className="fill-current" />
       <span>{t("jumpToLive")}</span>
@@ -52,32 +54,29 @@ function ShellPreview({ tool }: { tool: ToolEvent }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-4">
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-gray-700 bg-[#1e1e1e]">
-        <div className="flex-shrink-0 border-b border-gray-700 bg-[#2d2d2d] py-1.5 text-center text-xs text-gray-400">
-          {sessionId || tToolUse("shellFallback")}
-        </div>
+      <TerminalSurface title={sessionId || tToolUse("shellFallback")} className="flex-1">
         <ScrollArea className="min-h-0 flex-1">
           <div className="p-4 font-mono text-sm leading-relaxed">
             {records.length > 0 ? (
               records.map((rec, i) => (
                 <div key={i} className="mb-2">
                   <div>
-                    <span className="text-green-400">{rec.ps1}</span>{" "}
-                    <span className="text-white">{rec.command}</span>
+                    <span className="text-terminal-success">{rec.ps1}</span>{" "}
+                    <span className="text-terminal-foreground">{rec.command}</span>
                   </div>
                   {rec.output && (
-                    <pre className="mt-0.5 break-words whitespace-pre-wrap text-gray-300">
+                    <pre className="text-terminal-foreground/80 mt-0.5 break-words whitespace-pre-wrap">
                       {rec.output}
                     </pre>
                   )}
                 </div>
               ))
             ) : (
-              <span className="text-gray-500">{t("waitingShellOutput")}</span>
+              <span className="text-terminal-foreground/60">{t("waitingShellOutput")}</span>
             )}
           </div>
         </ScrollArea>
-      </div>
+      </TerminalSurface>
     </div>
   );
 }
@@ -110,7 +109,7 @@ function BrowserPreview({ tool, onOpenVNC }: { tool: ToolEvent; onOpenVNC?: () =
           <button
             type="button"
             onClick={onOpenVNC}
-            className="absolute right-3 bottom-3 z-10 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-gray-800/80 text-white shadow-lg transition-colors hover:bg-gray-700"
+            className="bg-terminal/80 text-terminal-foreground hover:bg-terminal absolute right-3 bottom-3 z-10 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full shadow-lg transition-colors"
             aria-label={t("openRemoteDesktop")}
           >
             <Sparkles size={16} />
@@ -150,8 +149,8 @@ function SearchPreview({ tool }: { tool: ToolEvent }) {
               rel="noopener noreferrer"
               className="hover:bg-muted/60 group block rounded-lg p-3 transition-colors"
             >
-              <div className="mb-0.5 truncate text-xs text-green-700">{item.url}</div>
-              <div className="mb-1 line-clamp-1 text-sm font-medium text-blue-700 group-hover:underline">
+              <div className="text-success mb-0.5 truncate text-xs">{item.url}</div>
+              <div className="text-link mb-1 line-clamp-1 text-sm font-medium group-hover:underline">
                 {item.title}
               </div>
               {item.snippet && (
@@ -160,7 +159,7 @@ function SearchPreview({ tool }: { tool: ToolEvent }) {
             </a>
           ))
         ) : (
-          <div className="text-muted-foreground py-8 text-center text-sm">{t("noSearchResults")}</div>
+          <EmptyState title={t("noSearchResults")} className="py-8" />
         )}
       </div>
     </ScrollArea>
@@ -182,39 +181,34 @@ function FileToolPreview({ tool }: { tool: ToolEvent }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-4">
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-gray-700 bg-[#1e1e1e]">
-        {filepath && (
-          <div className="flex-shrink-0 truncate border-b border-gray-700 bg-[#2d2d2d] px-4 py-1.5 text-center text-xs text-gray-400">
-            {filepath}
-          </div>
-        )}
+      <TerminalSurface title={filepath || undefined} className="flex-1">
         <ScrollArea className="min-h-0 flex-1">
           {isMarkdown && fileContent ? (
             <div className="bg-card p-4">
               <MarkdownContent content={fileContent} />
             </div>
           ) : (
-            <pre className="p-4 font-mono text-sm leading-relaxed break-words whitespace-pre-wrap text-gray-300">
+            <pre className="text-terminal-foreground/80 p-4 font-mono text-sm leading-relaxed break-words whitespace-pre-wrap">
               {fileContent ?? t("waitingFileContent")}
             </pre>
           )}
         </ScrollArea>
-      </div>
+      </TerminalSurface>
     </div>
   );
 }
 
 function ResultBlock({ value, fallback }: { value: unknown; fallback: string }) {
   return (
-    <div className="rounded-lg border border-gray-700 bg-[#1e1e1e] p-4">
-      <pre className="font-mono text-sm break-words whitespace-pre-wrap text-gray-300">
+    <TerminalSurface>
+      <pre className="text-terminal-foreground/80 p-4 font-mono text-sm break-words whitespace-pre-wrap">
         {value != null
           ? typeof value === "string"
             ? value
             : JSON.stringify(value, null, 2)
           : fallback}
       </pre>
-    </div>
+    </TerminalSurface>
   );
 }
 

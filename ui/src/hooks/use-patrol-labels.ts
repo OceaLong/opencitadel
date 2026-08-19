@@ -2,6 +2,26 @@
 
 import { useTranslations } from "next-intl";
 
+import type { StatusBadgeVariant } from "@/components/status-badge";
+
+/**
+ * Ops Patrol 状态 → StatusBadge variant 的统一映射（合并原 patrol-pack-list 的
+ * pack/run 状态映射与 patrol-run-detail 的 run/check 状态映射，两处消费同一份逻辑）。
+ */
+export function patrolStatusVariant(status: string): StatusBadgeVariant {
+  if (status === "active" || status === "completed" || status === "pass") return "success";
+  if (status === "invalid" || status === "failed" || status === "fail" || status === "error")
+    return "destructive";
+  if (
+    status === "paused" ||
+    status === "skipped" ||
+    status === "warn" ||
+    status.includes("finding")
+  )
+    return "warning";
+  return "secondary";
+}
+
 export function usePatrolLabels() {
   const t = useTranslations("patrol");
 

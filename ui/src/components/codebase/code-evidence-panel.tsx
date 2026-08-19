@@ -57,7 +57,7 @@ export function CodeEvidencePanel({
               <li key={`${edgeIndex}:${refIndex}:${ref.path}:${lineRange}`}>
                 <button
                   type="button"
-                  className="text-blue-600 hover:underline"
+                  className="text-link hover:underline"
                   onClick={() => onOpenSource(ref.path!, start)}
                 >
                   {ref.path}

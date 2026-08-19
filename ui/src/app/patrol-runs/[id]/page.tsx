@@ -11,12 +11,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { patrolsApi } from "@/lib/api/patrols";
 import type { PatrolRunDetail } from "@/lib/api/types";
 import { useAuth } from "@/providers/auth-provider";
+import { useReportPageTitle } from "@/providers/page-title-provider";
 
 export default function PatrolRunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const t = useTranslations("patrol");
   const { user } = useAuth();
   const [run, setRun] = useState<PatrolRunDetail | null>(null);
+  useReportPageTitle(
+    run ? `Run #${run.id.length > 8 ? `${run.id.slice(0, 8)}…` : run.id}` : undefined,
+  );
   const load = useCallback(async () => {
     try {
       setRun(await patrolsApi.getRun(id));
@@ -48,7 +52,7 @@ export default function PatrolRunPage({ params }: { params: Promise<{ id: string
   if (!run)
     return (
       <ScrollablePageContent>
-        <div className="grid gap-3 p-6">
+        <div className="grid gap-3">
           <Skeleton className="h-44" />
           <Skeleton className="h-72" />
         </div>
@@ -56,13 +60,11 @@ export default function PatrolRunPage({ params }: { params: Promise<{ id: string
     );
   return (
     <ScrollablePageContent>
-      <div className="p-4 sm:p-6">
-        <PatrolRunDetailView
-          run={run}
-          readOnly={user?.global_role === "auditor"}
-          onRefresh={() => void load()}
-        />
-      </div>
+      <PatrolRunDetailView
+        run={run}
+        readOnly={user?.global_role === "auditor"}
+        onRefresh={() => void load()}
+      />
     </ScrollablePageContent>
   );
 }

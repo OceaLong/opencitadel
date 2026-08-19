@@ -14,6 +14,8 @@
     "retry": "重试",
     "close": "关闭",
     "copy": "复制",
+    "copied": "已复制",
+    "copyFailed": "复制失败",
     "back": "返回",
     "backHome": "返回首页",
     "user": "用户",
@@ -168,6 +170,7 @@
     "manageCodebase": "管理代码知识库",
     "manageKnowledge": "管理文档知识库",
     "noModel": "请先配置模型",
+    "secondaryNav": "知识管理入口",
     "title": "OpenCitadel"
   },
   "sessionMode": {
@@ -175,13 +178,7 @@
     "agent": "Agent"
   },
   "chatHeader": {
-    "backHome": "返回首页",
-    "codebase": "代码知识库",
-    "knowledge": "文档知识库",
-    "patrol": "运维巡检",
-    "automation": "自动化",
-    "modelStatus": "{status, select, unknown {模型状态未知} unavailable {模型不可用} ok {模型正常} other {模型状态}}",
-    "workspaceMenu": "工作区"
+    "modelStatus": "{status, select, unknown {模型状态未知} unavailable {模型不可用} ok {模型正常} other {模型状态}}"
   },
   "leftPanel": {
     "newTask": "新建任务",
@@ -190,6 +187,15 @@
   "workspace": {
     "label": "工作区",
     "personal": "个人工作区"
+  },
+  "nav": {
+    "label": "主导航",
+    "chat": "对话",
+    "patrol": "巡检",
+    "automation": "自动化",
+    "knowledge": "知识库",
+    "codebase": "代码库",
+    "admin": "管理后台"
   },
   "account": {
     "settings": "系统设置",
@@ -1021,6 +1027,20 @@
     "recentInvitesDesc": "最新平台注册邀请",
     "noInvitationRecords": "暂无邀请记录",
     "noEmailSpecified": "未指定邮箱",
+    "columnAction": "操作",
+    "columnActor": "操作者",
+    "columnResource": "资源",
+    "columnRequestId": "请求 ID",
+    "columnTime": "时间",
+    "copied": "已复制",
+    "columnEmail": "邮箱",
+    "columnActions": "操作",
+    "columnUser": "用户",
+    "columnLastLogin": "最近登录",
+    "columnCreatedAt": "创建时间",
+    "columnExpiresAt": "过期时间",
+    "noUsersFound": "未找到匹配用户",
+    "searchCurrentPageHint": "搜索仅过滤当前页",
     "inviteAccepted": "已接受",
     "invitePending": "待处理",
     "inviteExpired": "已过期",
@@ -1099,9 +1119,7 @@
     "timeRangeAll": "全部时间"
   },
   "adminNav": {
-    "subtitle": "用户、审计与平台设置",
     "auditorSubtitle": "只读合规与审计门户",
-    "back": "返回应用",
     "forbidden": "需要管理员或审计员权限。",
     "overview": "概览",
     "users": "用户",
@@ -1110,8 +1128,7 @@
     "audit": "审计日志",
     "governance": "治理概览",
     "evidence": "证据中心",
-    "complianceReport": "合规报表",
-    "menu": "菜单"
+    "complianceReport": "合规报表"
   },
   "teams": {
     "title": "团队",
@@ -1130,6 +1147,7 @@
     "backToTeams": "返回团队列表",
     "teamNotFound": "未找到该团队",
     "deleteTeam": "解散团队",
+    "deleteConfirmTitle": "确定解散该团队吗？",
     "deleteConfirm": "确定解散该团队吗？团队资源将回落到各创建者的个人工作区。",
     "deleteSuccess": "团队已解散",
     "deleteFailed": "解散团队失败",
@@ -1153,6 +1171,8 @@
     "acceptSuccess": "已成功加入团队",
     "acceptFailed": "加入团队失败",
     "leaveTeam": "退出团队",
+    "leavingTeam": "退出中...",
+    "leaveConfirmTitle": "确定退出该团队吗？",
     "leaveConfirm": "确定退出该团队吗？你将无法再访问该团队工作区。",
     "leaveSuccess": "已退出团队",
     "leaveFailed": "退出团队失败",
@@ -1166,7 +1186,8 @@
     "inviteNeedsPlatformAccess": "接受邀请前需要先拥有平台账号。",
     "registerAndJoin": "注册并加入",
     "soleOwnerCannotLeave": "请先转移所有权或解散团队后再退出",
-    "you": "你"
+    "you": "你",
+    "emptyMembers": "暂无成员"
   },
   "adminTeams": {
     "title": "团队管理",
@@ -1175,11 +1196,14 @@
     "teamsListDesc": "共 {total} 个团队",
     "emptyTeams": "暂无团队",
     "memberCount": "{count} 名成员",
-    "nextPage": "下一页",
     "membersTitle": "成员",
     "selectTeamHint": "选择一个团队查看成员",
     "emptyMembers": "暂无成员",
     "deleteConfirm": "确定解散该团队吗？",
+    "deleteConfirmDesc": "「{name}」下的全部成员与数据将被永久删除，且无法撤销。",
+    "columnActions": "操作",
+    "columnMember": "成员",
+    "columnRole": "角色",
     "deleteSuccess": "团队已解散",
     "deleteFailed": "解散团队失败",
     "memberRemoved": "成员已移除",
@@ -1380,6 +1404,15 @@
     "startAgent": "Agent",
     "startAsk": "Ask",
     "startTaskFailed": "启动任务失败",
+    "status": {
+      "pending": "等待中",
+      "parsing": "解析中",
+      "chunking": "分块中",
+      "indexing": "索引中",
+      "graph_building": "构建图谱中",
+      "ready": "就绪",
+      "failed": "失败"
+    },
     "statusDocCount": "{status} · {count} 篇文档",
     "title": "文档知识库"
   },
@@ -1476,12 +1509,7 @@
   },
   "mobileNav": {
     "label": "主导航",
-    "chat": "对话",
-    "codebase": "代码库",
-    "knowledge": "知识库",
-    "patrol": "巡检",
     "more": "更多",
-    "automation": "自动化",
     "teams": "团队"
   },
   "mermaid": {
@@ -1593,6 +1621,7 @@
     },
     "errors": {
       "action": "操作失败",
+      "contextMissing": "usePatrolPacksContext 必须在 PatrolPacksProvider 内使用",
       "create": "创建巡检失败",
       "evidenceDownload": "证据下载失败",
       "findingUpdate": "Finding 更新失败",
@@ -1810,11 +1839,15 @@
     "copySecretAria": "复制 Webhook 密钥",
     "copyTokenAria": "复制 Webhook Token",
     "copyWebhookUrlAria": "复制 Webhook URL",
+    "columnActions": "操作",
+    "columnTrigger": "触发方式",
     "create": "创建任务",
     "creating": "创建中...",
     "credentialsSaved": "完成",
     "deleteFailed": "删除任务失败",
     "deleteJobAria": "删除定时任务",
+    "deleteJobDescription": "此操作将永久删除定时任务「{name}」，且无法撤销。",
+    "deleteJobTitle": "删除任务？",
     "editJob": "编辑任务",
     "empty": "暂无定时任务",
     "fields": {
@@ -1841,6 +1874,7 @@
     "newJob": "新建任务",
     "nextRunAt": "下次运行",
     "promptPlaceholder": "描述该任务应执行的内容...",
+    "refresh": "刷新",
     "rotateSecretAria": "轮换 Webhook 密钥",
     "rotateSecretFailed": "轮换密钥失败",
     "saveJob": "保存任务",
@@ -1864,7 +1898,7 @@
     "runNowStarted": "任务已开始",
     "toggleEnabledFailed": "更新任务状态失败",
     "lastRunError": "上次错误：{error}",
-    "promptHelp": "Webhook 可使用 {{payload.key}} 引用 JSON 字段",
+    "promptHelp": "Webhook 可使用 '{{payload.key}}' 引用 JSON 字段",
     "cronHelp": "Cron：HH:MM 或 minute hour * * *（如 0 9 * * *）",
     "webhookCredentialsDescription": "请立即保存这些凭据，密钥仅显示一次。请使用以下方式签名请求：",
     "webhookCredentialsTitle": "Webhook 凭据",

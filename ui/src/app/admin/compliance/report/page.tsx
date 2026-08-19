@@ -50,7 +50,6 @@ export default function AdminComplianceReportPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        bordered={false}
         title={t("reportTitle")}
         description={t("reportDesc")}
       />

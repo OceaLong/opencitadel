@@ -17,6 +17,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { formatCompactNumber, formatShortDate } from "@/lib/admin-utils";
@@ -69,9 +70,7 @@ export function UsageTimeseriesChart({ points }: { points: UsageTimeseriesPoint[
       </CardHeader>
       <CardContent className="h-72">
         {data.length === 0 ? (
-          <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-            {t("noUsageData")}
-          </div>
+          <EmptyState title={t("noUsageData")} className="h-full justify-center" />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data}>
@@ -106,9 +105,7 @@ export function UsageCallsChart({ points }: { points: UsageTimeseriesPoint[] }) 
       </CardHeader>
       <CardContent className="h-64">
         {data.length === 0 ? (
-          <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-            {t("noCallsData")}
-          </div>
+          <EmptyState title={t("noCallsData")} className="h-full justify-center" />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data}>
@@ -149,9 +146,7 @@ export function UsageBreakdownChart({
       </CardHeader>
       <CardContent className="h-72">
         {data.length === 0 ? (
-          <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-            {t("noBreakdownData")}
-          </div>
+          <EmptyState title={t("noBreakdownData")} className="h-full justify-center" />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
@@ -196,9 +191,7 @@ export function AuditActivityChart({
       </CardHeader>
       <CardContent className="h-64">
         {data.length === 0 ? (
-          <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-            {t("noAuditData")}
-          </div>
+          <EmptyState title={t("noAuditData")} className="h-full justify-center" />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data}>

@@ -188,7 +188,7 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
       {/* 头部：文件名 + 操作按钮 - 添加背景色区分 */}
       <div className="border-border/70 bg-muted/30 flex flex-shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-100 text-blue-600">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-info/15 text-info">
             <FileText size={16} />
           </div>
           <div className="min-w-0 flex-1">
@@ -230,7 +230,7 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
 
         {error && !loading && (
           <div className="flex h-full items-center justify-center px-6">
-            <p className="text-sm text-red-600">{error}</p>
+            <p className="text-destructive text-sm">{error}</p>
           </div>
         )}
 

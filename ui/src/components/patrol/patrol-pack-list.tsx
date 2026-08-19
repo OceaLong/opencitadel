@@ -4,22 +4,14 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { AlertTriangle, CheckCircle2, Clock3, Pause, Play, Stethoscope } from "lucide-react";
 
+import { EmptyState } from "@/components/empty-state";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
-import { usePatrolLabels } from "@/hooks/use-patrol-labels";
+import { patrolStatusVariant, usePatrolLabels } from "@/hooks/use-patrol-labels";
 import type { PatrolPack, PatrolRun } from "@/lib/api/types";
-
-const variant = (status: string) =>
-  status === "active" || status === "completed"
-    ? "success"
-    : status === "invalid" || status === "failed"
-      ? "destructive"
-      : status.includes("finding") || status === "paused"
-        ? "warning"
-        : "secondary";
 
 export function PatrolPackList({
   packs,
@@ -53,20 +45,19 @@ export function PatrolPackList({
   }
   if (!packs.length) {
     return (
-      <Card className="border-dashed">
-        <CardContent className="flex min-h-64 flex-col items-center justify-center gap-4 text-center">
-          <Stethoscope className="text-muted-foreground size-10" />
-          <div>
-            <h2 className="font-semibold">{t("empty.title")}</h2>
-            <p className="text-muted-foreground mt-1 text-sm">{t("empty.description")}</p>
-          </div>
-          {!readOnly && (
+      <EmptyState
+        variant="dashed"
+        icon={Stethoscope}
+        title={t("empty.title")}
+        description={t("empty.description")}
+        action={
+          !readOnly ? (
             <Button asChild>
               <Link href="/patrols/new">{t("actions.create")}</Link>
             </Button>
-          )}
-        </CardContent>
-      </Card>
+          ) : undefined
+        }
+      />
     );
   }
   return (
@@ -84,7 +75,7 @@ export function PatrolPackList({
                   >
                     {pack.name}
                   </Link>
-                  <StatusBadge variant={variant(pack.status)}>
+                  <StatusBadge variant={patrolStatusVariant(pack.status)}>
                     {labels.status[pack.status] ?? pack.status}
                   </StatusBadge>
                   <span className="text-muted-foreground text-xs">
@@ -105,16 +96,18 @@ export function PatrolPackList({
                 </div>
                 {run ? (
                   <div className="flex flex-wrap items-center gap-3 text-xs">
-                    <StatusBadge variant={variant(run.status)}>
+                    <StatusBadge variant={patrolStatusVariant(run.status)}>
                       {labels.status[run.status] ?? run.status}
                     </StatusBadge>
                     <span className="inline-flex items-center gap-1">
                       <CheckCircle2 className="size-3.5" />
-                      PASS {run.counts.pass}
+                      PASS <span className="font-mono">{run.counts.pass}</span>
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <AlertTriangle className="size-3.5" />
-                      WARN {run.counts.warn} · FAIL {run.counts.fail} · ERROR {run.counts.error}
+                      WARN <span className="font-mono">{run.counts.warn}</span> · FAIL{" "}
+                      <span className="font-mono">{run.counts.fail}</span> · ERROR{" "}
+                      <span className="font-mono">{run.counts.error}</span>
                     </span>
                     <span>
                       {t("evidencePercent", {

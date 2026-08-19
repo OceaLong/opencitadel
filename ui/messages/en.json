@@ -14,6 +14,8 @@
     "retry": "Retry",
     "close": "Close",
     "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Copy failed",
     "back": "Back",
     "backHome": "Back to home",
     "user": "User",
@@ -168,6 +170,7 @@
     "manageCodebase": "Manage code knowledge base",
     "manageKnowledge": "Manage document knowledge base",
     "noModel": "Please configure a model first",
+    "secondaryNav": "Knowledge management",
     "title": "OpenCitadel"
   },
   "sessionMode": {
@@ -175,13 +178,7 @@
     "agent": "Agent"
   },
   "chatHeader": {
-    "backHome": "Back to home",
-    "codebase": "Code knowledge base",
-    "knowledge": "Document knowledge base",
-    "patrol": "Ops Patrol",
-    "automation": "Automation",
-    "modelStatus": "{status, select, unknown {Model status unknown} unavailable {Model unavailable} ok {Model OK} other {Model status}}",
-    "workspaceMenu": "Workspace"
+    "modelStatus": "{status, select, unknown {Model status unknown} unavailable {Model unavailable} ok {Model OK} other {Model status}}"
   },
   "leftPanel": {
     "newTask": "New task",
@@ -190,6 +187,15 @@
   "workspace": {
     "label": "Workspace",
     "personal": "Personal workspace"
+  },
+  "nav": {
+    "label": "Main navigation",
+    "chat": "Chat",
+    "patrol": "Ops Patrol",
+    "automation": "Automation",
+    "knowledge": "Knowledge",
+    "codebase": "Codebase",
+    "admin": "Admin"
   },
   "account": {
     "settings": "System settings",
@@ -1021,6 +1027,20 @@
     "recentInvitesDesc": "Latest platform registration invites",
     "noInvitationRecords": "No invitation records",
     "noEmailSpecified": "No email specified",
+    "columnAction": "Action",
+    "columnActor": "Actor",
+    "columnResource": "Resource",
+    "columnRequestId": "Request ID",
+    "columnTime": "Time",
+    "copied": "Copied",
+    "columnEmail": "Email",
+    "columnActions": "Actions",
+    "columnUser": "User",
+    "columnLastLogin": "Last login",
+    "columnCreatedAt": "Created",
+    "columnExpiresAt": "Expires",
+    "noUsersFound": "No matching users",
+    "searchCurrentPageHint": "Search only filters the current page",
     "inviteAccepted": "Accepted",
     "invitePending": "Pending",
     "inviteExpired": "Expired",
@@ -1099,9 +1119,7 @@
     "timeRangeAll": "All time"
   },
   "adminNav": {
-    "subtitle": "Users, audit, and platform settings",
     "auditorSubtitle": "Read-only compliance and audit portal",
-    "back": "Back to app",
     "forbidden": "Admin or auditor access required.",
     "overview": "Overview",
     "users": "Users",
@@ -1110,8 +1128,7 @@
     "audit": "Audit log",
     "governance": "Governance",
     "evidence": "Evidence center",
-    "complianceReport": "Compliance report",
-    "menu": "Menu"
+    "complianceReport": "Compliance report"
   },
   "teams": {
     "title": "Teams",
@@ -1130,6 +1147,7 @@
     "backToTeams": "Back to teams",
     "teamNotFound": "Team not found",
     "deleteTeam": "Delete team",
+    "deleteConfirmTitle": "Delete this team?",
     "deleteConfirm": "Delete this team? Team resources will revert to personal workspaces.",
     "deleteSuccess": "Team deleted",
     "deleteFailed": "Failed to delete team",
@@ -1153,6 +1171,8 @@
     "acceptSuccess": "Joined team successfully",
     "acceptFailed": "Failed to join team",
     "leaveTeam": "Leave team",
+    "leavingTeam": "Leaving...",
+    "leaveConfirmTitle": "Leave this team?",
     "leaveConfirm": "Leave this team? You will lose access to its workspace.",
     "leaveSuccess": "Left team",
     "leaveFailed": "Failed to leave team",
@@ -1166,7 +1186,8 @@
     "inviteNeedsPlatformAccess": "You need a platform account before you can accept this invitation.",
     "registerAndJoin": "Register and join",
     "soleOwnerCannotLeave": "Transfer ownership or delete the team before leaving",
-    "you": "you"
+    "you": "you",
+    "emptyMembers": "No members"
   },
   "adminTeams": {
     "title": "Team management",
@@ -1175,11 +1196,14 @@
     "teamsListDesc": "{total} teams total",
     "emptyTeams": "No teams yet",
     "memberCount": "{count} members",
-    "nextPage": "Next",
     "membersTitle": "Members",
     "selectTeamHint": "Select a team to view members",
     "emptyMembers": "No members",
     "deleteConfirm": "Delete this team?",
+    "deleteConfirmDesc": "All members and data in \"{name}\" will be permanently deleted. This cannot be undone.",
+    "columnActions": "Actions",
+    "columnMember": "Member",
+    "columnRole": "Role",
     "deleteSuccess": "Team deleted",
     "deleteFailed": "Failed to delete team",
     "memberRemoved": "Member removed",
@@ -1380,6 +1404,15 @@
     "startAgent": "Agent",
     "startAsk": "Ask",
     "startTaskFailed": "Failed to start task",
+    "status": {
+      "pending": "Pending",
+      "parsing": "Parsing",
+      "chunking": "Chunking",
+      "indexing": "Indexing",
+      "graph_building": "Building graph",
+      "ready": "Ready",
+      "failed": "Failed"
+    },
     "statusDocCount": "{status} · {count} documents",
     "title": "Document knowledge base"
   },
@@ -1476,12 +1509,7 @@
   },
   "mobileNav": {
     "label": "Main navigation",
-    "chat": "Chat",
-    "codebase": "Codebase",
-    "knowledge": "Knowledge",
-    "patrol": "Patrol",
     "more": "More",
-    "automation": "Automation",
     "teams": "Teams"
   },
   "mermaid": {
@@ -1593,6 +1621,7 @@
     },
     "errors": {
       "action": "Action failed",
+      "contextMissing": "usePatrolPacksContext must be used within PatrolPacksProvider",
       "create": "Failed to create patrol",
       "evidenceDownload": "Failed to download evidence",
       "findingUpdate": "Failed to update Finding",
@@ -1810,11 +1839,15 @@
     "copySecretAria": "Copy webhook secret",
     "copyTokenAria": "Copy webhook token",
     "copyWebhookUrlAria": "Copy webhook URL",
+    "columnActions": "Actions",
+    "columnTrigger": "Trigger",
     "create": "Create job",
     "creating": "Creating...",
     "credentialsSaved": "Done",
     "deleteFailed": "Failed to delete job",
     "deleteJobAria": "Delete scheduled job",
+    "deleteJobDescription": "This will permanently delete the scheduled job \"{name}\". This cannot be undone.",
+    "deleteJobTitle": "Delete job?",
     "editJob": "Edit job",
     "empty": "No scheduled jobs yet",
     "fields": {
@@ -1841,6 +1874,7 @@
     "newJob": "New job",
     "nextRunAt": "Next run",
     "promptPlaceholder": "Describe what this job should do...",
+    "refresh": "Refresh",
     "rotateSecretAria": "Rotate webhook secret",
     "rotateSecretFailed": "Failed to rotate secret",
     "saveJob": "Save job",
@@ -1864,7 +1898,7 @@
     "runNowStarted": "Job started",
     "toggleEnabledFailed": "Failed to update job status",
     "lastRunError": "Last error: {error}",
-    "promptHelp": "Use {{payload.key}} for webhook JSON fields",
+    "promptHelp": "Use '{{payload.key}}' for webhook JSON fields",
     "cronHelp": "Cron: HH:MM or minute hour * * * (e.g. 0 9 * * *)",
     "webhookCredentialsDescription": "Save these credentials now. The secret is shown only once. Sign requests with",
     "webhookCredentialsTitle": "Webhook credentials",

@@ -8,7 +8,6 @@ import { SessionList } from "@/components/session/session-list";
 import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarTrigger } from "@/components/ui/sidebar";
-import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 
 import { IconAdd } from "@/lib/icons";
 import { useAuth } from "@/providers/auth-provider";
@@ -26,7 +25,6 @@ export function LeftPanel() {
         <SidebarTrigger className="cursor-pointer" />
       </SidebarHeader>
       <SidebarContent className="p-2">
-        <WorkspaceSwitcher />
         <Button
           variant="outline"
           className="mb-3 cursor-pointer"
@@ -47,7 +45,9 @@ export function LeftPanel() {
         </Button>
         <SessionList />
       </SidebarContent>
-      <AccountMenu />
+      <div className="md:hidden">
+        <AccountMenu />
+      </div>
     </Sidebar>
   );
 }

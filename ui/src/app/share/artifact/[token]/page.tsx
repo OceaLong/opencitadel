@@ -75,7 +75,7 @@ function ShareArtifactContent() {
         ) : (
           <>
             {contentIncomplete && (
-              <div className="border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 mb-4 rounded-xl border px-4 py-2 text-sm">
+              <div className="border-warning-subtle bg-warning-subtle text-warning mb-4 rounded-xl border px-4 py-2 text-sm">
                 {t("incompleteContentWarning")}
               </div>
             )}
@@ -83,11 +83,11 @@ function ShareArtifactContent() {
               <iframe
                 title={t("artifactTitle")}
                 srcDoc={content}
-                className="bg-background h-[calc(100vh-120px)] w-full rounded-xl border shadow-[var(--shadow-panel)]"
+                className="bg-background h-[calc(100vh-120px)] w-full rounded-xl border shadow-panel"
                 sandbox="allow-scripts"
               />
             ) : (
-              <div className="bg-card border-border/70 rounded-xl border p-6 shadow-[var(--shadow-panel)]">
+              <div className="bg-card border-border/70 rounded-xl border p-6 shadow-panel">
                 <MarkdownContent content={content} />
               </div>
             )}

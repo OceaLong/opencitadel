@@ -106,7 +106,7 @@ function buildComponents(
       return (
         <button
           type="button"
-          className="text-sm text-blue-600 hover:underline"
+          className="text-link text-sm hover:underline"
           onClick={() => onSourceClick(href)}
         >
           {children}
@@ -118,7 +118,7 @@ function buildComponents(
       return (
         <button
           type="button"
-          className="text-sm text-blue-600 hover:underline"
+          className="text-link text-sm hover:underline"
           onClick={() => onSourceClick(locMatch[1], Number(locMatch[2]))}
         >
           {childText}
@@ -131,7 +131,7 @@ function buildComponents(
     }
     return (
       <a
-        className={cn("text-sm text-blue-600 hover:underline", className)}
+        className={cn("text-link text-sm hover:underline", className)}
         href={href}
         target="_blank"
         rel="noopener noreferrer"

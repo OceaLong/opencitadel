@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Check, ChevronDown, User, Users } from "lucide-react";
 
@@ -16,7 +16,7 @@ import { readLocalStorageKey, writeLocalStorageKey } from "@/lib/storage-migrati
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
-export function WorkspaceSwitcher() {
+export function WorkspaceSwitcher({ trigger }: { trigger?: ReactNode }) {
   const { user } = useAuth();
   const t = useTranslations("workspace");
   const [teams, setTeams] = useState<Team[]>([]);
@@ -67,15 +67,17 @@ export function WorkspaceSwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="mb-3 flex w-full items-center gap-2.5 rounded-xl bg-muted/50 px-2.5 py-2 transition-colors hover:bg-muted/80"
-          aria-label={t("label")}
-        >
-          <TriggerIcon className="size-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">{displayLabel}</span>
-          <ChevronDown className="size-4 shrink-0 opacity-60" />
-        </button>
+        {trigger ?? (
+          <button
+            type="button"
+            className="mb-3 flex w-full items-center gap-2.5 rounded-xl bg-muted/50 px-2.5 py-2 transition-colors hover:bg-muted/80"
+            aria-label={t("label")}
+          >
+            <TriggerIcon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">{displayLabel}</span>
+            <ChevronDown className="size-4 shrink-0 opacity-60" />
+          </button>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-[min(100vw-2rem,280px)] p-1.5">
         {options.map((option) => {

@@ -12,6 +12,12 @@ import { PageHeader } from "@/components/page-header";
 import { ResourceVersionStatus } from "@/components/resource/resource-version-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { type ResourceLibraryApi, useResourceLibrary } from "@/hooks/use-resource-library";
@@ -24,6 +30,7 @@ import {
   IconDelete,
   IconDownload,
   IconLoading,
+  IconMore,
   IconRefresh,
 } from "@/lib/icons";
 import { cn } from "@/lib/utils";
@@ -143,8 +150,7 @@ export function CodebaseLibrary() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        size="sm"
-        className="px-4 py-3"
+        className="border-border/70 border-b px-4 py-3 sm:px-6"
         title={
           <span className="inline-flex items-center gap-2">
             <IconCodebase className="size-5" />
@@ -176,7 +182,54 @@ export function CodebaseLibrary() {
             return (
               <Card key={cb.id} className={cn(ingesting && "border-primary/30")}>
                 <CardHeader className="pb-2">
-                  <CardTitle className="truncate text-base">{cb.name}</CardTitle>
+                  <div className="flex items-start justify-between gap-2">
+                    <CardTitle className="truncate text-base">{cb.name}</CardTitle>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="icon-sm" variant="ghost" className="shrink-0">
+                          <IconMore className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onSelect={async () => {
+                            if (rebuilding) {
+                              await loadCodebases();
+                              return;
+                            }
+                            await codebaseApi.createBuild(cb.id);
+                            watchIngest(cb.id);
+                            await loadCodebases();
+                          }}
+                        >
+                          <IconRefresh className="mr-1 size-3" />
+                          {rebuilding ? t("viewBuild") : t("reanalyze")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={async () => {
+                            try {
+                              const data = await codebaseApi.download(cb.id);
+                              toast.success(t("downloadSuccess", { key: data.snapshot_key }));
+                            } catch (err) {
+                              toast.error(err instanceof Error ? err.message : t("downloadFailed"));
+                            }
+                          }}
+                        >
+                          <IconDownload className="mr-1 size-3" />
+                          {t("download")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          variant="destructive"
+                          disabled={ingesting}
+                          title={ingesting ? t("deleteBlockedIngesting") : undefined}
+                          onSelect={() => setPendingDelete(cb)}
+                        >
+                          <IconDelete className="mr-1 size-3" />
+                          {tCommon("delete")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                   <CardDescription className="text-xs">
                     {t("statusFileCount", { status: statusLabel, count: cb.file_count ?? 0 })}
                     {ingesting && (
@@ -195,78 +248,42 @@ export function CodebaseLibrary() {
                     )}
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="flex flex-wrap gap-2">
-                  <div className="basis-full">
-                    <ResourceVersionStatus
-                      api={codebaseApi}
-                      resourceId={cb.id}
-                      ns="codebase"
-                      controlledHistory={history}
-                      onBuildChanged={loadCodebases}
-                    />
+                <CardContent className="space-y-3">
+                  <ResourceVersionStatus
+                    api={codebaseApi}
+                    resourceId={cb.id}
+                    ns="codebase"
+                    controlledHistory={history}
+                    onBuildChanged={loadCodebases}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      disabled={startingId === cb.id || !canStart}
+                      onClick={() => void startTask(cb, "ask")}
+                    >
+                      {startingId === cb.id ? (
+                        <IconLoading className="size-4 animate-spin" />
+                      ) : (
+                        t("startAsk")
+                      )}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={startingId === cb.id || !canStart}
+                      onClick={() => void startTask(cb, "agent")}
+                    >
+                      {t("startAgent")}
+                    </Button>
                   </div>
-                  <Button
-                    size="sm"
-                    disabled={startingId === cb.id || !canStart}
-                    onClick={() => void startTask(cb, "ask")}
-                  >
-                    {startingId === cb.id ? <IconLoading className="size-4 animate-spin" /> : t("startAsk")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={startingId === cb.id || !canStart}
-                    onClick={() => void startTask(cb, "agent")}
-                  >
-                    {t("startAgent")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={async () => {
-                      if (rebuilding) {
-                        await loadCodebases();
-                        return;
-                      }
-                      await codebaseApi.createBuild(cb.id);
-                      watchIngest(cb.id);
-                      await loadCodebases();
-                    }}
-                  >
-                    <IconRefresh className="mr-1 size-3" />
-                    {rebuilding ? t("viewBuild") : t("reanalyze")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={async () => {
-                      try {
-                        const data = await codebaseApi.download(cb.id);
-                        toast.success(t("downloadSuccess", { key: data.snapshot_key }));
-                      } catch (err) {
-                        toast.error(err instanceof Error ? err.message : t("downloadFailed"));
-                      }
-                    }}
-                  >
-                    <IconDownload className="mr-1 size-3" />
-                    {t("download")}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive hover:text-destructive"
-                    disabled={ingesting}
-                    title={ingesting ? t("deleteBlockedIngesting") : undefined}
-                    onClick={() => setPendingDelete(cb)}
-                  >
-                    <IconDelete className="mr-1 size-3" />
-                    {tCommon("delete")}
-                  </Button>
                 </CardContent>
               </Card>
             );
           })}
-          {!codebases.length && <EmptyState title={t("empty")} className="col-span-full" />}
+          {!codebases.length && (
+            <EmptyState variant="dashed" title={t("empty")} className="col-span-full" />
+          )}
         </div>
       </ScrollArea>
 

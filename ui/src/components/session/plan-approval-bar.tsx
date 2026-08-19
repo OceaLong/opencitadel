@@ -6,6 +6,7 @@ import { Check, Pencil, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { ApprovalBar } from "@/components/session/approval-bar";
+import { GovernanceRail } from "@/components/session/governance-rail";
 import { PlanStepRow } from "@/components/session/plan-step-row";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -194,17 +195,17 @@ export function PlanApprovalBar({
           </div>
         </div>
       ) : (
-        <div className="bg-muted/40 mt-2 rounded-xl py-1">
-          {steps.map((step, index) => (
-            <PlanStepRow
-              key={step.id || index}
-              description={step.description}
-              status="pending"
-              index={index + 1}
-              variant="timeline"
-              isLast={index === steps.length - 1}
-            />
-          ))}
+        <div className="bg-muted/40 mt-2 rounded-xl px-2 py-1">
+          <GovernanceRail>
+            {steps.map((step, index) => (
+              <PlanStepRow
+                key={step.id || index}
+                description={step.description}
+                status="pending"
+                index={index + 1}
+              />
+            ))}
+          </GovernanceRail>
         </div>
       )}
 

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Layers,Loader2, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
 import { ChatInput } from "@/components/session/chat-input";
 import { CheckpointRestoreDialog } from "@/components/session/checkpoint-restore-dialog";
 import { FilePreviewPanel } from "@/components/session/file-preview-panel";
@@ -21,6 +22,7 @@ import { VNCOverlay } from "@/components/session/vnc-overlay";
 import { SessionModelPicker } from "@/components/session-model-picker";
 import { SessionSkillPicker } from "@/components/session-skill-picker";
 import { getToolKind } from "@/components/tool-use/utils";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
@@ -32,6 +34,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useSessionDetailView } from "@/hooks/use-session-detail-view";
 import { sessionApi } from "@/lib/api/session";
 import type { SessionMode } from "@/lib/api/types";
+import { useReportPageTitle } from "@/providers/page-title-provider";
 
 export type SessionDetailViewProps = {
   sessionId: string;
@@ -121,6 +124,8 @@ export function SessionDetailView({
     }
   }, [session?.mode]);
 
+  useReportPageTitle(session?.title ?? undefined);
+
   const hasContext = Boolean(session?.codebase_id || session?.knowledge_base_id);
   const showModeToggle = Boolean(session?.codebase_id);
 
@@ -182,10 +187,14 @@ export function SessionDetailView({
   if (error && !session) {
     return (
       <div className="relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-2 px-4">
-        <p className="text-sm text-red-600">{error.message}</p>
-        <button type="button" onClick={() => refresh()} className="text-primary text-sm underline">
-          {tCommon("retry")}
-        </button>
+        <Alert variant="destructive" className="w-auto max-w-md">
+          <AlertDescription className="flex flex-col items-center gap-2 text-center">
+            <span>{error.message}</span>
+            <Button type="button" variant="outline" size="sm" onClick={() => refresh()}>
+              {tCommon("retry")}
+            </Button>
+          </AlertDescription>
+        </Alert>
       </div>
     );
   }
@@ -241,68 +250,76 @@ export function SessionDetailView({
             <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
               <div className="flex w-full flex-col gap-3 pt-3">
                 {showOperatorPanel && (
-                  <div className="border-primary/20 bg-primary/5 text-muted-foreground flex flex-wrap items-start justify-between gap-2 rounded-lg border px-3 py-2 text-xs">
-                    <div className="space-y-1">
-                      <p>
-                        {t("operator.modeLabel")} ·{" "}
-                        {session.operator_scope === "third_party_saas"
-                          ? t("operator.thirdPartySaas")
-                          : session.operator_scope === "owned"
-                            ? t("operator.owned")
-                            : t("operator.webOperator")}
-                        {session.gate_profile
-                          ? ` · ${t("operator.gateProfileLabel", { profile: session.gate_profile })}`
-                          : ""}
-                        {session.status === "waiting" && ` · ${t("operator.waitingApproval")}`}
-                        {Boolean(session.awaiting_human) && ` · ${t("operator.awaitingHuman")}`}
-                      </p>
-                      {session.operator_domains && session.operator_domains.length > 0 && (
-                        <p>
-                          {t("operator.domainsLabel", {
-                            domains: session.operator_domains.join(", "),
-                          })}
-                        </p>
-                      )}
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 shrink-0 text-xs"
-                      disabled={savingGateSettings}
-                      onClick={() => setGateSettingsOpen(true)}
-                    >
-                      <Settings2 className="size-3.5" />
-                      {t("operator.editGateSettings")}
-                    </Button>
-                  </div>
+                  <Alert variant="info">
+                    <AlertDescription>
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="space-y-1">
+                          <p>
+                            {t("operator.modeLabel")} ·{" "}
+                            {session.operator_scope === "third_party_saas"
+                              ? t("operator.thirdPartySaas")
+                              : session.operator_scope === "owned"
+                                ? t("operator.owned")
+                                : t("operator.webOperator")}
+                            {session.gate_profile
+                              ? ` · ${t("operator.gateProfileLabel", { profile: session.gate_profile })}`
+                              : ""}
+                            {session.status === "waiting" && ` · ${t("operator.waitingApproval")}`}
+                            {Boolean(session.awaiting_human) && ` · ${t("operator.awaitingHuman")}`}
+                          </p>
+                          {session.operator_domains && session.operator_domains.length > 0 && (
+                            <p>
+                              {t("operator.domainsLabel", {
+                                domains: session.operator_domains.join(", "),
+                              })}
+                            </p>
+                          )}
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 shrink-0 text-xs"
+                          disabled={savingGateSettings}
+                          onClick={() => setGateSettingsOpen(true)}
+                        >
+                          <Settings2 className="size-3.5" />
+                          {t("operator.editGateSettings")}
+                        </Button>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
                 )}
                 {session.status === "failed" && (
-                  <div className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-3 py-2 text-sm">
-                    {t("taskFailed")}
-                  </div>
+                  <Alert variant="destructive">
+                    <AlertDescription>{t("taskFailed")}</AlertDescription>
+                  </Alert>
                 )}
                 {session.status === "running" &&
                   (streamStatus === "reconnecting" ||
                     streamStatus === "stale" ||
                     streamStatus === "error") && (
-                    <div className="border-border bg-muted/60 text-muted-foreground flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm">
-                      <span>
-                        {streamStatus === "stale"
-                          ? t("streamStale")
-                          : streamStatus === "error"
-                            ? streamError?.message || t("streamError")
-                            : t("streamReconnecting")}
-                      </span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => refresh()}
-                      >
-                        {t("resync")}
-                      </Button>
-                    </div>
+                    <Alert variant="info">
+                      <AlertDescription>
+                        <div className="flex items-center justify-between gap-3">
+                          <span>
+                            {streamStatus === "stale"
+                              ? t("streamStale")
+                              : streamStatus === "error"
+                                ? streamError?.message || t("streamError")
+                                : t("streamReconnecting")}
+                          </span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => refresh()}
+                          >
+                            {t("resync")}
+                          </Button>
+                        </div>
+                      </AlertDescription>
+                    </Alert>
                   )}
                 {hasEarlierHistory && (
                   <div className="flex justify-center">
@@ -319,9 +336,7 @@ export function SessionDetailView({
                 )}
 
                 {timeline.length === 0 && !streaming && !hasInitialMessage && (
-                  <div className="text-muted-foreground flex items-center justify-center py-8 text-sm">
-                    {t("emptyTimeline")}
-                  </div>
+                  <EmptyState title={t("emptyTimeline")} className="h-full justify-center" />
                 )}
 
                 <VirtualizedTimeline
@@ -358,7 +373,7 @@ export function SessionDetailView({
                     <button
                       key={ex}
                       type="button"
-                      className="border-border/60 bg-card text-muted-foreground hover:bg-muted/70 hover:text-foreground rounded-full border px-2.5 py-1 text-xs shadow-[var(--shadow-card)] transition-colors"
+                      className="border-border/60 bg-card text-muted-foreground hover:bg-muted/70 hover:text-foreground rounded-full border px-2.5 py-1 text-xs shadow-card transition-colors"
                       onClick={() => chatInputRef.current?.setInputText(ex)}
                     >
                       {ex}
@@ -369,6 +384,7 @@ export function SessionDetailView({
               <PlanPanel className="mb-2" steps={planSteps} />
               {latestApproval?.kind === "plan" && (
                 <PlanApprovalBar
+                  key={latestApproval.approval_id}
                   className="mb-2"
                   sessionId={sessionId}
                   approval={latestApproval}
@@ -378,6 +394,7 @@ export function SessionDetailView({
               )}
               {latestApproval && (latestApproval.kind === "tool" || latestApproval.kind === "takeover") && (
                 <GateActionsBar
+                  key={latestApproval.approval_id}
                   className="mb-2"
                   approval={latestApproval}
                   onSend={handleGateSend}

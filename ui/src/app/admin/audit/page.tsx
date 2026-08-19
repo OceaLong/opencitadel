@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { ShieldCheck, ShieldX } from "lucide-react";
+import { toast } from "sonner";
 
 import { AdminTimeRangePicker } from "@/components/admin/time-range-picker";
 import { AuditActivityChart } from "@/components/admin/usage-charts";
@@ -28,11 +29,19 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 import { type AdminTimeRange, formatDateTime, getAdminDateRange } from "@/lib/admin-utils";
 import { adminApi, type AuditLog, type AuditLogDetail } from "@/lib/api/admin";
 import { type ChainVerifyResult,complianceApi } from "@/lib/api/compliance";
-import { IconDownload } from "@/lib/icons";
+import { IconCopy, IconDownload } from "@/lib/icons";
 
 const PAGE_SIZE = 20;
 
@@ -129,6 +138,18 @@ export default function AdminAuditPage() {
     }
   }, []);
 
+  const copyToClipboard = useCallback(
+    async (value: string) => {
+      try {
+        await navigator.clipboard.writeText(value);
+        toast.success(t("copied"));
+      } catch {
+        toast.error(tCommon("copyFailed"));
+      }
+    },
+    [t, tCommon],
+  );
+
   useEffect(() => {
     void loadAudit(0);
   }, [loadAudit]);
@@ -159,7 +180,6 @@ export default function AdminAuditPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        bordered={false}
         title={t("auditLog")}
         description={t("auditSubtitle")}
         actions={
@@ -251,34 +271,64 @@ export default function AdminAuditPage() {
           ) : logs.length === 0 ? (
             <EmptyState title={t("noAuditRecords")} className="py-10" />
           ) : (
-            <div className="space-y-2">
-              {logs.map((item) => (
-                <div
-                  key={item.id}
-                  role="button"
-                  tabIndex={0}
-                  className="hover:bg-muted/60 cursor-pointer rounded-lg border px-3 py-3 text-sm transition-colors"
-                  onClick={() => void openDetail(item.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      void openDetail(item.id);
-                    }
-                  }}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("columnAction")}</TableHead>
+                  <TableHead>{t("columnTime")}</TableHead>
+                  <TableHead>{t("columnActor")}</TableHead>
+                  <TableHead>{t("columnResource")}</TableHead>
+                  <TableHead>{t("columnRequestId")}</TableHead>
+                  <TableHead className="text-right">{t("columnActions")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {logs.map((item) => (
+                  <TableRow
+                    key={item.id}
+                    tabIndex={0}
+                    className="cursor-pointer"
+                    onClick={() => void openDetail(item.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        void openDetail(item.id);
+                      }
+                    }}
+                  >
+                    <TableCell>
                       <StatusBadge variant={actionBadgeVariant(item.action)}>
                         {item.action}
                       </StatusBadge>
-                      <span className="text-muted-foreground text-xs">
-                        {formatDateTime(item.created_at)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-dense">
+                      {formatDateTime(item.created_at)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {item.actor_user_id || t("system")}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-xs">
+                      {item.resource_type}:{item.resource_id}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="font-mono text-dense">
+                          {item.request_id.slice(0, 8)}…
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={tCommon("copy")}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void copyToClipboard(item.request_id);
+                          }}
+                        >
+                          <IconCopy />
+                        </Button>
                       </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground text-xs">
-                        {item.actor_user_id || t("system")}
-                      </span>
+                    </TableCell>
+                    <TableCell className="text-right">
                       <Button
                         variant="ghost"
                         size="sm"
@@ -289,14 +339,11 @@ export default function AdminAuditPage() {
                       >
                         {t("viewDetail")}
                       </Button>
-                    </div>
-                  </div>
-                  <div className="text-muted-foreground mt-2 font-mono text-xs">
-                    {item.resource_type}:{item.resource_id}
-                  </div>
-                </div>
-              ))}
-            </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
 
           <div className="mt-4 flex items-center justify-between">
@@ -347,16 +394,34 @@ export default function AdminAuditPage() {
               </div>
               <div>
                 <dt className="text-muted-foreground text-xs">request_id</dt>
-                <dd className="mt-0.5 font-mono text-xs">{detail.request_id || "—"}</dd>
+                <dd className="mt-0.5 flex items-center gap-1">
+                  <span className="font-mono text-xs">{detail.request_id || "—"}</span>
+                  {detail.request_id ? (
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={tCommon("copy")}
+                      onClick={() => void copyToClipboard(detail.request_id ?? "")}
+                    >
+                      <IconCopy />
+                    </Button>
+                  ) : null}
+                </dd>
               </div>
               <div>
                 <dt className="text-muted-foreground text-xs">{t("chainSeqLabel")}</dt>
-                <dd className="mt-0.5">
+                <dd className="mt-0.5 flex items-center gap-1">
+                  <span className="font-mono text-xs">{detail.chain_seq ?? "—"}</span>
                   {detail.chain_seq != null ? (
-                    <StatusBadge variant="secondary">{detail.chain_seq}</StatusBadge>
-                  ) : (
-                    "—"
-                  )}
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={tCommon("copy")}
+                      onClick={() => void copyToClipboard(String(detail.chain_seq))}
+                    >
+                      <IconCopy />
+                    </Button>
+                  ) : null}
                 </dd>
               </div>
               <div>

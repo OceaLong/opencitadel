@@ -301,7 +301,7 @@ export const McpServerForm = forwardRef<McpServerFormHandle, McpServerFormProps>
   return (
     <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
       {form.urlUndecryptable && isHttp ? (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200">
+        <div className="border-warning-subtle bg-warning-subtle text-warning flex items-start gap-2 rounded-lg border p-3 text-sm">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <span>{t("mcpUrlUndecryptable")}</span>
         </div>

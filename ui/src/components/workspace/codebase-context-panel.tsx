@@ -330,7 +330,7 @@ export function CodebaseContextPanel({
                               disabled={!canNavigate}
                               className={cn(
                                 canNavigate
-                                  ? "text-blue-600 hover:underline"
+                                  ? "text-link hover:underline"
                                   : "text-muted-foreground cursor-not-allowed",
                               )}
                               onClick={() => {

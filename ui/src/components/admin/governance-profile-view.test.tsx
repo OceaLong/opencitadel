@@ -106,11 +106,13 @@ describe("GovernanceProfileView", () => {
 
       const badge = container.querySelector('[data-testid="terminal-status-badge"]');
       expect(badge?.textContent).toBe(status);
+      expect(badge?.getAttribute("data-variant")).toBeNull();
       if (expectedVariant === "success") {
-        expect(badge?.getAttribute("data-variant")).toBeNull();
         expect(badge?.className).toContain("bg-success");
+      } else if (expectedVariant === "destructive") {
+        expect(badge?.className).toContain("bg-destructive/15");
       } else {
-        expect(badge?.getAttribute("data-variant")).toBe(expectedVariant);
+        expect(badge?.className).toContain("bg-muted");
       }
       await unmount();
     },

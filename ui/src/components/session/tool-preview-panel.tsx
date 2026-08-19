@@ -135,7 +135,7 @@ function ToolPreviewHeader({
         )}
       </div>
       {tool.error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-700 dark:text-red-300">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
           {tool.error}
         </div>
       )}
@@ -187,7 +187,7 @@ export function ToolPreviewPanel({
   }
 
   return (
-    <div className="bg-card flex h-full flex-col overflow-hidden rounded-2xl shadow-[var(--shadow-panel)]">
+    <div className="bg-card flex h-full flex-col overflow-hidden rounded-2xl shadow-panel">
       {showTabs ? (
         <Tabs
           value={effectiveTab}

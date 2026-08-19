@@ -1,37 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Stethoscope } from "lucide-react";
-import type { CSSProperties } from "react";
 
 import { NotificationInbox } from "@/components/notification-inbox";
-import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
-import { useFeatureFlags } from "@/hooks/use-feature-flags";
+import { useNavModules } from "@/hooks/use-nav-modules";
+import { matchAdminNav } from "@/lib/admin-nav";
 import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
 import type { LLMStatusData } from "@/lib/api/types";
-import {
-  IconAutomation,
-  IconCodebase,
-  IconKnowledge,
-  IconSettings,
-  IconWorkspace,
-} from "@/lib/icons";
 import { cn } from "@/lib/utils";
-import { useSettingsDialog } from "@/providers/settings-dialog-provider";
+import { usePageTitle } from "@/providers/page-title-provider";
 
 function AppHeaderSidebarTrigger() {
   const { open, isMobile } = useSidebar();
@@ -43,11 +34,17 @@ function AppHeaderSidebarTrigger() {
 
 export function AppHeader() {
   const t = useTranslations("chatHeader");
-  const tSettings = useTranslations("settings");
-  const tMeta = useTranslations("metadata");
-  const { openSettings } = useSettingsDialog();
+  const tNav = useTranslations("nav");
+  const tAdminNav = useTranslations("adminNav");
+  const pathname = usePathname();
+  const { activeModule, adminVisible, modules } = useNavModules();
+  const moduleVisible =
+    !!activeModule &&
+    (modules.some((module) => module.key === activeModule.key) || activeModule.key === "admin");
+  const showActiveModule = moduleVisible && (activeModule?.key !== "admin" || adminVisible);
+  const pageTitle = usePageTitle();
+  const adminItem = activeModule?.key === "admin" ? matchAdminNav(pathname) : undefined;
   const [llmStatus, setLlmStatus] = useState<LLMStatusData["status"]>("unknown");
-  const { opsPatrolEnabled } = useFeatureFlags();
 
   const modelStatusKey =
     llmStatus === "unknown"
@@ -74,19 +71,46 @@ export function AppHeader() {
     };
   }, [llmStatus]);
 
+  const crumbs: { label: string; href?: string }[] = [];
+  if (activeModule && showActiveModule) {
+    crumbs.push({ label: tNav(activeModule.key), href: activeModule.href });
+    if (adminItem && adminItem.href !== "/admin") {
+      crumbs.push({ label: tAdminNav(adminItem.labelKey), href: adminItem.href });
+    }
+    if (pageTitle) crumbs.push({ label: pageTitle });
+  }
+
   return (
-    <header className="border-border/70 bg-background/95 z-50 flex w-full shrink-0 items-center justify-between border-b px-4 py-2 backdrop-blur">
-      <div className="flex items-center gap-2">
-        <AppHeaderSidebarTrigger />
-        <Link
-          href="/"
-          className="border-border/60 bg-card text-foreground hover:bg-muted/60 flex h-9 items-center gap-2 rounded-xl border px-3 shadow-card transition-colors"
-          style={{ "--logo-color": "currentColor" } as CSSProperties}
-          aria-label={t("backHome")}
-        >
-          <OpenCitadelIcon />
-          <span className="sr-only">{tMeta("title")}</span>
-        </Link>
+    <header className="border-border/70 bg-background/95 z-50 flex h-12 w-full shrink-0 items-center justify-between border-b px-4 backdrop-blur">
+      <div className="flex min-w-0 items-center gap-2">
+        {activeModule?.hasContextPanel && showActiveModule ? <AppHeaderSidebarTrigger /> : null}
+        {crumbs.length <= 1 ? (
+          <span className="truncate text-sm font-medium">{crumbs[0]?.label ?? null}</span>
+        ) : (
+          <Breadcrumb className="min-w-0">
+            <BreadcrumbList className="flex-nowrap">
+              {crumbs.map((crumb, index) => {
+                const isLast = index === crumbs.length - 1;
+                return (
+                  <Fragment key={`${crumb.label}-${index}`}>
+                    <BreadcrumbItem className="min-w-0">
+                      {isLast || !crumb.href ? (
+                        <BreadcrumbPage className="truncate text-sm font-medium">
+                          {crumb.label}
+                        </BreadcrumbPage>
+                      ) : (
+                        <BreadcrumbLink asChild className="truncate">
+                          <Link href={crumb.href}>{crumb.label}</Link>
+                        </BreadcrumbLink>
+                      )}
+                    </BreadcrumbItem>
+                    {isLast ? null : <BreadcrumbSeparator />}
+                  </Fragment>
+                );
+              })}
+            </BreadcrumbList>
+          </Breadcrumb>
+        )}
       </div>
       <div className="flex items-center gap-1">
         <Badge
@@ -104,60 +128,7 @@ export function AppHeader() {
           title={t("modelStatus", { status: modelStatusKey })}
           aria-label={t("modelStatus", { status: modelStatusKey })}
         />
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label={t("workspaceMenu")}
-              title={t("workspaceMenu")}
-              className="hidden md:inline-flex"
-            >
-              <IconWorkspace className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel>{t("workspaceMenu")}</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {opsPatrolEnabled && (
-              <DropdownMenuItem asChild>
-                <Link href="/patrols" className="cursor-pointer">
-                  <Stethoscope className="size-4" />
-                  {t("patrol")}
-                </Link>
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem asChild>
-              <Link href="/automation" className="cursor-pointer">
-                <IconAutomation className="size-4" />
-                {t("automation")}
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href="/knowledge" className="cursor-pointer">
-                <IconKnowledge className="size-4" />
-                {t("knowledge")}
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href="/codebase" className="cursor-pointer">
-                <IconCodebase className="size-4" />
-                {t("codebase")}
-              </Link>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
         <NotificationInbox />
-        <Button
-          variant="outline"
-          size="icon-sm"
-          className="cursor-pointer"
-          aria-label={tSettings("openModelsLabel")}
-          title={tSettings("models")}
-          onClick={() => openSettings("models-setting")}
-        >
-          <IconSettings className="size-4" />
-        </Button>
       </div>
     </header>
   );

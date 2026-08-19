@@ -19,6 +19,8 @@ type ConfirmDeleteDialogProps = {
   onConfirm: () => Promise<void>;
   title: string;
   description: string;
+  confirmLabel?: string;
+  confirmingLabel?: string;
 };
 
 export function ConfirmDeleteDialog({
@@ -27,6 +29,8 @@ export function ConfirmDeleteDialog({
   onConfirm,
   title,
   description,
+  confirmLabel,
+  confirmingLabel,
 }: ConfirmDeleteDialogProps) {
   const tCommon = useTranslations("common");
   const [deleting, setDeleting] = useState(false);
@@ -64,7 +68,7 @@ export function ConfirmDeleteDialog({
             onClick={handleConfirm}
             disabled={deleting}
           >
-            {deleting ? tCommon("deleting") : tCommon("delete")}
+            {deleting ? (confirmingLabel ?? tCommon("deleting")) : (confirmLabel ?? tCommon("delete"))}
           </Button>
         </DialogFooter>
       </DialogContent>

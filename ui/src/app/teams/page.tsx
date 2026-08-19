@@ -5,11 +5,12 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
 import { LoadingSpinner } from "@/components/loading-spinner";
 import { PageHeader } from "@/components/page-header";
 import { ScrollablePageContent } from "@/components/scrollable-page-content";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -84,7 +85,6 @@ export default function TeamsPage() {
   return (
     <ScrollablePageContent>
       <PageHeader
-        bordered={false}
         title={t("title")}
         description={t("subtitle")}
         actions={
@@ -100,21 +100,26 @@ export default function TeamsPage() {
           <LoadingSpinner />
         </div>
       ) : teams.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center py-16 text-center">
-            <IconUsers className="text-muted-foreground mb-4 size-10" />
-            <p className="text-base font-medium">{t("title")}</p>
-            <p className="text-muted-foreground mt-1 max-w-sm text-sm">{t("emptyTeams")}</p>
-            <Button className="mt-6" onClick={() => setDialogOpen(true)}>
+        <EmptyState
+          variant="dashed"
+          icon={IconUsers}
+          title={t("title")}
+          description={t("emptyTeams")}
+          action={
+            <Button onClick={() => setDialogOpen(true)}>
               <IconAdd className="mr-1 size-4" />
               {t("createTeam")}
             </Button>
-          </CardContent>
-        </Card>
+          }
+          className="py-16"
+        />
       ) : (
         <div className="grid gap-3">
           {teams.map((team) => (
-            <Card key={team.id} className="transition-colors hover:shadow-[var(--shadow-card-hover)]">
+            <Card
+              key={team.id}
+              className="transition-colors hover:border-border hover:shadow-card-hover"
+            >
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

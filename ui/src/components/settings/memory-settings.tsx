@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -184,7 +185,7 @@ export function MemorySettings({ embedded = false }: Props) {
           {entries.map((e) => (
             <div
               key={e.id}
-              className="group border-border/70 bg-card hover:border-border overflow-hidden rounded-xl border shadow-[var(--shadow-card)] transition-all hover:shadow-[var(--shadow-card-hover)]"
+              className="group border-border/70 bg-card hover:border-border overflow-hidden rounded-xl border shadow-card transition-all hover:shadow-card-hover"
             >
               <div className="border-border/60 bg-muted/30 flex items-start justify-between gap-3 border-b px-4 py-3">
                 <div className="min-w-0 flex-1">
@@ -245,13 +246,13 @@ export function MemorySettings({ embedded = false }: Props) {
             </div>
           ))}
           {entries.length === 0 && (
-            <p className="text-muted-foreground py-8 text-center text-sm">{t("noEntries")}</p>
+            <EmptyState title={t("noEntries")} className="py-8" />
           )}
         </div>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="shadow-[var(--shadow-panel)]">
+        <DialogContent className="shadow-panel">
           <DialogHeader>
             <DialogTitle>{editing ? t("editMemory") : t("addMemory")}</DialogTitle>
           </DialogHeader>

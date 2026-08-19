@@ -94,7 +94,7 @@ export function GateActionsBar({
       approval.options.length > 0 ? approval.options : [...DEFAULT_TAKEOVER_OPTIONS];
 
     return (
-      <ApprovalBar tone="blue" className={className}>
+      <ApprovalBar className={className}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-foreground flex items-center gap-1.5 text-sm font-medium">
@@ -163,7 +163,7 @@ export function GateActionsBar({
           </p>
           <p className="text-muted-foreground text-xs">{toolName}</p>
           {domainNote && (
-            <p className="text-amber-700 mt-1 text-xs">{domainNote}</p>
+            <p className="text-warning mt-1 text-xs">{domainNote}</p>
           )}
           <div className="mt-1 flex flex-wrap items-center gap-2">
             {isFirstVisit && (

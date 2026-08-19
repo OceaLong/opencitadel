@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -56,39 +57,35 @@ type RoleStyle = {
 const ROLE_STYLES: Record<MemoryRole, RoleStyle> = {
   system: {
     icon: Settings2,
-    cardClass: "border-slate-300/70 dark:border-slate-600/50",
-    headerClass: "bg-slate-100/80 dark:bg-slate-800/40",
-    accentClass: "border-l-slate-400 dark:border-l-slate-500",
-    badgeClass:
-      "border-slate-300/60 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-300",
-    contentClass: "bg-slate-50/50 dark:bg-slate-900/20",
+    cardClass: "border-border/70",
+    headerClass: "bg-muted/50",
+    accentClass: "border-l-muted-foreground/40",
+    badgeClass: "border-border text-muted-foreground bg-muted/40",
+    contentClass: "bg-muted/20",
   },
   user: {
     icon: UserRound,
-    cardClass: "border-blue-200/70 dark:border-blue-700/40",
-    headerClass: "bg-blue-50/80 dark:bg-blue-950/30",
-    accentClass: "border-l-blue-400 dark:border-l-blue-500",
-    badgeClass:
-      "border-blue-200/60 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-300",
-    contentClass: "bg-blue-50/30 dark:bg-blue-950/15",
+    cardClass: "border-info/30",
+    headerClass: "bg-info-subtle",
+    accentClass: "border-l-accent-info",
+    badgeClass: "border-info/40 text-info bg-info/10",
+    contentClass: "bg-info/5",
   },
   assistant: {
     icon: Bot,
-    cardClass: "border-violet-200/70 dark:border-violet-700/40",
-    headerClass: "bg-violet-50/80 dark:bg-violet-950/30",
-    accentClass: "border-l-violet-400 dark:border-l-violet-500",
-    badgeClass:
-      "border-violet-200/60 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/50 dark:text-violet-300",
-    contentClass: "bg-violet-50/30 dark:bg-violet-950/15",
+    cardClass: "border-primary/30",
+    headerClass: "bg-primary/5",
+    accentClass: "border-l-primary",
+    badgeClass: "border-primary/40 text-primary bg-primary/10",
+    contentClass: "bg-primary/5",
   },
   tool: {
     icon: Wrench,
-    cardClass: "border-amber-200/70 dark:border-amber-700/40",
-    headerClass: "bg-amber-50/80 dark:bg-amber-950/30",
-    accentClass: "border-l-amber-400 dark:border-l-amber-500",
-    badgeClass:
-      "border-amber-200/60 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300",
-    contentClass: "bg-amber-50/30 dark:bg-amber-950/15",
+    cardClass: "border-border/70",
+    headerClass: "bg-muted/50",
+    accentClass: "border-l-warning",
+    badgeClass: "border-warning/40 text-warning bg-transparent",
+    contentClass: "bg-muted/20",
   },
   unknown: {
     icon: HelpCircle,
@@ -201,7 +198,7 @@ function MemoryMessageCard({
   return (
     <div
       className={cn(
-        "group overflow-hidden rounded-2xl border border-l-4 bg-card/95 shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-card-hover)]",
+        "group overflow-hidden rounded-2xl border border-l-4 bg-card/95 shadow-card transition-shadow hover:border-border hover:shadow-card-hover",
         roleStyle.cardClass,
         roleStyle.accentClass,
       )}
@@ -366,7 +363,7 @@ export function SessionMemorySheet({
         />
       ))}
       {messages.length === 0 && (
-        <p className="text-muted-foreground py-6 text-center text-sm">{tCommon("noMessages")}</p>
+        <EmptyState title={tCommon("noMessages")} className="py-6" />
       )}
     </div>
   );

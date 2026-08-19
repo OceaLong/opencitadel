@@ -84,7 +84,7 @@ export function BuildCandidatePanel<TVersion extends VersionShape, TBuild extend
             </p>
           )}
           {!!actionableBuild.degraded_reasons.length && (
-            <p className="text-amber-600 dark:text-amber-500">
+            <p className="text-warning">
               {t("candidateDegraded", {
                 reasons: actionableBuild.degraded_reasons.join(", "),
               })}

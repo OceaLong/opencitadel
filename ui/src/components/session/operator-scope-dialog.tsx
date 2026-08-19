@@ -109,17 +109,17 @@ export function OperatorScopeDialog({
               <button
                 type="button"
                 className={cn(
-                  "hover:bg-muted/60 w-full rounded-lg border border-amber-500/40 p-3 text-left transition-colors",
-                  scope === "third_party_saas" && "border-amber-600 bg-amber-500/10",
+                  "hover:bg-muted/60 w-full rounded-lg border border-gate-subtle p-3 text-left transition-colors",
+                  scope === "third_party_saas" && "border-gate bg-gate-subtle",
                 )}
                 onClick={() => setScope("third_party_saas")}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium">{t("thirdPartyTitle")}</span>
-                  {scope === "third_party_saas" && <Check className="size-4 text-amber-700" />}
+                  {scope === "third_party_saas" && <Check className="size-4 text-warning" />}
                 </div>
                 <p className="text-muted-foreground mt-1 flex items-start gap-1 text-xs">
-                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
                   {t("thirdPartyDescription")}
                 </p>
               </button>

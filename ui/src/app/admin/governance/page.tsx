@@ -68,7 +68,6 @@ export default function AdminGovernancePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        bordered={false}
         title={t("pageTitle")}
         description={t("pageDescription")}
         actions={<AdminTimeRangePicker value={range} onChange={setRange} />}

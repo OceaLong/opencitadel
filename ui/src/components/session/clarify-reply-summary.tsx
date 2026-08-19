@@ -27,7 +27,7 @@ export function ClarifyReplySummary({ answers, className }: ClarifyReplySummaryP
   return (
     <div
       className={cn(
-        "border-border/70 bg-card text-foreground w-full space-y-3 rounded-2xl border px-3.5 py-2.5 text-sm leading-relaxed shadow-[var(--shadow-card)]",
+        "border-border/70 bg-card text-foreground w-full space-y-3 rounded-2xl border px-3.5 py-2.5 text-sm leading-relaxed shadow-card",
         className,
       )}
     >

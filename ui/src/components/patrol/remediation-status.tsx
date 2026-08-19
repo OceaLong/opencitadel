@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
+import { EmptyState } from "@/components/empty-state";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -14,19 +15,15 @@ import type { PatrolRemediation, PatrolRemediationStatus } from "@/lib/api/types
 // badge here so a new/unmapped status can never render blank. Colors mirror
 // the phase-3 brief: PROPOSED/CANCELLED gray, EXECUTING/EXECUTED blue,
 // VERIFIED green, FAILED red.
+const IN_PROGRESS_BADGE_CLASSNAME = "border-transparent bg-info-subtle text-info";
+
 const REMEDIATION_BADGE: Record<
   PatrolRemediationStatus,
   { variant: "secondary" | "outline" | "success" | "destructive"; className?: string }
 > = {
   proposed: { variant: "secondary" },
-  executing: {
-    variant: "outline",
-    className: "border-transparent bg-blue-500/15 text-blue-600 dark:text-blue-400",
-  },
-  executed: {
-    variant: "outline",
-    className: "border-transparent bg-blue-500/15 text-blue-600 dark:text-blue-400",
-  },
+  executing: { variant: "outline", className: IN_PROGRESS_BADGE_CLASSNAME },
+  executed: { variant: "outline", className: IN_PROGRESS_BADGE_CLASSNAME },
   verified: { variant: "success" },
   failed: { variant: "destructive" },
   cancelled: { variant: "secondary" },
@@ -42,7 +39,7 @@ export function RemediationStatusList({ remediations }: { remediations: PatrolRe
       </CardHeader>
       <CardContent className="grid gap-3">
         {remediations.length === 0 ? (
-          <p className="text-muted-foreground text-sm">{t("remediation.empty")}</p>
+          <EmptyState title={t("remediation.empty")} />
         ) : (
           remediations.map((remediation) => {
             const badge = REMEDIATION_BADGE[remediation.status];

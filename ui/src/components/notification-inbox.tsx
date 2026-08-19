@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { Bell } from "lucide-react";
 
+import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -133,7 +134,7 @@ export function NotificationInbox({ className }: { className?: string }) {
         <DropdownMenuSeparator />
         <ScrollArea className="max-h-72">
           {items.length === 0 ? (
-            <p className="text-muted-foreground px-3 py-6 text-center text-sm">{t("empty")}</p>
+            <EmptyState title={t("empty")} className="py-6" />
           ) : (
             items.map((item) => {
               const href = notificationHref(item);

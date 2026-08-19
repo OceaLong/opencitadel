@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Copy, KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -104,7 +105,7 @@ export function ServiceKeysSettings() {
           <Loader2 className="text-muted-foreground size-6 animate-spin" />
         </div>
       ) : keys.length === 0 ? (
-        <p className="text-muted-foreground py-6 text-sm">{t("noKeys")}</p>
+        <EmptyState title={t("noKeys")} className="py-6" />
       ) : (
         <div className="space-y-2">
           {keys.map((key) => (

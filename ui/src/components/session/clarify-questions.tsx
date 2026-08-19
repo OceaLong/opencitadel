@@ -202,7 +202,7 @@ export function ClarifyQuestions({
     );
 
   return (
-    <ApprovalBar tone="blue" className={cn("gap-4 py-3", className)}>
+    <ApprovalBar tone="info" className={cn("gap-4 py-3", className)}>
       <div className="flex items-center gap-2">
         <HelpCircle className="text-primary size-4 shrink-0" />
         <p className="text-foreground text-sm font-medium">{title || t("defaultTitle")}</p>

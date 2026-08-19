@@ -135,3 +135,45 @@ def test_each_present_credential_gets_its_own_rate_limit_bucket():
         "stable-refresh",
         "stable-service-key",
     ))
+
+
+class _FakeServerCfg:
+    def __init__(self, per_minute: int, enabled: bool = True):
+        self.rate_limit_per_minute = per_minute
+        self.rate_limit_enabled = enabled
+
+
+class _FakeRuntimeCfg:
+    def __init__(self, per_minute: int, enabled: bool = True):
+        self.server = _FakeServerCfg(per_minute, enabled)
+
+
+def test_effective_limit_follows_runtime_config(monkeypatch):
+    """限流值必须每请求动态读运行时配置，而非安装时冻结（冷缓存 bug 回归测试）。"""
+    middleware = RateLimitMiddleware(Starlette(), requests_per_minute=120)
+    monkeypatch.setattr(
+        "app.interfaces.middleware.rate_limit.get_runtime_config",
+        lambda: _FakeRuntimeCfg(per_minute=999),
+    )
+    assert middleware._effective_limit() == 999
+
+
+def test_effective_limit_falls_back_to_install_value_on_error(monkeypatch):
+    middleware = RateLimitMiddleware(Starlette(), requests_per_minute=77)
+
+    def _boom():
+        raise RuntimeError("cold")
+
+    monkeypatch.setattr(
+        "app.interfaces.middleware.rate_limit.get_runtime_config", _boom
+    )
+    assert middleware._effective_limit() == 77
+
+
+def test_rate_limit_disabled_at_runtime_skips_limiting(monkeypatch):
+    middleware = RateLimitMiddleware(Starlette(), requests_per_minute=120)
+    monkeypatch.setattr(
+        "app.interfaces.middleware.rate_limit.get_runtime_config",
+        lambda: _FakeRuntimeCfg(per_minute=120, enabled=False),
+    )
+    assert middleware._runtime_enabled() is False

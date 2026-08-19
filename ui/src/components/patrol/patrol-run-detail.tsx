@@ -2,9 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { AlertCircle, CheckCircle2, Download, Loader2, ShieldAlert } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Download,
+  Link2,
+  Loader2,
+  MoreHorizontal,
+  ShieldAlert,
+} from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
 import { RemediationDialog } from "@/components/patrol/remediation-dialog";
 import { RemediationStatusList } from "@/components/patrol/remediation-status";
 import { StatusBadge } from "@/components/status-badge";
@@ -17,20 +26,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 
-import { usePatrolLabels } from "@/hooks/use-patrol-labels";
+import { patrolStatusVariant, usePatrolLabels } from "@/hooks/use-patrol-labels";
 import { patrolsApi } from "@/lib/api/patrols";
 import type { PatrolFinding, PatrolRemediation, PatrolRunDetail } from "@/lib/api/types";
-
-const statusVariant = (status: string) =>
-  status === "pass" || status === "completed"
-    ? "success"
-    : status === "warn" || status.includes("finding") || status === "skipped"
-      ? "warning"
-      : status === "fail" || status === "error" || status === "failed"
-        ? "destructive"
-        : "secondary";
 
 export function PatrolRunDetailView({
   run,
@@ -92,12 +98,12 @@ export function PatrolRunDetailView({
   };
   return (
     <div className="grid gap-5">
-      <Card>
-        <CardContent className="grid gap-4 p-5 sm:grid-cols-[1fr_auto]">
+      <Card className="sticky top-0 z-10 bg-background/95 backdrop-blur">
+        <CardContent className="grid gap-4 p-5">
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold">{t("run.title")}</h1>
-              <StatusBadge variant={statusVariant(run.status)}>
+              <StatusBadge variant={patrolStatusVariant(run.status)}>
                 {labels.status[run.status] ?? run.status}
               </StatusBadge>
             </div>
@@ -106,23 +112,26 @@ export function PatrolRunDetailView({
               {labels.trigger[run.trigger_type] ?? run.trigger_type}
             </p>
           </div>
-          <Button variant="outline" onClick={() => void download()}>
-            <Download className="size-4" />
-            {t("actions.downloadEvidence")}
-          </Button>
-          <div className="col-span-full grid grid-cols-2 gap-2 sm:grid-cols-6">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             {(["pass", "warn", "fail", "error", "skipped"] as const).map((key) => (
               <div key={key} className="rounded-lg border p-3">
                 <p className="text-muted-foreground text-xs uppercase">{key}</p>
-                <p className="text-xl font-semibold">{run.counts[key]}</p>
+                <p className="font-mono text-xl font-semibold">{run.counts[key]}</p>
               </div>
             ))}
-            <div className="rounded-lg border p-3">
+          </div>
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
+            <Link2 className="text-muted-foreground size-4 shrink-0" />
+            <div className="min-w-0 flex-1">
               <p className="text-muted-foreground text-xs">{t("run.evidenceCompleteness")}</p>
-              <p className="text-xl font-semibold">
+              <p className="font-mono text-sm font-semibold">
                 {Math.round((run.evidence_completeness ?? 0) * 100)}%
               </p>
             </div>
+            <Button variant="outline" size="sm" onClick={() => void download()}>
+              <Download className="size-4" />
+              {t("actions.downloadEvidence")}
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -135,7 +144,7 @@ export function PatrolRunDetailView({
         </CardHeader>
         <CardContent className="grid gap-3">
           {run.findings.length === 0 ? (
-            <p className="text-muted-foreground text-sm">{t("run.noFindings")}</p>
+            <EmptyState title={t("run.noFindings")} />
           ) : (
             run.findings.map((finding) => (
               <div
@@ -153,35 +162,44 @@ export function PatrolRunDetailView({
                       {labels.findingStatus[finding.status] ?? finding.status}
                     </StatusBadge>
                   </div>
-                  <h3 className="mt-2 font-medium">{finding.title}</h3>
-                  <p className="text-muted-foreground mt-1 text-sm">{finding.summary}</p>
+                  <h3 className="mt-2 text-sm font-medium">{finding.title}</h3>
+                  <p className="text-muted-foreground text-dense mt-1">{finding.summary}</p>
                 </div>
                 {!readOnly && (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex items-start gap-2">
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => setDecision({ finding, action: "acknowledge" })}
+                      className="border-warning/40 text-warning hover:bg-gate-subtle"
+                      onClick={() => setRemediationTarget(finding)}
                     >
-                      {t("actions.acknowledge")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setDecision({ finding, action: "resolve" })}
-                    >
-                      {t("actions.resolve")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setDecision({ finding, action: "false-positive" })}
-                    >
-                      {t("actions.falsePositive")}
-                    </Button>
-                    <Button size="sm" onClick={() => setRemediationTarget(finding)}>
                       {t("actions.remediate")}
                     </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="icon-sm" variant="ghost">
+                          <MoreHorizontal className="size-4" />
+                          <span className="sr-only">{t("decision.title")}</span>
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onSelect={() => setDecision({ finding, action: "acknowledge" })}
+                        >
+                          {t("actions.acknowledge")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => setDecision({ finding, action: "resolve" })}
+                        >
+                          {t("actions.resolve")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => setDecision({ finding, action: "false-positive" })}
+                        >
+                          {t("actions.falsePositive")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 )}
               </div>
@@ -206,7 +224,7 @@ export function PatrolRunDetailView({
                   )}
                   <span className="font-medium">{result.check_id}</span>
                 </span>
-                <StatusBadge variant={statusVariant(result.status)}>
+                <StatusBadge variant={patrolStatusVariant(result.status)}>
                   {labels.status[result.status] ?? result.status}
                 </StatusBadge>
               </summary>

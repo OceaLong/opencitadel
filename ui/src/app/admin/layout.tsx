@@ -1,5 +1,12 @@
-import { AdminLayoutShell } from "@/components/admin/admin-layout-shell";
+import type { ReactNode } from "react";
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  return <AdminLayoutShell>{children}</AdminLayoutShell>;
+import { AdminGuard } from "@/components/admin/admin-guard";
+import { ScrollablePageContent } from "@/components/scrollable-page-content";
+
+export default function AdminLayout({ children }: { children: ReactNode }) {
+  return (
+    <AdminGuard>
+      <ScrollablePageContent width="data">{children}</ScrollablePageContent>
+    </AdminGuard>
+  );
 }

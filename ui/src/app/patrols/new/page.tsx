@@ -17,19 +17,19 @@ export default function NewPatrolPage() {
   if (!opsPatrolEnabled)
     return (
       <ScrollablePageContent>
-        <p className="p-6">{t("disabled.title")}</p>
+        <p>{t("disabled.title")}</p>
       </ScrollablePageContent>
     );
   if (user?.global_role === "auditor")
     return (
       <ScrollablePageContent>
-        <p className="p-6">{t("new.readOnly")}</p>
+        <p>{t("new.readOnly")}</p>
       </ScrollablePageContent>
     );
   return (
     <ScrollablePageContent>
-      <div className="grid gap-5 p-4 sm:p-6">
-        <PageHeader bordered={false} title={t("new.title")} description={t("new.description")} />
+      <div className="grid gap-5">
+        <PageHeader title={t("new.title")} description={t("new.description")} />
         <PackWizard />
       </div>
     </ScrollablePageContent>

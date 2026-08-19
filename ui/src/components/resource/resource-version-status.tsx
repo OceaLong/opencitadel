@@ -132,7 +132,7 @@ export function ResourceVersionStatus<
           ns === "codebase" ? (
             <>
               {!!viewed?.degraded_reasons.length && (
-                <p className="text-amber-600 dark:text-amber-500">
+                <p className="text-warning">
                   {t("versionDegraded", {
                     reasons: viewed.degraded_reasons.join(", "),
                   })}

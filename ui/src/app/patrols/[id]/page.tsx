@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { Loader2, Pause, Play, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { ScrollablePageContent } from "@/components/scrollable-page-content";
 import { StatusBadge } from "@/components/status-badge";
@@ -18,6 +19,7 @@ import { usePatrolLabels } from "@/hooks/use-patrol-labels";
 import { patrolsApi } from "@/lib/api/patrols";
 import type { PatrolPack, PatrolPackMetrics, PatrolRun } from "@/lib/api/types";
 import { useAuth } from "@/providers/auth-provider";
+import { useReportPageTitle } from "@/providers/page-title-provider";
 
 export default function PatrolPackPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -30,6 +32,7 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
   const [runs, setRuns] = useState<PatrolRun[]>([]);
   const [metrics, setMetrics] = useState<PatrolPackMetrics | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  useReportPageTitle(pack?.name);
   const load = useCallback(async () => {
     const [item, history, metricData] = await Promise.all([
       patrolsApi.getPack(id),
@@ -70,7 +73,7 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
   if (flagLoading || !pack)
     return (
       <ScrollablePageContent>
-        <div className="grid gap-3 p-6">
+        <div className="grid gap-3">
           <Skeleton className="h-24" />
           <Skeleton className="h-64" />
         </div>
@@ -78,9 +81,8 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
     );
   return (
     <ScrollablePageContent>
-      <div className="grid gap-5 p-4 sm:p-6">
+      <div className="grid gap-5">
         <PageHeader
-          bordered={false}
           title={
             <span className="flex flex-wrap items-center gap-2">
               {pack.name}
@@ -256,7 +258,7 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
                 </Link>
               ))
             ) : (
-              <p className="text-muted-foreground text-sm">{t("empty.noRuns")}</p>
+              <EmptyState title={t("empty.noRuns")} />
             )}
           </CardContent>
         </Card>

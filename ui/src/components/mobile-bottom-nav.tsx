@@ -2,9 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Stethoscope } from "lucide-react";
+import { LogIn, LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -14,60 +13,30 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 
-import { useFeatureFlags } from "@/hooks/use-feature-flags";
+import { useNavModules } from "@/hooks/use-nav-modules";
 import {
   IconAdmin,
-  IconAgent,
-  IconAutomation,
-  IconCodebase,
-  IconKnowledge,
   IconMore,
   IconSettings,
   IconUsers,
 } from "@/lib/icons";
+import { splitMobileNav } from "@/lib/nav-modules";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
+import { useLoginPrompt } from "@/providers/login-prompt-provider";
 import { useSettingsDialog } from "@/providers/settings-dialog-provider";
 
-type NavItem = {
-  href: string;
-  labelKey: "chat" | "codebase" | "knowledge";
-  icon: typeof IconAgent;
-  match: (pathname: string) => boolean;
-};
-
-const MAIN_NAV: NavItem[] = [
-  {
-    href: "/",
-    labelKey: "chat",
-    icon: IconAgent,
-    match: (pathname) => pathname === "/" || pathname.startsWith("/sessions/"),
-  },
-  {
-    href: "/codebase",
-    labelKey: "codebase",
-    icon: IconCodebase,
-    match: (pathname) => pathname.startsWith("/codebase"),
-  },
-  {
-    href: "/knowledge",
-    labelKey: "knowledge",
-    icon: IconKnowledge,
-    match: (pathname) => pathname.startsWith("/knowledge"),
-  },
-];
-
 export function MobileBottomNav() {
-  const pathname = usePathname();
   const t = useTranslations("mobileNav");
+  const tNav = useTranslations("nav");
   const tAccount = useTranslations("account");
-  const { user } = useAuth();
+  const tAuth = useTranslations("auth");
   const { openSettings } = useSettingsDialog();
+  const { user, logout } = useAuth();
+  const { promptLogin } = useLoginPrompt();
   const [moreOpen, setMoreOpen] = useState(false);
-  const { opsPatrolEnabled } = useFeatureFlags();
-
-  const isAdmin = user?.global_role === "admin";
-  const isAuditor = user?.global_role === "auditor";
+  const { modules, activeModule, adminVisible } = useNavModules();
+  const { primary, overflow } = splitMobileNav(modules);
 
   return (
     <>
@@ -76,12 +45,13 @@ export function MobileBottomNav() {
         aria-label={t("label")}
       >
         <div className="grid h-14 grid-cols-4">
-          {MAIN_NAV.map(({ href, labelKey, icon: Icon, match }) => {
-            const active = match(pathname);
+          {primary.map((module) => {
+            const active = activeModule?.key === module.key;
+            const Icon = module.icon;
             return (
               <Link
-                key={href}
-                href={href}
+                key={module.key}
+                href={module.href}
                 className={cn(
                   "flex min-h-11 flex-col items-center justify-center gap-0.5 px-1 text-[10px] transition-colors",
                   active
@@ -90,7 +60,7 @@ export function MobileBottomNav() {
                 )}
               >
                 <Icon className="size-5 shrink-0" />
-                <span className="truncate">{t(labelKey)}</span>
+                <span className="truncate">{tNav(module.key)}</span>
               </Link>
             );
           })}
@@ -111,20 +81,22 @@ export function MobileBottomNav() {
             <SheetTitle>{t("more")}</SheetTitle>
           </SheetHeader>
           <div className="mt-4 grid gap-2">
-            {opsPatrolEnabled && (
-              <Button variant="outline" className="h-11 justify-start" asChild>
-                <Link href="/patrols" onClick={() => setMoreOpen(false)}>
-                  <Stethoscope className="size-4" />
-                  {t("patrol")}
-                </Link>
-              </Button>
-            )}
-            <Button variant="outline" className="h-11 justify-start" asChild>
-              <Link href="/automation" onClick={() => setMoreOpen(false)}>
-                <IconAutomation className="size-4" />
-                {t("automation")}
-              </Link>
-            </Button>
+            {overflow.map((module) => {
+              const Icon = module.icon;
+              return (
+                <Button
+                  key={module.key}
+                  variant="outline"
+                  className="h-11 justify-start"
+                  asChild
+                >
+                  <Link href={module.href} onClick={() => setMoreOpen(false)}>
+                    <Icon className="size-4" />
+                    {tNav(module.key)}
+                  </Link>
+                </Button>
+              );
+            })}
             <Button variant="outline" className="h-11 justify-start" asChild>
               <Link href="/teams" onClick={() => setMoreOpen(false)}>
                 <IconUsers className="size-4" />
@@ -142,12 +114,37 @@ export function MobileBottomNav() {
               <IconSettings className="size-4" />
               {tAccount("settings")}
             </Button>
-            {(isAdmin || isAuditor) && (
+            {adminVisible && (
               <Button variant="outline" className="h-11 justify-start" asChild>
                 <Link href="/admin" onClick={() => setMoreOpen(false)}>
                   <IconAdmin className="size-4" />
                   {tAccount("adminPanel")}
                 </Link>
+              </Button>
+            )}
+            {user ? (
+              <Button
+                variant="outline"
+                className="h-11 justify-start"
+                onClick={() => {
+                  setMoreOpen(false);
+                  void logout();
+                }}
+              >
+                <LogOut className="size-4" />
+                {tAuth("logout")}
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                className="h-11 justify-start"
+                onClick={() => {
+                  setMoreOpen(false);
+                  promptLogin();
+                }}
+              >
+                <LogIn className="size-4" />
+                {tAuth("loginRegister")}
               </Button>
             )}
           </div>

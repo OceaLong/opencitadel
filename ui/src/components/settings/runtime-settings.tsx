@@ -171,7 +171,7 @@ export function RuntimeSettings({ isAdmin }: RuntimeSettingsProps) {
           {t(`sections.${activeSection}` as Parameters<typeof t>[0])}
         </FieldLegend>
         {activeSection === "server" && (
-          <FieldDescription className="text-xs text-amber-600">
+          <FieldDescription className="text-warning text-xs">
             {t("corsOriginsReadonlyHint")}
           </FieldDescription>
         )}

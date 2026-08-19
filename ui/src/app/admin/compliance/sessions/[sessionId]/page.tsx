@@ -44,7 +44,6 @@ export default function GovernanceProfilePage({
   return (
     <div className="space-y-6">
       <PageHeader
-        bordered={false}
         title={profile?.session.title || t("title")}
         description={t("pageDescription")}
         actions={

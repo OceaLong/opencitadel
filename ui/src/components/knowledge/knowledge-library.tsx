@@ -17,13 +17,19 @@ import { PageHeader } from "@/components/page-header";
 import { ResourceVersionStatus } from "@/components/resource/resource-version-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { type ResourceLibraryApi, useResourceLibrary } from "@/hooks/use-resource-library";
 import { knowledgeApi } from "@/lib/api/knowledge";
 import { sessionApi } from "@/lib/api/session";
 import type { KnowledgeBase, KnowledgeDocument, SessionMode } from "@/lib/api/types";
-import { IconAdd, IconDelete, IconKnowledge, IconLoading } from "@/lib/icons";
+import { IconAdd, IconDelete, IconKnowledge, IconLoading, IconMore } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -31,6 +37,16 @@ const TERMINAL_KB_STATUSES = new Set<KnowledgeBase["status"]>(["ready", "failed"
 
 const PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
+
+const KB_STATUS_LABEL_KEYS: Record<KnowledgeBase["status"], `status.${KnowledgeBase["status"]}`> = {
+  pending: "status.pending",
+  parsing: "status.parsing",
+  chunking: "status.chunking",
+  indexing: "status.indexing",
+  graph_building: "status.graph_building",
+  ready: "status.ready",
+  failed: "status.failed",
+};
 
 async function startKnowledgeTask(
   kbId: string,
@@ -258,8 +274,7 @@ export function KnowledgeLibrary() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        size="sm"
-        className="px-4 py-3"
+        className="border-border/70 border-b px-4 py-3 sm:px-6"
         title={
           <span className="inline-flex items-center gap-2">
             <IconKnowledge className="size-5" />
@@ -282,12 +297,36 @@ export function KnowledgeLibrary() {
             const docsPage = docsByKb[kb.id];
             const documents = docsPage?.items ?? [];
             const expanded = expandedKbs.has(kb.id);
+            const statusLabel = t(KB_STATUS_LABEL_KEYS[kb.status]);
             return (
               <Card key={kb.id} className={cn(ingesting && "border-primary/30")}>
                 <CardHeader className="pb-2">
-                  <CardTitle className="truncate text-base">{kb.name}</CardTitle>
+                  <div className="flex items-start justify-between gap-2">
+                    <CardTitle className="truncate text-base">{kb.name}</CardTitle>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="icon-sm" variant="ghost" className="shrink-0">
+                          <IconMore className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => setAddOpenFor(kb.id)}>
+                          {t("addDocument")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          variant="destructive"
+                          disabled={ingesting}
+                          title={ingesting ? t("deleteBlockedIngesting") : undefined}
+                          onSelect={() => setPendingDelete({ kind: "kb", kb })}
+                        >
+                          <IconDelete className="mr-1 size-3" />
+                          {tCommon("delete")}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                   <CardDescription className="text-xs">
-                    {t("statusDocCount", { status: kb.status, count: kb.doc_count ?? 0 })}
+                    {t("statusDocCount", { status: statusLabel, count: kb.doc_count ?? 0 })}
                     {" · "}
                     {t("readyDocCount", {
                       ready: kb.ready_doc_count ?? 0,
@@ -305,7 +344,7 @@ export function KnowledgeLibrary() {
                       </span>
                     )}
                     {kb.status !== "failed" && kb.error && (
-                      <span className="mt-1 block text-amber-600 dark:text-amber-500">
+                      <span className="text-warning mt-1 block">
                         {t("partialFailureWarning", { error: kb.error })}
                       </span>
                     )}
@@ -345,20 +384,6 @@ export function KnowledgeLibrary() {
                       }
                     >
                       {t("startAgent")}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => setAddOpenFor(kb.id)}>
-                      {t("addDocument")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive hover:text-destructive"
-                      disabled={ingesting}
-                      title={ingesting ? t("deleteBlockedIngesting") : undefined}
-                      onClick={() => setPendingDelete({ kind: "kb", kb })}
-                    >
-                      <IconDelete className="mr-1 size-3" />
-                      {tCommon("delete")}
                     </Button>
                   </div>
 
@@ -439,7 +464,9 @@ export function KnowledgeLibrary() {
               </Card>
             );
           })}
-          {!items.length && <EmptyState title={t("empty")} className="col-span-full" />}
+          {!items.length && (
+            <EmptyState variant="dashed" title={t("empty")} className="col-span-full" />
+          )}
         </div>
       </ScrollArea>
 

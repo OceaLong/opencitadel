@@ -202,7 +202,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     return (
       <div
         className={cn(
-          "bg-card border-border/70 flex w-full flex-col rounded-2xl border py-3 shadow-[var(--shadow-card)]",
+          "bg-card border-border/70 focus-within:border-ring focus-within:ring-ring/40 shadow-card flex w-full flex-col rounded-2xl border py-3 transition-shadow focus-within:ring-2",
           className,
         )}
       >

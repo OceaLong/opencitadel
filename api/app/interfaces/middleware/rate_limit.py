@@ -66,6 +66,27 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         )
         self._hits: DefaultDict[str, Deque[float]] = defaultdict(deque)
 
+    def _effective_limit(self) -> int:
+        """每请求动态读运行时配置的限流值。
+
+        中间件在应用启动早期安装，此时运行时配置缓存尚未 warmup，
+        安装时读到的只是默认值；冻结它会导致 DB/yaml 配置永远不生效。
+        warmup 完成后 get_runtime_config() 走进程内缓存，开销可忽略。
+        """
+        try:
+            limit = int(get_runtime_config().server.rate_limit_per_minute)
+            if limit > 0:
+                return limit
+        except Exception:  # noqa: BLE001 - 冷缓存/配置异常回退安装值
+            pass
+        return self._limit
+
+    def _runtime_enabled(self) -> bool:
+        try:
+            return bool(get_runtime_config().server.rate_limit_enabled)
+        except Exception:  # noqa: BLE001
+            return True
+
     def _client_key(self, request: Request) -> str:
         return get_client_ip(
             request,
@@ -112,7 +133,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 redis_key,
                 now,
                 window_start,
-                self._limit,
+                self._effective_limit(),
                 f"{now}:{uuid.uuid4().hex}",
                 _WINDOW_SECONDS + 5,
             )
@@ -129,13 +150,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         bucket = self._hits[key]
         while bucket and now - bucket[0] > _WINDOW_SECONDS:
             bucket.popleft()
-        if len(bucket) >= self._limit:
+        if len(bucket) >= self._effective_limit():
             return True
         bucket.append(now)
         return False
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.method == "OPTIONS" or not self._is_limited_path(request.url.path):
+            return await call_next(request)
+        if not self._runtime_enabled():
             return await call_next(request)
 
         try:
@@ -164,7 +187,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 content={"code": 429, "msg": "请求过于频繁，请稍后再试", "data": None},
                 headers={
                     "Retry-After": str(_WINDOW_SECONDS),
-                    "X-RateLimit-Limit": str(self._limit),
+                    "X-RateLimit-Limit": str(self._effective_limit()),
                     "Cache-Control": "no-store",
                 },
             )

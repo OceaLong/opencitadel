@@ -2,13 +2,15 @@
 # -*- coding: utf-8 -*-
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
+from pydantic import AfterValidator
 from sqlalchemy import func, select, text
 from starlette.responses import StreamingResponse
 
 from app.application.errors.exceptions import BadRequestError, NotFoundError
+from app.domain.utils.time_utils import to_naive_utc
 from app.application.services.audit_service import AuditService
 from app.application.services.team_service import TeamService
 from app.application.services.usage_stats_service import UsageBreakdownDimension, UsageStatsService
@@ -49,6 +51,12 @@ from app.interfaces.service_dependencies import get_audit_service, get_team_serv
 from app.infrastructure.models.user import UserORM
 from app.infrastructure.storage.postgres import get_uow
 from core.config import get_settings
+
+
+# HTTP 层可能收到带时区的 ISO datetime（如前端 toISOString 的 Z 后缀），
+# 数据库列为 naive UTC——在参数边界统一规范化，避免 asyncpg 报
+# "can't subtract offset-naive and offset-aware datetimes"。
+NaiveUtcDatetime = Annotated[Optional[datetime], Query(), AfterValidator(to_naive_utc)]
 
 router = APIRouter(prefix="/admin", tags=["管理员"])
 
@@ -301,8 +309,8 @@ async def list_audit_logs(
         actor_user_id: Optional[str] = Query(None),
         resource_type: Optional[str] = Query(None),
         resource_id: Optional[str] = Query(None),
-        start_at: Optional[datetime] = Query(None),
-        end_at: Optional[datetime] = Query(None),
+        start_at: NaiveUtcDatetime = None,
+        end_at: NaiveUtcDatetime = None,
         service: AuditService = Depends(get_audit_service),
 ) -> Response[ListAuditLogsResponse]:
     logs = await service.list_logs(
@@ -344,8 +352,8 @@ async def get_audit_log(
 
 @router.get("/audit/summary", response_model=Response[AuditSummaryResponse], dependencies=[Depends(require_auditor_or_admin)])
 async def audit_summary(
-        start_at: Optional[datetime] = Query(None),
-        end_at: Optional[datetime] = Query(None),
+        start_at: NaiveUtcDatetime = None,
+        end_at: NaiveUtcDatetime = None,
         service: AuditService = Depends(get_audit_service),
 ) -> Response[AuditSummaryResponse]:
     summary = await service.summarize(start_at=start_at, end_at=end_at)
@@ -358,8 +366,8 @@ async def export_audit_logs(
         actor_user_id: Optional[str] = Query(None),
         resource_type: Optional[str] = Query(None),
         resource_id: Optional[str] = Query(None),
-        start_at: Optional[datetime] = Query(None),
-        end_at: Optional[datetime] = Query(None),
+        start_at: NaiveUtcDatetime = None,
+        end_at: NaiveUtcDatetime = None,
         service: AuditService = Depends(get_audit_service),
 ) -> StreamingResponse:
     return StreamingResponse(
@@ -380,8 +388,8 @@ async def export_audit_logs(
 async def usage_summary(
         user_id: Optional[str] = Query(None),
         team_id: Optional[str] = Query(None),
-        start_at: Optional[datetime] = Query(None),
-        end_at: Optional[datetime] = Query(None),
+        start_at: NaiveUtcDatetime = None,
+        end_at: NaiveUtcDatetime = None,
         service: UsageStatsService = Depends(get_usage_stats_service),
 ) -> Response[UsageSummaryResponse]:
     data = await service.aggregate_usage(
@@ -397,8 +405,8 @@ async def usage_summary(
 async def usage_summary_alias(
         user_id: Optional[str] = Query(None),
         team_id: Optional[str] = Query(None),
-        start_at: Optional[datetime] = Query(None),
-        end_at: Optional[datetime] = Query(None),
+        start_at: NaiveUtcDatetime = None,
+        end_at: NaiveUtcDatetime = None,
         service: UsageStatsService = Depends(get_usage_stats_service),
 ) -> Response[UsageSummaryResponse]:
     return await usage_summary(user_id=user_id, team_id=team_id, start_at=start_at, end_at=end_at, service=service)
@@ -408,8 +416,8 @@ async def usage_summary_alias(
 async def usage_timeseries(
         user_id: Optional[str] = Query(None),
         team_id: Optional[str] = Query(None),
-        start_at: Optional[datetime] = Query(None),
-        end_at: Optional[datetime] = Query(None),
+        start_at: NaiveUtcDatetime = None,
+        end_at: NaiveUtcDatetime = None,
         service: UsageStatsService = Depends(get_usage_stats_service),
 ) -> Response[UsageTimeseriesResponse]:
     points = await service.usage_timeseries(
@@ -426,8 +434,8 @@ async def usage_breakdown(
         dimension: UsageBreakdownDimension = Query("model"),
         user_id: Optional[str] = Query(None),
         team_id: Optional[str] = Query(None),
-        start_at: Optional[datetime] = Query(None),
-        end_at: Optional[datetime] = Query(None),
+        start_at: NaiveUtcDatetime = None,
+        end_at: NaiveUtcDatetime = None,
         limit: int = Query(10, ge=1, le=50),
         service: UsageStatsService = Depends(get_usage_stats_service),
 ) -> Response[UsageBreakdownResponse]:

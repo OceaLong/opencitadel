@@ -7,6 +7,8 @@ import { useTranslations } from "next-intl";
 import { Copy, Loader2, LogOut, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
+import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { ScrollablePageContent } from "@/components/scrollable-page-content";
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +42,8 @@ export default function TeamDetailPage() {
   const [inviteUrl, setInviteUrl] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
 
   const myRole = useMemo(
     () => members.find((member) => member.user_id === user?.id)?.role,
@@ -91,8 +95,12 @@ export default function TeamDetailPage() {
 
   async function copyInviteUrl() {
     if (!inviteUrl) return;
-    await navigator.clipboard.writeText(inviteUrl);
-    toast.success(tCommon("copy"));
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      toast.success(tCommon("copied"));
+    } catch {
+      toast.error(tCommon("copyFailed"));
+    }
   }
 
   async function handleRemoveMember(userId: string) {
@@ -116,7 +124,6 @@ export default function TeamDetailPage() {
   }
 
   async function handleDeleteTeam() {
-    if (!window.confirm(t("deleteConfirm"))) return;
     setDeleting(true);
     try {
       await teamApi.remove(teamId);
@@ -131,7 +138,6 @@ export default function TeamDetailPage() {
   }
 
   async function handleLeaveTeam() {
-    if (!window.confirm(t("leaveConfirm"))) return;
     setLeaving(true);
     try {
       await teamApi.leave(teamId);
@@ -167,7 +173,6 @@ export default function TeamDetailPage() {
   return (
     <ScrollablePageContent>
       <PageHeader
-        bordered={false}
         title={team.name}
         description={team.description || undefined}
         actions={
@@ -179,7 +184,7 @@ export default function TeamDetailPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => void handleLeaveTeam()}
+                onClick={() => setLeaveDialogOpen(true)}
                 disabled={leaving || isSoleOwner}
                 title={isSoleOwner ? t("soleOwnerCannotLeave") : undefined}
               >
@@ -188,7 +193,7 @@ export default function TeamDetailPage() {
               </Button>
             ) : null}
             {isOwner ? (
-              <Button variant="destructive" size="sm" onClick={() => void handleDeleteTeam()} disabled={deleting}>
+              <Button variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)} disabled={deleting}>
                 {deleting ? <Loader2 className="animate-spin" /> : <Trash2 className="mr-1 size-4" />}
                 {t("deleteTeam")}
               </Button>
@@ -246,6 +251,9 @@ export default function TeamDetailPage() {
           <CardDescription>{t("membersDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
+          {members.length === 0 ? (
+            <EmptyState title={t("emptyMembers")} className="py-8" />
+          ) : null}
           {members.map((member) => (
             <div
               key={member.user_id}
@@ -293,6 +301,23 @@ export default function TeamDetailPage() {
           ))}
         </CardContent>
       </Card>
+
+      <ConfirmDeleteDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        onConfirm={handleDeleteTeam}
+        title={t("deleteConfirmTitle")}
+        description={t("deleteConfirm")}
+      />
+      <ConfirmDeleteDialog
+        open={leaveDialogOpen}
+        onOpenChange={setLeaveDialogOpen}
+        onConfirm={handleLeaveTeam}
+        title={t("leaveConfirmTitle")}
+        description={t("leaveConfirm")}
+        confirmLabel={t("leaveTeam")}
+        confirmingLabel={t("leavingTeam")}
+      />
     </ScrollablePageContent>
   );
 }

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Loader2, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -330,7 +331,7 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
             <Card
               key={s.id}
               className={cn(
-                "hover:border-border transition-all hover:shadow-[var(--shadow-card-hover)]",
+                "hover:border-border transition-all hover:shadow-card-hover",
                 !s.enabled && "opacity-60",
               )}
             >
@@ -361,13 +362,13 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
             </Card>
           ))}
           {skills.length === 0 && (
-            <p className="text-muted-foreground py-8 text-center text-sm">{t("noSkills")}</p>
+            <EmptyState title={t("noSkills")} className="py-8" />
           )}
         </div>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto shadow-[var(--shadow-panel)]">
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto shadow-panel">
           <DialogHeader>
             <DialogTitle>{editing ? t("editSkill") : t("createSkill")}</DialogTitle>
           </DialogHeader>

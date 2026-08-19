@@ -62,14 +62,14 @@ export function SessionDebugSheet({ events, includeDebug = false, compact, onOpe
       <SheetTrigger asChild>
         <Button
           variant="ghost"
-          size={compact ? "icon" : "sm"}
-          className={compact ? "relative size-8" : "relative"}
+          size={compact ? "icon-sm" : "sm"}
+          className="relative"
           title={t("title")}
         >
           <Bug className="size-4" />
           {!compact && <span className="ml-1">{t("button")}</span>}
           {errorItems.length > 0 && (
-            <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-medium text-white">
+            <span className="bg-destructive text-primary-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-mono text-[10px] font-medium">
               {errorItems.length > 99 ? "99+" : errorItems.length}
             </span>
           )}

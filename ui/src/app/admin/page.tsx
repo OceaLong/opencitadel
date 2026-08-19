@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 
+import { InvitationStatusBadge } from "@/components/admin/invitation-status-badge";
 import { AdminStatCard } from "@/components/admin/stat-card";
 import { AdminTimeRangePicker } from "@/components/admin/time-range-picker";
 import {
@@ -13,9 +14,16 @@ import {
 } from "@/components/admin/usage-charts";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 import { type AdminTimeRange, formatDateTime,getAdminDateRange } from "@/lib/admin-utils";
 import {
@@ -102,8 +110,8 @@ export default function AdminOverviewPage() {
           <Skeleton className="h-8 w-40" />
           <Skeleton className="h-9 w-72" />
         </div>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, index) => (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
             <Skeleton key={index} className="h-28 rounded-xl" />
           ))}
         </div>
@@ -115,7 +123,6 @@ export default function AdminOverviewPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        bordered={false}
         title={t("overviewTitle")}
         description={t("overviewSubtitle")}
         actions={<AdminTimeRangePicker value={range} onChange={setRange} />}
@@ -163,21 +170,32 @@ export default function AdminOverviewPage() {
             <CardTitle className="text-base">{t("recentAuditTitle")}</CardTitle>
             <CardDescription>{t("recentAuditDesc")}</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent>
             {recentAudit.length === 0 ? (
               <EmptyState title={t("noAuditRecords")} className="py-8" />
             ) : (
-              recentAudit.map((item) => (
-                <div key={item.id} className="rounded-lg border px-3 py-2 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{item.action}</span>
-                    <span className="text-muted-foreground text-xs">{formatDateTime(item.created_at)}</span>
-                  </div>
-                  <div className="text-muted-foreground mt-1 text-xs">
-                    {item.resource_type}:{item.resource_id}
-                  </div>
-                </div>
-              ))
+              <Table className="text-dense">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("columnAction")}</TableHead>
+                    <TableHead>{t("columnResource")}</TableHead>
+                    <TableHead className="text-right">{t("columnTime")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {recentAudit.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-medium">{item.action}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {item.resource_type}:{item.resource_id}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-right">
+                        {formatDateTime(item.created_at)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         </Card>
@@ -187,19 +205,34 @@ export default function AdminOverviewPage() {
             <CardTitle className="text-base">{t("recentInvitesTitle")}</CardTitle>
             <CardDescription>{t("recentInvitesDesc")}</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent>
             {recentInvitations.length === 0 ? (
               <EmptyState title={t("noInvitationRecords")} className="py-8" />
             ) : (
-              recentInvitations.map((item) => (
-                <div key={item.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
-                  <div className="min-w-0">
-                    <div className="truncate font-medium">{item.email || t("noEmailSpecified")}</div>
-                    <div className="text-muted-foreground text-xs">{formatDateTime(item.created_at)}</div>
-                  </div>
-                  <InvitationStatusBadge status={item.status} />
-                </div>
-              ))
+              <Table className="text-dense">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("columnEmail")}</TableHead>
+                    <TableHead>{t("status")}</TableHead>
+                    <TableHead className="text-right">{t("columnTime")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {recentInvitations.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="max-w-40 truncate font-medium">
+                        {item.email || t("noEmailSpecified")}
+                      </TableCell>
+                      <TableCell>
+                        <InvitationStatusBadge status={item.status} />
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-right">
+                        {formatDateTime(item.created_at)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         </Card>
@@ -215,12 +248,4 @@ function MetricRow({ label, value }: { label: string; value: number }) {
       <div className="mt-1 text-xl font-semibold">{value}</div>
     </div>
   );
-}
-
-function InvitationStatusBadge({ status }: { status: PlatformInvitation["status"] }) {
-  const t = useTranslations("admin");
-  const variant = status === "accepted" ? "secondary" : status === "pending" ? "outline" : "destructive";
-  const label =
-    status === "accepted" ? t("inviteAccepted") : status === "pending" ? t("invitePending") : t("inviteExpired");
-  return <Badge variant={variant}>{label}</Badge>;
 }

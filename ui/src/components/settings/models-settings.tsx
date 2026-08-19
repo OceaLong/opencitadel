@@ -5,6 +5,8 @@ import { useTranslations } from "next-intl";
 import { Loader2, Plus, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
+import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -190,13 +192,13 @@ export function ModelsSettings({ embedded = false, isAdmin = false, userId }: Pr
             />
           ))}
           {endpointsState.endpoints.length === 0 && (
-            <p className="text-muted-foreground py-8 text-center text-sm">{t("noEndpoints")}</p>
+            <EmptyState title={t("noEndpoints")} className="py-8" />
           )}
         </div>
       )}
 
       <Dialog open={endpointsState.dialogOpen} onOpenChange={endpointsState.setDialogOpen}>
-        <DialogContent className="max-w-lg shadow-[var(--shadow-panel)]">
+        <DialogContent className="max-w-lg shadow-panel">
           <DialogHeader>
             <DialogTitle>{endpointsState.editing ? t("editEndpoint") : t("addEndpoint")}</DialogTitle>
           </DialogHeader>
@@ -263,7 +265,7 @@ export function ModelsSettings({ embedded = false, isAdmin = false, userId }: Pr
       </Dialog>
 
       <Dialog open={modelsState.dialogOpen} onOpenChange={modelsState.setDialogOpen}>
-        <DialogContent className="max-w-lg shadow-[var(--shadow-panel)]">
+        <DialogContent className="max-w-lg shadow-panel">
           <DialogHeader>
             <DialogTitle>{modelsState.editing ? t("editModel") : t("addModel")}</DialogTitle>
           </DialogHeader>
@@ -459,7 +461,7 @@ function EndpointGroup({
   const canManageEndpoint = canManageResource(endpoint, isAdmin, userId);
 
   return (
-    <Card className="hover:border-border transition-all hover:shadow-[var(--shadow-card-hover)]">
+    <Card className="hover:border-border transition-all hover:shadow-card-hover">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -499,19 +501,13 @@ function EndpointGroup({
                   {model.is_default && <Badge variant="secondary">{tCommon("default")}</Badge>}
                   {model.supports_multimodal && <Badge variant="outline">{t("multimodal")}</Badge>}
                   {probeStatus[model.id] === "ok" && (
-                    <Badge variant="outline" className="text-green-600">
-                      {t("verified")}
-                    </Badge>
+                    <StatusBadge variant="success">{t("verified")}</StatusBadge>
                   )}
                   {probeStatus[model.id] === "error" && (
-                    <Badge variant="outline" className="text-red-600">
-                      {t("probeFailed")}
-                    </Badge>
+                    <StatusBadge variant="destructive">{t("probeFailed")}</StatusBadge>
                   )}
                   {!SUPPORTED_PROVIDERS.some((p) => p.value === model.provider) && (
-                    <Badge variant="outline" className="text-amber-600">
-                      {t("notImplemented")}
-                    </Badge>
+                    <StatusBadge variant="warning">{t("notImplemented")}</StatusBadge>
                   )}
                 </div>
                 <p className="text-muted-foreground mt-1 text-xs">{model.model_name}</p>

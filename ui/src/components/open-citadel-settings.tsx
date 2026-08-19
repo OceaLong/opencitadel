@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/empty-state";
 import { AgentSettings } from "@/components/settings/agent-settings";
 import { GeneralSettings } from "@/components/settings/general-settings";
 import { HitlSettings } from "@/components/settings/hitl-settings";
@@ -172,7 +173,7 @@ export function A2ASetting({
 
           {/* 空态 */}
           {!loading && servers.length === 0 && (
-            <div className="text-muted-foreground py-8 text-center text-sm">{t("noA2aAgents")}</div>
+            <EmptyState title={t("noA2aAgents")} className="py-8" />
           )}
 
           {/* 列表 */}
@@ -498,7 +499,7 @@ export function MCPSetting({
 
           {/* 空态 */}
           {!loading && servers.length === 0 && (
-            <div className="text-muted-foreground py-8 text-center text-sm">{t("noMcpServers")}</div>
+            <EmptyState title={t("noMcpServers")} className="py-8" />
           )}
 
           {/* 列表 */}
@@ -710,7 +711,7 @@ export function SettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          "flex flex-col overflow-hidden shadow-[var(--shadow-panel)]",
+          "flex flex-col overflow-hidden shadow-panel",
           "h-[100dvh] max-h-[100dvh] w-full max-w-full rounded-none",
           "md:h-[640px] md:max-h-[90vh] md:!max-w-[920px] md:rounded-lg",
         )}

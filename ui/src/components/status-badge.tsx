@@ -1,18 +1,25 @@
 import type { ReactNode } from "react";
 
-import { Badge } from "@/components/ui/badge";
-
 import { cn } from "@/lib/utils";
 
-export type StatusBadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning";
+export type StatusBadgeVariant =
+  | "default"
+  | "secondary"
+  | "destructive"
+  | "outline"
+  | "success"
+  | "warning"
+  | "info";
 
+// 琥珀纪律（spec §2.2）：warning 只许文字 + 细边框，禁止背景块
 const variantClasses: Record<StatusBadgeVariant, string> = {
-  default: "",
-  secondary: "",
-  destructive: "",
-  outline: "",
-  success: "border-transparent bg-success/15 text-success hover:bg-success/15",
-  warning: "border-transparent bg-warning/15 text-warning-foreground hover:bg-warning/15",
+  default: "border-transparent bg-primary/15 text-primary",
+  secondary: "border-transparent bg-muted text-muted-foreground",
+  destructive: "border-transparent bg-destructive/15 text-destructive",
+  outline: "border-border text-foreground",
+  success: "border-transparent bg-success/15 text-success",
+  warning: "border-warning/40 bg-transparent text-warning",
+  info: "border-transparent bg-info/15 text-info",
 };
 
 type StatusBadgeProps = {
@@ -28,26 +35,16 @@ export function StatusBadge({
   className,
   ...rest
 }: StatusBadgeProps) {
-  const semantic = variant === "success" || variant === "warning";
-
-  if (semantic) {
-    return (
-      <span
-        className={cn(
-          "inline-flex items-center rounded-full border px-2.5 py-0.5 text-2xs font-medium",
-          variantClasses[variant],
-          className,
-        )}
-        {...rest}
-      >
-        {children}
-      </span>
-    );
-  }
-
   return (
-    <Badge variant={variant} className={cn("text-2xs", className)} {...rest}>
+    <span
+      className={cn(
+        "text-2xs inline-flex items-center rounded-full border px-2.5 py-0.5 font-medium whitespace-nowrap",
+        variantClasses[variant],
+        className,
+      )}
+      {...rest}
+    >
       {children}
-    </Badge>
+    </span>
   );
 }

@@ -78,24 +78,24 @@ export function VNCOverlay({ sessionId, onClose }: VNCOverlayProps) {
         <VNCViewer url={vncUrl} viewOnly={false} onStatusChange={handleStatusChange} />
 
         {status === "connecting" && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/80">
-            <Loader2 className="size-8 animate-spin text-white" />
-            <span className="text-sm text-gray-300">{t("connectingSandbox")}</span>
+          <div className="bg-terminal/80 absolute inset-0 z-10 flex flex-col items-center justify-center gap-3">
+            <Loader2 className="text-terminal-foreground size-8 animate-spin" />
+            <span className="text-terminal-foreground/70 text-sm">{t("connectingSandbox")}</span>
           </div>
         )}
 
         {hasError && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/80">
-            <div className="flex flex-col items-center gap-3 rounded-2xl border border-gray-700 bg-gray-900/90 px-10 py-8">
-              <WifiOff className="size-10 text-gray-400" />
-              <div className="text-base font-medium text-white">{t("cannotConnectSandbox")}</div>
-              <p className="max-w-[280px] text-center text-sm leading-relaxed text-gray-400">
+          <div className="bg-terminal/80 absolute inset-0 z-10 flex flex-col items-center justify-center">
+            <div className="border-terminal-foreground/20 bg-terminal/90 flex flex-col items-center gap-3 rounded-2xl border px-10 py-8">
+              <WifiOff className="text-terminal-foreground/70 size-10" />
+              <div className="text-terminal-foreground text-base font-medium">{t("cannotConnectSandbox")}</div>
+              <p className="text-terminal-foreground/70 max-w-[280px] text-center text-sm leading-relaxed">
                 {errorDetail || t("sandboxClosedHint")}
               </p>
               <Button
                 variant="secondary"
                 onClick={onClose}
-                className="mt-2 min-h-11 cursor-pointer gap-2 rounded-full border border-gray-600 bg-white/10 px-6 text-white hover:bg-white/20"
+                className="border-terminal-foreground/25 bg-terminal-foreground/10 text-terminal-foreground hover:bg-terminal-foreground/20 mt-2 min-h-11 cursor-pointer gap-2 rounded-full border px-6"
               >
                 <X size={14} />
                 {t("exitRemoteDesktop")}
@@ -110,7 +110,7 @@ export function VNCOverlay({ sessionId, onClose }: VNCOverlayProps) {
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-white/10 bg-black/60 px-5 py-2.5 text-sm text-white/90 shadow-xl backdrop-blur transition-colors hover:bg-black/80"
+            className="border-terminal-foreground/10 bg-terminal/60 text-terminal-foreground/90 hover:bg-terminal/80 inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border px-5 py-2.5 text-sm shadow-xl backdrop-blur transition-colors"
           >
             <X size={14} />
             {t("exitRemoteDesktop")}

@@ -133,11 +133,11 @@ const DYNAMIC_EXPANSIONS = [
   },
   {
     prefix: "adminNav.",
-    values: ["overview", "users", "teams", "invitations", "audit", "evidence", "complianceReport"],
+    values: ["overview", "users", "teams", "invitations", "audit", "evidence", "complianceReport", "governance"],
   },
   {
-    prefix: "mobileNav.",
-    values: ["chat", "codebase", "knowledge"],
+    prefix: "nav.",
+    values: ["chat", "patrol", "automation", "knowledge", "codebase", "admin", "label"],
   },
 ];
 
@@ -213,6 +213,19 @@ if (missingFromEn.length || missingFromZh.length) {
     console.error(`  missing from zh.json (${missingFromZh.length}):`);
     console.error("   ", missingFromZh.join(", "));
   }
+}
+
+// check B': keys present in messages but never referenced in code (warn only)
+const ALLOWED_UNUSED_PREFIXES = ["metadata."];
+const unusedKeys = [...enKeys].filter(
+  (key) =>
+    !used.has(key) &&
+    !ALLOWED_UNUSED_PREFIXES.some((prefix) => key.startsWith(prefix)) &&
+    !key.startsWith("settingsRuntime."),
+);
+if (unusedKeys.length) {
+  console.warn(`\n[warn] ${unusedKeys.length} unused key(s):`);
+  for (const key of unusedKeys) console.warn(`  - ${key}`);
 }
 
 const missingRuntimeFields = [];

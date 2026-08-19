@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
+import { GovernanceRail } from "@/components/session/governance-rail";
 import { PlanProgressHeader } from "@/components/session/plan-progress-header";
 import { PlanStepRow } from "@/components/session/plan-step-row";
 import { PlanStepStatusIcon } from "@/components/session/plan-step-status-icon";
@@ -46,7 +47,7 @@ export function PlanPanel({ className, steps: stepsProp = [] }: PlanPanelProps) 
   return (
     <div
       className={cn(
-        "bg-card border-border/70 rounded-xl border shadow-[var(--shadow-card)]",
+        "bg-card border-border/70 rounded-xl border shadow-card",
         className,
       )}
     >
@@ -89,7 +90,7 @@ export function PlanPanel({ className, steps: stepsProp = [] }: PlanPanelProps) 
               <ChevronDown className="text-muted-foreground size-4" />
             </Button>
           </div>
-          <div className="bg-muted/40 rounded-xl py-3">
+          <div className="bg-muted/40 rounded-xl px-2 py-3">
             <PlanProgressHeader
               title={t("stepsCompleted")}
               completedCount={completedCount}
@@ -97,16 +98,24 @@ export function PlanPanel({ className, steps: stepsProp = [] }: PlanPanelProps) 
               className="mb-2"
             />
             <div className="max-h-[min(calc(100vh-360px),400px)] overflow-y-auto">
-              {steps.map((step, index) => (
-                <PlanStepRow
-                  key={step.id}
-                  description={step.description}
-                  status={step.status}
-                  highlight={step.status === "running"}
-                  variant="timeline"
-                  isLast={index === steps.length - 1}
-                />
-              ))}
+              <GovernanceRail
+                lineState={
+                  steps.some((step) => step.status === "failed")
+                    ? "failed"
+                    : steps.every((step) => step.status === "completed")
+                      ? "completed"
+                      : "default"
+                }
+              >
+                {steps.map((step) => (
+                  <PlanStepRow
+                    key={step.id}
+                    description={step.description}
+                    status={step.status}
+                    highlight={step.status === "running"}
+                  />
+                ))}
+              </GovernanceRail>
             </div>
           </div>
         </div>

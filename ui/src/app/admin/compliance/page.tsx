@@ -62,7 +62,6 @@ export default function AdminCompliancePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        bordered={false}
         title={t("evidenceCenterTitle")}
         description={t("evidenceCenterDesc")}
         actions={

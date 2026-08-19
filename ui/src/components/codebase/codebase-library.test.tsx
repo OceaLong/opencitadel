@@ -78,12 +78,33 @@ vi.mock("@/components/ui/card", () => ({
 vi.mock("@/components/ui/scroll-area", () => ({
   ScrollArea: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
+vi.mock("@/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuItem: ({
+    children,
+    onSelect,
+    onClick,
+    disabled,
+  }: {
+    children: React.ReactNode;
+    onSelect?: () => void;
+    onClick?: () => void;
+    disabled?: boolean;
+  }) => (
+    <button onClick={onSelect ?? onClick} disabled={disabled}>
+      {children}
+    </button>
+  ),
+}));
 vi.mock("@/lib/icons", () => ({
   IconAdd: () => null,
   IconCodebase: () => null,
   IconDelete: () => null,
   IconDownload: () => null,
   IconLoading: () => null,
+  IconMore: () => null,
   IconRefresh: () => null,
 }));
 
