@@ -10,6 +10,10 @@ def build_docker_sandbox_config(
     settings: SandboxRuntimeSettings,
     container_name: str,
 ) -> dict[str, Any]:
+    chrome_args = (settings.chrome_args or "").strip()
+    if "--no-sandbox" not in chrome_args.split():
+        chrome_args = f"{chrome_args} --no-sandbox".strip()
+
     config: dict[str, Any] = {
         "image": settings.image,
         "name": container_name,
@@ -28,7 +32,7 @@ def build_docker_sandbox_config(
         "shm_size": "256m",
         "environment": {
             "SERVER_TIMEOUT_MINUTES": str(settings.ttl_minutes or 60),
-            "CHROME_ARGS": settings.chrome_args or "",
+            "CHROME_ARGS": chrome_args,
             "HTTPS_PROXY": settings.https_proxy or "",
             "HTTP_PROXY": settings.http_proxy or "",
             "NO_PROXY": settings.no_proxy or "",

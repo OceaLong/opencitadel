@@ -8,7 +8,7 @@ from typing import List, Callable, Type, Optional, Tuple
 from app.application.dto.session_io import FileReadResult, ShellReadResult
 from app.application.services.resource_binding_service import ResourceBindingService
 from app.application.services.resource_guard_service import ResourceGuardService
-from app.application.errors.exceptions import NotFoundError, ServerRequestsError
+from app.domain.errors import NotFoundError, ServerRequestsError
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.session_list_notifier import NoopSessionListNotifier, SessionListNotifierPort
 from app.domain.external.task_state_port import TaskStatePort
@@ -95,8 +95,6 @@ class SessionService:
             model_id=model_id,
             skill_id=skill_id,
             thinking_enabled=thinking_enabled,
-            codebase_id=codebase_id,
-            knowledge_base_id=knowledge_base_id,
             operator_scope=operator_scope,
             operator_domains=list(operator_domains or []),
             gate_profile=gate_profile or ("standard" if operator_scope else None),

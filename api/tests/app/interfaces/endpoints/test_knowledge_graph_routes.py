@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.domain.models.knowledge_base import (
     KnowledgeBase,

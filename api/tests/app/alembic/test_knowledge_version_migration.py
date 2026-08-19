@@ -154,7 +154,7 @@ def test_upgrade_backfills_deterministic_versions_revisions_manifests_and_rows()
     assert "'#legacy-'" in sql
 
 
-def test_p1_1_c7_is_expand_compatible_and_defers_contract_nullability():
+def test_p1_1_c7_defers_nullability_until_current_contract_migration():
     sql = _offline_sql("upgrade")
 
     for table in (
@@ -164,7 +164,7 @@ def test_p1_1_c7_is_expand_compatible_and_defers_contract_nullability():
         "knowledge_entity_refs",
     ):
         assert f"ALTER TABLE {table} ALTER COLUMN version_id SET NOT NULL" not in sql
-        assert Base.metadata.tables[table].c.version_id.nullable is True
+        assert Base.metadata.tables[table].c.version_id.nullable is False
     assert "ALTER COLUMN normalized_name SET NOT NULL" not in sql
     assert Base.metadata.tables["knowledge_entities"].c.normalized_name.nullable is True
 

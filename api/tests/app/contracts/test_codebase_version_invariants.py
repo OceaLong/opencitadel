@@ -12,7 +12,7 @@ import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.application.services.codebase_service import CodebaseService
 from app.domain.models.codebase import ArtifactKind, EdgeKind
 from app.domain.models.codebase_version import CodebaseVersionState
@@ -228,7 +228,8 @@ def test_symbols_ambiguous_calls_and_artifact_facts_have_evidence():
 def test_alembic_has_only_patrol_schedule_head_and_preserves_codebase_parentage():
     script = ScriptDirectory.from_config(Config("alembic.ini"))
 
-    assert script.get_heads() == ["94feff5b0d54"]
+    assert script.get_heads() == ["aa06contract"]
+    assert script.get_revision("aa06contract").down_revision == "94feff5b0d54"
     assert script.get_revision("94feff5b0d54").down_revision == "f1a2b3c4d5e6"
     assert script.get_revision("f1a2b3c4d5e6").down_revision == "f0a1b2c3d4e5"
     assert script.get_revision("f0a1b2c3d4e5").down_revision == "e9f0a1b2c3d4"

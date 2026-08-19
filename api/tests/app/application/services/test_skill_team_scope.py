@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import pytest
 
-from app.application.errors.exceptions import BadRequestError, ForbiddenError
+from app.domain.errors import BadRequestError, ForbiddenError
 from app.application.services.skill_service import SkillService
 from app.domain.models.scope import OwnerScope
 from app.domain.models.skill import ResourceVisibility, Skill

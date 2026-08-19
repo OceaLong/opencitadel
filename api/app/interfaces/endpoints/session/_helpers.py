@@ -49,7 +49,6 @@ async def _record_gate_audit_if_needed(
     if action == "unknown":
         return
     meta = session.pending_metadata or {}
-    pending = meta.get("pending_tool_call") or {}
     approval_batch_id = meta.get("approval_batch_id")
     audit_action = {
         TOOL_APPROVAL_PHASE: {
@@ -81,9 +80,6 @@ async def _record_gate_audit_if_needed(
             "feedback": feedback,
             "pending_phase": session.pending_phase,
             "approval_batch_id": approval_batch_id,
-            "tool": pending.get("tool_name"),
-            "args": pending.get("args"),
-            "first_visit_domain": pending.get("first_visit_domain"),
             "operator_scope": session.operator_scope,
         },
     ))
@@ -114,8 +110,6 @@ def _session_to_list_item(session: Session) -> ListSessionItem:
         latest_message_at=session.latest_message_at,
         status=session.status,
         unread_message_count=session.unread_message_count,
-        codebase_id=session.codebase_id,
-        knowledge_base_id=session.knowledge_base_id,
         mode=session.mode,
         resource_bindings=session.resource_bindings,
     )
@@ -203,8 +197,6 @@ async def build_get_session_response(
         operator_domains=session.operator_domains or [],
         gate_profile=session.gate_profile,
         awaiting_human=bool((session.pending_metadata or {}).get("awaiting_human")),
-        codebase_id=session.codebase_id,
-        knowledge_base_id=session.knowledge_base_id,
         mode=session.mode,
         resource_bindings=session.resource_bindings,
     )

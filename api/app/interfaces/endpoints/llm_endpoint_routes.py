@@ -5,7 +5,7 @@ from typing import Optional, Dict
 
 from fastapi import APIRouter, Depends
 
-from app.application.errors.exceptions import ForbiddenError
+from app.domain.errors import ForbiddenError
 from app.application.services.llm_endpoint_service import LLMEndpointService
 from app.application.services.audit_service import AuditService
 from app.domain.models.llm_endpoint import LLMEndpoint

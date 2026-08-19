@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.domain.models.patrol import PatrolPackConfig
 
 

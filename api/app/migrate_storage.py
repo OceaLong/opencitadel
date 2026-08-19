@@ -163,8 +163,7 @@ async def copy_object(
     if dry_run:
         return "copied"
 
-    _LARGE_OBJECT_BYTES = 100 * 1024 * 1024  # 100 MB
-    if obj.size > _LARGE_OBJECT_BYTES:
+    if obj.size > _LARGE_OBJECT_THRESHOLD_BYTES:
         logger.warning(
             "Large object detected: %s (%s MB). "
             "Increase migration container mem_limit or use --concurrency 1 to reduce peak memory.",

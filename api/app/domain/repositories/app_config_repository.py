@@ -58,10 +58,3 @@ class AppConfigRepository(Protocol):
 
     async def rollback_to_revision(self, revision_id: str, *, changed_by: Optional[str] = None) -> AppConfig:
         ...
-
-    # Backward-compatible aliases
-    async def load(self) -> Optional[AppConfig]:
-        ...
-
-    async def save(self, app_config: AppConfig) -> None:
-        ...

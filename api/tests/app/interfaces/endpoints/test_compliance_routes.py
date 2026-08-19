@@ -10,7 +10,7 @@ dependencies overridden, exercised through TestClient.
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.application.errors.exceptions import ForbiddenError, NotFoundError
+from app.domain.errors import ForbiddenError, NotFoundError
 from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
 from app.domain.models.user import GlobalRole
 from app.interfaces.auth_dependencies import get_workspace_context, require_auditor_or_admin

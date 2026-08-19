@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Type
 
 from pydantic import BaseModel
 
-from app.application.errors.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.domain.errors import BadRequestError, ForbiddenError, NotFoundError
 from app.application.services.config_provider import invalidate_runtime_config
 from app.application.services.integration_server_service import A2AServerConfigService, MCPServerService
 from app.application.services.owner_config_resolver import (

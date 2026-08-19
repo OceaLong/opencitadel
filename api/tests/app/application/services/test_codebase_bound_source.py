@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.application.services.codebase_service import CodebaseService
 from app.domain.models.codebase import Codebase
 from app.domain.models.codebase_version import (

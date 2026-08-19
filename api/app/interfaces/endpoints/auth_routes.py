@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query, Request, Response as StarletteResponse
 from starlette.responses import RedirectResponse
 
-from app.application.errors.exceptions import BadRequestError, UnauthorizedError
+from app.domain.errors import BadRequestError, UnauthorizedError
 from app.application.services.auth_service import AuthService
 from app.domain.models.invitation import InvitationType
 from app.domain.models.oauth_identity import OAuthIdentity

@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 import pytest
 
-from app.application.errors.exceptions import BadRequestError, NotFoundError
+from app.domain.errors import BadRequestError, NotFoundError
 from app.application.services.codebase_version_service import CodebaseVersionService
 from app.application.services.knowledge_version_service import KnowledgeVersionService
 from app.domain.models.codebase import Codebase

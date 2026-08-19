@@ -65,6 +65,7 @@ const SessionsContext = createContext<SessionsContextValue | null>(null);
 export function SessionsProvider({ children }: { children: React.ReactNode }) {
   const t = useTranslations("sessions");
   const { user, loading: authLoading } = useAuth();
+  const userId = user?.id ?? null;
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +76,11 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   const initialFetchedRef = useRef(false);
   /** 标记 SSE 是否已经推送过数据，防止 REST 回调覆盖更新的 SSE 数据 */
   const sseReceivedRef = useRef(false);
+  const tRef = useRef(t);
+
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
 
   // ---------- 手动刷新 ----------
   const refresh = useCallback(async () => {
@@ -84,16 +90,16 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
       const raw = await sessionApi.getSessions();
       setSessions(normalizeSessions(raw));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("fetchFailed"));
+      setError(err instanceof Error ? err.message : tRef.current("fetchFailed"));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, []);
 
   // ---------- 初始 REST 请求（仅一次，登录后） ----------
   useEffect(() => {
     if (authLoading) return;
-    if (!user) {
+    if (!userId) {
       setSessions([]);
       setLoading(false);
       setError(null);
@@ -114,14 +120,14 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         setError(null);
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : t("fetchFailed"));
+        setError(err instanceof Error ? err.message : tRef.current("fetchFailed"));
         setLoading(false);
       });
-  }, [authLoading, user, t]);
+  }, [authLoading, userId]);
 
   // ---------- SSE 实时订阅 ----------
   useEffect(() => {
-    if (authLoading || !user) return;
+    if (authLoading || !userId) return;
 
     let mounted = true;
     let retryCount = 0;
@@ -164,7 +170,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
           if (!mounted) return;
 
           if (retryCount >= RETRY_CONFIG.maxRetries) {
-            setError(t("streamDisconnected"));
+            setError(tRef.current("streamDisconnected"));
             return;
           }
 
@@ -193,7 +199,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
         retryTimerRef.current = null;
       }
     };
-  }, [authLoading, user, t]);
+  }, [authLoading, userId]);
 
   // ---------- 删除会话 ----------
   const deleteSession = useCallback(async (sessionId: string): Promise<boolean> => {
@@ -211,11 +217,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     [sessions, loading, error, refresh, deleteSession],
   );
 
-  return (
-    <SessionsContext.Provider value={contextValue}>
-      {children}
-    </SessionsContext.Provider>
-  );
+  return <SessionsContext.Provider value={contextValue}>{children}</SessionsContext.Provider>;
 }
 
 // ==================== Hook ====================

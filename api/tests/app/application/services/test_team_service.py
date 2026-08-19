@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.application.errors.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.domain.errors import BadRequestError, ForbiddenError, NotFoundError
 from app.application.services.team_service import TeamService
 from app.domain.models.invitation import Invitation
 from app.domain.models.team import Team, TeamMember, TeamRole

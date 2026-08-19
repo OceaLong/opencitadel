@@ -10,7 +10,7 @@ construction (mcp_config filtering, extra_tools, a2a_config exclusion).
 """
 from typing import Callable, Optional
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.application.services.patrol_collector_validator import MCPPatrolCollectorValidator
 from app.domain.external.connection_pool import MCPConnectionPoolPort
 from app.domain.models.app_config import AgentConfig

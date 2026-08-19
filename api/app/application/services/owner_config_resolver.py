@@ -3,7 +3,7 @@
 """Merge global AppConfig with optional per-user overrides."""
 from typing import Optional
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.domain.models.app_config import AppConfig
 from app.domain.models.app_config_scope import (
     GLOBAL_ONLY_SECTIONS,

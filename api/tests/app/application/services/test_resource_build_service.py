@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.application.errors.exceptions import (
+from app.domain.errors import (
     BadRequestError,
     ConflictError,
     NotFoundError,

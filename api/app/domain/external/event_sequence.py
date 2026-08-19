@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from typing import Awaitable, Callable, Protocol, runtime_checkable
-
-EventSeqAllocator = Callable[[], Awaitable[int]]
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable

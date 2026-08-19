@@ -6,7 +6,7 @@ from typing import Optional, Dict, AsyncGenerator
 from fastapi import APIRouter, Depends, Body, Query, Request
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.application.services.agent_service import AgentService
 from app.application.services.session_service import SessionService
 from app.interfaces.client_ip import get_client_ip

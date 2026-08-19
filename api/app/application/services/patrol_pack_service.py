@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 
-from app.application.errors.exceptions import BadRequestError, ConflictError, NotFoundError, ValidationError
+from app.domain.errors import BadRequestError, ConflictError, NotFoundError, ValidationError
 from app.application.services.audit_service import AuditService
 from app.application.services.config_provider import get_runtime_config
 from app.domain.models.audit_log import AuditLog

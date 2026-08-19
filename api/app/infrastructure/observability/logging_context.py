@@ -24,10 +24,6 @@ class CorrelationContextFilter(logging.Filter):
         return True
 
 
-# Backward-compatible alias
-SessionContextFilter = CorrelationContextFilter
-
-
 class JsonLogFormatter(logging.Formatter):
     """JSON log formatter for log aggregation systems."""
 

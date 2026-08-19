@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 from app.domain.models.llm_model import ModelCapabilities
-from app.domain.models.message import VisionAttachment
+from app.domain.models.message import MediaAttachment
 from app.domain.services import vision_service
 
 
@@ -24,7 +24,7 @@ def test_build_user_message_uses_image_ref_when_url_encoding():
     llm = _FakeLLM(ModelCapabilities(vision=True, image_encoding="url"))
     message = vision_service.build_user_message(
         "describe",
-        [VisionAttachment(mime_type="image/png", ref_url="https://example.com/a.png")],
+        [MediaAttachment(mime_type="image/png", ref_url="https://example.com/a.png")],
         llm=llm,
     )
     assert message["content"][1]["type"] == "image_ref"
@@ -48,7 +48,7 @@ def test_build_user_message_without_vision_returns_text_only():
     llm = _FakeLLM(ModelCapabilities(vision=False))
     message = vision_service.build_user_message(
         "hello",
-        [VisionAttachment(mime_type="image/png", data_base64="aW1n")],
+        [MediaAttachment(mime_type="image/png", data_base64="aW1n")],
         llm=llm,
     )
     assert message["content"] == "hello"

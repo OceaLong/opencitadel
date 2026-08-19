@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.application.errors.exceptions import BadRequestError, ConflictError, UnauthorizedError
+from app.domain.errors import BadRequestError, ConflictError, UnauthorizedError
 from app.application.services.auth_service import AuthService
 from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.refresh_token import RefreshToken

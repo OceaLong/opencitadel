@@ -5,7 +5,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from app.application.errors.exceptions import ForbiddenError
+from app.domain.errors import ForbiddenError
 from app.domain.models.scope import Principal
 from app.domain.models.user import GlobalRole
 from app.interfaces.auth_dependencies import (

@@ -13,7 +13,7 @@ import { plexMono, plexSans } from "@/fonts";
 
 import "./globals.css";
 
-const themeInitScript = `(function(){try{var t=localStorage.getItem("opencitadel-theme")||localStorage.getItem("my-manus-theme");var dark=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(dark)document.documentElement.classList.add("dark");}catch(e){}})();`;
+const themeInitScript = `(function(){try{var t=localStorage.getItem("opencitadel-theme");var dark=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(dark)document.documentElement.classList.add("dark");}catch(e){}})();`;
 
 export const viewport: Viewport = {
   width: "device-width",

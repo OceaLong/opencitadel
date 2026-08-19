@@ -11,7 +11,7 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.application.security.authorization_context import (
     reset_authorization_context,
     set_authorization_context,
@@ -146,7 +146,6 @@ _AUDITOR_MUTATIONS = [
         {"name": "Code", "source_type": "files", "file_ids": []},
     ),
     ("POST", "/api/codebases/cb1/source", {"path": "main.py"}),
-    ("POST", "/api/codebases/cb1/reanalyze", None),
     ("POST", "/api/codebases/cb1/snapshots", None),
     (
         "POST",
@@ -458,23 +457,17 @@ class _SnapshotService:
         return self.codebase.snapshot_key
 
 
-def test_real_http_download_get_is_read_only_and_post_mutates_exactly_once():
+def test_real_http_snapshot_post_mutates_exactly_once():
     codebase = _SnapshotService()
     app = _http_app(codebase_service=codebase)
 
     with TestClient(app) as client:
-        download = client.get(
-            "/api/codebases/cb1/download",
-            headers={"X-Test-Principal": "owner"},
-        )
         assert codebase.package_calls == 0
         snapshot = client.post(
             "/api/codebases/cb1/snapshots",
             headers={"X-Test-Principal": "owner"},
         )
 
-    assert download.status_code == 200
-    assert download.json()["data"]["snapshot_key"] == "existing.tgz"
     assert snapshot.status_code == 200
     assert snapshot.json()["data"]["snapshot_key"] == "new.tgz"
     assert codebase.package_calls == 1

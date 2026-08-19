@@ -208,7 +208,7 @@ export function CodebaseLibrary() {
                         <DropdownMenuItem
                           onSelect={async () => {
                             try {
-                              const data = await codebaseApi.download(cb.id);
+                              const data = await codebaseApi.createSnapshot(cb.id);
                               toast.success(t("downloadSuccess", { key: data.snapshot_key }));
                             } catch (err) {
                               toast.error(err instanceof Error ? err.message : t("downloadFailed"));

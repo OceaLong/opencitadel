@@ -49,7 +49,6 @@ class KnowledgeBase(BaseModel):
     ingest_task_id: Optional[str] = None
     error: Optional[str] = None
     vector_degraded: bool = False
-    legacy_v1_migrated: bool = False
     active_version_id: Optional[str] = None
     ready_doc_count: int = 0
     settings: Dict[str, Any] = Field(default_factory=dict)
@@ -86,7 +85,7 @@ class KnowledgeChunk(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     kb_id: str
     doc_id: str
-    version_id: Optional[str] = None
+    version_id: str
     parent_id: Optional[str] = None
     level: ChunkLevel = ChunkLevel.CHILD
     content: str = ""
@@ -104,7 +103,7 @@ class KnowledgeChunk(BaseModel):
 class KnowledgeEntity(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     kb_id: str
-    version_id: Optional[str] = None
+    version_id: str
     name: str
     normalized_name: str = ""
     type: str = ""
@@ -114,7 +113,7 @@ class KnowledgeEntity(BaseModel):
 class KnowledgeRelation(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     kb_id: str
-    version_id: Optional[str] = None
+    version_id: str
     src_entity_id: str
     dst_entity_id: str
     relation: str = ""
@@ -124,7 +123,7 @@ class KnowledgeRelation(BaseModel):
 class KnowledgeEntityRef(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     kb_id: str
-    version_id: Optional[str] = None
+    version_id: str
     entity_id: str
     doc_id: str
 

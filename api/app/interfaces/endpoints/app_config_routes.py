@@ -40,7 +40,7 @@ async def get_section(
         app_config_service: AppConfigService = Depends(get_app_config_service),
 ) -> Response[Dict[str, Any]]:
     if section in GLOBAL_ONLY_SECTIONS and not ctx.principal.is_admin:
-        from app.application.errors.exceptions import ForbiddenError
+        from app.domain.errors import ForbiddenError
         raise ForbiddenError("仅管理员可查看该配置段")
     data = await app_config_service.get_section(
         section,
@@ -63,7 +63,7 @@ async def update_section(
 ) -> Response[Dict[str, Any]]:
     is_admin = ctx.principal.is_admin
     if section not in USER_OVERRIDABLE_SECTIONS and not is_admin:
-        from app.application.errors.exceptions import ForbiddenError
+        from app.domain.errors import ForbiddenError
         raise ForbiddenError("仅管理员可修改该配置段")
     updated = await app_config_service.update_section(
         section,
@@ -108,7 +108,7 @@ async def list_revisions(
             owner_user_id = ctx.principal.user_id
             scope = "user"
     if owner_user_id and owner_user_id != ctx.principal.user_id and not ctx.principal.is_admin:
-        from app.application.errors.exceptions import ForbiddenError
+        from app.domain.errors import ForbiddenError
         raise ForbiddenError("无权查看其他用户的配置历史")
     if scope == "user" and not owner_user_id:
         owner_user_id = ctx.principal.user_id
@@ -197,7 +197,7 @@ async def create_mcp_servers(
     if not ctx.principal.is_admin:
         for cfg in mcp_config.mcpServers.values():
             if cfg.transport == MCPTransport.STDIO:
-                from app.application.errors.exceptions import ForbiddenError
+                from app.domain.errors import ForbiddenError
                 raise ForbiddenError("仅管理员可配置 stdio 类型的 MCP 服务")
     await app_config_service.update_and_create_mcp_servers(
         mcp_config,
@@ -222,7 +222,7 @@ async def update_mcp_server(
     if not ctx.principal.is_admin:
         cfg = mcp_config.mcpServers.get(server_name)
         if cfg and cfg.transport == MCPTransport.STDIO:
-            from app.application.errors.exceptions import ForbiddenError
+            from app.domain.errors import ForbiddenError
             raise ForbiddenError("仅管理员可配置 stdio 类型的 MCP 服务")
     await app_config_service.update_mcp_server(
         server_name,

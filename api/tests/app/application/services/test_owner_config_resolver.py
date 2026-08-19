@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import pytest
 
-from app.application.errors.exceptions import BadRequestError, ForbiddenError
+from app.domain.errors import BadRequestError, ForbiddenError
 from app.application.services.integration_server_service import (
     A2AServerConfigService,
     MCPServerService,

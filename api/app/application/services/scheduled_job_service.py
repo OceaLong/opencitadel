@@ -10,9 +10,15 @@ from typing import Callable, List, Optional
 
 from core.config import get_settings
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.application.services.config_provider import get_runtime_config
 from app.application.services.patrol_run_service import PatrolRunService
+from app.application.services.resource_binding_service import (
+    ResourceBindingService,
+)
+from app.application.services.resource_guard_service import (
+    ResourceGuardService,
+)
 from app.domain.models.patrol import PatrolTriggerType
 from app.domain.models.scheduled_job import ScheduledJob, NotifyChannel
 from app.domain.models.scope import OwnerScope, OwnerScopeType
@@ -35,9 +41,17 @@ _TERMINAL_STATUS_MAP = {
 
 
 class ScheduledJobService:
-    def __init__(self, uow_factory: Callable[[], IUnitOfWork], patrol_run_service: PatrolRunService | None = None) -> None:
+    def __init__(
+            self,
+            uow_factory: Callable[[], IUnitOfWork],
+            patrol_run_service: PatrolRunService | None = None,
+            resource_guard: ResourceGuardService | None = None,
+            resource_binding_service: ResourceBindingService | None = None,
+    ) -> None:
         self._uow_factory = uow_factory
         self._patrol_run_service = patrol_run_service
+        self._resource_guard = resource_guard
+        self._resource_binding_service = resource_binding_service
 
     @staticmethod
     def _cipher() -> ApiKeyCipher:
@@ -331,16 +345,32 @@ class ScheduledJobService:
                 await uow.scheduled_job.save(job)
             return run.session_id
 
+        scope = self._scope_for_job(job)
         async with self._uow_factory() as uow:
-            await self._validate_resource_access(uow, job, self._scope_for_job(job))
+            await self._validate_resource_access(uow, job, scope)
+
+        validated_resources = None
+        if job.codebase_id or job.knowledge_base_id:
+            if not self._resource_guard or not self._resource_binding_service:
+                raise BadRequestError(
+                    "Scheduled job resource binding is unavailable"
+                )
+            validated_resources = (
+                await self._resource_guard.validate_session_request(
+                    mode=SessionMode.AGENT,
+                    codebase_id=job.codebase_id,
+                    codebase_version_id=None,
+                    knowledge_base_id=job.knowledge_base_id,
+                    knowledge_base_version_id=None,
+                    scope=scope,
+                )
+            )
 
         prompt = render_prompt_template(job.prompt_template, payload)
         session = Session(
             title=f"[定时] {job.name}",
             model_id=job.model_id,
             skill_id=job.skill_id,
-            codebase_id=job.codebase_id,
-            knowledge_base_id=job.knowledge_base_id,
             owner_user_id=job.owner_user_id,
             team_id=job.team_id,
             operator_scope=job.operator_scope,
@@ -354,6 +384,20 @@ class ScheduledJobService:
 
         async with self._uow_factory() as uow:
             await uow.session.save(session)
+            if validated_resources:
+                for version in validated_resources.versions:
+                    binding = await (
+                        self._resource_binding_service.bind_initial_resolved(
+                            uow,
+                            session_id=session.id,
+                            resolved=version,
+                            scope=scope,
+                            actor_id=scope.user_id,
+                        )
+                    )
+                    session.resource_bindings.append(
+                        binding.to_projection()
+                    )
             await uow.session.update_status(session.id, SessionStatus.RUNNING)
             await uow.commit()
 

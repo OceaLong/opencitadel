@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
-from app.application.errors.exceptions import AppException
+from app.domain.errors import AppException
 from app.infrastructure.observability.logging_context import get_request_id
 from app.interfaces.schemas import Response
 

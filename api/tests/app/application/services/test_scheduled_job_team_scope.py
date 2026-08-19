@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import pytest
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.application.services.scheduled_job_service import ScheduledJobService
 from app.domain.models.scope import OwnerScope
 

@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { useSessionEventLog } from "@/hooks/use-session-event-log";
 import { useSessionMeta } from "@/hooks/use-session-meta";
-import { type SessionStreamStatus,useSessionStreams } from "@/hooks/use-session-streams";
+import { type SessionStreamStatus, useSessionStreams } from "@/hooks/use-session-streams";
 import type {
   ClarifyAnswer,
   SessionCheckpoint,
@@ -58,6 +58,18 @@ export function useSessionDetail(
   const markSessionMissingRef = useRef<(() => void) | null>(null);
   const setErrorRef = useRef<((err: Error | null) => void) | null>(null);
   const resetMetaRef = useRef<(() => void) | null>(null);
+  const resetEventsRef = useRef<(() => void) | null>(null);
+  const refreshRef = useRef<(() => Promise<void>) | null>(null);
+
+  const handleSessionMissing = useCallback(
+    (err: unknown) => {
+      markSessionMissingRef.current?.();
+      resetStreamsRef.current?.();
+      resetMetaRef.current?.();
+      setErrorRef.current?.(err instanceof Error ? err : new Error(t("sessionNotFound")));
+    },
+    [t],
+  );
 
   const {
     session,
@@ -71,12 +83,7 @@ export function useSessionDetail(
     updateSessionConfig,
     applySessionPatch,
     resetMeta,
-  } = useSessionMeta(sessionId, (err) => {
-    markSessionMissingRef.current?.();
-    resetStreamsRef.current?.();
-    resetMetaRef.current?.();
-    setErrorRef.current?.(err instanceof Error ? err : new Error(t("sessionNotFound")));
-  });
+  } = useSessionMeta(sessionId, handleSessionMissing);
 
   const {
     events,
@@ -98,6 +105,10 @@ export function useSessionDetail(
 
   const streamIncludeDebugRef = useRef(false);
 
+  const handleDebugModeChange = useCallback((enabled: boolean) => {
+    streamIncludeDebugRef.current = enabled;
+  }, []);
+
   const reconnect = useCallback(async () => {
     await refreshMeta();
     try {
@@ -111,12 +122,7 @@ export function useSessionDetail(
     sessionId,
     sessionStatus: session?.status,
     appendEvent,
-    onSessionMissing: (err) => {
-      markSessionMissingRef.current?.();
-      resetStreamsRef.current?.();
-      resetMetaRef.current?.();
-      setError(err instanceof Error ? err : new Error(t("sessionNotFound")));
-    },
+    onSessionMissing: handleSessionMissing,
     applySessionPatch,
     setError,
     lastEventIdRef,
@@ -124,14 +130,14 @@ export function useSessionDetail(
     initialEventsLoaded,
     skipEmptyStream: initialSkipEmptyStream,
     onReconnect: reconnect,
-    onDebugModeChange: (enabled) => {
-      streamIncludeDebugRef.current = enabled;
-    },
+    onDebugModeChange: handleDebugModeChange,
   });
 
   useEffect(() => {
     setErrorRef.current = setError;
     resetMetaRef.current = resetMeta;
+    resetEventsRef.current = resetEvents;
+    refreshRef.current = refresh;
     resetStreamsRef.current = streams.resetStreams;
     markSessionMissingRef.current = streams.markSessionMissing;
   });
@@ -142,20 +148,20 @@ export function useSessionDetail(
 
   const refetchEventsWithDebug = useCallback(async () => {
     streamIncludeDebugRef.current = true;
-    await loadEventsPage(true);
-  }, [loadEventsPage]);
+    await syncMissingEvents(true);
+  }, [syncMissingEvents]);
 
   useEffect(() => {
     if (!sessionId) {
-      resetMeta();
-      resetEvents();
-      streams.resetStreams();
+      resetMetaRef.current?.();
+      resetEventsRef.current?.();
+      resetStreamsRef.current?.();
       return;
     }
-    resetEvents();
-    void refresh();
+    resetEventsRef.current?.();
+    void refreshRef.current?.();
     return () => {
-      streams.resetStreams();
+      resetStreamsRef.current?.();
     };
   }, [sessionId]);
 

@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, delete
 
-from app.application.errors.exceptions import NotFoundError, ServerRequestsError
+from app.domain.errors import NotFoundError, ServerRequestsError
 from app.domain.models.app_config import AppConfig
 from app.domain.models.app_config_revision import AppConfigRevision
 from app.domain.models.app_config_scope import (
@@ -50,12 +50,6 @@ class DbAppConfigRepository(AppConfigRepository):
         except Exception as exc:
             logger.error("读取用户配置覆盖失败: %s", exc)
             raise ServerRequestsError("读取用户配置覆盖失败，请稍后尝试") from exc
-
-    async def load(self) -> Optional[AppConfig]:
-        return await self.load_global()
-
-    async def save(self, app_config: AppConfig) -> None:
-        await self.save_global(app_config)
 
     async def save_global(
         self,

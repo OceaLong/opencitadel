@@ -8,7 +8,7 @@ auditor-facing JSON document. Read-only: no new tables, no new writes.
 """
 from typing import Any, Callable, Dict, Optional
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.application.services.audit_service import AuditService, sanitize_audit_metadata
 from app.domain.models.audit_log import AuditLog
 from app.domain.models.checkpoint import Checkpoint

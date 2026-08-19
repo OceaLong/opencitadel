@@ -36,7 +36,7 @@ naming, so they remain overridden per resource.
 """
 from typing import Any, Optional
 
-from app.application.errors.exceptions import ConflictError
+from app.domain.errors import ConflictError
 from app.domain.models.resource_governance import (
     BuildState,
     ResourceBuild,

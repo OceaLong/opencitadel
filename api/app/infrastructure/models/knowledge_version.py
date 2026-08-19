@@ -123,11 +123,6 @@ class KnowledgeBaseVersionORM(Base):
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )
-    legacy_snapshot: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        server_default=text("false"),
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -148,7 +143,6 @@ class KnowledgeBaseVersionORM(Base):
             capabilities=dict(self.capabilities or {}),
             degraded_reasons=list(self.degraded_reasons or []),
             metrics=dict(self.metrics or {}),
-            legacy_snapshot=self.legacy_snapshot,
             created_at=self.created_at,
             published_at=self.published_at,
         )
@@ -167,7 +161,6 @@ class KnowledgeBaseVersionORM(Base):
             capabilities=mutable_json_value(version.capabilities),
             degraded_reasons=mutable_json_value(version.degraded_reasons),
             metrics=mutable_json_value(version.metrics),
-            legacy_snapshot=version.legacy_snapshot,
             created_at=version.created_at,
             published_at=version.published_at,
         )

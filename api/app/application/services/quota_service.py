@@ -5,7 +5,7 @@ from typing import Callable
 
 from sqlalchemy import func, select
 
-from app.application.errors.exceptions import TooManyRequestsError
+from app.domain.errors import TooManyRequestsError
 from app.domain.repositories.uow import IUnitOfWork
 from app.infrastructure.models.file import FileModel
 from app.infrastructure.models.llm_token_usage import LLMTokenUsageORM

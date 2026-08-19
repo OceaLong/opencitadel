@@ -7,8 +7,6 @@ import pytest
 from app.domain.models.knowledge_base import (
     KnowledgeBase,
     KnowledgeChunk,
-    KnowledgeEntity,
-    KnowledgeEntityRef,
 )
 from app.domain.models.scope import OwnerScope
 from app.infrastructure.repositories import (
@@ -40,6 +38,7 @@ def _chunk(i: int, with_embedding: bool) -> KnowledgeChunk:
         id=f"c{i}",
         kb_id="kb1",
         doc_id="d1",
+        version_id="v1",
         content=f"content {i}",
         embedding=[0.1, 0.2] if with_embedding else [],
     )
@@ -81,6 +80,38 @@ async def test_save_chunks_empty_is_noop():
     repo = DBKnowledgeBaseRepository(db_session=session)
     await repo.save_chunks([])
     assert session.calls == []
+
+
+@pytest.mark.anyio
+async def test_delete_kb_removes_restricted_revision_chain_first():
+    session = _RecordingSession()
+    repo = DBKnowledgeBaseRepository(db_session=session)
+
+    await repo.delete_kb("kb1")
+
+    statements = [sql for sql, _params in session.calls]
+    assert len(statements) == 3
+    assert "DELETE FROM knowledge_base_version_documents" in statements[0]
+    assert "knowledge_base_version_documents.knowledge_base_id" in statements[0]
+    assert "DELETE FROM knowledge_document_revisions" in statements[1]
+    assert "SELECT knowledge_documents.id" in statements[1]
+    assert "knowledge_documents.kb_id" in statements[1]
+    assert "DELETE FROM knowledge_bases" in statements[2]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("with_embedding", [False, True])
+async def test_save_chunks_types_nullable_tsvector_bind(with_embedding):
+    session = _RecordingSession()
+    repo = DBKnowledgeBaseRepository(db_session=session)
+
+    await repo.save_chunks([_chunk(1, with_embedding=with_embedding)])
+
+    sql = " ".join(session.calls[0][0].split())
+    assert "COALESCE(" in sql
+    assert "CAST(:content_tsv AS tsvector)" in sql
+    assert "to_tsvector('simple', :segmented_content)" in sql
+    assert "WHEN :content_tsv IS NULL" not in sql
 
 
 class _FakeResult:
@@ -133,43 +164,6 @@ async def test_get_kb_for_update_uses_owner_scoped_row_lock():
     sql, _ = session.calls[0]
     assert "FOR UPDATE" in sql
     assert "owner_user_id" in sql
-
-@pytest.mark.anyio
-async def test_upsert_entities_reuses_existing_ids_and_inserts_new():
-    existing = SimpleNamespace(id="e-old", name="OpenCitadel")
-    session = _RecordingSession(results=[_FakeResult(scalars_all=[existing])])
-    repo = DBKnowledgeBaseRepository(db_session=session)
-    entities = [
-        KnowledgeEntity(id="e-new-1", kb_id="kb1", name="opencitadel"),  # 与已有实体同名（忽略大小写）
-        KnowledgeEntity(id="e-new-2", kb_id="kb1", name="RAG"),
-    ]
-
-    id_map = await repo.upsert_entities(entities)
-
-    assert id_map == {"opencitadel": "e-old", "rag": "e-new-2"}
-    assert [obj.id for obj in session.added] == ["e-new-2"]  # 只插入新实体
-
-
-@pytest.mark.anyio
-async def test_upsert_entities_empty_returns_empty_map():
-    session = _RecordingSession()
-    repo = DBKnowledgeBaseRepository(db_session=session)
-    assert await repo.upsert_entities([]) == {}
-    assert session.calls == []
-
-
-@pytest.mark.anyio
-async def test_save_entity_refs_uses_on_conflict_do_nothing():
-    session = _RecordingSession(results=[_FakeResult()])
-    repo = DBKnowledgeBaseRepository(db_session=session)
-    refs = [KnowledgeEntityRef(kb_id="kb1", entity_id="e1", doc_id="d1")]
-
-    await repo.save_entity_refs(refs)
-
-    sql, params = session.calls[0]
-    assert "ON CONFLICT (entity_id, doc_id) DO NOTHING" in sql
-    assert len(params) == 1
-
 
 @pytest.mark.anyio
 async def test_purge_documents_deletes_zero_ref_entities_from_candidates_only():

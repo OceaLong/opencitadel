@@ -10,7 +10,7 @@ from app.application.dto.codebase_build import (
     CodebaseVersionHistoryProjection,
     CodebaseVersionProjection,
 )
-from app.application.errors.exceptions import (
+from app.domain.errors import (
     BadRequestError,
     ConflictError,
     NotFoundError,
@@ -419,10 +419,10 @@ class CodebaseService(ResourceBuildSupport, IngestTaskSupport):
                 build_id=retry_build.id,
                 state=CodebaseVersionState.BUILDING,
             )
+            retry_build = await uow.resource_governance.add_build(retry_build)
             retry_version = await uow.codebase_version.add_version(
                 retry_version
             )
-            retry_build = await uow.resource_governance.add_build(retry_build)
             codebase.status = CodebaseStatus.PENDING
             codebase.ingest_task_id = retry_build.id
             codebase.error = None
@@ -521,20 +521,6 @@ class CodebaseService(ResourceBuildSupport, IngestTaskSupport):
         await self._task_state.request_cancel(build.id)
         return projection
 
-    async def get_download_snapshot_key(
-            self,
-            codebase_id: str,
-            *,
-            scope: Optional[OwnerScope] = None,
-    ) -> str:
-        codebase = await self.get_codebase(codebase_id, scope=scope)
-        version = await self._resolve_source_version(codebase)
-        if version is not None and version.source_snapshot_key:
-            return version.source_snapshot_key
-        if codebase.snapshot_key:
-            return codebase.snapshot_key
-        raise NotFoundError("代码库版本快照不可用")
-
     async def _dispatch_codebase_build(self, build: ResourceBuild) -> None:
         await self._dispatch_ingest_task(build.id, resource_id=build.resource_id)
 
@@ -570,7 +556,6 @@ class CodebaseService(ResourceBuildSupport, IngestTaskSupport):
             capabilities=version.capabilities,
             degraded_reasons=version.degraded_reasons,
             metrics=version.metrics,
-            legacy_snapshot=version.legacy_snapshot,
             created_at=version.created_at,
             published_at=version.published_at,
             is_active=is_active,
@@ -631,7 +616,6 @@ class CodebaseService(ResourceBuildSupport, IngestTaskSupport):
             capabilities=version.capabilities,
             degraded_reasons=version.degraded_reasons,
             metrics=version.metrics,
-            legacy_snapshot=version.legacy_snapshot,
             created_at=version.created_at,
             published_at=version.published_at,
             is_active=version.id == codebase.active_version_id,
@@ -696,7 +680,6 @@ class CodebaseService(ResourceBuildSupport, IngestTaskSupport):
             )
         session = Session(
             title=f"代码库对话",
-            codebase_id=codebase_id,
             mode=mode,
             model_id=model_id,
             skill_id=skill_id,

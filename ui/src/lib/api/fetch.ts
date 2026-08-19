@@ -1,5 +1,4 @@
-import { ACTIVE_WORKSPACE_KEY, LEGACY_ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
-import { readLocalStorageKey } from "@/lib/storage-migration";
+import { ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
 
 import { translate } from "@/i18n/translate";
 
@@ -61,7 +60,7 @@ function readCookie(name: string): string {
 
 function activeWorkspaceId(): string {
   if (typeof window === "undefined") return "";
-  return readLocalStorageKey(LEGACY_ACTIVE_WORKSPACE_KEY, ACTIVE_WORKSPACE_KEY);
+  return window.localStorage.getItem(ACTIVE_WORKSPACE_KEY) ?? "";
 }
 
 let refreshPromise: Promise<unknown> | null = null;
@@ -659,9 +658,10 @@ function processSSEEvent(
     // 忽略其他行（如 retry:、comment 等）
   }
 
-  if (eventData) {
+  const normalizedEventData = eventData.trim();
+  if (normalizedEventData) {
     try {
-      const data = JSON.parse(eventData.trim());
+      const data = JSON.parse(normalizedEventData);
       onEvent(
         new MessageEvent(eventType, {
           data,

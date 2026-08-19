@@ -16,8 +16,7 @@ Ask/Agent 绑定、混合检索、有证据的分析产物、重建恢复、兼�
 | 重试 / 取消 | `POST /api/codebases/{id}/builds/{build_id}/retry`、`/cancel` | 只允许同代码库 build/version 闭包 |
 | 版本源码 | `POST /api/codebases/{id}/versions/{version_id}/source` | 读取该已发布版本的不可变 snapshot |
 | 版本产物 | `GET /api/codebases/{id}/versions/{version_id}/artifacts` | 返回该版本有证据支撑的产物 |
-| 兼容重建 | `POST /api/codebases/{id}/reanalyze` | 一个版本窗口内作为 `POST /builds` 适配器 |
-| 兼容下载 | `GET /api/codebases/{id}/download` | 只读查询现有 active-version snapshot key |
+| 创建下载快照 | `POST /api/codebases/{id}/snapshots` | 以显式写操作打包并持久化 snapshot key |
 
 Ask 与 Agent 会话创建时都会携带明确的 `codebase_version_id`。已有会话在
 新版本发布后仍继续读取绑定版本。
@@ -123,12 +122,7 @@ lexical 结果，并返回可见降级信息：
 不支持的视图记录在版本 metrics 和 capabilities 中。UI 展示 unsupported
 reason，而不是渲染泛化模板图。
 
-## 兼容与恢复
-
-一个版本窗口内保留兼容路由：
-
-- `/reanalyze` 创建或返回 build，然后返回 codebase 形状。
-- `/download` 读取现有 active-version snapshot key，不打包也不修改数据库。
+## 恢复
 
 Worker reconciliation 可以把 stale candidate/build 标记失败，但除非
 candidate 通过发布 CAS，否则不得改变 active version。retry 会基于当前

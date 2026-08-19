@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from prometheus_client import REGISTRY
 
-from app.application.errors.exceptions import BadRequestError, ConflictError, NotFoundError
+from app.domain.errors import BadRequestError, ConflictError, NotFoundError
 from app.application.patrol_templates import load_patrol_template
 from app.application.services.patrol_remediation_service import PatrolRemediationService
 from app.domain.models.app_config import AppConfig

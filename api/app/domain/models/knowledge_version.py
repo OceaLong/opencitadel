@@ -121,7 +121,6 @@ class KnowledgeBaseVersion(BaseModel):
     capabilities: FrozenMapping = Field(default_factory=FrozenMapping)
     degraded_reasons: tuple[str, ...] = ()
     metrics: FrozenMapping = Field(default_factory=FrozenMapping)
-    legacy_snapshot: bool = False
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

@@ -71,7 +71,6 @@ class KnowledgeVersionProjection(BaseModel):
     capabilities: FrozenMapping = Field(default_factory=FrozenMapping)
     degraded_reasons: tuple[str, ...] = ()
     metrics: FrozenMapping = Field(default_factory=FrozenMapping)
-    legacy_snapshot: bool = False
     created_at: datetime
     published_at: Optional[datetime] = None
     is_active: bool = False

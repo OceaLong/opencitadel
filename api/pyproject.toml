@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.16.5",
+    "argon2-cffi>=25.1.0",
     "authlib>=1.6.5",
     "async-lru>=2.0.5",
     "asyncpg>=0.30.0",
@@ -17,10 +18,10 @@ dependencies = [
     "fastapi>=0.130.0",
     "filelock>=3.20.0",
     "httpx>=0.28.1",
+    "itsdangerous>=2.2.0",
     "json-repair>=0.53.0",
     "openai>=1.107.2",
     "pillow>=11.0.0",
-    "passlib[argon2]>=1.7.4",
     "pypdf>=5.0.0",
     "psycopg2-binary>=2.9.10",
     "pydantic>=2.11.9",
@@ -38,13 +39,10 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.50b0",
     "pymupdf>=1.27.2.3",
     "pgvector>=0.3.6",
-    "pdf2docx>=0.5.13",
     "python-docx>=1.2.0",
-    "markdown>=3.10.2",
     "weasyprint>=63.0",
     "dependency-injector>=4.49.0",
     "psutil>=6.1.0",
-    "itsdangerous>=2.2.0",
 ]
 
 [project.optional-dependencies]
@@ -54,7 +52,7 @@ k8s = [
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
+    "httpx2>=2.12.0,<3",
     "import-linter>=2.13",
     "pytest>=8.4.2",
     "pytest-asyncio>=0.25.0",

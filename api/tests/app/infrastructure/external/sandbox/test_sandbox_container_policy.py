@@ -33,3 +33,20 @@ def test_dynamic_sandbox_policy_is_non_root_ephemeral_and_resource_bounded():
     assert "/home/ubuntu" in config["tmpfs"]
     assert "/tmp" in config["tmpfs"]
     assert config["init"] is True
+
+
+def test_hardened_dynamic_sandbox_disables_chromium_inner_sandbox():
+    config = build_docker_sandbox_config(
+        SandboxRuntimeSettings(
+            image="sandbox:test",
+            chrome_args="--proxy-server=http://egress:3128",
+        ),
+        "opencitadel-sandbox-12345678",
+    )
+
+    assert config["cap_drop"] == ["ALL"]
+    assert "no-new-privileges:true" in config["security_opt"]
+    assert config["environment"]["CHROME_ARGS"].split() == [
+        "--proxy-server=http://egress:3128",
+        "--no-sandbox",
+    ]

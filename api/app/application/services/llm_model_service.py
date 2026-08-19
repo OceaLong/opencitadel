@@ -3,7 +3,7 @@
 import logging
 from typing import Callable, List, Optional
 
-from app.application.errors.exceptions import (
+from app.domain.errors import (
     BadRequestError,
     ForbiddenError,
     NotFoundError,

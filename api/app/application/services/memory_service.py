@@ -3,7 +3,7 @@
 import logging
 from typing import Callable, Dict, List, Optional
 
-from app.application.errors.exceptions import NotFoundError, BadRequestError
+from app.domain.errors import NotFoundError, BadRequestError
 from app.application.services.config_provider import get_runtime_config
 from app.domain.utils.memory_recall import rank_entries_with_decay
 from app.domain.models.memory import Memory

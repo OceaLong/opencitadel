@@ -32,6 +32,12 @@ def test_entity_ref_table_shape():
 
 
 def test_entity_ref_to_domain():
-    record = KnowledgeEntityRefModel(id="r1", kb_id="kb1", entity_id="e1", doc_id="d1")
+    record = KnowledgeEntityRefModel(
+        id="r1",
+        kb_id="kb1",
+        version_id="v1",
+        entity_id="e1",
+        doc_id="d1",
+    )
     domain = record.to_domain()
     assert (domain.id, domain.kb_id, domain.entity_id, domain.doc_id) == ("r1", "kb1", "e1", "d1")

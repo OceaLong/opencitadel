@@ -158,8 +158,6 @@ def _session_row(*, id: str, mode: str, created_at: datetime) -> SessionModel:
         model_id=None,
         skill_id=None,
         thinking_enabled=False,
-        codebase_id=None,
-        knowledge_base_id=None,
         owner_user_id=None,
         team_id=None,
         mode=mode,

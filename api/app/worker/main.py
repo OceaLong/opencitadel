@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Standalone agent worker: consumes task dispatch queue and runs AgentTaskRunner."""
 import asyncio
+import inspect
 import logging
 import signal
 import socket
@@ -11,6 +12,7 @@ from enum import Enum
 
 from app.application.services.bootstrap_service import bootstrap_data
 from app.application.services.config_provider import get_runtime_config
+from app.application.services.resource_build_service import ResourceBuildService
 from app.application.services.task_runner_factory import TaskRunnerFactory
 from app.container import get_worker_container, init_worker_container, shutdown_worker_container
 from app.domain.external.sandbox import Sandbox
@@ -63,6 +65,13 @@ set_role(ProcessRole.WORKER)
 logger = logging.getLogger(__name__)
 
 _KB_INGEST_SESSION_PREFIX = "kb-ingest:"
+
+
+async def _resolve_resource_build_service(container) -> ResourceBuildService:
+    service = container.resource_build_service()
+    if inspect.isawaitable(service):
+        service = await service
+    return service
 
 
 async def _finalize_kb_ingest_failure(kb_id: str, error: str) -> None:
@@ -393,7 +402,9 @@ class AgentWorker:
             )
             return
 
-        build_service = get_worker_container().resource_build_service()
+        build_service = await _resolve_resource_build_service(
+            get_worker_container()
+        )
         runner = KBIngestionRunner(
             uow_factory=get_uow,
             file_storage=getattr(self, "_file_storage", None),
@@ -783,7 +794,9 @@ class AgentWorker:
                 await KBIngestionRunner(
                     uow_factory=get_uow,
                     file_storage=self._file_storage,
-                    build_service=container.resource_build_service(),
+                    build_service=await _resolve_resource_build_service(
+                        container
+                    ),
                 ).cancel(task_id)
             await self._task_state.set_status(
                 task_id,
@@ -969,6 +982,7 @@ class AgentWorker:
         except Exception as exc:
             logger.warning("知识库摄取 OCR LLM 不可用: %s", exc)
         container = get_worker_container()
+        build_service = await _resolve_resource_build_service(container)
         runner = KBIngestionTaskRunner(
             uow_factory=get_uow,
             file_storage=self._file_storage,
@@ -976,7 +990,7 @@ class AgentWorker:
             llm=llm,
             ocr_llm=ocr_llm,
             json_parser=container.json_parser(),
-            build_service=container.resource_build_service(),
+            build_service=build_service,
         )
         task = self._task_cls(
             task_id=task_id,

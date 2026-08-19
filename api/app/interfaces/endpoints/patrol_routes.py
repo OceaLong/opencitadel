@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import StreamingResponse
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.application.services.patrol_evidence_service import PatrolEvidenceService
 from app.application.patrol_templates import load_patrol_template
 from app.application.services.patrol_pack_service import PatrolPackService

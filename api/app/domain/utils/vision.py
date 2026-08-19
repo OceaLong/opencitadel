@@ -5,7 +5,7 @@ import base64
 import logging
 from typing import Any, Dict, List, Optional, Union
 
-from app.domain.models.message import MediaAttachment, VisionAttachment
+from app.domain.models.message import MediaAttachment, MediaAttachment
 from app.domain.models.multimodal import CONTENT_TYPE_IMAGE_URL
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ def build_image_content_part_from_base64(data_base64: str, mime_type: str) -> Di
     return build_image_content_part(base64.b64decode(data_base64), mime_type)
 
 
-def vision_attachment_byte_size(attachment: Union[VisionAttachment, MediaAttachment]) -> int:
+def vision_attachment_byte_size(attachment: Union[MediaAttachment, MediaAttachment]) -> int:
     """估算 vision 附件解码后的原始字节大小。"""
     if not attachment.data_base64:
         return 0
@@ -54,12 +54,12 @@ def vision_attachment_byte_size(attachment: Union[VisionAttachment, MediaAttachm
 
 
 def filter_valid_vision_attachments(
-        vision_attachments: Optional[List[Union[VisionAttachment, MediaAttachment]]] = None,
+        vision_attachments: Optional[List[Union[MediaAttachment, MediaAttachment]]] = None,
         *,
         max_bytes: int = MAX_VISION_IMAGE_BYTES,
-) -> List[Union[VisionAttachment, MediaAttachment]]:
+) -> List[Union[MediaAttachment, MediaAttachment]]:
     """过滤无效或过大的图片附件，避免多模态请求长时间阻塞。"""
-    valid: List[Union[VisionAttachment, MediaAttachment]] = []
+    valid: List[Union[MediaAttachment, MediaAttachment]] = []
     for attachment in vision_attachments or []:
         media_type = getattr(attachment, "media_type", "image")
         if media_type != "image" and not is_image_mime(attachment.mime_type):
@@ -89,7 +89,7 @@ def filter_valid_vision_attachments(
 
 def build_user_message(
         text: str,
-        vision_attachments: Optional[List[Union[VisionAttachment, MediaAttachment]]] = None,
+        vision_attachments: Optional[List[Union[MediaAttachment, MediaAttachment]]] = None,
         *,
         supports_multimodal: bool = False,
         llm=None,

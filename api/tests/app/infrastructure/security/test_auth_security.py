@@ -4,7 +4,7 @@ import pytest
 import jwt
 from datetime import datetime
 
-from app.application.errors.exceptions import UnauthorizedError
+from app.domain.errors import UnauthorizedError
 from app.application.services.auth_service import AuthService
 from app.domain.models.refresh_token import RefreshToken
 from app.domain.models.user import User, UserStatus
@@ -20,6 +20,18 @@ def test_password_hasher_hashes_and_verifies_password():
     assert password_hash != "correct horse battery staple"
     assert hasher.verify("correct horse battery staple", password_hash)
     assert not hasher.verify("wrong", password_hash)
+
+
+def test_password_hasher_verifies_existing_argon2id_hash():
+    hasher = PasswordHasher()
+    existing_hash = (
+        "$argon2id$v=19$m=65536,t=3,p=4$kawm5JfXoOCU27tt0qoIMA$"
+        "BFnFIP1yC3CHjVEOp5z6phW344/2eZDNtSNv4bRwg4w"
+    )
+
+    assert hasher.verify("correct horse battery staple", existing_hash)
+    assert not hasher.verify("wrong", existing_hash)
+    assert not hasher.verify("correct horse battery staple", "not-a-hash")
 
 
 def test_jwt_service_issues_typed_tokens_with_version():

@@ -5,7 +5,7 @@ from typing import List, Dict, Any, AsyncGenerator, Union
 
 from openai import AsyncOpenAI
 
-from app.application.errors.exceptions import ServerRequestsError
+from app.domain.errors import ServerRequestsError
 from app.domain.external.llm import LLM
 from app.domain.utils.llm_retry import is_quota_exhausted_error
 from app.domain.models.llm_model import LLMModel, ModelCapabilities, LLMProvider

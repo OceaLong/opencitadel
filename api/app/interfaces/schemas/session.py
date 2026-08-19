@@ -80,8 +80,6 @@ class ListSessionItem(BaseModel):
     latest_message_at: Optional[datetime] = Field(default_factory=datetime.now)
     status: SessionStatus = SessionStatus.PENDING
     unread_message_count: int = 0
-    codebase_id: Optional[str] = None
-    knowledge_base_id: Optional[str] = None
     mode: Optional[SessionMode] = None
     resource_bindings: List[ResourceBindingProjection] = Field(default_factory=list)
 
@@ -165,8 +163,6 @@ class GetSessionResponse(BaseModel):
     operator_domains: List[str] = Field(default_factory=list)
     gate_profile: Optional[str] = None
     awaiting_human: bool = False
-    codebase_id: Optional[str] = None
-    knowledge_base_id: Optional[str] = None
     mode: Optional[SessionMode] = None
     resource_bindings: List[ResourceBindingProjection] = Field(default_factory=list)
 

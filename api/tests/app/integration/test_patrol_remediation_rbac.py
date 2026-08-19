@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.application.errors.exceptions import ForbiddenError, NotFoundError
+from app.domain.errors import ForbiddenError, NotFoundError
 from app.application.patrol_templates import load_patrol_template
 from app.application.services.patrol_remediation_service import PatrolRemediationService
 from app.domain.models.app_config import AppConfig

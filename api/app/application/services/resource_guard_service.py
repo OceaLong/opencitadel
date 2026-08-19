@@ -4,7 +4,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.domain.models.codebase import SessionMode
 from app.domain.models.resource_governance import (
     BuildState,

@@ -11,7 +11,7 @@ extra_tools, mcp_config exclusion via exclude_actuator_server).
 import json
 from typing import Callable, Optional
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.domain.external.connection_pool import MCPConnectionPoolPort
 from app.domain.models.app_config import MCPConfig
 from app.domain.models.patrol import PatrolFinding, PatrolRemediation, PatrolRemediationStatus

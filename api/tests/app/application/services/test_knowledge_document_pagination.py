@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.application.errors.exceptions import BadRequestError, NotFoundError
+from app.domain.errors import BadRequestError, NotFoundError
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.domain.models.knowledge_base import (
     ChunkLevel,

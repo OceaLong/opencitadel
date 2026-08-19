@@ -9,7 +9,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 TriggerType = Literal["cron", "interval", "webhook"]
-JobRunStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 ScheduledJobSourceType = Literal["generic", "patrol_pack"]
 
 

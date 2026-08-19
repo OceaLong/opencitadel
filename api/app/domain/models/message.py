@@ -6,9 +6,6 @@ from pydantic import BaseModel, Field
 
 from app.domain.models.multimodal import MediaAttachment
 
-# 向后兼容别名
-VisionAttachment = MediaAttachment
-
 
 class Message(BaseModel):
     """用户传递的消息"""

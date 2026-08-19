@@ -74,7 +74,6 @@ class Codebase(BaseModel):
     ingest_task_id: Optional[str] = None
     error: Optional[str] = None
     vector_degraded: bool = False
-    legacy_v1_migrated: bool = False
     active_version_id: Optional[str] = None
     owner_user_id: Optional[str] = None
     team_id: Optional[str] = None

@@ -9,7 +9,11 @@ import type {
 
 import { toMillis } from "./format";
 
-export const TRANSIENT_EVENT_TYPES = new Set(["message_delta", "reasoning_delta", "tool_args_delta"]);
+export const TRANSIENT_EVENT_TYPES = new Set([
+  "message_delta",
+  "reasoning_delta",
+  "tool_args_delta",
+]);
 
 export function getEventVisibility(ev: SSEEventData): EventVisibility {
   const visibility = (ev.data as { visibility?: EventVisibility })?.visibility;
@@ -86,6 +90,7 @@ export function extractDebugItems(events: SSEEventData[]): DebugItemEvent[] {
 export type SessionErrorItem = {
   id: string;
   message: string;
+  rawMessage?: string;
   source: "tool" | "system";
   toolName?: string;
   code?: string | null;
@@ -93,8 +98,16 @@ export type SessionErrorItem = {
   repeatCount?: number;
 };
 
-function systemErrorMergeKey(code: string | null | undefined, message: string): string {
-  return `${code ?? ""}\0${message}`;
+function systemErrorMergeKey(
+  code: string | null | undefined,
+  message: string,
+  rawMessage?: string,
+): string {
+  return `${code ?? ""}\0${message}\0${rawMessage ?? ""}`;
+}
+
+export function countSessionErrorOccurrences(items: SessionErrorItem[]): number {
+  return items.reduce((total, item) => total + (item.repeatCount ?? 1), 0);
 }
 
 /** 从事件列表提取去重后的错误项（tool.error 与 type: error） */
@@ -111,12 +124,13 @@ export function extractSessionErrors(events: SSEEventData[]): SessionErrorItem[]
       };
       const message = modelErrorMessage(errorData.code) ?? errorData.error;
       if (!message) continue;
+      const rawMessage = errorData.error;
       const timestamp = toMillis(errorData.created_at);
-      const mergeKey = systemErrorMergeKey(errorData.code, message);
+      const mergeKey = systemErrorMergeKey(errorData.code, message, rawMessage);
       const last = items[items.length - 1];
       if (
-        last?.source === "system"
-        && systemErrorMergeKey(last.code, last.message) === mergeKey
+        last?.source === "system" &&
+        systemErrorMergeKey(last.code, last.message, last.rawMessage) === mergeKey
       ) {
         last.repeatCount = (last.repeatCount ?? 1) + 1;
         if (timestamp !== undefined) {
@@ -128,6 +142,7 @@ export function extractSessionErrors(events: SSEEventData[]): SessionErrorItem[]
       items.push({
         id: key,
         message,
+        rawMessage,
         source: "system",
         code: errorData.code,
         timestamp,

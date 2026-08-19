@@ -45,7 +45,6 @@ class CodebaseVersion(BaseModel):
     capabilities: dict[str, bool] = Field(default_factory=dict)
     degraded_reasons: list[str] = Field(default_factory=list)
     metrics: dict[str, Any] = Field(default_factory=dict)
-    legacy_snapshot: bool = False
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

@@ -465,6 +465,8 @@ class BaseContainer(containers.DeclarativeContainer):
         ScheduledJobService,
         uow_factory=uow_factory,
         patrol_run_service=patrol_run_service,
+        resource_guard=resource_guard,
+        resource_binding_service=resource_binding_service,
     )
 
     task_runner_factory = providers.Singleton(

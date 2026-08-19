@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.application.services.resource_binding_service import ResourceBindingService
 from app.application.services.resource_build_service import (
     MAX_EVENT_PAGE_SIZE,

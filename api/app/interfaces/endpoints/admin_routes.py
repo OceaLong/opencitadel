@@ -9,7 +9,7 @@ from pydantic import AfterValidator
 from sqlalchemy import func, select, text
 from starlette.responses import StreamingResponse
 
-from app.application.errors.exceptions import BadRequestError, NotFoundError
+from app.domain.errors import BadRequestError, NotFoundError
 from app.domain.utils.time_utils import to_naive_utc
 from app.application.services.audit_service import AuditService
 from app.application.services.team_service import TeamService

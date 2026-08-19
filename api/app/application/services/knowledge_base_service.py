@@ -14,7 +14,7 @@ from app.application.dto.knowledge_build import (
     KnowledgeVersionHistoryProjection,
     KnowledgeVersionProjection,
 )
-from app.application.errors.exceptions import BadRequestError, ConflictError, NotFoundError
+from app.domain.errors import BadRequestError, ConflictError, NotFoundError
 from app.application.services.ingest_task_support import IngestTaskSupport
 from app.application.services.resource_build_support import (
     ResourceBuildSupport,
@@ -829,7 +829,6 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             capabilities=version.capabilities,
             degraded_reasons=version.degraded_reasons,
             metrics=version.metrics,
-            legacy_snapshot=version.legacy_snapshot,
             created_at=version.created_at,
             published_at=version.published_at,
             is_active=is_active,
@@ -886,7 +885,6 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             capabilities=version.capabilities,
             degraded_reasons=version.degraded_reasons,
             metrics=version.metrics,
-            legacy_snapshot=version.legacy_snapshot,
             created_at=version.created_at,
             published_at=version.published_at,
             is_active=version.id == result.resource.active_version_id,
@@ -950,7 +948,6 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             raise BadRequestError("知识库尚无就绪文档，请等待索引完成后再开始问答")
         session = Session(
             title=f"文档知识库对话 · {kb.name}",
-            knowledge_base_id=kb_id,
             mode=mode,
             model_id=model_id,
             skill_id=skill_id,

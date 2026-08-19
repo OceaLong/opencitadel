@@ -58,23 +58,17 @@ returns the shared publication contract:
 `degraded`, `capabilities`, and `degraded_reasons`. The shared layer does not
 define knowledge-base or codebase domain-version tables.
 
-### Deprecated adapters and one-release window
+### Retired adapters
 
-Deprecated fields and routes stay available for at least one complete release
-after the replacement is generally available. Removal requires migration
-verification and release-note notice; no compatibility adapter may retain a
-write side effect on a GET route.
+The compatibility window for the old codebase snapshot routes, single-call
+approval state, direct session resource columns, and synthetic legacy resource
+versions has ended. Current contracts use `POST /api/codebases/{id}/snapshots`,
+persistent approval batches, immutable `resource_bindings`, and real published
+versions. The contract migration validates and backfills representable rows
+before dropping the retired columns; unresolved rows abort the upgrade.
 
-| Deprecated contract | Replacement and compatibility rule |
-|---------------------|------------------------------------|
-| `GET /api/codebases/{id}/download` as snapshot preparation | It is now a read-only lookup of the existing `snapshot_key`; `POST /api/codebases/{id}/snapshots` is the only snapshot-creation mutation. Keep the GET adapter for one full release, then remove it. |
-| `pending_metadata.pending_tool_call` single-call gate | New writes use persistent approval batches and `pending_metadata.approval_batch_id`. Legacy single-call data remains a read/resume fallback for one full release and must never bypass batch governance. |
-| Direct `codebase_id` / `knowledge_base_id` session fields without immutable history | Creation accepts the existing IDs and optional version IDs during the window, but responses and events expose `resource_bindings`; no automatic upgrade is inferred. |
-| Pre-version ready resources | Only rows explicitly marked `legacy_v1_migrated=true` may resolve synthetic `legacy:<resource_id>`; building, failed, or newly created ready rows never receive this fallback. |
-
-The normal additive API/SSE window remains at least two minor versions. The
-one-release rule above is a minimum retention period for explicitly deprecated
-governance adapters, not permission to break other additive contracts early.
+The normal additive API/SSE compatibility window remains at least two minor
+versions.
 
 ## Related Documentation
 

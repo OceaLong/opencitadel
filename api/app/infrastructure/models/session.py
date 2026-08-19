@@ -71,16 +71,6 @@ class SessionModel(Base):
         nullable=False,
         server_default=text("false"),
     )  # 会话级思考模式
-    codebase_id: Mapped[Optional[str]] = mapped_column(
-        String(255),
-        ForeignKey("codebases.id", ondelete="SET NULL"),
-        nullable=True,
-    )  # 关联代码库
-    knowledge_base_id: Mapped[Optional[str]] = mapped_column(
-        String(255),
-        ForeignKey("knowledge_bases.id", ondelete="SET NULL"),
-        nullable=True,
-    )  # 关联文档知识库
     owner_user_id: Mapped[Optional[str]] = mapped_column(
         String(255),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -179,8 +169,6 @@ class SessionModel(Base):
             "model_id": self.model_id,
             "skill_id": self.skill_id,
             "thinking_enabled": self.thinking_enabled,
-            "codebase_id": self.codebase_id,
-            "knowledge_base_id": self.knowledge_base_id,
             "resource_bindings": [],
             "owner_user_id": self.owner_user_id,
             "team_id": self.team_id,

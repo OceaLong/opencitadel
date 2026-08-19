@@ -12,7 +12,7 @@ import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable, Iterator, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
@@ -111,13 +111,6 @@ class GraphBuildResult:
             and self.degraded_reason is None
         )
 
-    def __iter__(self) -> Iterator[int | str | None]:
-        """Keep the three-value legacy direct-caller unpacking contract."""
-        yield self.entity_count
-        yield self.relation_count
-        yield self.warning
-
-
 class GraphBuilder:
     def __init__(
         self,
@@ -141,7 +134,7 @@ class GraphBuilder:
         kb_id: str,
         parent_chunks: List[KnowledgeChunk],
         *,
-        version_id: str | None = None,
+        version_id: str,
         budget: GraphBudget | None = None,
         resume_cursor: str | None = None,
         checkpoint: Callable[[dict[str, Any]], Awaitable[None]]
@@ -183,33 +176,25 @@ class GraphBuilder:
                 budget=budget,
                 degraded_reason="GRAPH_UNAVAILABLE",
             )
-        if version_id is not None and (
-            not version_id.strip()
-            or any(
-                chunk.kb_id != kb_id
-                or chunk.version_id != version_id
-                for chunk in parent_chunks
-            )
+        if not version_id.strip() or any(
+            chunk.kb_id != kb_id or chunk.version_id != version_id
+            for chunk in parent_chunks
         ):
             raise ValueError(
                 "candidate graph requires exact version-scoped chunks"
             )
 
-        atomic_candidate_upsert = False
-        if version_id is not None:
-            async with self._uow_factory() as uow:
-                atomic_candidate_upsert = callable(
-                    getattr(
-                        uow.knowledge_base,
-                        "upsert_candidate_graph_batch",
-                        None,
-                    )
+        async with self._uow_factory() as uow:
+            atomic_candidate_upsert = callable(
+                getattr(
+                    uow.knowledge_base,
+                    "upsert_candidate_graph_batch",
+                    None,
                 )
+            )
 
         selected, capped_count = self._select_chunks(parent_chunks)
         if resume_cursor is not None:
-            if version_id is None:
-                raise ValueError("graph cursor requires a version")
             cursor_key = _decode_cursor(
                 resume_cursor,
                 kb_id=kb_id,
@@ -560,10 +545,7 @@ class GraphBuilder:
                                     relation.id
                                     for relation in relations
                                 )
-                                if (
-                                    version_id is not None
-                                    and not cursor_blocked
-                                ):
+                                if not cursor_blocked:
                                     next_cursor = _encode_cursor(
                                         kb_id,
                                         version_id,
@@ -647,8 +629,6 @@ class GraphBuilder:
         relation_count = len(persisted_relation_ids)
         if (
             atomic_candidate_upsert
-            and
-            version_id is not None
             and persistence_error is None
             and (succeeded or resume_cursor is not None)
         ):
@@ -740,96 +720,36 @@ class GraphBuilder:
     async def _persist_batch(
         self,
         kb_id: str,
-        version_id: str | None,
+        version_id: str,
         entities: list[KnowledgeEntity],
         relations: list[KnowledgeRelation],
         refs: list[KnowledgeEntityRef],
     ) -> None:
         async with self._uow_factory() as uow:
-            if version_id is not None:
-                await uow.knowledge_base.upsert_candidate_graph_batch(
-                    kb_id,
-                    version_id,
-                    entities,
-                    relations,
-                    refs,
-                )
-                return
-            persisted_ids = await uow.knowledge_base.upsert_entities(
-                entities
+            await uow.knowledge_base.upsert_candidate_graph_batch(
+                kb_id,
+                version_id,
+                entities,
+                relations,
+                refs,
             )
-            temp_identity = {
-                entity.id: entity.normalized_name for entity in entities
-            }
-            for relation in relations:
-                relation.src_entity_id = persisted_ids.get(
-                    temp_identity.get(relation.src_entity_id, ""),
-                    relation.src_entity_id,
-                )
-                relation.dst_entity_id = persisted_ids.get(
-                    temp_identity.get(relation.dst_entity_id, ""),
-                    relation.dst_entity_id,
-                )
-            await uow.knowledge_base.save_relations(relations)
-            remapped_refs = []
-            for ref in refs:
-                normalized_name = temp_identity.get(ref.entity_id)
-                if normalized_name in persisted_ids:
-                    remapped_refs.append(
-                        ref.model_copy(
-                            update={
-                                "entity_id": persisted_ids[normalized_name]
-                            }
-                        )
-                    )
-            await uow.knowledge_base.save_entity_refs(remapped_refs)
 
     async def _persist_aggregate(
         self,
         kb_id: str,
-        version_id: str | None,
+        version_id: str,
         entities: list[KnowledgeEntity],
         relations: list[KnowledgeRelation],
         refs: list[KnowledgeEntityRef],
     ) -> None:
         async with self._uow_factory() as uow:
-            if version_id is not None:
-                await uow.knowledge_base.replace_candidate_graph(
-                    kb_id,
-                    version_id,
-                    entities,
-                    relations,
-                    refs,
-                )
-                return
-            persisted_ids = await uow.knowledge_base.upsert_entities(
-                entities
+            await uow.knowledge_base.replace_candidate_graph(
+                kb_id,
+                version_id,
+                entities,
+                relations,
+                refs,
             )
-            temp_identity = {
-                entity.id: entity.normalized_name for entity in entities
-            }
-            for relation in relations:
-                relation.src_entity_id = persisted_ids.get(
-                    temp_identity.get(relation.src_entity_id, ""),
-                    relation.src_entity_id,
-                )
-                relation.dst_entity_id = persisted_ids.get(
-                    temp_identity.get(relation.dst_entity_id, ""),
-                    relation.dst_entity_id,
-                )
-            await uow.knowledge_base.save_relations(relations)
-            remapped_refs = []
-            for ref in refs:
-                normalized_name = temp_identity.get(ref.entity_id)
-                if normalized_name in persisted_ids:
-                    remapped_refs.append(
-                        ref.model_copy(
-                            update={
-                                "entity_id": persisted_ids[normalized_name]
-                            }
-                        )
-                    )
-            await uow.knowledge_base.save_entity_refs(remapped_refs)
 
     async def _extract_chunk(
         self, chunk: KnowledgeChunk
@@ -882,7 +802,7 @@ def normalize_entity_type(value: str) -> str:
 
 def _graph_batch_from_payload(
     kb_id: str,
-    version_id: str | None,
+    version_id: str,
     chunk: KnowledgeChunk,
     payload: dict[str, Any],
 ) -> tuple[
@@ -892,7 +812,6 @@ def _graph_batch_from_payload(
 ]:
     entity_by_key: dict[tuple[str, str], KnowledgeEntity] = {}
     keys_by_name: dict[str, list[tuple[str, str]]] = {}
-    version_key = version_id or "legacy"
     for item in payload["entities"]:
         name = str(item["name"]).strip()
         normalized_name = normalize_entity_name(name)
@@ -903,7 +822,7 @@ def _graph_batch_from_payload(
             KnowledgeEntity(
                 id=_stable_id(
                     "entity",
-                    version_key,
+                    version_id,
                     normalized_name,
                     entity_type,
                 ),
@@ -938,7 +857,7 @@ def _graph_batch_from_payload(
             KnowledgeRelation(
                 id=_stable_id(
                     "relation",
-                    version_key,
+                    version_id,
                     src.normalized_name,
                     src.type,
                     dst.normalized_name,
@@ -958,7 +877,7 @@ def _graph_batch_from_payload(
         KnowledgeEntityRef(
             id=_stable_id(
                 "entity-ref",
-                version_key,
+                version_id,
                 entity.normalized_name,
                 entity.type,
                 chunk.doc_id,

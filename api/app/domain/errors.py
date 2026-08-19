@@ -1,14 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Domain-level application exception hierarchy.
-
-Moved here from app.application.errors.exceptions (Phase C engineering-debt
-cleanup) because these are plain-Python exception types with no web-framework
-dependency, and domain services need them without reaching into the
-application layer. app.application.errors.exceptions re-exports everything
-from this module for backward compatibility — existing application/
-interfaces imports are unaffected.
-"""
+"""Domain-level application exception hierarchy."""
 from typing import Any, Dict, Optional
 
 __all__ = [

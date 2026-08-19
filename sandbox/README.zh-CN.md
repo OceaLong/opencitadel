@@ -86,7 +86,6 @@ docker compose build opencitadel-sandbox
 
 ```bash
 SERVER_TIMEOUT_MINUTES=60   # 推荐（pydantic-settings 标准名）
-# 兼容旧名: SERVICE_TIMEOUT_MINUTES=60
 ```
 
 API/Worker 侧通过 `SANDBOX_TTL_MINUTES` 创建动态沙箱时注入 `SERVER_TIMEOUT_MINUTES`。

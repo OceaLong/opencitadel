@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.application.errors.exceptions import ConflictError
+from app.domain.errors import ConflictError
 from app.application.patrol_templates import load_patrol_template
 from app.application.services.patrol_pack_service import PatrolPackService
 from app.domain.models.app_config import AppConfig

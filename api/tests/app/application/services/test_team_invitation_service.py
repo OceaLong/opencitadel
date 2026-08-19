@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.application.errors.exceptions import BadRequestError, ConflictError
+from app.domain.errors import BadRequestError, ConflictError
 from app.application.services.team_service import TeamService
 from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.team import Team, TeamMember, TeamRole

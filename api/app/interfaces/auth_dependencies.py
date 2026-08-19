@@ -6,7 +6,7 @@ from app.application.security.authorization_context import (
     get_authorization_context,
     set_authorization_context,
 )
-from app.application.errors.exceptions import ForbiddenError, UnauthorizedError
+from app.domain.errors import ForbiddenError, UnauthorizedError
 from app.domain.models.authorization import AuthorizationContext, AuthorizationMode
 from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
 from app.infrastructure.security.csrf import CsrfService

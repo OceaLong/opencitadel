@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import pytest
 
-from app.application.errors.exceptions import ServerRequestsError
+from app.domain.errors import ServerRequestsError
 from app.application.services.memory_extractor_service import (
     EXTRACT_PROMPT,
     _extract_llm_text_content,

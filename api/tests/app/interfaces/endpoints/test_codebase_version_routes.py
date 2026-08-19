@@ -1,6 +1,6 @@
 """Codebase version/build route regressions."""
+import json
 from datetime import datetime, timezone
-from types import SimpleNamespace
 
 import pytest
 
@@ -60,6 +60,16 @@ def _version(build=None) -> CodebaseVersionProjection:
         is_candidate=True,
         build=build,
     )
+
+
+def test_version_response_serializes_nested_immutable_metrics():
+    response = codebase_routes._to_version_response(_version(_build()))
+
+    payload = json.loads(response.model_dump_json())
+
+    assert payload["metrics"]["unsupported_views"] == {
+        "flowchart": "unsupported",
+    }
 
 
 @pytest.mark.asyncio
@@ -191,67 +201,4 @@ async def test_version_source_and_artifacts_routes_use_requested_version():
     assert calls == [
         ("source", "cb1", "src/main.py", "candidate", ctx.scope),
         ("artifacts", "cb1", ArtifactKind.CALL_CHAIN, "candidate", ctx.scope),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_reanalyze_compatibility_uses_build_command_and_returns_codebase():
-    ctx = _ctx()
-    calls = []
-    build = _build()
-    version = _version(build)
-    codebase = SimpleNamespace(
-        id="cb1",
-        name="demo",
-        source_type="files",
-        source_ref="{}",
-        status="ready",
-        language_stats={},
-        file_count=1,
-        sandbox_id=None,
-        workspace_path="",
-        ingest_task_id=build.id,
-        error=None,
-        vector_degraded=False,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-        model_dump=lambda mode="json": {
-            "id": "cb1",
-            "name": "demo",
-            "source_type": "files",
-            "source_ref": "{}",
-            "status": "ready",
-            "language_stats": {},
-            "file_count": 1,
-            "sandbox_id": None,
-            "workspace_path": "",
-            "ingest_task_id": build.id,
-            "error": None,
-            "vector_degraded": False,
-            "active_version_id": "active",
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
-        },
-    )
-
-    class Service:
-        async def create_build(self, codebase_id, **kwargs):
-            calls.append(("create", codebase_id, kwargs["scope"]))
-            return version
-
-        async def get_codebase(self, codebase_id, **kwargs):
-            calls.append(("get_codebase", codebase_id, kwargs["scope"]))
-            return codebase
-
-    response = await codebase_routes.reanalyze(
-        "cb1",
-        ctx,
-        Principal(user_id="u1"),
-        Service(),
-    )
-
-    assert response.data.ingest_task_id == "build-1"
-    assert calls == [
-        ("create", "cb1", ctx.scope),
-        ("get_codebase", "cb1", ctx.scope),
     ]

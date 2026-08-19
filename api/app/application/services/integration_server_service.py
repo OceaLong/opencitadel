@@ -7,7 +7,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from pydantic import ValidationError
 
-from app.application.errors.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.domain.errors import BadRequestError, ForbiddenError, NotFoundError
 from app.application.services.audit_service import AuditService
 from app.domain.models.app_config import A2AConfig, MCPConfig, MCPTransport
 from app.domain.models.audit_log import AuditLog

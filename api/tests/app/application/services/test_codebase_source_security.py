@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.application.services.codebase_service import CodebaseService
 from app.domain.models.codebase import CodebaseSourceType
 from app.domain.models.file import File

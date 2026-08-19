@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.domain.models.knowledge_base import KnowledgeBase
 from app.domain.models.knowledge_version import (
     KnowledgeBaseVersion,
@@ -75,7 +75,6 @@ async def test_factory_authorizes_exact_session_kb_binding_in_same_uow():
     factory._uow_factory = lambda: uow
     session = Session(
         id="session1",
-        knowledge_base_id="kb1",
         resource_bindings=[_binding()],
         owner_user_id="user1",
     )
@@ -96,7 +95,6 @@ async def test_factory_authorizes_exact_session_kb_binding_in_same_uow():
 @pytest.mark.parametrize(
     "bindings",
     [
-        [],
         [_binding(), _binding("kbv2")],
         [_binding(resource_id="foreign-kb")],
     ],
@@ -108,7 +106,6 @@ async def test_factory_fails_closed_on_missing_duplicate_or_foreign_binding(
     factory._uow_factory = lambda: _Uow(_version())
     session = Session(
         id="session1",
-        knowledge_base_id="kb1",
         resource_bindings=bindings,
         owner_user_id="user1",
     )
@@ -140,7 +137,6 @@ async def test_factory_fails_closed_on_unpublished_binding(version):
     factory._uow_factory = lambda: _Uow(version)
     session = Session(
         id="session1",
-        knowledge_base_id="kb1",
         resource_bindings=[_binding()],
         owner_user_id="user1",
     )

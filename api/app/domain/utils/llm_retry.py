@@ -114,4 +114,4 @@ def classify_llm_error_code(error: Exception) -> str:
         return EC.MODEL_UNAVAILABLE
     if is_retriable_llm_error(error):
         return EC.MODEL_UNAVAILABLE
-    return EC.MODEL_UNAVAILABLE
+    return EC.TASK_INFRA_FAILED

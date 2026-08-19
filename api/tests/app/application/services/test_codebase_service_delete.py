@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.application.errors.exceptions import ConflictError, NotFoundError
+from app.domain.errors import ConflictError, NotFoundError
 from app.application.services.codebase_service import CodebaseService
 from app.domain.models.codebase import Codebase, CodebaseStatus
 

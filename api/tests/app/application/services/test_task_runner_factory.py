@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.application.services.task_runner_factory import (
     CODE_ASK_SKILL_PROMPT,
     DOC_AGENT_SKILL_PROMPT,
@@ -178,7 +178,6 @@ async def test_ask_mode_codebase_tool_uses_published_snapshot_reader():
 
     session = Session(
         id="sess-1",
-        codebase_id="cb1",
         mode=SessionMode.ASK,
         model_id="model-1",
         owner_user_id="user-1",
@@ -251,7 +250,6 @@ async def test_agent_mode_codebase_tool_uses_session_sandbox():
 
     session = Session(
         id="sess-1",
-        codebase_id="cb1",
         mode=SessionMode.AGENT,
         model_id="model-1",
         owner_user_id="user-1",
@@ -320,7 +318,6 @@ async def test_ask_mode_injects_codebase_skill_prompt():
 
     session = Session(
         id="sess-1",
-        codebase_id="cb1",
         mode=SessionMode.ASK,
         model_id="model-1",
         owner_user_id="user-1",
@@ -391,7 +388,6 @@ async def test_kb_only_agent_mode_injects_document_agent_prompt():
     factory._memory_service.save_from_tool = AsyncMock(return_value=MagicMock(id="mem-1"))
     session = Session(
         id="sess-1",
-        knowledge_base_id="kb-1",
         resource_bindings=[
             ResourceBindingProjection(
                 binding_id="binding-kbv1",
@@ -453,10 +449,17 @@ async def test_create_runner_rejects_persisted_cross_scope_codebase():
     factory._memory_service.save_from_tool = AsyncMock(return_value=MagicMock(id="mem-1"))
     session = Session(
         id="sess-1",
-        codebase_id="victim-cb",
         mode=SessionMode.ASK,
         model_id="model-1",
         owner_user_id="attacker-user",
+        resource_bindings=[
+            ResourceBindingProjection(
+                binding_id="binding-victim-cb",
+                resource_kind=ResourceKind.CODEBASE,
+                resource_id="victim-cb",
+                version_id="victim-cbv1",
+            )
+        ],
     )
     llm = MagicMock(supports_multimodal=False)
 
@@ -495,10 +498,17 @@ async def test_create_runner_rejects_persisted_cross_scope_knowledge_base():
     factory._memory_service.save_from_tool = AsyncMock(return_value=MagicMock(id="mem-1"))
     session = Session(
         id="sess-1",
-        knowledge_base_id="victim-kb",
         mode=SessionMode.ASK,
         model_id="model-1",
         owner_user_id="attacker-user",
+        resource_bindings=[
+            ResourceBindingProjection(
+                binding_id="binding-victim-kb",
+                resource_kind=ResourceKind.KNOWLEDGE_BASE,
+                resource_id="victim-kb",
+                version_id="victim-kbv1",
+            )
+        ],
     )
     llm = MagicMock(supports_multimodal=False)
 

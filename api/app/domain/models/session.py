@@ -13,7 +13,7 @@ from .memory import Memory
 from .plan import Plan
 from .skill import SkillSummary
 from .codebase import SessionMode
-from .resource_governance import ResourceBindingProjection
+from .resource_governance import ResourceBindingProjection, ResourceKind
 
 
 class SessionStatus(str, Enum):
@@ -41,8 +41,6 @@ class Session(BaseModel):
     model_id: Optional[str] = None  # 会话级模型id，null使用全局默认
     skill_id: Optional[str] = None  # 会话级Skill id，null表示不启用
     thinking_enabled: bool = False  # 会话级思考模式，默认关闭
-    codebase_id: Optional[str] = None  # 关联代码库
-    knowledge_base_id: Optional[str] = None  # 关联文档知识库
     resource_bindings: List[ResourceBindingProjection] = Field(
         default_factory=list
     )  # 当前不可变资源版本投影；历史回答以事件快照为准
@@ -67,3 +65,19 @@ class Session(BaseModel):
                 return event.plan
 
         return None
+
+    def binding_for(
+            self,
+            kind: ResourceKind,
+    ) -> Optional[ResourceBindingProjection]:
+        """Return the sole current binding of ``kind`` for this session."""
+        matches = [
+            binding
+            for binding in self.resource_bindings
+            if binding.resource_kind == kind
+        ]
+        if len(matches) > 1:
+            raise ValueError(
+                f"会话[{self.id}]存在重复的[{kind.value}]资源绑定"
+            )
+        return matches[0] if matches else None

@@ -7,6 +7,8 @@
 .idea/
 .vscode/
 .worktrees/
+docker-compose.override.yml
+/tmp/
 
 __pycache__/
 *.py[cod]

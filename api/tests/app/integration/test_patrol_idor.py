@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.application.patrol_templates import load_patrol_template
 from app.application.services.patrol_pack_service import PatrolPackService
 from app.application.services.patrol_run_service import PatrolRunService

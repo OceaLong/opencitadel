@@ -1,4 +1,4 @@
-"""Snapshot endpoints separate read-only compatibility from mutation."""
+"""Snapshot endpoint contract tests."""
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -28,17 +28,8 @@ class _SnapshotService:
 
 
 @pytest.mark.asyncio
-async def test_get_download_is_a_read_only_compatibility_lookup():
-    """Catches GET creating a sandbox snapshot or persisting a new key."""
-    service = _SnapshotService()
-    response = await codebase_routes.download_codebase("cb1", _ctx(), service)
-    assert response.data.snapshot_key == "stored.tgz"
-    assert service.package_calls == 0
-
-
-@pytest.mark.asyncio
 async def test_post_snapshot_is_the_only_snapshot_mutation():
-    """Catches POST snapshots becoming a no-op after GET was made read-only."""
+    """Catches POST snapshots becoming a no-op."""
     service = _SnapshotService()
     response = await codebase_routes.create_codebase_snapshot("cb1", _ctx(), Principal(user_id="u1"), service, object())
     assert response.data.snapshot_key == "new.tgz"

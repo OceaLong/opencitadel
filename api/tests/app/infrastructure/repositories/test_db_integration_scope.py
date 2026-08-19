@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import pytest
 
-from app.application.errors.exceptions import ServerRequestsError
+from app.domain.errors import ServerRequestsError
 from app.domain.models.scope import OwnerScope
 from app.infrastructure.repositories.db_integration_server_repository import (
     DBA2AServerRepository,

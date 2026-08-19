@@ -4,7 +4,6 @@ from datetime import datetime
 from typing import Any, Optional
 
 from sqlalchemy import (
-    Boolean,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -97,9 +96,6 @@ class CodebaseVersionORM(Base):
     metrics: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
-    legacy_snapshot: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false")
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -122,7 +118,6 @@ class CodebaseVersionORM(Base):
             capabilities=dict(self.capabilities or {}),
             degraded_reasons=list(self.degraded_reasons or []),
             metrics=dict(self.metrics or {}),
-            legacy_snapshot=bool(self.legacy_snapshot),
             created_at=self.created_at,
             published_at=self.published_at,
         )
@@ -141,7 +136,6 @@ class CodebaseVersionORM(Base):
             capabilities=version.capabilities,
             degraded_reasons=version.degraded_reasons,
             metrics=version.metrics,
-            legacy_snapshot=version.legacy_snapshot,
             created_at=version.created_at,
             published_at=version.published_at,
         )

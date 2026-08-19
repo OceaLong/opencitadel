@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Callable
 
-from app.application.errors.exceptions import BadRequestError, ConflictError, ForbiddenError, NotFoundError, ValidationError
+from app.domain.errors import BadRequestError, ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.application.services.audit_service import AuditService
 from app.application.services.artifact_service import ArtifactService
 from app.application.services.config_provider import get_runtime_config

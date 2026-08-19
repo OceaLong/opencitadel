@@ -27,10 +27,13 @@ class _CodebaseRepo:
 
 
 class _VersionRepo:
-    def __init__(self):
+    def __init__(self, builds):
         self.versions = {}
+        self.builds = builds
 
     async def add_version(self, version):
+        if version.build_id not in self.builds.builds:
+            raise RuntimeError("version build foreign key is missing")
         self.versions[version.id] = version
         return version
 
@@ -71,8 +74,8 @@ class _Uow:
 @pytest.mark.asyncio
 async def test_duplicate_reanalyze_returns_same_candidate_build():
     codebase = _CodebaseRepo()
-    versions = _VersionRepo()
     builds = _BuildRepo()
+    versions = _VersionRepo(builds)
     builder = CodebaseVersionBuilder(
         lambda: _Uow(codebase, versions, builds)
     )

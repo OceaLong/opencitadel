@@ -5,7 +5,7 @@ from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.application.services.memory_service import MemoryService
 from app.application.services.session_service import SessionService
 from app.domain.models.scope import WorkspaceContext

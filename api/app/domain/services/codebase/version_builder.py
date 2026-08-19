@@ -87,6 +87,6 @@ class CodebaseVersionBuilder:
                 state=BuildState.QUEUED,
                 created_by=actor_id,
             )
-            version = await uow.codebase_version.add_version(version)
             build = await uow.resource_governance.add_build(build)
+            version = await uow.codebase_version.add_version(version)
             return CodebaseBuildPlan(version=version, build=build)

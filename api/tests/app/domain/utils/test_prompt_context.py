@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from app.domain.models.message import Message, VisionAttachment
+from app.domain.models.message import Message, MediaAttachment
 from app.domain.utils.prompt_context import (
     format_user_attachments_for_prompt,
     has_user_attachments,
@@ -20,7 +20,7 @@ def test_has_user_attachments_true_for_paths():
 def test_has_user_attachments_true_for_vision_only():
     message = Message(
         message="hello",
-        vision_attachments=[VisionAttachment(mime_type="image/png", data_base64="aW1n")],
+        vision_attachments=[MediaAttachment(mime_type="image/png", data_base64="aW1n")],
     )
     assert has_user_attachments(message) is True
 
@@ -50,8 +50,8 @@ def test_format_user_attachments_for_prompt_with_vision_labels():
         message="hello",
         attachments=["/workspace/doc.txt"],
         vision_attachments=[
-            VisionAttachment(mime_type="image/png", ref_url="cos://bucket/img.png"),
-            VisionAttachment(mime_type="audio/mpeg"),
+            MediaAttachment(mime_type="image/png", ref_url="cos://bucket/img.png"),
+            MediaAttachment(mime_type="audio/mpeg"),
         ],
     )
     assert format_user_attachments_for_prompt(message, locale="en") == (

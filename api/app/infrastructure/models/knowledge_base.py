@@ -58,9 +58,6 @@ class KnowledgeBaseModel(Base):
     ingest_task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     vector_degraded: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
-    legacy_v1_migrated: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false")
-    )
     active_version_id: Mapped[Optional[str]] = mapped_column(
         String(255),
         nullable=True,
@@ -93,7 +90,6 @@ class KnowledgeBaseModel(Base):
             ingest_task_id=self.ingest_task_id,
             error=self.error,
             vector_degraded=bool(self.vector_degraded),
-            legacy_v1_migrated=bool(self.legacy_v1_migrated),
             active_version_id=self.active_version_id,
             settings=self.settings or {},
             owner_user_id=self.owner_user_id,
@@ -113,7 +109,6 @@ class KnowledgeBaseModel(Base):
             ingest_task_id=kb.ingest_task_id,
             error=kb.error,
             vector_degraded=kb.vector_degraded,
-            legacy_v1_migrated=kb.legacy_v1_migrated,
             active_version_id=kb.active_version_id,
             settings=kb.settings,
             owner_user_id=kb.owner_user_id,
@@ -210,9 +205,9 @@ class KnowledgeChunkModel(Base):
     doc_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False
     )
-    version_id: Mapped[Optional[str]] = mapped_column(
+    version_id: Mapped[str] = mapped_column(
         String(255),
-        nullable=True,
+        nullable=False,
     )
     parent_id: Mapped[Optional[str]] = mapped_column(
         String(255), ForeignKey("knowledge_chunks.id", ondelete="CASCADE"), nullable=True
@@ -269,9 +264,9 @@ class KnowledgeEntityModel(Base):
     kb_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False
     )
-    version_id: Mapped[Optional[str]] = mapped_column(
+    version_id: Mapped[str] = mapped_column(
         String(255),
-        nullable=True,
+        nullable=False,
     )
     name: Mapped[str] = mapped_column(String(512), nullable=False)
     normalized_name: Mapped[Optional[str]] = mapped_column(
@@ -329,9 +324,9 @@ class KnowledgeRelationModel(Base):
     kb_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False
     )
-    version_id: Mapped[Optional[str]] = mapped_column(
+    version_id: Mapped[str] = mapped_column(
         String(255),
-        nullable=True,
+        nullable=False,
     )
     src_entity_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("knowledge_entities.id", ondelete="CASCADE"), nullable=False
@@ -391,9 +386,9 @@ class KnowledgeEntityRefModel(Base):
     kb_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False
     )
-    version_id: Mapped[Optional[str]] = mapped_column(
+    version_id: Mapped[str] = mapped_column(
         String(255),
-        nullable=True,
+        nullable=False,
     )
     entity_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("knowledge_entities.id", ondelete="CASCADE"), nullable=False

@@ -8,7 +8,7 @@ import pytest
 
 from app.domain.models.event import MessageEvent, StepEvent
 from app.domain.models.memory import Memory
-from app.domain.models.message import Message, VisionAttachment
+from app.domain.models.message import Message, MediaAttachment
 from app.domain.services.agents.react import ReActAgent
 from tests.app.domain.services.agents.conftest import (
     _DummyLLM,
@@ -42,7 +42,7 @@ class _SummarizeAgent(ReActAgent):
             self,
             query: str,
             format: Optional[str] = None,
-            vision_attachments: Optional[List[VisionAttachment]] = None,
+            vision_attachments: Optional[List[MediaAttachment]] = None,
             emit_deltas: bool = True,
             response_schema=None,
     ) -> AsyncGenerator[MessageEvent, None]:
@@ -60,7 +60,7 @@ class _StepAgent(ReActAgent):
             self,
             query: str,
             format: Optional[str] = None,
-            vision_attachments: Optional[List[VisionAttachment]] = None,
+            vision_attachments: Optional[List[MediaAttachment]] = None,
             emit_deltas: bool = True,
             response_schema=None,
     ) -> AsyncGenerator[MessageEvent, None]:
@@ -77,7 +77,7 @@ class _RepairStepAgent(ReActAgent):
             self,
             query: str,
             format: Optional[str] = None,
-            vision_attachments: Optional[List[VisionAttachment]] = None,
+            vision_attachments: Optional[List[MediaAttachment]] = None,
             emit_deltas: bool = True,
             response_schema=None,
     ) -> AsyncGenerator[MessageEvent, None]:
@@ -115,7 +115,7 @@ async def _test_summarize_accepts_user_message_and_vision_attachments():
     user_message = Message(
         message="summarize this",
         vision_attachments=[
-            VisionAttachment(mime_type="image/png", data_base64="aW1n"),
+            MediaAttachment(mime_type="image/png", data_base64="aW1n"),
         ],
     )
 
@@ -135,7 +135,7 @@ async def _test_execute_step_respects_optional_vision_attachments():
     agent = _StepAgent(**_agent_kwargs())
     message = Message(
         message="do task",
-        vision_attachments=[VisionAttachment(mime_type="image/png", data_base64="aW1n")],
+        vision_attachments=[MediaAttachment(mime_type="image/png", data_base64="aW1n")],
     )
     plan = Plan(title="t", message="m", language="zh", steps=[Step(description="s1")])
     step = plan.steps[0]

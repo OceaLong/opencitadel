@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from app.application.errors.exceptions import BadRequestError, ForbiddenError
+from app.domain.errors import BadRequestError, ForbiddenError
 from app.application.services.llm_endpoint_service import LLMEndpointService
 from app.domain.models.llm_endpoint import LLMEndpoint
 from app.domain.models.llm_model import LLMProvider, ResourceVisibility

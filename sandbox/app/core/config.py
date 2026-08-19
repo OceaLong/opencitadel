@@ -2,21 +2,13 @@
 # -*- coding: utf-8 -*-
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """沙箱API服务基础配置信息"""
     log_level: str = "INFO"
-    server_timeout_minutes: int = Field(
-        default=60,
-        validation_alias=AliasChoices(
-            "SERVER_TIMEOUT_MINUTES",
-            "SERVICE_TIMEOUT_MINUTES",
-            "server_timeout_minutes",
-        ),
-    )
+    server_timeout_minutes: int = 60
 
     model_config = SettingsConfigDict(
         env_file=".env",

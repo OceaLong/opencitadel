@@ -22,6 +22,7 @@ from typing import Annotated, Any, Type, TypeVar
 from fastapi import Depends
 from pydantic import BaseModel
 
+from app.domain.models.knowledge_version import mutable_json_value
 from app.domain.models.scope import Principal, WorkspaceContext
 from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
 
@@ -30,11 +31,19 @@ TResponse = TypeVar("TResponse", bound=BaseModel)
 
 def to_version_response(response_cls: Type[TResponse], version: Any) -> TResponse:
     """Map a domain version object to its resource-specific response schema."""
+    if isinstance(version, BaseModel):
+        return response_cls.model_validate(
+            mutable_json_value(version.model_dump(mode="python"))
+        )
     return response_cls.model_validate(version, from_attributes=True)
 
 
 def to_build_response(response_cls: Type[TResponse], build: Any) -> TResponse:
     """Map a domain build object to its resource-specific response schema."""
+    if isinstance(build, BaseModel):
+        return response_cls.model_validate(
+            mutable_json_value(build.model_dump(mode="python"))
+        )
     return response_cls.model_validate(build, from_attributes=True)
 
 

@@ -8,7 +8,7 @@ and test_compliance_report.py (fake repo + fake collaborators, no real DB).
 """
 import pytest
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.application.services.governance_profile_service import (
     GovernanceProfileService,
 )

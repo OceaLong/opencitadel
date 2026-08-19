@@ -12,8 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 
 import { teamApi, type TeamInvitationPreview, type TeamMember } from "@/lib/api/team";
-import { ACTIVE_WORKSPACE_KEY, LEGACY_ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
-import { writeLocalStorageKey } from "@/lib/storage-migration";
+import { ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
 import { useAuth } from "@/providers/auth-provider";
 
 function roleLabel(role: TeamMember["role"], t: ReturnType<typeof useTranslations<"teams">>) {
@@ -80,7 +79,7 @@ export default function AcceptInvitationPage() {
 
   const finishJoin = useCallback(
     (member: TeamMember) => {
-      writeLocalStorageKey(LEGACY_ACTIVE_WORKSPACE_KEY, ACTIVE_WORKSPACE_KEY, member.team_id);
+      window.localStorage.setItem(ACTIVE_WORKSPACE_KEY, member.team_id);
       setAccepted(true);
       toast.success(t("acceptSuccess"));
       router.replace("/");

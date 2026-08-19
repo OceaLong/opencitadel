@@ -56,20 +56,14 @@ flowchart LR
 `degraded`、`capabilities`、`degraded_reasons`。共享层不定义知识库或
 Codebase 的领域版本表。
 
-### 弃用适配器与一个发布周期
+### 已退役适配器
 
-弃用字段和路由在替代项正式可用后至少保留一个完整发布周期。移除前必须完成
-迁移校验并在 release notes 中说明；任何兼容适配器都不得让 GET 保留写副作用。
+旧代码库快照路由、单调用审批状态、会话直接资源列以及合成 legacy 资源版本的
+兼容窗口已经结束。当前契约分别使用 `POST /api/codebases/{id}/snapshots`、持久化
+approval batch、不可变 `resource_bindings` 和真实已发布版本。契约迁移会先回填并
+校验可迁移数据，再删除废弃列；存在无法解析的数据时会中止升级。
 
-| 弃用契约 | 替代项与兼容规则 |
-|----------|------------------|
-| 使用 `GET /api/codebases/{id}/download` 准备 snapshot | 该 GET 现在只读取已有 `snapshot_key`；只有 `POST /api/codebases/{id}/snapshots` 创建 snapshot。GET 适配器保留一个完整发布周期后移除。 |
-| `pending_metadata.pending_tool_call` 单调用门控 | 新写入使用持久化 approval batch 与 `pending_metadata.approval_batch_id`。旧单调用数据仅保留一个发布周期的读取/恢复 fallback，且不能绕过批次治理。 |
-| 缺少不可变历史的直接 `codebase_id` / `knowledge_base_id` 会话字段 | 兼容期创建请求仍接受现有 ID 与可选 version ID，但响应和事件暴露 `resource_bindings`，且不会推断自动升级。 |
-| 版本化之前的 ready 资源 | 只有显式标记 `legacy_v1_migrated=true` 的行可解析为合成 `legacy:<resource_id>`；building、failed 或迁移后新建的 ready 行都不能回落。 |
-
-通用增量 API/SSE 兼容窗口仍至少为两个 minor 版本。上述一个发布周期是显式
-弃用治理适配器的最低保留期，不代表可以提前破坏其他增量契约。
+通用增量 API/SSE 兼容窗口仍至少为两个 minor 版本。
 
 ## 相关文档
 

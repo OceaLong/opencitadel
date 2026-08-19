@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 
-from app.application.errors.exceptions import (
+from app.domain.errors import (
     BadRequestError,
     ConflictError,
     NotFoundError,

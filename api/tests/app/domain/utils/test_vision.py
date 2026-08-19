@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import base64
 
-from app.domain.models.message import VisionAttachment
+from app.domain.models.message import MediaAttachment
 from app.domain.utils.vision import (
     MAX_VISION_IMAGE_BYTES,
     build_image_content_part,
@@ -25,7 +25,7 @@ def test_build_image_content_part():
 
 
 def test_build_user_message_with_vision_attachments():
-    attachment = VisionAttachment(
+    attachment = MediaAttachment(
         mime_type="image/png",
         data_base64=base64.b64encode(b"png").decode("ascii"),
     )
@@ -40,7 +40,7 @@ def test_build_user_message_with_vision_attachments():
 
 
 def test_build_user_message_without_multimodal_flag():
-    attachment = VisionAttachment(
+    attachment = MediaAttachment(
         mime_type="image/png",
         data_base64=base64.b64encode(b"png").decode("ascii"),
     )
@@ -53,7 +53,7 @@ def test_build_user_message_without_multimodal_flag():
 
 
 def test_filter_valid_vision_attachments_skips_oversized_image():
-    oversized = VisionAttachment(
+    oversized = MediaAttachment(
         mime_type="image/png",
         data_base64=base64.b64encode(b"x" * (MAX_VISION_IMAGE_BYTES + 1)).decode("ascii"),
     )
@@ -62,7 +62,7 @@ def test_filter_valid_vision_attachments_skips_oversized_image():
 
 
 def test_build_user_message_skips_oversized_image():
-    oversized = VisionAttachment(
+    oversized = MediaAttachment(
         mime_type="image/png",
         data_base64=base64.b64encode(b"x" * (MAX_VISION_IMAGE_BYTES + 1)).decode("ascii"),
     )
@@ -75,7 +75,7 @@ def test_build_user_message_skips_oversized_image():
 
 
 def test_vision_attachment_byte_size():
-    attachment = VisionAttachment(
+    attachment = MediaAttachment(
         mime_type="image/png",
         data_base64=base64.b64encode(b"png").decode("ascii"),
     )

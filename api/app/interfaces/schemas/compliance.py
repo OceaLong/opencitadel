@@ -1,37 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
-
-# Five-state compliance evaluator vocabulary (Phase A Task 4, spec §A5):
-#   pass         判定满足
-#   gap          判定不满足，硬失败（如证据链断裂）
-#   attention    有数据但治理未被触发或未达标
-#   not_verified 无法程序化验证，如实陈述依据缺失
-#   na           evaluator 缺失
-# ``ComplianceReport.controls[i].status`` and ``ComplianceReport.summary``
-# use this vocabulary. ``ComplianceReportResponse.report`` stays a loose
-# ``Dict[str, Any]`` (built by ComplianceService.build_report, not a pydantic
-# model) so this alias documents the contract for callers/UI rather than
-# enforcing it at the wire boundary.
-ComplianceStatus = Literal["pass", "gap", "attention", "not_verified", "na"]
-
-
-class ComplianceSummary(BaseModel):
-    """Shape of ``ComplianceReport.summary`` -- documented for UI/consumer
-    reference; see ``ComplianceStatus`` for the five-state vocabulary."""
-
-    pass_: int = Field(0, alias="pass")
-    gap: int = 0
-    attention: int = 0
-    not_verified: int = 0
-    na: int = 0
-    total: int = 0
-
-    model_config = {"populate_by_name": True}
-
 
 class ChainVerifyResponse(BaseModel):
     ok: bool

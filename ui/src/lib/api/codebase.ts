@@ -76,12 +76,8 @@ export const codebaseApi = {
     );
   },
 
-  reanalyze: (codebaseId: string): Promise<Codebase> => {
-    return post<Codebase>(`/codebases/${codebaseId}/reanalyze`);
-  },
-
-  download: (codebaseId: string): Promise<DownloadCodebaseData> => {
-    return get<DownloadCodebaseData>(`/codebases/${codebaseId}/download`);
+  createSnapshot: (codebaseId: string): Promise<DownloadCodebaseData> => {
+    return post<DownloadCodebaseData>(`/codebases/${codebaseId}/snapshots`);
   },
 
   ingestStream: (

@@ -101,11 +101,11 @@ def test_legacy_chunk_clone_marker_round_trips_on_immutable_revision():
     assert restored.model_dump_json() == revision.model_dump_json()
 
 
-def test_runner_uses_revision_marker_not_immediate_parent_legacy_flag():
+def test_runner_uses_revision_clone_marker():
     source = inspect.getsource(KBIngestionRunner.run)
 
     assert "revision.needs_chunk_clone" in source
-    assert "parent_version.legacy_snapshot" not in source
+    assert "legacy_snapshot" not in source
 
 
 @pytest.mark.asyncio
@@ -168,14 +168,14 @@ async def test_mixed_graph_payload_is_invalid_as_a_whole(payload):
     assert repository.graph == ("kb", "v2", [], [], [])
 
 
-def test_active_read_compatibility_and_candidate_closure_are_single_contracts():
+def test_active_read_and_candidate_closure_are_single_contracts():
     repository_source = inspect.getsource(DBKnowledgeBaseRepository)
     validation_source = inspect.getsource(
         DBKnowledgeBaseRepository.get_candidate_index_metrics
     )
 
     assert "_active_version_row_predicate" in repository_source
-    assert "legacy_snapshot" in repository_source
+    assert "legacy_snapshot" not in repository_source
     for fragment in (
         "parent.level <> 'parent'",
         "parent.kb_id <> child.kb_id",

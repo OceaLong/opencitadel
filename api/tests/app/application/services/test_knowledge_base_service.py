@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.application.errors.exceptions import BadRequestError, ConflictError, NotFoundError
+from app.domain.errors import BadRequestError, ConflictError, NotFoundError
 from app.application.services.knowledge_base_service import KnowledgeBaseService
 from app.domain.models.knowledge_base import KBStatus, KnowledgeBase
 from app.domain.models.scope import OwnerScope
@@ -370,7 +370,7 @@ async def test_create_session_allowed_when_any_ready_doc(monkeypatch):
 
     session = await service.create_session_for_kb("kb1")
 
-    assert session.knowledge_base_id == "kb1"
+    assert session.title == "文档知识库对话 · t"
 
 
 @pytest.mark.anyio

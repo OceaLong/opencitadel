@@ -4,7 +4,7 @@
 import logging
 from typing import Callable, Optional, Type
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.application.services.audit_service import AuditService
 from app.application.services.codebase_service import CodebaseService
 from app.application.services.artifact_service import ArtifactService
@@ -368,12 +368,12 @@ class TaskRunnerFactory:
 
         on_ready = None
         if (
-            session.codebase_id
+            authorized_codebase
             and session.mode == SessionMode.AGENT
             and self._codebase_service
             and self._object_storage
         ):
-            codebase_id = session.codebase_id
+            codebase_id = authorized_codebase.id
             codebase_service = self._codebase_service
             object_storage = self._object_storage
             codebase_version_id = authorized_codebase_version_id
@@ -469,52 +469,50 @@ class TaskRunnerFactory:
             )
 
         codebase_prompt = ""
-        if session.codebase_id:
+        if authorized_codebase:
             codebase = authorized_codebase
-            if codebase:
-                if session.mode == SessionMode.AGENT:
-                    codebase_prompt = CODE_AGENT_SKILL_PROMPT
-                elif session.mode == SessionMode.ASK:
-                    codebase_prompt = CODE_ASK_SKILL_PROMPT.format(
-                        name=codebase.name,
-                        workspace_path=codebase.workspace_path,
-                    )
-                source_reader = None
-                if (
-                    session.mode == SessionMode.ASK
-                    and authorized_codebase_version_id
-                ):
-                    source_reader = await self._build_versioned_code_source(
-                        codebase.id,
-                        authorized_codebase_version_id,
-                    )
-                extra_tools.append(
-                    CodebaseTool(
-                        uow_factory=self._uow_factory,
-                        codebase_id=codebase.id,
-                        sandbox=sandbox,
-                        workspace_path=codebase.workspace_path,
-                        version_id=authorized_codebase_version_id,
-                        source_reader=source_reader,
-                        base_version_id=authorized_codebase_version_id,
-                    )
+            if session.mode == SessionMode.AGENT:
+                codebase_prompt = CODE_AGENT_SKILL_PROMPT
+            elif session.mode == SessionMode.ASK:
+                codebase_prompt = CODE_ASK_SKILL_PROMPT.format(
+                    name=codebase.name,
+                    workspace_path=codebase.workspace_path,
                 )
+            source_reader = None
+            if (
+                session.mode == SessionMode.ASK
+                and authorized_codebase_version_id
+            ):
+                source_reader = await self._build_versioned_code_source(
+                    codebase.id,
+                    authorized_codebase_version_id,
+                )
+            extra_tools.append(
+                CodebaseTool(
+                    uow_factory=self._uow_factory,
+                    codebase_id=codebase.id,
+                    sandbox=sandbox,
+                    workspace_path=codebase.workspace_path,
+                    version_id=authorized_codebase_version_id,
+                    source_reader=source_reader,
+                    base_version_id=authorized_codebase_version_id,
+                )
+            )
         if codebase_prompt:
             skill_prompt = f"{skill_prompt}\n\n{codebase_prompt}".strip() if skill_prompt else codebase_prompt
         knowledge_base_prompt = ""
-        if session.knowledge_base_id:
+        if authorized_knowledge_base:
             kb = authorized_knowledge_base
-            if kb:
-                if session.mode == SessionMode.AGENT:
-                    knowledge_base_prompt = DOC_AGENT_SKILL_PROMPT
-                extra_tools.append(
-                    KnowledgeBaseTool(
-                        uow_factory=self._uow_factory,
-                        kb_id=kb.id,
-                        version_id=authorized_knowledge_base_version_id,
-                        llm=llm,
-                    )
+            if session.mode == SessionMode.AGENT:
+                knowledge_base_prompt = DOC_AGENT_SKILL_PROMPT
+            extra_tools.append(
+                KnowledgeBaseTool(
+                    uow_factory=self._uow_factory,
+                    kb_id=kb.id,
+                    version_id=authorized_knowledge_base_version_id,
+                    llm=llm,
                 )
+            )
         if knowledge_base_prompt:
             skill_prompt = (
                 f"{skill_prompt}\n\n{knowledge_base_prompt}".strip()
@@ -570,8 +568,8 @@ class TaskRunnerFactory:
         allowed_for_subagent = skill.allowed_tools if (skill and skill.allowed_tools) else None
         session_policy = SessionFlowResolver.resolve(
             session.mode,
-            has_kb=bool(session.knowledge_base_id),
-            has_codebase=bool(session.codebase_id),
+            has_kb=authorized_knowledge_base is not None,
+            has_codebase=authorized_codebase is not None,
         ).policy
         if allowed_for_subagent is not None:
             session_policy = CapabilityPolicy.for_mode(
@@ -713,8 +711,14 @@ class TaskRunnerFactory:
             model_id=model_id,
             checkpoint_service=self._checkpoint_service,
             mode=session.mode,
-            codebase_id=session.codebase_id,
-            knowledge_base_id=session.knowledge_base_id,
+            codebase_id=(
+                authorized_codebase.id if authorized_codebase else None
+            ),
+            knowledge_base_id=(
+                authorized_knowledge_base.id
+                if authorized_knowledge_base
+                else None
+            ),
             task_state_port=self._task_state_port,
             observability_port=self._observability_port,
             event_sequence_port=self._event_sequence_port,

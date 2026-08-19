@@ -191,8 +191,12 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
   })();
 
   const contextKind = getSessionContextKind({
-    codebase_id: value.codebaseId,
-    knowledge_base_id: value.knowledgeBaseId,
+    resource_bindings: [
+      ...(value.codebaseId ? [{ resource_kind: "codebase" as const }] : []),
+      ...(value.knowledgeBaseId
+        ? [{ resource_kind: "knowledge_base" as const }]
+        : []),
+    ],
   });
 
   const handleOpenChange = (next: boolean) => {

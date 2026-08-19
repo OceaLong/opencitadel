@@ -32,7 +32,6 @@ const api = vi.hoisted(() => {
       latest_message_at: "2026-07-29T00:00:00Z",
       status: "completed" as const,
       unread_message_count: 0,
-      knowledge_base_id: "kb1",
       mode: "agent" as const,
       thinking_enabled: false,
       resource_bindings: [v1],

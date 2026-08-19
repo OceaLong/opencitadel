@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.domain.models.codebase import Codebase
 from app.domain.models.codebase_version import (
     CodebaseVersion,
@@ -77,7 +77,6 @@ async def test_factory_authorizes_exact_session_codebase_binding_in_same_uow():
     factory._uow_factory = lambda: uow
     session = Session(
         id="session1",
-        codebase_id="cb1",
         resource_bindings=[_binding()],
         owner_user_id="user1",
     )
@@ -100,7 +99,6 @@ async def test_factory_authorizes_exact_session_codebase_binding_in_same_uow():
 @pytest.mark.parametrize(
     "bindings",
     [
-        [],
         [_binding(), _binding("cbv2")],
         [_binding(resource_id="foreign-cb")],
     ],
@@ -112,7 +110,6 @@ async def test_factory_fails_closed_on_missing_duplicate_or_foreign_codebase_bin
     factory._uow_factory = lambda: _Uow(_version())
     session = Session(
         id="session1",
-        codebase_id="cb1",
         resource_bindings=bindings,
         owner_user_id="user1",
     )
@@ -122,6 +119,20 @@ async def test_factory_fails_closed_on_missing_duplicate_or_foreign_codebase_bin
             session,
             factory._scope_for_session(session),
         )
+
+
+@pytest.mark.anyio
+async def test_factory_accepts_resource_free_session_without_binding():
+    factory = _build_factory(AsyncMock())
+    factory._uow_factory = lambda: _Uow(_version())
+    session = Session(id="session1", owner_user_id="user1")
+
+    authorized = await factory._authorize_session_resources(
+        session,
+        factory._scope_for_session(session),
+    )
+
+    assert authorized == (None, None, None, None)
 
 
 @pytest.mark.anyio
@@ -144,7 +155,6 @@ async def test_factory_fails_closed_on_unpublished_codebase_binding(version):
     factory._uow_factory = lambda: _Uow(version)
     session = Session(
         id="session1",
-        codebase_id="cb1",
         resource_bindings=[_binding()],
         owner_user_id="user1",
     )

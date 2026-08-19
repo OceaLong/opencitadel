@@ -7,7 +7,7 @@ from app.application.services.integration_server_service import (
     _merge_url_secrets,
     _should_keep,
 )
-from app.application.errors.exceptions import BadRequestError, ForbiddenError
+from app.domain.errors import BadRequestError, ForbiddenError
 from app.domain.models.app_config import MCPTransport
 from app.domain.models.integration_server import MCPServerRecord
 from app.domain.models.llm_model import ResourceVisibility

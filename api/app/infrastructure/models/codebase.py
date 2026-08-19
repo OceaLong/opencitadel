@@ -68,9 +68,6 @@ class CodebaseModel(Base):
     vector_degraded: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
-    legacy_v1_migrated: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false")
-    )
     active_version_id: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True
     )
@@ -106,7 +103,6 @@ class CodebaseModel(Base):
             ingest_task_id=self.ingest_task_id,
             error=self.error,
             vector_degraded=bool(self.vector_degraded),
-            legacy_v1_migrated=bool(self.legacy_v1_migrated),
             active_version_id=self.active_version_id,
             owner_user_id=self.owner_user_id,
             team_id=self.team_id,
@@ -130,7 +126,6 @@ class CodebaseModel(Base):
             ingest_task_id=codebase.ingest_task_id,
             error=codebase.error,
             vector_degraded=codebase.vector_degraded,
-            legacy_v1_migrated=codebase.legacy_v1_migrated,
             active_version_id=codebase.active_version_id,
             owner_user_id=codebase.owner_user_id,
             team_id=codebase.team_id,

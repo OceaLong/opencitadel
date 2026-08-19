@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.application.errors.exceptions import ConflictError
+from app.domain.errors import ConflictError
 from app.application.services.resource_binding_service import (
     ResourceBindingService,
 )

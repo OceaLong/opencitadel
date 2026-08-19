@@ -43,7 +43,7 @@ class PatrolEvidenceService:
         async with self._uow_factory() as uow:
             run = await uow.patrol.get_run(run_id, scope)
             if run is None or not run.session_id:
-                from app.application.errors.exceptions import NotFoundError
+                from app.domain.errors import NotFoundError
                 raise NotFoundError("Patrol Run 不存在", error_key="patrol.runNotFound")
             results = await uow.patrol.list_check_results(run_id, scope)
             findings = await uow.patrol.list_findings(run_id, scope)

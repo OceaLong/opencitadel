@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from datetime import datetime, timedelta
+import json
+from datetime import datetime, timedelta, timezone
 
 from app.domain.models.error_codes import MODEL_QUOTA_EXCEEDED
 from app.domain.models.event import (
@@ -32,7 +33,28 @@ from app.domain.models.resource_governance import (
     ResourceBindingProjection,
     ResourceKind,
 )
-from app.interfaces.schemas.event import EventMapper
+from app.interfaces.schemas.event import BaseEventData, CommonEventData, EventMapper
+
+
+def test_base_and_common_event_data_serialize_created_at_as_epoch_seconds():
+    created_at = datetime(2026, 8, 19, 12, 30, tzinfo=timezone.utc)
+    expected = 1787142600
+
+    assert json.loads(
+        BaseEventData(created_at=created_at).model_dump_json()
+    )["created_at"] == expected
+    assert json.loads(
+        CommonEventData(created_at=created_at, extension="kept").model_dump_json()
+    ) == {
+        "event_id": None,
+        "created_at": expected,
+        "schema_version": EVENT_SCHEMA_VERSION,
+        "visibility": "user",
+        "channel": "ui",
+        "persist": True,
+        "resource_bindings": [],
+        "extension": "kept",
+    }
 
 
 def test_event_mapper_filters_transient_on_replay():

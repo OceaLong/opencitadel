@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import pytest
 
-from app.application.errors.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.domain.errors import BadRequestError, ForbiddenError, NotFoundError
 from app.application.services.llm_model_service import LLMModelService
 from app.domain.models.llm_endpoint import LLMEndpoint
 from app.domain.models.llm_model import LLMModel, ModelCapabilities, ResourceVisibility

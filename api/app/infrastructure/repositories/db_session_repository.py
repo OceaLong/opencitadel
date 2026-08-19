@@ -110,18 +110,35 @@ class DBSessionRepository(SessionRepository):
         self,
         session_id: str,
     ):
+        return (
+            await self._load_resource_bindings_for_sessions([session_id])
+        ).get(session_id, [])
+
+    async def _load_resource_bindings_for_sessions(
+        self,
+        session_ids: List[str],
+    ) -> Dict[str, list]:
+        bindings_by_session = {
+            session_id: [] for session_id in session_ids
+        }
+        if not session_ids:
+            return bindings_by_session
         result = await self.db_session.execute(
             select(SessionResourceBindingORM)
             .where(
-                SessionResourceBindingORM.session_id == session_id,
+                SessionResourceBindingORM.session_id.in_(session_ids),
                 SessionResourceBindingORM.is_current.is_(True),
             )
-            .order_by(SessionResourceBindingORM.resource_kind.asc())
+            .order_by(
+                SessionResourceBindingORM.session_id.asc(),
+                SessionResourceBindingORM.resource_kind.asc(),
+            )
         )
-        return [
-            record.to_domain().to_projection()
-            for record in result.scalars().all()
-        ]
+        for record in result.scalars().all():
+            bindings_by_session[record.session_id].append(
+                record.to_domain().to_projection()
+            )
+        return bindings_by_session
 
     async def _persist_memories(self, session_id: str, memories: Dict[str, Memory]) -> None:
         if not memories:
@@ -185,6 +202,7 @@ class DBSessionRepository(SessionRepository):
             self.db_session.add(record)
             await self._persist_memories(session.id, session.memories)
             await self._persist_files(session.id, session.files)
+            await self.db_session.flush()
             return
 
         # 3.会话存在则仅更新元数据（memories/files 由 save_memory/add_file 等专用路径维护）
@@ -196,7 +214,13 @@ class DBSessionRepository(SessionRepository):
         stmt = stmt.order_by(SessionModel.latest_message_at.desc().nullslast()).offset(max(offset, 0)).limit(max(1, min(limit, 500)))
         result = await self.db_session.execute(stmt)
         records = result.scalars().all()
-        return [record.to_domain() for record in records]
+        bindings = await self._load_resource_bindings_for_sessions(
+            [record.id for record in records]
+        )
+        sessions = [record.to_domain() for record in records]
+        for session in sessions:
+            session.resource_bindings = bindings[session.id]
+        return sessions
 
     async def count(self) -> int:
         result = await self.db_session.execute(select(func.count()).select_from(SessionModel))
@@ -220,7 +244,14 @@ class DBSessionRepository(SessionRepository):
         if updated_before is not None:
             stmt = stmt.where(SessionModel.updated_at < updated_before)
         result = await self.db_session.execute(stmt)
-        return [record.to_domain() for record in result.scalars().all()]
+        records = result.scalars().all()
+        bindings = await self._load_resource_bindings_for_sessions(
+            [record.id for record in records]
+        )
+        sessions = [record.to_domain() for record in records]
+        for session in sessions:
+            session.resource_bindings = bindings[session.id]
+        return sessions
 
     async def exists(self, session_id: str) -> bool:
         stmt = select(SessionModel.id).where(SessionModel.id == session_id).limit(1)
@@ -235,7 +266,7 @@ class DBSessionRepository(SessionRepository):
             return None
         session = record.to_domain()
         session.resource_bindings = await self._load_resource_bindings(
-            record.id
+            session.id
         )
         return session
 
@@ -250,7 +281,13 @@ class DBSessionRepository(SessionRepository):
         ).with_for_update()
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
-        return record.to_domain() if record is not None else None
+        if record is None:
+            return None
+        session = record.to_domain()
+        session.resource_bindings = await self._load_resource_bindings(
+            session.id
+        )
+        return session
 
     async def get_files(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[List[File]]:
         if await self.get_metadata(session_id, scope=scope) is None:

@@ -10,7 +10,7 @@ from app.domain.external.file_storage import FileStorage, FileUploadPayload
 from app.domain.external.llm import LLM
 from app.domain.models.file import File
 from app.domain.models.llm_model import ModelCapabilities
-from app.domain.models.message import MediaAttachment, Message, VisionAttachment
+from app.domain.models.message import MediaAttachment, Message, MediaAttachment
 from app.domain.models.multimodal import (
     CONTENT_TYPE_IMAGE_REF,
     CONTENT_TYPE_TEXT,
@@ -178,7 +178,7 @@ async def upload_image_bytes_to_storage(
 
 
 def _attachment_to_memory_part(
-        attachment: Union[VisionAttachment, MediaAttachment],
+        attachment: Union[MediaAttachment, MediaAttachment],
         capabilities: ModelCapabilities,
 ) -> Optional[Dict[str, Any]]:
     media_type = getattr(attachment, "media_type", "image")
@@ -208,7 +208,7 @@ def _attachment_to_memory_part(
 
 def build_user_message(
         text: str,
-        vision_attachments: Optional[List[Union[VisionAttachment, MediaAttachment]]] = None,
+        vision_attachments: Optional[List[Union[MediaAttachment, MediaAttachment]]] = None,
         llm: Optional[LLM] = None,
 ) -> Dict[str, Any]:
     """构建 user 消息；多模态时 content 为 parts 数组（优先 image_ref）。"""
@@ -472,13 +472,13 @@ async def prepare_vision_attachments_from_files(
         files: List[File],
         llm: LLM,
         file_storage: FileStorage,
-) -> List[VisionAttachment]:
+) -> List[MediaAttachment]:
     """为多模态模型构建用户图片附件，优先使用 URL 引用。"""
     if not vision_enabled(llm):
         return []
 
     capabilities = resolve_capabilities(llm)
-    attachments: List[VisionAttachment] = []
+    attachments: List[MediaAttachment] = []
     for file in files:
         if not is_image_mime(file.mime_type):
             continue
@@ -493,12 +493,12 @@ async def prepare_vision_attachments_from_files(
                 )
             ref_url = await build_file_public_url(stored_file) if stored_file.key else ""
             if ref_url:
-                attachments.append(VisionAttachment(
+                attachments.append(MediaAttachment(
                     mime_type=file.mime_type,
                     ref_url=ref_url,
                 ))
             else:
-                attachments.append(VisionAttachment(
+                attachments.append(MediaAttachment(
                     mime_type=file.mime_type,
                     data_base64=base64.b64encode(image_bytes).decode("ascii"),
                     ref_url=ref_url,

@@ -22,7 +22,7 @@ from app.domain.models.tool_result import ToolResult
 from app.domain.models.tool_approval import ApprovalStatus
 from app.domain.utils.hitl import TAKEOVER_PHASE, TOOL_APPROVAL_PHASE, merge_pending_metadata, parse_gate_action, preserve_session_tracking_metadata
 from app.domain.models.file import File
-from app.domain.models.message import Message, VisionAttachment
+from app.domain.models.message import Message, MediaAttachment
 from app.domain.models.plan import Plan, Step, ExecutionStatus
 from app.domain.schemas.react_output import ReactStepSchema, ReactSummarySchema
 from app.domain.services.agents.structured_parse import StructuredParseError, parse_structured_output
@@ -339,12 +339,15 @@ class ReActAgent(BaseAgent):
             "approval_batch_id"
         )
         if not batch_id:
-            async for event in self._resume_single_tool_approval(
-                    session,
-                    message,
-                    step,
-            ):
-                yield event
+            async with self._uow_factory() as uow:
+                await uow.session.set_pending_phase(self._session_id, None)
+                await uow.session.set_pending_metadata(
+                    self._session_id,
+                    preserve_session_tracking_metadata(
+                        session.pending_metadata
+                    ),
+                )
+            yield ErrorEvent(error="工具审批状态已过期，请重试")
             return
 
         action, feedback = parse_gate_action(message.message)
@@ -457,123 +460,6 @@ class ReActAgent(BaseAgent):
                 yield tool_event
                 tool_messages.extend(messages)
 
-        async for event in self.continue_tool_iteration_loop(
-                inject_tool_messages=tool_messages,
-                emit_deltas=self._should_emit_deltas(),
-        ):
-            async for out in self._handle_execute_event(event, step):
-                yield out
-
-    async def _resume_single_tool_approval(
-            self,
-            session,
-            message: Message,
-            step: Step,
-    ):
-        meta = session.pending_metadata or {}
-        pending = meta.get("pending_tool_call") or {}
-        action, feedback = parse_gate_action(message.message)
-        tool_name = pending.get("tool_name", "")
-        tool_args = pending.get("args") or {}
-        tool_call_id = pending.get("tool_call_id") or str(uuid.uuid4())
-
-        if action == "unknown":
-            yield WaitEvent()
-            return
-
-        if action == "approve_same":
-            approved = list(meta.get("approved_tools") or [])
-            if tool_name and tool_name not in approved:
-                approved.append(tool_name)
-            patch: dict = {"approved_tools": approved}
-            first_domain = pending.get("first_visit_domain")
-            if first_domain:
-                approved_domains = list(meta.get("approved_domains") or [])
-                if first_domain not in approved_domains:
-                    approved_domains.append(first_domain)
-                patch["approved_domains"] = approved_domains
-            meta = merge_pending_metadata(meta, patch)
-            async with self._uow_factory() as uow:
-                await uow.session.set_pending_phase(self._session_id, None)
-                await uow.session.set_pending_metadata(self._session_id, meta)
-        elif action in {"approve"}:
-            patch = {}
-            first_domain = pending.get("first_visit_domain")
-            if first_domain:
-                approved_domains = list(meta.get("approved_domains") or [])
-                if first_domain not in approved_domains:
-                    approved_domains.append(first_domain)
-                patch["approved_domains"] = approved_domains
-            async with self._uow_factory() as uow:
-                await uow.session.set_pending_phase(self._session_id, None)
-                if patch:
-                    await uow.session.set_pending_metadata(
-                        self._session_id,
-                        merge_pending_metadata(meta, patch),
-                    )
-                else:
-                    await uow.session.set_pending_metadata(
-                        self._session_id,
-                        preserve_session_tracking_metadata(meta),
-                    )
-        else:
-            async with self._uow_factory() as uow:
-                await uow.session.set_pending_phase(self._session_id, None)
-                await uow.session.set_pending_metadata(
-                    self._session_id,
-                    preserve_session_tracking_metadata(meta),
-                )
-
-        if action == "reject":
-            tool_messages = [{
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "_function_name": tool_name,
-                "content": ToolResult(
-                    success=False,
-                    message=feedback or "用户拒绝了此操作",
-                ).model_dump_json(),
-            }]
-            async for event in self.continue_tool_iteration_loop(
-                    inject_tool_messages=tool_messages,
-                    emit_deltas=self._should_emit_deltas(),
-            ):
-                async for out in self._handle_execute_event(event, step):
-                    yield out
-            return
-
-        if action not in {"approve", "approve_same"}:
-            yield WaitEvent()
-            return
-
-        try:
-            tool = self._resolve_tool(tool_name)
-            result = await self._get_tool_batch_executor().invoke_preapproved({
-                "id": tool_call_id,
-                "function": {
-                    "name": tool_name,
-                    "arguments": tool_args,
-                },
-            })
-            tool_label = tool.name
-        except Exception as exc:
-            result = ToolResult(success=False, message=str(exc))
-            tool_label = "tool"
-        self._record_tool_result_citations(result)
-        yield ToolEvent(
-            tool_call_id=tool_call_id,
-            tool_name=tool_label,
-            function_name=tool_name,
-            function_args=tool_args,
-            function_result=result,
-            status=ToolEventStatus.CALLED,
-        )
-        tool_messages = [{
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "_function_name": tool_name,
-            "content": result.model_dump_json(),
-        }]
         async for event in self.continue_tool_iteration_loop(
                 inject_tool_messages=tool_messages,
                 emit_deltas=self._should_emit_deltas(),

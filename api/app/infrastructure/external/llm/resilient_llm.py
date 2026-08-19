@@ -8,7 +8,7 @@ import logging
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
-from app.application.errors.exceptions import ServerRequestsError
+from app.domain.errors import ServerRequestsError
 from app.application.services.config_provider import get_runtime_config
 from app.application.services.llm_model_service import LLMModelService
 from app.domain.external.llm import LLM

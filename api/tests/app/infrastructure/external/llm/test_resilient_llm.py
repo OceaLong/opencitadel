@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.application.errors.exceptions import ServerRequestsError
+from app.domain.errors import ServerRequestsError
 from app.domain.models.error_codes import MODEL_QUOTA_EXCEEDED
 from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities
 from app.infrastructure.external.llm.resilient_llm import ModelUnavailableError, ResilientLLMClient

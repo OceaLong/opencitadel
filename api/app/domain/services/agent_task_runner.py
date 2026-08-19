@@ -25,7 +25,7 @@ from app.domain.models.event import ApprovalEvent, ErrorEvent, Event, MessageEve
     TitleEvent, WaitEvent, DoneEvent, AssistantNoticeEvent, StepEvent, StepEventStatus, ToolEventStatus
 from app.domain.services.checkpoint_service import CheckpointService
 from app.domain.models.file import File
-from app.domain.models.message import Message, VisionAttachment
+from app.domain.models.message import Message, MediaAttachment
 from app.domain.models.run_outcome import (
     RunOutcome,
     RunReconciliationEnvelope,
@@ -718,7 +718,7 @@ class AgentTaskRunner(TaskRunner):
 
         return event
 
-    async def _build_vision_attachments(self, files: List[File]) -> List[VisionAttachment]:
+    async def _build_vision_attachments(self, files: List[File]) -> List[MediaAttachment]:
         """为多模态模型构建用户附件（图片/音频/视频帧）。"""
         if not files:
             return []

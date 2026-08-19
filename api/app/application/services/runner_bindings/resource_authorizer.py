@@ -9,7 +9,7 @@ TaskRunnerFactory._authorize_session_resources remains as a thin delegate
 """
 from typing import Callable, Optional
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.domain.models.codebase import Codebase
 from app.domain.models.codebase_version import CodebaseVersionState
 from app.domain.models.knowledge_base import KnowledgeBase
@@ -30,31 +30,28 @@ async def authorize_session_resources(
     knowledge_base = None
     knowledge_base_version_id = None
     async with uow_factory() as uow:
-        if session.codebase_id:
-            codebase = await uow.codebase.get_by_id(session.codebase_id, scope=scope)
+        try:
+            codebase_binding = session.binding_for(ResourceKind.CODEBASE)
+            knowledge_binding = session.binding_for(
+                ResourceKind.KNOWLEDGE_BASE
+            )
+        except ValueError as exc:
+            raise NotFoundError("会话资源版本绑定重复") from exc
+        if codebase_binding:
+            codebase_id = codebase_binding.resource_id
+            codebase = await uow.codebase.get_by_id(codebase_id, scope=scope)
             if codebase is None:
                 raise NotFoundError("会话关联代码库不存在或无权访问")
-            bindings = [
-                binding
-                for binding in session.resource_bindings
-                if binding.resource_kind == ResourceKind.CODEBASE
-            ]
-            if (
-                len(bindings) != 1
-                or bindings[0].resource_id != session.codebase_id
-            ):
-                raise NotFoundError(
-                    "会话代码库版本绑定缺失、重复或不匹配"
-                )
-            binding = bindings[0]
+            if codebase.id != codebase_id:
+                raise NotFoundError("会话代码库版本绑定不匹配")
             version = await uow.codebase_version.get_version(
-                binding.version_id,
-                codebase_id=session.codebase_id,
+                codebase_binding.version_id,
+                codebase_id=codebase_id,
             )
             if (
                 version is None
-                or version.id != binding.version_id
-                or version.codebase_id != session.codebase_id
+                or version.id != codebase_binding.version_id
+                or version.codebase_id != codebase_id
                 or version.published_at is None
                 or version.state not in {
                     CodebaseVersionState.READY,
@@ -65,39 +62,25 @@ async def authorize_session_resources(
                     "会话代码库版本不是可用的已发布版本"
                 )
             codebase_version_id = version.id
-        if session.knowledge_base_id:
+        if knowledge_binding:
+            knowledge_base_id = knowledge_binding.resource_id
             knowledge_base = await uow.knowledge_base.get_kb(
-                session.knowledge_base_id,
+                knowledge_base_id,
                 scope=scope,
             )
             if knowledge_base is None:
                 raise NotFoundError("会话关联知识库不存在或无权访问")
-            bindings = [
-                binding
-                for binding in session.resource_bindings
-                if (
-                    binding.resource_kind
-                    == ResourceKind.KNOWLEDGE_BASE
-                )
-            ]
-            if (
-                len(bindings) != 1
-                or bindings[0].resource_id
-                != session.knowledge_base_id
-            ):
-                raise NotFoundError(
-                    "会话知识库版本绑定缺失、重复或不匹配"
-                )
-            binding = bindings[0]
+            if knowledge_base.id != knowledge_base_id:
+                raise NotFoundError("会话知识库版本绑定不匹配")
             version = await uow.knowledge_version.get_version(
-                binding.version_id,
-                knowledge_base_id=session.knowledge_base_id,
+                knowledge_binding.version_id,
+                knowledge_base_id=knowledge_base_id,
             )
             if (
                 version is None
-                or version.id != binding.version_id
+                or version.id != knowledge_binding.version_id
                 or version.knowledge_base_id
-                != session.knowledge_base_id
+                != knowledge_base_id
                 or version.published_at is None
                 or version.state not in {
                     KnowledgeVersionState.READY,

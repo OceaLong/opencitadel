@@ -151,7 +151,6 @@ class KnowledgeVersionResponse(BaseModel):
     capabilities: Dict[str, Any] = Field(default_factory=dict)
     degraded_reasons: List[str] = Field(default_factory=list)
     metrics: Dict[str, Any] = Field(default_factory=dict)
-    legacy_snapshot: bool = False
     created_at: datetime
     published_at: Optional[datetime] = None
     is_active: bool = False

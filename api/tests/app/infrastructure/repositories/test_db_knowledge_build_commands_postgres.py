@@ -13,7 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.application.errors.exceptions import ConflictError
+from app.domain.errors import ConflictError
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.knowledge_base import KnowledgeBase
 from app.domain.models.knowledge_version import (

@@ -17,7 +17,11 @@ import {
 } from "@/components/ui/sheet";
 
 import type { SSEEventData } from "@/lib/api/types";
-import { extractDebugItems, extractSessionErrors } from "@/lib/session-events";
+import {
+  countSessionErrorOccurrences,
+  extractDebugItems,
+  extractSessionErrors,
+} from "@/lib/session-events";
 
 type Props = {
   events: SSEEventData[];
@@ -38,6 +42,7 @@ export function SessionDebugSheet({ events, includeDebug = false, compact, onOpe
   const t = useTranslations("sessionDebug");
   const [open, setOpen] = useState(false);
   const errorItems = useMemo(() => extractSessionErrors(events), [events]);
+  const errorCount = useMemo(() => countSessionErrorOccurrences(errorItems), [errorItems]);
   const debugItems = useMemo(
     () => (includeDebug ? extractDebugItems(events) : []),
     [events, includeDebug],
@@ -68,9 +73,9 @@ export function SessionDebugSheet({ events, includeDebug = false, compact, onOpe
         >
           <Bug className="size-4" />
           {!compact && <span className="ml-1">{t("button")}</span>}
-          {errorItems.length > 0 && (
+          {errorCount > 0 && (
             <span className="bg-destructive text-primary-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-mono text-[10px] font-medium">
-              {errorItems.length > 99 ? "99+" : errorItems.length}
+              {errorCount > 99 ? "99+" : errorCount}
             </span>
           )}
         </Button>
@@ -85,7 +90,7 @@ export function SessionDebugSheet({ events, includeDebug = false, compact, onOpe
             {errorItems.length > 0 && (
               <section className="flex flex-col gap-2">
                 <h3 className="text-foreground text-sm font-medium">
-                  {t("errorsTitle", { count: errorItems.length })}
+                  {t("errorsTitle", { count: errorCount })}
                 </h3>
                 <div className="flex flex-col gap-2">
                   {errorItems.map((item) => (
@@ -95,13 +100,16 @@ export function SessionDebugSheet({ events, includeDebug = false, compact, onOpe
                     >
                       <div className="border-destructive/20 bg-destructive/10 flex items-center justify-between gap-2 border-b px-3 py-2">
                         <div className="flex min-w-0 items-center gap-2">
-                          <Badge variant="outline" className="border-destructive/40 text-destructive text-2xs">
+                          <Badge
+                            variant="outline"
+                            className="border-destructive/40 text-destructive text-2xs"
+                          >
                             {item.source === "tool"
                               ? t("errorSourceTool", { name: item.toolName ?? "?" })
                               : t("errorSourceSystem")}
                           </Badge>
                           {item.code && (
-                            <span className="text-muted-foreground truncate font-mono text-2xs">
+                            <span className="text-muted-foreground text-2xs truncate font-mono">
                               {item.code}
                             </span>
                           )}
@@ -112,14 +120,26 @@ export function SessionDebugSheet({ events, includeDebug = false, compact, onOpe
                           </span>
                         )}
                       </div>
-                      <p className="text-destructive p-3 text-sm break-words whitespace-pre-wrap">
-                        {item.message}
-                        {item.repeatCount && item.repeatCount > 1 ? (
-                          <span className="text-muted-foreground mt-1 block text-xs">
-                            ×{item.repeatCount}
-                          </span>
+                      <div className="p-3">
+                        <p className="text-destructive text-sm break-words whitespace-pre-wrap">
+                          {item.message}
+                          {item.repeatCount && item.repeatCount > 1 ? (
+                            <span className="text-muted-foreground mt-1 block text-xs">
+                              ×{item.repeatCount}
+                            </span>
+                          ) : null}
+                        </p>
+                        {item.rawMessage && item.rawMessage !== item.message ? (
+                          <div className="border-destructive/20 mt-3 border-t pt-3">
+                            <div className="text-muted-foreground mb-1 text-xs font-medium">
+                              {t("rawError")}
+                            </div>
+                            <pre className="text-muted-foreground max-h-32 overflow-auto font-mono text-xs break-words whitespace-pre-wrap">
+                              {item.rawMessage}
+                            </pre>
+                          </div>
                         ) : null}
-                      </p>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -148,7 +168,7 @@ export function SessionDebugSheet({ events, includeDebug = false, compact, onOpe
                   >
                     <div className="border-border/60 bg-muted/50 flex items-center justify-between gap-2 border-b px-3 py-2">
                       <div className="flex min-w-0 items-center gap-2">
-                        <Badge variant="outline" className="font-mono text-2xs">
+                        <Badge variant="outline" className="text-2xs font-mono">
                           {getDebugDescription(item.item_type)}
                         </Badge>
                         <span className="text-muted-foreground truncate font-mono text-xs">

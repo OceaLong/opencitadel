@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable, List, Optional
 
-from app.application.errors.exceptions import BadRequestError, ConflictError, ForbiddenError, NotFoundError
+from app.domain.errors import BadRequestError, ConflictError, ForbiddenError, NotFoundError
 from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.team import Team, TeamMember, TeamRole
 from app.domain.models.user import User

@@ -76,7 +76,6 @@ async def test_task_runner_factory_builds_real_ask_flow_without_write_or_delegat
     llm.supports_multimodal = False
     session = Session(
         id="session-1",
-        codebase_id=codebase.id,
         mode=SessionMode.ASK,
         model_id="model-1",
         owner_user_id="user-1",

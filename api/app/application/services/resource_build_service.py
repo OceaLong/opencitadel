@@ -7,7 +7,7 @@ import logging
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from app.application.errors.exceptions import (
+from app.domain.errors import (
     BadRequestError,
     ConflictError,
     NotFoundError,

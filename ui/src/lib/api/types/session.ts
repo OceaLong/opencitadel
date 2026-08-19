@@ -14,8 +14,6 @@ export type Session = {
   latest_message_at: string;
   status: SessionStatus;
   unread_message_count: number;
-  codebase_id?: string | null;
-  knowledge_base_id?: string | null;
   mode?: SessionMode;
   resource_bindings?: SessionResourceBinding[];
   [key: string]: unknown;
@@ -148,8 +146,6 @@ export type SessionDetail = Session & {
   model?: LLMModel | null;
   skill?: SkillSummary | null;
   token_usage?: TokenUsageSummary | null;
-  codebase_id?: string | null;
-  knowledge_base_id?: string | null;
   mode?: SessionMode;
   operator_scope?: string | null;
   operator_domains?: string[];

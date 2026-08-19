@@ -79,7 +79,6 @@ class DBCodebaseRepository(CodebaseRepository):
         record.ingest_task_id = codebase.ingest_task_id
         record.error = codebase.error
         record.vector_degraded = codebase.vector_degraded
-        record.legacy_v1_migrated = codebase.legacy_v1_migrated
         record.active_version_id = codebase.active_version_id
         record.owner_user_id = codebase.owner_user_id
         record.team_id = codebase.team_id

@@ -20,7 +20,7 @@ from app.domain.models.event import (
     ApprovalEvent, WaitEvent, AssistantNoticeEvent,
 )
 from app.domain.models.memory import Memory
-from app.domain.models.message import Message, VisionAttachment
+from app.domain.models.message import Message, MediaAttachment
 from app.domain.models.tool_result import ToolResult
 from app.domain.models.knowledge_citation import (
     KnowledgeCitation,
@@ -856,7 +856,7 @@ class BaseAgent(ABC):
             self,
             query: str,
             format: Optional[str] = None,
-            vision_attachments: Optional[List[VisionAttachment]] = None,
+            vision_attachments: Optional[List[MediaAttachment]] = None,
             emit_deltas: bool = True,
             response_schema: Optional[Type[BaseModel]] = None,
     ) -> AsyncGenerator[BaseEvent, None]:
@@ -881,7 +881,7 @@ class BaseAgent(ABC):
             self,
             query: str,
             format: Optional[str],
-            vision_attachments: Optional[List[VisionAttachment]],
+            vision_attachments: Optional[List[MediaAttachment]],
             emit_deltas: bool,
             response_schema: Optional[Type[BaseModel]],
     ) -> AsyncGenerator[BaseEvent, None]:
@@ -901,7 +901,7 @@ class BaseAgent(ABC):
             self,
             query: str,
             format: Optional[str],
-            vision_attachments: Optional[List[VisionAttachment]],
+            vision_attachments: Optional[List[MediaAttachment]],
             emit_deltas: bool,
             response_schema: Optional[Type[BaseModel]],
     ) -> AsyncGenerator[BaseEvent, None]:

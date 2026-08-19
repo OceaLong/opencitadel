@@ -131,7 +131,6 @@ export type KnowledgeVersion = {
   capabilities: Record<string, unknown>;
   degraded_reasons: string[];
   metrics: Record<string, unknown>;
-  legacy_snapshot: boolean;
   created_at: string;
   published_at?: string | null;
   is_active: boolean;

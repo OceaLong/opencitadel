@@ -44,11 +44,10 @@ _CHUNK_INSERT_WITH_EMBEDDING_SQL = text(
          page_no, heading_path, ordinal, embedding)
     VALUES
         (:id, :kb_id, :doc_id, :version_id, :parent_id, :level, :content,
-         CASE
-           WHEN :content_tsv IS NULL
-             THEN to_tsvector('simple', :segmented_content)
-           ELSE CAST(:content_tsv AS tsvector)
-         END,
+         COALESCE(
+           CAST(:content_tsv AS tsvector),
+           to_tsvector('simple', :segmented_content)
+         ),
          :page_no, :heading_path, :ordinal, :embedding::vector)
     """
 )
@@ -61,11 +60,10 @@ _CHUNK_INSERT_PLAIN_SQL = text(
          page_no, heading_path, ordinal)
     VALUES
         (:id, :kb_id, :doc_id, :version_id, :parent_id, :level, :content,
-         CASE
-           WHEN :content_tsv IS NULL
-             THEN to_tsvector('simple', :segmented_content)
-           ELSE CAST(:content_tsv AS tsvector)
-         END,
+         COALESCE(
+           CAST(:content_tsv AS tsvector),
+           to_tsvector('simple', :segmented_content)
+         ),
          :page_no, :heading_path, :ordinal)
     """
 )
@@ -623,17 +621,7 @@ class KBIndexMixin:
             )
             .where(KnowledgeDocumentModel.kb_id.in_(kb_ids))
             .where(self._active_document_predicate())
-            .where(
-                or_(
-                    KnowledgeVersionDocumentORM.state == "indexed",
-                    and_(
-                        KnowledgeVersionDocumentORM.document_id.is_(None),
-                        KnowledgeBaseVersionORM.legacy_snapshot.is_(True),
-                        KnowledgeDocumentModel.status
-                        == DocStatus.READY.value,
-                    ),
-                )
-            )
+            .where(KnowledgeVersionDocumentORM.state == "indexed")
             .group_by(KnowledgeDocumentModel.kb_id)
         )
         result = await self.db_session.execute(stmt)

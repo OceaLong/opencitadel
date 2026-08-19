@@ -353,16 +353,16 @@ class DBCodebaseVersionRepository(
             return False
         if codebase.active_version_id != expected_active_version_id:
             return False
-        now = datetime.now(timezone.utc)
+        published_at = datetime.now(timezone.utc)
         version.state = state.value
         version.capabilities = dict(capabilities)
         version.degraded_reasons = list(degraded_reasons)
         version.metrics = dict(metrics)
-        version.published_at = now
+        version.published_at = published_at
         codebase.active_version_id = version.id
         codebase.status = CodebaseStatus.READY.value
         codebase.vector_degraded = state is CodebaseVersionState.DEGRADED
-        codebase.updated_at = now
+        codebase.updated_at = published_at.replace(tzinfo=None)
         await self.db_session.flush()
         return True
 

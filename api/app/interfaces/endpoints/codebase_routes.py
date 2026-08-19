@@ -334,41 +334,6 @@ async def ingest_stream(
     return EventSourceResponse(generator())
 
 
-@router.post("/{codebase_id}/reanalyze", response_model=Response[CodebaseResponse])
-async def reanalyze(
-        codebase_id: str,
-        ctx: WorkspaceContextDep,
-        _write_guard: NonAuditorWriteGuardDep,
-        service: CodebaseService = Depends(get_codebase_service),
-) -> Response[CodebaseResponse]:
-    if hasattr(service, "create_build"):
-        await service.create_build(codebase_id, scope=ctx.scope)
-        codebase = await service.get_codebase(codebase_id, scope=ctx.scope)
-    else:
-        codebase = await service.reanalyze(codebase_id, scope=ctx.scope)
-    return Response.success(data=_to_codebase_response(codebase))
-
-
-@router.get("/{codebase_id}/download", response_model=Response[DownloadCodebaseResponse])
-async def download_codebase(
-        codebase_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        service: CodebaseService = Depends(get_codebase_service),
-) -> Response[DownloadCodebaseResponse]:
-    """Deprecated, read-only compatibility lookup for an existing snapshot."""
-    if hasattr(service, "get_download_snapshot_key"):
-        snapshot_key = await service.get_download_snapshot_key(
-            codebase_id,
-            scope=ctx.scope,
-        )
-    else:
-        codebase = await service.get_codebase(codebase_id, scope=ctx.scope)
-        snapshot_key = codebase.snapshot_key or ""
-    return Response.success(data=DownloadCodebaseResponse(
-        snapshot_key=snapshot_key,
-    ))
-
-
 @router.post("/{codebase_id}/snapshots", response_model=Response[DownloadCodebaseResponse])
 async def create_codebase_snapshot(
         codebase_id: str,

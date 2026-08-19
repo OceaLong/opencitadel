@@ -4,7 +4,7 @@ import type { EventMeta, SSEEventData } from "@/lib/api/types";
 
 import * as sessionEvents from "./session-events";
 
-const { eventsToTimeline, extractSessionErrors } = sessionEvents;
+const { countSessionErrorOccurrences, eventsToTimeline, extractSessionErrors } = sessionEvents;
 
 function eventMeta(createdAt: number, eventId?: string): EventMeta {
   return {
@@ -103,6 +103,35 @@ describe("eventsToTimeline error i18n", () => {
     expect(errors[0]?.repeatCount).toBe(2);
   });
 
+  it("preserves raw system evidence and counts occurrences across groups", () => {
+    const rawError = "<Token var=<ContextVar name='task_id'>> was created in a different Context";
+    const events: SSEEventData[] = [
+      {
+        type: "error",
+        data: {
+          error: rawError,
+          code: "MODEL_UNAVAILABLE",
+          ...eventMeta(1, "1"),
+        },
+      },
+      {
+        type: "error",
+        data: {
+          error: rawError,
+          code: "MODEL_UNAVAILABLE",
+          ...eventMeta(2, "2"),
+        },
+      },
+    ];
+
+    const errors = extractSessionErrors(events);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.rawMessage).toBe(rawError);
+    expect(errors[0]?.repeatCount).toBe(2);
+    expect(countSessionErrorOccurrences(errors)).toBe(2);
+  });
+
   it("localizes assistant_notice via i18n_key", () => {
     const events: SSEEventData[] = [
       {
@@ -131,7 +160,8 @@ describe("eventsToTimeline error i18n", () => {
       {
         type: "assistant_notice",
         data: {
-          message: "Current model quota is exhausted. Switched to qwen3.7-max; the task will continue.",
+          message:
+            "Current model quota is exhausted. Switched to qwen3.7-max; the task will continue.",
           i18n_key: "sessionDetail.modelFallbackNotice",
           i18n_params: { modelName: "qwen3.7-max" },
           ...eventMeta(1),
@@ -289,10 +319,7 @@ describe("session status reducer", () => {
       statusEvent("running", "10"),
       statusEvent("failed", "11"),
     ]);
-    const replayed = sessionEvents.reduceSessionStatusState(
-      [statusEvent("running", "10")],
-      first,
-    );
+    const replayed = sessionEvents.reduceSessionStatusState([statusEvent("running", "10")], first);
 
     expect(replayed.status).toBe("failed");
     expect(replayed.lastPersistedSeq).toBe(11);

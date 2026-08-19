@@ -17,8 +17,7 @@ and retention.
 | Retry / cancel | `POST /api/codebases/{id}/builds/{build_id}/retry`, `/cancel` | Only valid for same-codebase build/version closure |
 | Versioned source | `POST /api/codebases/{id}/versions/{version_id}/source` | Reads immutable snapshot for that published version |
 | Versioned artifacts | `GET /api/codebases/{id}/versions/{version_id}/artifacts` | Returns evidence-supported artifacts for that version |
-| Compatibility rebuild | `POST /api/codebases/{id}/reanalyze` | Adapter to `POST /builds` for one release |
-| Compatibility download | `GET /api/codebases/{id}/download` | Read-only lookup of an existing active-version snapshot key |
+| Create download snapshot | `POST /api/codebases/{id}/snapshots` | Packages and persists a snapshot key as an explicit mutation |
 
 Ask sessions and Agent sessions are created with an explicit
 `codebase_version_id`. Existing sessions keep reading their bound version even
@@ -133,13 +132,7 @@ Artifacts are generated only when their facts have evidence:
 Unsupported views are recorded in version metrics and capabilities. The UI
 shows unsupported reasons instead of rendering generic diagrams.
 
-## Compatibility and recovery
-
-Compatibility routes remain for one release:
-
-- `/reanalyze` creates or returns a build and then returns the codebase shape.
-- `/download` reads the existing active-version snapshot key and never packages
-  or mutates the database.
+## Recovery
 
 Worker reconciliation may fail stale candidates and builds, but it must not
 change the active version unless the candidate passes the publish CAS. Retry

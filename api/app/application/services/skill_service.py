@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Callable, List, Optional
 
-from app.application.errors.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.domain.errors import BadRequestError, ForbiddenError, NotFoundError
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.skill import ResourceVisibility, Skill, SkillAgentParams, SkillSummary
 from app.domain.repositories.uow import IUnitOfWork

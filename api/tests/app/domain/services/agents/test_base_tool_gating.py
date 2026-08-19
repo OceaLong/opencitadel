@@ -6,7 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.domain.models.event import ApprovalEvent, MessageEvent, ToolEvent, WaitEvent
+from app.domain.models.event import (
+    ApprovalEvent,
+    ErrorEvent,
+    MessageEvent,
+    ToolEvent,
+    WaitEvent,
+)
 from app.domain.models.message import Message
 from app.domain.models.plan import ExecutionStatus, Plan, Step
 from app.domain.models.tool_approval import ApprovalStatus
@@ -468,7 +474,7 @@ async def test_react_resumes_complete_persisted_approval_batch():
 
 
 @pytest.mark.asyncio
-async def test_legacy_single_approval_retries_safe_timeout_with_attempt_metadata():
+async def test_tool_approval_without_batch_expires_without_executing_legacy_call():
     uow = _Uow()
     tool_pack = _LegacyRetryTool()
     agent = _ResumeAgent(
@@ -486,6 +492,7 @@ async def test_legacy_single_approval_retries_safe_timeout_with_attempt_metadata
         runtime_settings=agent_test_runtime_settings(),
     )
     session = uow.session.session
+    session.pending_phase = "tool_approval"
     session.pending_metadata = {
         "pending_tool_call": {
             "tool_call_id": "legacy-safe",
@@ -496,60 +503,20 @@ async def test_legacy_single_approval_retries_safe_timeout_with_attempt_metadata
 
     events = [
         event
-        async for event in agent._resume_single_tool_approval(
+        async for event in agent._resume_tool_approval(
             session,
             Message(message="approve"),
-            Step(description="legacy safe retry"),
+            Step(description="expired legacy approval"),
         )
     ]
 
-    invoked = next(event for event in events if isinstance(event, ToolEvent))
-    assert tool_pack.safe_timeout_calls == 2
-    assert invoked.function_result.status is ToolExecutionStatus.SUCCESS
-    assert [attempt.attempt_number for attempt in invoked.function_result.attempts] == [1, 2]
-
-
-@pytest.mark.asyncio
-async def test_legacy_single_approval_claims_keyed_write_once_then_reuses_key():
-    uow = _Uow()
-    tool_pack = _LegacyRetryTool()
-    agent = _ResumeAgent(
-        uow_factory=lambda: uow,
-        session_id="s1",
-        agent_config=SimpleNamespace(
-            max_retries=2,
-            max_iterations=1,
-            tool_result_max_chars=8000,
-        ),
-        llm=_LLM(),
-        json_parser=_Parser(),
-        tools=[tool_pack],
-        observability_port=agent_test_observability_port(),
-        runtime_settings=agent_test_runtime_settings(),
-    )
-    session = uow.session.session
-    session.pending_metadata = {
-        "pending_tool_call": {
-            "tool_call_id": "legacy-keyed",
-            "tool_name": "legacy_keyed_write",
-            "args": {},
-        }
-    }
-
-    events = [
-        event
-        async for event in agent._resume_single_tool_approval(
-            session,
-            Message(message="approve"),
-            Step(description="legacy keyed retry"),
-        )
+    assert tool_pack.safe_timeout_calls == 0
+    assert tool_pack.keyed_calls == 0
+    assert session.pending_phase is None
+    assert session.pending_metadata is None
+    assert [event.error for event in events if isinstance(event, ErrorEvent)] == [
+        "工具审批状态已过期，请重试"
     ]
-
-    invoked = next(event for event in events if isinstance(event, ToolEvent))
-    assert tool_pack.keyed_calls == 2
-    assert len(set(tool_pack.received_keys)) == 1
-    assert invoked.function_result.status is ToolExecutionStatus.SUCCESS
-    assert uow.resource_governance.batch.status is ApprovalStatus.CONSUMED
 
 
 @pytest.mark.asyncio

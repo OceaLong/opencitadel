@@ -188,7 +188,6 @@ describe("knowledge task starts", () => {
           capabilities: {},
           degraded_reasons: [],
           metrics: {},
-          legacy_snapshot: false,
           created_at: "2026-07-29T00:00:00Z",
           published_at: "2026-07-29T00:01:00Z",
           is_active: true,

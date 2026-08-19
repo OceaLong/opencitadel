@@ -126,8 +126,14 @@ export function SessionDetailView({
 
   useReportPageTitle(session?.title ?? undefined);
 
-  const hasContext = Boolean(session?.codebase_id || session?.knowledge_base_id);
-  const showModeToggle = Boolean(session?.codebase_id);
+  const codebaseId = session?.resource_bindings?.find(
+    (binding) => binding.resource_kind === "codebase",
+  )?.resource_id;
+  const knowledgeBaseId = session?.resource_bindings?.find(
+    (binding) => binding.resource_kind === "knowledge_base",
+  )?.resource_id;
+  const hasContext = Boolean(codebaseId || knowledgeBaseId);
+  const showModeToggle = Boolean(codebaseId);
 
   const handleGateSettingsSave = async (config: {
     operatorDomains: string[];
@@ -447,8 +453,8 @@ export function SessionDetailView({
         {hasContext && !showMobilePanels && (
           <div className={hasPreview ? "hidden" : undefined}>
             <SessionContextPanel
-              codebaseId={session.codebase_id}
-              knowledgeBaseId={session.knowledge_base_id}
+              codebaseId={codebaseId}
+              knowledgeBaseId={knowledgeBaseId}
               sessionId={session.session_id}
               resourceBindings={session.resource_bindings}
               codeSourceRef={codeSourceRef}
@@ -470,8 +476,8 @@ export function SessionDetailView({
         <Sheet open={contextSheetOpen} onOpenChange={setContextSheetOpen}>
           <SheetContent side="right" className="w-full max-w-full overflow-hidden p-0 sm:max-w-md">
             <SessionContextPanel
-              codebaseId={session.codebase_id}
-              knowledgeBaseId={session.knowledge_base_id}
+              codebaseId={codebaseId}
+              knowledgeBaseId={knowledgeBaseId}
               sessionId={session.session_id}
               resourceBindings={session.resource_bindings}
               codeSourceRef={codeSourceRef}

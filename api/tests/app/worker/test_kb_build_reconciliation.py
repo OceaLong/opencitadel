@@ -201,6 +201,9 @@ async def test_stale_reconciliation_is_idempotent_and_preserves_old_active(
     async def no_lease(_build_id):
         return None
 
+    async def provide_build_service():
+        return _ReconcileBuildService(store)
+
     monkeypatch.setattr(
         "app.worker.main.get_uow",
         uow_factory,
@@ -212,7 +215,7 @@ async def test_stale_reconciliation_is_idempotent_and_preserves_old_active(
     monkeypatch.setattr(
         "app.worker.main.get_worker_container",
         lambda: SimpleNamespace(
-            resource_build_service=lambda: _ReconcileBuildService(store)
+            resource_build_service=provide_build_service
         ),
     )
     worker = object.__new__(AgentWorker)

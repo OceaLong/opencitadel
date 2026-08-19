@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import pytest
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.domain.models.llm_model import LLMModel, ResourceVisibility
 from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
 from app.domain.models.team import TeamRole
@@ -236,7 +236,7 @@ async def test_team_member_cannot_change_team_model_preference():
         scope=OwnerScope.team("member-1", "team-1"),
     )
 
-    from app.application.errors.exceptions import ForbiddenError
+    from app.domain.errors import ForbiddenError
 
     with pytest.raises(ForbiddenError, match="团队"):
         await set_preferred_model(

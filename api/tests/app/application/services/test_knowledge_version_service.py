@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.container import BaseContainer
-from app.application.errors.exceptions import BadRequestError, NotFoundError
+from app.domain.errors import BadRequestError, NotFoundError
 from app.application.services.knowledge_version_service import (
     KnowledgeVersionService,
 )

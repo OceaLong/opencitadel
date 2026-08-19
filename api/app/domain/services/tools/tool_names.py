@@ -18,7 +18,6 @@ LEGACY_TOOL_NAME_ALIASES = {
 # Skill 白名单中的 A2A 工具组标识
 A2A_GROUP_TOKEN = "a2a"
 A2A_TOOL_NAMES = frozenset({"get_remote_agent_cards", "call_remote_agent"})
-MCP_GROUP_TOKEN = "mcp_*"
 
 
 def normalize_tool_name(name: str) -> str:

@@ -27,12 +27,7 @@ def test_resource_mutation_route_matrix_requires_non_auditor():
         "kb:POST:/knowledge-bases/{kb_id}/builds",
         "kb:POST:/knowledge-bases/{kb_id}/builds/{build_id}/retry",
         "kb:POST:/knowledge-bases/{kb_id}/builds/{build_id}/cancel",
-        "cb:POST:/codebases/{codebase_id}/reanalyze", "cb:POST:/codebases/{codebase_id}/snapshots",
+        "cb:POST:/codebases/{codebase_id}/snapshots",
         "cb:POST:/codebases/{codebase_id}/sessions", "cb:DELETE:/codebases/{codebase_id}",
     ):
         assert require_non_auditor in required[name]
-
-
-def test_read_only_download_has_no_mutation_guard():
-    """Catches a compatibility GET changing back into a mutating route."""
-    assert require_non_auditor not in _write_dependencies(codebase_router)["GET:/codebases/{codebase_id}/download"]

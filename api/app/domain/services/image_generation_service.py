@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""图像生成与编辑服务（OpenAI Images / Gemini Imagen）。"""
+"""图像生成服务（OpenAI Images / Gemini Imagen）。"""
 import base64
-import io
 import logging
-from typing import Optional, Tuple
+from typing import Optional
 
 import httpx
 
@@ -139,78 +138,4 @@ async def _generate_gemini_image(
             )
     except Exception as exc:
         logger.error("Gemini 图像生成失败: %s", exc)
-        return None
-
-
-async def edit_image(
-        image_bytes: bytes,
-        mask_bytes: bytes,
-        prompt: str,
-        model: LLMModel,
-        file_storage: FileStorage,
-        *,
-        mime_type: str = "image/png",
-        owner_user_id: Optional[str] = None,
-        team_id: Optional[str] = None,
-) -> Optional[Tuple[bytes, str]]:
-    """图像编辑/inpaint，返回 (image_bytes, mime_type)。"""
-    if model.provider in (LLMProvider.OPENAI, LLMProvider.AZURE):
-        return await _edit_openai_image(
-            image_bytes, mask_bytes, prompt, model, file_storage, mime_type=mime_type,
-            owner_user_id=owner_user_id, team_id=team_id,
-        )
-    logger.warning("Provider %s 不支持图像编辑", model.provider)
-    return None
-
-
-async def _edit_openai_image(
-        image_bytes: bytes,
-        mask_bytes: bytes,
-        prompt: str,
-        model: LLMModel,
-        file_storage: FileStorage,
-        *,
-        mime_type: str,
-        owner_user_id: Optional[str],
-        team_id: Optional[str],
-) -> Optional[Tuple[bytes, str]]:
-    base_url = str(model.base_url).rstrip("/")
-    url = f"{base_url}/images/edits" if base_url.endswith("/v1") else f"{base_url}/v1/images/edits"
-    headers = {"Authorization": f"Bearer {model.api_key}"}
-    image_file = ("image.png", io.BytesIO(image_bytes), mime_type)
-    mask_file = ("mask.png", io.BytesIO(mask_bytes), "image/png")
-    data = {
-        "model": model.extra_params.get("image_edit_model", "gpt-image-1"),
-        "prompt": prompt,
-        "n": "1",
-        "size": "1024x1024",
-        "response_format": "b64_json",
-    }
-    try:
-        async with create_ssrf_safe_async_client(
-            timeout=180.0,
-            follow_redirects=False,
-        ) as client:
-            response = await client.post(
-                url,
-                headers=headers,
-                data=data,
-                files={"image": image_file, "mask": mask_file},
-            )
-            response.raise_for_status()
-            _ensure_bounded_provider_response(response)
-            payload = response.json()
-            b64 = payload["data"][0].get("b64_json", "")
-            if not b64:
-                return None
-            edited = base64.b64decode(b64)
-            await upload_image_bytes_to_storage(
-                file_storage, edited, "image/png",
-                owner_user_id=owner_user_id,
-                team_id=team_id,
-                fallback_to_proxy=True,
-            )
-            return edited, "image/png"
-    except Exception as exc:
-        logger.error("OpenAI 图像编辑失败: %s", exc)
         return None

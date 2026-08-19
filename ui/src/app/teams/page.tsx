@@ -25,8 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/admin-utils";
 import { type Team, teamApi } from "@/lib/api/team";
 import { IconAdd, IconLoading, IconUsers } from "@/lib/icons";
-import { ACTIVE_WORKSPACE_KEY, LEGACY_ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
-import { writeLocalStorageKey } from "@/lib/storage-migration";
+import { ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
 
 export default function TeamsPage() {
   const t = useTranslations("teams");
@@ -66,7 +65,7 @@ export default function TeamsPage() {
         action: {
           label: t("switchToTeam"),
           onClick: () => {
-            writeLocalStorageKey(LEGACY_ACTIVE_WORKSPACE_KEY, ACTIVE_WORKSPACE_KEY, team.id);
+            window.localStorage.setItem(ACTIVE_WORKSPACE_KEY, team.id);
             window.location.reload();
           },
         },

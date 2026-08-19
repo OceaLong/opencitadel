@@ -9,7 +9,7 @@ import { renderComponent } from "@/test-utils/render";
 const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   createBuild: vi.fn(),
-  legacyReanalyze: vi.fn(),
+  createSnapshot: vi.fn(),
   listCodebases: vi.fn(),
   listVersions: vi.fn(),
   push: vi.fn(),
@@ -42,11 +42,10 @@ vi.mock("@/lib/api/codebase", () => ({
     list: mocks.listCodebases,
     listVersions: mocks.listVersions,
     createBuild: mocks.createBuild,
+    createSnapshot: mocks.createSnapshot,
     retryBuild: vi.fn(),
     cancelBuild: vi.fn(),
-    reanalyze: mocks.legacyReanalyze,
     ingestStream: vi.fn(() => vi.fn()),
-    download: vi.fn(),
     delete: vi.fn(),
   },
 }));
@@ -130,7 +129,7 @@ describe("codebase library versions", () => {
   afterEach(() => {
     mocks.createSession.mockReset();
     mocks.createBuild.mockReset();
-    mocks.legacyReanalyze.mockReset();
+    mocks.createSnapshot.mockReset();
     mocks.listCodebases.mockReset();
     mocks.listVersions.mockReset();
     mocks.push.mockReset();
@@ -180,7 +179,6 @@ describe("codebase library versions", () => {
           capabilities: {},
           degraded_reasons: [],
           metrics: {},
-          legacy_snapshot: false,
           created_at: "2026-07-29T00:00:00Z",
           published_at: "2026-07-29T00:01:00Z",
           is_active: true,
@@ -207,7 +205,40 @@ describe("codebase library versions", () => {
       codebase_version_id: "active-v2",
       mode: "agent",
     });
-    expect(mocks.legacyReanalyze).not.toHaveBeenCalled();
+    expect(mocks.createSnapshot).not.toHaveBeenCalled();
+
+    root.unmount();
+  });
+
+  it("creates a snapshot through the mutating snapshots endpoint", async () => {
+    mocks.listCodebases.mockResolvedValue({
+      codebases: [
+        {
+          id: "cb1",
+          name: "Repo",
+          source_type: "files",
+          status: "ready",
+          file_count: 7,
+          active_version_id: "active-v2",
+        },
+      ],
+    });
+    mocks.listVersions.mockResolvedValue({
+      codebase_id: "cb1",
+      active_version_id: "active-v2",
+      active_build: null,
+      versions: [],
+    });
+    mocks.createSnapshot.mockResolvedValue({ snapshot_key: "codebases/cb1/download.tgz" });
+
+    const { container, root } = await renderLibrary();
+
+    await act(async () => {
+      findButton(container, "Download").click();
+    });
+
+    expect(mocks.createSnapshot).toHaveBeenCalledTimes(1);
+    expect(mocks.createSnapshot).toHaveBeenCalledWith("cb1");
 
     root.unmount();
   });

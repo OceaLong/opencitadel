@@ -1,14 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""KBGraphMixin: candidate graph write path + entity/relation
-read methods (versioned and non-versioned) for DBKnowledgeBaseRepository.
+"""KBGraphMixin: versioned graph writes and active-version reads.
 
 Pure re-homed methods split out of db_knowledge_base_repository.py
 (Phase C task 5, KB repository mixin split).
 """
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
-from sqlalchemy import and_, case, delete, func, or_, select, text
+from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.domain.models.knowledge_base import (
@@ -24,15 +23,11 @@ from app.infrastructure.models.knowledge_base import (
 )
 from app.infrastructure.models.knowledge_version import KnowledgeBaseVersionORM
 from app.domain.models.knowledge_version import KnowledgeVersionState
-from app.infrastructure.repositories.kb._shared import (
-    _CHUNK_INSERT_BATCH_SIZE,
-    _normalize_graph_identity,
-)
+from app.infrastructure.repositories.kb._shared import _normalize_graph_identity
 
 
 class KBGraphMixin:
-    """Candidate graph write path + entity/relation read methods
-    (versioned and non-versioned) for DBKnowledgeBaseRepository."""
+    """Candidate graph write path plus active-version graph reads."""
 
     async def replace_candidate_graph(
             self,
@@ -255,82 +250,6 @@ class KBGraphMixin:
                 KnowledgeEntityModel.version_id == version_id
             )
         )
-
-    async def save_entities(self, entities: List[KnowledgeEntity]) -> None:
-        for entity in entities:
-            self.db_session.add(
-                KnowledgeEntityModel(
-                    id=entity.id,
-                    kb_id=entity.kb_id,
-                    name=entity.name,
-                    type=entity.type,
-                    description=entity.description,
-                )
-            )
-
-    async def upsert_entities(self, entities: List[KnowledgeEntity]) -> Dict[str, str]:
-        keyed: Dict[str, KnowledgeEntity] = {}
-        for entity in entities:
-            key = entity.name.strip().lower()
-            if key:
-                keyed.setdefault(key, entity)
-        if not keyed:
-            return {}
-        kb_id = next(iter(keyed.values())).kb_id
-        stmt = (
-            select(KnowledgeEntityModel)
-            .where(KnowledgeEntityModel.kb_id == kb_id)
-            .where(func.lower(KnowledgeEntityModel.name).in_(list(keyed)))
-        )
-        result = await self.db_session.execute(stmt)
-        existing = {record.name.strip().lower(): record.id for record in result.scalars().all()}
-        id_map: Dict[str, str] = {}
-        for key, entity in keyed.items():
-            if key in existing:
-                id_map[key] = existing[key]
-                continue
-            self.db_session.add(
-                KnowledgeEntityModel(
-                    id=entity.id,
-                    kb_id=entity.kb_id,
-                    name=entity.name,
-                    type=entity.type,
-                    description=entity.description,
-                )
-            )
-            id_map[key] = entity.id
-        return id_map
-
-    async def save_entity_refs(self, refs: List[KnowledgeEntityRef]) -> None:
-        sql = text(
-            """
-            INSERT INTO knowledge_entity_refs (id, kb_id, entity_id, doc_id)
-            VALUES (:id, :kb_id, :entity_id, :doc_id)
-            ON CONFLICT (entity_id, doc_id) DO NOTHING
-            """
-        )
-        for start in range(0, len(refs), _CHUNK_INSERT_BATCH_SIZE):
-            batch = refs[start:start + _CHUNK_INSERT_BATCH_SIZE]
-            await self.db_session.execute(
-                sql,
-                [
-                    {"id": ref.id, "kb_id": ref.kb_id, "entity_id": ref.entity_id, "doc_id": ref.doc_id}
-                    for ref in batch
-                ],
-            )
-
-    async def save_relations(self, relations: List[KnowledgeRelation]) -> None:
-        for relation in relations:
-            self.db_session.add(
-                KnowledgeRelationModel(
-                    id=relation.id,
-                    kb_id=relation.kb_id,
-                    src_entity_id=relation.src_entity_id,
-                    dst_entity_id=relation.dst_entity_id,
-                    relation=relation.relation,
-                    chunk_id=relation.chunk_id,
-                )
-            )
 
     async def list_entities(self, kb_id: str, name: Optional[str] = None) -> List[KnowledgeEntity]:
         stmt = (

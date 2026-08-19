@@ -5,7 +5,6 @@ from typing import List, Optional
 
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from app.domain.models.knowledge_base import (
     DocStatus,
@@ -24,6 +23,7 @@ from app.infrastructure.models.knowledge_base import (
 )
 from app.infrastructure.models.knowledge_version import (
     KnowledgeBaseVersionORM,
+    KnowledgeDocumentRevisionORM,
     KnowledgeVersionDocumentORM,
 )
 from app.infrastructure.repositories.kb._shared import (
@@ -59,35 +59,13 @@ class DBKnowledgeBaseRepository(
 
     @staticmethod
     def _active_version_row_predicate(version_column):
-        """Expose legacy NULL rows only during the c7 legacy snapshot window."""
-        return or_(
-            version_column == KnowledgeBaseModel.active_version_id,
-            and_(
-                version_column.is_(None),
-                KnowledgeBaseVersionORM.legacy_snapshot.is_(True),
-            ),
-        )
+        """Expose rows owned by the authoritative active version."""
+        return version_column == KnowledgeBaseModel.active_version_id
 
     @staticmethod
     def _active_document_predicate():
-        """Use the active manifest, with c7 old-writer fallback only."""
-        any_manifest = aliased(KnowledgeVersionDocumentORM)
-        has_any_manifest = (
-            select(any_manifest.version_id)
-            .where(
-                any_manifest.knowledge_base_id
-                == KnowledgeDocumentModel.kb_id,
-                any_manifest.document_id == KnowledgeDocumentModel.id,
-            )
-            .exists()
-        )
-        return or_(
-            KnowledgeVersionDocumentORM.document_id.is_not(None),
-            and_(
-                KnowledgeBaseVersionORM.legacy_snapshot.is_(True),
-                ~has_any_manifest,
-            ),
-        )
+        """Expose documents present in the authoritative active manifest."""
+        return KnowledgeVersionDocumentORM.document_id.is_not(None)
 
     async def save_kb(self, kb: KnowledgeBase) -> None:
         stmt = select(KnowledgeBaseModel).where(KnowledgeBaseModel.id == kb.id)
@@ -158,7 +136,24 @@ class DBKnowledgeBaseRepository(
         return [record.to_domain() for record in result.scalars().all()]
 
     async def delete_kb(self, kb_id: str) -> None:
-        await self.db_session.execute(delete(KnowledgeBaseModel).where(KnowledgeBaseModel.id == kb_id))
+        await self.db_session.execute(
+            delete(KnowledgeVersionDocumentORM).where(
+                KnowledgeVersionDocumentORM.knowledge_base_id == kb_id
+            )
+        )
+        document_ids = select(KnowledgeDocumentModel.id).where(
+            KnowledgeDocumentModel.kb_id == kb_id
+        )
+        await self.db_session.execute(
+            delete(KnowledgeDocumentRevisionORM).where(
+                KnowledgeDocumentRevisionORM.document_id.in_(document_ids)
+            )
+        )
+        await self.db_session.execute(
+            delete(KnowledgeBaseModel).where(
+                KnowledgeBaseModel.id == kb_id
+            )
+        )
 
     async def update_status(
             self,

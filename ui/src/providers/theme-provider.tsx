@@ -10,8 +10,7 @@ import {
   useState,
 } from "react";
 
-import { LEGACY_THEME_KEY, THEME_KEY } from "@/lib/storage-keys";
-import { migrateLocalStorageKey, writeLocalStorageKey } from "@/lib/storage-migration";
+import { THEME_KEY } from "@/lib/storage-keys";
 
 export type ThemePreference = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
@@ -48,7 +47,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>("light");
 
   useEffect(() => {
-    const stored = migrateLocalStorageKey(LEGACY_THEME_KEY, THEME_KEY);
+    const stored = window.localStorage.getItem(THEME_KEY);
     const initial = parseStoredTheme(stored);
     const resolved = resolveTheme(initial);
     applyTheme(resolved);
@@ -81,7 +80,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const resolved = resolveTheme(next);
     setThemeState(next);
     setResolvedTheme(resolved);
-    writeLocalStorageKey(LEGACY_THEME_KEY, THEME_KEY, next);
+    window.localStorage.setItem(THEME_KEY, next);
     applyTheme(resolved);
   }, []);
 

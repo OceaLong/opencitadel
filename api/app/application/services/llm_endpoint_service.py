@@ -3,7 +3,7 @@
 import logging
 from typing import Callable, List, Optional
 
-from app.application.errors.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.domain.errors import BadRequestError, ForbiddenError, NotFoundError
 from app.domain.models.llm_endpoint import LLMEndpoint
 from app.domain.models.llm_model import LLMProvider, ResourceVisibility
 from app.domain.models.scope import OwnerScope, OwnerScopeType

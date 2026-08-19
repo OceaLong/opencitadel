@@ -6,7 +6,7 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse, Response
 
-from app.application.errors.exceptions import ForbiddenError
+from app.domain.errors import ForbiddenError
 from app.infrastructure.security.cookie import ACCESS_COOKIE, CSRF_COOKIE, REFRESH_COOKIE
 
 

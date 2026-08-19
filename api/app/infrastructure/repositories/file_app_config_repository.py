@@ -8,7 +8,7 @@ from typing import List, Optional
 import yaml
 from filelock import FileLock
 
-from app.application.errors.exceptions import NotFoundError, ServerRequestsError
+from app.domain.errors import NotFoundError, ServerRequestsError
 from app.domain.models.app_config import AppConfig
 from app.domain.models.app_config_revision import AppConfigRevision
 from app.domain.repositories.app_config_repository import AppConfigRepository
@@ -52,16 +52,13 @@ class FileAppConfigRepository(AppConfigRepository):
             raise ServerRequestsError("写入配置文件失败，请稍后尝试")
 
     async def load_global(self) -> Optional[AppConfig]:
-        return await self.load()
+        return await asyncio.to_thread(self._load_sync)
 
     async def load_user_override_payload(self, user_id: str) -> dict:
         return {}
 
     async def load_user_override(self, user_id: str) -> Optional[AppConfig]:
         return None
-
-    async def load(self) -> Optional[AppConfig]:
-        return await asyncio.to_thread(self._load_sync)
 
     async def save_global(
         self,
@@ -70,7 +67,7 @@ class FileAppConfigRepository(AppConfigRepository):
         changed_by: Optional[str] = None,
         note: str = "",
     ) -> None:
-        await self.save(app_config)
+        await asyncio.to_thread(self._save_sync, app_config)
 
     async def save_user_override(
         self,
@@ -116,6 +113,3 @@ class FileAppConfigRepository(AppConfigRepository):
         changed_by: Optional[str] = None,
     ) -> AppConfig:
         raise NotFoundError(f"配置版本[{revision_id}]不存在")
-
-    async def save(self, app_config: AppConfig) -> None:
-        await asyncio.to_thread(self._save_sync, app_config)

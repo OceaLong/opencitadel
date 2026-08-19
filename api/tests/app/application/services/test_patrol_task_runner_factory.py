@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.application.patrol_templates import load_patrol_template
 from app.application.services.skill_service import BUILTIN_SKILLS
 from app.application.services.runner_bindings.remediation import remediation_session_prompt

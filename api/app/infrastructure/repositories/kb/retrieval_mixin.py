@@ -73,13 +73,7 @@ class KBRetrievalMixin:
                  AND active.knowledge_base_id = kb.id
                 JOIN knowledge_documents d ON d.id = c.doc_id
                 WHERE c.kb_id = :kb_id
-                  AND (
-                    c.version_id = kb.active_version_id
-                    OR (
-                      c.version_id IS NULL
-                      AND active.legacy_snapshot IS TRUE
-                    )
-                  )
+                  AND c.version_id = kb.active_version_id
                   AND c.level = 'child'
                   AND c.embedding IS NOT NULL
                 ORDER BY c.embedding <=> :query::vector
@@ -115,13 +109,7 @@ class KBRetrievalMixin:
                  AND active.knowledge_base_id = kb.id
                 JOIN knowledge_documents d ON d.id = c.doc_id
                 WHERE c.kb_id = :kb_id
-                  AND (
-                    c.version_id = kb.active_version_id
-                    OR (
-                      c.version_id IS NULL
-                      AND active.legacy_snapshot IS TRUE
-                    )
-                  )
+                  AND c.version_id = kb.active_version_id
                   AND c.level = 'child'
                   AND c.content_tsv @@ plainto_tsquery('simple', :query)
                 ORDER BY score DESC

@@ -5,10 +5,8 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Activity,
-  ArrowLeft,
   BookOpen,
   Bot,
-  Boxes,
   Brain,
   CircuitBoard,
   ClipboardList,
@@ -45,8 +43,6 @@ export const IconCodebase: LucideIcon = Code2;
 export const IconKnowledge: LucideIcon = BookOpen;
 /** Scheduled / automation jobs */
 export const IconAutomation: LucideIcon = Clock;
-/** Unified workspace menu trigger */
-export const IconWorkspace: LucideIcon = Boxes;
 /** System / quick settings */
 export const IconSettings: LucideIcon = Settings;
 /** Admin dashboard */
@@ -73,8 +69,6 @@ export const IconTask: LucideIcon = CircuitBoard;
 export const IconFilePreview: LucideIcon = FileText;
 /** File search in tools */
 export const IconFileSearch: LucideIcon = FileSearch;
-/** Back navigation */
-export const IconBack: LucideIcon = ArrowLeft;
 /** Loading spinner */
 export const IconLoading: LucideIcon = Loader2;
 /** New / add */
@@ -109,11 +103,13 @@ export const IconTool: LucideIcon = Wrench;
 export type SessionContextKind = "general" | "codebase" | "knowledge" | "hybrid";
 
 export function getSessionContextKind(session: {
-  codebase_id?: string | null;
-  knowledge_base_id?: string | null;
+  resource_bindings?: Array<{
+    resource_kind: "codebase" | "knowledge_base";
+  }>;
 }): SessionContextKind {
-  const hasCode = Boolean(session.codebase_id);
-  const hasKb = Boolean(session.knowledge_base_id);
+  const bindings = session.resource_bindings ?? [];
+  const hasCode = bindings.some((binding) => binding.resource_kind === "codebase");
+  const hasKb = bindings.some((binding) => binding.resource_kind === "knowledge_base");
   if (hasCode && hasKb) return "hybrid";
   if (hasCode) return "codebase";
   if (hasKb) return "knowledge";

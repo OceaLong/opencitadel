@@ -10,7 +10,7 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
-from app.application.errors.exceptions import BadRequestError, NotFoundError
+from app.domain.errors import BadRequestError, NotFoundError
 from app.domain.models.resource_governance import (
     BuildState,
     ResourceBuild,

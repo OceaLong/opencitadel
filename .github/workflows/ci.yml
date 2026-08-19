@@ -252,11 +252,9 @@ jobs:
     # the nginx/busybox/python fixture images) needs no extra buildx setup.
     name: Ops Patrol disposable-cluster fixtures (20 read-only + fixture 21 remediation)
     runs-on: ubuntu-latest
-    # Bumped from 25 -> 30: fixture 21 (ops-actuator remediation) added a
-    # Docker build + kind-load of the ops-actuator image plus the extra
-    # fail -> restart -> idempotent-replay -> heal -> recheck drive on top
-    # of the original 20 read-only cases. Revisit after the first few real
-    # CI runs show a stable observed duration.
+    # Keep a hard 30-minute ceiling: the complete 21-case flow takes about
+    # 17 minutes from a cold local kind cluster after restoring API-server
+    # egress, leaving useful runner variance without masking a blocked phase.
     timeout-minutes: 30
     needs: [patrol-collector-test, api-test]
     env:
@@ -277,7 +275,10 @@ jobs:
       - name: Run guarded fixture score (20 read-only cases + fixture 21 remediation)
         run: ./scripts/run-patrol-fixtures.sh
       - name: Upload fixture score
-        if: always()
+        # A successful runner must publish its score; if the runner itself
+        # fails or is cancelled, preserve that primary error instead of
+        # adding a misleading secondary "file not found" failure.
+        if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: patrol-fixture-score
@@ -326,10 +327,11 @@ jobs:
           NPM_CONFIG_REGISTRY: https://registry.npmjs.org
       - name: Wait for services to become healthy
         run: |
-          for i in $(seq 1 60); do
+          for attempt in $(seq 1 60); do
             unhealthy=$(docker compose --env-file .env.e2e --profile local --profile demo --profile patrol ps --format json \
               | python3 -c "import json,sys; rows=[json.loads(l) for l in sys.stdin if l.strip()]; print(sum(1 for r in rows if r.get('Health') not in ('healthy','') or r.get('State')!='running'))")
             [ "$unhealthy" = "0" ] && exit 0
+            echo "health check attempt ${attempt}/60: ${unhealthy} service(s) not ready"
             sleep 10
           done
           docker compose --env-file .env.e2e --profile local --profile demo --profile patrol ps

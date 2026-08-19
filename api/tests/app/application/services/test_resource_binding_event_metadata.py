@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import asyncio
+from contextvars import Context
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -133,3 +135,40 @@ async def test_user_message_captures_current_binding_snapshot_once_per_turn():
     uow.resource_governance.list_current_bindings.assert_awaited_once_with(
         "s1"
     )
+
+
+@pytest.mark.asyncio
+async def test_chat_close_from_fresh_context_does_not_persist_false_error():
+    binding = SessionResourceBinding(
+        id="binding-v1",
+        session_id="s1",
+        resource_kind=ResourceKind.KNOWLEDGE_BASE,
+        resource_id="kb1",
+        version_id="kbv1",
+        bound_by="u1",
+    )
+    uow = _Uow(binding)
+    service = AgentService(
+        uow_factory=lambda: uow,
+        task_cls=_TaskClass,
+        checkpoint_service=SimpleNamespace(),
+        task_state_port=SimpleNamespace(
+            get_runtime_snapshot=AsyncMock(
+                return_value={
+                    "cancelled": False,
+                    "is_done": False,
+                }
+            )
+        ),
+        event_sequence_port=SimpleNamespace(
+            allocate=AsyncMock(side_effect=[17, 18])
+        ),
+    )
+
+    stream = service.chat("s1", message="question")
+    await stream.__anext__()
+
+    close_task = Context().run(asyncio.create_task, stream.aclose())
+    await close_task
+
+    assert len(uow.session.persisted) == 1

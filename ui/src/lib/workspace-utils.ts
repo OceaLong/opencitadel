@@ -1,9 +1,9 @@
-import { ACTIVE_WORKSPACE_KEY, LEGACY_ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
-import { readLocalStorageKey, writeLocalStorageKey } from "@/lib/storage-migration";
+import { ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
 
 export function resetWorkspaceIfMatches(teamId: string): void {
-  const active = readLocalStorageKey(LEGACY_ACTIVE_WORKSPACE_KEY, ACTIVE_WORKSPACE_KEY);
+  if (typeof window === "undefined") return;
+  const active = window.localStorage.getItem(ACTIVE_WORKSPACE_KEY) ?? "";
   if (active === teamId) {
-    writeLocalStorageKey(LEGACY_ACTIVE_WORKSPACE_KEY, ACTIVE_WORKSPACE_KEY, "");
+    window.localStorage.setItem(ACTIVE_WORKSPACE_KEY, "");
   }
 }

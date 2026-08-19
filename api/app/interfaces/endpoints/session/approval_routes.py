@@ -3,7 +3,7 @@
 # 本模块路由经 session_routes.py 的 .routes.extend() 聚合，勿在别处单独 include_router。
 from fastapi import APIRouter, Body, Depends
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.domain.models.scope import WorkspaceContext
 from app.infrastructure.storage.postgres import get_uow
 from app.interfaces.auth_dependencies import get_workspace_context

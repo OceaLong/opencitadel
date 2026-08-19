@@ -12,7 +12,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import select
 
-from app.application.errors.exceptions import BadRequestError, NotFoundError
+from app.domain.errors import BadRequestError, NotFoundError
 from app.application.services.knowledge_base_service import (
     KnowledgeBaseService,
 )
@@ -519,7 +519,6 @@ async def test_parsed_unindexed_candidate_is_not_ask_agent_or_runner_ready(
     )
     session = Session(
         id="session-building",
-        knowledge_base_id="kb1",
         resource_bindings=[_runner_binding("kbv2")],
         owner_user_id="user1",
     )
@@ -945,7 +944,8 @@ async def test_retry_cancel_and_reconcile_preserve_active_version():
 def test_alembic_has_only_patrol_schedule_head_and_preserves_kb_parentage():
     script = ScriptDirectory.from_config(Config("alembic.ini"))
 
-    assert script.get_heads() == ["94feff5b0d54"]
+    assert script.get_heads() == ["aa06contract"]
+    assert script.get_revision("aa06contract").down_revision == "94feff5b0d54"
     assert script.get_revision("94feff5b0d54").down_revision == "f1a2b3c4d5e6"
     assert script.get_revision("f1a2b3c4d5e6").down_revision == "f0a1b2c3d4e5"
     assert script.get_revision("f0a1b2c3d4e5").down_revision == "e9f0a1b2c3d4"

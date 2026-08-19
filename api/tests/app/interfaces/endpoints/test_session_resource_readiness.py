@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.domain.models.resource_governance import ResourceKind, SessionResourceBinding
 from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
 from app.interfaces.endpoints import resource_governance_routes

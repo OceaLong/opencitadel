@@ -6,7 +6,7 @@ import zipfile
 
 import pytest
 
-from app.application.errors.exceptions import BadRequestError
+from app.domain.errors import BadRequestError
 from app.domain.models.codebase import CodebaseSourceType
 from app.domain.services.codebase.source_validator import (
     CodebaseSourceValidator,

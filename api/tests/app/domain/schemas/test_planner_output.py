@@ -3,7 +3,7 @@
 import pytest
 
 from app.domain.schemas.planner_output import PlannerPlanSchema
-from app.domain.services.prompts.planner import CREATE_PLAN_PROMPT
+from app.domain.services.prompts.en.planner import CREATE_PLAN_PROMPT
 
 
 def test_planner_plan_schema_requires_steps():

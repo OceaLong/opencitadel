@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.application.errors.exceptions import (
+from app.domain.errors import (
     BadRequestError,
     ConflictError,
     NotFoundError,

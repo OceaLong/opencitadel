@@ -6,7 +6,7 @@ from typing import Any, AsyncGenerator, Dict, List, Union
 
 import httpx
 
-from app.application.errors.exceptions import ServerRequestsError
+from app.domain.errors import ServerRequestsError
 from app.domain.external.llm import LLM
 from app.domain.models.llm_model import LLMModel, ModelCapabilities
 from app.infrastructure.external.llm.base_llm import (

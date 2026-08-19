@@ -526,6 +526,37 @@ async def test_session_metadata_projects_current_binding_ids_and_versions():
 
 
 @pytest.mark.asyncio
+async def test_new_session_is_flushed_before_repository_returns():
+    class _Result:
+        @staticmethod
+        def scalar_one_or_none():
+            return None
+
+    class _Adapter:
+        def __init__(self):
+            self.added = []
+            self.flush_calls = 0
+
+        async def execute(self, _statement):
+            return _Result()
+
+        def add(self, record):
+            self.added.append(record)
+
+        async def flush(self):
+            self.flush_calls += 1
+
+    adapter = _Adapter()
+
+    await DBSessionRepository(adapter).save(
+        DomainSession(id="new-session", owner_user_id="u1")
+    )
+
+    assert [record.id for record in adapter.added] == ["new-session"]
+    assert adapter.flush_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_session_lock_is_scope_filtered_and_uses_for_update():
     record = SimpleNamespace(
         to_domain=lambda: DomainSession(
@@ -541,9 +572,12 @@ async def test_session_lock_is_scope_filtered_and_uses_for_update():
         def scalar_one_or_none(self):
             return self.value
 
+        def scalars(self):
+            return SimpleNamespace(all=lambda: [])
+
     class _Adapter:
         def __init__(self):
-            self.results = [_Result(None), _Result(record)]
+            self.results = [_Result(None), _Result(record), _Result(None)]
             self.statements = []
 
         async def execute(self, statement):
@@ -565,11 +599,12 @@ async def test_session_lock_is_scope_filtered_and_uses_for_update():
     assert allowed is not None
     assert all(
         getattr(statement, "_for_update_arg", None) is not None
-        for statement in adapter.statements
+        for statement in adapter.statements[:2]
     )
+    assert getattr(adapter.statements[2], "_for_update_arg", None) is None
     assert all(
         "sessions.owner_user_id" in str(statement)
-        for statement in adapter.statements
+        for statement in adapter.statements[:2]
     )
 
 

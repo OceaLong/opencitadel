@@ -13,3 +13,8 @@ def test_retry_budget_exceeded_maps_to_task_infra_failed():
 def test_retry_budget_message_maps_to_task_infra_failed():
     exc = RuntimeError("LLM重试预算调用次数已耗尽: reason=agent_invoke_retry")
     assert classify_llm_error_code(exc) == EC.TASK_INFRA_FAILED
+
+
+def test_unknown_runtime_error_maps_to_task_infra_failed():
+    exc = RuntimeError("context cleanup failed")
+    assert classify_llm_error_code(exc) == EC.TASK_INFRA_FAILED

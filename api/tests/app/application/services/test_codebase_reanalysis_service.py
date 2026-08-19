@@ -58,6 +58,60 @@ class _Uow:
         return False
 
 
+class _RetryBuildRepo:
+    def __init__(self):
+        failed = ResourceBuild(
+            id="failed-build",
+            resource_kind=ResourceKind.CODEBASE,
+            resource_id="cb1",
+            version_id="failed-version",
+            parent_version_id="cbv1",
+            command_key="reanalyze:cb1",
+            state=BuildState.FAILED,
+            created_by="owner",
+        )
+        self.builds = {failed.id: failed}
+
+    async def get_build(self, build_id, for_update=False):
+        return self.builds.get(build_id)
+
+    async def get_active_build(self, resource_kind, resource_id):
+        return None
+
+    async def add_build(self, build):
+        self.builds[build.id] = build
+        return build
+
+
+class _RetryVersionRepo:
+    def __init__(self, builds):
+        failed = CodebaseVersion(
+            id="failed-version",
+            codebase_id="cb1",
+            parent_version_id="cbv1",
+            build_id="failed-build",
+            state=CodebaseVersionState.FAILED,
+        )
+        self.versions = {failed.id: failed}
+        self.builds = builds
+
+    async def get_version(self, version_id, *, codebase_id=None):
+        return self.versions.get(version_id)
+
+    async def add_version(self, version):
+        if version.build_id not in self.builds.builds:
+            raise RuntimeError("version build foreign key is missing")
+        self.versions[version.id] = version
+        return version
+
+
+class _RetryUow(_Uow):
+    def __init__(self, codebase_repo, versions, builds):
+        super().__init__(codebase_repo)
+        self.codebase_version = versions
+        self.resource_governance = builds
+
+
 class _VersionService:
     def __init__(self, plans):
         self.plans = list(plans)
@@ -139,3 +193,27 @@ async def test_reanalyze_dispatches_new_candidate_and_dedupes_existing(monkeypat
         ("cb1", "owner", scope),
         ("cb1", "owner", scope),
     ]
+
+
+@pytest.mark.asyncio
+async def test_retry_persists_build_before_foreign_keyed_candidate():
+    codebase = _CodebaseRepo()
+    builds = _RetryBuildRepo()
+    versions = _RetryVersionRepo(builds)
+    service = CodebaseService(
+        uow_factory=lambda: _RetryUow(codebase, versions, builds),
+        sandbox_cls=MagicMock(),
+        file_storage=object(),  # type: ignore[arg-type]
+        codebase_version_service=MagicMock(),
+    )
+    service._dispatch_codebase_build = AsyncMock()  # type: ignore[method-assign]
+
+    result = await service.retry_build(
+        "cb1",
+        "failed-build",
+        scope=OwnerScope.personal("owner"),
+    )
+
+    assert result.state is CodebaseVersionState.BUILDING
+    assert result.build is not None
+    assert result.build.id in builds.builds

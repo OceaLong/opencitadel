@@ -341,6 +341,7 @@
     "typeToolArgs": "Tool Args",
     "typeDebug": "Debug",
     "errorsTitle": "错误 ({count})",
+    "rawError": "原始错误",
     "errorSourceSystem": "系统",
     "errorSourceTool": "工具: {name}",
     "debugSectionTitle": "调试事件",

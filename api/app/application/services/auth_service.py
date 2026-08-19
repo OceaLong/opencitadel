@@ -6,7 +6,7 @@ from typing import Callable, Optional
 
 import jwt
 
-from app.application.errors.exceptions import BadRequestError, ConflictError, UnauthorizedError
+from app.domain.errors import BadRequestError, ConflictError, UnauthorizedError
 from app.domain.models.invitation import InvitationType
 from app.domain.models.refresh_token import RefreshToken
 from app.domain.models.user import User, UserStatus

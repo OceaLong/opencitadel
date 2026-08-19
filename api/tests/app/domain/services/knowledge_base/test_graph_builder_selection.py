@@ -10,9 +10,10 @@ def test_graph_builder_caps_per_document_not_globally():
     for doc_idx in range(2):
         for idx in range(3):
             chunks.append(
-                KnowledgeChunk(
-                    kb_id="kb1",
-                    doc_id=f"doc-{doc_idx}",
+                    KnowledgeChunk(
+                        kb_id="kb1",
+                        doc_id=f"doc-{doc_idx}",
+                        version_id="v2",
                     level=ChunkLevel.PARENT,
                     content=f"doc{doc_idx}-chunk{idx}",
                     ordinal=idx,

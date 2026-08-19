@@ -1212,15 +1212,12 @@ async def test_cancel_published_candidate_repairs_success_terminal(
         ("add", 2),
     ],
 )
-async def test_c7_legacy_indexed_empty_blocks_clone_without_mutating_v1(
+async def test_indexed_empty_blocks_clone_without_mutating_source_version(
     monkeypatch,
     operation,
     documents,
 ):
     store = _RunnerStore(documents=documents)
-    store.parent_version = store.parent_version.model_copy(
-        update={"legacy_snapshot": True}
-    )
     legacy_revision = store.revisions["rev-0"].model_copy(
         update={
             "state": DocumentRevisionState.INDEXED,
@@ -1278,11 +1275,8 @@ async def test_c7_legacy_indexed_empty_blocks_clone_without_mutating_v1(
 async def test_marked_legacy_revision_clones_across_two_published_generations(
     monkeypatch,
 ):
-    # v2 adds doc-1 while retaining the c7-marked doc-0.
+    # v2 adds doc-1 while retaining the clone-marked doc-0.
     first = _RunnerStore(documents=2)
-    first.parent_version = first.parent_version.model_copy(
-        update={"legacy_snapshot": True}
-    )
     first.revisions["rev-0"] = first.revisions["rev-0"].model_copy(
         update={
             "state": DocumentRevisionState.INDEXED,
@@ -1321,7 +1315,6 @@ async def test_marked_legacy_revision_clones_across_two_published_generations(
 
     _first_runner, first_events = await _run_candidate(monkeypatch, first)
     assert first_events[-1].type == "done"
-    assert first.version.legacy_snapshot is False
 
     second = _RunnerStore()
     second.kb = first.kb.model_copy(

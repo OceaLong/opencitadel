@@ -5,7 +5,7 @@ from typing import Optional, Dict
 
 from fastapi import APIRouter, Depends, Query
 
-from app.application.errors.exceptions import ForbiddenError
+from app.domain.errors import ForbiddenError
 from app.application.services.llm_model_service import LLMModelService
 from app.application.services.skill_recommender_service import SkillRecommenderService
 from app.application.services.skill_service import SkillService

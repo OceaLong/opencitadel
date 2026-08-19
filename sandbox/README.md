@@ -87,7 +87,6 @@ Sandbox idle destroy timeout (minutes):
 
 ```bash
 SERVER_TIMEOUT_MINUTES=60   # Recommended (pydantic-settings standard)
-# Legacy alias: SERVICE_TIMEOUT_MINUTES=60
 ```
 
 API/Worker inject `SERVER_TIMEOUT_MINUTES` via `SANDBOX_TTL_MINUTES` when creating dynamic sandboxes.

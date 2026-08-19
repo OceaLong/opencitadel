@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.application.errors.exceptions import ServerRequestsError
+from app.domain.errors import ServerRequestsError
 from app.domain.models.llm_model import LLMModel, LLMProvider, ModelCapabilities
 from app.domain.schemas.planner_output import PlannerPlanSchema
 from app.infrastructure.external.llm.base_llm import (

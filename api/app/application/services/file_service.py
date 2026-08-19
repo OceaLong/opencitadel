@@ -4,7 +4,7 @@ from typing import Tuple, BinaryIO, Callable
 
 from fastapi import UploadFile
 
-from app.application.errors.exceptions import NotFoundError
+from app.domain.errors import NotFoundError
 from app.domain.external.file_storage import FileStorage, FileUploadPayload
 from app.domain.models.file import File
 from app.domain.models.scope import OwnerScope, OwnerScopeType
