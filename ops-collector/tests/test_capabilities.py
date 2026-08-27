@@ -1,6 +1,10 @@
 import asyncio
 
-from opencitadel_ops_collector.capabilities import TOOL_INPUT_MODELS, canonical_hash, capability_manifest
+from opencitadel_ops_collector.capabilities import (
+    TOOL_INPUT_MODELS,
+    canonical_hash,
+    capability_manifest,
+)
 from opencitadel_ops_collector.server import create_server
 
 

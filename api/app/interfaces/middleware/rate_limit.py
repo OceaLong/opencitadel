@@ -1,44 +1,25 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import hashlib
 import logging
 import time
-import uuid
 from collections import defaultdict, deque
-from typing import Deque, DefaultDict
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse
 
-from app.application.services.config_provider import get_runtime_config
-from app.interfaces.client_ip import (
-    configured_trusted_proxy_cidrs,
-    get_client_ip,
+from app.application.ports.crypto import ACCESS_COOKIE, REFRESH_COOKIE
+from app.domain.runtime_policy import (
+    RuntimePolicyIntegrityError,
+    RuntimePolicyStaleError,
+    RuntimePolicyUnavailableError,
+    TrafficPolicy,
 )
-from app.infrastructure.security.cookie import ACCESS_COOKIE, REFRESH_COOKIE
-from core.config import get_settings
+from app.domain.utils.time_utils import utc_now
+from app.interfaces.client_ip import get_client_ip
+from app.interfaces.service_dependencies import require_api_runtime
 
 logger = logging.getLogger(__name__)
 _WINDOW_SECONDS = 60
-_REDIS_KEY_PREFIX = "ratelimit:"
-
-_SLIDING_WINDOW_LUA = """
-local key = KEYS[1]
-local now = tonumber(ARGV[1])
-local window_start = tonumber(ARGV[2])
-local limit = tonumber(ARGV[3])
-local member = ARGV[4]
-local ttl = tonumber(ARGV[5])
-redis.call('zremrangebyscore', key, 0, window_start)
-local count = redis.call('zcard', key)
-if count >= limit then
-  return 1
-end
-redis.call('zadd', key, now, member)
-redis.call('expire', key, ttl)
-return 0
-"""
 
 
 class RateLimitBackendUnavailable(RuntimeError):
@@ -52,46 +33,30 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self,
         app,
         *,
-        requests_per_minute: int = 120,
         fail_closed: bool = False,
-        trusted_proxy_cidrs: tuple[str, ...] | None = None,
+        trusted_proxy_cidrs: tuple[str, ...] = (),
     ) -> None:
         super().__init__(app)
-        self._limit = max(1, requests_per_minute)
         self._fail_closed = fail_closed
-        self._trusted_proxy_cidrs = (
-            trusted_proxy_cidrs
-            if trusted_proxy_cidrs is not None
-            else configured_trusted_proxy_cidrs()
+        self._trusted_proxy_cidrs = trusted_proxy_cidrs
+        self._hits: defaultdict[str, deque[float]] = defaultdict(deque)
+
+    async def _traffic_policy(self, request: Request) -> TrafficPolicy:
+        runtime = require_api_runtime(request)
+        active = await runtime.runtime_policy_reader.active_operations(
+            require_fresh=True,
+            now=utc_now(),
         )
-        self._hits: DefaultDict[str, Deque[float]] = defaultdict(deque)
-
-    def _effective_limit(self) -> int:
-        """每请求动态读运行时配置的限流值。
-
-        中间件在应用启动早期安装，此时运行时配置缓存尚未 warmup，
-        安装时读到的只是默认值；冻结它会导致 DB/yaml 配置永远不生效。
-        warmup 完成后 get_runtime_config() 走进程内缓存，开销可忽略。
-        """
-        try:
-            limit = int(get_runtime_config().server.rate_limit_per_minute)
-            if limit > 0:
-                return limit
-        except Exception:  # noqa: BLE001 - 冷缓存/配置异常回退安装值
-            pass
-        return self._limit
-
-    def _runtime_enabled(self) -> bool:
-        try:
-            return bool(get_runtime_config().server.rate_limit_enabled)
-        except Exception:  # noqa: BLE001
-            return True
+        return active.revision.policy.traffic
 
     def _client_key(self, request: Request) -> str:
-        return get_client_ip(
-            request,
-            trusted_proxy_cidrs=self._trusted_proxy_cidrs,
-        ) or "unknown"
+        return (
+            get_client_ip(
+                request,
+                trusted_proxy_cidrs=self._trusted_proxy_cidrs,
+            )
+            or "unknown"
+        )
 
     def _request_keys(self, request: Request) -> tuple[str, ...]:
         """Apply both network and credential limits without storing raw tokens."""
@@ -115,42 +80,38 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def _is_limited_path(self, path: str) -> bool:
         excluded_paths = {
+            "/api/health/live",
+            "/api/health/ready",
             "/api/status",
         }
         return path.startswith("/api/") and path not in excluded_paths
 
-    async def _is_rate_limited_redis(self, key: str) -> bool:
+    async def _is_rate_limited(self, request: Request, key: str, *, limit: int) -> bool:
         try:
-            from app.infrastructure.storage.redis import get_redis
-
-            redis = get_redis().client
-            redis_key = f"{_REDIS_KEY_PREFIX}{key}"
-            now = time.time()
-            window_start = now - _WINDOW_SECONDS
-            result = await redis.eval(
-                _SLIDING_WINDOW_LUA,
-                1,
-                redis_key,
-                now,
-                window_start,
-                self._effective_limit(),
-                f"{now}:{uuid.uuid4().hex}",
-                _WINDOW_SECONDS + 5,
+            decision = await require_api_runtime(request).rate_limit_store.check_and_record(
+                key,
+                limit=limit,
+                window_seconds=_WINDOW_SECONDS,
             )
-            return int(result or 0) == 1
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             if self._fail_closed:
                 logger.error("Redis rate limit unavailable; rejecting request")
                 raise RateLimitBackendUnavailable from exc
             logger.debug("Redis rate limit unavailable, using in-memory fallback: %s", exc)
-            return await self._is_rate_limited_memory(key)
+            return await self._is_rate_limited_memory(key, limit=limit)
+        if decision.connectivity.available:
+            return decision.limited
+        if self._fail_closed:
+            logger.error("Redis rate limit unavailable; rejecting request")
+            raise RateLimitBackendUnavailable
+        return await self._is_rate_limited_memory(key, limit=limit)
 
-    async def _is_rate_limited_memory(self, key: str) -> bool:
+    async def _is_rate_limited_memory(self, key: str, *, limit: int) -> bool:
         now = time.monotonic()
         bucket = self._hits[key]
         while bucket and now - bucket[0] > _WINDOW_SECONDS:
             bucket.popleft()
-        if len(bucket) >= self._effective_limit():
+        if len(bucket) >= limit:
             return True
         bucket.append(now)
         return False
@@ -158,16 +119,34 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.method == "OPTIONS" or not self._is_limited_path(request.url.path):
             return await call_next(request)
-        if not self._runtime_enabled():
+        try:
+            traffic = await self._traffic_policy(request)
+        except (
+            RuntimePolicyIntegrityError,
+            RuntimePolicyStaleError,
+            RuntimePolicyUnavailableError,
+        ) as exc:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "code": 503,
+                    "msg": "运行策略暂不可用，请稍后重试",
+                    "data": {"error_key": exc.error_key},
+                },
+                headers={"Retry-After": "5", "Cache-Control": "no-store"},
+            )
+        if not traffic.rate_limit_enabled:
             return await call_next(request)
 
         try:
-            limited = any(
-                [
-                    await self._is_rate_limited_redis(key)
-                    for key in self._request_keys(request)
-                ]
-            )
+            limited = False
+            for key in self._request_keys(request):
+                if await self._is_rate_limited(
+                    request,
+                    key,
+                    limit=traffic.requests_per_minute,
+                ):
+                    limited = True
         except RateLimitBackendUnavailable:
             return JSONResponse(
                 status_code=503,
@@ -187,7 +166,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 content={"code": 429, "msg": "请求过于频繁，请稍后再试", "data": None},
                 headers={
                     "Retry-After": str(_WINDOW_SECONDS),
-                    "X-RateLimit-Limit": str(self._effective_limit()),
+                    "X-RateLimit-Limit": str(traffic.requests_per_minute),
                     "Cache-Control": "no-store",
                 },
             )
@@ -202,14 +181,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return "api"
 
 
-def maybe_install_rate_limit(app) -> None:
-    settings = get_settings()
-    if settings.env == "test":
-        return
-    runtime = get_runtime_config()
-    if runtime.server.rate_limit_enabled:
-        app.add_middleware(
-            RateLimitMiddleware,
-            requests_per_minute=runtime.server.rate_limit_per_minute,
-            fail_closed=settings.env.lower() == "production",
-        )
+def maybe_install_rate_limit(
+    app,
+    *,
+    fail_closed: bool,
+    trusted_proxy_cidrs: tuple[str, ...],
+) -> None:
+    app.add_middleware(
+        RateLimitMiddleware,
+        fail_closed=fail_closed,
+        trusted_proxy_cidrs=trusted_proxy_cidrs,
+    )

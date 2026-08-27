@@ -1,17 +1,12 @@
 "use client";
 
-import { type MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { ApiError } from "@/lib/api";
-import { modelErrorMessage } from "@/lib/api/llm-status";
+import { modelErrorMessage } from "@/lib/api/inference-errors";
 import { sessionApi } from "@/lib/api/session";
-import type {
-  ClarifyAnswer,
-  SessionDetail,
-  SSEEventData,
-  TokenUsageSummary,
-} from "@/lib/api/types";
+import type { SessionDetail, SSEEventData } from "@/lib/api/types";
 import { reduceSessionStatusState, type SessionStatusReductionState } from "@/lib/session-events";
 
 function isSessionMissingError(err: unknown): boolean {
@@ -42,11 +37,9 @@ type StreamDeps = {
   applySessionPatch: (patch: Partial<SessionDetail>) => void;
   setError: (err: Error | null) => void;
   lastEventIdRef: MutableRefObject<string | null>;
-  lastPersistedSeqRef?: MutableRefObject<number | null>;
   initialEventsLoaded?: boolean;
   skipEmptyStream?: boolean;
   onReconnect?: () => Promise<void>;
-  onDebugModeChange?: (enabled: boolean) => void;
 };
 
 export type SessionStreamStatus =
@@ -65,17 +58,24 @@ export function useSessionStreams({
   applySessionPatch,
   setError,
   lastEventIdRef,
-  lastPersistedSeqRef,
   initialEventsLoaded = false,
   skipEmptyStream = false,
   onReconnect,
-  onDebugModeChange,
 }: StreamDeps) {
   const t = useTranslations("sessionDetail");
+  const messages = useMemo(
+    () => ({
+      taskCancelledNotice: t("taskCancelledNotice"),
+      taskFailedNotice: t("taskFailedNotice"),
+      sessionNotFound: t("sessionNotFound"),
+      streamError: t("streamError"),
+      streamResponseError: t("streamResponseError"),
+    }),
+    [t],
+  );
   const [streaming, setStreaming] = useState(false);
   const [streamStatus, setStreamStatus] = useState<SessionStreamStatus>("idle");
   const [streamError, setStreamError] = useState<Error | null>(null);
-  const streamIncludeDebugRef = useRef(false);
   const emptyStreamCleanupRef = useRef<(() => void) | null>(null);
   const messageStreamCleanupRef = useRef<(() => void) | null>(null);
   const emptyStreamRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -93,10 +93,8 @@ export function useSessionStreams({
     applySessionPatch,
     setError,
     lastEventIdRef,
-    lastPersistedSeqRef,
     onReconnect,
-    onDebugModeChange,
-    t,
+    messages,
   });
 
   useEffect(() => {
@@ -106,10 +104,8 @@ export function useSessionStreams({
       applySessionPatch,
       setError,
       lastEventIdRef,
-      lastPersistedSeqRef,
       onReconnect,
-      onDebugModeChange,
-      t,
+      messages,
     };
   }, [
     appendEvent,
@@ -117,10 +113,8 @@ export function useSessionStreams({
     applySessionPatch,
     setError,
     lastEventIdRef,
-    lastPersistedSeqRef,
     onReconnect,
-    onDebugModeChange,
-    t,
+    messages,
   ]);
 
   useEffect(() => {
@@ -151,20 +145,12 @@ export function useSessionStreams({
       appendEvent: appendLatestEvent,
       applySessionPatch: applyLatestSessionPatch,
       setError: setLatestError,
-      t: translate,
+      messages: latestMessages,
     } = dependenciesRef.current;
     setStreamStatus("connected");
     setStreamError(null);
     const accepted = appendLatestEvent(ev);
     if (!accepted) return;
-
-    if (
-      ev.type === "title" &&
-      ev.data &&
-      typeof (ev.data as { title?: string }).title === "string"
-    ) {
-      applyLatestSessionPatch({ title: (ev.data as { title: string }).title });
-    }
 
     if (ev.type === "session_status") {
       const state = reduceSessionStatusState([ev], sessionStatusStateRef.current);
@@ -182,21 +168,20 @@ export function useSessionStreams({
           setStreaming(false);
         }
         if (status === "cancelled") {
-          setStreamError(new Error(translate("taskCancelledNotice")));
+          setStreamError(new Error(latestMessages.taskCancelledNotice));
           setStreamStatus("error");
         }
         if (status === "failed") {
-          setStreamError(new Error(translate("taskFailedNotice")));
+          setStreamError(new Error(latestMessages.taskFailedNotice));
           setStreamStatus("error");
         }
       }
     }
 
-    if (ev.type === "usage") {
-      applyLatestSessionPatch({ token_usage: ev.data as TokenUsageSummary });
-    }
-
     if (ev.type === "done") {
+      sessionStatusRef.current = "completed";
+      sessionStatusStateRef.current.status = "completed";
+      applyLatestSessionPatch({ status: "completed" });
       setStreaming(false);
     }
 
@@ -221,12 +206,7 @@ export function useSessionStreams({
     if (emptyStreamCleanupRef.current || isSendMessageRef.current) return;
     clearEmptyStreamRetryTimer();
     setStreamStatus(emptyStreamRetryCountRef.current > 0 ? "reconnecting" : "connecting");
-    const { lastEventIdRef: latestEventIdRef, lastPersistedSeqRef: latestPersistedSeqRef } =
-      dependenciesRef.current;
-    const resumeEventId =
-      latestPersistedSeqRef?.current != null
-        ? String(latestPersistedSeqRef.current)
-        : latestEventIdRef.current || undefined;
+    const resumeEventId = dependenciesRef.current.lastEventIdRef.current || undefined;
     emptyStreamCleanupRef.current = sessionApi.chat(
       sessionId,
       { event_id: resumeEventId },
@@ -234,8 +214,9 @@ export function useSessionStreams({
         emptyStreamRetryCountRef.current = 0;
         handleStreamEvent(ev);
         if (getSessionMissingErrorFromEvent(ev)) {
-          const { onSessionMissing: handleSessionMissing, t: translate } = dependenciesRef.current;
-          handleSessionMissing(new Error(translate("sessionNotFound")));
+          const { onSessionMissing: handleSessionMissing, messages: latestMessages } =
+            dependenciesRef.current;
+          handleSessionMissing(new Error(latestMessages.sessionNotFound));
         }
       },
       (err) => {
@@ -267,28 +248,18 @@ export function useSessionStreams({
           }, delay);
           return;
         }
-        const { setError: setLatestError, t: translate } = dependenciesRef.current;
-        const nextError = err instanceof Error ? err : new Error(translate("streamError"));
+        const { setError: setLatestError, messages: latestMessages } = dependenciesRef.current;
+        const nextError = err instanceof Error ? err : new Error(latestMessages.streamError);
         setStreamError(nextError);
         setStreamStatus("error");
         setLatestError(nextError);
       },
-      { include_debug: streamIncludeDebugRef.current },
     );
   }, [sessionId, handleStreamEvent, clearEmptyStreamRetryTimer]);
 
   useEffect(() => {
     startEmptyStreamRef.current = startEmptyStream;
   });
-
-  const enableDebugStream = useCallback(() => {
-    streamIncludeDebugRef.current = true;
-    dependenciesRef.current.onDebugModeChange?.(true);
-    if (!isSendMessageRef.current) {
-      stopEmptyStream();
-      startEmptyStreamRef.current?.();
-    }
-  }, [stopEmptyStream]);
 
   const sendMessage = useCallback(
     async (
@@ -299,7 +270,6 @@ export function useSessionStreams({
         skill_id?: string;
         thinking_enabled?: boolean;
         mode?: import("@/lib/api/types").SessionMode;
-        clarify_answers?: ClarifyAnswer[];
       },
     ) => {
       if (!sessionId) return;
@@ -322,8 +292,9 @@ export function useSessionStreams({
             messageStreamCleanupRef.current();
             messageStreamCleanupRef.current = null;
           }
-          const { onSessionMissing: handleSessionMissing, t: translate } = dependenciesRef.current;
-          handleSessionMissing(new Error(translate("sessionNotFound")));
+          const { onSessionMissing: handleSessionMissing, messages: latestMessages } =
+            dependenciesRef.current;
+          handleSessionMissing(new Error(latestMessages.sessionNotFound));
           return;
         }
         if (ev.type === "done") {
@@ -335,12 +306,12 @@ export function useSessionStreams({
         sessionId,
         {
           message,
+          request_id: crypto.randomUUID(),
           attachments: attachmentIds,
           model_id: options?.model_id,
           skill_id: options?.skill_id,
           thinking_enabled: options?.thinking_enabled,
           mode: options?.mode,
-          clarify_answers: options?.clarify_answers,
         },
         onEvent,
         (err) => {
@@ -369,9 +340,9 @@ export function useSessionStreams({
             }
             return;
           }
-          const { setError: setLatestError, t: translate } = dependenciesRef.current;
+          const { setError: setLatestError, messages: latestMessages } = dependenciesRef.current;
           const nextError =
-            err instanceof Error ? err : new Error(translate("streamResponseError"));
+            err instanceof Error ? err : new Error(latestMessages.streamResponseError);
           setLatestError(nextError);
           setStreaming(false);
           isSendMessageRef.current = false;
@@ -389,7 +360,6 @@ export function useSessionStreams({
             }
           }
         },
-        { include_debug: streamIncludeDebugRef.current },
       );
     },
     [sessionId, handleStreamEvent, startEmptyStream, stopEmptyStream],
@@ -434,8 +404,6 @@ export function useSessionStreams({
   const resetStreams = useCallback(() => {
     sessionMissingRef.current = false;
     isSendMessageRef.current = false;
-    streamIncludeDebugRef.current = false;
-    dependenciesRef.current.onDebugModeChange?.(false);
     emptyStreamRetryCountRef.current = 0;
     stopEmptyStream();
     if (messageStreamCleanupRef.current) {
@@ -452,7 +420,6 @@ export function useSessionStreams({
     streamStatus,
     streamError,
     sendMessage,
-    enableDebugStream,
     resetStreams,
     markSessionMissing: () => {
       sessionMissingRef.current = true;

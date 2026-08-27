@@ -1,27 +1,21 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """SSRF-safe URL validation for knowledge-base web ingestion."""
-from typing import Optional
 
 from app.domain.errors import BadRequestError
-from app.domain.config_port import get_runtime_config
+from app.domain.runtime_policy import SourceAccessPolicy
 from app.domain.utils.outbound_url import (
     OutboundURLRejected,
     resolve_outbound_url,
 )
 
 
-def validate_public_url(url: str, *, allowlist: Optional[list[str]] = None) -> str:
+def validate_public_url(url: str, *, policy: SourceAccessPolicy) -> str:
     """Validate URL scheme/host and block private/metadata targets."""
-    cfg = get_runtime_config().knowledge_base.connectors
-    effective_allowlist = allowlist if allowlist is not None else (cfg.url_allowlist or [])
-    denylist = cfg.url_denylist or []
     try:
         target = resolve_outbound_url(
             url,
             allowed_ports={80, 443},
-            allowlist=effective_allowlist,
-            denylist=denylist,
+            allowlist=list(policy.url_allowlist),
+            denylist=list(policy.url_denylist),
         )
     except OutboundURLRejected as exc:
         raise BadRequestError(

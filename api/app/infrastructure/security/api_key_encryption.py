@@ -1,13 +1,10 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""LLM API Key storage format identifiers for llm_endpoints.api_key_encryption."""
+"""Inference credential storage format identifiers."""
 
 from enum import StrEnum
 
 
 class ApiKeyEncryption(StrEnum):
-    """How llm_endpoints.api_key is stored."""
+    """How inference endpoint credentials are stored."""
 
-    LEGACY_PLAINTEXT = "legacy_plaintext"
-    FERNET_V1 = "fernet_v1"
+    PLAINTEXT = "plaintext"
     FERNET_V2 = "fernet_v2"

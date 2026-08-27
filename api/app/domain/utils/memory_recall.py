@@ -1,9 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Memory recall scoring with time decay."""
+
 import math
-from datetime import datetime, timezone
-from typing import List
+from datetime import UTC, datetime
 
 from app.domain.models.memory_entry import MemoryEntry
 
@@ -11,13 +9,13 @@ from app.domain.models.memory_entry import MemoryEntry
 def _entry_age_hours(entry: MemoryEntry, now: datetime) -> float:
     anchor = entry.last_used_at or entry.created_at or now
     if anchor.tzinfo is None:
-        anchor = anchor.replace(tzinfo=timezone.utc)
+        anchor = anchor.replace(tzinfo=UTC)
     return max(0.0, (now - anchor).total_seconds() / 3600.0)
 
 
-def rank_entries_with_decay(entries: List[MemoryEntry], limit: int) -> List[MemoryEntry]:
+def rank_entries_with_decay(entries: list[MemoryEntry], limit: int) -> list[MemoryEntry]:
     """Rank memories by recency decay and usage reinforcement."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     scored = []
     for entry in entries:
         age_hours = _entry_age_hours(entry, now)

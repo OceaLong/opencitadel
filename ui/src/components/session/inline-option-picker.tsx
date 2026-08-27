@@ -107,7 +107,7 @@ export function InlineOptionPicker({
                     {option.title}
                   </span>
                   {option.badge && (
-                    <Badge variant="secondary" className="px-1.5 py-0 text-2xs">
+                    <Badge variant="secondary" className="text-2xs px-1.5 py-0">
                       {option.badge}
                     </Badge>
                   )}

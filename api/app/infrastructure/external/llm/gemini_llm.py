@@ -1,20 +1,21 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import json
 import logging
-from typing import Any, AsyncGenerator, Dict, List, Union
+from collections.abc import AsyncGenerator
+from typing import Any
 
-import httpx
-
+from app.application.ports.crypto import OutboundNetworkPolicy
 from app.domain.errors import ServerRequestsError
 from app.domain.external.llm import LLM
-from app.domain.models.llm_model import LLMModel, ModelCapabilities
+from app.domain.models.inference import InferenceCapabilities, ResolvedInferenceModel
 from app.infrastructure.external.llm.base_llm import (
     normalize_usage,
     openai_content_to_gemini_parts,
 )
 from app.infrastructure.external.llm.structured_output import to_gemini_schema
-from app.infrastructure.security.outbound_http import create_ssrf_safe_async_client
+from app.infrastructure.security.outbound_http import (
+    DEFAULT_OUTBOUND_NETWORK_POLICY,
+    create_ssrf_safe_async_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,16 +23,24 @@ logger = logging.getLogger(__name__)
 class GeminiLLM(LLM):
     """Google Gemini via generateContent API."""
 
-    def __init__(self, model: LLMModel, thinking_enabled: bool = False, **kwargs) -> None:
+    def __init__(
+        self,
+        model: ResolvedInferenceModel,
+        thinking_enabled: bool = False,
+        outbound_policy: OutboundNetworkPolicy = DEFAULT_OUTBOUND_NETWORK_POLICY,
+        **kwargs,
+    ) -> None:
         self._model = model
         self._model_name = model.model_name
         self._temperature = model.temperature
-        self._max_tokens = model.max_tokens
-        self._supports_multimodal = model.supports_multimodal
+        self._max_tokens = model.max_output_tokens
         self._capabilities = model.capabilities
         self._base_url = (model.base_url or "https://generativelanguage.googleapis.com").rstrip("/")
-        self._api_key = model.api_key
-        self._client = create_ssrf_safe_async_client(timeout=300)
+        self._credential = model.credential
+        self._client = create_ssrf_safe_async_client(
+            timeout=300,
+            outbound_policy=outbound_policy,
+        )
 
     @property
     def model_name(self) -> str:
@@ -46,25 +55,23 @@ class GeminiLLM(LLM):
         return self._max_tokens
 
     @property
-    def supports_multimodal(self) -> bool:
-        return self._supports_multimodal
-
-    @property
-    def capabilities(self) -> ModelCapabilities:
+    def capabilities(self) -> InferenceCapabilities:
         return self._capabilities
 
-    def _convert_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _convert_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         declarations = []
         for tool in tools or []:
             fn = tool.get("function", {})
-            declarations.append({
-                "name": fn.get("name"),
-                "description": fn.get("description"),
-                "parameters": fn.get("parameters") or {"type": "object", "properties": {}},
-            })
+            declarations.append(
+                {
+                    "name": fn.get("name"),
+                    "description": fn.get("description"),
+                    "parameters": fn.get("parameters") or {"type": "object", "properties": {}},
+                }
+            )
         return declarations
 
-    def _convert_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _convert_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         contents = []
         for msg in messages:
             role = msg.get("role")
@@ -76,7 +83,7 @@ class GeminiLLM(LLM):
                 parts = openai_content_to_gemini_parts(content)
                 contents.append({"role": "user", "parts": parts})
             elif role == "assistant":
-                parts: List[Dict[str, Any]] = []
+                parts: list[dict[str, Any]] = []
                 text = content if isinstance(content, str) else ""
                 if text:
                     parts.append({"text": text})
@@ -84,40 +91,47 @@ class GeminiLLM(LLM):
                     fn = tool_call.get("function") or {}
                     raw_args = fn.get("arguments") or "{}"
                     try:
-                        parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                        parsed_args = (
+                            json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                        )
                     except json.JSONDecodeError:
                         parsed_args = {}
-                    parts.append({
-                        "functionCall": {
-                            "name": fn.get("name"),
-                            "args": parsed_args or {},
+                    parts.append(
+                        {
+                            "functionCall": {
+                                "name": fn.get("name"),
+                                "args": parsed_args or {},
+                            }
                         }
-                    })
+                    )
                 contents.append({"role": "model", "parts": parts or [{"text": ""}]})
             elif role == "tool":
                 tool_text = content if isinstance(content, str) else json.dumps(content)
-                contents.append({
-                    "role": "function",
-                    "parts": [{
-                        "functionResponse": {
-                            "name": msg.get("name") or "tool",
-                            "response": {"result": tool_text},
-                        }
-                    }],
-                })
+                contents.append(
+                    {
+                        "role": "function",
+                        "parts": [
+                            {
+                                "functionResponse": {
+                                    "name": msg.get("name") or "tool",
+                                    "response": {"result": tool_text},
+                                }
+                            }
+                        ],
+                    }
+                )
         return contents
 
     async def invoke(
-            self,
-            messages: List[Dict[str, Any]],
-            tools: List[Dict[str, Any]] = None,
-            response_format: Dict[str, Any] = None,
-            tool_choice: Union[str, Dict[str, Any], None] = None,
-            response_schema: Dict[str, Any] = None,
-            retry_budget: Any = None,
-    ) -> Dict[str, Any]:
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         contents = self._convert_messages(messages)
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "contents": contents,
             "generationConfig": {
                 "temperature": self._temperature,
@@ -128,10 +142,15 @@ class GeminiLLM(LLM):
             payload["generationConfig"]["responseMimeType"] = "application/json"
         if response_schema and not tools:
             payload["generationConfig"]["responseMimeType"] = "application/json"
-            payload["generationConfig"]["responseSchema"] = to_gemini_schema(response_schema["model_class"])
+            payload["generationConfig"]["responseSchema"] = to_gemini_schema(
+                response_schema["model_class"]
+            )
         if tools:
             payload["tools"] = [{"functionDeclarations": self._convert_tools(tools)}]
-        url = f"{self._base_url}/v1beta/models/{self._model_name}:generateContent?key={self._api_key}"
+        url = (
+            f"{self._base_url}/v1beta/models/"
+            f"{self._model_name}:generateContent?key={self._credential}"
+        )
         response = await self._client.post(url, json=payload)
         if response.status_code >= 400:
             raise ServerRequestsError(f"Gemini API error: {response.text}")
@@ -148,39 +167,42 @@ class GeminiLLM(LLM):
                 text_parts.append(part.get("text", ""))
             function_call = part.get("functionCall")
             if function_call:
-                tool_calls.append({
-                    "id": f"call_{function_call.get('name', 'tool')}",
-                    "type": "function",
-                    "function": {
-                        "name": function_call.get("name"),
-                        "arguments": json.dumps(function_call.get("args") or {}),
-                    },
-                })
-        message: Dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
+                tool_calls.append(
+                    {
+                        "id": f"call_{function_call.get('name', 'tool')}",
+                        "type": "function",
+                        "function": {
+                            "name": function_call.get("name"),
+                            "arguments": json.dumps(function_call.get("args") or {}),
+                        },
+                    }
+                )
+        message: dict[str, Any] = {"role": "assistant", "content": "".join(text_parts) or None}
         if tool_calls:
             message["tool_calls"] = tool_calls
         usage_meta = data.get("usageMetadata") or {}
-        usage = normalize_usage({
-            "promptTokenCount": usage_meta.get("promptTokenCount"),
-            "candidatesTokenCount": usage_meta.get("candidatesTokenCount"),
-            "totalTokenCount": usage_meta.get("totalTokenCount"),
-            "cachedContentTokenCount": usage_meta.get("cachedContentTokenCount"),
-        })
+        usage = normalize_usage(
+            {
+                "promptTokenCount": usage_meta.get("promptTokenCount"),
+                "candidatesTokenCount": usage_meta.get("candidatesTokenCount"),
+                "totalTokenCount": usage_meta.get("totalTokenCount"),
+                "cachedContentTokenCount": usage_meta.get("cachedContentTokenCount"),
+            }
+        )
         if usage.get("total_tokens"):
             message["_usage"] = usage
         return message
 
     async def stream_invoke(
-            self,
-            messages: List[Dict[str, Any]],
-            tools: List[Dict[str, Any]] = None,
-            response_format: Dict[str, Any] = None,
-            tool_choice: Union[str, Dict[str, Any], None] = None,
-            response_schema: Dict[str, Any] = None,
-            retry_budget: Any = None,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
         contents = self._convert_messages(messages)
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "contents": contents,
             "generationConfig": {
                 "temperature": self._temperature,
@@ -191,16 +213,21 @@ class GeminiLLM(LLM):
             payload["generationConfig"]["responseMimeType"] = "application/json"
         if response_schema and not tools:
             payload["generationConfig"]["responseMimeType"] = "application/json"
-            payload["generationConfig"]["responseSchema"] = to_gemini_schema(response_schema["model_class"])
+            payload["generationConfig"]["responseSchema"] = to_gemini_schema(
+                response_schema["model_class"]
+            )
         if tools:
             payload["tools"] = [{"functionDeclarations": self._convert_tools(tools)}]
-        url = f"{self._base_url}/v1beta/models/{self._model_name}:streamGenerateContent?alt=sse&key={self._api_key}"
+        url = (
+            f"{self._base_url}/v1beta/models/{self._model_name}:"
+            f"streamGenerateContent?alt=sse&key={self._credential}"
+        )
 
         prompt_tokens = 0
         completion_tokens = 0
         total_tokens = 0
         cached_tokens = 0
-        tool_index_by_name: Dict[str, int] = {}
+        tool_index_by_name: dict[str, int] = {}
         async with self._client.stream("POST", url, json=payload) as response:
             if response.status_code >= 400:
                 body = await response.aread()
@@ -238,21 +265,27 @@ class GeminiLLM(LLM):
                             name = function_call.get("name") or "tool"
                             idx = tool_index_by_name.setdefault(name, len(tool_index_by_name))
                             yield {
-                                "tool_calls": [{
-                                    "index": idx,
-                                    "id": f"call_{name}_{idx}",
-                                    "function": {
-                                        "name": name,
-                                        "arguments": json.dumps(function_call.get("args") or {}),
-                                    },
-                                }]
+                                "tool_calls": [
+                                    {
+                                        "index": idx,
+                                        "id": f"call_{name}_{idx}",
+                                        "function": {
+                                            "name": name,
+                                            "arguments": json.dumps(
+                                                function_call.get("args") or {}
+                                            ),
+                                        },
+                                    }
+                                ]
                             }
 
-        usage = normalize_usage({
-            "promptTokenCount": prompt_tokens,
-            "candidatesTokenCount": completion_tokens,
-            "totalTokenCount": total_tokens,
-            "cachedContentTokenCount": cached_tokens,
-        })
+        usage = normalize_usage(
+            {
+                "promptTokenCount": prompt_tokens,
+                "candidatesTokenCount": completion_tokens,
+                "totalTokenCount": total_tokens,
+                "cachedContentTokenCount": cached_tokens,
+            }
+        )
         if usage.get("total_tokens"):
             yield {"usage": usage}

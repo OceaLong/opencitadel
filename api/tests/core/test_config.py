@@ -1,11 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from core.config import Settings, sqlalchemy_sync_database_uri
 import pytest
+
+import core.config as deployment_config
+from core.config import (
+    DeploymentSettings,
+    sqlalchemy_sync_database_uri,
+    sqlalchemy_sync_migration_database_uri,
+)
 
 
 def test_settings_derives_database_uri_from_postgres_fields():
-    settings = Settings(
+    settings = DeploymentSettings(
         postgres_user="app",
         postgres_password="s3cret!",
         postgres_db="opencitadel",
@@ -18,22 +22,29 @@ def test_settings_derives_database_uri_from_postgres_fields():
 
 def test_settings_metrics_defaults_are_fail_closed():
     """metrics_token empty -> /api/metrics stays 404 (see metrics_routes.py);
-    worker_metrics_port 9108 -> worker binds a Prometheus scrape port by
-    default (see worker/main.py:main)."""
-    settings = Settings()
+    execution_kernel_metrics_port 9108 -> the kernel binds a Prometheus
+    scrape port by default."""
+    settings = DeploymentSettings()
 
     assert settings.metrics_token == ""
-    assert settings.worker_metrics_port == 9108
+    assert settings.execution_kernel_metrics_port == 9108
+
+
+def test_bootstrap_admin_is_disabled_unless_explicitly_configured():
+    settings = DeploymentSettings()
+
+    assert settings.bootstrap_admin_email == ""
+    assert settings.bootstrap_admin_password == ""
 
 
 def test_settings_keeps_explicit_database_uri():
     explicit = "postgresql+asyncpg://custom:custom@db.example.com:5432/custom"
-    settings = Settings(sqlalchemy_database_uri=explicit)
+    settings = DeploymentSettings(sqlalchemy_database_uri=explicit)
     assert settings.sqlalchemy_database_uri == explicit
 
 
 def test_sqlalchemy_sync_database_uri_uses_postgres_fields():
-    settings = Settings(
+    settings = DeploymentSettings(
         postgres_user="app",
         postgres_password="s3cret!",
         postgres_db="opencitadel",
@@ -42,6 +53,32 @@ def test_sqlalchemy_sync_database_uri_uses_postgres_fields():
     assert sqlalchemy_sync_database_uri(settings) == (
         "postgresql+psycopg2://app:s3cret%21@opencitadel-postgres:5432/opencitadel"
     )
+
+
+def test_migration_database_uri_uses_distinct_admin_credentials():
+    settings = DeploymentSettings(
+        postgres_user="app",
+        postgres_password="app-secret",
+        postgres_admin_user="migration_admin",
+        postgres_admin_password="admin-secret!",
+        postgres_db="opencitadel",
+        postgres_host="opencitadel-postgres",
+    )
+
+    assert sqlalchemy_sync_migration_database_uri(settings) == (
+        "postgresql+psycopg2://migration_admin:admin-secret%21@"
+        "opencitadel-postgres:5432/opencitadel"
+    )
+
+
+def test_production_migration_database_uri_requires_admin_credentials():
+    settings = _production_settings(
+        postgres_admin_user="postgres",
+        postgres_admin_password="",
+    )
+
+    with pytest.raises(ValueError, match="migration database credentials"):
+        sqlalchemy_sync_migration_database_uri(settings)
 
 
 def _production_settings(**updates):
@@ -57,7 +94,7 @@ def _production_settings(**updates):
         "redis_password": "strong-redis-password",
     }
     values.update(updates)
-    return Settings(**values)
+    return DeploymentSettings(**values)
 
 
 def test_production_settings_require_distinct_audit_signing_key():
@@ -91,3 +128,41 @@ def test_production_settings_accept_strong_distinct_secrets():
 def test_production_settings_reject_placeholder_credentials(field, value):
     with pytest.raises(ValueError, match=field):
         _production_settings(**{field: value})
+
+
+def test_deployment_settings_reject_invalid_policy_freshness() -> None:
+    deployment_settings = deployment_config.DeploymentSettings
+
+    with pytest.raises(ValueError, match="policy_max_staleness_seconds"):
+        deployment_settings(
+            policy_head_refresh_interval_seconds=30,
+            policy_max_staleness_seconds=30,
+        )
+
+
+def test_deployment_settings_read_the_shared_shutdown_timeout(monkeypatch) -> None:
+    monkeypatch.setenv("OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS", "17.5")
+
+    settings = deployment_config.DeploymentSettings(_env_file=None)
+
+    assert settings.shutdown_timeout_seconds == 17.5
+
+
+def test_deployment_settings_own_observability_bootstrap() -> None:
+    settings = deployment_config.DeploymentSettings()
+
+    assert settings.cors_origins == "*"
+    assert settings.otel_enabled is False
+    assert settings.otel_service_name == "opencitadel-api"
+    assert settings.otel_exporter_endpoint == ""
+
+
+def test_deployment_settings_own_sandbox_topology() -> None:
+    settings = deployment_config.DeploymentSettings()
+
+    assert settings.sandbox_driver == "auto"
+    assert settings.sandbox_image == ""
+    assert settings.sandbox_network == ""
+    assert settings.sandbox_k8s_namespace == "default"
+    assert settings.policy_head_refresh_interval_seconds == 5.0
+    assert settings.policy_max_staleness_seconds == 30.0

@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from typing import Protocol
 
 from app.domain.models.health_status import HealthStatus

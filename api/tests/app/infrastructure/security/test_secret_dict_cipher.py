@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from app.domain.models.app_config import MCPTransport
+from app.domain.models.integration_runtime import MCPTransport
 from app.domain.models.integration_server import MCPServerRecord
 from app.domain.utils.secret_masking import mask_string_value, mask_url
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
@@ -28,7 +26,7 @@ def test_encrypt_secret_dict_matches_access_key_hint():
     cipher = ApiKeyCipher("test-secret-key-for-unit-tests-only")
     original = {"QINIU_ACCESS_KEY": "ak1234567890", "QINIU_BUCKET": "mybucket"}
     encrypted, enc_flag = encrypt_secret_dict(original, cipher)
-    assert enc_flag == ApiKeyEncryption.FERNET_V1
+    assert enc_flag == ApiKeyEncryption.FERNET_V2
     assert encrypted["QINIU_ACCESS_KEY"] != original["QINIU_ACCESS_KEY"]
     assert encrypted["QINIU_BUCKET"] == "mybucket"
     decrypted = decrypt_secret_dict(encrypted, enc_flag, cipher)
@@ -39,7 +37,7 @@ def test_encrypt_secret_dict_matches_exact_key_name():
     cipher = ApiKeyCipher("test-secret-key-for-unit-tests-only")
     original = {"key": "secret-value"}
     encrypted, enc_flag = encrypt_secret_dict(original, cipher)
-    assert enc_flag == ApiKeyEncryption.FERNET_V1
+    assert enc_flag == ApiKeyEncryption.FERNET_V2
     decrypted = decrypt_secret_dict(encrypted, enc_flag, cipher)
     assert decrypted == original
 
@@ -48,7 +46,7 @@ def test_encrypt_url_with_query_roundtrip():
     cipher = ApiKeyCipher("test-secret-key-for-unit-tests-only")
     original = "https://mcp.amap.com/mcp?key=3244242424"
     encrypted, enc_flag = encrypt_url(original, cipher)
-    assert enc_flag == ApiKeyEncryption.FERNET_V1
+    assert enc_flag == ApiKeyEncryption.FERNET_V2
     assert encrypted != original
     decrypted = decrypt_url(encrypted, enc_flag, cipher)
     assert decrypted == original
@@ -58,7 +56,7 @@ def test_encrypt_url_without_query_stays_plaintext():
     cipher = ApiKeyCipher("test-secret-key-for-unit-tests-only")
     original = "https://example.com/mcp"
     encrypted, enc_flag = encrypt_url(original, cipher)
-    assert enc_flag == ApiKeyEncryption.LEGACY_PLAINTEXT
+    assert enc_flag == ApiKeyEncryption.PLAINTEXT
     assert encrypted == original
 
 
@@ -66,7 +64,7 @@ def test_encrypt_url_with_userinfo_roundtrip():
     cipher = ApiKeyCipher("test-secret-key-for-unit-tests-only")
     original = "https://user:supersecret@example.com/mcp"
     encrypted, enc_flag = encrypt_url(original, cipher)
-    assert enc_flag == ApiKeyEncryption.FERNET_V1
+    assert enc_flag == ApiKeyEncryption.FERNET_V2
     decrypted = decrypt_url(encrypted, enc_flag, cipher)
     assert decrypted == original
 

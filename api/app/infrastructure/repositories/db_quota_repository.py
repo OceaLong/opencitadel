@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Optional
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.user_quota import UserQuota
@@ -13,7 +9,7 @@ class DBQuotaRepository(QuotaRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
-    async def get_for_user(self, user_id: str) -> Optional[UserQuota]:
+    async def get_for_user(self, user_id: str) -> UserQuota | None:
         record = await self.db_session.get(UserQuotaORM, user_id)
         return record.to_domain() if record else None
 

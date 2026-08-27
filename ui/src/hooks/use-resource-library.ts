@@ -51,8 +51,6 @@ export type UseResourceLibraryOptions<TItem extends { id: string }, TVersionsDat
     ctx: { ingestingIds: Set<string>; versionsById: Record<string, TVersionsData | null> },
   ) => boolean;
   pollMs: number;
-  /** KB's `watchIngest` requires a truthy ingest task id before it starts watching; CB always starts. */
-  requireIngestTaskId?: boolean;
   formatIngestError: (event: IngestStreamErrorEvent) => string;
   /** Extra side effect when the SSE connection itself fails (KB toasts an error; CB doesn't). */
   onStreamConnectError?: () => void;
@@ -66,7 +64,7 @@ export type UseResourceLibraryResult<TItem, TVersionsData> = {
   startingId: string | null;
   load: () => Promise<void>;
   remove: (id: string) => Promise<void>;
-  watchIngest: (id: string, ingestTaskId?: string | null) => void;
+  watchIngest: (id: string) => void;
   startTask: (id: string, run: () => Promise<void>, errorMessage: string) => Promise<void>;
 };
 
@@ -92,10 +90,12 @@ export function useResourceLibrary<TItem extends { id: string }, TVersionsData =
   loadErrorMessage,
   shouldPoll,
   pollMs,
-  requireIngestTaskId,
   formatIngestError,
   onStreamConnectError,
-}: UseResourceLibraryOptions<TItem, TVersionsData>): UseResourceLibraryResult<TItem, TVersionsData> {
+}: UseResourceLibraryOptions<TItem, TVersionsData>): UseResourceLibraryResult<
+  TItem,
+  TVersionsData
+> {
   const [items, setItems] = useState<TItem[]>([]);
   const [versionsById, setVersionsById] = useState<Record<string, TVersionsData | null>>({});
   const [ingestingIds, setIngestingIds] = useState<Set<string>>(new Set());
@@ -152,8 +152,7 @@ export function useResourceLibrary<TItem extends { id: string }, TVersionsData =
   }, []);
 
   const watchIngest = useCallback(
-    (id: string, ingestTaskId?: string | null) => {
-      if (requireIngestTaskId && !ingestTaskId) return;
+    (id: string) => {
       if (ingestCleanupRef.current.has(id)) return;
       setIngestingIds((prev) => new Set(prev).add(id));
       const finish = () => {
@@ -191,7 +190,7 @@ export function useResourceLibrary<TItem extends { id: string }, TVersionsData =
       );
       ingestCleanupRef.current.set(id, cleanup);
     },
-    [api, load, requireIngestTaskId, formatIngestError, onStreamConnectError],
+    [api, load, formatIngestError, onStreamConnectError],
   );
 
   const remove = useCallback(

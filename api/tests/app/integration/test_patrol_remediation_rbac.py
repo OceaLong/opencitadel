@@ -5,15 +5,17 @@ NotFoundError for cross-tenant access) and test_resource_mutation_rbac.py
 (static route-matrix assertion that every mutating route carries the
 require_non_auditor guard).
 """
+
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
-from app.domain.errors import ForbiddenError, NotFoundError
 from app.application.patrol_templates import load_patrol_template
 from app.application.services.patrol_remediation_service import PatrolRemediationService
-from app.domain.models.app_config import AppConfig
+from app.domain.errors import ForbiddenError, NotFoundError
 from app.domain.models.patrol import (
     PatrolCheckResult,
     PatrolCheckStatus,
@@ -27,31 +29,50 @@ from app.domain.models.patrol import (
 )
 from app.domain.models.scope import OwnerScope, Principal
 from app.domain.models.user import GlobalRole
+from app.domain.runtime_policy import (
+    OperationsPolicy,
+    PatrolOperationsPolicy,
+    PatrolRemediationMode,
+)
 from app.interfaces.auth_dependencies import require_non_auditor
 from app.interfaces.endpoints.patrol_routes import router as patrol_router
+from tests.app.application_test_support import NoopGovernanceMetrics
+from tests.runtime_policy_support import MutablePolicyReader
 
 
 class Repo:
     def __init__(self):
         config = load_patrol_template("kubernetes-baseline-v1")
         self.pack = PatrolPack(
-            owner_user_id="owner-a", name="Daily", slug="daily", status=PatrolPackStatus.ACTIVE,
-            config=config, mcp_server_id="server-1", skill_id="skill-1",
+            owner_user_id="owner-a",
+            name="Daily",
+            slug="daily",
+            status=PatrolPackStatus.ACTIVE,
+            config=config,
+            mcp_server_id="server-1",
         )
         self.run = PatrolRun(
-            pack_id=self.pack.id, pack_version=1,
+            pack_id=self.pack.id,
+            pack_version=1,
             pack_snapshot={"config": config.model_dump(mode="json")},
-            trigger_type=PatrolTriggerType.MANUAL, idempotency_key="key-1",
+            trigger_type=PatrolTriggerType.MANUAL,
+            idempotency_key="key-1",
+            execution_run_id=uuid4(),
         )
         self.check_result = PatrolCheckResult(
-            run_id=self.run.id, check_id="k8s-workload-availability",
-            status=PatrolCheckStatus.FAIL, severity=PatrolFindingSeverity.CRITICAL,
+            run_id=self.run.id,
+            check_id="k8s-workload-availability",
+            status=PatrolCheckStatus.FAIL,
+            severity=PatrolFindingSeverity.CRITICAL,
             fingerprint="f" * 64,
         )
         self.finding = PatrolFinding(
-            run_id=self.run.id, check_result_id=self.check_result.id,
-            fingerprint=self.check_result.fingerprint, severity=PatrolFindingSeverity.CRITICAL,
-            title="k8s workload unavailable", summary="unavailable replicas",
+            run_id=self.run.id,
+            check_result_id=self.check_result.id,
+            fingerprint=self.check_result.fingerprint,
+            severity=PatrolFindingSeverity.CRITICAL,
+            title="k8s workload unavailable",
+            summary="unavailable replicas",
         )
         self.remediations: dict[str, object] = {}
 
@@ -86,46 +107,49 @@ class Repo:
         return [item for item in self.remediations.values() if item.run_id == run_id]
 
 
-class SkillRepo:
-    """Fake skill repository: the remediation Skill is registered by default
-    so these RBAC/IDOR tests exercise scope handling, not the skill gate
-    (that gate has its own dedicated coverage in
-    test_patrol_remediation_service.py)."""
-
-    async def get_by_slug(self, slug):
-        if slug == "ops-patrol-remediation":
-            return SimpleNamespace(id="skill-remediation-1", slug="ops-patrol-remediation")
-        return None
-
-
 class Uow:
     def __init__(self, repo):
         self.patrol = repo
+        self.execution_commands = object()
         self.session = SimpleNamespace(save=AsyncMock(), update_status=AsyncMock())
-        self.skill = SkillRepo()
 
     async def __aenter__(self):
         return self
+
+    async def commit(self):
+        return None
 
     async def __aexit__(self, *args):
         return None
 
 
-def feature_config() -> AppConfig:
-    cfg = AppConfig()
-    cfg.feature_flags.enable_ops_patrol_remediation = True
-    return cfg
+POLICY_READER = MutablePolicyReader(
+    operations=OperationsPolicy(
+        patrol=PatrolOperationsPolicy(remediation=PatrolRemediationMode.ENABLED)
+    )
+)
 
 
 @pytest.mark.asyncio
 async def test_attacker_scope_get_remediation_is_indistinguishable_from_missing():
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = PatrolRemediationService(
+        lambda: Uow(repo),
+        actuator_client=SimpleNamespace(),
+        patrol_run_service=SimpleNamespace(),
+        run_admission_service=SimpleNamespace(admit=AsyncMock(return_value=uuid4())),
+        policy_reader=POLICY_READER,
+        governance_metrics=NoopGovernanceMetrics(),
+    )
     owner_scope = OwnerScope.personal("owner-a")
 
-    with patch("app.application.services.patrol_remediation_service.get_runtime_config", return_value=feature_config()):
+    with nullcontext():
         remediation = await service.propose(
-            repo.finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, owner_scope, "owner-a", dispatch=False,
+            repo.finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            owner_scope,
+            "owner-a",
         )
 
     attacker_scope = OwnerScope.personal("attacker-b")
@@ -140,14 +164,27 @@ async def test_attacker_scope_get_remediation_is_indistinguishable_from_missing(
 @pytest.mark.asyncio
 async def test_attacker_scope_propose_against_foreign_finding_returns_not_found():
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = PatrolRemediationService(
+        lambda: Uow(repo),
+        actuator_client=SimpleNamespace(),
+        patrol_run_service=SimpleNamespace(),
+        run_admission_service=SimpleNamespace(admit=AsyncMock(return_value=uuid4())),
+        policy_reader=POLICY_READER,
+        governance_metrics=NoopGovernanceMetrics(),
+    )
     attacker_scope = OwnerScope.personal("attacker-b")
 
-    with patch("app.application.services.patrol_remediation_service.get_runtime_config", return_value=feature_config()):
-        with pytest.raises(NotFoundError):
-            await service.propose(
-                repo.finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, attacker_scope, "attacker-b", dispatch=False,
-            )
+    with (
+        nullcontext(),
+        pytest.raises(NotFoundError),
+    ):
+        await service.propose(
+            repo.finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            attacker_scope,
+            "attacker-b",
+        )
 
 
 def _make_auditor_principal() -> Principal:
@@ -156,17 +193,21 @@ def _make_auditor_principal() -> Principal:
 
 @pytest.mark.asyncio
 async def test_auditor_cannot_pass_the_propose_route_write_guard():
-    with patch(
-        "app.interfaces.auth_dependencies.get_current_principal",
-        new=AsyncMock(return_value=_make_auditor_principal()),
+    with (
+        patch(
+            "app.interfaces.auth_dependencies.get_current_principal",
+            new=AsyncMock(return_value=_make_auditor_principal()),
+        ),
+        pytest.raises(ForbiddenError),
     ):
-        with pytest.raises(ForbiddenError):
-            await require_non_auditor()
+        await require_non_auditor()
 
 
 def _write_dependencies():
     return {
-        f"{next(iter(route.methods))}:{route.path}": {dependency.call for dependency in route.dependant.dependencies}
+        f"{next(iter(route.methods))}:{route.path}": {
+            dependency.call for dependency in route.dependant.dependencies
+        }
         for route in patrol_router.routes
         if hasattr(route, "dependant")
     }

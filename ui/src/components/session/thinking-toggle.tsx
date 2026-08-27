@@ -42,7 +42,7 @@ export function ThinkingToggle({
       <span className="relative inline-flex items-center justify-center">
         <Sparkles className={cn("size-4", enabled ? "text-primary" : "text-muted-foreground")} />
         {enabled && (
-          <span className="bg-primary text-primary-foreground absolute -right-0.5 -bottom-0.5 flex size-3 items-center justify-center rounded-full text-2xs">
+          <span className="bg-primary text-primary-foreground text-2xs absolute -right-0.5 -bottom-0.5 flex size-3 items-center justify-center rounded-full">
             ✓
           </span>
         )}

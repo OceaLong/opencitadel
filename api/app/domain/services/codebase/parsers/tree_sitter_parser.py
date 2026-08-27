@@ -1,16 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Optional tree-sitter parser adapter.
 
-The language pack is intentionally used as an availability gate here.  The
+The language pack is intentionally used as an availability prerequisite here.  The
 conservative extraction remains shared with the regex fallback so parser
 failures cannot fail ingestion.
 """
+
 from __future__ import annotations
 
 from app.domain.services.codebase.parsers.base import ParsedFile
 from app.domain.services.codebase.parsers.regex_fallback import RegexFallbackParser
-
 
 TREE_SITTER_LANGUAGES = {
     "javascript",
@@ -46,13 +44,13 @@ class TreeSitterParser:
             return self._regex.parse(path, content, language)
         try:
             return self._tree_sitter_regex.parse(path, content, language)
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             return self._regex.parse(path, content, language)
 
     @staticmethod
     def _language_pack_available() -> bool:
         try:
-            import tree_sitter_language_pack  # noqa: F401
-        except Exception:
+            pass
+        except (OSError, RuntimeError, ValueError):
             return False
         return True

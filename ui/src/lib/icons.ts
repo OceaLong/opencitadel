@@ -51,7 +51,7 @@ export const IconAdmin: LucideIcon = LayoutDashboard;
 export const IconDelete: LucideIcon = Trash2;
 /** Skill templates */
 export const IconSkill: LucideIcon = Wand2;
-/** LLM model management */
+/** Inference control plane */
 export const IconModel: LucideIcon = Cpu;
 /** Layered resources / teams grouping */
 export const IconLayers: LucideIcon = Layers;

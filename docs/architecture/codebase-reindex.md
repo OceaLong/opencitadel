@@ -4,8 +4,7 @@
 
 This document is the authoritative reference for the Codebase module: secure
 source acquisition, immutable analysis versions, Ask/Agent bindings, hybrid
-retrieval, evidence-backed artifacts, rebuild recovery, compatibility routes,
-and retention.
+retrieval, evidence-backed artifacts, durable recovery, and retention.
 
 ## Capability surface
 
@@ -13,7 +12,7 @@ and retention.
 |------------|-------------|----------|
 | List / create | `/codebase`, `POST /api/codebases` | ZIP, file set, or HTTPS Git import after source validation |
 | Version history | `GET /api/codebases/{id}/versions` | Active version plus candidate build state |
-| Build | `POST /api/codebases/{id}/builds` | Idempotently creates or returns one queued/running candidate |
+| Build | `POST /api/codebases/{id}/builds` | Idempotently creates one candidate and admits its source Run |
 | Retry / cancel | `POST /api/codebases/{id}/builds/{build_id}/retry`, `/cancel` | Only valid for same-codebase build/version closure |
 | Versioned source | `POST /api/codebases/{id}/versions/{version_id}/source` | Reads immutable snapshot for that published version |
 | Versioned artifacts | `GET /api/codebases/{id}/versions/{version_id}/artifacts` | Returns evidence-supported artifacts for that version |
@@ -25,13 +24,13 @@ after a newer codebase version is published.
 
 ## Source acquisition and immutable snapshots
 
-Every import or rebuild creates a candidate `codebase_version` and a shared
-`resource_build`.
+Every import or rebuild creates one candidate `codebase_version` carrying
+`build_id` and `request_key`, then atomically admits one `codebase_ingest` Run.
 
 ```mermaid
 flowchart TD
   Request["create/rebuild request"] --> Validate["Validate source parameters"]
-  Validate --> Candidate["Create candidate version + ResourceBuild"]
+  Validate --> Candidate["Create candidate version + source Run"]
   Candidate --> Materialize["Materialize into clean temp workspace"]
   Materialize --> Snapshot["Create content-addressed source snapshot"]
   Snapshot --> Analyze["Analyze files, symbols, edges, chunks"]
@@ -61,13 +60,14 @@ Security rules at the boundary:
 
 ## Build state and publish semantics
 
-At most one queued/running build exists for a codebase. Duplicate rebuild
-requests return the existing candidate instead of dispatching another worker
-task.
+At most one `building` candidate exists for a codebase. The source Run is the
+only lifecycle/progress authority and uses `new`, `queued`, `running`,
+`waiting`, `completed`, `failed`, or `cancelled`. Duplicate requests return the
+same admitted candidate/Run through command and request-key idempotency.
 
 Publication is a short compare-and-swap transaction:
 
-1. verify the candidate belongs to the codebase and its build;
+1. verify the candidate belongs to the codebase and its source Run identity;
 2. verify the candidate parent still equals the current active version;
 3. verify mandatory facts exist: non-empty source set, source snapshot, source
    digest, lexical index, and referential closure;
@@ -134,9 +134,10 @@ shows unsupported reasons instead of rendering generic diagrams.
 
 ## Recovery
 
-Worker reconciliation may fail stale candidates and builds, but it must not
-change the active version unless the candidate passes the publish CAS. Retry
-creates a fresh candidate closed over the current active version.
+The execution kernel reclaims commands and expired Activity claims from
+PostgreSQL. It may fail an unpublished candidate, but cannot change the active
+version unless the candidate passes the publish CAS. Retry creates a fresh
+candidate and a new Run closed over the current active version.
 
 ## Retention and GC
 
@@ -146,15 +147,14 @@ Codebase version GC is default-off and bounded by:
 - `codebase.version_retention_min_days`
 - `codebase.version_gc_batch_size`
 
-GC protects active versions, historical session bindings, queued/running build
-versions, age windows, and retention windows. It deletes version-scoped files,
-symbols, edges, chunks, artifacts, terminal build events/builds, and version
-rows in a transaction. A source snapshot object is deleted only after no other
-version references its key.
+GC protects active versions, historical session bindings, all `building`
+candidates, age windows, and retention windows. It deletes version-scoped
+files, symbols, edges, chunks, artifacts, and version rows in a transaction. A
+source snapshot object is deleted only after no other version references its
+key. Run events follow execution-event retention and are not product-GC data.
 
 ## Related documentation
 
 - [Security Model](security-model.md)
 - [Knowledge base ingestion](knowledge-base-ingestion.md)
-- [Events](events.md)
-- [Contract compatibility](contract-compatibility.md)
+- [Execution kernel](execution-kernel.md)

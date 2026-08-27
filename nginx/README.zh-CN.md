@@ -40,9 +40,9 @@ client_max_body_size 200m;
 | 功能 | 有效限制 | 执行方 |
 |------|----------|--------------|
 | Codebase ZIP | 200 MB | UI `CODEBASE_ZIP_MAX_BYTES` + nginx |
-| 知识库文档 | 默认 50 MB | AppConfig `knowledge_base.document.max_bytes` |
+| 知识库文档 | 默认 50 MB | Execution Policy `knowledge_base.document.max_bytes` |
 
-修改 Codebase 上传上限时需同步 UI 常量、nginx 与 AppConfig。
+修改上传上限时需同步 UI 常量、nginx 与类型化 Execution Policy。
 
 ## SSE 与 WebSocket
 

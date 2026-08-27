@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.interfaces.schemas.knowledge_base import (
     KnowledgeBaseResponse,
@@ -10,7 +8,11 @@ from app.interfaces.schemas.knowledge_base import (
 
 def test_kb_response_has_ready_doc_count_default_zero():
     resp = KnowledgeBaseResponse(
-        id="kb1", name="t", status="ready", created_at=datetime.now(), updated_at=datetime.now()
+        id="kb1",
+        name="t",
+        status="ready",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     assert resp.ready_doc_count == 0
 

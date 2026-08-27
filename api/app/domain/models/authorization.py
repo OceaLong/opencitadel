@@ -1,7 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
@@ -9,7 +6,7 @@ from app.domain.models.scope import OwnerScope, Principal
 from app.domain.models.team import TeamRole
 
 
-class AuthorizationMode(str, Enum):
+class AuthorizationMode(StrEnum):
     ANONYMOUS = "anonymous"
     USER = "user"
     SYSTEM = "system"
@@ -21,8 +18,8 @@ class AuthorizationContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     mode: AuthorizationMode
-    principal: Optional[Principal] = None
-    scope: Optional[OwnerScope] = None
+    principal: Principal | None = None
+    scope: OwnerScope | None = None
     request_id: str = ""
     system_actor: str = ""
 
@@ -35,7 +32,7 @@ class AuthorizationContext(BaseModel):
         cls,
         principal: Principal,
         *,
-        scope: Optional[OwnerScope] = None,
+        scope: OwnerScope | None = None,
         request_id: str = "",
     ) -> "AuthorizationContext":
         resolved_scope = scope or OwnerScope.personal(principal.user_id)
@@ -58,15 +55,15 @@ class AuthorizationContext(BaseModel):
         return cls(mode=AuthorizationMode.SYSTEM, system_actor=normalized)
 
     @property
-    def user_id(self) -> Optional[str]:
+    def user_id(self) -> str | None:
         return self.principal.user_id if self.principal else None
 
     @property
-    def team_id(self) -> Optional[str]:
+    def team_id(self) -> str | None:
         return self.scope.team_id if self.scope else None
 
     @property
-    def team_role(self) -> Optional[TeamRole]:
+    def team_role(self) -> TeamRole | None:
         if not self.principal or not self.team_id:
             return None
         return self.principal.team_roles.get(self.team_id)

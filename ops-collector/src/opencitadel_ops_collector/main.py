@@ -1,4 +1,5 @@
 """Collector CLI. Streamable HTTP is default; stdio must be explicitly enabled."""
+
 from __future__ import annotations
 
 import argparse
@@ -18,7 +19,9 @@ def main() -> None:
     settings = CollectorSettings()
     transport = args.transport or settings.transport
     if transport == "stdio" and not settings.allow_stdio:
-        raise SystemExit("stdio transport is disabled; set OPS_COLLECTOR_ALLOW_STDIO=true for development")
+        raise SystemExit(
+            "stdio transport is disabled; set OPS_COLLECTOR_ALLOW_STDIO=true for development"
+        )
     create_server(settings).run(transport=transport)
 
 

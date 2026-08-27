@@ -42,21 +42,6 @@ export const knowledgeApi = {
     return del<KnowledgeBase>(`/knowledge-bases/${kbId}/documents/${docId}`);
   },
 
-  reindex: (kbId: string): Promise<KnowledgeBase> => {
-    return post<KnowledgeBase>(`/knowledge-bases/${kbId}/reindex`);
-  },
-
-  readDocument: (
-    kbId: string,
-    docId: string,
-    page?: number,
-  ): Promise<ReadKnowledgeDocumentData> => {
-    return get<ReadKnowledgeDocumentData>(
-      `/knowledge-bases/${kbId}/documents/${docId}`,
-      page ? { page } : undefined,
-    );
-  },
-
   readDocumentPage: (
     kbId: string,
     versionId: string,
@@ -84,7 +69,13 @@ export const knowledgeApi = {
     eventId?: string,
     onComplete?: () => void,
   ): (() => void) => {
-    return createIngestStream(`/knowledge-bases/${kbId}/ingest`, onEvent, onError, eventId, onComplete);
+    return createIngestStream(
+      `/knowledge-bases/${kbId}/ingest`,
+      onEvent,
+      onError,
+      eventId,
+      onComplete,
+    );
   },
 };
 

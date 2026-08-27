@@ -1,12 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Vision token 估算与消息体积统计。"""
+
 import base64
 import io
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
-from app.domain.models.multimodal import IMAGE_PART_TYPES, is_image_part
+from app.domain.models.multimodal import is_image_part
 
 _DATA_URL_PATTERN = re.compile(r"^data:([^;]+);base64,(.+)$", re.DOTALL)
 
@@ -16,12 +15,13 @@ _TILE_SIZE = 512
 _TOKENS_PER_TILE = 170
 
 
-def _decode_image_dimensions(image_bytes: bytes) -> Tuple[int, int]:
+def _decode_image_dimensions(image_bytes: bytes) -> tuple[int, int]:
     try:
         from PIL import Image
+
         with Image.open(io.BytesIO(image_bytes)) as img:
             return img.width, img.height
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         # 无法解析时按 1024x1024 估算
         return 1024, 1024
 
@@ -45,7 +45,7 @@ def estimate_image_bytes_tokens(image_bytes: bytes, *, detail: str = "high") -> 
     return estimate_image_tokens(width, height, detail=detail)
 
 
-def _image_bytes_from_part(part: Dict[str, Any]) -> bytes:
+def _image_bytes_from_part(part: dict[str, Any]) -> bytes:
     part_type = part.get("type")
     if part_type == "image_url":
         url = (part.get("image_url") or {}).get("url", "")
@@ -53,7 +53,7 @@ def _image_bytes_from_part(part: Dict[str, Any]) -> bytes:
             encoded = url.split(";base64,", 1)[1]
             try:
                 return base64.b64decode(encoded, validate=False)
-            except Exception:
+            except (OSError, RuntimeError, ValueError):
                 return b""
         # 远程 URL 无法获知体积，按 200KB 估算
         return b"x" * 200_000
@@ -62,13 +62,13 @@ def _image_bytes_from_part(part: Dict[str, Any]) -> bytes:
         if ref and not str(ref).startswith("http"):
             try:
                 return base64.b64decode(ref, validate=False)
-            except Exception:
+            except (OSError, RuntimeError, ValueError):
                 return b""
         return b"x" * 200_000
     return b""
 
 
-def count_message_image_stats(messages: List[Dict[str, Any]]) -> Tuple[int, int, int]:
+def count_message_image_stats(messages: list[dict[str, Any]]) -> tuple[int, int, int]:
     """返回 (image_count, total_bytes, estimated_vision_tokens)。"""
     image_count = 0
     total_bytes = 0
@@ -90,7 +90,7 @@ def count_message_image_stats(messages: List[Dict[str, Any]]) -> Tuple[int, int,
     return image_count, total_bytes, vision_tokens
 
 
-def estimate_messages_tokens(messages: List[Dict[str, Any]]) -> int:
+def estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
     """估算消息列表总 token（文本 + vision）。"""
     text_chars = 0
     _, _, vision_tokens = count_message_image_stats(messages)

@@ -1,22 +1,19 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
 import logging
 import re
 import time
-from typing import Optional
 
 import httpx
 from bs4 import BeautifulSoup
 
 from app.domain.external.search import SearchEngine
-from app.domain.models.search import SearchResults, SearchResultItem
+from app.domain.models.search import SearchResultItem, SearchResults
 from app.domain.models.tool_result import ToolResult
 
 logger = logging.getLogger(__name__)
 
 
-def _parse_bing_html(html: str, query: str, date_range: Optional[str]) -> ToolResult[SearchResults]:
+def _parse_bing_html(html: str, query: str, date_range: str | None) -> ToolResult[SearchResults]:
     """Parse Bing HTML synchronously (run in a worker thread)."""
     soup = BeautifulSoup(html, "html.parser")
     search_results = []
@@ -46,8 +43,7 @@ def _parse_bing_html(html: str, query: str, date_range: Optional[str]) -> ToolRe
 
             snippet = ""
             snippet_items = item.find_all(
-                ["p", "div"],
-                class_=re.compile(r'b_lineclamp|b_descript|b_caption')
+                ["p", "div"], class_=re.compile(r"b_lineclamp|b_descript|b_caption")
             )
             if snippet_items:
                 snippet = snippet_items[0].get_text(strip=True)
@@ -62,7 +58,7 @@ def _parse_bing_html(html: str, query: str, date_range: Optional[str]) -> ToolRe
 
             if not snippet:
                 all_text = item.get_text(strip=True)
-                sentences = re.split(r'[.!?\n。！]', all_text)
+                sentences = re.split(r"[.!?\n。！]", all_text)
                 for sentence in sentences:
                     clean_sentence = sentence.strip()
                     if len(clean_sentence) > 20 and clean_sentence != title:
@@ -75,13 +71,15 @@ def _parse_bing_html(html: str, query: str, date_range: Optional[str]) -> ToolRe
                 elif url.startswith("/"):
                     url = "https://www.bing.com" + url
 
-            search_results.append(SearchResultItem(
-                title=title,
-                url=url,
-                snippet=snippet,
-            ))
-        except Exception as e:
-            logger.warning(f"Bing搜索结果解析失败: {str(e)}")
+            search_results.append(
+                SearchResultItem(
+                    title=title,
+                    url=url,
+                    snippet=snippet,
+                )
+            )
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.warning("Bing搜索结果解析失败: %s", e)
             continue
 
     total_results = 0
@@ -93,22 +91,21 @@ def _parse_bing_html(html: str, query: str, date_range: Optional[str]) -> ToolRe
                 try:
                     total_results = int(match.group(1).replace(",", ""))
                     break
-                except Exception:
+                except (OSError, RuntimeError, ValueError):
                     continue
 
     if total_results == 0:
         count_elements = soup.find_all(
-            ["span", "div", "p"],
-            class_=re.compile(r"sb_count|b_focusTextMedium")
+            ["span", "div", "p"], class_=re.compile(r"sb_count|b_focusTextMedium")
         )
         for element in count_elements:
             text = element.get_text(strip=True)
             match = re.search(r"([\d,]+)\s*results", text)
             if match:
                 try:
-                    total_results = int(match.group(1).replace(',', ''))
+                    total_results = int(match.group(1).replace(",", ""))
                     break
-                except Exception:
+                except (OSError, RuntimeError, ValueError):
                     continue
 
     results = SearchResults(
@@ -136,7 +133,7 @@ class BingSearchEngine(SearchEngine):
         }
         self.cookies = httpx.Cookies()
 
-    async def invoke(self, query: str, date_range: Optional[str] = None) -> ToolResult[SearchResults]:
+    async def invoke(self, query: str, date_range: str | None = None) -> ToolResult[SearchResults]:
         """传递query+date_range使用httpx+bs4调用bing搜索并获取搜索结果"""
         # 1.构建请求参数
         params = {"q": query}
@@ -148,11 +145,11 @@ class BingSearchEngine(SearchEngine):
 
             # 4.创建日期检索数据类型映射
             date_mapping = {
-                "past_hour": "ex1%3a\"ez1\"",
-                "past_day": "ex1%3a\"ez1\"",
-                "past_week": "ex1%3a\"ez2\"",
-                "past_month": "ex1%3a\"ez3\"",
-                "past_year": f"ex1%3a\"ez5_{days_since_epoch - 365}_{days_since_epoch}\""
+                "past_hour": 'ex1%3a"ez1"',
+                "past_day": 'ex1%3a"ez1"',
+                "past_week": 'ex1%3a"ez2"',
+                "past_month": 'ex1%3a"ez3"',
+                "past_year": f'ex1%3a"ez5_{days_since_epoch - 365}_{days_since_epoch}"',
             }
 
             # 5.判断是否传递了date_range补全params参数
@@ -162,10 +159,10 @@ class BingSearchEngine(SearchEngine):
         try:
             # 6.使用httpx创建异步客户端
             async with httpx.AsyncClient(
-                    headers=self.headers,
-                    cookies=self.cookies,
-                    timeout=60,
-                    follow_redirects=True,
+                headers=self.headers,
+                cookies=self.cookies,
+                timeout=60,
+                follow_redirects=True,
             ) as client:
                 # 7.调用客户端发起请求
                 response = await client.get(self.base_url, params=params)
@@ -180,9 +177,9 @@ class BingSearchEngine(SearchEngine):
                     query,
                     date_range,
                 )
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             # 31.记录日志并返回错误工具调用结果
-            logger.error(f"Bing搜索出错: {str(e)}")
+            logger.error("Bing搜索出错: %s", e)
             error_results = SearchResults(
                 query=query,
                 date_range=date_range,
@@ -191,7 +188,6 @@ class BingSearchEngine(SearchEngine):
             )
             return ToolResult(
                 success=False,
-                message=f"Bing搜索出错: {str(e)}",
+                message=f"Bing搜索出错: {e!s}",
                 data=error_results,
             )
-

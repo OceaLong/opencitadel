@@ -96,9 +96,7 @@ export function NotificationInbox({ className }: { className?: string }) {
     if (item.read) return;
     try {
       await notificationsApi.markRead(item.id);
-      setItems((prev) =>
-        prev.map((row) => (row.id === item.id ? { ...row, read: true } : row)),
-      );
+      setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, read: true } : row)));
       setUnreadCount((count) => Math.max(0, count - 1));
     } catch {
       // ignore
@@ -119,7 +117,7 @@ export function NotificationInbox({ className }: { className?: string }) {
           {unreadCount > 0 && (
             <Badge
               variant="destructive"
-              className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full p-0 text-2xs"
+              className="text-2xs absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full p-0"
             >
               {unreadCount > 9 ? "9+" : unreadCount}
             </Badge>

@@ -26,40 +26,38 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 
 | Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
 |------|-------|-----------|-----------|----------|-------------|------------|
-| [overview.md](architecture/overview.md) | System design, API/Worker, DI, sandbox | primary | paired | mermaid | `api/app/container.py`, `worker/main.py`, `api/app/application/services/runner_bindings/` | medium |
-| [governance-plane.md](architecture/governance-plane.md) | Effect contracts, capability narrowing, batch approval, terminal latch, evidence | primary | paired | mermaid | `tool_policy.py`, `capability_policy.py`, `tool_batch_executor.py`, `governance_profile_service.py`, `evidence_service.py` | medium |
+| [overview.md](architecture/overview.md) | System design, typed composition, API/kernel, sandbox | primary | paired | mermaid | `api/app/composition/`, `api/app/execution_kernel.py` | low |
+| [governance-plane.md](architecture/governance-plane.md) | Effect contracts, capability narrowing, approval, terminal latch, evidence | primary | paired | mermaid | `tool_policy.py`, `application/execution/`, `governance_profile_service.py`, `evidence_service.py` | medium |
 | [security-model.md](architecture/security-model.md) | Trust boundaries, auth, secrets | primary | paired | mermaid | `api/app/infrastructure/security/` | medium |
-| [events.md](architecture/events.md) | Domain events, SSE, replay | primary | paired | mermaid | `domain/models/event.py` | medium |
-| [checkpoints-and-hitl.md](architecture/checkpoints-and-hitl.md) | HITL gates, checkpoints, Web Operator | primary | paired | mermaid | `checkpoint_service.py`, `session_routes.py`, `session/approval_routes.py` | medium |
-| [web-operator.md](architecture/web-operator.md) | Gate profiles, audit contract | primary | paired | mermaid | `domain/services/agents/` | low |
+| [execution-kernel.md](architecture/execution-kernel.md) | Commands, events, Activities, projections, SSE, recovery | primary | paired | mermaid | `domain/execution/`, `application/execution/`, `execution_kernel.py` | low |
+| [web-operator.md](architecture/web-operator.md) | Exact-host boundary, approval, evidence | primary | paired | mermaid | `application/execution/agent_tool_catalog.py`, `tools/browser.py` | low |
 | [teams-and-workspaces.md](architecture/teams-and-workspaces.md) | Teams, `X-Workspace-Id` | primary | paired | mermaid | `team_routes.py` | low |
 | [admin-auditor-compliance.md](architecture/admin-auditor-compliance.md) | Admin, auditor, compliance | primary | paired | mermaid | `admin_routes.py`, `ui/src/app/admin/` | medium |
 | [integrations-a2a-service-keys.md](architecture/integrations-a2a-service-keys.md) | A2A, service API keys | primary | paired | mermaid | `a2a_routes.py`, `service_api_key_routes.py` | low |
-| [skills.md](architecture/skills.md) | Skill templates, runtime | primary | paired | mermaid | `skill_service.py`, `task_runner_factory.py`, `runner_bindings/` | low |
+| [skills.md](architecture/skills.md) | Skill templates, runtime | primary | paired | mermaid | `skill_service.py`, `application/execution/agent_tool_catalog.py` | low |
 | [artifacts-sharing.md](architecture/artifacts-sharing.md) | Artifacts, public share | primary | paired | mermaid | `artifact_routes.py` | low |
-| [automation-scheduler.md](architecture/automation-scheduler.md) | Cron, webhooks, leader election | primary | paired | mermaid | `scheduling_routes.py`, `worker/main.py` | low |
+| [automation-scheduler.md](architecture/automation-scheduler.md) | Cron, webhooks, leader election | primary | paired | mermaid | `scheduling_routes.py`, `execution_kernel.py` | low |
 | [ops-patrol.md](architecture/ops-patrol.md) | Pack/Run lifecycle, Collector boundary, evidence | primary | paired | mermaid | `patrol_routes.py`, `patrol_run_service.py` | low |
-| [config-source-governance.md](architecture/config-source-governance.md) | AppConfig vs env boundaries | primary | paired | mermaid | `core/config.py`, `app_config_routes.py` | medium |
+| [config-source-governance.md](architecture/config-source-governance.md) | Deployment, policy, Integration authority boundaries | primary | paired | none | `core/config.py`, `runtime_policy_service.py` | medium |
+| [runtime-policy-control-plane.md](architecture/runtime-policy-control-plane.md) | Runtime Policy revision, head, reader, consumer model | primary | paired | mermaid | `runtime_policy_service.py`, `runtime_policy_reader.py` | medium |
 | [model-resilience.md](architecture/model-resilience.md) | Circuit breaker, fallback | primary | paired | mermaid | `resilient_llm.py` | low |
-| [contract-compatibility.md](architecture/contract-compatibility.md) | API/SSE compatibility window | primary | paired | mermaid | `event_upgrader.py` | low |
 | [codebase-reindex.md](architecture/codebase-reindex.md) | Codebase ingest, vector recovery | primary | paired | mermaid | `codebase/ingestion_runner.py` | medium |
 | [knowledge-base-ingestion.md](architecture/knowledge-base-ingestion.md) | KB parse, OCR, GraphRAG, ingest failures | primary | paired | mermaid | `knowledge_base/ingestion_runner.py` | medium |
 | [architecture-evolution.md](architecture/architecture-evolution.md) | Compose → K8s evolution | primary | paired | mermaid | `deploy/helm/` | low |
-| [llm-endpoints-and-models.md](architecture/llm-endpoints-and-models.md) | LLM endpoint/model split | primary | paired | mermaid | `llm_endpoint_routes.py`, `llm_model_routes.py` | low |
+| [inference-control-plane.md](architecture/inference-control-plane.md) | Inference endpoint/model/binding control plane | primary | paired | mermaid | `inference_routes.py`, `inference-settings.tsx` | low |
 | [frontend-ui.md](architecture/frontend-ui.md) | Next.js UI architecture | primary | paired | mermaid | `ui/src/` | low |
-| [task-recovery.md](architecture/task-recovery.md) | Recoverable task retry | primary | paired | mermaid | `recoverable_task_retry.py` | low |
 | [technical-decisions.md](architecture/technical-decisions.md) | Technology choices & alternatives | primary | paired | mermaid | — | low |
 
 ## Operations & tutorials
 
 | Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
 |------|-------|-----------|-----------|----------|-------------|------------|
-| [operations/deployment.md](operations/deployment.md) | Production deployment | primary | paired | mermaid | `docker-compose.yml` | low |
+| [operations/deployment.md](operations/deployment.md) | Production deployment, probes, bounded drain | primary | paired | mermaid | `docker-compose.yml`, `deploy/helm/opencitadel/` | low |
 | [operations/ops-patrol.md](operations/ops-patrol.md) | Patrol enablement, deployment, evidence, recovery | primary | paired | mermaid | `ops-collector/`, `ops-actuator/`, `deploy/helm/` | low |
 | [operations/https-domain-setup.md](operations/https-domain-setup.md) | HTTPS & domain | primary | paired | none | `.env.example` | low |
 | [tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.md) | Quick BYO key onboarding | tutorial | paired | none | `scripts/quickstart.sh` | low |
 | [tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.md) | Knowledge base RAG | tutorial | paired | mermaid | `knowledge-base-ingestion.md` | low |
-| [tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.md) | MCP setup | tutorial | paired | none | `app_config_routes.py` | low |
+| [tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.md) | MCP setup | tutorial | paired | none | `integration_routes.py` | low |
 | [tutorials/04-governed-web-operator.md](tutorials/04-governed-web-operator.md) | Web Operator runbook | tutorial | paired | none | `operator-scope-dialog.tsx` | low |
 | [tutorials/05-refund-reconciliation-compliance.md](tutorials/05-refund-reconciliation-compliance.md) | Compliance demo | tutorial | paired | none | `compliance_routes.py` | low |
 | [tutorials/06-ops-patrol.md](tutorials/06-ops-patrol.md) | Read-only Kubernetes Patrol walkthrough | tutorial | paired | none | `ui/src/app/patrols/` | low |
@@ -91,23 +89,6 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [SECURITY.md](../.github/SECURITY.md) | Vulnerability reporting | governance | paired | none | low |
 | [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.md) | Community standards | governance | paired | none | low |
 | [pull_request_template.md](../.github/pull_request_template.md) | PR template | governance | paired | none | low |
-
-## Audits (`docs/superpowers/audits/`)
-
-| Path | Topic | Authority | Bilingual | Diagrams | Code anchor | Stale risk |
-|------|-------|-----------|-----------|----------|-------------|------------|
-| [2026-07-28-agent-kb-codebase-governance-audit.md](superpowers/audits/2026-07-28-agent-kb-codebase-governance-audit.md) | Superseded governance audit — resource versioning gap claim (see status banner) | historical | zh-only (exempt) | none | `api/app/application/services/*_version_service.py` | low |
-| [2026-08-04-governance-p0-reverification.md](superpowers/audits/2026-08-04-governance-p0-reverification.md) | Re-verification of 2026-07-28 governance audit P0 findings | historical | zh-only (exempt) | none | — | low |
-
-## Deprecation candidates (resolved — kept for grep regression)
-
-| Location | Issue | Action |
-|----------|-------|--------|
-| `ui/README.md` | “Language switch planned in Settings” | Fixed — Settings → General (`GeneralSettings`) |
-| `admin-auditor-compliance.md` | `/admin/usage` UI route | Fixed — usage charts on `/admin` overview |
-| Tutorials | “Knowledge in sidebar” | Fixed — Header workspace menu |
-| Multiple docs | Duplicate LLM model-only setup steps | Dedupe — link to `deployment.md` |
-| `DOCUMENTATION_INVENTORY` | `technical-decisions` marked `none` for diagrams | Fixed — includes Mermaid |
 
 ## Maintenance
 

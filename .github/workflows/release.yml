@@ -25,10 +25,10 @@ jobs:
             context: api
             file: api/Dockerfile
             target: api
-          - name: worker
+          - name: execution-kernel
             context: api
             file: api/Dockerfile
-            target: worker
+            target: execution-kernel
           - name: migrate
             context: api
             file: api/Dockerfile
@@ -94,10 +94,10 @@ jobs:
             context: api
             file: api/Dockerfile
             target: api
-          - name: worker
+          - name: execution-kernel
             context: api
             file: api/Dockerfile
-            target: worker
+            target: execution-kernel
           - name: migrate
             context: api
             file: api/Dockerfile

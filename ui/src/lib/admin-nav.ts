@@ -1,10 +1,4 @@
-import {
-  IconAdmin,
-  IconAudit,
-  IconInvitation,
-  IconSecurity,
-  IconUsers,
-} from "@/lib/icons";
+import { IconAdmin, IconAudit, IconInvitation, IconSecurity, IconUsers } from "@/lib/icons";
 
 export type AdminNavItem = {
   href: string;

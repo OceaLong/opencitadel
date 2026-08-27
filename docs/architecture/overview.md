@@ -1,389 +1,153 @@
-# OpenCitadel Architecture
+# Architecture Overview
 
 [简体中文](overview.zh-CN.md)
 
-This document is the authoritative reference for OpenCitadel system architecture, API/Worker responsibility boundaries, dependency injection, sandbox lifecycle, and deployment topologies.
+OpenCitadel is built around one event-sourced execution kernel. Agent, Ask,
+resource ingestion, automation, patrol, and remediation all use the same
+PostgreSQL command, event, Activity, timer, approval, and projection protocol.
+There is no second task lifecycle and no transport-owned workflow state.
 
-## Overall Architecture
+## Runtime topology
 
 ```mermaid
 flowchart LR
-  Client["Client UI"] -->|"HTTP or SSE"| Api["FastAPI API"]
-  Api -->|"task input and dispatch"| Redis["Redis Streams"]
-  Api -->|"read and write"| Postgres["Postgres pgvector"]
-  Api -->|"objects"| Storage["COS / MinIO"]
-  Redis -->|"claim task:dispatch"| Worker["Agent Worker Pool"]
-  Worker -->|"run task runner"| AgentRunner["AgentTaskRunner or IngestionRunner"]
-  AgentRunner -->|"create or attach"| Sandbox["Sandbox Runtime"]
-  AgentRunner -->|"LLM calls"| ModelProvider["Model Providers"]
-  AgentRunner -->|"output events"| Redis
-  Worker -->|"persist events"| Postgres
-  Redis -->|"task output stream"| Api
-  Worker -->|"MCP calls, read-only"| Collector["Ops Collector 8090"]
-  Worker -->|"MCP calls, approval-gated write"| Actuator["Ops Actuator 8091"]
+  Client[Web / API clients] --> API[Stateless API]
+  API --> Inbox[(Command inbox)]
+  Scheduler[Scheduler / webhooks] --> Inbox
+  Inbox --> Kernel[Execution kernel]
+  Kernel --> Events[(Execution events)]
+  Events --> Activities[(Activity tasks)]
+  Activities --> Kernel
+  Kernel --> Providers[LLM / sandbox / MCP / storage]
+  Events --> Views[(Formal projections)]
+  Views --> API
+  Events --> Public[(Public event projection)]
+  Public --> SSE[SSE replay and live delivery]
+  Kernel -. disposable wake-up .-> Redis[(Redis)]
 ```
 
-At runtime, the core boundaries are: stateless API, Workers consuming Redis Streams, Postgres persistence, and sandbox-isolated execution. The API handles ingress and projection; Workers handle execution and resource governance; Migrate handles schema and configuration seed migrations. Ops Patrol and Ops Patrol Remediation add an optional, feature-flagged MCP plane reached only from Worker: the Ops Collector (8090) exposes fixed read-only Kubernetes/Prometheus probes; the Ops Actuator (8091) exposes a narrow, patch-only write surface that only executes after a persisted `ToolApprovalBatch` is approved. See [Ops Patrol architecture](ops-patrol.md) and [Security model](security-model.md#trust-boundaries).
-
-### Code layering
-
-| Layer | Path | Responsibility |
-|-------|------|----------------|
-| **interfaces** | `app/interfaces/` | FastAPI routes, schemas, middleware, auth DI |
-| **application** | `app/application/` | Use-case services (sessions, LLM, tasks, artifacts) |
-| **domain** | `app/domain/` | Models, repository ports, agents, flows, tools |
-| **infrastructure** | `app/infrastructure/` | ORM, DB repos, Redis, LLM, sandbox, security adapters |
-
-Ports live in `domain/external/`; adapters in `infrastructure/adapters/`. Shared wiring: `dependency-injector` containers in `app/container.py`.
-
-See [Technical decisions](technical-decisions.md).
-
-## Process Roles
-
-| Role | Entry | Image target | Responsibilities |
-|------|-------|--------------|------------------|
-| API | `app.main` -> `uvicorn` | `api` | HTTP/SSE, task dispatch, event stream reads, configuration management |
-| Worker | `app.worker.main` | `worker` | Consume `task:dispatch`, run Agent / codebase ingestion |
-| Migrate | `app.migrate` | `api`, one-shot job | `alembic upgrade head` and configuration seed migration |
-
-Process roles are set explicitly via the `ProcessRole` enum in `app/runtime_role.py` and written to the `OPENCITADEL_PROCESS_ROLE` environment variable.
-
-## Runtime Data Flow
-
-```mermaid
-flowchart TD
-  Client["Client"] -->|"POST chat or SSE"| Api["FastAPI API"]
-  Api -->|"write task:input"| TaskInput["Redis task:input"]
-  Api -->|"dispatch task"| TaskDispatch["Redis task:dispatch"]
-  TaskDispatch -->|"consumer group claim"| Worker["Agent Worker"]
-  Worker -->|"Planner and ReAct loop"| Runner["Task Runner"]
-  Runner -->|"stream events"| TaskOutput["Redis task:output"]
-  Runner -->|"persistable events"| SessionEvents["session_events append table"]
-  TaskOutput -->|"XREAD live events"| Api
-  SessionEvents -->|"replay pages"| Api
-  Api -->|"SSE projection"| Client
-```
-
-### API Responsibilities
-
-- Accept HTTP / WebSocket requests and return SSE event streams.
-- Create tasks and write user messages to Redis `task:input`.
-- Dispatch via `task.invoke()` to the `task:dispatch` consumer group.
-- Read events from the `task:output` stream and push them to clients.
-- Notify Workers of `stop` via the Redis cancel channel.
-- Validate DB schema version and refuse startup when migrations are pending.
-- Maintain MCP / A2A connection pool idle reclamation via `_connection_pool_cleanup_loop`.
-
-### Worker Responsibilities
-
-- Claim tasks from the Redis `task:dispatch` consumer group.
-- Admission gate: when `can_admit()` is false, do not claim; tasks remain in the Stream and do not enter the PEL.
-- Task idempotency lock: after claim, use `try_acquire_task_lease()` and related functions in `task_lease.py` to prevent duplicate execution from XAUTOCLAIM.
-- Run `AgentTaskRunner`, `CodebaseIngestionTaskRunner`, or `KBIngestionTaskRunner` by `task_type`.
-- Write events to the `task:output` stream.
-- Append persistable events to the `session_events` table.
-- Run sandbox reconcile, idle reclamation, and low-memory reclamation, coordinated by a single active leader via `try_become_reclaim_leader()`.
-- Reconcile orphaned agent tasks and stuck KB ingests via `_task_reconcile_loop()` (see [Knowledge base ingestion](knowledge-base-ingestion.md)).
-- Release stale MCP / A2A connections after task completion.
-
-## Ingestion Task Types
-
-Worker routes by `task_type` in task metadata (`worker/main.py`):
-
-| `task_type` | Session id pattern | Runner | Description |
-|-------------|-------------------|--------|-------------|
-| `agent` (default) | user session id | `AgentTaskRunner` | Chat, HITL, tools |
-| `codebase_ingest` | `codebase-ingest:{id}` | `CodebaseIngestionTaskRunner` | ZIP/Git import, static analysis, artifacts |
-| `kb_ingest` | `kb-ingest:{id}` | `KBIngestionTaskRunner` | Document parse, OCR, chunk, embed, GraphRAG |
-
-Ingestion tasks emit SSE `step` events on synthetic session ids; they do not use Agent flow routing. See [Codebase reindex](codebase-reindex.md) and [Knowledge base ingestion](knowledge-base-ingestion.md).
-
-## Agent Flow Routing (SessionMode)
-
-`AgentTaskRunner` selects the execution flow based on session-bound resources and `SessionMode` (`api/app/domain/services/agent_task_runner.py`):
-
-```mermaid
-flowchart TD
-  Start["AgentTaskRunner init"] --> Hybrid{"codebase_id + knowledge_base_id + ASK?"}
-  Hybrid -->|"yes"| HybridAsk["HybridAskFlow"]
-  Hybrid -->|"no"| CheckCode{"codebase_id set?"}
-  CheckCode -->|"yes + mode ASK"| CodeAsk["CodeAskFlow"]
-  CheckCode -->|"no"| CheckKB{"knowledge_base_id set?"}
-  CheckKB -->|"yes + mode ASK"| DocQA["DocQAFlow"]
-  CheckKB -->|"no or mode AGENT"| Planner["PlannerReActFlow"]
-```
-
-| Condition | Flow | Description |
-|-----------|------|-------------|
-| `codebase_id` + `knowledge_base_id` + `SessionMode.ASK` | `HybridAskFlow` | Combined codebase + KB Q&A |
-| `codebase_id` + `SessionMode.ASK` | `CodeAskFlow` | Codebase Q&A; takes priority over KB-only |
-| `knowledge_base_id` + `SessionMode.ASK` | `DocQAFlow` | Knowledge base Doc QA |
-| Other (including `SessionMode.AGENT`) | `PlannerReActFlow` | Planner → Clarify → ReAct general Agent |
-
-### Ask mode codebase access
-
-Ask flows (`CodeAskFlow` / `HybridAskFlow` / `DocQAFlow`) are read-only RAG Q&A and differ from Agent mode in how codebases are accessed:
-
-| Dimension | Ask mode | Agent mode |
-|-----------|----------|------------|
-| Codebase materialization | Does not restore tarball into session sandbox | `attach_to_session_sandbox` restores snapshot under `/home/ubuntu` |
-| `read_code` sandbox | Ingestion sandbox `codebase.sandbox_id` (same as UI `readSource`) | Session sandbox `session.sandbox_id` (reads post-edit state) |
-| Tool allowlist | `build_ask_tools`: codebase / knowledge_base / memory / MCP / A2A / Message | `build_default_tools`: includes shell / file / browser, etc. |
-| Workspace path | Default `/home/ubuntu/codebase` (`codebase.workspace_path`) | Same, present in session sandbox after attach |
-
-Container path semantics:
-
-- `/home/ubuntu/codebase` — user-imported, indexed codebase workspace
-- `/home/ubuntu` — agent home; shell default cwd when `exec_dir` is empty
-- `/sandbox` — sandbox microservice code (FastAPI / supervisord), **not** the user codebase; Ask mode disables shell/file tools to prevent accidental reads
-
-Implementation: `api/app/application/services/task_runner_factory.py` (ingestion sandbox injection), `api/app/domain/services/tools/tool_registry.py` (`build_ask_tools`).
-
-## Task Execution Status
-
-Task status persisted in Redis is defined by the `TaskStatus` enum (`api/app/infrastructure/external/task/task_state.py`), with 5 values:
-
-| `TaskStatus` | Value | Description |
-|--------------|-------|-------------|
-| `PENDING` | `pending` | Task registered and dispatched to `task:dispatch`, waiting for Worker execution |
-| `RUNNING` | `running` | `RedisStreamTask.execute_locally()` has started |
-| `DONE` | `done` | Completed normally (corresponds to SSE `done` event; session layer projects as `completed`) |
-| `FAILED` | `failed` | Execution failed |
-| `CANCELLED` | `cancelled` | Cancelled by user or system |
-
-The following behavioral phases are **not written** to `TaskStatus` but affect task flow:
-
-| Behavioral phase | Implementation | Description |
-|------------------|----------------|-------------|
-| WaitingAdmission | `worker/main.py` | Worker sleeps when `can_admit()` is false; does not claim; task stays in Stream |
-| Claimed | `claim_dispatch()` | XREADGROUP claim succeeds; no independent status field |
-| LeaseAcquired | `try_acquire_task_lease()` | Redis idempotency lock; on conflict, ack and skip; status unchanged |
-
-```mermaid
-stateDiagram-v2
-  [*] --> pending: register_task_and_dispatch
-  pending --> pending: admission_denied_or_dispatch_retry
-  pending --> pending: recoverable_input_unavailable
-  pending --> running: execute_locally_started
-  running --> done: success
-  running --> failed: error
-  running --> cancelled: cancel_signal
-  done --> [*]
-  failed --> [*]
-  cancelled --> [*]
-```
-
-Recovery and retry paths (not shown as separate states above):
-
-- `RecoverableTaskInputUnavailable`: input unavailable before execution → revert to `pending` and re-dispatch.
-- `TASK_INFRA_FAILED`: transient infra failure → checkpoint restore + requeue user message + re-dispatch (see [Task recovery](task-recovery.md)).
-- `mark_dispatch_failure()`: non-fatal dispatch failure → revert to `pending` and retry dispatch.
-- Task lease conflict: ack dispatch message; do not update `TaskStatus`.
-
-`task:dispatch` is the authoritative task dispatch queue. On admission failure, Workers do not claim, avoiding tasks stuck in the PEL; after a successful claim, module functions in `task_lease.py` serve as the execution idempotency lock.
-
-## Sandbox Admission and Lifecycle
-
-```mermaid
-flowchart TD
-  Worker["Worker before claim"] --> CanAdmit["SandboxQuota can_admit"]
-  CanAdmit -->|"false"| StayQueued["leave task in stream"]
-  CanAdmit -->|"true"| ClaimTask["claim task"]
-  ClaimTask --> Acquire["SandboxQuota acquire"]
-  Acquire --> Sandbox["create or reuse sandbox"]
-  Sandbox --> Release["release on destroy or reclaim"]
-```
-
-```mermaid
-stateDiagram-v2
-  [*] --> Requested
-  Requested --> Admitted: quota_available
-  Requested --> Rejected: quota_unavailable
-  Admitted --> Creating: acquire_holder
-  Creating --> Running: sandbox_ready
-  Running --> Idle: task_finished
-  Running --> Reclaiming: low_memory_or_shutdown
-  Idle --> Reused: next_task
-  Idle --> Reclaiming: idle_timeout
-  Reused --> Running
-  Reclaiming --> Released: destroy_and_release
-  Released --> [*]
-  Rejected --> [*]
-```
-
-| Component | File | Description |
-|-----------|------|-------------|
-| `SandboxQuota` | `api/app/infrastructure/external/sandbox/admission.py` | Per-node bucket quota; fail-closed when Redis is unavailable |
-| `try_acquire_task_lease()` etc. | `api/app/infrastructure/external/task/task_lease.py` | Long-running task deduplication |
-| `MemoryProbe` | `api/app/infrastructure/external/sandbox/memory_probe.py` | Docker mode reads host `/proc/meminfo`; K8s bypass |
-| `try_become_reclaim_leader()` | `api/app/infrastructure/external/sandbox/reclaim_coordinator.py` | Redis leader lease; single active reclamation |
-| `resolve_sandbox_driver()` / `get_sandbox_class()` | `api/app/infrastructure/external/sandbox/sandbox_driver.py` | `auto` detects docker / kubernetes |
-
-### Sandbox Runtime Modes
-
-| Mode | Typical scenario | Configuration | Description |
-|------|------------------|---------------|-------------|
-| Docker local dynamic sandbox | Single-node Docker Compose | `sandbox.driver=auto` or `docker`, `sandbox.address` empty | API/Worker use the authenticated lifecycle broker; only the broker has `docker.sock` |
-| Kubernetes Pod sandbox | Helm cluster deployment | `sandbox.driver=kubernetes`, `sandbox.address` empty | Worker uses ServiceAccount + RBAC to create Pods; ResourceQuota limits total |
-| Remote sandbox gateway | External sandbox execution plane | `sandbox.address=http://sandbox-gateway.internal:8080` | Worker connects directly to remote service; no local Docker or K8s API calls |
-
-`pool_enabled=false` is the current deployment default in `api/config.yaml` and Helm seed config; the `AppConfig` schema itself retains `true` as a fallback when no seed is present. The warm pool is an optional optimization and should only be enabled when memory budget is clear and first tool-call latency needs to be reduced.
-
-## Dependency Injection Container
-
-```mermaid
-flowchart TB
-  subgraph baseContainer ["BaseContainer shared providers"]
-    Infra["postgres redis cos config_provider"]
-    Services["application services task_runner_factory agent_service"]
-  end
-  ApiEntry["app.main role api"] --> ApiContainer["ApiContainer"]
-  WorkerEntry["app.worker.main role worker"] --> WorkerContainer["WorkerContainer"]
-  ApiContainer --> baseContainer
-  WorkerContainer --> baseContainer
-  ApiContainer --> InterfaceWiring["wires app.interfaces"]
-  ApiContainer --> ApiConfigListener["config hot reload listener"]
-  WorkerContainer --> WorkerConfigListener["config hot reload listener"]
-  WorkerContainer --> SandboxPool["optional SandboxPool"]
-```
-
-| Container | File | HTTP wiring | Sandbox warm pool | Config hot reload listener |
-|-----------|------|-------------|-------------------|------------------------------|
-| `BaseContainer` | `app/container.py` | No | No | No |
-| `ApiContainer` | Extends Base | Yes | No | Yes |
-| `WorkerContainer` | Extends Base | No | Yes | Yes |
-
-Initialization entry points:
-
-- API: `init_api_container()` / `shutdown_api_container()`.
-- Worker: `init_worker_container()` / `shutdown_worker_container()`.
-
-FastAPI dependency injection resolves via `ApiContainer`; the Worker entry initializes runtime dependencies via `WorkerContainer`.
-
-## Configuration Authority
-
-| Type | Authoritative source | Description |
-|------|---------------------|-------------|
-| Behavioral config | `AppConfig`, backed by DB | Runtime behavior such as `model_resilience`, `feature_flags`, `worker`, `sandbox` |
-| Initial defaults | `api/config.yaml` / Helm `appConfig` | Migrate job writes seed when `AppConfig` is empty |
-| Secrets and connections | `Settings` environment variables | Deployment secrets: DB, Redis, COS/MinIO, JWT, etc. |
-| LLM credentials | `llm_endpoints` table (encrypted) | Per-endpoint API keys; models reference `endpoint_id` |
-
-Production must use `USE_DB_APP_CONFIG=true`; Docker Compose does not enforce this by default—set it explicitly in `.env`; Helm `env` is already configured. When modifying `AppConfig` fields, sync the schema, `config.yaml`, Helm `appConfig`, and related documentation.
-
-## Background Loop Ownership
-
-| Loop | Owner | Description |
-|------|-------|-------------|
-| MCP / A2A connection pool reclamation | API | Release stale connections every 5 minutes |
-| Sandbox maintenance | Worker | `run_sandbox_maintenance()` + leader lease |
-| Sandbox warm pool | Worker | `SandboxPool`, default `pool_enabled=false` |
-| Automation scheduler | Worker | `run_scheduler_loop()` — cron/webhook leader election |
-| Task reconcile | Worker | `_task_reconcile_loop()` — stale agent task recovery + stuck KB ingest cleanup |
-| DLQ replay | Worker | `_dlq_replay_loop()` when enabled |
-
-## Memory Auto-Extraction
-
-After an Agent task completes normally, if `memory.auto_extract_enabled=true`, `TaskRunnerFactory` triggers `MemoryExtractorService.extract_from_session()` via an `on_complete` callback — **except for governed single-tool sessions** (`ops-patrol` / `ops-patrol-remediation`). `TaskRunnerFactory` passes `on_complete_callback=None` whenever `is_governed_single_tool_session` is true (`task_runner_factory.py:707-711`), regardless of `auto_extract_enabled`, because those sessions carry no general-purpose conversational content to extract memory from:
-
-```mermaid
-flowchart TD
-  Done["Agent task completed"] --> Governed{"governed single-tool session?"}
-  Governed -->|"yes: patrol / remediation"| Skip["skip, on_complete_callback=None"]
-  Governed -->|"no"| Enabled{"auto_extract enabled?"}
-  Enabled -->|"no"| Skip
-  Enabled -->|"yes"| Load["Load last 30 session events"]
-  Load --> LLM["LLM extract 3-10 facts JSON"]
-  LLM --> Retry{"parse ok?"}
-  Retry -->|"no, retries left"| LLM
-  Retry -->|"no, exhausted"| Warn["log warning, skip"]
-  Retry -->|"yes"| Store["Create MemoryEntry SESSION scope"]
-  Store --> Vector["VectorMemoryService.store_embedding"]
-  Vector --> VectorFail{"embedding ok?"}
-  VectorFail -->|"no"| PersistText["persist text only"]
-  VectorFail -->|"yes"| DoneMem["memory ready for recall"]
-```
-
-- Extraction results are written to `MemoryEntry`, source marked as `AUTO_EXTRACTED`, scope `SESSION`.
-- JSON parsing retries up to 2 times (`RepairJSONParser`); text memory is retained even when vector embedding fails.
-- Catches `IntegrityError` on concurrent session deletion and exits safely.
-
-## Dependency Management
-
-| Module | Tool | Lock file | Install command |
-|--------|------|-----------|-----------------|
-| `api/` | uv | `uv.lock` | `uv sync --frozen` |
-| `sandbox/` | uv | `uv.lock` | `uv sync --frozen` |
-| `ops-collector/` | uv | `uv.lock` | `uv sync --frozen` |
-| `ops-actuator/` | uv | `uv.lock` | `uv sync --frozen` |
-| `ui/` | npm | `package-lock.json` | `npm ci` |
-
-Python projects uniformly use `pyproject.toml` + `uv.lock`; `requirements.txt` is no longer maintained.
-
-## Packaging and Deployment
-
-### Docker Images
-
-`api/Dockerfile` is a multi-stage build:
-
-| target | Image name | CMD | `OPENCITADEL_PROCESS_ROLE` |
-|--------|------------|-----|----------------------------|
-| `api` | `opencitadel-api` | `./run.sh` | `api` |
-| `worker` | `opencitadel-worker` | `./worker.sh` | `worker` |
-
-`opencitadel-migrate` uses the `api` target with image name `opencitadel-migrate`, command overridden to `python -m app.migrate`. The `opencitadel-ui` image name is `opencitadel-ui`.
-
-### Docker Compose Startup Order
-
-```text
-postgres/redis -> opencitadel-migrate -> opencitadel-api + opencitadel-worker -> ui -> nginx
-```
-
-### Build-Time Mirror Sources
-
-`docker-compose.yml` passes unified build args to API / Worker / Sandbox / UI: `PIP_INDEX_URL`, `UV_INDEX_URL`, `UV_VERSION`, `UV_HTTP_TIMEOUT`, `NPM_CONFIG_REGISTRY`, etc. After Compose build, application images are uniformly named `opencitadel-api`, `opencitadel-worker`, `opencitadel-migrate`, `opencitadel-ui`, `opencitadel-sandbox`. Pre-built GHCR images (see `docker-compose.yml` comments) or CI pipelines in `.github/workflows/` can also be used.
-
-> **Dynamic sandbox image**: The `opencitadel-sandbox` compose service is under the `fixed-sandbox` profile and is **not started by default**, but Worker-created sandboxes require the image. `make quickstart` and [deployment](../operations/deployment.md) run `docker compose build opencitadel-sandbox` explicitly before starting the stack.
-
-> **Ops Collector / Actuator images**: `ops-collector/Dockerfile` and `ops-actuator/Dockerfile` build the `opencitadel-ops-collector` and `opencitadel-ops-actuator` images independently of `api/Dockerfile`. Both are opt-in via Compose profiles (`patrol` / `actuator`) and disabled by default; see [Ops Patrol operations](../operations/ops-patrol.md).
-
-### Kubernetes / Helm
-
-The Chart is located at `deploy/helm/opencitadel/` and provides full-stack one-click deployment:
-
-- In-cluster PostgreSQL pgvector / Redis StatefulSets.
-- API / Worker / UI Deployments + Ingress.
-- Worker ServiceAccount + RBAC for Pod sandbox create / delete.
-- Namespace ResourceQuota limiting total sandbox Pods.
-- Migrate initContainer using the API image.
-- Default K8s sandbox mode is `sandbox.driver=kubernetes` with `sandbox.address` empty; use `sandbox.address` when connecting to a remote sandbox gateway.
-- Optional Ops Collector / Actuator Deployments (`opsCollector.enabled` / `opsActuator.enabled`, both `false` by default), each with its own ServiceAccount, patch/read-scoped RBAC ClusterRole, and NetworkPolicy restricting ingress to API/Worker only.
-
-## Code anchors
-
-Quick links to authoritative implementation files:
-
-| Topic | Primary files |
-|-------|---------------|
-| DI / process roles | `api/app/container.py`, `api/app/runtime_role.py` |
-| Worker dispatch | `api/app/worker/main.py`, `api/app/infrastructure/external/task/redis_stream_task.py` |
-| Agent flow routing | `api/app/domain/services/agent_task_runner.py`, `api/app/domain/services/flows/` |
-| Task assembly | `api/app/application/services/task_runner_factory.py`, `api/app/application/services/runner_bindings/` |
-| Tool registry | `api/app/domain/services/tools/tool_registry.py` |
-| Tool governance gate | `api/app/domain/services/agents/tool_gate_policy.py` |
-| UI shell | `ui/src/components/app-shell.tsx`, `ui/src/lib/api/fetch.ts` |
-| Workspace scope | `ui/src/components/workspace-switcher.tsx`, `api/app/interfaces/auth_dependencies.py` |
-
-## Related Documentation
-
-- [LLM endpoints and models](llm-endpoints-and-models.md)
-- [Frontend UI](frontend-ui.md)
-- [Task recovery](task-recovery.md)
-- [Event System](events.md)
-- [Configuration Source Governance](config-source-governance.md)
-- [Model Resilience Design](model-resilience.md)
-- [Knowledge base ingestion](knowledge-base-ingestion.md)
-- [Codebase reindex](codebase-reindex.md)
-- [Architecture Evolution Guide](architecture-evolution.md)
-- [Security Model](security-model.md)
-- [Production Deployment](../operations/deployment.md)
+PostgreSQL is the lifecycle authority. Redis may reduce wake-up and notification
+latency, but a lost notification cannot lose accepted work: the kernel polls
+pending database rows and resumes from verified events.
+
+## Processes and trust boundaries
+
+| Process | Responsibility | Database role |
+| --- | --- | --- |
+| API | Authenticate, authorize, submit idempotent commands, read projections, serve SSE | API role |
+| Execution kernel | Decide Runs, append events, claim Activities and timers, project formal views | Execution role |
+| Migrate | Apply Alembic schema and seed configuration | Migration role |
+| UI | Render API projections and public events; never infer authoritative state | None |
+| Sandbox broker | Create isolated execution sandboxes without exposing the container socket to API/kernel | None |
+| Ops collector / actuator | Fixed read probes and approval-gated narrow mutations | Service-specific |
+
+Schema ownership is separated from runtime DML. Owner-scoped execution tables
+use forced row-level security, and the event store checks that every append
+matches the stream's original owner scope.
+
+## Composition, transactions, and lifecycle
+
+Each executable loads `DeploymentSettings` exactly once and builds its own
+manual typed object graph. `app.composition.api` owns one immutable
+`ApiRuntime`; `app.composition.kernel` owns a separate `KernelRuntime`. HTTP
+dependencies resolve services from `app.state` and never construct
+infrastructure. There is no service locator, global resource getter, or shared
+role container.
+
+Every background coroutine belongs to the runtime's `TaskSupervisor`. A
+critical failure initiates process shutdown; auxiliary listeners restart under
+a bounded policy. Shutdown revokes readiness before the supervisor drains and
+closes the process-owned PostgreSQL, Redis, storage, provider, and connection
+pool resources.
+
+Application writes use an explicit unit of work: a successful mutation calls
+`uow.commit()`. Leaving the context without that call rolls back, including
+normal returns. PostgreSQL is authoritative; Redis messages and caches are
+post-commit hints only and cannot make an uncommitted write visible.
+
+The browser follows the same ownership rule. Authenticated resource caches are
+owned by `ClientDataProvider` and keyed by exactly `userId + workspaceId`.
+Identity/workspace changes invalidate the old generation, so a late response
+cannot populate the new scope; anonymous state cannot read authenticated data.
+
+## One execution model
+
+Every behavior starts as a `Run` in one family:
+
+- `agent` and `ask` for conversational execution;
+- `kb_ingest` and `codebase_ingest` for immutable candidate publication;
+- `automation`, `patrol`, and `remediation` for scheduled or governed work.
+
+A pure family decision handler consumes the current aggregate and one typed
+command, then emits typed events and deterministic effects. Nondeterministic
+work is an Activity. Before an external call begins, its input reference,
+digest, invocation identity, timeout, and claim generation are durable.
+Heartbeats, retries, cancellation, approvals, timeouts, and unknown outcomes
+are explicit protocol states.
+
+The durable records are:
+
+- `execution_command_inbox` for idempotent ingress;
+- `execution_events` for append-only, hash-chained facts;
+- `execution_activity_tasks` for external work and fencing;
+- `execution_scheduled_commands` for timers and cancellation;
+- `execution_outbox` for post-commit wake-ups;
+- integrity-checked snapshots for replay acceleration.
+
+Run, activity, approval, resource-build, and public-event tables are rebuildable
+projections. They can answer queries but cannot decide workflow state.
+
+## Product data and resource bindings
+
+Product repositories store content, configuration, files, immutable resource
+versions, and evidence. A knowledge or codebase rebuild creates one candidate
+version carrying `build_id` and `request_key`; the source Run owns lifecycle and
+progress. Publication validates the complete closure and compare-and-swaps the
+resource's `active_version_id`.
+
+Sessions bind concrete published resource versions through
+`session_resource_bindings`. Later publication never changes an existing
+session's evidence boundary. Missing, foreign, unpublished, or ambiguous
+bindings fail closed.
+
+## API and streaming contract
+
+Mutation endpoints submit typed commands. Approval decisions use dedicated
+endpoints and cannot be synthesized from chat text. Read endpoints return
+formal projections. SSE live delivery and replay read the same sanitized
+`execution_public_events` projection and use the formal event position as the
+cursor; private Activity inputs and provider payloads are never exposed.
+
+## Failure and recovery rules
+
+- Process death does not imply success or failure; expired claims are fenced
+  and reclaimed from PostgreSQL.
+- A duplicate command returns its persisted result and cannot repeat effects.
+- A repeated Activity delivery reuses the same invocation result; an explicit
+  new invocation may execute again.
+- Invalid snapshots fall back to verified event replay.
+- Hash-chain, owner-scope, or projection-integrity failure stops closed and
+  produces operational evidence.
+- Candidate build failure never mutates the active published version.
+
+## Code map
+
+| Boundary | Location |
+| --- | --- |
+| Commands, events, aggregates, decisions | `api/app/domain/execution/` |
+| Orchestration and Activities | `api/app/application/execution/` |
+| PostgreSQL stores and formal projectors | `api/app/infrastructure/execution/` |
+| API/kernel typed composition | `api/app/composition/api.py`, `api/app/composition/kernel.py` |
+| Task ownership and bounded drain | `api/app/composition/tasks.py` |
+| Kernel process | `api/app/execution_kernel_main.py` |
+| Resource binding model | `api/app/domain/models/resource_bindings.py` |
+| HTTP ingress and projection routes | `api/app/interfaces/endpoints/` |
+| Scoped browser resources | `ui/src/providers/client-data-provider.tsx` |
+
+## Related documentation
+
+- [Execution kernel](execution-kernel.md)
+- [Security model](security-model.md)
+- [Knowledge-base ingestion](knowledge-base-ingestion.md)
+- [Codebase analysis](codebase-reindex.md)
+- [Automation and scheduler](automation-scheduler.md)

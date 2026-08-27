@@ -1,4 +1,5 @@
 """Deterministic schema manifest for the fixed MCP surface."""
+
 from __future__ import annotations
 
 import hashlib
@@ -17,7 +18,6 @@ from .contracts import (
     WorkloadSummaryRequest,
 )
 
-
 TOOL_INPUT_MODELS = {
     "get_capabilities": None,
     "k8s_workload_summary": WorkloadSummaryRequest,
@@ -32,7 +32,9 @@ TOOL_INPUT_MODELS = {
 
 
 def canonical_hash(value: Any) -> str:
-    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    payload = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 

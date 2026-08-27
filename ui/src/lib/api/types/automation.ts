@@ -1,4 +1,4 @@
-import type { SessionCheckpoint, SSEEventData } from "./session";
+import type { SSEEventData } from "./session";
 
 // ==================== 自动化任务 ====================
 
@@ -6,7 +6,7 @@ type ScheduledJobTriggerType = "cron" | "interval" | "webhook";
 
 type NotifyChannel = {
   type: string;
-  server_name: string;
+  server_id: string;
   channel_arg: string;
 };
 
@@ -23,7 +23,6 @@ export type ScheduledJob = {
   knowledge_base_id?: string | null;
   operator_scope?: "owned" | "third_party_saas" | null;
   operator_domains?: string[];
-  gate_profile?: "loose" | "standard" | "strict" | null;
   notify_channels: NotifyChannel[];
   enabled: boolean;
   timezone: string;
@@ -53,7 +52,6 @@ export type CreateScheduledJobParams = {
   notify_channels?: NotifyChannel[];
   operator_scope?: "owned" | "third_party_saas" | null;
   operator_domains?: string[];
-  gate_profile?: "loose" | "standard" | "strict" | null;
   enabled?: boolean;
   timezone?: string;
 };
@@ -66,10 +64,6 @@ export type CreateScheduledJobResult = {
 };
 
 export type ApprovalEventData = Extract<SSEEventData, { type: "approval" }>["data"];
-
-export type SessionCheckpointsData = {
-  checkpoints: SessionCheckpoint[];
-};
 
 /**
  * 会话文件信息

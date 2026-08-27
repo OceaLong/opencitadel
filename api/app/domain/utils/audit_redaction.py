@@ -1,16 +1,25 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Redact sensitive values from audit payloads."""
+
 from __future__ import annotations
 
 import re
 from copy import deepcopy
-from typing import Any, Dict, List
+from typing import Any
 
-_SENSITIVE_KEYS = frozenset({
-    "password", "passwd", "secret", "token", "api_key", "apikey",
-    "authorization", "credential", "access_token", "refresh_token",
-})
+_SENSITIVE_KEYS = frozenset(
+    {
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "api_key",
+        "apikey",
+        "authorization",
+        "credential",
+        "access_token",
+        "refresh_token",
+    }
+)
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _PHONE_RE = re.compile(r"\b1[3-9]\d{9}\b|\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b")
 _REDACTED = "***REDACTED***"
@@ -37,14 +46,12 @@ def scrub_secret_patterns(value: Any) -> str:
     rendered = _SECRET_PATTERNS[0].sub(r"\1***REDACTED***", rendered)
     rendered = _SECRET_PATTERNS[1].sub(r"\1=***REDACTED***", rendered)
     rendered = _SECRET_PATTERNS[2].sub(r"\1***REDACTED***\2", rendered)
-    rendered = _SECRET_PATTERNS[3].sub("***REDACTED***", rendered)
-    return rendered
+    return _SECRET_PATTERNS[3].sub("***REDACTED***", rendered)
 
 
 def _mask_string(value: str) -> str:
     masked = _EMAIL_RE.sub("[email]", value)
-    masked = _PHONE_RE.sub("[phone]", masked)
-    return masked
+    return _PHONE_RE.sub("[phone]", masked)
 
 
 def redact_value(key: str, value: Any) -> Any:
@@ -60,8 +67,8 @@ def redact_value(key: str, value: Any) -> Any:
     return value
 
 
-def redact_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    out: Dict[str, Any] = {}
+def redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
     for key, value in (payload or {}).items():
         out[key] = redact_value(key, value)
     return out
@@ -71,13 +78,13 @@ def summarize_tool_result(result: Any, max_chars: int = 500) -> str:
     if result is None:
         return ""
     if hasattr(result, "success"):
-        if bool(getattr(result, "success")):
+        if bool(result.success):
             return "success"
         failure_kind = str(getattr(result, "failure_kind", "") or "failed")
         return f"failure:{failure_kind}"[:max_chars]
     text = ""
     if hasattr(result, "message"):
-        text = str(getattr(result, "message") or "")
+        text = str(result.message or "")
     elif hasattr(result, "model_dump"):
         text = str(result.model_dump())
     else:
@@ -88,5 +95,5 @@ def summarize_tool_result(result: Any, max_chars: int = 500) -> str:
     return text
 
 
-def redact_tool_args(args: Dict[str, Any]) -> Dict[str, Any]:
+def redact_tool_args(args: dict[str, Any]) -> dict[str, Any]:
     return redact_payload(deepcopy(args or {}))

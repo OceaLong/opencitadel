@@ -1,15 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Version-closed hybrid retrieval with truthful runtime degradation."""
+
 import logging
 import math
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, List, Optional
 
 from app.domain.external.llm import LLM
-from app.domain.models.knowledge_citation import KnowledgeCitation
 from app.domain.models.knowledge_base import KnowledgeChunk, KnowledgeDocument
+from app.domain.models.knowledge_citation import KnowledgeCitation
 from app.domain.models.knowledge_version import (
     FrozenMapping,
     KnowledgeVersionState,
@@ -19,27 +18,19 @@ from app.domain.repositories.knowledge_base_repository import (
     VersionedKnowledgeChunk,
 )
 from app.domain.repositories.uow import IUnitOfWork
-from app.domain.services.knowledge_base.rerank_service import RerankService, RerankSettings
+from app.domain.runtime_policy import KnowledgeRetrievalRunPolicy
+from app.domain.services.knowledge_base.rerank_service import RerankService
 from app.domain.services.knowledge_base.vector_service import KBVectorService
 from app.domain.services.knowledge_base.zh_tokenizer import segment_for_bm25
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class RetrievalSettings:
-    vector_top_k: int = 20
-    bm25_top_k: int = 20
-    rrf_k: int = 60
-    final_top_k: int = 8
-    graph_enabled: bool = True
-
-
 @dataclass(frozen=True)
 class RetrievedChunk:
     chunk: KnowledgeChunk
     document: KnowledgeDocument
-    parent: Optional[KnowledgeChunk]
+    parent: KnowledgeChunk | None
     score: float
     citation: KnowledgeCitation
 
@@ -70,25 +61,25 @@ class RetrievalResponse:
 
 class HybridRetriever:
     def __init__(
-            self,
-            uow_factory: Callable[[], IUnitOfWork],
-            llm: Optional[LLM] = None,
-            vector_service: Optional[KBVectorService] = None,
-            settings: Optional[RetrievalSettings] = None,
-            rerank_settings: Optional[RerankSettings] = None,
+        self,
+        uow_factory: Callable[[], IUnitOfWork],
+        *,
+        policy: KnowledgeRetrievalRunPolicy,
+        llm: LLM | None = None,
+        vector_service: KBVectorService | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm = llm
-        self._vector = vector_service or KBVectorService()
-        self._settings = settings or RetrievalSettings()
-        self._rerank = RerankService(llm=llm, settings=rerank_settings)
+        self._vector = vector_service
+        self._policy = policy
+        self._rerank = RerankService(llm=llm, policy=policy.rerank)
 
     async def retrieve(
-            self,
-            kb_id: str,
-            version_id: str,
-            query: str,
-            limit: int,
+        self,
+        kb_id: str,
+        version_id: str,
+        query: str,
+        limit: int,
     ) -> RetrievalResponse:
         if not str(kb_id or "").strip():
             raise ValueError("knowledge base id is required")
@@ -97,7 +88,7 @@ class HybridRetriever:
         if limit < 1:
             raise ValueError("retrieval limit must be positive")
         started = time.perf_counter()
-        final_top_k = min(limit, self._settings.final_top_k, 100)
+        final_top_k = min(limit, self._policy.retrieval.final_top_k)
         async with self._uow_factory() as uow:
             version = await uow.knowledge_version.get_version(
                 version_id,
@@ -108,7 +99,8 @@ class HybridRetriever:
             or version.id != version_id
             or version.knowledge_base_id != kb_id
             or version.published_at is None
-            or version.state not in {
+            or version.state
+            not in {
                 KnowledgeVersionState.READY,
                 KnowledgeVersionState.DEGRADED,
             }
@@ -121,14 +113,21 @@ class HybridRetriever:
         capabilities.setdefault("graph_search", False)
         reasons = list(version.degraded_reasons)
         embedding: list[float] = []
-        vector_enabled = bool(capabilities["vector_search"])
+        vector_enabled = bool(
+            self._policy.vector_enabled
+            and capabilities["vector_search"]
+            and self._vector is not None
+        )
+        if not self._policy.vector_enabled:
+            capabilities["vector_search"] = False
         if vector_enabled:
             try:
+                assert self._vector is not None
                 raw_embedding = await self._vector.embed(query)
                 if not self._valid_embedding(raw_embedding):
                     raise ValueError("embedding is empty or malformed")
                 embedding = [float(item) for item in raw_embedding]
-            except Exception:
+            except (OSError, RuntimeError, ValueError):
                 logger.warning(
                     "KB embedding 失败，降级为 BM25-only kb=%s version=%s",
                     kb_id,
@@ -140,13 +139,11 @@ class HybridRetriever:
 
         segmented_query = segment_for_bm25(query)
         async with self._uow_factory() as uow:
-            bm25_hits = (
-                await uow.knowledge_base.bm25_search_chunks_for_version(
-                    kb_id,
-                    version_id,
-                    segmented_query,
-                    limit=self._settings.bm25_top_k,
-                )
+            bm25_hits = await uow.knowledge_base.bm25_search_chunks_for_version(
+                kb_id,
+                version_id,
+                segmented_query,
+                limit=self._policy.retrieval.bm25_top_k,
             )
         vector_hits: list[VersionedKnowledgeChunk] = []
         if capabilities["vector_search"]:
@@ -155,19 +152,15 @@ class HybridRetriever:
                 # unsupported iterative-scan setting or SQL error cannot
                 # poison the already-successful mandatory BM25 read.
                 async with self._uow_factory() as uow:
-                    vector_hits = (
-                        await uow.knowledge_base
-                        .vector_search_chunks_for_version(
-                            kb_id,
-                            version_id,
-                            embedding,
-                            limit=self._settings.vector_top_k,
-                        )
+                    vector_hits = await uow.knowledge_base.vector_search_chunks_for_version(
+                        kb_id,
+                        version_id,
+                        embedding,
+                        limit=self._policy.retrieval.vector_top_k,
                     )
-            except Exception:
+            except (OSError, RuntimeError, ValueError):
                 logger.warning(
-                    "KB vector SQL 失败，降级为 BM25-only kb=%s "
-                    "version=%s",
+                    "KB vector SQL 失败，降级为 BM25-only kb=%s version=%s",
                     kb_id,
                     version_id,
                     exc_info=True,
@@ -182,7 +175,7 @@ class HybridRetriever:
             bm25_hits,
         )
         if not candidates:
-            if not self._settings.graph_enabled:
+            if not self._policy.graph_enabled:
                 capabilities["graph_search"] = False
             return RetrievalResponse(
                 items=(),
@@ -190,14 +183,14 @@ class HybridRetriever:
                 degraded_reasons=self._dedupe_reasons(reasons),
             )
 
-        if capabilities["graph_search"] and self._settings.graph_enabled:
+        if capabilities["graph_search"] and self._policy.graph_enabled:
             try:
                 candidates = await self._expand_graph(
                     kb_id,
                     version_id,
                     candidates,
                 )
-            except Exception:
+            except (OSError, RuntimeError, ValueError):
                 logger.warning(
                     "KB graph expansion failed kb=%s version=%s",
                     kb_id,
@@ -237,11 +230,11 @@ class HybridRetriever:
         )
 
     def _rrf_fuse(
-            self,
-            kb_id: str,
-            version_id: str,
-            *ranked_lists: list[VersionedKnowledgeChunk],
-    ) -> List[RetrievedChunk]:
+        self,
+        kb_id: str,
+        version_id: str,
+        *ranked_lists: list[VersionedKnowledgeChunk],
+    ) -> list[RetrievedChunk]:
         by_id: dict[str, RetrievedChunk] = {}
         for ranked in ranked_lists:
             for rank, record in enumerate(ranked, start=1):
@@ -253,10 +246,8 @@ class HybridRetriever:
                 ):
                     continue
                 if not str(record.document_revision_id or "").strip():
-                    raise ValueError(
-                        "retrieval record is missing document revision identity"
-                    )
-                fused = 1.0 / (self._settings.rrf_k + rank)
+                    raise ValueError("retrieval record is missing document revision identity")
+                fused = 1.0 / (self._policy.retrieval.rrf_k + rank)
                 existing = by_id.get(record.chunk.id)
                 if existing:
                     by_id[record.chunk.id] = RetrievedChunk(
@@ -286,28 +277,23 @@ class HybridRetriever:
         )
 
     async def _expand_graph(
-            self,
-            kb_id: str,
-            version_id: str,
-            candidates: List[RetrievedChunk],
-    ) -> List[RetrievedChunk]:
+        self,
+        kb_id: str,
+        version_id: str,
+        candidates: list[RetrievedChunk],
+    ) -> list[RetrievedChunk]:
         chunk_ids = [item.chunk.id for item in candidates]
         async with self._uow_factory() as uow:
-            related_ids = (
-                await uow.knowledge_base
-                .get_related_chunk_ids_for_version(
-                    kb_id,
-                    version_id,
-                    chunk_ids,
-                    limit=20,
-                )
+            related_ids = await uow.knowledge_base.get_related_chunk_ids_for_version(
+                kb_id,
+                version_id,
+                chunk_ids,
+                limit=20,
             )
-            related_chunks = (
-                await uow.knowledge_base.get_chunks_by_ids_for_version(
-                    kb_id,
-                    version_id,
-                    related_ids,
-                )
+            related_chunks = await uow.knowledge_base.get_chunks_by_ids_for_version(
+                kb_id,
+                version_id,
+                related_ids,
             )
         existing = {item.chunk.id for item in candidates}
         out = list(candidates)
@@ -321,9 +307,7 @@ class HybridRetriever:
             ):
                 continue
             if not str(record.document_revision_id or "").strip():
-                raise ValueError(
-                    "graph record is missing document revision identity"
-                )
+                raise ValueError("graph record is missing document revision identity")
             out.append(
                 RetrievedChunk(
                     chunk=record.chunk,
@@ -343,39 +327,27 @@ class HybridRetriever:
         return out
 
     async def _attach_parents(
-            self,
-            kb_id: str,
-            version_id: str,
-            candidates: List[RetrievedChunk],
-    ) -> List[RetrievedChunk]:
-        parent_ids = sorted({
-            item.chunk.parent_id
-            for item in candidates
-            if item.chunk.parent_id
-        })
+        self,
+        kb_id: str,
+        version_id: str,
+        candidates: list[RetrievedChunk],
+    ) -> list[RetrievedChunk]:
+        parent_ids = sorted({item.chunk.parent_id for item in candidates if item.chunk.parent_id})
         async with self._uow_factory() as uow:
             parents = {
                 parent.id: parent
                 for parent in (
-                    await uow.knowledge_base
-                    .get_parents_by_ids_for_version(
+                    await uow.knowledge_base.get_parents_by_ids_for_version(
                         kb_id,
                         version_id,
                         parent_ids,
                     )
                 )
-                if (
-                    parent.kb_id == kb_id
-                    and parent.version_id == version_id
-                )
+                if (parent.kb_id == kb_id and parent.version_id == version_id)
             }
         out: list[RetrievedChunk] = []
         for item in candidates:
-            parent = (
-                parents.get(item.chunk.parent_id)
-                if item.chunk.parent_id
-                else None
-            )
+            parent = parents.get(item.chunk.parent_id) if item.chunk.parent_id else None
             if parent is not None and parent.doc_id != item.chunk.doc_id:
                 parent = None
             citation = item.citation
@@ -384,28 +356,23 @@ class HybridRetriever:
                     version_id=citation.version_id,
                     document_revision_id=citation.document_revision_id,
                     doc_id=citation.doc_id,
-                    page_no=(
-                        parent.page_no
-                        if parent.page_no is not None
-                        else citation.page_no
-                    ),
+                    page_no=(parent.page_no if parent.page_no is not None else citation.page_no),
                     chunk_id=parent.id,
                 )
-            out.append(RetrievedChunk(
-                chunk=item.chunk,
-                document=item.document,
-                parent=parent,
-                score=item.score,
-                citation=citation,
-            ))
+            out.append(
+                RetrievedChunk(
+                    chunk=item.chunk,
+                    document=item.document,
+                    parent=parent,
+                    score=item.score,
+                    citation=citation,
+                )
+            )
         return out
 
     @staticmethod
     def _valid_embedding(value: object) -> bool:
-        if (
-            not isinstance(value, (list, tuple))
-            or len(value) != KNOWLEDGE_EMBEDDING_DIMENSION
-        ):
+        if not isinstance(value, (list, tuple)) or len(value) != KNOWLEDGE_EMBEDDING_DIMENSION:
             return False
         try:
             return all(math.isfinite(float(item)) for item in value)

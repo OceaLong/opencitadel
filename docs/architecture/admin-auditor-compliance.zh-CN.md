@@ -1,141 +1,54 @@
-[English](admin-auditor-compliance.md) · [简体中文](admin-auditor-compliance.zh-CN.md)
+# 管理员、审计员与合规
 
-# 管理、审计员与合规
+[English](admin-auditor-compliance.md)
 
-平台管理、只读审计员角色，以及合规证据工作流。
+平台管理与审计是不同权限。Admin 管理平台资源；Auditor 读取治理与证据，但不能修改产品或
+执行状态。
 
-## 全局角色
+## Read Model
 
-| 角色 | `global_role` | 写权限 | 读权限 |
-|------|---------------|--------|--------|
-| 管理员 | `admin` | 完整平台管理与用户操作 | 所有 admin/audit/compliance 路由 |
-| 用户 | `user` | 会话、KB、代码库、团队（受 non-auditor 保护） | 个人与团队作用域资源 |
-| 审计员 | `auditor` | **无** — `require_non_auditor` 拦截写操作 | 审计、用量、合规、证据 |
+合规 UI 只消费正式、按 Owner Scope 的投影：
 
-审计员可审阅治理数据，但无法创建会话、上传文件或修改配置。
+- Session Metadata 与冻结的 Operator Scope/Domain；
+- Run Family、State、创建与终止时间；
+- Approval Request、Decision、Actor、Subject 与 Feedback；
+- Activity Type、State、Attempt 与脱敏 Failure Code；
+- Execution Event 与 Audit Chain 校验状态；
+- Patrol Finding 与 Remediation Outcome。
 
-```mermaid
-flowchart TD
-  Login["审计员登录"] --> Admin["/admin/compliance"]
-  Admin --> Chain["校验审计链"]
-  Admin --> Evidence["下载证据 ZIP"]
-  Admin --> Profile["打开会话治理档案"]
-  Admin --> Report["/admin/compliance/report"]
-  Report --> Export["导出 JSON / MD / PDF"]
-  Chain --> Integrity["平台级 HMAC 完整性"]
-  Evidence --> SessionPkg["逐会话工具调用记录"]
-  Evidence --> SignedPkg["签名证据包：manifest.json + chain-signature.txt"]
-  Profile --> ProfileView["/admin/compliance/sessions/{sessionId}"]
-  ProfileView --> ProfileData["审批 + Gate 命中 + 检查点 + 终态"]
-```
+这些 View 不从 UI Event 或 Audit 文本重建工作流状态。Run、Approval 与 Activity 行来自正式
+执行投影；Audit Chain 提供独立 Action Evidence。
 
-## 管理后台路由
+## 主要 Endpoint
 
-| 路由 | 说明 |
-|------|------|
-| `/admin` | 概览仪表盘 |
-| `/admin/users` | 用户列表、配额、角色分配 |
-| `/admin/teams` | 团队管理 |
-| `/admin/invitations` | 平台邀请令牌 |
-| `/admin/audit` | 审计日志查看 |
-| `/admin/compliance` | 证据中心、链校验、合规报告 |
-| `/admin/compliance/sessions/[sessionId]` | 单会话治理档案：审批、Gate 命中、策略拒绝、检查点、终态 |
-| `/admin/compliance/report` | 全页合规报告导出（JSON / MD / PDF） |
-| `/admin/governance` | 平台级治理概览：审批结果统计、按日拦截趋势（审批决策 + 策略拒绝）、Ops Patrol 趋势、修复结果分布、审计链状态 |
+- `GET /api/admin/governance/overview`：审批积压/结果、每日 Approval Request 与 Activity
+  Failure、Patrol Trend、Remediation Status、Audit Chain Status。
+- `GET /api/admin/governance/sessions/{id}/profile`：单 Session 的 Run、Approval、Activity
+  与已验证 Chain Timeline。
+- `GET /api/admin/evidence/sessions`：可出证 Session 与 Event 数量。
+- `GET /api/admin/evidence/sessions/{id}/package`：签名、脱敏 Evidence Archive。
+- `GET /api/admin/audit/verify-chain`：平台或 Session Chain Verification。
+- `GET /api/admin/compliance/report`：聚合合规报告。
 
-Token 用量图表在 **`/admin` 概览页**展示（无独立 `/admin/usage` 页面）。后端用量 API 仍在 `/api/admin/usage/*`。
+跨 Owner Session 访问由服务端在 Auditor Authority 下解析；普通用户不能用这些 Endpoint 枚举
+外部资源。
 
-首次 migrate 时根据 `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` 创建引导管理员。
+## Evidence Package
 
-## 合规 API
+证据包由确定性代码生成，不调用 LLM。它包含 Manifest、JSON/Markdown Governance Profile、
+Audit Material、授权范围内的 Artifact Metadata/Content，以及 Renderer 可用时的 PDF Summary。
+所有自由文本先做 Key-based Redaction，再做 Secret Pattern Scrubbing。Manifest Digest 与 HMAC
+Signature 支持离线完整性验证。
 
-以下路由均需 `require_auditor_or_admin`（前缀 `/api/admin`）：
+可选 PDF 能力缺失不会改变 Source Evidence，Package 会记录缺项。Hash Chain 或 Signature
+失败直接显示错误，不降级成“尽力成功”。
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/admin/audit/verify-chain` | 校验全局审计 HMAC 链 |
-| GET | `/api/admin/audit/verify-chain/sessions/{id}` | 校验会话工具调用链 |
-| GET | `/api/admin/evidence/sessions` | 列出可导出证据的会话 |
-| GET | `/api/admin/evidence/sessions/{id}/package` | 下载 ZIP 证据包 |
-| GET | `/api/admin/compliance/report` | 合规报告（`json` / `md` / `pdf`） |
-| GET | `/api/admin/governance/sessions/{id}/profile` | 单会话治理档案只读聚合（审批、Gate 命中、策略拒绝、检查点、链校验、终态） |
-| GET | `/api/admin/governance/overview?days=30` | 平台级治理概览只读聚合（审批批次结果、按日审批决策/策略拒绝拦截趋势、Ops Patrol 运行/问题趋势、修复状态分布、审计链状态）——同样受 `require_auditor_or_admin` 保护，`days` 取值 1–365 |
+## UI
 
-合规映射覆盖**等保2.0**与 **ISO27001** 控制项。设置 `gate_profile` 的 Web Operator 会话会写入带 HMAC 证据链字段的 `agent_tool_invoke` 记录。
+- `/admin/governance`：平台治理趋势。
+- `/admin/compliance`：Evidence Session 与导出。
+- `/admin/compliance/sessions/[sessionId]`：正式 Governance Profile。
+- `/admin/audit`：Audit 搜索与 Chain Verification。
 
-每个控制项最终判定为五种状态之一：`pass`（有证据证明控制项已落实）、`gap`（有证据证明控制项缺失或配置不当）、`attention`（能力存在但有需要关注的保留意见——例如能力已具备但在报告窗口内从未被实际触发）、`not_verified`（窗口内无数据可供判断，例如窗口期间无 Agent 会话运行）、`na`（控制项对本部署不适用）。报告摘要携带各状态计数；每个控制项由真实评估器读取窗口内实际审计/配置数据后判定，而非静态的"全部通过"默认值。
-
-## 证据包内容
-
-证据中心按会话导出的 ZIP 包含：
-
-- `audit.json`、`audit-report.md` —— 结构化 JSON 与渲染后 Markdown 形式的审计轨迹
-- `checkpoints.json` —— 会话检查点索引
-- `governance-profile.json`、`governance-profile.md` —— 与上方 API 返回的同一份治理档案，经脱敏并确定性渲染
-- 可用时包含 `evidence-summary.pdf`
-- `manifest.json` —— 每个文件的 SHA-256 哈希与链校验结果
-- `chain-signature.txt` —— `HMAC-SHA256(AUDIT_SIGNING_KEY, manifest.json 字节)`
-
-会话产生浏览器截图或制品时会额外包含 `screenshots/*.png` 与 `reconciliation/*.md`/`.html`。
-
-## 治理档案
-
-治理档案是对治理执行链已记录数据——审计哈希链、检查点、会话状态——的只读聚合，汇总为一份面向审计员的文档。不新增表，也不新增写操作。它有七个顶层字段：`session`、`chain`、`approvals`、`gate_hits`、`checkpoints`、`terminal`、`denials`——最后一个字段投影该会话所有 `agent_tool_denied` 审计行（assembly/exposure/execution 层的能力策略拒绝），每条含 `tool`、`layer`、`reason`、`created_at`。证据 ZIP 中的 `governance-profile.md` 将其渲染为「策略拒绝」表。
-
-```mermaid
-erDiagram
-  SESSION ||--o{ AUDIT_LOG : "链式工具调用与审批记录"
-  SESSION ||--o{ TOOL_APPROVAL_BATCH : "受门控的工具调用批次"
-  TOOL_APPROVAL_BATCH ||--o{ AUDIT_LOG : "批准 / 拒绝决策"
-  SESSION ||--o| RUN_OUTCOME : "终态（到达后才有）"
-  SESSION ||--|| GOVERNANCE_PROFILE : "聚合为"
-  GOVERNANCE_PROFILE ||--o{ EVIDENCE_PACKAGE : "按需导出为"
-
-  SESSION {
-    string id PK
-    string gate_profile
-    string operator_scope
-    string status
-  }
-  TOOL_APPROVAL_BATCH {
-    string id PK
-    string session_id FK
-    string status
-    datetime expires_at
-  }
-  AUDIT_LOG {
-    string id PK
-    string session_id FK
-    string action
-    int chain_seq
-    string prev_hash
-    string entry_hash
-  }
-  RUN_OUTCOME {
-    string status
-    string error_code
-  }
-  GOVERNANCE_PROFILE {
-    bool chain_verified
-    int checked_entries
-  }
-  EVIDENCE_PACKAGE {
-    string manifest_sha256
-    string pdf_status
-  }
-```
-
-## 典型审计员工作流
-
-1. 以审计员身份登录（管理员分配 `global_role=auditor`）
-2. 打开 **管理 → 合规**（`/admin/compliance`）
-3. 执行**校验审计链**确认平台完整性
-4. 筛选 Web Operator 会话并下载证据 ZIP
-5. 打开某会话的治理档案（`/admin/compliance/sessions/{sessionId}`）查看审批/Gate/检查点细节
-6. 按审计周期导出合规报告（`framework=djbh2.0` 或 ISO）
-
-## 相关文档
-
-- [Web Operator 架构](web-operator.zh-CN.md) — 门控档位与证据链
-- [退款对账与合规教程](../tutorials/05-refund-reconciliation-compliance.zh-CN.md)
-- [安全模型](security-model.zh-CN.md) — RBAC 细节
+Auditor View 隐藏所有 Mutation Control。Admin Mutation Route 仍需 CSRF、明确 Role Check、
+Scope Validation 与追加式 Audit Recording。

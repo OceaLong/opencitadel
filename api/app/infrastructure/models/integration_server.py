@@ -1,17 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
-from sqlalchemy import String, Boolean, DateTime, Text, text, ForeignKey
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
-from app.domain.models.app_config import MCPServerConfig, MCPTransport
+from app.domain.models.inference import ResourceVisibility
+from app.domain.models.integration_runtime import MCPTransport
 from app.domain.models.integration_server import A2AServerRecord, MCPServerRecord
-from app.domain.models.llm_model import ResourceVisibility
-from app.infrastructure.security.api_key_encryption import ApiKeyEncryption
+
+from .base import Base
 
 
 class MCPServerORM(Base):
@@ -19,46 +17,52 @@ class MCPServerORM(Base):
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    transport: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'streamable_http'"))
+    transport: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default=text("'streamable_http'")
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    args: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
-    url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    command: Mapped[str | None] = mapped_column(Text, nullable=True)
+    args: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
     url_encryption: Mapped[str] = mapped_column(
-        String(32), nullable=False, server_default=text("'legacy_plaintext'")
+        String(32), nullable=False, server_default=text("'plaintext'")
     )
-    headers: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    headers: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     headers_encryption: Mapped[str] = mapped_column(
-        String(32), nullable=False, server_default=text("'legacy_plaintext'")
+        String(32), nullable=False, server_default=text("'plaintext'")
     )
-    env: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    env: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     env_encryption: Mapped[str] = mapped_column(
-        String(32), nullable=False, server_default=text("'legacy_plaintext'")
+        String(32), nullable=False, server_default=text("'plaintext'")
     )
-    extra: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
-    tool_policies: Mapped[Dict[str, Any]] = mapped_column(
+    extra: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
-    owner_user_id: Mapped[Optional[str]] = mapped_column(
+    tool_policies: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    owner_user_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    team_id: Mapped[Optional[str]] = mapped_column(
+    team_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    visibility: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'global'"))
+    visibility: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'global'")
+    )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
 
     def to_domain(
         self,
-        url: Optional[str],
-        headers: Optional[Dict[str, Any]],
-        env: Optional[Dict[str, Any]],
+        url: str | None,
+        headers: dict[str, Any] | None,
+        env: dict[str, Any] | None,
     ) -> MCPServerRecord:
         return MCPServerRecord(
             id=self.id,
@@ -71,7 +75,7 @@ class MCPServerORM(Base):
             url=url,
             headers=headers,
             env=env,
-            extra=self.extra or {},
+            transport_options=self.extra or {},
             tool_policies=self.tool_policies or {},
             owner_user_id=self.owner_user_id,
             team_id=self.team_id,
@@ -87,21 +91,23 @@ class A2AServerORM(Base):
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
-    tool_policies: Mapped[Dict[str, Any]] = mapped_column(
+    tool_policies: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
-    owner_user_id: Mapped[Optional[str]] = mapped_column(
+    owner_user_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    team_id: Mapped[Optional[str]] = mapped_column(
+    team_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    visibility: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'global'"))
+    visibility: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'global'")
+    )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
 
     def to_domain(self) -> A2AServerRecord:

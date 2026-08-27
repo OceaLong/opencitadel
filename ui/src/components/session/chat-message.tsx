@@ -2,25 +2,15 @@
 
 import { memo, useState } from "react";
 import { useTranslations } from "next-intl";
-import { AlertCircle, ChevronDown, Clock, History } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 
 import { MarkdownContent } from "@/components/markdown-content";
 import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { AttachmentsMessage } from "@/components/session/attachments-message";
-import { ClarifyQuestions } from "@/components/session/clarify-questions";
-import { ClarifyReplySummary } from "@/components/session/clarify-reply-summary";
-import {
-  GovernanceRail,
-  GovernanceRailItem,
-  RailCheckpointButton,
-  toolEventRailState,
-} from "@/components/session/governance-rail";
-import { PlanStepStatusIcon } from "@/components/session/plan-step-status-icon";
 import { ToolUse } from "@/components/tool-use";
 
-import type { ClarifyAnswer, SessionCheckpoint, SessionStatus, ToolEvent } from "@/lib/api/types";
-import { formatGateActionMessage } from "@/lib/gate-action-label";
-import { type AttachmentFile, getToolTimeLabel, type TimelineItem } from "@/lib/session-events";
+import type { ToolEvent } from "@/lib/api/types";
+import { type AttachmentFile, type TimelineItem } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 
 export type ChatMessageProps = {
@@ -29,47 +19,18 @@ export type ChatMessageProps = {
   onViewAllFiles?: () => void;
   onFileClick?: (file: AttachmentFile) => void;
   onToolClick?: (tool: ToolEvent) => void;
-  onClarifyAnswer?: (answer: string, clarifyAnswers: ClarifyAnswer[]) => Promise<void> | void;
-  sessionStatus?: SessionStatus;
-  checkpoint?: SessionCheckpoint;
-  onRestoreCheckpoint?: (checkpoint: SessionCheckpoint) => Promise<void> | void;
-  restoringCheckpoint?: boolean;
   onSourceClick?: (path: string, line?: number) => void;
 };
 
-type ToolRowProps = {
+function ToolRow({
+  className,
+  timeLabel,
+  children,
+}: {
   className?: string;
   timeLabel?: string;
   children: React.ReactNode;
-};
-
-function RestoreCheckpointButton({
-  checkpoint,
-  onRestore,
-  disabled,
-}: {
-  checkpoint: SessionCheckpoint;
-  onRestore?: (checkpoint: SessionCheckpoint) => Promise<void> | void;
-  disabled?: boolean;
 }) {
-  const t = useTranslations("chatMessage");
-  if (!onRestore) return null;
-
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={() => onRestore(checkpoint)}
-      className="text-muted-foreground hover:text-foreground border-border/70 bg-card/80 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-      title={t("restoreTitle")}
-    >
-      <History className="size-3" />
-      <span>{t("restoreHere")}</span>
-    </button>
-  );
-}
-
-function ToolRow({ className, timeLabel, children }: ToolRowProps) {
   const tCommon = useTranslations("common");
   const [hovered, setHovered] = useState(false);
   return (
@@ -97,38 +58,15 @@ function ChatMessageComponent({
   onViewAllFiles,
   onFileClick,
   onToolClick,
-  onClarifyAnswer,
-  sessionStatus,
-  checkpoint,
-  onRestoreCheckpoint,
-  restoringCheckpoint,
   onSourceClick,
 }: ChatMessageProps) {
   const t = useTranslations("chatMessage");
-  const tGate = useTranslations("gateActions");
-  const tPlan = useTranslations("planApproval");
-  if (item.kind === "user") {
-    const displayMessage = formatGateActionMessage(item.data.message, tGate, tPlan);
-    const clarifyAnswers = item.data.clarify_answers;
-    const hasClarifyReply = Array.isArray(clarifyAnswers) && clarifyAnswers.length > 0;
 
+  if (item.kind === "user") {
     return (
-      <div className={cn("group mt-3 flex w-full flex-col items-end justify-end gap-1", className)}>
-        <div className="relative flex max-w-[90%] flex-col items-end gap-2">
-          {checkpoint && (
-            <RestoreCheckpointButton
-              checkpoint={checkpoint}
-              onRestore={onRestoreCheckpoint}
-              disabled={restoringCheckpoint || sessionStatus === "running"}
-            />
-          )}
-          {hasClarifyReply ? (
-            <ClarifyReplySummary answers={clarifyAnswers} />
-          ) : (
-            <div className="border-border/70 bg-card text-foreground relative flex items-center overflow-hidden rounded-2xl border px-3.5 py-2.5 text-sm leading-relaxed shadow-card">
-              {displayMessage}
-            </div>
-          )}
+      <div className={cn("group mt-3 flex w-full flex-col items-end gap-1", className)}>
+        <div className="border-border/70 bg-card text-foreground shadow-card max-w-[90%] rounded-2xl border px-3.5 py-2.5 text-sm leading-relaxed">
+          {item.data.message}
         </div>
       </div>
     );
@@ -137,37 +75,17 @@ function ChatMessageComponent({
   if (item.kind === "assistant") {
     return (
       <div className={cn("group mt-3 flex w-full flex-col gap-2", className)}>
-        <div className="group flex h-7 items-center justify-between">
-          <div className="text-foreground flex items-center justify-center gap-1">
-            <OpenCitadelIcon variant="icon" />
-          </div>
+        <div className="flex h-7 items-center justify-between">
+          <OpenCitadelIcon variant="icon" />
           {item.data.resource_bindings?.length ? (
-            <span className="text-muted-foreground text-xs" aria-label="消息资源版本">
+            <span className="text-muted-foreground text-xs" aria-label={t("resourceVersionsAria")}>
               {item.data.resource_bindings.map((binding) => binding.version_id).join(", ")}
             </span>
           ) : null}
         </div>
         <div className="text-foreground m-0 max-w-none p-0">
-          <MarkdownContent content={item.data.message ?? ""} onSourceClick={onSourceClick} />
+          <MarkdownContent content={item.data.message} onSourceClick={onSourceClick} />
         </div>
-      </div>
-    );
-  }
-
-  if (item.kind === "clarify") {
-    return (
-      <div className={cn("group mt-3 flex w-full flex-col gap-2", className)}>
-        <div className="group flex h-7 items-center justify-between">
-          <div className="text-foreground flex items-center justify-center gap-1">
-            <OpenCitadelIcon variant="icon" />
-          </div>
-        </div>
-        <ClarifyQuestions
-          title={item.title}
-          questions={item.questions}
-          interactive={item.interactive && sessionStatus === "waiting"}
-          onSubmit={onClarifyAnswer}
-        />
       </div>
     );
   }
@@ -180,52 +98,6 @@ function ChatMessageComponent({
           onClick={onToolClick ? () => onToolClick(item.data) : undefined}
         />
       </ToolRow>
-    );
-  }
-
-  if (item.kind === "subagent") {
-    const statusLabel =
-      item.data.status === "completed"
-        ? t("completed")
-        : item.data.status === "failed"
-          ? t("failed")
-          : t("running");
-    return (
-      <div className={cn("mt-3 flex w-full", className)}>
-        <div className="border-border/70 bg-muted/30 w-full rounded-lg border px-3 py-2 text-sm">
-          <div className="text-muted-foreground mb-1 text-xs">{t("subAgent")} {statusLabel}</div>
-          <div className="font-medium">{item.data.goal}</div>
-          {item.data.result_preview ? (
-            <div className="text-muted-foreground mt-2 text-xs">{item.data.result_preview}</div>
-          ) : null}
-          {item.data.error ? <div className="text-destructive mt-1 text-xs">{item.data.error}</div> : null}
-        </div>
-      </div>
-    );
-  }
-
-  if (item.kind === "step") {
-    return (
-      <StepBlock
-        stepItem={item}
-        className={className}
-        onToolClick={onToolClick}
-        checkpoint={checkpoint}
-        onRestoreCheckpoint={onRestoreCheckpoint}
-        restoringCheckpoint={restoringCheckpoint}
-        sessionStatus={sessionStatus}
-      />
-    );
-  }
-
-  if (item.kind === "wait") {
-    return (
-      <div className={cn("mt-3 flex w-full", className)}>
-        <div className="border-border/70 bg-muted/40 text-muted-foreground flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
-          <Clock className="size-4 shrink-0" />
-          <span>{item.message}</span>
-        </div>
-      </div>
     );
   }
 
@@ -242,170 +114,44 @@ function ChatMessageComponent({
     );
   }
 
-  if (item.kind === "error") {
-    return (
-      <div className={cn("group mt-3 flex w-full flex-col gap-2", className)}>
-        <div className="group flex h-7 items-center justify-between">
-          <div className="text-destructive flex items-center justify-center gap-1">
-            <OpenCitadelIcon variant="icon" />
-          </div>
-        </div>
-        <div className="text-destructive m-0 max-w-none p-0">
-          {item.contextLabel && (
-            <div className="text-destructive mb-1 flex items-center gap-1 text-xs">
-              <AlertCircle className="size-3.5" />
-              <span>{t("errorAfter", { context: item.contextLabel })}</span>
-            </div>
-          )}
-          <MarkdownContent
-            content={
-              item.repeatCount && item.repeatCount > 1
-                ? `${item.error}\n\n(${t("errorRepeated", { count: item.repeatCount })})`
-                : item.error
-            }
-          />
-        </div>
-      </div>
-    );
-  }
-
-  return null;
-}
-
-function toolSignature(tool: ToolEvent): string {
-  return [
-    (tool as { tool_call_id?: string }).tool_call_id,
-    (tool as { status?: string }).status,
-    (tool as { function_name?: string }).function_name,
-  ].join(":");
-}
-
-function itemSignature(item: TimelineItem): string {
-  switch (item.kind) {
-    case "user":
-      return `${item.kind}:${item.id}:${item.data.message ?? ""}:${(item.data.clarify_answers ?? []).length}`;
-    case "assistant":
-      return `${item.kind}:${item.id}:${item.data.message ?? ""}`;
-    case "clarify":
-      return `${item.kind}:${item.id}:${item.interactive}:${item.questions.length}`;
-    case "tool":
-      return `${item.kind}:${item.id}:${toolSignature(item.data)}`;
-    case "step":
-      return `${item.kind}:${item.id}:${item.data.status}:${item.tools.length}:${item.tools.map(toolSignature).join("|")}`;
-    case "subagent":
-      return `${item.kind}:${item.id}:${item.data.status}:${item.data.goal ?? ""}:${item.data.result_preview ?? ""}:${item.data.error ?? ""}`;
-    case "attachments":
-      return `${item.kind}:${item.id}:${item.role}:${item.files.map((file) => file.id).join("|")}`;
-    case "wait":
-      return `${item.kind}:${item.id}:${item.message}`;
-    case "error":
-      return `${item.kind}:${item.id}:${item.error}:${item.contextLabel ?? ""}`;
-    default:
-      return "";
-  }
-}
-
-export const ChatMessage = memo(ChatMessageComponent, (prev, next) => {
   return (
-    prev.className === next.className &&
-    prev.sessionStatus === next.sessionStatus &&
-    prev.onViewAllFiles === next.onViewAllFiles &&
-    prev.onFileClick === next.onFileClick &&
-    prev.onToolClick === next.onToolClick &&
-    prev.onClarifyAnswer === next.onClarifyAnswer &&
-    prev.checkpoint?.id === next.checkpoint?.id &&
-    prev.onRestoreCheckpoint === next.onRestoreCheckpoint &&
-    prev.restoringCheckpoint === next.restoringCheckpoint &&
-    itemSignature(prev.item) === itemSignature(next.item)
-  );
-});
-
-function StepBlock({
-  stepItem,
-  className,
-  onToolClick,
-  checkpoint,
-  onRestoreCheckpoint,
-  restoringCheckpoint,
-  sessionStatus,
-}: {
-  stepItem: Extract<TimelineItem, { kind: "step" }>;
-  className?: string;
-  onToolClick?: (tool: ToolEvent) => void;
-  checkpoint?: SessionCheckpoint;
-  onRestoreCheckpoint?: (checkpoint: SessionCheckpoint) => Promise<void> | void;
-  restoringCheckpoint?: boolean;
-  sessionStatus?: SessionStatus;
-}) {
-  const t = useTranslations("chatMessage");
-  const [expanded, setExpanded] = useState(true);
-  const { data, tools } = stepItem;
-  const railDisabled = restoringCheckpoint || sessionStatus === "running";
-  // The rail head only exists once the tools rail itself renders. When the
-  // step is collapsed or has no tools yet (streaming / plain description
-  // step), fall back to a standalone header-level checkpoint button so
-  // restore stays reachable instead of silently disappearing.
-  const showRailHead = expanded && tools.length > 0;
-
-  return (
-    <div className={cn("mt-3 flex flex-col", className)}>
-      {checkpoint && onRestoreCheckpoint && !showRailHead ? (
-        <div className="mb-1 flex justify-start">
-          <RailCheckpointButton
-            title={t("restoreTitle")}
-            onClick={() => onRestoreCheckpoint(checkpoint)}
-            disabled={railDisabled}
-          />
-        </div>
-      ) : null}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setExpanded(!expanded)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setExpanded((prev) => !prev);
-          }
-        }}
-        className="group/header text-foreground hover:bg-muted/60 focus-visible:ring-ring/40 flex w-full cursor-pointer justify-between gap-2 rounded-lg px-1.5 py-1 text-sm transition-colors outline-none focus-visible:ring-2"
-      >
-        <div className="flex min-w-0 flex-1 flex-row items-start justify-start gap-2">
-          <PlanStepStatusIcon status={data.status} className="relative top-0.5" />
-          <div className="markdown-content min-w-0 flex-1 break-words font-medium leading-relaxed">
-            {data.description}
-          </div>
-          <ChevronDown
-            className={cn(
-              "text-muted-foreground flex-shrink-0 transition-transform",
-              expanded && "rotate-180",
-            )}
-          />
-        </div>
+    <div className={cn("group mt-3 flex w-full flex-col gap-2", className)}>
+      <div className="text-destructive flex h-7 items-center gap-1">
+        <OpenCitadelIcon variant="icon" />
+        <AlertCircle className="size-3.5" />
       </div>
-      {showRailHead ? (
-        <GovernanceRail
-          className="mt-1"
-          checkpointTitle={checkpoint ? t("restoreTitle") : undefined}
-          onRestoreCheckpoint={checkpoint && onRestoreCheckpoint ? () => onRestoreCheckpoint(checkpoint) : undefined}
-          restoreDisabled={railDisabled}
-          lineState={
-            tools.some((tool) => tool.status === "error")
-              ? "failed"
-              : tools.every((tool) => tool.status === "called")
-                ? "completed"
-                : "default"
+      <div className="text-destructive m-0 max-w-none p-0">
+        <MarkdownContent
+          content={
+            item.repeatCount && item.repeatCount > 1
+              ? `${item.error}\n\n(${t("errorRepeated", { count: item.repeatCount })})`
+              : item.error
           }
-        >
-          {tools.map((tool, idx) => (
-            <GovernanceRailItem key={`${data.id}-tool-${idx}`} state={toolEventRailState(tool.status)}>
-              <ToolRow timeLabel={getToolTimeLabel(tool)}>
-                <ToolUse data={tool} onClick={onToolClick ? () => onToolClick(tool) : undefined} />
-              </ToolRow>
-            </GovernanceRailItem>
-          ))}
-        </GovernanceRail>
-      ) : null}
+        />
+      </div>
     </div>
   );
 }
+
+function itemSignature(item: TimelineItem): string {
+  if (item.kind === "user" || item.kind === "assistant") {
+    return `${item.kind}:${item.id}:${item.data.message}`;
+  }
+  if (item.kind === "tool") {
+    return `${item.kind}:${item.id}:${item.data.tool_call_id}:${item.data.status}`;
+  }
+  if (item.kind === "attachments") {
+    return `${item.kind}:${item.id}:${item.files.map((file) => file.id).join("|")}`;
+  }
+  return `${item.kind}:${item.id}:${item.error}:${item.repeatCount ?? 1}`;
+}
+
+export const ChatMessage = memo(
+  ChatMessageComponent,
+  (previous, next) =>
+    previous.className === next.className &&
+    previous.onViewAllFiles === next.onViewAllFiles &&
+    previous.onFileClick === next.onFileClick &&
+    previous.onToolClick === next.onToolClick &&
+    itemSignature(previous.item) === itemSignature(next.item),
+);

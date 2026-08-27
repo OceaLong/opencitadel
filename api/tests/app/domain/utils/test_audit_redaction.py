@@ -1,7 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from app.domain.utils.audit_redaction import redact_payload, redact_tool_args, summarize_tool_result
 from app.domain.models.tool_result import ToolResult
+from app.domain.utils.audit_redaction import redact_payload, redact_tool_args, summarize_tool_result
 
 
 def test_redact_password_field():

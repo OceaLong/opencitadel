@@ -1,4 +1,5 @@
 """Deterministic Markdown rendering for structured Patrol truth."""
+
 from __future__ import annotations
 
 import json
@@ -14,7 +15,9 @@ def _text(value: Any) -> str:
 
 def _json(value: Any) -> str:
     safe = redact_value("", value)
-    return _text(json.dumps(safe, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str))
+    return _text(
+        json.dumps(safe, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    )
 
 
 class PatrolReportService:
@@ -48,8 +51,16 @@ class PatrolReportService:
         ]
         actionable = [item for item in findings if item.status.value in {"open", "acknowledged"}]
         if actionable:
-            for item in sorted(actionable, key=lambda value: (value.severity.value, value.fingerprint), reverse=True):
-                lines.append(f"- **{item.severity.value.upper()}** {_text(item.title)} — {_text(item.summary)} (`{item.id}`)")
+            lines.extend(
+                (
+                    f"- **{item.severity.value.upper()}** {_text(item.title)} — {_text(item.summary)} (`{item.id}`)"
+                )
+                for item in sorted(
+                    actionable,
+                    key=lambda value: (value.severity.value, value.fingerprint),
+                    reverse=True,
+                )
+            )
         else:
             lines.append("- 无开放 Finding。")
 
@@ -104,8 +115,12 @@ class PatrolReportService:
         )
         missing = [item for item in results if item.status.value in {"error", "skipped"}]
         if missing:
-            for item in missing:
-                lines.append(f"- `{item.check_id}`: `{item.error_code or item.status.value}` {_text(item.error_message or '')}".rstrip())
+            lines.extend(
+                (
+                    f"- `{item.check_id}`: `{item.error_code or item.status.value}` {_text(item.error_message or '')}".rstrip()
+                )
+                for item in missing
+            )
         else:
             lines.append("- 无已知缺失数据。")
         return "\n".join(lines).rstrip() + "\n"

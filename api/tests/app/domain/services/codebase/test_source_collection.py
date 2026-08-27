@@ -1,11 +1,10 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
 from app.domain.models.codebase import Codebase
 from app.domain.models.tool_result import ToolResult
+from app.domain.runtime_policy import CodebaseAnalysisPolicy
 from app.domain.services.codebase.ingestion_runner import (
     CodebaseIngestionRunner,
     SourceCollectionResult,
@@ -54,7 +53,7 @@ def _runner() -> CodebaseIngestionRunner:
     repo = _CodebaseRepo()
     return CodebaseIngestionRunner(
         uow_factory=lambda: _Uow(repo),
-        sandbox_cls=MagicMock(),
+        sandbox_factory=MagicMock(),
         file_storage=MagicMock(),
     )
 
@@ -79,8 +78,7 @@ async def test_ignored_files_do_not_consume_source_limit(monkeypatch):
     result = await runner._collect_source_files(
         sandbox,
         workspace,
-        max_files=5000,
-        batch_size=50,
+        policy=CodebaseAnalysisPolicy(max_files=5_000, source_read_batch_size=50),
     )
 
     assert isinstance(result, SourceCollectionResult)
@@ -110,8 +108,7 @@ async def test_collection_uses_bounded_batches(monkeypatch):
     result = await runner._collect_source_files(
         sandbox,
         workspace,
-        max_files=5000,
-        batch_size=50,
+        policy=CodebaseAnalysisPolicy(max_files=5_000, source_read_batch_size=50),
     )
 
     assert len(result.entries) == 250
@@ -136,8 +133,7 @@ async def test_collection_reports_truncation_after_filtering(monkeypatch):
     result = await runner._collect_source_files(
         sandbox,
         workspace,
-        max_files=3,
-        batch_size=2,
+        policy=CodebaseAnalysisPolicy(max_files=3, source_read_batch_size=2),
     )
 
     assert [entry.path for entry in result.entries] == [
@@ -168,7 +164,7 @@ async def test_collection_reports_failed_reads(monkeypatch):
             ]
 
     async def fake_exec_await(*args, **kwargs):
-        return "\n".join([ok_path, bad_path])
+        return f"{ok_path}\n{bad_path}"
 
     monkeypatch.setattr(
         "app.domain.services.codebase.ingestion_runner.exec_command_await",
@@ -178,10 +174,9 @@ async def test_collection_reports_failed_reads(monkeypatch):
     result = await runner._collect_source_files(
         FailingSandbox({}),
         workspace,
-        max_files=5000,
-        batch_size=50,
+        policy=CodebaseAnalysisPolicy(max_files=5_000, source_read_batch_size=50),
     )
 
     assert [entry.path for entry in result.entries] == ["src/ok.py"]
     assert result.failed == 1
-    assert result.total_bytes == len("print('ok')".encode())
+    assert result.total_bytes == len(b"print('ok')")

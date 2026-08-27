@@ -6,11 +6,7 @@ import type { ReactNode } from "react";
 
 import { OpenCitadelIcon } from "@/components/open-citadel-icon";
 import { RailAccountMenu } from "@/components/rail-account-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 
 import { useNavModules } from "@/hooks/use-nav-modules";
@@ -100,17 +96,14 @@ export function IconRail() {
       </nav>
       <div className="flex flex-col items-center gap-2 pb-1">
         {adminVisible ? (
-          <RailModuleLink
-            module={ADMIN_NAV}
-            active={activeModule?.key === "admin"}
-          />
+          <RailModuleLink module={ADMIN_NAV} active={activeModule?.key === "admin"} />
         ) : null}
-        <RailTooltip label={tSettings("models")}>
+        <RailTooltip label={tSettings("inference")}>
           <button
             type="button"
             className="text-muted-foreground hover:bg-muted/50 hover:text-foreground flex size-9 items-center justify-center rounded-lg transition-colors"
-            aria-label={tSettings("openModelsLabel")}
-            onClick={() => openSettings("models-setting")}
+            aria-label={tSettings("openInferenceLabel")}
+            onClick={() => openSettings("inference-setting")}
           >
             <IconSettings className="size-4" />
           </button>

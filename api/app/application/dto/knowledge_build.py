@@ -1,23 +1,18 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Immutable API-facing knowledge version and build projections."""
+
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.domain.models.knowledge_version import FrozenMapping
-from app.domain.models.resource_governance import BuildState
-from app.domain.models.knowledge_version import KnowledgeVersionState
+from app.domain.execution.run import RunStatus
+from app.domain.models.knowledge_version import FrozenMapping, KnowledgeVersionState
 
 
 def _freeze_value(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return FrozenMapping(
-            (key, _freeze_value(item))
-            for key, item in value.items()
-        )
+        return FrozenMapping((key, _freeze_value(item)) for key, item in value.items())
     if isinstance(value, (list, tuple)):
         return tuple(_freeze_value(item) for item in value)
     if isinstance(value, (set, frozenset)):
@@ -29,35 +24,18 @@ class KnowledgeBuildProjection(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     id: str
+    run_id: str | None = None
     knowledge_base_id: str
     version_id: str
-    parent_version_id: Optional[str] = None
-    command_key: str
-    state: BuildState
-    phase: Optional[str] = None
-    progress: float = 0.0
-    capabilities: tuple[Any, ...] = ()
-    degraded_reasons: tuple[Any, ...] = ()
-    metrics: FrozenMapping = Field(default_factory=FrozenMapping)
-    error_code: Optional[str] = None
-    error_message: Optional[str] = None
-    heartbeat_at: Optional[datetime] = None
-    last_event_seq: int = 0
+    status: RunStatus
+    phase: str | None = None
+    progress: int = 0
+    failure_code: str | None = None
     created_at: datetime
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
+    updated_at: datetime
+    terminal_at: datetime | None = None
     can_retry: bool = False
     can_cancel: bool = False
-
-    @field_validator("capabilities", "degraded_reasons", mode="before")
-    @classmethod
-    def _freeze_sequences(cls, value: Any) -> tuple[Any, ...]:
-        return tuple(_freeze_value(item) for item in (value or ()))
-
-    @field_validator("metrics", mode="before")
-    @classmethod
-    def _freeze_metrics(cls, value: Any) -> FrozenMapping:
-        return FrozenMapping(value or {})
 
 
 class KnowledgeVersionProjection(BaseModel):
@@ -65,18 +43,18 @@ class KnowledgeVersionProjection(BaseModel):
 
     id: str
     knowledge_base_id: str
-    parent_version_id: Optional[str] = None
-    build_id: Optional[str] = None
+    parent_version_id: str | None = None
+    build_id: str | None = None
     state: KnowledgeVersionState
     capabilities: FrozenMapping = Field(default_factory=FrozenMapping)
     degraded_reasons: tuple[str, ...] = ()
     metrics: FrozenMapping = Field(default_factory=FrozenMapping)
     created_at: datetime
-    published_at: Optional[datetime] = None
+    published_at: datetime | None = None
     is_active: bool = False
     is_published: bool = False
     is_candidate: bool = False
-    build: Optional[KnowledgeBuildProjection] = None
+    build: KnowledgeBuildProjection | None = None
 
     @field_validator("capabilities", "metrics", mode="before")
     @classmethod
@@ -93,8 +71,8 @@ class KnowledgeVersionHistoryProjection(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     knowledge_base_id: str
-    active_version_id: Optional[str] = None
-    active_build: Optional[KnowledgeBuildProjection] = None
+    active_version_id: str | None = None
+    active_build: KnowledgeBuildProjection | None = None
     versions: tuple[KnowledgeVersionProjection, ...] = ()
 
     @field_validator("versions", mode="before")

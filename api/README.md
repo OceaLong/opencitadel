@@ -1,449 +1,126 @@
-[English](README.md) · [简体中文](README.zh-CN.md)
+# OpenCitadel API and Execution Kernel
 
-# OpenCitadel API Service
+[简体中文](README.zh-CN.md)
 
-FastAPI backend providing session management, AI Agent orchestration, model management, Skill templates, long-term memory, file handling, and sandbox management.
+The Python backend has three explicit process roles. PostgreSQL execution
+events are the only workflow authority; Redis is a disposable wake-up channel.
 
-Agent tasks run in a **separate Worker process**; the API layer is stateless and supports horizontal scaling across replicas.
+| Role | Entrypoint | Responsibility |
+| --- | --- | --- |
+| API | `app.main` / `run.sh` | Authentication, authorization, command admission, projection queries, SSE |
+| Execution kernel | `app.execution_kernel_main` / `execution-kernel.sh` | Inbox, decisions, Activities, timers, outbox, projectors, scheduler |
+| Migrate | `app.migrate` / `migrate.sh` | Greenfield Alembic schema and typed Runtime Policy seed |
 
-## Tech Stack
+The API never runs Agent or ingestion workflow steps. The execution kernel
+polls durable PostgreSQL work and may also wait on Redis hints. Deleting Redis
+cannot delete an accepted command, Activity, timer, event, or outcome.
 
-- Python 3.12+
-- FastAPI + Uvicorn
-- SQLAlchemy (asyncpg) + Alembic + **pgvector**
-- Redis 7 (task dispatch consumer groups + Streams event pipeline)
-- Docker SDK + SandboxProvider (sandbox pooling abstraction)
-- Playwright (browser control in Worker; Chromium runs inside sandbox via CDP)
-- OpenTelemetry + Prometheus (optional observability)
-- MCP SDK / httpx (MCP, A2A, Anthropic, Gemini)
+## Technology
 
-## Architecture Overview
+- Python 3.12, FastAPI, Pydantic 2
+- SQLAlchemy 2 async, Alembic, PostgreSQL 16, pgvector
+- Redis 7 for wake-up hints and cache only
+- OpenAI, Anthropic, and Gemini model adapters
+- MCP, A2A, Playwright, Docker/Kubernetes sandboxes
+- OpenTelemetry and Prometheus
 
-API and Worker are separate processes sharing infrastructure and service providers from `BaseContainer`, each with a role-specific container:
+## Source map
 
-| Role | Entry | Container | Docker target |
-|------|-------|-----------|---------------|
-| API | `app.main` | `ApiContainer` | `api` → `opencitadel-api` |
-| Worker | `app.worker.main` | `WorkerContainer` | `worker` → `opencitadel-worker` |
-| Migrate | `app.migrate` | — | `api` (one-off job) |
+```text
+app/
+├── domain/execution/           typed commands, events, aggregates, policies
+├── application/execution/      orchestration, decisions, Activities, projectors
+├── infrastructure/execution/   PostgreSQL stores and Redis wake-up adapter
+├── composition/                manual typed API/kernel graphs and task ownership
+├── interfaces/                 FastAPI routes, schemas, auth dependencies
+├── application/services/       product application services
+├── domain/                     product entities and ports
+├── infrastructure/             repositories, providers, security, observability
+├── execution_kernel.py         application-only kernel orchestration
+├── execution_kernel_main.py
+├── migrate.py
+└── main.py
+alembic/versions/0001greenfield_initial.py
+```
 
-- **API**: HTTP/SSE, task dispatch, event stream reads, MCP/A2A connection pool recycling
-- **Worker**: consumes `task:dispatch`, runs Agents, codebase/kb ingestion, sandbox warm gateway and orphan cleanup
-- **Migrate**: standalone job (`python -m app.migrate`); API startup only validates schema version
+All nondeterministic provider work is an Activity. An invocation identity,
+input digest, timeout, policy snapshot, and call-start state are committed
+before the external call. Completion returns through a typed command. Formal
+Run, Activity, approval, resource-build, and public-event tables are
+rebuildable projections, not alternate state machines.
 
-完整架构说明见 [`../docs/architecture/overview.md`](../docs/architecture/overview.md)。
+## Composition and transactions
 
-## Worker & Migrate roles
+`app.main:create_app --factory` loads deployment settings once and installs a
+lifespan-owned `ApiRuntime` on `app.state`. `app.execution_kernel_main` builds a
+separate `KernelRuntime`. `TaskSupervisor` owns every background coroutine and
+performs bounded drain; the roles do not share resource instances.
 
-### Worker (`app.worker.main`)
+Application mutations call `uow.commit()` explicitly. Context exit without a
+commit always rolls back, including a normal return. Repository methods never
+commit, and Redis publication is a post-commit hint after PostgreSQL succeeds.
 
-The Worker is a **long-running consumer** of Redis `task:dispatch`. It must run alongside the API for any Agent, codebase ingest, or knowledge-base ingest work to execute.
+Use `/api/health/live` for process liveness and `/api/health/ready` for complete
+runtime readiness. `/api/status` is a dependency diagnostic, not a lifecycle
+probe.
 
-| `task_type` | Synthetic session id | Runner |
-|-------------|---------------------|--------|
-| `agent` (default) | User session id | `AgentTaskRunner` via `TaskRunnerFactory` |
-| `codebase_ingest` | `codebase-ingest:{id}` | `CodebaseIngestionTaskRunner` |
-| `kb_ingest` | `kb-ingest:{id}` | `KBIngestionTaskRunner` |
+## Security boundaries
 
-Worker responsibilities beyond task execution:
+Authenticated requests resolve an immutable `AuthorizationContext` and
+`OwnerScope`. Transaction-local PostgreSQL settings drive forced RLS. The
+greenfield deployment provisions separate application, execution-kernel, and
+migration roles; schema ownership is not granted to runtime roles.
 
-- Task lease acquire/renew/release (`task_lease.py`) for crash-safe idempotency
-- Sandbox admission, warm pool, and orphan cleanup (`sandbox_maintenance.py`)
-- Stuck KB ingest reconciliation on startup and periodic loops
-- Ops Patrol execution plus leased retention cleanup for expired Runs, Findings, and evidence references
-- Optional DLQ replay when `model_resilience.dlq_replay_enabled=true`
-- MCP/A2A outbound connection pool release on shutdown
+- User resources are personal or belong to one team workspace.
+- Auditors are read-only.
+- Administrators manage global resources and platform configuration.
+- Cross-scope lookups fail closed and normally return not found.
+- LLM and integration secrets use only versioned `fernet_v2` envelopes.
 
-Scale Workers horizontally; each replica joins the same Redis consumer group. See [Task recovery](../docs/architecture/task-recovery.md).
+## Core HTTP contract
 
-### Migrate (`app.migrate`)
+All application routes are under `/api`.
 
-Migrate is a **one-off job** per deploy — not a long-running service:
+- `/auth/*`, `/teams/*`, `/service-keys/*`: identity and workspaces
+- `/sessions/*`: session CRUD, message command admission, public event replay,
+  VNC and files
+- `/runs/*`, `/approval-batches/*`: formal execution and approval commands
+- `/knowledge-bases/*`, `/codebases/*`: immutable candidate builds and
+  published version bindings
+- `/scheduled-jobs/*`, `/patrol-*`: automation, patrol, evidence, remediation
+- `/inference/endpoints/*`, `/inference/models/*`, `/inference/bindings/*`,
+  `/skills/*`, `/runtime-policies/*`: runtime resources, policy revisions, and inference bindings
+- `/admin/*`: users, usage, audit, governance, compliance
 
-1. **Alembic** schema upgrade to `head`
-2. **Data migrations**: LLM API key encryption, AppConfig YAML seed, MCP/A2A blob migration, MCP URL/secret migration
+OpenAPI at `/openapi.json` is the route-level source of truth.
+
+## Local development
+
+```bash
+uv sync
+uv run pytest -q
+uv run lint-imports
+uv run ruff check --select F821 app tests
+```
+
+Run the roles in separate terminals after configuring `.env` and PostgreSQL:
 
 ```bash
 ./migrate.sh
-# or: python -m app.migrate
-```
-
-API startup validates schema is at Alembic head and **refuses to start** if not migrated (skipped in test env). Docker Compose runs `opencitadel-migrate` before API/Worker; Helm uses a migrate initContainer.
-
-Do not run Agent tasks in the migrate process — it has no `WorkerContainer` wiring.
-
-## Project Structure
-
-```
-api/
-├── app/
-│   ├── interfaces/            # FastAPI routes, schemas, middleware, auth DI
-│   ├── application/
-│   │   └── services/          # AgentService, TaskRunnerFactory, LLM*Service...
-│   ├── domain/
-│   │   ├── models/            # Domain entities (session, llm_endpoint, event...)
-│   │   ├── repositories/      # UoW and repository ports
-│   │   ├── external/          # External service ports
-│   │   ├── services/agents/   # Planner, Clarify, ReAct, SubAgent
-│   │   ├── services/flows/    # PlannerReActFlow, CodeAskFlow, DocQAFlow, HybridAskFlow
-│   │   └── schemas/           # Structured LLM outputs
-│   ├── infrastructure/
-│   │   ├── repositories/      # DB repository implementations
-│   │   ├── adapters/          # Redis, storage, event projection adapters
-│   │   ├── external/task/     # RedisStreamTask, TaskStateService
-│   │   ├── external/sandbox/  # DockerSandbox, SandboxProvider
-│   │   ├── external/llm/      # OpenAI, ResilientLLM, circuit breaker
-│   │   ├── observability/     # OTel, AgentTracer, logging_context
-│   │   └── security/          # ApiKeyCipher, SecretManager
-│   ├── runtime_role.py        # ProcessRole (api/worker/migrate)
-│   ├── container.py           # BaseContainer / ApiContainer / WorkerContainer
-│   ├── worker/main.py         # Agent Worker entry
-│   ├── migrate.py             # Standalone migration entry
-│   └── main.py                # FastAPI entry
-├── alembic/
-├── core/config.py
-├── migrate.sh / worker.sh / run.sh
-└── Dockerfile
-```
-
-## API Routes
-
-All routes below are prefixed with `/api` unless noted. Authenticated routes require a valid session JWT unless using `X-Api-Key` on supported integration endpoints.
-
-> **Maintenance**: This table is maintained manually. When adding routes, update this file and `README.zh-CN.md`, then verify against `app/interfaces/endpoints/routes.py` and live OpenAPI at `/openapi.json`. Run `./scripts/check-docs.sh` before docs PRs.
-
-### Authorization and tenant isolation
-
-Authenticated requests resolve
-`Principal → WorkspaceContext / OwnerScope → immutable AuthorizationContext`.
-The unit of work copies that context into transaction-local PostgreSQL GUCs
-before repository queries. Tenant tables use FORCE RLS (forced row-level
-security), providing defense in depth behind the application scope filters.
-Callers outside a resource scope normally receive 404 to avoid object-existence
-leaks.
-
-- `USER` can mutate owned personal resources and resources in validated team
-  workspaces.
-- `AUDITOR` is read-only: authenticated mutations are default-denied, and an
-  auditor-owned service API key cannot execute A2A.
-- `ADMIN` owns platform administration and mutation of global LLM
-  endpoints/models, Skills, MCP servers, and A2A servers.
-- Personal and team default-model choices are stored in
-  `llm_model_preferences`; they do not mutate global `llm_models`.
-
-### Public / unauthenticated
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout` | Cookie session auth |
-| GET | `/auth/oauth/{provider}/login`, `/auth/oauth/{provider}/callback` | OAuth (Google/GitHub) |
-| GET | `/status` | Health check |
-| GET | `/llm/status` | LLM provider availability summary |
-| GET | `/metrics` | Prometheus metrics |
-| POST | `/webhooks/{job_token}` | Automation webhook ingress (token in path) |
-| GET | `/share/artifact/{token}` | Public artifact share (token in path) |
-| GET | `/invitations/{token}` | Team invitation preview |
-| POST | `/invitations/{token}/register` | Register and join via team invitation |
-| GET | `/.well-known/agent-card.json` | A2A agent card (when feature flag enabled) |
-
-### Authenticated (session JWT)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/auth/me` | Current user profile |
-| POST | `/invitations/{token}/accept` | Accept team invitation (logged-in user) |
-| GET/POST/DELETE | `/service-keys` | Service API key CRUD |
-| GET/POST/PATCH/DELETE | `/teams`, `/teams/{id}/*` | Team workspace APIs |
-| GET/POST/PATCH | `/sessions`, `/sessions/{id}/*` | Session CRUD, chat SSE, checkpoints, VNC |
-| GET/POST/PATCH/DELETE | `/patrol-packs`, `/patrol-packs/{id}/*`, `/patrol-runs/*`, `/patrol-findings/*` | Feature-flagged Ops Patrol control plane (read-only findings; remediation writes gated separately) |
-| POST/GET | `/patrol-findings/{id}/remediations`, `/patrol-runs/{run_id}/remediations`, `/patrol-remediations/{id}` | Feature-flagged Patrol remediation proposals, approval, and execution |
-| GET/POST/PUT/DELETE | `/skills`, `/memories`, `/files` | Skills, long-term memory, files |
-| GET/POST | `/codebases`, `/knowledge-bases`, `/scheduled-jobs`, `/notifications` | Codebase, KB, automation, notifications |
-| GET/PUT/DELETE | `/app-config/*`, `/llm-endpoints`, `/llm-models` | AppConfig, LLM endpoints and models |
-
-### Service API key (`X-Api-Key`)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/a2a` | Inbound A2A (feature-flagged; requires valid service API key) |
-
-> Service API keys authenticate the caller but do **not** carry team workspace
-> scope. Use session JWT + `X-Workspace-Id` for team-scoped operations.
-> `require_service_api_key` also rejects keys owned by an `AUDITOR`, so those
-> credentials cannot invoke A2A.
-
-### Admin & compliance (auditor or admin)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET/PATCH/DELETE | `/admin/users`, `/admin/users/{id}` | User management |
-| POST | `/admin/invitations` | Platform invitations |
-| GET/PUT | `/admin/users/{id}/quota` | User quotas |
-| GET | `/admin/audit`, `/admin/audit/{id}`, `/admin/audit/summary`, `/admin/audit/export` | Audit logs |
-| GET | `/admin/usage`, `/admin/usage/summary`, `/admin/usage/timeseries`, `/admin/usage/breakdown` | Token usage APIs |
-| GET | `/admin/overview` | Admin dashboard metrics |
-| GET/DELETE/PATCH | `/admin/teams`, `/admin/teams/{id}` | Team administration |
-| GET | `/admin/audit/verify-chain`, `/admin/audit/verify-chain/sessions/{id}` | Audit chain verification |
-| GET | `/admin/evidence/sessions`, `/admin/evidence/sessions/{id}/package` | Compliance evidence |
-| GET | `/admin/compliance/report` | Compliance report export |
-| GET | `/admin/governance/sessions/{id}/profile` | Session governance profile (capability narrowing, approval batches, denials, run outcome, audit chain) |
-| GET | `/admin/governance/overview?days=30` | Platform-wide governance overview (approval outcomes, daily interceptions, Ops Patrol trend, remediation outcomes, audit chain status) |
-
-### Teams & invitations
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET/POST | `/teams` | List/create teams |
-| GET/DELETE | `/teams/{id}` | Team details/delete |
-| GET/POST/DELETE/PATCH | `/teams/{id}/members`, `/teams/{id}/invitations` | Members and invitations (optional `email`) |
-| POST | `/teams/{id}/leave` | Leave team |
-| GET | `/invitations/{token}` | Preview invitation (public) |
-| POST | `/invitations/{token}/register` | Register and join (public) |
-| POST | `/invitations/{token}/accept` | Accept invitation |
-
-### App configuration & integrations
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/app-config/sections` | List AppConfig sections |
-| GET/PUT/DELETE | `/app-config/sections/{section}` | Read/update/delete section |
-| GET/POST | `/app-config/revisions`, `/app-config/revisions/{id}/rollback` | Config revision history |
-| GET/PUT | `/app-config/agent` | Agent config shortcut |
-| GET/POST/PUT/DELETE | `/app-config/mcp-servers`, `/app-config/mcp-servers/{name}/*` | MCP server CRUD |
-| GET/POST/DELETE | `/app-config/a2a-servers`, `/app-config/a2a-servers/{id}/*` | A2A server CRUD |
-
-### Ops Patrol (Developer Preview)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET/POST | `/patrol-packs` | List/create versioned Packs |
-| GET/PATCH/DELETE | `/patrol-packs/{id}` | Pack detail and lifecycle-safe updates |
-| POST | `/patrol-packs/{id}/{validate\|activate\|pause}` | Validate capabilities, activate, or pause |
-| POST | `/patrol-packs/{id}/trigger` | Manual Run; requires `Idempotency-Key` |
-| GET | `/patrol-packs/{id}/metrics` | 30-day scheduled success, Findings, review time |
-| GET | `/patrol-runs`, `/patrol-runs/{id}` | Filter Runs and read authoritative results |
-| POST | `/patrol-runs/{id}/{cancel\|replay}` | Cancel or replay a Run |
-| GET | `/patrol-runs/{id}/evidence` | Download signed evidence ZIP |
-| POST | `/patrol-findings/{id}/{acknowledge\|resolve\|false-positive}` | Record an audited decision |
-| POST | `/patrol-findings/{id}/remediations` | Propose a remediation action for a Finding |
-| GET | `/patrol-runs/{run_id}/remediations` | List remediations for a Run |
-| GET | `/patrol-remediations/{id}` | Remediation detail (status, approval, execution result) |
-
-Patrol resources use the same personal/team `OwnerScope` and FORCE RLS controls as other tenant data. `AUDITOR` can read and download evidence but cannot mutate. Remediation execution is disabled by default (`enable_ops_patrol_remediation`) and always routes through the same `ToolApprovalBatch` human-approval gate as any `approval=always` tool. See [Ops Patrol architecture](../docs/architecture/ops-patrol.md).
-
-### LLM endpoints & models
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET/POST | `/llm-endpoints` | List/create provider endpoints (stores encrypted API key) |
-| GET/PUT/DELETE | `/llm-endpoints/{id}` | Endpoint CRUD |
-| GET/POST | `/llm-models` | List/create models (references `endpoint_id`) |
-| GET/PUT/DELETE | `/llm-models/{id}` | Model CRUD |
-| POST | `/llm-models/{id}/set-default` | Set default model |
-| POST | `/llm-models/{id}/probe-multimodal` | Probe vision capability |
-
-Endpoint/model rows are global control-plane records and require `ADMIN` for
-mutation. `POST /llm-models/{id}/set-default` writes the caller's personal or
-team-scoped `llm_model_preferences` row; only an admin operating in global
-scope changes the global default.
-
-See [`../docs/architecture/llm-endpoints-and-models.md`](../docs/architecture/llm-endpoints-and-models.md).
-
-### Sessions, artifacts, skills, memory, files
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST/GET/PATCH | `/sessions`, `/sessions/stream`, `/sessions/{id}` | Session CRUD and list |
-| POST | `/sessions/{id}/chat` | SSE streaming chat |
-| GET | `/sessions/{id}/events` | Paginated event replay |
-| GET/POST | `/sessions/{id}/memory`, `/memory/compact`, `/memory/clear` | Session agent memory |
-| GET/POST | `/sessions/{id}/checkpoints`, `/checkpoints/{id}/restore` | Checkpoints and rollback |
-| WS | `/sessions/{id}/vnc` | VNC WebSocket proxy |
-| GET/POST | `/sessions/{session_id}/artifacts`, `/artifacts/{id}`, `/artifacts/{id}/share` | Artifacts |
-| GET/POST/PUT/DELETE | `/skills`, `/skills/recommend`, `/skills/import` | Skill templates |
-| GET/POST/PUT/DELETE | `/memories` | Long-term memory |
-| POST/GET | `/files`, `/files/{id}/download` | File upload/download |
-
-### Codebase, knowledge base, automation
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET/POST | `/codebases`, `/codebases/{id}/*` | Code import, ingest SSE, symbols, sessions |
-| GET/POST | `/knowledge-bases`, `/knowledge-bases/{id}/*` | KB CRUD, documents, ingest, reindex |
-| GET/POST/PATCH/DELETE | `/scheduled-jobs`, `/scheduled-jobs/{id}/*` | Cron/webhook jobs |
-| GET/POST | `/notifications`, `/notifications/stream` | User notifications |
-
-### SSE Event Types
-
-All SSE `data` includes `event_id`, `created_at`, `schema_version`, `visibility`, `channel`, and `persist` metadata. Historical events replay via `GET /api/sessions/{id}/events?after=<seq>&limit=100`; live events push through `/chat` SSE.
-
-| Event | Description |
-|-------|-------------|
-| `clarify` | Clarifying question from ClarifyAgent |
-| `message` | Full user or assistant message |
-| `message_delta` | Assistant text delta (merged by `stream_id`) |
-| `reasoning_delta` | Reasoning delta (default: `include_debug=true` only) |
-| `tool_args_delta` | Tool args JSON delta (default: `include_debug=true` only) |
-| `assistant_notice` | User-facing assistant notice |
-| `session_status` | Server-authoritative session status |
-| `debug_item` | Internal debug item (`include_debug=true`) |
-| `title` | Session title update |
-| `plan` | Plan event (with steps list) |
-| `step` | Step event (id/status/description) |
-| `subagent` | Sub-agent delegation status |
-| `tool` | Tool call event (name/function/args/content) |
-| `artifact` | Artifact workbench update |
-| `approval` | Plan/tool approval gate state |
-| `wait` | Waiting for user input |
-| `usage` | Token usage event |
-| `done` | Stream end |
-| `error` | Error event |
-
-See [`../docs/architecture/events.md`](../docs/architecture/events.md) for design details.
-
-## Agent Capabilities
-
-- **Token streaming**: `LLM.stream_invoke()` pushes deltas to SSE
-- **Parallel tools**: multiple `tool_calls` per turn; browser/shell auto-locked
-- **Structured Planner output**: `PlannerPlanSchema` Pydantic strict validation
-- **Vector memory**: pgvector hybrid recall when `memory.vector_enabled: true` in `api/config.yaml` (default **false**). Knowledge base indexing uses a separate `knowledge_base.vector_enabled` flag (default **true**).
-- **Multi-provider**: OpenAI-compatible / Anthropic / Gemini native adapters
-
-## Local Development
-
-### Prerequisites
-
-```bash
-pip install uv
-uv sync --frozen
-playwright install
-```
-
-### Configuration
-
-See `.env.example` (bootstrap and secrets) and `api/config.yaml` (runtime behavior). Key `.env` settings:
-
-```bash
-POSTGRES_ADMIN_USER=postgres       # Bootstrap/admin role; never used by the app
-POSTGRES_ADMIN_PASSWORD=<distinct-admin-password>
-POSTGRES_USER=opencitadel_app      # NOSUPERUSER NOBYPASSRLS application role
-POSTGRES_PASSWORD=<app-password>
-POSTGRES_DB=opencitadel
-POSTGRES_HOST=localhost
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=<16-plus-character-password>
-API_KEY_SECRET=<32-plus-character-random-secret>
-API_KEY_SECRET_ID=primary
-API_KEY_PREVIOUS_SECRETS={}
-AUDIT_SIGNING_KEY=<different-32-plus-character-random-secret>
-AUDIT_SIGNING_KEY_ID=primary
-AUDIT_PREVIOUS_SIGNING_KEYS={}
-JWT_SECRET=<different-32-plus-character-random-secret>
-SESSION_SECRET=<different-32-plus-character-random-secret>
-SANDBOX_BROKER_TOKEN=<32-plus-character-random-token>
-EMBEDDING_API_KEY=         # Required when vector memory is enabled
-```
-
-Sandbox address, vector memory, OTEL toggles in `api/config.yaml`:
-
-```yaml
-sandbox:
-  address: null             # Leave empty to create sandbox containers dynamically
-memory:
-  vector_enabled: false
-observability:
-  otel_enabled: false
-```
-
-### Start Services
-
-```bash
-# 1. Database migration (required first)
-./migrate.sh
-
-# 2. Start API
 ./run.sh
-# or: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-# 3. Start Worker in another terminal (required for Agent tasks)
-./worker.sh
+./execution-kernel.sh
 ```
 
-Visit `http://localhost:8000/docs` for API documentation.
+The migration is a single greenfield revision. There is no historical data
+conversion command or alternate execution schema.
 
-### Database Migrations
+## Containers
 
-```bash
-# Recommended: standalone migration script (Alembic + data migration / config seed)
-./migrate.sh
-# or
-python -m app.migrate
+The Dockerfile exposes `api` and `execution-kernel` targets. Compose service
+names are `opencitadel-api`, `opencitadel-execution-kernel`, and
+`opencitadel-migrate`. The Helm chart uses the same API/kernel split and
+dedicated credentials.
 
-# Development: generate new migration
-alembic revision --autogenerate -m "description"
-# Apply migrations via full entry point
-./migrate.sh
-```
-
-> **Note**: API startup validates DB schema is at Alembic head; startup fails if not migrated (skipped in test env).
-
-### Versioned credential and audit-key rotation
-
-Set distinct strong values for `API_KEY_SECRET` and `AUDIT_SIGNING_KEY` in
-production (`openssl rand -hex 32`). `llm_endpoints.api_key_encryption`
-indicates storage format:
-
-| Value | Meaning |
-|-------|---------|
-| `legacy_plaintext` | Legacy plaintext (compatible read) |
-| `fernet_v1` | Legacy unversioned Fernet |
-| `fernet_v2` | Current `v2.<key-id>.<token>` format |
-
-`python -m app.migrate` auto-encrypts legacy plaintext after Alembic.
-For encryption-key rotation:
-
-1. retain the old id/secret in `API_KEY_PREVIOUS_SECRETS`;
-2. set a new `API_KEY_SECRET_ID` and `API_KEY_SECRET`;
-3. run `python -m app.migrate_llm_api_key_rotation`;
-4. verify every non-empty row is `fernet_v2` under the new id before removing
-   the old key.
-
-Audit rows use `AUDIT_SIGNING_KEY_ID` and verify historical signatures through
-`AUDIT_PREVIOUS_SIGNING_KEYS`. Because audit rows are append-only, keep an old
-signing key for as long as retained rows reference it and verify through
-`GET /api/admin/audit/verify-chain`.
-
-API, Worker, and migrate reject weak/placeholder secrets when
-`ENV=production`. The rollback-safe Compose and Helm sequences are in the
-[production deployment guide](../docs/operations/deployment.md#credential-encryption-and-audit-signing-key-rotation).
-
-## Docker Deployment
-
-Multi-stage `Dockerfile` produces separate images:
-
-| target | Image | CMD |
-|--------|-------|-----|
-| `api` | `opencitadel-api` | `./run.sh` |
-| `worker` | `opencitadel-worker` | `./worker.sh` |
-
-Deploy via root `docker-compose.yml`:
-
-| Service | Description |
-|---------|-------------|
-| `opencitadel-migrate` | One-off init job (api target), Alembic + LLM key migration |
-| `opencitadel-api` | Stateless FastAPI API (`target: api`) |
-| `opencitadel-worker` | Agent Worker pool (`target: worker`, scalable) |
-| `opencitadel-postgres` | `pgvector/pgvector:pg16` |
-| `opencitadel-redis` | Task queue and event streams |
-
-```bash
-docker compose up -d --build
-docker compose logs -f opencitadel-worker
-```
-
-Build-time `pip install uv` and `uv sync` default to Aliyun PyPI (see build args in root `docker-compose.yml`). Override with `PIP_INDEX_URL`, `UV_INDEX_URL`, `UV_VERSION`, `UV_HTTP_TIMEOUT`.
-
-## Kubernetes
-
-Helm chart at [`../deploy/helm/opencitadel/`](../deploy/helm/opencitadel/), including API/Worker Deployments, HPA, and migrate initContainer.
+See [architecture overview](../docs/architecture/overview.md),
+[execution kernel](../docs/architecture/execution-kernel.md), and
+[deployment](../docs/operations/deployment.md).

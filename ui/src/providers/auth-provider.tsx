@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { authApi, type AuthUser } from "@/lib/api/auth";
+import { useClientDataScope } from "@/providers/client-data-provider";
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -14,34 +15,42 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { bindAuthenticatedUser, clearAuthenticatedData } = useClientDataScope();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      setUser(await authApi.me());
+      const authenticatedUser = await authApi.me();
+      bindAuthenticatedUser(authenticatedUser.id);
+      setUser(authenticatedUser);
     } catch {
+      clearAuthenticatedData();
       setUser(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [bindAuthenticatedUser, clearAuthenticatedData]);
 
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
     } finally {
+      clearAuthenticatedData();
       setUser(null);
       window.location.href = "/";
     }
-  }, []);
+  }, [clearAuthenticatedData]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  const value = useMemo(() => ({ user, loading, refresh, logout }), [user, loading, refresh, logout]);
+  const value = useMemo(
+    () => ({ user, loading, refresh, logout }),
+    [user, loading, refresh, logout],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

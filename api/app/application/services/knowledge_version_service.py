@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Owner-scoped ResourceVersionProvider for knowledge bases."""
+
 from datetime import datetime
 
 from app.application.services.resource_version_provider import (
@@ -11,14 +10,12 @@ from app.domain.models.knowledge_version import (
     KnowledgeBaseVersion,
     KnowledgeVersionState,
 )
-from app.domain.models.resource_governance import ResourceKind
+from app.domain.models.resource_bindings import ResourceKind
 from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
 
 
-class KnowledgeVersionService(
-    OwnerScopedVersionProvider[KnowledgeBase, KnowledgeBaseVersion]
-):
+class KnowledgeVersionService(OwnerScopedVersionProvider[KnowledgeBase, KnowledgeBaseVersion]):
     kind = ResourceKind.KNOWLEDGE_BASE
     _resource_label = "knowledge base"
     _version_label = "knowledge-base version"
@@ -53,14 +50,10 @@ class KnowledgeVersionService(
 
     @classmethod
     def _is_published(cls, version: KnowledgeBaseVersion) -> bool:
-        return (
-            version.published_at is not None
-            and version.state
-            in {
-                KnowledgeVersionState.READY,
-                KnowledgeVersionState.DEGRADED,
-            }
-        )
+        return version.published_at is not None and version.state in {
+            KnowledgeVersionState.READY,
+            KnowledgeVersionState.DEGRADED,
+        }
 
     @classmethod
     def _is_degraded(cls, version: KnowledgeBaseVersion) -> bool:

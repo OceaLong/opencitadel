@@ -3,6 +3,7 @@
 Hash algorithm (canonical JSON -> sha256) and manifest shape mirror
 ops-collector/src/opencitadel_ops_collector/capabilities.py:34-36.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -11,7 +12,6 @@ from typing import Any
 
 from . import __version__
 from .contracts import ActuatorEnvelope, RestartRequest, RollbackRequest, ScaleRequest
-
 
 TOOL_INPUT_MODELS = {
     "get_capabilities": None,
@@ -22,7 +22,9 @@ TOOL_INPUT_MODELS = {
 
 
 def canonical_hash(value: Any) -> str:
-    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    payload = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 

@@ -2,8 +2,8 @@ import pytest
 
 from app.domain.errors import BadRequestError
 from app.domain.models.codebase import SessionMode
-from app.domain.models.resource_governance import (
-    BuildState,
+from app.domain.models.resource_bindings import (
+    PublicationState,
     PublishedResourceVersion,
     ResourceKind,
 )
@@ -34,7 +34,7 @@ async def test_guard_resolves_only_matching_published_versions():
             ResourceKind.KNOWLEDGE_BASE,
             "kb1",
             "v2",
-            state=BuildState.SUCCEEDED,
+            state=PublicationState.READY,
             published=True,
         ),
     )
@@ -67,7 +67,7 @@ async def test_guard_rejects_unpublished_resources_with_the_same_error():
             ResourceKind.CODEBASE,
             "cb1",
             "v1",
-            state=BuildState.RUNNING,
+            state=PublicationState.READY,
             published=False,
         ),
     )

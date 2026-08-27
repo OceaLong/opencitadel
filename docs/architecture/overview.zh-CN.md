@@ -1,389 +1,120 @@
+# 架构总览
+
 [English](overview.md)
 
-# OpenCitadel 架构说明
+OpenCitadel 只有一个事件溯源执行内核。Agent、Ask、资源摄取、自动化、巡检和修复统一使用 PostgreSQL 命令、事件、Activity、定时器、审批与投影协议；系统中不存在第二套任务生命周期，也不让传输层持有工作流状态。
 
-本文档是 OpenCitadel 系统架构、API / Worker 职责划分、依赖注入、沙箱生命周期与部署形态的权威说明。
-
-## 总体架构
+## 运行拓扑
 
 ```mermaid
 flowchart LR
-  Client["Client UI"] -->|"HTTP or SSE"| Api["FastAPI API"]
-  Api -->|"task input and dispatch"| Redis["Redis Streams"]
-  Api -->|"read and write"| Postgres["Postgres pgvector"]
-  Api -->|"objects"| Storage["COS / MinIO"]
-  Redis -->|"claim task:dispatch"| Worker["Agent Worker Pool"]
-  Worker -->|"run task runner"| AgentRunner["AgentTaskRunner or IngestionRunner"]
-  AgentRunner -->|"create or attach"| Sandbox["Sandbox Runtime"]
-  AgentRunner -->|"LLM calls"| ModelProvider["Model Providers"]
-  AgentRunner -->|"output events"| Redis
-  Worker -->|"persist events"| Postgres
-  Redis -->|"task output stream"| Api
-  Worker -->|"MCP calls, read-only"| Collector["Ops Collector 8090"]
-  Worker -->|"MCP calls, approval-gated write"| Actuator["Ops Actuator 8091"]
+  Client[Web / API 客户端] --> API[无状态 API]
+  API --> Inbox[(命令收件箱)]
+  Scheduler[调度器 / Webhook] --> Inbox
+  Inbox --> Kernel[执行内核]
+  Kernel --> Events[(执行事件)]
+  Events --> Activities[(Activity 任务)]
+  Activities --> Kernel
+  Kernel --> Providers[LLM / 沙箱 / MCP / 存储]
+  Events --> Views[(正式投影)]
+  Views --> API
+  Events --> Public[(公开事件投影)]
+  Public --> SSE[SSE 重放与实时推送]
+  Kernel -. 可丢弃唤醒 .-> Redis[(Redis)]
 ```
 
-运行时以 API 无状态、Worker 消费 Redis Streams、Postgres 持久化、沙箱隔离执行为核心边界。API 负责接入和投影，Worker 负责执行和资源治理，Migrate 负责 schema 与配置种子迁移。Ops Patrol 与 Ops Patrol Remediation 增加了一个可选的、功能开关控制的 MCP 平面，仅从 Worker 可达：Ops Collector（8090）暴露固定的只读 Kubernetes/Prometheus 探针；Ops Actuator（8091）暴露一个狭窄的、仅支持 patch 的写入面，只有在持久化的 `ToolApprovalBatch` 被批准后才会执行。见 [Ops Patrol 架构](ops-patrol.zh-CN.md) 与 [安全模型](security-model.zh-CN.md#信任边界)。
-
-### 代码分层
-
-| 层级 | 路径 | 职责 |
-|------|------|------|
-| **interfaces** | `app/interfaces/` | FastAPI 路由、schemas、中间件、认证 DI |
-| **application** | `app/application/` | 用例服务（会话、LLM、任务、交付物） |
-| **domain** | `app/domain/` | 模型、仓储端口、Agent、Flow、工具 |
-| **infrastructure** | `app/infrastructure/` | ORM、DB 仓储、Redis、LLM、沙箱、安全适配器 |
-
-端口在 `domain/external/`，适配器在 `infrastructure/adapters/`。共享装配：`dependency-injector` 容器（`app/container.py`）。
-
-见 [技术选型](technical-decisions.zh-CN.md)。
-
-## 进程角色
-
-| 角色 | 入口 | 镜像 target | 职责 |
-|------|------|-------------|------|
-| API | `app.main` -> `uvicorn` | `api` | HTTP/SSE、任务 dispatch、事件流读取、配置管理 |
-| Worker | `app.worker.main` | `worker` | 消费 `task:dispatch`、执行 Agent / 代码库摄取 |
-| Migrate | `app.migrate` | `api`，一次性 job | `alembic upgrade head` 与配置种子迁移 |
-
-进程角色通过 `app/runtime_role.py` 的 `ProcessRole` 枚举显式设置，并写入环境变量 `OPENCITADEL_PROCESS_ROLE`。
-
-## 运行时数据流
-
-```mermaid
-flowchart TD
-  Client["Client"] -->|"POST chat or SSE"| Api["FastAPI API"]
-  Api -->|"write task:input"| TaskInput["Redis task:input"]
-  Api -->|"dispatch task"| TaskDispatch["Redis task:dispatch"]
-  TaskDispatch -->|"consumer group claim"| Worker["Agent Worker"]
-  Worker -->|"Planner and ReAct loop"| Runner["Task Runner"]
-  Runner -->|"stream events"| TaskOutput["Redis task:output"]
-  Runner -->|"persistable events"| SessionEvents["session_events append table"]
-  TaskOutput -->|"XREAD live events"| Api
-  SessionEvents -->|"replay pages"| Api
-  Api -->|"SSE projection"| Client
-```
-
-### API 职责
-
-- 接收 HTTP / WebSocket 请求，返回 SSE 事件流。
-- 创建任务，写入用户消息到 Redis `task:input`。
-- 通过 `task.invoke()` dispatch 到 `task:dispatch` 消费组。
-- 从 `task:output` stream 读取事件并推送给客户端。
-- `stop` 通过 Redis cancel 通道通知 Worker。
-- 校验 DB schema 版本，拒绝未迁移启动。
-- 维护 MCP / A2A 连接池空闲回收，入口为 `_connection_pool_cleanup_loop`。
-
-### Worker 职责
-
-- 从 Redis `task:dispatch` 消费组领取任务。
-- 准入门控：`can_admit()` 不满足时不 claim，任务留在 Stream，不进入 PEL。
-- 任务幂等锁：claim 后通过 `task_lease.py` 中的 `try_acquire_task_lease()` 等函数防止 XAUTOCLAIM 重复执行。
-- 按 `task_type` 运行 `AgentTaskRunner`、`CodebaseIngestionTaskRunner` 或 `KBIngestionTaskRunner`。
-- 写入事件到 `task:output` stream。
-- 将可持久化事件追加到 `session_events` 表。
-- 执行沙箱 reconcile、空闲回收、低内存回收，使用 `try_become_reclaim_leader()` 单活协调。
-- 通过 `_task_reconcile_loop()` 对账孤儿 Agent 任务与卡住的知识库摄取（见 [知识库摄取](knowledge-base-ingestion.zh-CN.md)）。
-- 任务结束后释放 MCP / A2A 陈旧连接。
-
-## 摄取任务类型
-
-Worker 按任务元数据中的 `task_type` 路由（`worker/main.py`）：
-
-| `task_type` | session id 模式 | Runner | 说明 |
-|-------------|----------------|--------|------|
-| `agent`（默认） | 用户会话 id | `AgentTaskRunner` | 聊天、HITL、工具 |
-| `codebase_ingest` | `codebase-ingest:{id}` | `CodebaseIngestionTaskRunner` | ZIP/Git 导入、静态分析、产物 |
-| `kb_ingest` | `kb-ingest:{id}` | `KBIngestionTaskRunner` | 文档解析、OCR、分块、向量化、GraphRAG |
-
-摄取任务在合成 session id 上发出 SSE `step` 事件，不走 Agent 流路由。详见 [Codebase 重新索引](codebase-reindex.zh-CN.md) 与 [知识库摄取](knowledge-base-ingestion.zh-CN.md)。
-
-## Agent 流路由（SessionMode）
-
-`AgentTaskRunner` 根据会话绑定的资源与 `SessionMode` 选择执行流（`api/app/domain/services/agent_task_runner.py`）：
-
-```mermaid
-flowchart TD
-  Start["AgentTaskRunner init"] --> Hybrid{"codebase_id + knowledge_base_id + ASK?"}
-  Hybrid -->|"yes"| HybridAsk["HybridAskFlow"]
-  Hybrid -->|"no"| CheckCode{"codebase_id set?"}
-  CheckCode -->|"yes + mode ASK"| CodeAsk["CodeAskFlow"]
-  CheckCode -->|"no"| CheckKB{"knowledge_base_id set?"}
-  CheckKB -->|"yes + mode ASK"| DocQA["DocQAFlow"]
-  CheckKB -->|"no or mode AGENT"| Planner["PlannerReActFlow"]
-```
-
-| 条件 | 流 | 说明 |
-|------|-----|------|
-| `codebase_id` + `knowledge_base_id` + `SessionMode.ASK` | `HybridAskFlow` | 代码库 + 知识库联合问答 |
-| `codebase_id` + `SessionMode.ASK` | `CodeAskFlow` | 代码库问答；优先于仅 KB |
-| `knowledge_base_id` + `SessionMode.ASK` | `DocQAFlow` | 知识库 Doc QA |
-| 其他（含 `SessionMode.AGENT`） | `PlannerReActFlow` | Planner → Clarify → ReAct 通用 Agent |
-
-### Ask 模式代码库访问
-
-Ask 模式（`CodeAskFlow` / `HybridAskFlow` / `DocQAFlow`）是只读 RAG 问答，与 Agent 模式在代码库访问路径上不同：
-
-| 维度 | Ask 模式 | Agent 模式 |
-|------|----------|------------|
-| 代码库物化 | 不将 tarball 恢复到会话沙箱 | `attach_to_session_sandbox` 恢复快照到 `/home/ubuntu` |
-| `read_code` 沙箱 | 索引沙箱 `codebase.sandbox_id`（与 UI `readSource` 一致） | 会话沙箱 `session.sandbox_id`（支持改码后读取） |
-| 工具白名单 | `build_ask_tools`：codebase / knowledge_base / memory / MCP / A2A / Message | `build_default_tools`：含 shell / file / browser 等 |
-| 工作区路径 | 默认 `/home/ubuntu/codebase`（`codebase.workspace_path`） | 同上，经 attach 后存在于会话沙箱 |
-
-容器内路径语义：
-
-- `/home/ubuntu/codebase` — 用户导入并索引的代码库工作区
-- `/home/ubuntu` — Agent 默认 home，Shell 空 `exec_dir` 时的 cwd
-- `/sandbox` — 沙箱微服务自身代码（FastAPI / supervisord），**不是**用户代码库；Ask 模式已禁用 shell/file 工具以防误读
-
-实现位置：`api/app/application/services/task_runner_factory.py`（索引沙箱注入）、`api/app/domain/services/tools/tool_registry.py`（`build_ask_tools`）。
-
-## 任务执行状态
-
-Redis 中持久化的任务状态由 `TaskStatus` 枚举定义（`api/app/infrastructure/external/task/task_state.py`），共 5 个值：
-
-| `TaskStatus` | 值 | 说明 |
-|--------------|-----|------|
-| `PENDING` | `pending` | 任务已注册并 dispatch 到 `task:dispatch`，等待 Worker 执行 |
-| `RUNNING` | `running` | `RedisStreamTask.execute_locally()` 已开始执行 |
-| `DONE` | `done` | 正常完成（对应 SSE `done` 事件；会话层投影为 `completed`） |
-| `FAILED` | `failed` | 执行失败 |
-| `CANCELLED` | `cancelled` | 用户或系统取消 |
-
-以下行为阶段**不写入** `TaskStatus`，但影响任务流转：
-
-| 行为阶段 | 实现位置 | 说明 |
-|----------|----------|------|
-| WaitingAdmission | `worker/main.py` | `can_admit()` 为 false 时 Worker sleep，不 claim，任务留在 Stream |
-| Claimed | `claim_dispatch()` | XREADGROUP claim 成功，无独立状态字段 |
-| LeaseAcquired | `try_acquire_task_lease()` | Redis 幂等锁；冲突时 ack 并跳过，状态不变 |
-
-```mermaid
-stateDiagram-v2
-  [*] --> pending: register_task_and_dispatch
-  pending --> pending: admission_denied_or_dispatch_retry
-  pending --> pending: recoverable_input_unavailable
-  pending --> running: execute_locally_started
-  running --> done: success
-  running --> failed: error
-  running --> cancelled: cancel_signal
-  done --> [*]
-  failed --> [*]
-  cancelled --> [*]
-```
-
-恢复与重试路径（未在上图单独画状态）：
-
-- `RecoverableTaskInputUnavailable`：执行前输入不可用 → 回退 `pending` 并重新 dispatch。
-- `TASK_INFRA_FAILED`：瞬时基础设施失败 → 检查点恢复 + 重排队用户消息 + 重新 dispatch（见 [任务恢复](task-recovery.zh-CN.md)）。
-- `mark_dispatch_failure()`：非致命 dispatch 失败 → 回退 `pending` 并重试 dispatch。
-- 任务 lease 冲突：ack dispatch 消息，不更新 `TaskStatus`。
-
-`task:dispatch` 是任务分发权威队列。准入失败时 Worker 不 claim，避免任务进入 PEL 后长期占用；claim 成功后以 `task_lease.py` 中的模块函数作为执行幂等锁。
-
-## 沙箱准入与生命周期
-
-```mermaid
-flowchart TD
-  Worker["Worker before claim"] --> CanAdmit["SandboxQuota can_admit"]
-  CanAdmit -->|"false"| StayQueued["leave task in stream"]
-  CanAdmit -->|"true"| ClaimTask["claim task"]
-  ClaimTask --> Acquire["SandboxQuota acquire"]
-  Acquire --> Sandbox["create or reuse sandbox"]
-  Sandbox --> Release["release on destroy or reclaim"]
-```
-
-```mermaid
-stateDiagram-v2
-  [*] --> Requested
-  Requested --> Admitted: quota_available
-  Requested --> Rejected: quota_unavailable
-  Admitted --> Creating: acquire_holder
-  Creating --> Running: sandbox_ready
-  Running --> Idle: task_finished
-  Running --> Reclaiming: low_memory_or_shutdown
-  Idle --> Reused: next_task
-  Idle --> Reclaiming: idle_timeout
-  Reused --> Running
-  Reclaiming --> Released: destroy_and_release
-  Released --> [*]
-  Rejected --> [*]
-```
-
-| 组件 | 文件 | 说明 |
-|------|------|------|
-| `SandboxQuota` | `api/app/infrastructure/external/sandbox/admission.py` | 节点分桶配额；Redis 不可用 fail-closed |
-| `try_acquire_task_lease()` 等 | `api/app/infrastructure/external/task/task_lease.py` | 长任务执行去重 |
-| `MemoryProbe` | `api/app/infrastructure/external/sandbox/memory_probe.py` | Docker 模式读宿主机 `/proc/meminfo`；K8s 旁路 |
-| `try_become_reclaim_leader()` | `api/app/infrastructure/external/sandbox/reclaim_coordinator.py` | Redis leader lease，单活执行回收 |
-| `resolve_sandbox_driver()` / `get_sandbox_class()` | `api/app/infrastructure/external/sandbox/sandbox_driver.py` | `auto` 探测 docker / kubernetes |
-
-### 沙箱运行模式
-
-| 模式 | 典型场景 | 配置 | 说明 |
-|------|----------|------|------|
-| Docker 本地动态沙箱 | 单机 Docker Compose | `sandbox.driver=auto` 或 `docker`，`sandbox.address` 为空 | API/Worker 使用认证生命周期 broker；仅 broker 持有 `docker.sock` |
-| Kubernetes Pod 沙箱 | Helm 集群部署 | `sandbox.driver=kubernetes`，`sandbox.address` 为空 | Worker 使用 ServiceAccount + RBAC 创建 Pod，ResourceQuota 限制总量 |
-| 远程沙箱网关 | 沙箱执行面外置 | `sandbox.address=http://sandbox-gateway.internal:8080` | Worker 直连远程服务，不再调用本地 Docker 或 K8s API |
-
-`api/config.yaml` 与 Helm 种子配置中 `pool_enabled=false` 是当前部署默认值；`AppConfig` schema 自身仍保留 `true` 作为无种子兜底。预热池是可选优化，只应在内存预算明确且需要降低首个工具调用延迟时开启。
-
-## 依赖注入容器
-
-```mermaid
-flowchart TB
-  subgraph baseContainer ["BaseContainer shared providers"]
-    Infra["postgres redis cos config_provider"]
-    Services["application services task_runner_factory agent_service"]
-  end
-  ApiEntry["app.main role api"] --> ApiContainer["ApiContainer"]
-  WorkerEntry["app.worker.main role worker"] --> WorkerContainer["WorkerContainer"]
-  ApiContainer --> baseContainer
-  WorkerContainer --> baseContainer
-  ApiContainer --> InterfaceWiring["wires app.interfaces"]
-  ApiContainer --> ApiConfigListener["config hot reload listener"]
-  WorkerContainer --> WorkerConfigListener["config hot reload listener"]
-  WorkerContainer --> SandboxPool["optional SandboxPool"]
-```
-
-| 容器 | 文件 | HTTP wiring | Sandbox 预热门户 | 配置热更新监听 |
-|------|------|-------------|------------------|----------------|
-| `BaseContainer` | `app/container.py` | 否 | 否 | 否 |
-| `ApiContainer` | 继承 Base | 是 | 否 | 是 |
-| `WorkerContainer` | 继承 Base | 否 | 是 | 是 |
-
-初始化入口：
-
-- API：`init_api_container()` / `shutdown_api_container()`。
-- Worker：`init_worker_container()` / `shutdown_worker_container()`。
-
-FastAPI 依赖注入通过 `ApiContainer` 解析；Worker 入口通过 `WorkerContainer` 初始化运行时依赖。
-
-## 配置权威
-
-| 类型 | 权威来源 | 说明 |
-|------|----------|------|
-| 行为配置 | `AppConfig`，由 DB 承载 | `model_resilience`、`feature_flags`、`worker`、`sandbox` 等运行行为 |
-| 初始默认值 | `api/config.yaml` / Helm `appConfig` | migrate job 在 `AppConfig` 为空时写入种子 |
-| 密钥与连接 | `Settings` 环境变量 | DB、Redis、COS/MinIO、JWT 等部署私密信息 |
-| LLM 凭证 | `llm_endpoints` 表（加密） | 按端点存 API Key；模型引用 `endpoint_id` |
-
-生产环境必须使用 `USE_DB_APP_CONFIG=true`；Docker Compose 默认不强制设置，需在 `.env` 显式开启，Helm `env` 已配置。修改 `AppConfig` 字段时需同步 schema、`config.yaml`、Helm `appConfig` 与相关文档。
-
-## 后台循环归属
-
-| 循环 | 归属 | 说明 |
-|------|------|------|
-| MCP / A2A 连接池回收 | API | 每 5 分钟释放陈旧连接 |
-| 沙箱维护 | Worker | `run_sandbox_maintenance()` + leader lease |
-| 沙箱预热门户 | Worker | `SandboxPool`，默认 `pool_enabled=false` |
-| 自动化调度 | Worker | `run_scheduler_loop()` — Cron/Webhook Leader 选举 |
-| 任务对账 | Worker | `_task_reconcile_loop()` — 陈旧 Agent 任务恢复 + 卡住 KB 摄取清理 |
-| DLQ 回放 | Worker | 启用时 `_dlq_replay_loop()` |
-
-## Memory 自动提取
-
-Agent 任务正常结束后，若 `memory.auto_extract_enabled=true`，`TaskRunnerFactory` 通过 `on_complete` 回调触发 `MemoryExtractorService.extract_from_session()`——**受治理的单工具会话**（`ops-patrol` / `ops-patrol-remediation`）除外。只要 `is_governed_single_tool_session` 为真，`TaskRunnerFactory` 就会传入 `on_complete_callback=None`（`task_runner_factory.py:707-711`），与 `auto_extract_enabled` 无关，因为这类会话没有可供提取记忆的通用对话内容：
-
-```mermaid
-flowchart TD
-  Done["Agent task completed"] --> Governed{"governed single-tool session?"}
-  Governed -->|"yes: patrol / remediation"| Skip["skip, on_complete_callback=None"]
-  Governed -->|"no"| Enabled{"auto_extract enabled?"}
-  Enabled -->|"no"| Skip
-  Enabled -->|"yes"| Load["Load last 30 session events"]
-  Load --> LLM["LLM extract 3-10 facts JSON"]
-  LLM --> Retry{"parse ok?"}
-  Retry -->|"no, retries left"| LLM
-  Retry -->|"no, exhausted"| Warn["log warning, skip"]
-  Retry -->|"yes"| Store["Create MemoryEntry SESSION scope"]
-  Store --> Vector["VectorMemoryService.store_embedding"]
-  Vector --> VectorFail{"embedding ok?"}
-  VectorFail -->|"no"| PersistText["persist text only"]
-  VectorFail -->|"yes"| DoneMem["memory ready for recall"]
-```
-
-- 提取结果写入 `MemoryEntry`，来源标记为 `AUTO_EXTRACTED`，scope 为 `SESSION`。
-- JSON 解析最多重试 2 次（`RepairJSONParser`）；向量嵌入失败时仍保留文本记忆。
-- 与会话删除并发时捕获 `IntegrityError` 并安全退出。
-
-## 依赖管理规范
-
-| 模块 | 工具 | 锁文件 | 安装命令 |
-|------|------|--------|----------|
-| `api/` | uv | `uv.lock` | `uv sync --frozen` |
-| `sandbox/` | uv | `uv.lock` | `uv sync --frozen` |
-| `ops-collector/` | uv | `uv.lock` | `uv sync --frozen` |
-| `ops-actuator/` | uv | `uv.lock` | `uv sync --frozen` |
-| `ui/` | npm | `package-lock.json` | `npm ci` |
-
-Python 项目统一使用 `pyproject.toml` + `uv.lock`，不再维护 `requirements.txt`。
-
-## 打包与部署
-
-### Docker 镜像
-
-`api/Dockerfile` 为多阶段构建：
-
-| target | 镜像名 | CMD | `OPENCITADEL_PROCESS_ROLE` |
-|--------|--------|-----|----------------------|
-| `api` | `opencitadel-api` | `./run.sh` | `api` |
-| `worker` | `opencitadel-worker` | `./worker.sh` | `worker` |
-
-`opencitadel-migrate` 使用 `api` target，镜像名为 `opencitadel-migrate`，命令覆盖为 `python -m app.migrate`。`opencitadel-ui` 镜像名为 `opencitadel-ui`。
-
-### Docker Compose 启动顺序
-
-```text
-postgres/redis -> opencitadel-migrate -> opencitadel-api + opencitadel-worker -> ui -> nginx
-```
-
-### 构建期镜像源
-
-`docker-compose.yml` 向 API / Worker / Sandbox / UI 传入统一 build args：`PIP_INDEX_URL`、`UV_INDEX_URL`、`UV_VERSION`、`UV_HTTP_TIMEOUT`、`NPM_CONFIG_REGISTRY` 等。Compose 构建后的应用镜像统一为 `opencitadel-api`、`opencitadel-worker`、`opencitadel-migrate`、`opencitadel-ui`、`opencitadel-sandbox`。也可使用 GHCR 预构建镜像（见 `docker-compose.yml` 注释）或 `.github/workflows/` CI 流水线构建。
-
-> **动态沙箱镜像**：compose 中 `opencitadel-sandbox` 服务在 `fixed-sandbox` profile 下，**默认不启动**，但 Worker 动态创建的沙箱依赖该镜像。`make quickstart` 与 [部署指南](../operations/deployment.zh-CN.md) 会在启动栈之前显式执行 `docker compose build opencitadel-sandbox`。
-
-> **Ops Collector / Actuator 镜像**：`ops-collector/Dockerfile` 与 `ops-actuator/Dockerfile` 独立于 `api/Dockerfile` 构建 `opencitadel-ops-collector` 与 `opencitadel-ops-actuator` 镜像。两者均通过 Compose profile（`patrol` / `actuator`）可选启用，默认关闭；见 [Ops Patrol 运维](../operations/ops-patrol.zh-CN.md)。
-
-### Kubernetes / Helm
-
-Chart 位于 `deploy/helm/opencitadel/`，提供全栈一键部署：
-
-- 集群内 PostgreSQL pgvector / Redis StatefulSet。
-- API / Worker / UI Deployment + Ingress。
-- Worker ServiceAccount + RBAC，用于 Pod 沙箱 create / delete。
-- namespace ResourceQuota 限制沙箱 Pod 总量。
-- migrate initContainer 使用 API 镜像。
-- 默认 K8s 沙箱模式为 `sandbox.driver=kubernetes` 且 `sandbox.address` 为空；如接入远程沙箱网关，则改用 `sandbox.address`。
-- 可选的 Ops Collector / Actuator Deployment（`opsCollector.enabled` / `opsActuator.enabled`，默认均为 `false`），各自拥有独立 ServiceAccount、patch/read 范围受限的 RBAC ClusterRole，以及仅放行 API/Worker 入站的 NetworkPolicy。
-
-## 代码锚点
-
-权威实现文件快速索引：
-
-| 主题 | 主要文件 |
-|------|----------|
-| DI / 进程角色 | `api/app/container.py`、`api/app/runtime_role.py` |
-| Worker 分发 | `api/app/worker/main.py`、`api/app/infrastructure/external/task/redis_stream_task.py` |
-| Agent Flow 路由 | `api/app/domain/services/agent_task_runner.py`、`api/app/domain/services/flows/` |
-| 任务装配 | `api/app/application/services/task_runner_factory.py`、`api/app/application/services/runner_bindings/` |
-| 工具注册表 | `api/app/domain/services/tools/tool_registry.py` |
-| 工具治理门控 | `api/app/domain/services/agents/tool_gate_policy.py` |
-| UI Shell | `ui/src/components/app-shell.tsx`、`ui/src/lib/api/fetch.ts` |
-| 工作区 scope | `ui/src/components/workspace-switcher.tsx`、`api/app/interfaces/auth_dependencies.py` |
+PostgreSQL 是生命周期唯一权威。Redis 只用于降低唤醒和通知延迟；通知丢失不会丢失已接收工作，执行内核会轮询数据库待处理行并从已校验事件恢复。
+
+## 进程与信任边界
+
+| 进程 | 职责 | 数据库角色 |
+| --- | --- | --- |
+| API | 认证授权、提交幂等命令、读取投影、提供 SSE | API 角色 |
+| 执行内核 | 决策 Run、追加事件、认领 Activity/定时器、构建正式投影 | 执行角色 |
+| Migrate | 执行 Alembic schema 与配置种子迁移 | 迁移角色 |
+| UI | 展示 API 投影与公开事件，不自行推断权威状态 | 无 |
+| 沙箱 Broker | 创建隔离沙箱，不向 API/内核暴露容器 socket | 无 |
+| Ops Collector / Actuator | 固定只读探针与审批后窄写入 | 服务专用 |
+
+Schema 所有权与运行时 DML 分离。所有按所有者隔离的执行表强制启用行级安全；事件存储还会校验每次追加的上下文与该流首次建立的 owner scope 完全一致。
+
+## 装配、事务与生命周期
+
+每个可执行入口只加载一次 `DeploymentSettings`，并构建自己的手工强类型对象图。
+`app.composition.api` 持有一个不可变 `ApiRuntime`，`app.composition.kernel` 持有完全
+独立的 `KernelRuntime`。HTTP 依赖只从 `app.state` 解析服务，不构造基础设施；系统中
+不存在 Service Locator、全局资源 Getter 或跨角色共享容器。
+
+每个后台协程都归运行时的 `TaskSupervisor` 所有。关键任务失败会触发进程退出，辅助监听器
+按有界策略重启。关闭时先撤销就绪状态，再排空 Supervisor，并关闭该进程独占的 PostgreSQL、
+Redis、对象存储、Provider 与连接池资源。
+
+应用写入使用显式 Unit of Work：成功变更必须调用 `uow.commit()`；未调用即退出 Context 时，
+即使是正常 return 也会 rollback。PostgreSQL 是权威，Redis 消息与缓存只是 post-commit
+提示，不能让未提交写入变得可见。
+
+浏览器也遵守同一所有权规则。认证资源缓存由 `ClientDataProvider` 持有，并严格按
+`userId + workspaceId` 建键。身份或工作区变化会递增旧 Scope 的 Generation，晚到响应不能
+写入新 Scope；匿名状态不能读取认证数据。
+
+## 单一执行模型
+
+每项行为都以某个 `Run` family 开始：
+
+- `agent`、`ask`：对话执行；
+- `kb_ingest`、`codebase_ingest`：不可变候选版本发布；
+- `automation`、`patrol`、`remediation`：调度或受治理工作。
+
+纯 family 决策器读取当前聚合与一个类型化命令，产出类型化事件和确定性 effect。所有非确定性工作都是 Activity。外部调用开始前，输入引用、摘要、调用身份、超时和认领代次都已持久化。心跳、重试、取消、审批、超时和未知结果均为显式协议状态。
+
+持久化事实包括：
+
+- `execution_command_inbox`：幂等接入；
+- `execution_events`：仅追加、带哈希链的事实；
+- `execution_activity_tasks`：外部工作与 fencing；
+- `execution_scheduled_commands`：定时器和取消；
+- `execution_outbox`：提交后唤醒；
+- 完整性校验的快照：仅用于加速重放。
+
+Run、Activity、审批、资源构建和公开事件表都是可重建投影；它们可以回答查询，但不能决定工作流状态。
+
+## 产品数据与资源绑定
+
+产品仓库存储内容、配置、文件、不可变资源版本和证据。知识库或代码库重建只创建一个带 `build_id`、`request_key` 的候选版本，源 Run 独占生命周期和进度。发布前验证完整闭包，再通过 CAS 切换资源的 `active_version_id`。
+
+会话通过 `session_resource_bindings` 固定到具体已发布版本。后续发布不会改变已有会话的证据边界；缺失、跨租户、未发布或歧义绑定一律关闭执行。
+
+## API 与流式契约
+
+写接口只提交类型化命令。审批只能通过专用端点决策，聊天文本不能绕过审批。读接口返回正式投影。SSE 实时和重放统一读取脱敏后的 `execution_public_events`，以正式事件位置作为 cursor；Activity 私有输入和供应商载荷永不进入公开投影。
+
+## 失败与恢复规则
+
+- 进程退出不等于成功或失败；过期 claim 由 fencing 后从 PostgreSQL 回收。
+- 重复命令返回已持久化结果，不会重复 effect。
+- 同一 Activity invocation 的重复投递复用结果；只有显式新 invocation 才可再次执行。
+- 无效快照回退到已校验事件重放。
+- 哈希链、owner scope 或投影完整性失败时关闭执行并产生运维证据。
+- 候选构建失败绝不改动当前已发布版本。
+
+## 代码地图
+
+| 边界 | 位置 |
+| --- | --- |
+| 命令、事件、聚合、决策 | `api/app/domain/execution/` |
+| 编排与 Activity | `api/app/application/execution/` |
+| PostgreSQL 存储与正式投影器 | `api/app/infrastructure/execution/` |
+| API/Kernel 强类型装配 | `api/app/composition/api.py`、`api/app/composition/kernel.py` |
+| 任务所有权与有界排空 | `api/app/composition/tasks.py` |
+| 执行内核进程 | `api/app/execution_kernel_main.py` |
+| 资源绑定模型 | `api/app/domain/models/resource_bindings.py` |
+| HTTP 接入与投影路由 | `api/app/interfaces/endpoints/` |
+| 浏览器作用域资源 | `ui/src/providers/client-data-provider.tsx` |
 
 ## 相关文档
 
-- [LLM 端点与模型](llm-endpoints-and-models.zh-CN.md)
-- [前端 UI](frontend-ui.zh-CN.md)
-- [任务恢复](task-recovery.zh-CN.md)
-- [事件系统](events.zh-CN.md)
-- [配置来源治理](config-source-governance.zh-CN.md)
-- [模型韧性设计](model-resilience.zh-CN.md)
-- [知识库摄取](knowledge-base-ingestion.zh-CN.md)
-- [Codebase 重新索引](codebase-reindex.zh-CN.md)
-- [架构演进指南](architecture-evolution.zh-CN.md)
+- [执行内核](execution-kernel.zh-CN.md)
 - [安全模型](security-model.zh-CN.md)
-- [生产部署](../operations/deployment.zh-CN.md)
+- [知识库摄取](knowledge-base-ingestion.zh-CN.md)
+- [代码库分析](codebase-reindex.zh-CN.md)
+- [自动化与调度器](automation-scheduler.zh-CN.md)

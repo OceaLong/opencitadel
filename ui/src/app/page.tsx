@@ -6,10 +6,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import {
-  ContextSelector,
-  type SessionContextSelection,
-} from "@/components/context-selector";
+import { ContextSelector, type SessionContextSelection } from "@/components/context-selector";
 import { ChatInput, type ChatInputRef } from "@/components/session/chat-input";
 import {
   OperatorScopeDialog,
@@ -21,14 +18,16 @@ import { SessionModelPicker } from "@/components/session-model-picker";
 import { SessionSkillPicker } from "@/components/session-skill-picker";
 
 import { useRequireAuth } from "@/hooks/use-require-auth";
-import { invalidateModelsCache, loadModels, resolveDefaultModelId } from "@/lib/api/models-cache";
+import { boundModelId, loadInferenceSnapshot } from "@/lib/api/inference-cache";
 import { sessionApi } from "@/lib/api/session";
 import type { FileInfo, Skill } from "@/lib/api/types";
+import { useClientDataScope } from "@/providers/client-data-provider";
 
 export default function Page() {
   const router = useRouter();
   const t = useTranslations("home");
   const { requireAuth } = useRequireAuth();
+  const { loadResource } = useClientDataScope();
   const chatInputRef = useRef<ChatInputRef>(null);
   const [sending, setSending] = useState(false);
   const [modelId, setModelId] = useState<string | undefined>();
@@ -40,7 +39,7 @@ export default function Page() {
   const [context, setContext] = useState<SessionContextSelection>({});
   const pendingSendRef = useRef<{ message: string; files: FileInfo[] } | null>(null);
 
-  const handleDefaultModelLoaded = useCallback((id: string | undefined) => {
+  const handleBoundModelLoaded = useCallback((id: string | undefined) => {
     setModelId((current) => current ?? id);
   }, []);
 
@@ -60,10 +59,9 @@ export default function Page() {
     let resolvedModelId = modelId;
 
     if (!resolvedModelId) {
-      invalidateModelsCache();
       try {
-        const models = await loadModels();
-        resolvedModelId = resolveDefaultModelId(models);
+        const inference = await loadResource("inference", loadInferenceSnapshot);
+        resolvedModelId = boundModelId(inference.bindings, "chat");
         if (resolvedModelId) {
           setModelId(resolvedModelId);
         }
@@ -88,7 +86,6 @@ export default function Page() {
         thinking_enabled: thinkingEnabled,
         operator_scope: operatorConfig?.scope,
         operator_domains: operatorConfig?.operatorDomains,
-        gate_profile: operatorConfig?.gateProfile,
         codebase_id: context.codebaseId,
         knowledge_base_id: context.knowledgeBaseId,
         mode: hasContext ? "ask" : undefined,
@@ -135,7 +132,7 @@ export default function Page() {
         }}
       />
       <div className="flex flex-1 items-center justify-center px-4 py-6 sm:py-8">
-        <div className="mx-auto w-full max-w-full sm:max-w-content sm:min-w-[390px]">
+        <div className="sm:max-w-content mx-auto w-full max-w-full sm:min-w-[390px]">
           <div className="text-foreground mb-6 text-center text-2xl font-semibold tracking-tight sm:mb-8 sm:text-left sm:text-3xl">
             {t("title")}
             <div className="text-muted-foreground mt-2 text-sm font-normal sm:text-base">
@@ -158,7 +155,7 @@ export default function Page() {
                 <SessionModelPicker
                   value={modelId}
                   onChange={setModelId}
-                  onDefaultModelLoaded={handleDefaultModelLoaded}
+                  onBoundModelLoaded={handleBoundModelLoaded}
                   onModelsResolved={handleModelsResolved}
                   disabled={sending}
                 />

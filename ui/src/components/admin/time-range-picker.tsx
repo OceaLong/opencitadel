@@ -5,7 +5,10 @@ import { useTranslations } from "next-intl";
 import type { AdminTimeRange } from "@/lib/admin-utils";
 import { cn } from "@/lib/utils";
 
-const OPTIONS: Array<{ value: AdminTimeRange; labelKey: "timeRange7d" | "timeRange30d" | "timeRange90d" | "timeRangeAll" }> = [
+const OPTIONS: Array<{
+  value: AdminTimeRange;
+  labelKey: "timeRange7d" | "timeRange30d" | "timeRange90d" | "timeRangeAll";
+}> = [
   { value: "7d", labelKey: "timeRange7d" },
   { value: "30d", labelKey: "timeRange30d" },
   { value: "90d", labelKey: "timeRange90d" },

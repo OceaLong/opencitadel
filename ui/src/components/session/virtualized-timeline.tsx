@@ -1,24 +1,19 @@
 "use client";
 
-import { type RefObject,useEffect } from "react";
+import { type RefObject, useEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { ChatMessage } from "@/components/session/chat-message";
 
-import type { ClarifyAnswer, SessionCheckpoint, SessionDetail, ToolEvent } from "@/lib/api/types";
+import type { ToolEvent } from "@/lib/api/types";
 import type { AttachmentFile, TimelineItem } from "@/lib/session-events";
 
 type VirtualizedTimelineProps = {
   timeline: TimelineItem[];
   scrollContainerRef: RefObject<HTMLDivElement | null>;
-  sessionStatus?: SessionDetail["status"];
   onViewAllFiles: () => void;
   onFileClick: (file: AttachmentFile) => void;
   onToolClick: (tool: ToolEvent) => void;
-  onClarifyAnswer: (answer: string, clarifyAnswers: ClarifyAnswer[]) => void;
-  resolveCheckpoint: (anchorEventId?: string) => SessionCheckpoint | undefined;
-  onRestoreCheckpoint: (checkpoint: SessionCheckpoint) => void;
-  restoringCheckpoint: boolean;
   streaming?: boolean;
   onSourceClick?: (path: string, line?: number) => void;
 };
@@ -26,17 +21,14 @@ type VirtualizedTimelineProps = {
 export function VirtualizedTimeline({
   timeline,
   scrollContainerRef,
-  sessionStatus,
   onViewAllFiles,
   onFileClick,
   onToolClick,
-  onClarifyAnswer,
-  resolveCheckpoint,
-  onRestoreCheckpoint,
-  restoringCheckpoint,
   streaming,
   onSourceClick,
 }: VirtualizedTimelineProps) {
+  // TanStack Virtual intentionally owns mutable measurement callbacks.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: timeline.length,
     getScrollElement: () => scrollContainerRef.current,
@@ -51,10 +43,7 @@ export function VirtualizedTimeline({
   }, [streaming, timeline.length, virtualizer]);
 
   return (
-    <div
-      className="relative w-full"
-      style={{ height: `${virtualizer.getTotalSize()}px` }}
-    >
+    <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
       {virtualizer.getVirtualItems().map((virtualItem) => {
         const item = timeline[virtualItem.index];
         return (
@@ -70,16 +59,7 @@ export function VirtualizedTimeline({
               onViewAllFiles={onViewAllFiles}
               onFileClick={onFileClick}
               onToolClick={onToolClick}
-              onClarifyAnswer={onClarifyAnswer}
               onSourceClick={onSourceClick}
-              sessionStatus={sessionStatus}
-              checkpoint={
-                item.kind === "user" || item.kind === "step"
-                  ? resolveCheckpoint(item.anchorEventId)
-                  : undefined
-              }
-              onRestoreCheckpoint={onRestoreCheckpoint}
-              restoringCheckpoint={restoringCheckpoint}
             />
           </div>
         );

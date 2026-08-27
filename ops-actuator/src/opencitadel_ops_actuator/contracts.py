@@ -6,19 +6,20 @@ evidence ref prefix changed to actuator://evidence/ and the envelope
 extended for write-action semantics (action, action_outcome, before/after
 observation snapshots) instead of the read-only status/duration_ms pair.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
-from enum import Enum
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
-class ActuatorErrorCode(str, Enum):
+class ActuatorErrorCode(StrEnum):
     NAMESPACE_DENIED = "NAMESPACE_DENIED"
     TARGET_DENIED = "TARGET_DENIED"
     TARGET_NOT_FOUND = "TARGET_NOT_FOUND"
@@ -44,7 +45,7 @@ class ActuatorEnvelope(BaseModel):
     schema_version: Literal[1] = 1
     request_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     target_ref: str
-    executed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    executed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     action: str
     action_outcome: Literal["applied", "skipped_idempotent", "failed"]
     before: dict[str, Any] | None = None
@@ -79,10 +80,12 @@ class RollbackRequest(BaseModel):
 
 
 def evidence_for(target_ref: str, data: dict[str, Any], types: list[str]) -> list[EvidenceItem]:
-    canonical = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    canonical = json.dumps(
+        data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    ).encode("utf-8")
     digest = hashlib.sha256(canonical).hexdigest()
     evidence_id = str(uuid.uuid4())
-    expires = datetime.now(timezone.utc) + timedelta(days=7)
+    expires = datetime.now(UTC) + timedelta(days=7)
     return [
         EvidenceItem(
             type=item,  # type: ignore[arg-type]

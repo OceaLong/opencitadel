@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Shared response mappers and write-guard dependency for resource routers.
 
 `codebase_routes.py` and `knowledge_base_routes.py` each publish a version/
@@ -17,7 +15,8 @@ entirely to pydantic based on the target response class. That means the two
 implementations can be merged without any "differing field" switch beyond the
 target response class itself, which becomes an explicit parameter here.
 """
-from typing import Annotated, Any, Type, TypeVar
+
+from typing import Annotated, Any, TypeVar
 
 from fastapi import Depends
 from pydantic import BaseModel
@@ -29,40 +28,23 @@ from app.interfaces.auth_dependencies import get_workspace_context, require_non_
 TResponse = TypeVar("TResponse", bound=BaseModel)
 
 
-def to_version_response(response_cls: Type[TResponse], version: Any) -> TResponse:
+def to_version_response[TResponse: BaseModel](
+    response_cls: type[TResponse], version: Any
+) -> TResponse:
     """Map a domain version object to its resource-specific response schema."""
     if isinstance(version, BaseModel):
-        return response_cls.model_validate(
-            mutable_json_value(version.model_dump(mode="python"))
-        )
+        return response_cls.model_validate(mutable_json_value(version.model_dump(mode="python")))
     return response_cls.model_validate(version, from_attributes=True)
 
 
-def to_build_response(response_cls: Type[TResponse], build: Any) -> TResponse:
+def to_build_response[TResponse: BaseModel](response_cls: type[TResponse], build: Any) -> TResponse:
     """Map a domain build object to its resource-specific response schema."""
     if isinstance(build, BaseModel):
-        return response_cls.model_validate(
-            mutable_json_value(build.model_dump(mode="python"))
-        )
+        return response_cls.model_validate(mutable_json_value(build.model_dump(mode="python")))
     return response_cls.model_validate(build, from_attributes=True)
 
 
-# The two dependencies below are always used together on mutation routes, in
-# this exact order: `WorkspaceContextDep` resolves and authorizes the
-# workspace scope first, then `NonAuditorWriteGuardDep` rejects the read-only
-# auditor role. Both files previously spelled out
-# `ctx: WorkspaceContext = Depends(get_workspace_context)` followed by
-# `_write_guard = Depends(require_non_auditor)` on every write route; sharing
-# these two named aliases keeps that pairing defined in one place.
-#
-# Deliberately kept as two parameters (not collapsed into a single combined
-# dependency): existing route-level unit tests invoke these router functions
-# directly with positional arguments shaped as
-# `(..., ctx, write_guard_principal, service, ...)`, and a separate RBAC
-# regression test asserts `require_non_auditor` is present as a *top-level*
-# dependency of each mutation route's `Dependant` (nested sub-dependencies of
-# a combined dependency would not show up there). Using two Annotated aliases
-# preserves parameter count, order, and top-level dependency identity exactly
-# as before, so no test needed to change.
+# Keep workspace authorization and the auditor write guard as independently
+# inspectable route dependencies so RBAC composition remains fail-closed.
 WorkspaceContextDep = Annotated[WorkspaceContext, Depends(get_workspace_context)]
 NonAuditorWriteGuardDep = Annotated[Principal, Depends(require_non_auditor)]

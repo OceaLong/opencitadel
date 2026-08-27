@@ -11,22 +11,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/admin-utils";
 import type { GovernanceProfile } from "@/lib/api/compliance";
 
-type GovernanceProfileViewProps = {
-  profile: GovernanceProfile;
-};
+type Props = { profile: GovernanceProfile };
 
-// Session terminal states: completed -> green, failed -> red, everything
-// else (cancelled, or any non-terminal status the profile still shows) ->
-// neutral gray, matching StatusBadge's "secondary" default look.
-function terminalStatusVariant(status: string): "success" | "destructive" | "secondary" {
-  if (status === "completed") return "success";
-  if (status === "failed") return "destructive";
+function statusVariant(status: string): "success" | "destructive" | "secondary" {
+  if (status === "completed" || status === "succeeded" || status === "approved") {
+    return "success";
+  }
+  if (status === "failed" || status === "unknown" || status === "rejected") {
+    return "destructive";
+  }
   return "secondary";
 }
 
-export function GovernanceProfileView({ profile }: GovernanceProfileViewProps) {
+export function GovernanceProfileView({ profile }: Props) {
   const t = useTranslations("governanceProfile");
-  const { session, chain, approvals, gate_hits: gateHits, checkpoints, terminal, denials } = profile;
+  const { session, chain, runs, approvals, activities } = profile;
 
   return (
     <div className="space-y-6">
@@ -37,211 +36,130 @@ export function GovernanceProfileView({ profile }: GovernanceProfileViewProps) {
         <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <p className="text-muted-foreground text-xs">{t("status")}</p>
-            <StatusBadge
-              data-testid="terminal-status-badge"
-              variant={terminalStatusVariant(terminal.status)}
-            >
-              {terminal.status}
+            <StatusBadge data-testid="session-status-badge" variant={statusVariant(session.status)}>
+              {session.status}
             </StatusBadge>
-          </div>
-          <div>
-            <p className="text-muted-foreground text-xs">{t("gateProfile")}</p>
-            {session.gate_profile ? (
-              <Badge variant="secondary">{session.gate_profile}</Badge>
-            ) : (
-              <span className="text-muted-foreground text-sm">—</span>
-            )}
           </div>
           <div>
             <p className="text-muted-foreground text-xs">{t("operatorScope")}</p>
             {session.operator_scope ? (
               <Badge variant="outline">{session.operator_scope}</Badge>
             ) : (
-              <span className="text-muted-foreground text-sm">—</span>
+              "—"
             )}
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs">{t("operatorDomains")}</p>
+            <p className="text-sm">{session.operator_domains.join(", ") || "—"}</p>
           </div>
           <div>
             <p className="text-muted-foreground text-xs">{t("chainVerification")}</p>
             <StatusBadge variant={chain.verified ? "success" : "destructive"} className="gap-1">
-              {chain.verified ? <ShieldCheck className="size-3.5" /> : <ShieldX className="size-3.5" />}
+              {chain.verified ? (
+                <ShieldCheck className="size-3.5" />
+              ) : (
+                <ShieldX className="size-3.5" />
+              )}
               {chain.verified ? t("chainVerified") : t("chainBroken")}
             </StatusBadge>
-          </div>
-          <div>
-            <p className="text-muted-foreground text-xs">{t("terminalState")}</p>
-            <p className="text-sm">
-              {terminal.status} · {formatDateTime(terminal.reached_at)}
+            <p className="text-muted-foreground mt-1 text-xs">
+              {t("chainCounts", { runs: chain.checked_runs, events: chain.checked_entries })}
             </p>
           </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("approvals")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {approvals.length === 0 ? (
-            <EmptyState title={t("noData")} className="py-8" />
-          ) : (
-            <ol className="space-y-3">
-              {approvals.map((approval, index) => (
-                <li
-                  key={`${approval.action}-${approval.created_at}-${index}`}
-                  className="border-border/50 rounded-lg border p-3 text-sm"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-muted-foreground text-xs">
-                      {formatDateTime(approval.created_at)}
-                    </span>
-                    <Badge variant="outline">{approval.action}</Badge>
-                    {approval.decision ? (
-                      <StatusBadge
-                        variant={approval.decision === "reject" ? "destructive" : "success"}
-                      >
-                        {approval.decision}
-                      </StatusBadge>
-                    ) : null}
-                  </div>
-                  <div className="text-muted-foreground mt-2 grid gap-1 text-xs sm:grid-cols-2">
-                    <span>
-                      {t("tool")}: {approval.tool ?? "—"}
-                    </span>
-                    <span>
-                      {t("actor")}: {approval.actor_user_id ?? "—"}
-                    </span>
-                    {approval.feedback ? (
-                      <span className="sm:col-span-2">
-                        {t("feedback")}: {approval.feedback}
-                      </span>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("gateHits")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {gateHits.length === 0 ? (
-            <EmptyState title={t("noData")} className="py-8" />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left">
-                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("tool")}</th>
-                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("gateProfile")}</th>
-                    <th className="text-muted-foreground pb-2 font-medium">{t("time")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {gateHits.map((hit, index) => (
-                    <tr
-                      key={`${hit.tool}-${hit.created_at}-${index}`}
-                      className="border-border/50 border-b"
-                    >
-                      <td className="py-2 pr-4">{hit.tool ?? "—"}</td>
-                      <td className="py-2 pr-4">
-                        {hit.gate_profile ? (
-                          <Badge variant="secondary">{hit.gate_profile}</Badge>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="py-2 text-muted-foreground">{formatDateTime(hit.created_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      <TimelineCard title={t("runs")} empty={runs.length === 0}>
+        {runs.map((run) => (
+          <li key={run.run_id} className="border-border/50 rounded-lg border p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge variant={statusVariant(run.status)}>{run.status}</StatusBadge>
+              <Badge variant="outline">{run.family}</Badge>
+              <span className="font-mono text-xs">{run.run_id}</span>
             </div>
-          )}
-        </CardContent>
-      </Card>
+            <p className="text-muted-foreground mt-2 text-xs">{formatDateTime(run.created_at)}</p>
+          </li>
+        ))}
+      </TimelineCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("denials")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {denials.length === 0 ? (
-            <EmptyState title={t("noData")} className="py-8" />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left">
-                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("tool")}</th>
-                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("layer")}</th>
-                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("reason")}</th>
-                    <th className="text-muted-foreground pb-2 font-medium">{t("time")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {denials.map((denial, index) => (
-                    <tr
-                      key={`${denial.tool}-${denial.created_at}-${index}`}
-                      className="border-border/50 border-b"
-                    >
-                      <td className="py-2 pr-4">{denial.tool ?? "—"}</td>
-                      <td className="py-2 pr-4">
-                        {denial.layer ? (
-                          <StatusBadge variant="destructive">{denial.layer}</StatusBadge>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="py-2 pr-4">{denial.reason ?? "—"}</td>
-                      <td className="py-2 text-muted-foreground">{formatDateTime(denial.created_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      <TimelineCard title={t("approvals")} empty={approvals.length === 0}>
+        {approvals.map((approval) => (
+          <li key={approval.approval_id} className="border-border/50 rounded-lg border p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge variant={statusVariant(approval.status)}>{approval.status}</StatusBadge>
+              <Badge variant="outline">{approval.approval_kind}</Badge>
+              <span>{approval.subject_label}</span>
             </div>
-          )}
-        </CardContent>
-      </Card>
+            <div className="text-muted-foreground mt-2 grid gap-1 text-xs sm:grid-cols-2">
+              <span>
+                {t("actor")}: {approval.decided_by_user_id ?? "—"}
+              </span>
+              <span>
+                {t("time")}: {formatDateTime(approval.requested_at)}
+              </span>
+              <span className="sm:col-span-2">
+                {t("risk")}: {approval.risk_summary}
+              </span>
+              {approval.feedback ? (
+                <span className="sm:col-span-2">
+                  {t("feedback")}: {approval.feedback}
+                </span>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </TimelineCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("checkpoints")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {checkpoints.length === 0 ? (
-            <EmptyState title={t("noData")} className="py-8" />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left">
-                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("label")}</th>
-                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("anchorType")}</th>
-                    <th className="text-muted-foreground pb-2 font-medium">{t("time")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {checkpoints.map((checkpoint) => (
-                    <tr key={checkpoint.id} className="border-border/50 border-b">
-                      <td className="py-2 pr-4">{checkpoint.label ?? "—"}</td>
-                      <td className="py-2 pr-4">
-                        <Badge variant="outline">{checkpoint.anchor_type}</Badge>
-                      </td>
-                      <td className="py-2 text-muted-foreground">
-                        {formatDateTime(checkpoint.created_at)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      <TimelineCard title={t("activities")} empty={activities.length === 0}>
+        {activities.map((activity) => (
+          <li key={activity.activity_id} className="border-border/50 rounded-lg border p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge variant={statusVariant(activity.status)}>{activity.status}</StatusBadge>
+              <Badge variant="outline">{activity.activity_type}</Badge>
+              <span className="font-mono text-xs">{activity.activity_id}</span>
             </div>
-          )}
-        </CardContent>
-      </Card>
+            <div className="text-muted-foreground mt-2 flex flex-wrap gap-4 text-xs">
+              <span>
+                {t("attempt")}: {activity.attempt}
+              </span>
+              <span>
+                {t("time")}: {formatDateTime(activity.created_at)}
+              </span>
+              {activity.failure_code ? (
+                <span>
+                  {t("failureCode")}: {activity.failure_code}
+                </span>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </TimelineCard>
     </div>
+  );
+}
+
+function TimelineCard({
+  title,
+  empty,
+  children,
+}: {
+  title: string;
+  empty: boolean;
+  children: React.ReactNode;
+}) {
+  const t = useTranslations("governanceProfile");
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {empty ? (
+          <EmptyState title={t("noData")} className="py-8" />
+        ) : (
+          <ol className="space-y-3">{children}</ol>
+        )}
+      </CardContent>
+    </Card>
   );
 }

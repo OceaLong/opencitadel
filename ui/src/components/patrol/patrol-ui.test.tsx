@@ -12,11 +12,21 @@ import en from "../../../messages/en.json";
 import zh from "../../../messages/zh.json";
 
 const mocks = vi.hoisted(() => ({
-  getMCPServers: vi.fn().mockResolvedValue({ mcp_servers: [] }),
+  listMCPServers: vi.fn().mockResolvedValue({ items: [] }),
+  remediationState: { state: "disabled" },
 }));
 
 vi.mock("next/navigation", () => mockNavigation());
-vi.mock("@/lib/api/config", () => ({ configApi: { getMCPServers: mocks.getMCPServers } }));
+vi.mock("@/lib/api", () => ({
+  integrationsApi: { listMCPServers: mocks.listMCPServers },
+}));
+vi.mock("@/hooks/use-capabilities", () => ({
+  useCapabilities: () => ({
+    loading: false,
+    capability: (name: string) =>
+      name === "ops_patrol_remediation" ? mocks.remediationState : undefined,
+  }),
+}));
 vi.mock("@/lib/api/patrols", () => ({
   patrolsApi: {
     downloadEvidence: vi.fn(),
@@ -63,6 +73,7 @@ function runFixture(): PatrolRunDetail {
         first_seen_at: "2026-08-03T00:01:00Z",
         last_seen_at: "2026-08-03T00:01:00Z",
         occurrence_count: 1,
+        allowed_actions: [],
       },
     ],
   };
@@ -94,6 +105,21 @@ describe.each([
     expect(container.textContent).toContain(messages.patrol.actions.downloadEvidence);
     expect(container.textContent).not.toContain(messages.patrol.actions.acknowledge);
     expect(container.textContent).not.toContain(messages.patrol.actions.falsePositive);
+    await unmount();
+  });
+
+  it("keeps findings visible but disables remediation proposals denied by policy", async () => {
+    const { container, unmount } = await renderComponent(
+      <NextIntlClientProvider locale={locale} messages={messages}>
+        <PatrolRunDetailView run={runFixture()} readOnly={false} onRefresh={() => undefined} />
+      </NextIntlClientProvider>,
+    );
+    const remediationButton = Array.from(container.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes(messages.patrol.actions.remediate),
+    );
+    expect(remediationButton).toBeDefined();
+    expect((remediationButton as HTMLButtonElement).disabled).toBe(true);
+    expect(container.textContent).toContain("Restart spike");
     await unmount();
   });
 });

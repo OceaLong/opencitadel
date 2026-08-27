@@ -1,7 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from abc import ABC, abstractmethod
-from typing import List, Optional
 
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope
 from app.domain.models.scope import OwnerScope
@@ -10,45 +7,39 @@ from app.domain.models.scope import OwnerScope
 class MemoryEntryRepository(ABC):
     @abstractmethod
     async def get_all(
-            self,
-            scope: Optional[MemoryScope] = None,
-            session_id: Optional[str] = None,
-            q: Optional[str] = None,
-            tags: Optional[List[str]] = None,
-            limit: int = 100,
-            owner_scope: Optional[OwnerScope] = None,
-    ) -> List[MemoryEntry]:
-        ...
+        self,
+        scope: MemoryScope | None = None,
+        session_id: str | None = None,
+        q: str | None = None,
+        tags: list[str] | None = None,
+        limit: int = 100,
+        owner_scope: OwnerScope | None = None,
+    ) -> list[MemoryEntry]: ...
 
     @abstractmethod
-    async def get_by_id(self, entry_id: str, owner_scope: Optional[OwnerScope] = None) -> Optional[MemoryEntry]:
-        ...
+    async def get_by_id(
+        self, entry_id: str, owner_scope: OwnerScope | None = None
+    ) -> MemoryEntry | None: ...
 
     @abstractmethod
-    async def recall_for_session(self, session_id: str, limit: int = 20) -> List[MemoryEntry]:
-        ...
+    async def recall_for_session(self, session_id: str, limit: int = 20) -> list[MemoryEntry]: ...
 
     @abstractmethod
-    async def save(self, entry: MemoryEntry) -> None:
-        ...
+    async def save(self, entry: MemoryEntry) -> None: ...
 
     @abstractmethod
-    async def delete_by_id(self, entry_id: str, owner_scope: Optional[OwnerScope] = None) -> None:
-        ...
+    async def delete_by_id(self, entry_id: str, owner_scope: OwnerScope | None = None) -> None: ...
 
     @abstractmethod
-    async def touch_used(self, entry_ids: List[str]) -> None:
-        ...
+    async def touch_used(self, entry_ids: list[str]) -> None: ...
 
     @abstractmethod
-    async def update_embedding(self, entry_id: str, embedding: List[float]) -> None:
-        ...
+    async def update_embedding(self, entry_id: str, embedding: list[float]) -> None: ...
 
     @abstractmethod
     async def vector_search_entries(
-            self,
-            query_embedding: List[float],
-            session_id: Optional[str] = None,
-            limit: int = 20,
-    ) -> List[MemoryEntry]:
-        ...
+        self,
+        query_embedding: list[float],
+        session_id: str | None = None,
+        limit: int = 20,
+    ) -> list[MemoryEntry]: ...

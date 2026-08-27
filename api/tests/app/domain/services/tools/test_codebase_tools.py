@@ -1,20 +1,27 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.domain.models.tool_result import ToolResult
-from app.domain.services.codebase.snapshot_service import (
-    CodeSnapshotService,
-    CodeSourceProvenance,
-    VersionedCodeSource,
+from app.domain.runtime_policy import (
+    CodebaseRetrievalPolicy,
+    CodebaseRetrievalRunPolicy,
 )
 from app.domain.services.codebase.hybrid_retriever import (
     CodeSearchResponse,
     CodeSearchResult,
 )
+from app.domain.services.codebase.snapshot_service import (
+    CodeSnapshotService,
+    CodeSourceProvenance,
+    VersionedCodeSource,
+)
 from app.domain.services.tools.codebase_tools import CodebaseTool
+
+_CODE_POLICY = CodebaseRetrievalRunPolicy(
+    vector_enabled=True,
+    retrieval=CodebaseRetrievalPolicy(),
+)
 
 
 @pytest.fixture
@@ -32,6 +39,7 @@ async def test_read_code_joins_workspace_path():
         uow_factory=lambda: MagicMock(),
         codebase_id="cb1",
         sandbox=sandbox,
+        policy=_CODE_POLICY,
         workspace_path="/home/ubuntu/codebase",
     )
 
@@ -56,6 +64,7 @@ async def test_read_code_returns_error_message_on_failure():
         uow_factory=lambda: MagicMock(),
         codebase_id="cb1",
         sandbox=sandbox,
+        policy=_CODE_POLICY,
         workspace_path="/home/ubuntu/codebase",
     )
 
@@ -83,9 +92,7 @@ async def test_read_prefers_published_version_source_reader_over_sandbox():
         version_id="cbv1",
         snapshot_key=materialized.snapshot_key,
         source_digest=materialized.source_digest,
-        object_storage=_ObjectStorage(
-            {materialized.snapshot_key: materialized.snapshot_bytes}
-        ),
+        object_storage=_ObjectStorage({materialized.snapshot_key: materialized.snapshot_bytes}),
     )
     sandbox = MagicMock()
     sandbox.read_file = AsyncMock()
@@ -93,6 +100,7 @@ async def test_read_prefers_published_version_source_reader_over_sandbox():
         uow_factory=lambda: MagicMock(),
         codebase_id="cb1",
         sandbox=sandbox,
+        policy=_CODE_POLICY,
         source_reader=source_reader,
         version_id="cbv1",
     )
@@ -116,6 +124,7 @@ async def test_read_labels_session_workspace_as_mutable_overlay():
         uow_factory=lambda: MagicMock(),
         codebase_id="cb1",
         sandbox=sandbox,
+        policy=_CODE_POLICY,
         workspace_path="/workspace",
         base_version_id="cbv1",
     )
@@ -142,14 +151,13 @@ async def test_read_code_includes_source_provenance_label():
         version_id="cbv1",
         snapshot_key=materialized.snapshot_key,
         source_digest=materialized.source_digest,
-        object_storage=_ObjectStorage(
-            {materialized.snapshot_key: materialized.snapshot_bytes}
-        ),
+        object_storage=_ObjectStorage({materialized.snapshot_key: materialized.snapshot_bytes}),
     )
     tool = CodebaseTool(
         uow_factory=lambda: MagicMock(),
         codebase_id="cb1",
         sandbox=MagicMock(),
+        policy=_CODE_POLICY,
         source_reader=source_reader,
         version_id="cbv1",
     )
@@ -184,6 +192,7 @@ async def test_semantic_search_uses_hybrid_retriever_with_bound_version():
         uow_factory=lambda: MagicMock(),
         codebase_id="cb1",
         sandbox=MagicMock(),
+        policy=_CODE_POLICY,
         version_id="cbv1",
         retriever=retriever,
     )
@@ -194,3 +203,31 @@ async def test_semantic_search_uses_hybrid_retriever_with_bound_version():
     assert "src/user_service.py:10-12" in result
     assert "sources=lexical,vector" in result
     assert "def create_user" in result
+
+
+@pytest.mark.anyio
+async def test_semantic_search_caps_requested_limit_with_the_run_policy():
+    retriever = MagicMock()
+    retriever.retrieve = AsyncMock(
+        return_value=CodeSearchResponse(
+            items=[],
+            capabilities={"lexical_search": True, "vector_search": False},
+            degraded_reasons=[],
+        )
+    )
+    policy = CodebaseRetrievalRunPolicy(
+        vector_enabled=False,
+        retrieval=CodebaseRetrievalPolicy(final_top_k=2),
+    )
+    tool = CodebaseTool(
+        uow_factory=lambda: MagicMock(),
+        codebase_id="cb1",
+        sandbox=MagicMock(),
+        policy=policy,
+        version_id="cbv1",
+        retriever=retriever,
+    )
+
+    await tool.semantic_search("create user", limit=99)
+
+    retriever.retrieve.assert_awaited_once_with("cb1", "cbv1", "create user", 2)

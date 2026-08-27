@@ -11,59 +11,55 @@ MCP servers expose tools (e.g. `maps_geocode`, `read_url`) that the Agent calls 
 - `stdio` — local process
 - `sse` / `streamable_http` — remote HTTP servers
 
-Configuration lives in `api/config.yaml` under `mcp_config.mcpServers` (a dictionary keyed by server name). You can also manage MCP servers from **Settings → Integrations** (Settings modal tab).
+MCP servers are first-class, owner-scoped Integration resources. Create and manage them from **Settings → Integrations** or `/api/integrations/mcp-servers`; stable resource IDs are used by Skills and Automations.
 
 ## Example: add a remote MCP server
 
-Edit `api/config.yaml`:
+Open **Settings → Integrations → Add server** and submit:
 
-```yaml
-mcp_config:
-  mcpServers:
-    jina-mcp-server:
-      transport: streamable_http
-      url: https://mcp.jina.ai/sse
-      enabled: true
+```json
+{
+  "name": "jina-mcp-server",
+  "transport": "streamable_http",
+  "url": "https://mcp.jina.ai/sse",
+  "enabled": true,
+  "visibility": "private"
+}
 ```
 
-Restart API and worker:
-
-```bash
-docker compose restart opencitadel-api opencitadel-worker
-```
-
-Tools appear with the `mcp_` prefix in the Agent tool list.
+No service restart is required. The Integration list projects connection state and discovered tools; Agent tools use the `mcp_` prefix.
 
 ## Example: internal HTTP MCP gateway
 
 For internal systems, run an MCP gateway inside your VPC:
 
-```yaml
-mcp_config:
-  mcpServers:
-    internal-crm:
-      transport: streamable_http
-      url: http://mcp-gateway.internal:8080/sse
-      enabled: true
-      headers:
-        Authorization: "Bearer ${CRM_MCP_TOKEN}"
+```json
+{
+  "name": "internal-crm",
+  "transport": "streamable_http",
+  "url": "http://mcp-gateway.internal:8080/sse",
+  "enabled": true,
+  "visibility": "private",
+  "headers": {"Authorization": "Bearer <token>"}
+}
 ```
 
-Store secrets in `.env` and reference via your deployment's secret injection.
+Credentials are encrypted at rest with the active API encryption key and masked on reads. Do not place Integration credentials in deployment variables or Runtime Policy.
 
 ## Template: stdio MCP (local script)
 
-```yaml
-mcp_config:
-  mcpServers:
-    company-tools:
-      transport: stdio
-      command: python
-      args: ["/opt/mcp/company_tools_server.py"]
-      enabled: true
+```json
+{
+  "name": "company-tools",
+  "transport": "stdio",
+  "command": "python",
+  "args": ["/opt/mcp/company_tools_server.py"],
+  "enabled": true,
+  "visibility": "global"
+}
 ```
 
-Mount the script into the worker container or run MCP on a sidecar reachable via HTTP.
+Only administrators may create stdio or global resources. Mount the script into the execution-kernel container, or prefer an HTTP sidecar reachable from every kernel replica.
 
 ## Verify tools
 
@@ -80,7 +76,7 @@ Mount the script into the worker container or run MCP on a sidecar reachable via
 
 ## Manage via UI
 
-Open **Settings → Integrations** to view MCP and A2A server configuration without editing YAML directly (runtime changes persist when `USE_DB_APP_CONFIG=true`).
+Open **Settings → Integrations** to manage MCP and A2A resources. Mutations persist immediately in PostgreSQL; connection health and discovered capabilities are read-side projections.
 
 ## Next
 

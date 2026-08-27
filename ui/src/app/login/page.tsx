@@ -50,7 +50,7 @@ export default function LoginPage() {
 
   return (
     <main className="bg-background flex min-h-screen items-center justify-center p-6">
-      <Card className="w-full max-w-[360px] shadow-card">
+      <Card className="shadow-card w-full max-w-[360px]">
         <CardHeader className="items-center text-center">
           <OpenCitadelIcon variant="icon" className="mb-2 size-10" />
           <CardTitle className="text-xl">{t("loginTitle")}</CardTitle>
@@ -74,11 +74,19 @@ export default function LoginPage() {
               {loading ? t("loggingIn") : t("login")}
             </Button>
             <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="outline" onClick={() => (window.location.href = oauthHref("google"))}>
-                Google
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => (window.location.href = oauthHref("google"))}
+              >
+                <span translate="no">Google</span>
               </Button>
-              <Button type="button" variant="outline" onClick={() => (window.location.href = oauthHref("github"))}>
-                GitHub
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => (window.location.href = oauthHref("github"))}
+              >
+                <span translate="no">GitHub</span>
               </Button>
             </div>
           </form>

@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from app.application.patrol_templates import load_patrol_template
 from app.domain.models.patrol import (
     PatrolCheckResult,
@@ -9,13 +11,14 @@ from app.domain.models.patrol import (
 )
 from app.interfaces.endpoints.patrol_routes import _finding_allowed_actions
 from app.interfaces.schemas.patrol import PatrolFindingResponse
-from app.main import app
+from tests.app.openapi_test_support import app
 
 
 def _run_with_config():
     config = load_patrol_template("kubernetes-baseline-v1")
     return PatrolRun(
         pack_id="pack-1",
+        execution_run_id=uuid4(),
         pack_version=1,
         pack_snapshot={"config": config.model_dump(mode="json")},
         trigger_type=PatrolTriggerType.MANUAL,
@@ -87,15 +90,19 @@ def test_patrol_finding_response_from_domain_embeds_allowed_actions():
         finding, allowed_actions=_finding_allowed_actions(finding, [check_result], run)
     )
 
-    assert response.allowed_actions == ["restart_workload", "rollback_workload", "scale_workload"]
+    assert response.allowed_actions == [
+        "restart_workload",
+        "rollback_workload",
+        "scale_workload",
+    ]
 
 
-def test_patrol_finding_response_from_domain_defaults_allowed_actions_to_empty():
+def test_patrol_finding_response_from_domain_accepts_explicit_empty_allowed_actions():
     run = _run_with_config()
     check_result = _check_result(run, "endpoint-health")
     finding = _finding_for(run, check_result)
 
-    assert PatrolFindingResponse.from_domain(finding).allowed_actions == []
+    assert PatrolFindingResponse.from_domain(finding, allowed_actions=[]).allowed_actions == []
 
 
 def test_openapi_exposes_complete_patrol_endpoint_set():

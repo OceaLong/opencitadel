@@ -1,18 +1,17 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Domain-level application exception hierarchy."""
-from typing import Any, Dict, Optional
+
+from typing import Any
 
 __all__ = [
     "AppException",
     "BadRequestError",
-    "UnauthorizedError",
-    "ForbiddenError",
     "ConflictError",
+    "ForbiddenError",
     "NotFoundError",
-    "ValidationError",
-    "TooManyRequestsError",
     "ServerRequestsError",
+    "TooManyRequestsError",
+    "UnauthorizedError",
+    "ValidationError",
 ]
 
 
@@ -20,13 +19,13 @@ class AppException(RuntimeError):
     """基础应用异常类，继承RuntimeError"""
 
     def __init__(
-            self,
-            code: int = 400,  # 自定义业务错误码
-            status_code: int = 400,
-            msg: str = "应用发生错误请稍后尝试",
-            data: Any = None,
-            error_key: Optional[str] = "errors.appError",
-            error_params: Optional[Dict[str, str]] = None,
+        self,
+        code: int = 400,  # 自定义业务错误码
+        status_code: int = 400,
+        msg: str = "应用发生错误请稍后尝试",
+        data: Any = None,
+        error_key: str | None = "errors.appError",
+        error_params: dict[str, str] | None = None,
     ):
         """构造函数，完成错误数据初始化"""
         self.code = code
@@ -45,10 +44,10 @@ class BadRequestError(AppException):
     """客户端请求错误"""
 
     def __init__(
-            self,
-            msg: str = "客户端请求错误，请检查后重试",
-            error_key: Optional[str] = "errors.badRequest",
-            error_params: Optional[Dict[str, str]] = None,
+        self,
+        msg: str = "客户端请求错误，请检查后重试",
+        error_key: str | None = "errors.badRequest",
+        error_params: dict[str, str] | None = None,
     ):
         super().__init__(
             status_code=400,
@@ -63,10 +62,10 @@ class UnauthorizedError(AppException):
     """身份认证失败"""
 
     def __init__(
-            self,
-            msg: str = "未登录或登录已过期，请重新登录",
-            error_key: Optional[str] = "errors.unauthorized",
-            error_params: Optional[Dict[str, str]] = None,
+        self,
+        msg: str = "未登录或登录已过期，请重新登录",
+        error_key: str | None = "errors.unauthorized",
+        error_params: dict[str, str] | None = None,
     ):
         super().__init__(
             status_code=401,
@@ -81,10 +80,10 @@ class ForbiddenError(AppException):
     """权限不足"""
 
     def __init__(
-            self,
-            msg: str = "无权执行该操作",
-            error_key: Optional[str] = "errors.forbidden",
-            error_params: Optional[Dict[str, str]] = None,
+        self,
+        msg: str = "无权执行该操作",
+        error_key: str | None = "errors.forbidden",
+        error_params: dict[str, str] | None = None,
     ):
         super().__init__(
             status_code=403,
@@ -99,10 +98,10 @@ class ConflictError(AppException):
     """资源冲突（如并发任务互斥）"""
 
     def __init__(
-            self,
-            msg: str = "操作冲突，请稍后重试",
-            error_key: Optional[str] = "errors.conflict",
-            error_params: Optional[Dict[str, str]] = None,
+        self,
+        msg: str = "操作冲突，请稍后重试",
+        error_key: str | None = "errors.conflict",
+        error_params: dict[str, str] | None = None,
     ):
         super().__init__(
             status_code=409,
@@ -117,10 +116,10 @@ class NotFoundError(AppException):
     """资源未找到错误"""
 
     def __init__(
-            self,
-            msg: str = "资源未找到，请核实后重试",
-            error_key: Optional[str] = "errors.notFound",
-            error_params: Optional[Dict[str, str]] = None,
+        self,
+        msg: str = "资源未找到，请核实后重试",
+        error_key: str | None = "errors.notFound",
+        error_params: dict[str, str] | None = None,
     ):
         super().__init__(
             status_code=404,
@@ -135,10 +134,10 @@ class ValidationError(AppException):
     """数据校验错误"""
 
     def __init__(
-            self,
-            msg: str = "请求参数数据校验错误，请核实后重试",
-            error_key: Optional[str] = "errors.badRequest",
-            error_params: Optional[Dict[str, str]] = None,
+        self,
+        msg: str = "请求参数数据校验错误，请核实后重试",
+        error_key: str | None = "errors.badRequest",
+        error_params: dict[str, str] | None = None,
     ):
         super().__init__(
             status_code=422,
@@ -153,10 +152,10 @@ class TooManyRequestsError(AppException):
     """请求过多错误（触发限流）"""
 
     def __init__(
-            self,
-            msg: str = "请求过多，触发限流，请稍后重试",
-            error_key: Optional[str] = "errors.rateLimit",
-            error_params: Optional[Dict[str, str]] = None,
+        self,
+        msg: str = "请求过多，触发限流，请稍后重试",
+        error_key: str | None = "errors.rateLimit",
+        error_params: dict[str, str] | None = None,
     ):
         super().__init__(
             status_code=429,
@@ -171,10 +170,10 @@ class ServerRequestsError(AppException):
     """服务器异常错误"""
 
     def __init__(
-            self,
-            msg: str = "服务器出现异常请稍后重试",
-            error_key: Optional[str] = "errors.serverError",
-            error_params: Optional[Dict[str, str]] = None,
+        self,
+        msg: str = "服务器出现异常请稍后重试",
+        error_key: str | None = "errors.serverError",
+        error_params: dict[str, str] | None = None,
     ):
         super().__init__(
             status_code=500,

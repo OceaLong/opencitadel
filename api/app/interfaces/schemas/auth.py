@@ -1,7 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -29,7 +26,7 @@ class UserResponse(BaseModel):
     global_role: GlobalRole
     status: UserStatus
     created_at: datetime
-    last_login_at: Optional[datetime] = None
+    last_login_at: datetime | None = None
 
     @classmethod
     def from_domain(cls, user: User) -> "UserResponse":

@@ -1,33 +1,29 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
-from datetime import datetime
-from typing import Optional
+from datetime import UTC, datetime
 
 from sqlalchemy import (
-    BigInteger,
-    String,
-    Integer,
     Boolean,
     DateTime,
+    ForeignKey,
+    Integer,
+    PrimaryKeyConstraint,
+    String,
     Text,
     text,
-    PrimaryKeyConstraint,
-    ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
 from ...domain.models.session import Session
+from .base import Base
 
 
 class SessionModel(Base):
     """会话ORM模型"""
+
     __tablename__ = "sessions"
-    __table_args__ = (
-        PrimaryKeyConstraint("id", name="pk_sessions_id"),
-    )
+    __table_args__ = (PrimaryKeyConstraint("id", name="pk_sessions_id"),)
 
     id: Mapped[str] = mapped_column(
         String(255),
@@ -36,7 +32,6 @@ class SessionModel(Base):
         default=lambda: str(uuid.uuid4()),
     )  # 会话id
     sandbox_id: Mapped[str] = mapped_column(String(255), nullable=True)  # 沙箱id
-    task_id: Mapped[str] = mapped_column(String(255), nullable=True)  # 任务id
     title: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
@@ -53,12 +48,12 @@ class SessionModel(Base):
         server_default=text("''::text"),
     )  # 最后一条消息
     latest_message_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True,
     )  # 最后一条消息时间
     model_id: Mapped[str] = mapped_column(
         String(255),
-        ForeignKey("llm_models.id", ondelete="SET NULL"),
+        ForeignKey("inference_models.id", ondelete="SET NULL"),
         nullable=True,
     )  # 会话级模型
     skill_id: Mapped[str] = mapped_column(
@@ -71,12 +66,12 @@ class SessionModel(Base):
         nullable=False,
         server_default=text("false"),
     )  # 会话级思考模式
-    owner_user_id: Mapped[Optional[str]] = mapped_column(
+    owner_user_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )  # 所属用户
-    team_id: Mapped[Optional[str]] = mapped_column(
+    team_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("teams.id", ondelete="SET NULL"),
         nullable=True,
@@ -86,15 +81,7 @@ class SessionModel(Base):
         nullable=False,
         server_default=text("'agent'"),
     )  # ask/agent
-    pending_phase: Mapped[Optional[str]] = mapped_column(
-        String(32),
-        nullable=True,
-    )  # 等待恢复的内部阶段
-    pending_metadata: Mapped[Optional[dict]] = mapped_column(
-        JSONB,
-        nullable=True,
-    )  # 门控状态细节
-    operator_scope: Mapped[Optional[str]] = mapped_column(
+    operator_scope: Mapped[str | None] = mapped_column(
         String(32),
         nullable=True,
     )  # Web Operator 目标系统归属
@@ -103,35 +90,27 @@ class SessionModel(Base):
         nullable=False,
         server_default=text("'[]'::jsonb"),
     )  # 域名白名单
-    gate_profile: Mapped[Optional[str]] = mapped_column(
-        String(16),
-        nullable=True,
-    )  # loose | standard | strict
     status: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
         server_default=text("''::character varying"),
     )  # 会话状态
-    current_run_epoch_id: Mapped[Optional[str]] = mapped_column(
-        String(511),
+    active_execution_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
         nullable=True,
     )
-    current_run_epoch_seq: Mapped[Optional[int]] = mapped_column(
-        BigInteger,
-        nullable=True,
-    )
-    current_run_terminal_status: Mapped[Optional[str]] = mapped_column(
-        String(32),
+    active_execution_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
         nullable=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
-        onupdate=datetime.now,
+        onupdate=lambda: datetime.now(UTC),
         server_default=text("CURRENT_TIMESTAMP(0)"),
     )  # 更新时间
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP(0)"),
     )  # 创建时间
@@ -143,9 +122,7 @@ class SessionModel(Base):
             **session.model_dump(
                 mode="python",
                 exclude={
-                    "memories",
                     "files",
-                    "events",
                     "resource_bindings",
                     "updated_at",
                     "created_at",
@@ -155,33 +132,31 @@ class SessionModel(Base):
 
     def to_domain(self) -> Session:
         """将会话ORM模型转换成领域模型"""
-        return Session.model_validate({
-            "id": self.id,
-            "sandbox_id": self.sandbox_id,
-            "task_id": self.task_id,
-            "title": self.title,
-            "unread_message_count": self.unread_message_count,
-            "latest_message": self.latest_message,
-            "latest_message_at": self.latest_message_at,
-            "events": [],
-            "files": [],
-            "memories": {},
-            "model_id": self.model_id,
-            "skill_id": self.skill_id,
-            "thinking_enabled": self.thinking_enabled,
-            "resource_bindings": [],
-            "owner_user_id": self.owner_user_id,
-            "team_id": self.team_id,
-            "mode": self.mode,
-            "pending_phase": self.pending_phase,
-            "pending_metadata": self.pending_metadata,
-            "operator_scope": self.operator_scope,
-            "operator_domains": self.operator_domains or [],
-            "gate_profile": self.gate_profile,
-            "status": self.status,
-            "updated_at": self.updated_at,
-            "created_at": self.created_at,
-        })
+        return Session.model_validate(
+            {
+                "id": self.id,
+                "sandbox_id": self.sandbox_id,
+                "title": self.title,
+                "unread_message_count": self.unread_message_count,
+                "latest_message": self.latest_message,
+                "latest_message_at": self.latest_message_at,
+                "files": [],
+                "model_id": self.model_id,
+                "skill_id": self.skill_id,
+                "thinking_enabled": self.thinking_enabled,
+                "resource_bindings": [],
+                "owner_user_id": self.owner_user_id,
+                "team_id": self.team_id,
+                "mode": self.mode,
+                "operator_scope": self.operator_scope,
+                "operator_domains": self.operator_domains or [],
+                "status": self.status,
+                "active_execution_run_id": self.active_execution_run_id,
+                "active_execution_request_id": self.active_execution_request_id,
+                "updated_at": self.updated_at,
+                "created_at": self.created_at,
+            }
+        )
 
     def update_from_domain(self, session: Session) -> None:
         """从传递的领域模型更新ORM数据"""
@@ -189,9 +164,7 @@ class SessionModel(Base):
         base_data = session.model_dump(
             mode="python",
             exclude={
-                "memories",
                 "files",
-                "events",
                 "resource_bindings",
                 "updated_at",
                 "created_at",

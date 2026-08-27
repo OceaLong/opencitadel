@@ -2,15 +2,7 @@ import type { ToolEvent } from "@/lib/api/types";
 
 import { translate } from "@/i18n/translate";
 
-export type ToolKind =
-  | "message"
-  | "bash"
-  | "file"
-  | "search"
-  | "browser"
-  | "mcp"
-  | "a2a"
-  | "default";
+export type ToolKind = "bash" | "file" | "search" | "browser" | "mcp" | "a2a" | "default";
 
 export function getArg(args: Record<string, unknown>, ...keys: string[]): string {
   if (!args || typeof args !== "object") return "";
@@ -30,9 +22,6 @@ export function getToolKind(data: ToolEvent | null | undefined): ToolKind {
   const name = (data.name ?? "").toLowerCase();
   const fn = (data.function ?? "").toLowerCase();
 
-  if (data.function === "message_notify_user" || data.function === "message_ask_user") {
-    return "message";
-  }
   if (
     name === "shell" ||
     name.includes("bash") ||
@@ -71,11 +60,6 @@ export function getFriendlyToolLabel(data: ToolEvent | null | undefined): string
   const name = (data.name ?? "").toLowerCase();
   const fn = (data.function ?? "").toLowerCase();
   const args = data.args && typeof data.args === "object" ? data.args : {};
-
-  if (data.function === "message_notify_user" || data.function === "message_ask_user") {
-    const text = typeof args.text === "string" ? args.text : "";
-    return text || "—";
-  }
 
   const filepath = getArg(args, "filepath", "path", "pathname");
   const dirPath = getArg(args, "dir_path", "directory", "dir");

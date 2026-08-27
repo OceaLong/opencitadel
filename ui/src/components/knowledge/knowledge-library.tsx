@@ -71,9 +71,7 @@ type PendingDelete =
   | null;
 
 function isKbIngesting(kb: KnowledgeBase, ingestingIds: Set<string>): boolean {
-  return (
-    ingestingIds.has(kb.id) || (!TERMINAL_KB_STATUSES.has(kb.status) && Boolean(kb.ingest_task_id))
-  );
+  return ingestingIds.has(kb.id) || !TERMINAL_KB_STATUSES.has(kb.status);
 }
 
 // Stable module-level adapter: `knowledgeApi` is itself a stable singleton, so
@@ -205,15 +203,14 @@ export function KnowledgeLibrary() {
     loadErrorMessage: t("loadListFailed"),
     shouldPoll: knowledgeShouldPoll,
     pollMs: 5000,
-    requireIngestTaskId: true,
     formatIngestError: formatIngestStreamError,
     onStreamConnectError: () => toast.error(t("ingestStreamFailed")),
   });
 
   useEffect(() => {
     for (const kb of items) {
-      if (kb.ingest_task_id && !TERMINAL_KB_STATUSES.has(kb.status)) {
-        watchIngest(kb.id, kb.ingest_task_id);
+      if (!TERMINAL_KB_STATUSES.has(kb.status)) {
+        watchIngest(kb.id);
       }
     }
   }, [items, watchIngest]);
@@ -483,7 +480,7 @@ export function KnowledgeLibrary() {
           open={Boolean(addOpenFor)}
           onOpenChange={(open) => !open && setAddOpenFor(null)}
           onAdded={(kb) => {
-            watchIngest(kb.id, kb.ingest_task_id);
+            watchIngest(kb.id);
             void loadList();
           }}
         />

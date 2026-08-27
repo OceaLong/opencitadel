@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -29,7 +29,7 @@ class _Session:
 
     async def flush(self):
         assert self.version.published_at.tzinfo is not None
-        assert self.codebase.updated_at.tzinfo is None
+        assert self.codebase.updated_at.tzinfo is not None
 
 
 @pytest.mark.asyncio
@@ -40,7 +40,7 @@ async def test_publish_uses_column_compatible_timestamps():
         parent_version_id=None,
         build_id="b1",
         state="building",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     codebase = CodebaseModel(
         id="cb1",
@@ -48,8 +48,8 @@ async def test_publish_uses_column_compatible_timestamps():
         source_type="files",
         status="pending",
         active_version_id=None,
-        created_at=datetime.now(),
-        updated_at=datetime.now(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     repository = DBCodebaseVersionRepository(_Session(version, codebase))
 

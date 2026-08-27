@@ -1,7 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -16,8 +13,8 @@ class ServiceApiKeyResponse(BaseModel):
     id: str
     name: str
     prefix: str
-    last_used_at: Optional[datetime] = None
-    revoked_at: Optional[datetime] = None
+    last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
     created_at: datetime
 
     @classmethod

@@ -20,8 +20,3 @@ export type MemoryEntry = {
 export type MemoryEntriesData = {
   entries: MemoryEntry[];
 };
-
-export type SessionMemoryData = {
-  planner: Array<Record<string, unknown>>;
-  react: Array<Record<string, unknown>>;
-};

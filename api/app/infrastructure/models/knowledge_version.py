@@ -1,11 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """SQLAlchemy persistence models for immutable knowledge-base versions."""
+
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import (
-    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -86,6 +84,17 @@ class KnowledgeBaseVersionORM(Base):
             "knowledge_base_id",
             "published_at",
         ),
+        Index(
+            "uq_knowledge_base_versions_build",
+            "build_id",
+            unique=True,
+        ),
+        Index(
+            "uq_knowledge_base_versions_building_candidate",
+            "knowledge_base_id",
+            unique=True,
+            postgresql_where=text("state = 'building'"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
@@ -94,14 +103,19 @@ class KnowledgeBaseVersionORM(Base):
         ForeignKey("knowledge_bases.id", ondelete="CASCADE"),
         nullable=False,
     )
-    parent_version_id: Mapped[Optional[str]] = mapped_column(
+    parent_version_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
     )
-    build_id: Mapped[Optional[str]] = mapped_column(
+    build_id: Mapped[str] = mapped_column(
         String(255),
-        ForeignKey("resource_builds.id", ondelete="SET NULL"),
-        nullable=True,
+        nullable=False,
+        server_default=text("gen_random_uuid()::text"),
+    )
+    request_key: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("md5(gen_random_uuid()::text) || md5(gen_random_uuid()::text)"),
     )
     state: Mapped[str] = mapped_column(
         String(32),
@@ -128,7 +142,7 @@ class KnowledgeBaseVersionORM(Base):
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP"),
     )
-    published_at: Mapped[Optional[datetime]] = mapped_column(
+    published_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
@@ -139,6 +153,7 @@ class KnowledgeBaseVersionORM(Base):
             knowledge_base_id=self.knowledge_base_id,
             parent_version_id=self.parent_version_id,
             build_id=self.build_id,
+            request_key=self.request_key,
             state=KnowledgeVersionState(self.state),
             capabilities=dict(self.capabilities or {}),
             degraded_reasons=list(self.degraded_reasons or []),
@@ -157,6 +172,7 @@ class KnowledgeBaseVersionORM(Base):
             knowledge_base_id=version.knowledge_base_id,
             parent_version_id=version.parent_version_id,
             build_id=version.build_id,
+            request_key=version.request_key,
             state=version.state.value,
             capabilities=mutable_json_value(version.capabilities),
             degraded_reasons=mutable_json_value(version.degraded_reasons),
@@ -170,8 +186,7 @@ class KnowledgeDocumentRevisionORM(Base):
     __tablename__ = "knowledge_document_revisions"
     __table_args__ = (
         CheckConstraint(
-            "state IN "
-            "('uploaded', 'parsing', 'parsed', 'indexing', 'indexed', 'failed')",
+            "state IN ('uploaded', 'parsing', 'parsed', 'indexing', 'indexed', 'failed')",
             name="ck_knowledge_document_revisions_state",
         ),
         UniqueConstraint(
@@ -218,13 +233,8 @@ class KnowledgeDocumentRevisionORM(Base):
         nullable=False,
         server_default=DocumentRevisionState.UPLOADED.value,
     )
-    needs_chunk_clone: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        server_default=text("false"),
-    )
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    warning: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    warning: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -240,7 +250,6 @@ class KnowledgeDocumentRevisionORM(Base):
             parsed_blocks=list(self.parsed_blocks or []),
             page_count=self.page_count,
             state=DocumentRevisionState(self.state),
-            needs_chunk_clone=self.needs_chunk_clone,
             error=self.error,
             warning=self.warning,
             created_at=self.created_at,
@@ -259,7 +268,6 @@ class KnowledgeDocumentRevisionORM(Base):
             parsed_blocks=mutable_json_value(revision.parsed_blocks),
             page_count=revision.page_count,
             state=revision.state.value,
-            needs_chunk_clone=revision.needs_chunk_clone,
             error=revision.error,
             warning=revision.warning,
             created_at=revision.created_at,
@@ -270,8 +278,7 @@ class KnowledgeVersionDocumentORM(Base):
     __tablename__ = "knowledge_base_version_documents"
     __table_args__ = (
         CheckConstraint(
-            "state IN "
-            "('uploaded', 'parsing', 'parsed', 'indexing', 'indexed', 'failed')",
+            "state IN ('uploaded', 'parsing', 'parsed', 'indexing', 'indexed', 'failed')",
             name="ck_knowledge_base_version_documents_state",
         ),
         ForeignKeyConstraint(
@@ -333,8 +340,8 @@ class KnowledgeVersionDocumentORM(Base):
         nullable=False,
         server_default=DocumentRevisionState.UPLOADED.value,
     )
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    warning: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    warning: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def to_domain(self) -> KnowledgeVersionDocument:
         return KnowledgeVersionDocument(

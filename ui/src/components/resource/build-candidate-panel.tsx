@@ -1,24 +1,30 @@
 "use client";
 
-import type { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
-
-type TFunction = ReturnType<typeof useTranslations>;
 
 type VersionShape = {
   id: string;
 };
 
+export type BuildCandidateMessages = {
+  activeVersion: (version: string) => string;
+  noActiveVersion: string;
+  versionCapabilities: (capabilities: string) => string;
+  noCapabilities: string;
+  candidateBuild: (values: { state: string; phase: string; progress: number }) => string;
+  candidatePhasePending: string;
+  retryBuild: string;
+  cancelBuild: string;
+};
+
 type BuildShape = {
   id: string;
-  state: string;
+  status: string;
   phase?: string | null;
   progress: number;
-  degraded_reasons: unknown[];
-  error_message?: string | null;
-  heartbeat_at?: string | null;
+  failure_code?: string | null;
   can_retry: boolean;
   can_cancel: boolean;
 };
@@ -31,7 +37,7 @@ export type BuildCandidatePanelProps<TVersion extends VersionShape, TBuild exten
   acting: boolean;
   onRetry: () => void;
   onCancel: () => void;
-  t: TFunction;
+  messages: BuildCandidateMessages;
   /**
    * Resource-specific extra info rendered right after the capabilities line
    * (only while a version is being viewed). Codebase uses this for its
@@ -53,18 +59,18 @@ export function BuildCandidatePanel<TVersion extends VersionShape, TBuild extend
   acting,
   onRetry,
   onCancel,
-  t,
+  messages,
   extraInfo,
 }: BuildCandidatePanelProps<TVersion, TBuild>) {
   return (
     <>
-      <p>{active ? t("activeVersion", { version: active.id }) : t("noActiveVersion")}</p>
+      <p>{active ? messages.activeVersion(active.id) : messages.noActiveVersion}</p>
       {viewed && (
         <>
           <p className="text-muted-foreground">
-            {t("versionCapabilities", {
-              capabilities: capabilities.length ? capabilities.join(", ") : t("noCapabilities"),
-            })}
+            {messages.versionCapabilities(
+              capabilities.length ? capabilities.join(", ") : messages.noCapabilities,
+            )}
           </p>
           {extraInfo}
         </>
@@ -72,35 +78,21 @@ export function BuildCandidatePanel<TVersion extends VersionShape, TBuild extend
       {actionableBuild && (
         <div className="text-muted-foreground">
           <p>
-            {t("candidateBuild", {
-              state: actionableBuild.state,
-              phase: actionableBuild.phase ?? t("candidatePhasePending"),
-              progress: Math.round(actionableBuild.progress * 100),
+            {messages.candidateBuild({
+              state: actionableBuild.status,
+              phase: actionableBuild.phase ?? messages.candidatePhasePending,
+              progress: actionableBuild.progress,
             })}
           </p>
-          {actionableBuild.error_message && (
+          {actionableBuild.failure_code && (
             <p role="alert" className="text-destructive">
-              {actionableBuild.error_message}
-            </p>
-          )}
-          {!!actionableBuild.degraded_reasons.length && (
-            <p className="text-warning">
-              {t("candidateDegraded", {
-                reasons: actionableBuild.degraded_reasons.join(", "),
-              })}
-            </p>
-          )}
-          {actionableBuild.heartbeat_at && (
-            <p>
-              {t("candidateHeartbeat", {
-                heartbeat: actionableBuild.heartbeat_at,
-              })}
+              {actionableBuild.failure_code}
             </p>
           )}
           <div className="mt-1 flex gap-1">
             {actionableBuild.can_retry && (
               <Button type="button" size="sm" variant="outline" disabled={acting} onClick={onRetry}>
-                {t("retryBuild")}
+                {messages.retryBuild}
               </Button>
             )}
             {actionableBuild.can_cancel && (
@@ -111,7 +103,7 @@ export function BuildCandidatePanel<TVersion extends VersionShape, TBuild extend
                 disabled={acting}
                 onClick={onCancel}
               >
-                {t("cancelBuild")}
+                {messages.cancelBuild}
               </Button>
             )}
           </div>

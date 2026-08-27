@@ -1,43 +1,21 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""Seed a runnable Ops Patrol demo (Phase B "ten minute demo loop", Task 2).
+"""Seed a runnable Ops Patrol demonstration.
 
 Container entrypoint:  docker compose exec opencitadel-api python -m app.seed_demo
 
 Automates the manual steps from docs/tutorials/06-ops-patrol.md end to end:
 
-1. Enable ``feature_flags.enable_ops_patrol`` (read-merge-write; leaves
-   ``enable_ops_patrol_fixture_replay``/``enable_ops_patrol_remediation`` untouched).
-2. Enable the ``ops-collector`` MCP server and persist its nine fixed
+1. Enable the ``ops-collector`` MCP server and persist its nine fixed
    read-only Tool Policies (values from docs/operations/ops-patrol.md).
-3. Optionally register a demo LLM endpoint/model from
-   DEMO_LLM_BASE_URL/DEMO_LLM_API_KEY/DEMO_LLM_MODEL/DEMO_LLM_PROVIDER env
-   vars, and set it as the system default model.
-4. Create, validate, and activate a custom "Demo Governance Patrol" Pack
+2. Optionally register a demo inference endpoint/model/binding from
+   DEMO_INFERENCE_BASE_URL/DEMO_INFERENCE_CREDENTIAL/DEMO_INFERENCE_MODEL/
+   DEMO_INFERENCE_PROVIDER env
+   vars, and create the global chat-purpose binding.
+3. Create, validate, and activate a custom "Demo Governance Patrol" Pack
    with three checks (see build_demo_pack_config()).
-5. Print demo guidance, including how to manufacture a Finding on demand.
+4. Print demo guidance, including how to manufacture a Finding on demand.
 
-Every step is idempotent: re-running this module makes zero additional
-writes once the demo state already exists ("[skip] ..." is printed instead).
-
-Fixed gap (coordinator review round 1, F1): MCPServerService.update_server()
-re-validates the server URL through
-app/domain/utils/mcp_url.py:validate_mcp_http_url(), which used to call
-resolve_outbound_url() *without* forwarding Settings.outbound_allowed_ports
-(unlike LLMEndpointService, which already did), falling back to a hardcoded
-``DEFAULT_OUTBOUND_PORTS = {80, 443, 8080, 8443}`` that did not include 8090
--- the port docker-compose.yml deploys ``opencitadel-ops-collector`` on. That
-blocked the officially documented admin flow in docs/operations/ops-patrol.md
-("Register the MCP Server" -> ``POST /api/app-config/mcp-servers/ops-collector
-/update``, which hits this exact code path) just as much as this seed script.
-Fixed at the source instead of working around it here: mcp_url.py now accepts
-an ``allowed_ports`` override, integration_server_service.py and
-domain/services/tools/mcp.py (the live MCP-connect path, which the same
-validator gates and which validate_pack()/activate_pack() below depend on)
-both pass ``Settings.outbound_allowed_ports``, and that setting's default
-(core/config.py) now includes 8090/8091. seed_mcp_tool_policies() below goes
-through the normal ``MCPServerService.update_server()`` path again -- the same
-one the documented admin flow uses.
+Every step is idempotent: re-running this module makes zero additional writes
+once the demo state exists.
 
 Finding-manufacture semantics (see build_demo_pack_config() docstring for the
 full reasoning): stopping the `ops-console` demo container makes the
@@ -57,40 +35,43 @@ ops-collector/src/opencitadel_ops_collector/collector.py shows why:
   returns envelope ``status="unavailable"``. PatrolAssertionEngine
   short-circuits on any ``probe_status != PatrolProbeStatus.OK`` *before*
   evaluating assertions, returning a generic ERROR result with a hardcoded
-  WARNING severity — it still becomes a Finding (WARN/FAIL/ERROR all do, see
-  patrol_run_service.py), but the assertion/severity_on_fail configuration
-  the Pack author wrote is never actually exercised, and the outcome depends
-  on the patrol agent faithfully mirroring the Collector's literal
-  "unavailable" string into `probe_status` rather than on deterministic
-  server-side evaluation.
+  WARNING severity. It still becomes a Finding, but the Pack's assertion and
+  `severity_on_fail` are not evaluated.
 
 For a demo whose "stop a container -> see a Finding" story must be reliable
 and easy to explain, `dependency_status`/TCP is the better choice. This
-seed's third check therefore targets `demo-console-tcp` instead of the
-`demo-console` HTTP probe suggested as the initial idea in the task brief.
+seed's third check therefore targets `demo-console-tcp`.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Optional
+from collections.abc import Callable
+from dataclasses import dataclass
 
+from app.application.ports.crypto import OutboundNetworkPolicy
+from app.application.ports.reporting import AuditVerificationKeyring
 from app.application.security.authorization_context import authorization_scope
-from app.application.services.app_config_repository_factory import create_app_config_repository
-from app.application.services.app_config_service import AppConfigService
 from app.application.services.audit_service import AuditService
-from app.application.services.config_provider import create_app_config_provider
+from app.application.services.inference_binding_service import InferenceBindingService
+from app.application.services.inference_endpoint_service import InferenceEndpointService
+from app.application.services.inference_model_service import InferenceModelService
 from app.application.services.integration_server_service import MCPServerService
-from app.application.services.llm_endpoint_service import LLMEndpointService
-from app.application.services.llm_model_service import LLMModelService
 from app.application.services.patrol_collector_validator import MCPPatrolCollectorValidator
 from app.application.services.patrol_pack_service import PatrolPackService
+from app.composition.uow import DBUnitOfWorkDependencies, create_uow_factory
 from app.domain.models.authorization import AuthorizationContext
+from app.domain.models.inference import (
+    InferenceEndpoint,
+    InferenceModel,
+    InferenceProvider,
+    InferencePurpose,
+    ResourceVisibility,
+)
+from app.domain.models.integration_runtime import MCPTransport
 from app.domain.models.integration_server import MCPServerRecord
-from app.domain.models.llm_endpoint import LLMEndpoint
-from app.domain.models.llm_model import LLMModel, LLMProvider, ResourceVisibility
 from app.domain.models.patrol import (
     PATROL_PROBE_TOOLS,
     PatrolAssertion,
@@ -107,19 +88,30 @@ from app.domain.models.tool_policy import (
     ToolExecutionPolicy,
     ToolIdempotency,
 )
+from app.domain.runtime_policy import ActivityExecutionPolicy
+from app.domain.utils.outbound_url import parse_allowed_ports
 from app.infrastructure.adapters.connection_pool import InfrastructureMCPConnectionPoolAdapter
-from app.infrastructure.external.app_config_notifier import publish_config_invalidate
-from app.infrastructure.repositories.db_uow import DBUnitOfWork
+from app.infrastructure.adapters.inference_ports import InfrastructureInferenceProviderAdapter
+from app.infrastructure.adapters.query_ports import SqlAlchemyAuditSummaryQuery
+from app.infrastructure.adapters.reporting_ports import PrometheusGovernanceMetricsAdapter
+from app.infrastructure.adapters.security_ports import (
+    FernetSecretEnvelopeAdapter,
+    FernetVersionedSecretCipherAdapter,
+)
+from app.infrastructure.repositories.postgres_runtime_policy_repository import (
+    PostgresRuntimePolicyRepository,
+)
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
-from app.infrastructure.storage.postgres import get_postgres
-from app.infrastructure.storage.redis import get_redis
-from core.config import get_settings
+from app.infrastructure.storage.postgres import Postgres
+from core.config import DeploymentSettings, load_deployment_settings
 
 logger = logging.getLogger(__name__)
 
 DEMO_MCP_SERVER_NAME = "ops-collector"
-DEMO_LLM_ENDPOINT_NAME = "Demo Endpoint"
-DEMO_LLM_MODEL_NAME = "Demo Model"
+DEMO_MCP_SERVER_ID = "demo-ops-collector"
+DEMO_MCP_SERVER_URL = "http://opencitadel-ops-collector:8090/mcp"
+DEMO_INFERENCE_ENDPOINT_NAME = "Demo Endpoint"
+DEMO_INFERENCE_MODEL_NAME = "Demo Model"
 DEMO_PACK_NAME = "Demo Governance Patrol"
 DEMO_PACK_SLUG = "demo-governance-patrol"
 
@@ -155,7 +147,7 @@ DEMO_ENVIRONMENT = "dev"
 
 def _desired_tool_policies() -> dict[str, ToolExecutionPolicy]:
     tool_names = sorted(PATROL_PROBE_TOOLS | {"get_capabilities"})
-    return {name: DEMO_TOOL_POLICY for name in tool_names}
+    return dict.fromkeys(tool_names, DEMO_TOOL_POLICY)
 
 
 def build_demo_pack_config() -> PatrolPackConfig:
@@ -244,92 +236,64 @@ def build_demo_pack_config() -> PatrolPackConfig:
 
 
 @dataclass
-class DemoLLMEnv:
+class DemoInferenceEnv:
     base_url: str
-    api_key: str
+    credential: str
     model: str
     provider: str = "openai"
 
 
-def read_demo_llm_env() -> Optional[DemoLLMEnv]:
-    base_url = os.environ.get("DEMO_LLM_BASE_URL", "").strip()
-    api_key = os.environ.get("DEMO_LLM_API_KEY", "").strip()
-    model = os.environ.get("DEMO_LLM_MODEL", "").strip()
-    provider = os.environ.get("DEMO_LLM_PROVIDER", "openai").strip() or "openai"
-    if not (base_url and api_key and model):
+def read_demo_inference_env() -> DemoInferenceEnv | None:
+    base_url = os.environ.get("DEMO_INFERENCE_BASE_URL", "").strip()
+    credential = os.environ.get("DEMO_INFERENCE_CREDENTIAL", "").strip()
+    model = os.environ.get("DEMO_INFERENCE_MODEL", "").strip()
+    provider = os.environ.get("DEMO_INFERENCE_PROVIDER", "openai").strip() or "openai"
+    if not (base_url and credential and model):
         return None
-    return DemoLLMEnv(base_url=base_url, api_key=api_key, model=model, provider=provider)
-
-
-async def _noop_refresh() -> None:
-    return None
+    return DemoInferenceEnv(
+        base_url=base_url,
+        credential=credential,
+        model=model,
+        provider=provider,
+    )
 
 
 @dataclass
 class SeedDeps:
-    app_config_service: AppConfigService
     mcp_server_service: MCPServerService
-    llm_endpoint_service: LLMEndpointService
-    llm_model_service: LLMModelService
+    inference_endpoint_service: InferenceEndpointService
+    inference_model_service: InferenceModelService
+    inference_binding_service: InferenceBindingService
     patrol_pack_service: PatrolPackService
+    activity_policy: ActivityExecutionPolicy
     admin_user_id: str
-    demo_llm_env: Optional[DemoLLMEnv] = None
-    refresh_runtime_config: Callable[[], Awaitable[None]] = field(default=_noop_refresh)
-    # Explicit cross-process cache-invalidation hook, called once after every
-    # seed run completes (see run_seed()). Defaults to a no-op for tests;
-    # main() wires the real publish_config_invalidate() here.
-    #
-    # Why this can't be left to AppConfigService's own fire-and-forget
-    # notification (app_config_service.py:_notify_config_invalidate()):
-    # that path does `loop.create_task(publish_config_invalidate())` and
-    # returns immediately without awaiting it. In a short-lived one-shot
-    # script driven by `asyncio.run(main())`, the event loop is torn down
-    # right after `main()` returns, so a task merely *scheduled* there is
-    # never guaranteed to actually run before the interpreter exits -- and
-    # even when it does run, publish_config_invalidate() swallows any
-    # exception (e.g. Redis never initialized) into a warning log, so seeding
-    # would silently "succeed" while never notifying already-running API
-    # processes to drop their stale `_sync_cache`. Awaiting it explicitly
-    # here, once, after all writes are done, makes the notification a
-    # hard-required, observable step of the seed run instead of a best-effort
-    # side effect.
-    notify_config_invalidate: Callable[[], Awaitable[None]] = field(default=_noop_refresh)
+    demo_inference_env: DemoInferenceEnv | None = None
 
 
-async def seed_feature_flags(app_config_service: AppConfigService, *, changed_by: str) -> str:
-    current = await app_config_service.get_section("feature_flags")
-    if current.enable_ops_patrol:
-        return "skip"
-    payload = current.model_dump(mode="json")
-    payload["enable_ops_patrol"] = True
-    await app_config_service.update_section(
-        "feature_flags",
-        payload,
-        changed_by=changed_by,
-        is_admin=True,
-    )
-    return "create"
-
-
-async def seed_mcp_tool_policies(mcp_server_service: MCPServerService, *, actor_user_id: str) -> str:
+async def seed_mcp_tool_policies(
+    mcp_server_service: MCPServerService, *, actor_user_id: str
+) -> str:
     """Enable ops-collector and persist its nine tool policies.
 
-    Goes through the normal ``MCPServerService.update_server()`` path -- the
-    same one the documented admin flow (docs/operations/ops-patrol.md
-    "Register the MCP Server") uses. This used to bypass the service and
-    write through the repository directly to work around
-    update_server()'s outbound-port revalidation rejecting the Collector's
-    port (8090); that gap is now fixed at the source (see module docstring,
-    "Fixed gap (coordinator review round 1, F1)").
+    Uses the same validated service path as the documented management API.
     """
     servers = await mcp_server_service.list_servers(mask=False)
     target = next((server for server in servers if server.name == DEMO_MCP_SERVER_NAME), None)
     if target is None:
-        raise RuntimeError(
-            f"MCP server '{DEMO_MCP_SERVER_NAME}' not found. It should already exist from the "
-            "config.yaml -> app_configs blob -> mcp_servers table migration (api/app/migrate.py); "
-            "run `docker compose exec opencitadel-api python -m app.migrate` first."
+        await mcp_server_service.create_server(
+            MCPServerRecord(
+                id=DEMO_MCP_SERVER_ID,
+                name=DEMO_MCP_SERVER_NAME,
+                transport=MCPTransport.STREAMABLE_HTTP,
+                url=DEMO_MCP_SERVER_URL,
+                enabled=True,
+                tool_policies=_desired_tool_policies(),
+                visibility=ResourceVisibility.GLOBAL,
+            ),
+            actor_user_id=actor_user_id,
+            is_admin=True,
         )
+        return "create"
     desired = _desired_tool_policies()
     if target.enabled and target.tool_policies == desired:
         return "skip"
@@ -344,6 +308,7 @@ async def seed_mcp_tool_policies(mcp_server_service: MCPServerService, *, actor_
         url=target.url,
         headers=target.headers,
         env=target.env,
+        transport_options=target.transport_options,
         tool_policies=desired,
         owner_user_id=target.owner_user_id,
         team_id=target.team_id,
@@ -358,42 +323,49 @@ async def seed_mcp_tool_policies(mcp_server_service: MCPServerService, *, actor_
     return "create"
 
 
-async def seed_llm(
-    llm_endpoint_service: LLMEndpointService,
-    llm_model_service: LLMModelService,
-    env: Optional[DemoLLMEnv],
+async def seed_inference(
+    endpoint_service: InferenceEndpointService,
+    model_service: InferenceModelService,
+    binding_service: InferenceBindingService,
+    env: DemoInferenceEnv | None,
 ) -> str:
     if env is None:
         return "skip-no-env"
-    endpoints = await llm_endpoint_service.list_endpoints(scope=None)
-    existing = next((item for item in endpoints if item.display_name == DEMO_LLM_ENDPOINT_NAME), None)
+    endpoints = await endpoint_service.list_endpoints(scope=None)
+    existing = next(
+        (item for item in endpoints if item.display_name == DEMO_INFERENCE_ENDPOINT_NAME),
+        None,
+    )
     if existing is not None:
         return "skip"
-    endpoint = LLMEndpoint(
-        display_name=DEMO_LLM_ENDPOINT_NAME,
-        provider=LLMProvider(env.provider),
+    endpoint = InferenceEndpoint(
+        display_name=DEMO_INFERENCE_ENDPOINT_NAME,
+        provider=InferenceProvider(env.provider),
         base_url=env.base_url,
-        api_key=env.api_key,
+        credential=env.credential,
         visibility=ResourceVisibility.GLOBAL,
     )
-    created_endpoint = await llm_endpoint_service.create_endpoint(
+    created_endpoint = await endpoint_service.create_endpoint(
         endpoint,
         scope=None,
         allow_global_mutation=True,
     )
-    model = LLMModel(
+    model = InferenceModel(
         endpoint_id=created_endpoint.id,
-        display_name=DEMO_LLM_MODEL_NAME,
-        provider=LLMProvider(env.provider),
+        display_name=DEMO_INFERENCE_MODEL_NAME,
         model_name=env.model,
         visibility=ResourceVisibility.GLOBAL,
     )
-    created_model = await llm_model_service.create_model(
+    created_model = await model_service.create_model(
         model,
         scope=None,
         allow_global_mutation=True,
     )
-    await llm_model_service.set_default(created_model.id)
+    await binding_service.set_binding(
+        InferencePurpose.CHAT,
+        created_model.id,
+        scope=None,
+    )
     return "create"
 
 
@@ -402,6 +374,7 @@ async def seed_demo_pack(
     mcp_server_service: MCPServerService,
     *,
     owner_user_id: str,
+    activity_policy: ActivityExecutionPolicy,
 ) -> str:
     scope = OwnerScope.personal(owner_user_id)
     existing_packs = await patrol_pack_service.list_packs(scope, limit=100)
@@ -410,7 +383,9 @@ async def seed_demo_pack(
     servers = await mcp_server_service.list_servers(mask=False)
     collector = next((server for server in servers if server.name == DEMO_MCP_SERVER_NAME), None)
     if collector is None:
-        raise RuntimeError(f"MCP server '{DEMO_MCP_SERVER_NAME}' not found; run seed_mcp_tool_policies() first")
+        raise RuntimeError(
+            f"MCP server '{DEMO_MCP_SERVER_NAME}' not found; run seed_mcp_tool_policies() first"
+        )
 
     pack = await patrol_pack_service.create_pack(
         owner_user_id=owner_user_id,
@@ -420,7 +395,12 @@ async def seed_demo_pack(
         config=build_demo_pack_config(),
         slug=DEMO_PACK_SLUG,
     )
-    validated = await patrol_pack_service.validate_pack(pack.id, scope, owner_user_id)
+    validated = await patrol_pack_service.validate_pack(
+        pack.id,
+        scope,
+        owner_user_id,
+        policy=activity_policy,
+    )
     if not validated.validation_summary.get("ok"):
         raise RuntimeError(
             f"Demo pack failed validation against the live Collector: "
@@ -440,8 +420,7 @@ def _print_demo_guide(results: dict[str, str]) -> None:
     print("=" * 72)
     print("OpenCitadel demo data is ready.")
     print("=" * 72)
-    print("  1. Log in, open 'Ops Patrol', and select "
-          f"'{DEMO_PACK_NAME}'.")
+    print(f"  1. Log in, open 'Ops Patrol', and select '{DEMO_PACK_NAME}'.")
     print("  2. Click 'Run now' and wait for the Run to reach a terminal state.")
     print("  3. Open /admin/governance for the governance overview dashboard.")
     print()
@@ -450,124 +429,163 @@ def _print_demo_guide(results: dict[str, str]) -> None:
     print("  ...then Run now again. The 'demo-console-health' check (a")
     print("  dependency_status probe against demo-console-tcp) fails")
     print("  deterministically: the refused TCP dial still comes back as")
-    print("  envelope status=\"ok\" with data.healthy=false, and the")
+    print('  envelope status="ok" with data.healthy=false, and the')
     print("  server-side assertion turns that into a FAIL -> Finding.")
     print("  (An http_probe against a fully-stopped target instead returns")
-    print("  status=\"unavailable\", which skips assertion evaluation")
+    print('  status="unavailable", which skips assertion evaluation')
     print("  entirely and is less demo-friendly — see api/app/seed_demo.py")
     print("  module docstring for the full read-the-code justification.)")
     print("  docker compose start ops-console   # restore before the next demo")
     print()
-    if results.get("llm") == "skip-no-env":
-        print("No demo LLM was registered (DEMO_LLM_BASE_URL/DEMO_LLM_API_KEY/")
-        print("DEMO_LLM_MODEL not set). Add one later in Settings -> Models.")
+    if results.get("inference") == "skip-no-env":
+        print("No demo inference model was registered (DEMO_INFERENCE_BASE_URL/")
+        print("DEMO_INFERENCE_CREDENTIAL/DEMO_INFERENCE_MODEL not set).")
     print("=" * 72)
 
 
 async def run_seed(deps: SeedDeps) -> dict[str, str]:
     results: dict[str, str] = {}
 
-    results["feature_flags"] = await seed_feature_flags(
-        deps.app_config_service, changed_by=deps.admin_user_id
-    )
-    _log("feature_flags.enable_ops_patrol", results["feature_flags"])
-
     results["mcp_tool_policies"] = await seed_mcp_tool_policies(
         deps.mcp_server_service, actor_user_id=deps.admin_user_id
     )
     _log("MCP server 'ops-collector' enabled + 9 tool policies", results["mcp_tool_policies"])
 
-    # Only the feature_flags write above goes through AppConfigService.
-    # update_section(), which is what actually calls invalidate_runtime_config()
-    # (seed_mcp_tool_policies() calls MCPServerService.update_server() directly,
-    # which does not touch that cache). patrol_pack_service._require_enabled()
-    # reads the cache synchronously, so refresh it before touching the Pack
-    # service regardless -- cheap, and correct even if a future step here starts
-    # invalidating it too.
-    await deps.refresh_runtime_config()
-
-    results["llm"] = await seed_llm(deps.llm_endpoint_service, deps.llm_model_service, deps.demo_llm_env)
-    _log("Demo LLM endpoint/model", results["llm"])
+    results["inference"] = await seed_inference(
+        deps.inference_endpoint_service,
+        deps.inference_model_service,
+        deps.inference_binding_service,
+        deps.demo_inference_env,
+    )
+    _log("Demo inference endpoint/model/binding", results["inference"])
 
     results["demo_pack"] = await seed_demo_pack(
-        deps.patrol_pack_service, deps.mcp_server_service, owner_user_id=deps.admin_user_id
+        deps.patrol_pack_service,
+        deps.mcp_server_service,
+        owner_user_id=deps.admin_user_id,
+        activity_policy=deps.activity_policy,
     )
     _log(f"Patrol pack '{DEMO_PACK_NAME}' ({DEMO_PACK_SLUG})", results["demo_pack"])
-
-    # Explicit, awaited cross-process invalidation -- see SeedDeps.notify_config_invalidate
-    # docstring above for why this can't rely on AppConfigService's internal
-    # fire-and-forget notification alone.
-    await deps.notify_config_invalidate()
 
     _print_demo_guide(results)
     return results
 
 
-async def main() -> None:
-    settings = get_settings()
-    postgres = get_postgres()
+async def run_seed_command(
+    settings: DeploymentSettings,
+    *,
+    postgres_factory: Callable[[DeploymentSettings], Postgres] = Postgres,
+) -> dict[str, str]:
+    """Open only PostgreSQL and execute the idempotent demo seed."""
+
+    postgres = postgres_factory(settings)
     await postgres.init()
     try:
-        # Cross-process config-invalidate notification (SeedDeps.notify_config_invalidate,
-        # awaited at the end of run_seed()) goes over Redis pub/sub, so it needs an
-        # initialized Redis client too -- this is a short-lived script, not the long-running
-        # API process, so nothing else in this module's process would ever init it.
-        redis = get_redis()
-        await redis.init()
-        try:
-            with authorization_scope(AuthorizationContext.system("seed-demo")):
-                uow_factory = lambda: DBUnitOfWork(session_factory=postgres.session_factory)  # noqa: E731
+        with authorization_scope(AuthorizationContext.system("seed-demo")):
+            cipher = ApiKeyCipher(
+                settings.api_key_secret,
+                key_id=settings.api_key_secret_id,
+                previous_secrets=settings.api_key_previous_secrets,
+            )
 
-                cipher = ApiKeyCipher(
-                    settings.api_key_secret,
-                    key_id=settings.api_key_secret_id,
-                    previous_secrets=settings.api_key_previous_secrets,
+            versioned_cipher = FernetVersionedSecretCipherAdapter(cipher)
+            uow_factory = create_uow_factory(
+                session_factory=postgres.session_factory,
+                dependencies=DBUnitOfWorkDependencies(
+                    secret_cipher=versioned_cipher,
+                    audit_signing_key=settings.audit_signing_key,
+                    audit_signing_key_id=settings.audit_signing_key_id,
+                    database_authorization_signing_secret=settings.session_secret,
+                ),
+            )
+
+            governance_metrics = PrometheusGovernanceMetricsAdapter()
+            audit_service = AuditService(
+                uow_factory,
+                AuditVerificationKeyring(
+                    keys={
+                        settings.audit_signing_key_id: (settings.audit_signing_key,),
+                        **{
+                            str(key_id): (str(secret),)
+                            for key_id, secret in settings.audit_previous_signing_keys.items()
+                        },
+                    }
+                ),
+                governance_metrics,
+                SqlAlchemyAuditSummaryQuery(postgres.session_factory),
+            )
+            outbound_policy = OutboundNetworkPolicy(
+                allowed_ports=parse_allowed_ports(settings.outbound_allowed_ports),
+                allow_private_hosts=frozenset(
+                    item.strip()
+                    for item in settings.outbound_private_host_allowlist.split(",")
+                    if item.strip()
+                ),
+            )
+            provider_adapter = InfrastructureInferenceProviderAdapter(
+                outbound_policy=outbound_policy,
+            )
+            mcp_server_service = MCPServerService(
+                uow_factory,
+                FernetSecretEnvelopeAdapter(cipher),
+                outbound_policy,
+                audit_service,
+            )
+            collector_validator = MCPPatrolCollectorValidator(
+                InfrastructureMCPConnectionPoolAdapter(
+                    outbound_policy=outbound_policy,
                 )
-                audit_service = AuditService(uow_factory)
-                mcp_server_service = MCPServerService(uow_factory, cipher, audit_service)
-                app_config_service = AppConfigService(
-                    app_config_repository=create_app_config_repository(),
-                    mcp_server_service=mcp_server_service,
+            )
+            patrol_pack_service = PatrolPackService(uow_factory, audit_service, collector_validator)
+            inference_model_service = InferenceModelService(
+                uow_factory,
+                provider_adapter,
+                provider_adapter,
+                provider_adapter,
+            )
+            inference_endpoint_service = InferenceEndpointService(
+                uow_factory,
+                versioned_cipher,
+                outbound_policy,
+                provider_adapter,
+            )
+            inference_binding_service = InferenceBindingService(uow_factory, provider_adapter)
+            runtime_policy_repository = PostgresRuntimePolicyRepository(
+                session_factory=postgres.session_factory,
+                authorization=AuthorizationContext.system("seed-demo-runtime-policy"),
+            )
+            active_policy = await runtime_policy_repository.load_active_pair()
+
+            async with uow_factory() as uow:
+                admin = await uow.user.get_by_email(settings.bootstrap_admin_email)
+            if admin is None:
+                raise SystemExit(
+                    f"Bootstrap admin user '{settings.bootstrap_admin_email}' not found. "
+                    "Start the API once first so bootstrap_admin_user() seeds it, then re-run."
                 )
-                provider = create_app_config_provider()
-                await provider.get()
 
-                collector_validator = MCPPatrolCollectorValidator(InfrastructureMCPConnectionPoolAdapter())
-                patrol_pack_service = PatrolPackService(uow_factory, audit_service, collector_validator)
-                llm_model_service = LLMModelService(uow_factory, cipher)
-                llm_endpoint_service = LLMEndpointService(uow_factory, cipher)
-
-                async with uow_factory() as uow:
-                    admin = await uow.user.get_by_email(settings.bootstrap_admin_email)
-                if admin is None:
-                    raise SystemExit(
-                        f"Bootstrap admin user '{settings.bootstrap_admin_email}' not found. "
-                        "Start the API once first so bootstrap_admin_user() seeds it, then re-run."
-                    )
-
-                async def _refresh() -> None:
-                    await provider.get()
-
-                deps = SeedDeps(
-                    app_config_service=app_config_service,
-                    mcp_server_service=mcp_server_service,
-                    llm_endpoint_service=llm_endpoint_service,
-                    llm_model_service=llm_model_service,
-                    patrol_pack_service=patrol_pack_service,
-                    admin_user_id=admin.id,
-                    demo_llm_env=read_demo_llm_env(),
-                    refresh_runtime_config=_refresh,
-                    notify_config_invalidate=publish_config_invalidate,
-                )
-                await run_seed(deps)
-        finally:
-            await redis.shutdown()
+            deps = SeedDeps(
+                mcp_server_service=mcp_server_service,
+                inference_endpoint_service=inference_endpoint_service,
+                inference_model_service=inference_model_service,
+                inference_binding_service=inference_binding_service,
+                patrol_pack_service=patrol_pack_service,
+                activity_policy=active_policy.execution.revision.policy.activity,
+                admin_user_id=admin.id,
+                demo_inference_env=read_demo_inference_env(),
+            )
+            return await run_seed(deps)
     finally:
         await postgres.shutdown()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    settings = load_deployment_settings()
     from app.infrastructure.logging import setup_logging
 
-    setup_logging()
-    asyncio.run(main())
+    setup_logging(settings)
+    asyncio.run(run_seed_command(settings))
+
+
+if __name__ == "__main__":
+    main()

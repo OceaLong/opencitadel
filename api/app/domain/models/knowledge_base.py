@@ -1,16 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.models.knowledge_citation import KnowledgeCitation
+from app.domain.utils.time_utils import utc_now
 
 
-class KBSourceType(str, Enum):
+class KBSourceType(StrEnum):
     UPLOAD = "upload"
     ZIP = "zip"
     WEB = "web"
@@ -18,7 +17,7 @@ class KBSourceType(str, Enum):
     FEISHU = "feishu"
 
 
-class KBStatus(str, Enum):
+class KBStatus(StrEnum):
     PENDING = "pending"
     PARSING = "parsing"
     CHUNKING = "chunking"
@@ -28,14 +27,14 @@ class KBStatus(str, Enum):
     FAILED = "failed"
 
 
-class DocStatus(str, Enum):
+class DocStatus(StrEnum):
     PENDING = "pending"
     PARSING = "parsing"
     READY = "ready"
     FAILED = "failed"
 
 
-class ChunkLevel(str, Enum):
+class ChunkLevel(StrEnum):
     PARENT = "parent"
     CHILD = "child"
 
@@ -46,16 +45,15 @@ class KnowledgeBase(BaseModel):
     status: KBStatus = KBStatus.PENDING
     doc_count: int = 0
     chunk_count: int = 0
-    ingest_task_id: Optional[str] = None
-    error: Optional[str] = None
+    error: str | None = None
     vector_degraded: bool = False
-    active_version_id: Optional[str] = None
+    active_version_id: str | None = None
     ready_doc_count: int = 0
-    settings: Dict[str, Any] = Field(default_factory=dict)
-    owner_user_id: Optional[str] = None
-    team_id: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    settings: dict[str, Any] = Field(default_factory=dict)
+    owner_user_id: str | None = None
+    team_id: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class KnowledgeDocument(BaseModel):
@@ -65,13 +63,13 @@ class KnowledgeDocument(BaseModel):
     source_type: KBSourceType = KBSourceType.UPLOAD
     source_ref: str = ""
     mime: str = ""
-    file_id: Optional[str] = None
+    file_id: str | None = None
     page_count: int = 0
     status: DocStatus = DocStatus.PENDING
-    error: Optional[str] = None
-    warning: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    error: str | None = None
+    warning: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
     @property
     def source_identity(self) -> str:
@@ -86,16 +84,14 @@ class KnowledgeChunk(BaseModel):
     kb_id: str
     doc_id: str
     version_id: str
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     level: ChunkLevel = ChunkLevel.CHILD
     content: str = ""
     segmented_content: str = ""
-    # PostgreSQL's already-normalized tsvector representation. This is set
-    # only while cloning immutable imported chunks so the keyword index is
-    # copied byte-for-byte instead of being tokenized again.
-    content_tsv: Optional[str] = None
-    embedding: List[float] = Field(default_factory=list)
-    page_no: Optional[int] = None
+    # Optional pre-normalized PostgreSQL tsvector representation.
+    content_tsv: str | None = None
+    embedding: list[float] = Field(default_factory=list)
+    page_no: int | None = None
     heading_path: str = ""
     ordinal: int = 0
 
@@ -117,7 +113,7 @@ class KnowledgeRelation(BaseModel):
     src_entity_id: str
     dst_entity_id: str
     relation: str = ""
-    chunk_id: Optional[str] = None
+    chunk_id: str | None = None
 
 
 class KnowledgeEntityRef(BaseModel):
@@ -144,7 +140,7 @@ class KnowledgeGraphEdge(BaseModel):
     source: str
     target: str
     relation: str = ""
-    evidence: Tuple[KnowledgeCitation, ...] = ()
+    evidence: tuple[KnowledgeCitation, ...] = ()
 
 
 class KnowledgeGraphResponse(BaseModel):
@@ -152,17 +148,17 @@ class KnowledgeGraphResponse(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    nodes: Tuple[KnowledgeGraphNode, ...] = ()
-    edges: Tuple[KnowledgeGraphEdge, ...] = ()
+    nodes: tuple[KnowledgeGraphNode, ...] = ()
+    edges: tuple[KnowledgeGraphEdge, ...] = ()
     capability: bool
-    next_cursor: Optional[str] = None
+    next_cursor: str | None = None
 
 
 class DocTreeNode(BaseModel):
     name: str
     doc_id: str
     status: str = ""
-    children: List["DocTreeNode"] = Field(default_factory=list)
+    children: list["DocTreeNode"] = Field(default_factory=list)
 
 
 DocTreeNode.model_rebuild()

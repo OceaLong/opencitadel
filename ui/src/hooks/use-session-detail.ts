@@ -7,8 +7,6 @@ import { useSessionEventLog } from "@/hooks/use-session-event-log";
 import { useSessionMeta } from "@/hooks/use-session-meta";
 import { type SessionStreamStatus, useSessionStreams } from "@/hooks/use-session-streams";
 import type {
-  ClarifyAnswer,
-  SessionCheckpoint,
   SessionDetail,
   SessionFile,
   SSEEventData,
@@ -19,7 +17,6 @@ export type UseSessionDetailResult = {
   session: SessionDetail | null;
   files: SessionFile[];
   events: SSEEventData[];
-  checkpoints: SessionCheckpoint[];
   loading: boolean;
   loadingEarlier: boolean;
   hasEarlierHistory: boolean;
@@ -35,15 +32,12 @@ export type UseSessionDetailResult = {
       skill_id?: string;
       thinking_enabled?: boolean;
       mode?: import("@/lib/api/types").SessionMode;
-      clarify_answers?: ClarifyAnswer[];
     },
   ) => Promise<void>;
   updateSessionConfig: (params: UpdateSessionConfigParams) => Promise<void>;
   streaming: boolean;
   streamStatus: SessionStreamStatus;
   streamError: Error | null;
-  enableDebugStream: () => void;
-  refetchEventsWithDebug: () => Promise<void>;
 };
 
 /**
@@ -74,7 +68,6 @@ export function useSessionDetail(
   const {
     session,
     files,
-    checkpoints,
     loading,
     error,
     setError,
@@ -95,26 +88,19 @@ export function useSessionDetail(
     hasEarlierHistory,
     initialEventsLoaded,
     lastEventIdRef,
-    lastPersistedSeqRef,
     resetEvents,
   } = useSessionEventLog(sessionId);
 
   const refresh = useCallback(async () => {
-    await Promise.all([refreshMeta(), loadEventsPage(false)]);
+    await Promise.all([refreshMeta(), loadEventsPage()]);
   }, [refreshMeta, loadEventsPage]);
-
-  const streamIncludeDebugRef = useRef(false);
-
-  const handleDebugModeChange = useCallback((enabled: boolean) => {
-    streamIncludeDebugRef.current = enabled;
-  }, []);
 
   const reconnect = useCallback(async () => {
     await refreshMeta();
     try {
-      await syncMissingEvents(streamIncludeDebugRef.current);
+      await syncMissingEvents();
     } catch {
-      await loadEventsPage(false);
+      await loadEventsPage();
     }
   }, [refreshMeta, syncMissingEvents, loadEventsPage]);
 
@@ -126,11 +112,9 @@ export function useSessionDetail(
     applySessionPatch,
     setError,
     lastEventIdRef,
-    lastPersistedSeqRef,
     initialEventsLoaded,
     skipEmptyStream: initialSkipEmptyStream,
     onReconnect: reconnect,
-    onDebugModeChange: handleDebugModeChange,
   });
 
   useEffect(() => {
@@ -143,13 +127,8 @@ export function useSessionDetail(
   });
 
   const loadEarlierEvents = useCallback(async () => {
-    await loadEarlier(false);
+    await loadEarlier();
   }, [loadEarlier]);
-
-  const refetchEventsWithDebug = useCallback(async () => {
-    streamIncludeDebugRef.current = true;
-    await syncMissingEvents(true);
-  }, [syncMissingEvents]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -169,7 +148,6 @@ export function useSessionDetail(
     session,
     files,
     events,
-    checkpoints,
     loading,
     loadingEarlier,
     hasEarlierHistory,
@@ -182,7 +160,5 @@ export function useSessionDetail(
     streaming: streams.streaming,
     streamStatus: streams.streamStatus,
     streamError: streams.streamError,
-    enableDebugStream: streams.enableDebugStream,
-    refetchEventsWithDebug,
   };
 }

@@ -1,17 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+from app.infrastructure.security import tenant_rls
 from app.infrastructure.security.tenant_rls import (
     CHILD_TABLES,
-    CONFIG_ROOT_TABLES,
+    EXECUTION_ROOT_TABLES,
     PRIVATE_ROOT_TABLES,
     VISIBILITY_ROOT_TABLES,
-    config_select_predicate,
-    config_write_predicate,
-    preference_select_predicate,
-    preference_write_predicate,
     direct_select_predicate,
     direct_write_predicate,
     policy_statements,
+    preference_select_predicate,
+    preference_write_predicate,
 )
 
 
@@ -31,15 +28,14 @@ def test_visibility_write_does_not_grant_global_mutation_to_regular_user():
     assert "app.auth_mode" in predicate
 
 
-def test_config_policy_allows_owner_override_but_protects_global_writes():
-    select_predicate = config_select_predicate()
-    write_predicate = config_write_predicate()
+def test_policy_control_plane_requires_system_or_admin_authorization():
+    predicate = tenant_rls.policy_control_plane_predicate()
 
-    assert "scope = 'global'" in select_predicate
-    assert "scope = 'user'" in select_predicate
-    assert "owner_user_id" in select_predicate
-    assert "scope = 'global'" not in write_predicate
-    assert "app.is_admin" in write_predicate
+    assert "app.auth_mode" in predicate
+    assert "'system'" in predicate
+    assert "app.is_admin" in predicate
+    assert "app.user_id" not in predicate
+    assert "app.team_id" not in predicate
 
 
 def test_model_preference_policy_separates_global_user_and_team_bindings():
@@ -54,7 +50,12 @@ def test_model_preference_policy_separates_global_user_and_team_bindings():
 
 
 def test_rls_policy_matrix_covers_root_and_child_tenant_tables():
-    root_tables = PRIVATE_ROOT_TABLES | VISIBILITY_ROOT_TABLES | CONFIG_ROOT_TABLES
+    root_tables = (
+        PRIVATE_ROOT_TABLES
+        | VISIBILITY_ROOT_TABLES
+        | tenant_rls.POLICY_ROOT_TABLES
+        | EXECUTION_ROOT_TABLES
+    )
 
     assert {
         "sessions",
@@ -63,19 +64,29 @@ def test_rls_policy_matrix_covers_root_and_child_tenant_tables():
         "codebases",
         "files",
         "llm_token_usages",
-        "llm_models",
-        "llm_endpoints",
+        "inference_models",
+        "inference_endpoints",
         "skills",
         "mcp_servers",
         "a2a_servers",
         "scheduled_jobs",
-        "app_configs",
-        "app_config_revisions",
+        "execution_policy_revisions",
+        "operations_policy_revisions",
+        "runtime_policy_heads",
+        "execution_events",
+        "execution_command_inbox",
+        "execution_outbox",
+        "execution_scheduled_commands",
+        "execution_activity_tasks",
+        "execution_snapshots",
+        "execution_projector_checkpoints",
+        "execution_run_projection",
+        "execution_resource_build_projection",
+        "execution_public_events",
+        "execution_activity_projection",
+        "execution_approval_projection",
     } <= root_tables
     assert {
-        "session_events",
-        "session_checkpoints",
-        "session_agent_memories",
         "session_file_attachments",
         "artifacts",
         "codebase_files",
@@ -89,9 +100,14 @@ def test_rls_policy_matrix_covers_root_and_child_tenant_tables():
         "knowledge_relations",
     } <= set(CHILD_TABLES)
 
-    statements = policy_statements("llm_models", has_visibility=True)
+    statements = policy_statements("inference_models", has_visibility=True)
     assert any("FORCE ROW LEVEL SECURITY" in statement for statement in statements)
     assert any("FOR SELECT" in statement for statement in statements)
     assert any("FOR INSERT" in statement for statement in statements)
     assert any("FOR UPDATE" in statement for statement in statements)
     assert any("FOR DELETE" in statement for statement in statements)
+    assert all(
+        "opencitadel_authorization_valid()" in statement
+        for statement in statements
+        if "CREATE POLICY" in statement
+    )

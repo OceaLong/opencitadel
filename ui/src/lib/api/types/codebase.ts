@@ -1,3 +1,4 @@
+import type { ExecutionRunStatus } from "./execution";
 import type { SessionMode } from "./session";
 
 // ==================== 代码知识库 ====================
@@ -31,7 +32,6 @@ export type Codebase = {
   file_count?: number;
   sandbox_id?: string | null;
   workspace_path?: string;
-  ingest_task_id?: string | null;
   error?: string | null;
   vector_degraded?: boolean;
   active_version_id?: string | null;
@@ -125,35 +125,20 @@ export type DownloadCodebaseData = {
   download_url?: string;
 };
 
-type CodebaseBuildState =
-  | "queued"
-  | "running"
-  | "succeeded"
-  | "degraded"
-  | "failed"
-  | "cancelled";
-
 type CodebaseVersionState = "building" | "ready" | "degraded" | "failed";
 
 export type CodebaseBuild = {
   id: string;
+  run_id?: string | null;
   codebase_id: string;
   version_id: string;
-  parent_version_id?: string | null;
-  command_key: string;
-  state: CodebaseBuildState;
+  status: ExecutionRunStatus;
   phase?: string | null;
   progress: number;
-  capabilities: unknown[];
-  degraded_reasons: unknown[];
-  metrics: Record<string, unknown>;
-  error_code?: string | null;
-  error_message?: string | null;
-  heartbeat_at?: string | null;
-  last_event_seq: number;
+  failure_code?: string | null;
   created_at: string;
-  started_at?: string | null;
-  finished_at?: string | null;
+  updated_at: string;
+  terminal_at?: string | null;
   can_retry: boolean;
   can_cancel: boolean;
 };
@@ -162,7 +147,7 @@ export type CodebaseVersion = {
   id: string;
   codebase_id: string;
   parent_version_id?: string | null;
-  build_id?: string | null;
+  build_id: string;
   state: CodebaseVersionState;
   source_snapshot_key?: string | null;
   source_revision?: string;

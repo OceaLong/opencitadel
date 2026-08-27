@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Real-SQL repro for the F3 finding in task-2-report.md.
 
 PatrolPackService.create_pack() does:
@@ -30,6 +28,7 @@ against SQLite it is because the *insert order* is actually fixed, not because o
 SQLite-specific leniency. Verified pre-fix: this test fails with the same
 IntegrityError/ForeignKeyViolation shape as the real Postgres run.
 """
+
 from types import SimpleNamespace
 
 import pytest
@@ -84,7 +83,7 @@ def _shadow_table(orm_cls, metadata: MetaData, *, fk: dict[str, str] | None = No
     throwaway MetaData. Every Column-level ForeignKey is dropped *except* the ones
     named in `fk` (column name -> "table.column" target) -- this test only wants the
     one FK under investigation (scheduled_job_id) actually enforced; patrol_packs/
-    scheduled_jobs also reference users/teams/skills/mcp_servers/llm_models/
+    scheduled_jobs also reference users/teams/skills/mcp_servers/inference_models/
     codebases/knowledge_bases, none of which are in scope here and would otherwise
     require seeding unrelated rows just to satisfy SQLite's checker.
 
@@ -101,7 +100,9 @@ def _shadow_table(orm_cls, metadata: MetaData, *, fk: dict[str, str] | None = No
     for c in orm_cls.__table__.columns:
         constraints = [ForeignKey(fk[c.name])] if c.name in fk else []
         columns.append(
-            Column(c.name, c.type, *constraints, primary_key=c.primary_key, nullable=not c.primary_key)
+            Column(
+                c.name, c.type, *constraints, primary_key=c.primary_key, nullable=not c.primary_key
+            )
         )
     return Table(orm_cls.__table__.name, metadata, *columns)
 
@@ -145,7 +146,6 @@ def _demo_pack(job_id: str) -> PatrolPack:
         slug="demo",
         config=config,
         mcp_server_id="server-1",
-        skill_id="skill-1",
         scheduled_job_id=job_id,
     )
 

@@ -14,8 +14,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
-import { useFeatureFlags } from "@/hooks/use-feature-flags";
+import { useCapabilities } from "@/hooks/use-capabilities";
 import { usePatrolLabels } from "@/hooks/use-patrol-labels";
+import { isCapabilityAvailable } from "@/lib/api/capabilities";
 import { patrolsApi } from "@/lib/api/patrols";
 import type { PatrolPack, PatrolPackMetrics, PatrolRun } from "@/lib/api/types";
 import { useAuth } from "@/providers/auth-provider";
@@ -25,7 +26,8 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
   const { id } = use(params);
   const t = useTranslations("patrol");
   const labels = usePatrolLabels();
-  const { opsPatrolEnabled, loading: flagLoading } = useFeatureFlags();
+  const { loading: capabilityLoading, capability } = useCapabilities();
+  const runAdmissionAvailable = isCapabilityAvailable(capability("ops_patrol"));
   const { user } = useAuth();
   const readOnly = user?.global_role === "auditor";
   const [pack, setPack] = useState<PatrolPack | null>(null);
@@ -44,13 +46,16 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
     setMetrics(metricData);
   }, [id]);
   useEffect(() => {
-    if (opsPatrolEnabled)
-      void load().catch((error) =>
-        toast.error(error instanceof Error ? error.message : t("errors.load")),
-      );
-  }, [load, opsPatrolEnabled, t]);
+    void load().catch((error) =>
+      toast.error(error instanceof Error ? error.message : t("errors.load")),
+    );
+  }, [load, t]);
   const action = async (name: "validate" | "activate" | "pause" | "trigger") => {
     if (!pack) return;
+    if (name === "trigger" && (capabilityLoading || !runAdmissionAvailable)) {
+      toast.error(t("disabled.description"));
+      return;
+    }
     setBusy(name);
     try {
       if (name === "validate") setPack(await patrolsApi.validatePack(pack.id));
@@ -70,7 +75,7 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
       setBusy(null);
     }
   };
-  if (flagLoading || !pack)
+  if (!pack)
     return (
       <ScrollablePageContent>
         <div className="grid gap-3">
@@ -116,7 +121,12 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
                   </Button>
                 )}
                 <Button
-                  disabled={pack.status !== "active" || Boolean(busy)}
+                  disabled={
+                    capabilityLoading ||
+                    !runAdmissionAvailable ||
+                    pack.status !== "active" ||
+                    Boolean(busy)
+                  }
                   onClick={() => void action("trigger")}
                 >
                   {busy === "trigger" ? (
@@ -158,8 +168,12 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
               <p>
                 {t("pack.environment")}: {pack.config.scope.environment}
               </p>
-              <p>Cluster: {pack.config.scope.cluster}</p>
-              <p>Namespace: {pack.config.scope.namespaces.join(", ")}</p>
+              <p>
+                {t("labels.cluster")}: {pack.config.scope.cluster}
+              </p>
+              <p>
+                {t("labels.namespace")}: {pack.config.scope.namespaces.join(", ")}
+              </p>
               <p>
                 {t("pack.schedule")}: {pack.config.schedule.cron} · {pack.config.timezone}
               </p>
@@ -167,7 +181,9 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
                 {t("pack.nextRun")}:{" "}
                 {pack.next_run_at ? new Date(pack.next_run_at).toLocaleString() : t("scheduleOff")}
               </p>
-              <p>Collector: {pack.mcp_server_id}</p>
+              <p>
+                {t("labels.collector")}: {pack.mcp_server_id}
+              </p>
             </CardContent>
           </Card>
           <Card>
@@ -176,7 +192,7 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
             </CardHeader>
             <CardContent className="grid gap-2 text-sm">
               <p>
-                Capability hash:{" "}
+                {t("labels.capabilityHash")}:{" "}
                 <code className="text-xs break-all">
                   {pack.validation_summary.capability_hash ?? t("pack.notValidated")}
                 </code>
@@ -246,12 +262,13 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
                   className="hover:bg-muted/50 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"
                 >
                   <span className="text-sm">
-                    {new Date(run.created_at).toLocaleString()} · v{run.pack_version}
+                    {new Date(run.created_at).toLocaleString()} ·{" "}
+                    <span translate="no">v{run.pack_version}</span>
                   </span>
                   <span className="flex items-center gap-2">
                     <StatusBadge>{labels.status[run.status] ?? run.status}</StatusBadge>
                     <span className="text-muted-foreground text-xs">
-                      PASS {run.counts.pass} / Finding{" "}
+                      {t("status.pass")} {run.counts.pass} / {t("labels.finding")}{" "}
                       {run.counts.warn + run.counts.fail + run.counts.error}
                     </span>
                   </span>

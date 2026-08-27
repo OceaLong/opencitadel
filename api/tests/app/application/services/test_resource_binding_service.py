@@ -1,30 +1,28 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 
+from app.application.services.resource_binding_service import (
+    ResourceBindingService,
+)
 from app.domain.errors import (
     BadRequestError,
     ConflictError,
     ForbiddenError,
     NotFoundError,
 )
-from app.application.services.resource_binding_service import (
-    ResourceBindingService,
-)
-from app.domain.models.resource_governance import (
-    BuildState,
-    PublishedResourceVersion,
-    ResourceKind,
-    SessionResourceBinding,
-)
 from app.domain.models.knowledge_version import (
     KnowledgeBaseVersion,
     KnowledgeVersionState,
+)
+from app.domain.models.resource_bindings import (
+    PublicationState,
+    PublishedResourceVersion,
+    ResourceKind,
+    SessionResourceBinding,
 )
 from app.domain.models.scope import OwnerScope
 from app.domain.services.resource_version_provider import (
@@ -108,7 +106,7 @@ class _SessionRepository:
         return await self.get_metadata(session_id, scope=scope)
 
 
-class _GovernanceRepository:
+class _BindingRepository:
     def __init__(self, store: _Store) -> None:
         self._store = store
 
@@ -139,10 +137,7 @@ class _GovernanceRepository:
             binding
             for binding in self._store.bindings
             if binding.session_id == session_id
-            and (
-                resource_kind is None
-                or binding.resource_kind == resource_kind
-            )
+            and (resource_kind is None or binding.resource_kind == resource_kind)
         ]
 
     async def list_current_bindings(self, session_id: str):
@@ -172,9 +167,7 @@ class _GovernanceRepository:
         replacement: SessionResourceBinding,
     ) -> SessionResourceBinding:
         index = self._store.bindings.index(current)
-        self._store.bindings[index] = current.model_copy(
-            update={"is_current": False}
-        )
+        self._store.bindings[index] = current.model_copy(update={"is_current": False})
         if self._store.fail_after_deactivate:
             raise RuntimeError("injected insert failure")
         self._store.bindings.append(replacement)
@@ -205,12 +198,10 @@ class _KnowledgeVersionRepository:
         *,
         knowledge_base_id: str,
     ):
-        self._store.version_rechecks.append(
-            (knowledge_base_id, version_id)
-        )
+        self._store.version_rechecks.append((knowledge_base_id, version_id))
         if version_id in self._store.deleted_versions:
             return None
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return KnowledgeBaseVersion(
             id=version_id,
             knowledge_base_id=knowledge_base_id,
@@ -226,13 +217,16 @@ class _Uow:
         self._snapshot = None
         self._held_locks: list[asyncio.Lock] = []
         self.session = _SessionRepository(store, self)
-        self.resource_governance = _GovernanceRepository(store)
+        self.resource_bindings = _BindingRepository(store)
         self.knowledge_base = _KnowledgeBaseRepository(store, self)
         self.knowledge_version = _KnowledgeVersionRepository(store)
 
     async def __aenter__(self):
         self._snapshot = deepcopy(self._store.bindings)
         return self
+
+    async def commit(self):
+        return None
 
     async def __aexit__(self, exc_type, _exc, _tb):
         if exc_type is not None:
@@ -264,14 +258,10 @@ def _published(
         resource_kind=kind,
         resource_id=resource_id,
         version_id=version_id,
-        state=(
-            BuildState.DEGRADED if degraded else BuildState.SUCCEEDED
-        ),
+        state=(PublicationState.DEGRADED if degraded else PublicationState.READY),
         published=published,
         capabilities={"keyword_search": True},
-        degraded_reasons=(
-            ["EMBEDDING_UNAVAILABLE"] if degraded else []
-        ),
+        degraded_reasons=(["EMBEDDING_UNAVAILABLE"] if degraded else []),
     )
 
 
@@ -297,7 +287,7 @@ def test_published_version_accepts_protocol_constructor_shape():
 
     assert version.kind == ResourceKind.KNOWLEDGE_BASE
     assert version.resource_kind == ResourceKind.KNOWLEDGE_BASE
-    assert version.state == BuildState.DEGRADED
+    assert version.state == PublicationState.DEGRADED
     assert version.degraded is True
 
 
@@ -781,9 +771,7 @@ async def test_kb_bind_initial_rechecks_under_kb_lock_after_provider_race(
         ResourceKind.KNOWLEDGE_BASE,
         _published(ResourceKind.KNOWLEDGE_BASE, "kb1", "kbv1"),
     )
-    provider.after_resolve = lambda response: store.deleted_versions.add(
-        response.version_id
-    )
+    provider.after_resolve = lambda response: store.deleted_versions.add(response.version_id)
     service = _service(store, provider)
 
     with pytest.raises(ConflictError, match="no longer"):
@@ -856,9 +844,7 @@ async def test_kb_upgrade_rechecks_target_under_same_kb_lock(
         "kb1",
         "kbv2",
     )
-    provider.after_resolve = lambda response: store.deleted_versions.add(
-        response.version_id
-    )
+    provider.after_resolve = lambda response: store.deleted_versions.add(response.version_id)
 
     with pytest.raises(ConflictError, match="no longer"):
         await service.upgrade(

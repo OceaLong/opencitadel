@@ -1,13 +1,12 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Helpers for parsing structured ToolResult payloads from sandbox APIs."""
-from typing import Any, Dict, Optional
+
+from typing import Any
 
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
 
 
-def shell_exec_data(result: ToolResult) -> Dict[str, Any]:
+def shell_exec_data(result: ToolResult) -> dict[str, Any]:
     return result.data if isinstance(result.data, dict) else {}
 
 
@@ -15,14 +14,14 @@ def shell_output(result: ToolResult) -> str:
     data = result.data
     if isinstance(data, dict):
         return data.get("output") or ""
-    return data if isinstance(data, str) else ""
+    return ""
 
 
 def file_content(result: ToolResult) -> str:
     data = result.data
     if isinstance(data, dict):
         return data.get("content") or ""
-    return data if isinstance(data, str) else ""
+    raise ValueError("sandbox file result must contain structured content")
 
 
 def _summarize_output(output: str, limit: int = 500) -> str:
@@ -32,7 +31,9 @@ def _summarize_output(output: str, limit: int = 500) -> str:
     return text[:limit] + "..."
 
 
-def _raise_command_failed(command: str, message: Optional[str], output: str, returncode: Optional[int]) -> None:
+def _raise_command_failed(
+    command: str, message: str | None, output: str, returncode: int | None
+) -> None:
     detail = _summarize_output(output)
     parts = [f"命令执行失败: {command}"]
     if returncode is not None:
@@ -45,12 +46,12 @@ def _raise_command_failed(command: str, message: Optional[str], output: str, ret
 
 
 async def exec_command_await(
-        sandbox: Sandbox,
-        session_id: str,
-        exec_dir: str,
-        command: str,
-        *,
-        timeout: int = 120,
+    sandbox: Sandbox,
+    session_id: str,
+    exec_dir: str,
+    command: str,
+    *,
+    timeout_seconds: int = 120,
 ) -> str:
     """Run a shell command and wait for completion, returning stdout."""
     result = await sandbox.exec_command(session_id, exec_dir, command)
@@ -61,7 +62,7 @@ async def exec_command_await(
     status = data.get("status")
 
     if status == "running":
-        wait_result = await sandbox.wait_process(session_id, seconds=timeout)
+        wait_result = await sandbox.wait_process(session_id, seconds=timeout_seconds)
         if not wait_result.success:
             _raise_command_failed(command, wait_result.message, shell_output(result), None)
         wait_data = shell_exec_data(wait_result)
@@ -82,4 +83,7 @@ async def exec_command_await(
     output = shell_output(result)
     if output:
         return output
-    _raise_command_failed(command, result.message or f"未知状态: {status}", output, data.get("returncode"))
+    _raise_command_failed(
+        command, result.message or f"未知状态: {status}", output, data.get("returncode")
+    )
+    return None

@@ -1,7 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime, timezone
 
 import pytest
 
@@ -13,7 +11,19 @@ from app.domain.models.knowledge_version import (
 from app.domain.repositories.knowledge_base_repository import (
     VersionedKnowledgeChunk,
 )
-from app.domain.services.knowledge_base.retriever import HybridRetriever, RerankSettings
+from app.domain.runtime_policy import (
+    KnowledgeRerankPolicy,
+    KnowledgeRetrievalPolicy,
+    KnowledgeRetrievalRunPolicy,
+)
+from app.domain.services.knowledge_base.retriever import HybridRetriever
+
+_POLICY = KnowledgeRetrievalRunPolicy(
+    vector_enabled=True,
+    graph_enabled=True,
+    retrieval=KnowledgeRetrievalPolicy(),
+    rerank=KnowledgeRerankPolicy(enabled=False),
+)
 
 
 class _FakeKbRepo:
@@ -44,7 +54,7 @@ class _FakeUow:
                     "vector_search": True,
                     "graph_search": False,
                 },
-                published_at=datetime.now(timezone.utc),
+                published_at=datetime.now(UTC),
             )
         )
 
@@ -96,8 +106,8 @@ async def test_retriever_falls_back_to_bm25_when_embedding_fails():
 
     retriever = HybridRetriever(
         uow_factory=lambda: _FakeUow(repo),
+        policy=_POLICY,
         vector_service=vector_service,
-        rerank_settings=RerankSettings(enabled=False),
     )
     retriever._rerank = rerank
 

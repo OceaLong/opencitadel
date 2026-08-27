@@ -1,31 +1,36 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import base64
+import contextlib
 import hashlib
 import json
 import logging
-from datetime import datetime
-from typing import AsyncGenerator, Awaitable, Callable, List, Optional
-
-from pydantic import TypeAdapter
+from collections.abc import AsyncGenerator, Callable
+from functools import partial
 
 from app.application.dto.knowledge_build import (
     KnowledgeBuildProjection,
     KnowledgeVersionHistoryProjection,
     KnowledgeVersionProjection,
 )
-from app.domain.errors import BadRequestError, ConflictError, NotFoundError
-from app.application.services.ingest_task_support import IngestTaskSupport
-from app.application.services.resource_build_support import (
-    ResourceBuildSupport,
-    _ACTIVE_BUILD_STATES,
-    _RETRYABLE_BUILD_STATES,
+from app.application.execution.admission import RunAdmissionService
+from app.application.execution.public_projection import PublicExecutionEvent
+from app.application.execution.run_control import RunControlService
+from app.application.ports.queries import (
+    ResourceBuildView,
+    RunProjectionPort,
 )
+from app.application.services.inference_binding_service import InferenceBindingService
 from app.application.services.resource_binding_service import ResourceBindingService
 from app.application.services.resource_guard_service import ResourceGuardService
+from app.domain.errors import BadRequestError, ConflictError, NotFoundError
+from app.domain.execution.run import RunFamily, RunStatus
 from app.domain.external.file_storage import FileStorage
-from app.domain.models.event import BaseEvent, Event
-from app.domain.models.event_upgrader import upgrade_event_payload
+from app.domain.external.web_document import WebDocument, WebDocumentGateway
+from app.domain.models.codebase import SessionMode
+from app.domain.models.inference import (
+    PLATFORM_EMBEDDING_DIMENSIONS,
+    EmbeddingModelSettings,
+    InferencePurpose,
+)
 from app.domain.models.knowledge_base import (
     KBSourceType,
     KBStatus,
@@ -40,33 +45,23 @@ from app.domain.models.knowledge_version import (
     KnowledgeBaseVersion,
     KnowledgeDocumentRevision,
     KnowledgeVersionState,
-    mutable_json_value,
 )
-from app.domain.models.resource_governance import (
-    ResourceBuild,
+from app.domain.models.resource_bindings import (
+    ResourceBuildIntent,
     ResourceKind,
 )
-from app.domain.models.session import Session
-from app.domain.models.codebase import SessionMode
 from app.domain.models.scope import OwnerScope, OwnerScopeType
+from app.domain.models.session import Session
 from app.domain.repositories.knowledge_base_repository import DocumentPage
 from app.domain.repositories.uow import IUnitOfWork
-from app.domain.external.task_state_port import TaskStatePort
+from app.domain.runtime_policy import ExecutionPolicy
 from app.domain.services.knowledge_base.url_guard import validate_public_url
-from app.domain.services.knowledge_base.web_connector import (
-    WebDocument,
-    fetch_confluence_document,
-    fetch_feishu_document,
-    fetch_web_document,
-)
 from app.domain.services.knowledge_base.version_builder import (
     CandidateBuildResult,
     KnowledgeBuildCommand,
     KnowledgeBuildSource,
     KnowledgeVersionBuilder,
 )
-from app.infrastructure.external.message_queue.redis_stream_message_queue import RedisStreamMessageQueue
-from app.infrastructure.external.task.task_state import get_task_state
 
 logger = logging.getLogger(__name__)
 
@@ -77,60 +72,108 @@ _PUBLISHED_KB_VERSION_STATES = {
 }
 
 
-class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
-    # Consistency-assertion hooks consumed by ResourceBuildSupport. Error
-    # strings are byte-identical to the pre-extraction literals (API contract).
-    _build_resource_kind = ResourceKind.KNOWLEDGE_BASE
-    _published_version_states = _PUBLISHED_KB_VERSION_STATES
-
-    _build_owner_closure_error = "knowledge build owner closure is malformed"
-    _build_candidate_closure_error = "knowledge build candidate closure is malformed"
-    _version_publication_error = "knowledge version publication is malformed"
-    _active_version_not_published_error = "knowledge base active version is not published"
-    _version_build_missing_error = "knowledge version has no matching build"
-    _version_build_closure_error = "knowledge version build closure is malformed"
-
+class KnowledgeBaseService:
     def __init__(
-            self,
-            uow_factory: Callable[[], IUnitOfWork],
-            file_storage: FileStorage,
-            resource_guard: Optional[ResourceGuardService] = None,
-            resource_binding_service: Optional[ResourceBindingService] = None,
-            version_builder: Optional[KnowledgeVersionBuilder] = None,
-            build_dispatcher: Optional[
-                Callable[[str, str], Awaitable[None]]
-            ] = None,
-            web_fetcher: Optional[
-                Callable[[str], Awaitable[WebDocument]]
-            ] = None,
-            confluence_fetcher: Optional[
-                Callable[[str], Awaitable[WebDocument]]
-            ] = None,
-            feishu_fetcher: Optional[
-                Callable[[str], Awaitable[WebDocument]]
-            ] = None,
-            task_state_port: Optional[TaskStatePort] = None,
+        self,
+        uow_factory: Callable[[], IUnitOfWork],
+        file_storage: FileStorage,
+        run_admission_service: RunAdmissionService,
+        run_control_service: RunControlService,
+        run_projection: RunProjectionPort,
+        web_documents: WebDocumentGateway,
+        resource_guard: ResourceGuardService | None = None,
+        resource_binding_service: ResourceBindingService | None = None,
+        version_builder: KnowledgeVersionBuilder | None = None,
+        inference_bindings: InferenceBindingService | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._file_storage = file_storage
-        self._task_state = task_state_port or get_task_state()
+        self._run_admission = run_admission_service
+        self._run_control = run_control_service
+        self._run_projection = run_projection
+        self._web_documents = web_documents
         self._resource_guard = resource_guard
         self._resource_binding_service = resource_binding_service
-        self._version_builder = version_builder or KnowledgeVersionBuilder(
-            uow_factory
+        self._version_builder = version_builder or KnowledgeVersionBuilder(uow_factory)
+        self._inference_bindings = inference_bindings
+
+    async def _admit_build(
+        self,
+        result: CandidateBuildResult,
+        scope: OwnerScope,
+        *,
+        command_sink=None,
+    ) -> None:
+        build = result.build
+
+        async def private_input(policy: ExecutionPolicy):
+            frozen = await self._freeze_embedding(build, scope, policy=policy)
+            return {
+                "build_id": frozen.build_id,
+                "resource_id": frozen.resource_id,
+                "version_id": frozen.version_id,
+                "embedding_model_id": frozen.embedding_model_id,
+                "embedding_dimensions": frozen.embedding_dimensions,
+            }
+
+        await self._run_admission.admit(
+            family=RunFamily.KB_INGEST,
+            source_entity_type="resource_build",
+            source_entity_id=build.build_id,
+            owner_scope=scope,
+            private_input=None,
+            private_input_factory=private_input,
+            public_input={
+                "resource_kind": ResourceKind.KNOWLEDGE_BASE.value,
+                "resource_id": build.resource_id,
+                "version_id": build.version_id,
+            },
+            workflow={
+                "build_id": build.build_id,
+                "resource_id": build.resource_id,
+                "version_id": build.version_id,
+                "active_version_id": build.parent_version_id,
+            },
+            idempotency_key=f"resource-build:{build.build_id}",
+            command_sink=command_sink,
         )
-        self._build_dispatcher = (
-            build_dispatcher or self._dispatch_candidate_task
+
+    async def _freeze_embedding(
+        self,
+        build: ResourceBuildIntent,
+        scope: OwnerScope,
+        *,
+        policy: ExecutionPolicy,
+    ) -> ResourceBuildIntent:
+        if not policy.knowledge_base.vector_enabled:
+            return build
+        if self._inference_bindings is None:
+            raise RuntimeError("knowledge-base vector indexing requires InferenceBindingService")
+        resolved = await self._inference_bindings.resolve(
+            InferencePurpose.EMBEDDING,
+            scope=scope,
         )
-        self._web_fetcher = web_fetcher or fetch_web_document
-        self._confluence_fetcher = (
-            confluence_fetcher or fetch_confluence_document
+        if not isinstance(resolved.model.settings, EmbeddingModelSettings):
+            raise ConflictError("embedding binding does not reference an embedding model")
+        return build.model_copy(
+            update={
+                "embedding_model_id": resolved.id,
+                "embedding_dimensions": PLATFORM_EMBEDDING_DIMENSIONS,
+            }
         )
-        self._feishu_fetcher = feishu_fetcher or fetch_feishu_document
-        self._ingest_terminal_statuses = _TERMINAL_KB_STATUSES
-        self._ingest_resource_label = "知识库"
-        self._ingest_session_prefix = "kb-ingest"
-        self._ingest_task_type = "kb_ingest"
+
+    async def _enqueue_candidate(
+        self,
+        uow: IUnitOfWork,
+        result: CandidateBuildResult,
+        *,
+        scope: OwnerScope,
+    ) -> None:
+        await self._admit_build(
+            result,
+            scope,
+            command_sink=uow.execution_commands,
+        )
 
     @staticmethod
     def _infer_file_source_type(filename: str, mime: str, fallback: KBSourceType) -> KBSourceType:
@@ -141,57 +184,14 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             return KBSourceType.UPLOAD
         return fallback
 
-    async def _dispatch_created_build(
-        self,
-        result: CandidateBuildResult,
-    ) -> None:
-        if not result.created:
-            return
-        try:
-            await self._build_dispatcher(
-                result.build.id,
-                result.resource.id,
-            )
-        except Exception as exc:
-            # The build/candidate/manifest transaction is already committed.
-            # Worker reconciliation owns redelivery; callers still receive the
-            # durable queued identity and must not manufacture a duplicate.
-            logger.warning(
-                "知识库候选构建派发失败，保留 queued build 供恢复 "
-                "build_id=%s kb_id=%s: %s",
-                result.build.id,
-                result.resource.id,
-                exc,
-            )
-
-    async def _dispatch_candidate_task(
-        self,
-        build_id: str,
-        kb_id: str,
-    ) -> None:
-        await self._dispatch_ingest_task(build_id, resource_id=kb_id)
-
     async def _fetch_url_document(
         self,
         source_type: KBSourceType,
         url: str,
     ) -> WebDocument:
-        fetchers: dict[
-            KBSourceType,
-            Callable[[str], Awaitable[WebDocument]],
-        ] = {
-            KBSourceType.WEB: self._web_fetcher,
-            KBSourceType.CONFLUENCE: self._confluence_fetcher,
-            KBSourceType.FEISHU: self._feishu_fetcher,
-        }
-        fetcher = fetchers.get(source_type)
-        if fetcher is None:
-            raise BadRequestError(
-                "URL 只能使用 web、confluence 或 feishu 来源类型"
-            )
         try:
-            return await fetcher(url)
-        except Exception as exc:
+            return await self._web_documents.fetch(source_type, url)
+        except (OSError, RuntimeError, ValueError) as exc:
             raise BadRequestError(f"URL[{url}]无法下载: {exc}") from exc
 
     async def _prepare_reindex_sources(
@@ -213,32 +213,21 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             )
             documents: list[KnowledgeDocument] = []
             for entry in manifest:
-                document = await uow.knowledge_base.get_document(
-                    entry.document_id
-                )
+                document = await uow.knowledge_base.get_document(entry.document_id)
                 if document is None or document.kb_id != kb.id:
-                    raise NotFoundError(
-                        "document not found in knowledge base manifest"
-                    )
+                    raise NotFoundError("document not found in knowledge base manifest")
                 documents.append(document)
         sources: list[KnowledgeBuildSource] = []
-        for entry, document in zip(manifest, documents):
-            revision: KnowledgeDocumentRevision | None = revisions.get(
-                entry.document_revision_id
-            )
+        for entry, document in zip(manifest, documents, strict=False):
+            revision: KnowledgeDocumentRevision | None = revisions.get(entry.document_revision_id)
             if revision is None:
-                raise ConflictError(
-                    "knowledge manifest revision closure is incomplete"
-                )
+                raise ConflictError("knowledge manifest revision closure is incomplete")
             digest = revision.source_digest
             source_ref = revision.source_ref or document.source_ref
             source_type = document.source_type
             source_title = document.title
             source_mime = document.mime
-            source_file_id = (
-                _file_id_from_source_ref(source_ref)
-                or document.file_id
-            )
+            source_file_id = _file_id_from_source_ref(source_ref) or document.file_id
             if source_file_id:
                 async with self._uow_factory() as uow:
                     file_info = await uow.file.get_by_id(
@@ -246,23 +235,13 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
                         scope=scope,
                     )
                 if file_info is None:
-                    raise BadRequestError(
-                        f"文件[{source_file_id}]不存在或无权访问"
-                    )
+                    raise BadRequestError(f"文件[{source_file_id}]不存在或无权访问")
                 try:
-                    stream, stored_file = (
-                        await self._file_storage.download_file(
-                            source_file_id
-                        )
-                    )
-                except Exception as exc:
-                    raise BadRequestError(
-                        f"文件[{source_file_id}]不存在或无法下载: {exc}"
-                    ) from exc
+                    stream, stored_file = await self._file_storage.download_file(source_file_id)
+                except (OSError, RuntimeError, ValueError) as exc:
+                    raise BadRequestError(f"文件[{source_file_id}]不存在或无法下载: {exc}") from exc
                 if stored_file.id != file_info.id:
-                    raise BadRequestError(
-                        f"文件[{source_file_id}]不存在或无法下载"
-                    )
+                    raise BadRequestError(f"文件[{source_file_id}]不存在或无法下载")
                 digest = _sha256_stream(stream)
                 identity = f"file:{source_file_id}"
                 source_title = file_info.filename
@@ -272,8 +251,7 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
                     file_info.mime_type,
                     (
                         document.source_type
-                        if document.source_type
-                        in {KBSourceType.UPLOAD, KBSourceType.ZIP}
+                        if document.source_type in {KBSourceType.UPLOAD, KBSourceType.ZIP}
                         else KBSourceType.UPLOAD
                     ),
                 )
@@ -286,9 +264,7 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
                 digest = _sha256_text(web_document.content)
                 source_title = web_document.title or source_title
                 source_mime = web_document.mime
-                identity = (
-                    f"{source_type.value}:{source_ref.strip()}"
-                )
+                identity = f"{source_type.value}:{source_ref.strip()}"
             sources.append(
                 KnowledgeBuildSource(
                     document_id=document.id,
@@ -304,10 +280,10 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
         return sources
 
     async def create_kb(
-            self,
-            name: str = "未命名知识库",
-            settings: Optional[dict] = None,
-            scope: Optional[OwnerScope] = None,
+        self,
+        name: str = "未命名知识库",
+        settings: dict | None = None,
+        scope: OwnerScope | None = None,
     ) -> KnowledgeBase:
         kb = KnowledgeBase(
             name=name or "未命名知识库",
@@ -317,16 +293,17 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
         )
         async with self._uow_factory() as uow:
             await uow.knowledge_base.save_kb(kb)
+            await uow.commit()
         return kb
 
     async def add_documents(
-            self,
-            kb_id: str,
-            *,
-            file_ids: Optional[List[str]] = None,
-            urls: Optional[List[str]] = None,
-            source_type: KBSourceType = KBSourceType.UPLOAD,
-            scope: Optional[OwnerScope] = None,
+        self,
+        kb_id: str,
+        *,
+        file_ids: list[str] | None = None,
+        urls: list[str] | None = None,
+        source_type: KBSourceType = KBSourceType.UPLOAD,
+        scope: OwnerScope | None = None,
     ) -> KnowledgeBase:
         file_ids = file_ids or []
         urls = urls or []
@@ -336,17 +313,13 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             KBSourceType.UPLOAD,
             KBSourceType.ZIP,
         }:
-            raise BadRequestError(
-                "文件只能使用 upload 或 zip 来源类型"
-            )
+            raise BadRequestError("文件只能使用 upload 或 zip 来源类型")
         if urls and source_type not in {
             KBSourceType.WEB,
             KBSourceType.CONFLUENCE,
             KBSourceType.FEISHU,
         }:
-            raise BadRequestError(
-                "URL 只能使用 web、confluence 或 feishu 来源类型"
-            )
+            raise BadRequestError("URL 只能使用 web、confluence 或 feishu 来源类型")
 
         kb = await self.get_kb(kb_id, scope=scope)
         actor_id = _require_actor(scope, kb)
@@ -357,16 +330,14 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             if file_info is None:
                 raise BadRequestError(f"文件[{file_id}]不存在或无权访问")
             try:
-                stream, stored_file = await self._file_storage.download_file(
-                    file_id
-                )
-            except Exception as exc:
+                stream, stored_file = await self._file_storage.download_file(file_id)
+            except (OSError, RuntimeError, ValueError) as exc:
                 raise BadRequestError(f"文件[{file_id}]不存在或无法下载: {exc}") from exc
             if stored_file.id != file_info.id:
-                raise BadRequestError(
-                    f"文件[{file_id}]不存在或无法下载"
-                )
-            inferred = self._infer_file_source_type(file_info.filename, file_info.mime_type, source_type)
+                raise BadRequestError(f"文件[{file_id}]不存在或无法下载")
+            inferred = self._infer_file_source_type(
+                file_info.filename, file_info.mime_type, source_type
+            )
             sources.append(
                 KnowledgeBuildSource(
                     title=file_info.filename,
@@ -404,18 +375,22 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
                     mime=source_mime,
                 )
             )
+        normalized_scope = _require_scope(scope, kb)
         result = await self._version_builder.create_candidate(
             KnowledgeBuildCommand.add(
                 kb_id,
                 sources,
                 actor_id=actor_id,
             ),
-            scope=_require_scope(scope, kb),
+            scope=normalized_scope,
+            before_commit=partial(
+                self._enqueue_candidate,
+                scope=normalized_scope,
+            ),
         )
-        await self._dispatch_created_build(result)
         return result.resource
 
-    async def get_kb(self, kb_id: str, scope: Optional[OwnerScope] = None) -> KnowledgeBase:
+    async def get_kb(self, kb_id: str, scope: OwnerScope | None = None) -> KnowledgeBase:
         async with self._uow_factory() as uow:
             kb = await uow.knowledge_base.get_kb(kb_id, scope=scope)
             if kb:
@@ -426,14 +401,14 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
         return kb
 
     async def get_version_graph(
-            self,
-            kb_id: str,
-            version_id: str,
-            *,
-            q: Optional[str] = None,
-            cursor: Optional[str] = None,
-            limit: int = 50,
-            scope: Optional[OwnerScope] = None,
+        self,
+        kb_id: str,
+        version_id: str,
+        *,
+        q: str | None = None,
+        cursor: str | None = None,
+        limit: int = 50,
+        scope: OwnerScope | None = None,
     ) -> KnowledgeGraphResponse:
         """Read one owner-scoped, exact published graph page."""
         if not kb_id.strip() or not version_id.strip():
@@ -461,9 +436,7 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
                     KnowledgeVersionState.DEGRADED,
                 }
             ):
-                raise BadRequestError(
-                    "knowledge base version is not published"
-                )
+                raise BadRequestError("knowledge base version is not published")
             after = (
                 _decode_graph_page_cursor(
                     cursor,
@@ -481,22 +454,17 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
                     edges=(),
                     next_cursor=None,
                 )
-            entities, next_key = (
-                await uow.knowledge_base.list_entities_page_for_version(
-                    kb_id,
-                    version_id,
-                    q=normalized_query or None,
-                    after=after,
-                    limit=bounded_limit,
-                )
+            entities, next_key = await uow.knowledge_base.list_entities_page_for_version(
+                kb_id,
+                version_id,
+                q=normalized_query or None,
+                after=after,
+                limit=bounded_limit,
             )
-            relations = (
-                await uow.knowledge_base
-                .list_relations_for_entities_for_version(
-                    kb_id,
-                    version_id,
-                    [entity.id for entity in entities],
-                )
+            relations = await uow.knowledge_base.list_relations_for_entities_for_version(
+                kb_id,
+                version_id,
+                [entity.id for entity in entities],
             )
             known_ids = {entity.id for entity in entities}
             endpoint_ids = {
@@ -510,8 +478,7 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             missing = sorted(endpoint_ids - known_ids)
             if missing:
                 entities.extend(
-                    await uow.knowledge_base
-                    .get_entities_by_ids_for_version(
+                    await uow.knowledge_base.get_entities_by_ids_for_version(
                         kb_id,
                         version_id,
                         missing,
@@ -521,21 +488,12 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             safe_relations = [
                 relation
                 for relation in relations
-                if relation.src_entity_id in entity_by_id
-                and relation.dst_entity_id in entity_by_id
+                if relation.src_entity_id in entity_by_id and relation.dst_entity_id in entity_by_id
             ]
-            evidence_rows = (
-                await uow.knowledge_base.get_chunks_by_ids_for_version(
-                    kb_id,
-                    version_id,
-                    sorted(
-                        {
-                            relation.chunk_id
-                            for relation in safe_relations
-                            if relation.chunk_id
-                        }
-                    ),
-                )
+            evidence_rows = await uow.knowledge_base.get_chunks_by_ids_for_version(
+                kb_id,
+                version_id,
+                sorted({relation.chunk_id for relation in safe_relations if relation.chunk_id}),
             )
         evidence_by_chunk = {
             row.chunk.id: KnowledgeCitation(
@@ -600,7 +558,9 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             ),
         )
 
-    async def list_kbs(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[KnowledgeBase]:
+    async def list_kbs(
+        self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
+    ) -> list[KnowledgeBase]:
         async with self._uow_factory() as uow:
             kbs = await uow.knowledge_base.list_kbs(limit=limit, offset=offset, scope=scope)
             counts = await uow.knowledge_base.count_ready_documents([kb.id for kb in kbs])
@@ -609,12 +569,12 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
         return kbs
 
     async def list_documents(
-            self,
-            kb_id: str,
-            limit: int = 50,
-            offset: int = 0,
-            scope: Optional[OwnerScope] = None,
-    ) -> tuple[List[KnowledgeDocument], int]:
+        self,
+        kb_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        scope: OwnerScope | None = None,
+    ) -> tuple[list[KnowledgeDocument], int]:
         await self.get_kb(kb_id, scope=scope)
         async with self._uow_factory() as uow:
             return await uow.knowledge_base.list_documents_page(kb_id, limit=limit, offset=offset)
@@ -623,7 +583,7 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
         self,
         kb_id: str,
         *,
-        scope: Optional[OwnerScope],
+        scope: OwnerScope | None,
     ) -> CandidateBuildResult:
         kb = await self.get_kb(kb_id, scope=scope)
         normalized_scope = _require_scope(scope, kb)
@@ -631,29 +591,24 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             kb,
             scope=normalized_scope,
         )
-        result = await self._version_builder.create_candidate(
+        return await self._version_builder.create_candidate(
             KnowledgeBuildCommand.reindex(
                 kb_id,
                 sources,
                 actor_id=_require_actor(normalized_scope, kb),
             ),
             scope=normalized_scope,
+            before_commit=partial(
+                self._enqueue_candidate,
+                scope=normalized_scope,
+            ),
         )
-        await self._dispatch_created_build(result)
-        return result
-
-    async def reindex(self, kb_id: str, scope: Optional[OwnerScope] = None) -> KnowledgeBase:
-        result = await self._create_reindex_candidate(
-            kb_id,
-            scope=scope,
-        )
-        return result.resource
 
     async def list_versions(
         self,
         kb_id: str,
         *,
-        scope: Optional[OwnerScope] = None,
+        scope: OwnerScope | None = None,
     ) -> KnowledgeVersionHistoryProjection:
         async with self._uow_factory() as uow:
             kb = await uow.knowledge_base.get_kb(kb_id, scope=scope)
@@ -664,33 +619,16 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
                 limit=500,
             )
             projected = tuple(
-                [
-                    await self._project_version(uow, kb, version)
-                    for version in versions
-                ]
+                [await self._project_version(uow, kb, version) for version in versions]
             )
-            active_build = (
-                await uow.resource_governance.get_active_build(
-                    ResourceKind.KNOWLEDGE_BASE,
-                    kb.id,
-                )
-            )
-            active_projection = None
-            if active_build is not None:
-                active_projection = await self._project_build(
-                    uow,
-                    kb.id,
-                    active_build,
-                    active_version_id=kb.active_version_id,
-                )
-                if not any(
-                    version.id == active_build.version_id
-                    and version.build_id == active_build.id
+            active_projection = next(
+                (
+                    version.build
                     for version in projected
-                ):
-                    raise ConflictError(
-                        "active knowledge build has no matching version"
-                    )
+                    if version.state is KnowledgeVersionState.BUILDING
+                ),
+                None,
+            )
         return KnowledgeVersionHistoryProjection(
             knowledge_base_id=kb.id,
             active_version_id=kb.active_version_id,
@@ -703,7 +641,7 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
         kb_id: str,
         version_id: str,
         *,
-        scope: Optional[OwnerScope] = None,
+        scope: OwnerScope | None = None,
     ) -> KnowledgeVersionProjection:
         async with self._uow_factory() as uow:
             kb = await uow.knowledge_base.get_kb(kb_id, scope=scope)
@@ -714,29 +652,30 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
                 knowledge_base_id=kb.id,
             )
             if version is None:
-                raise NotFoundError(
-                    "knowledge base version not found in owner scope"
-                )
+                raise NotFoundError("knowledge base version not found in owner scope")
             return await self._project_version(uow, kb, version)
 
     async def create_build(
         self,
         kb_id: str,
         *,
-        scope: Optional[OwnerScope] = None,
+        scope: OwnerScope | None = None,
     ) -> KnowledgeVersionProjection:
         result = await self._create_reindex_candidate(
             kb_id,
             scope=scope,
         )
-        return self._project_candidate_result(result)
+        return await self._project_candidate_result(
+            result,
+            _require_scope(scope, result.resource),
+        )
 
     async def retry_build(
         self,
         kb_id: str,
         build_id: str,
         *,
-        scope: Optional[OwnerScope] = None,
+        scope: OwnerScope | None = None,
     ) -> KnowledgeVersionProjection:
         kb = await self.get_kb(kb_id, scope=scope)
         normalized_scope = _require_scope(scope, kb)
@@ -745,70 +684,141 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             build_id,
             actor_id=_require_actor(normalized_scope, kb),
             scope=normalized_scope,
+            before_commit=partial(
+                self._enqueue_candidate,
+                scope=normalized_scope,
+            ),
         )
-        await self._dispatch_created_build(result)
-        return self._project_candidate_result(result)
+        return await self._project_candidate_result(result, normalized_scope)
 
     async def cancel_build(
         self,
         kb_id: str,
         build_id: str,
         *,
-        scope: Optional[OwnerScope] = None,
+        scope: OwnerScope | None = None,
     ) -> KnowledgeBuildProjection:
-        # Not hoisted to ResourceBuildSupport: semantically diverges from the
-        # codebase variant (no owner-scope guard, and it does not mark_failed
-        # the candidate, clear the ingest task or append a governance event
-        # before projecting).
+        if scope is None:
+            raise BadRequestError("knowledge builds require owner scope")
         async with self._uow_factory() as uow:
             kb = await uow.knowledge_base.get_kb(kb_id, scope=scope)
             if kb is None:
                 raise NotFoundError("knowledge build not found in owner scope")
-            build = await uow.resource_governance.get_build(
-                build_id,
-                for_update=True,
-            )
-            if (
-                build is None
-                or build.resource_kind is not ResourceKind.KNOWLEDGE_BASE
-                or build.resource_id != kb.id
-            ):
+            candidate_result = await uow.knowledge_version.get_build_candidate(build_id)
+            if candidate_result is None:
                 raise NotFoundError("knowledge build not found in owner scope")
-            if build.state not in _ACTIVE_BUILD_STATES:
-                raise ConflictError(
-                    "only an active knowledge build can be cancelled"
-                )
-            candidate = await uow.knowledge_version.get_version(
-                build.version_id,
-                knowledge_base_id=kb.id,
-            )
-            if (
-                candidate is None
-                or candidate.build_id != build.id
-                or candidate.parent_version_id != build.parent_version_id
-                or build.parent_version_id != kb.active_version_id
-                or candidate.state is not KnowledgeVersionState.BUILDING
-                or candidate.published_at is not None
-            ):
-                raise ConflictError(
-                    "knowledge build candidate closure is malformed"
-                )
-            projection = self._build_projection(
-                build,
-                active_version_id=kb.active_version_id,
-            )
-        await self._task_state.request_cancel(build.id)
+            candidate, _ = candidate_result
+            if candidate.knowledge_base_id != kb.id:
+                raise NotFoundError("knowledge build not found in owner scope")
+            if candidate.state is not KnowledgeVersionState.BUILDING:
+                raise ConflictError("only an active knowledge build can be cancelled")
+        view = await self._resource_build_view(build_id, scope)
+        projection = self._knowledge_build_projection(
+            view,
+            fallback=ResourceBuildIntent(
+                build_id=candidate.build_id,
+                resource_kind=ResourceKind.KNOWLEDGE_BASE,
+                resource_id=kb.id,
+                version_id=candidate.id,
+                parent_version_id=candidate.parent_version_id,
+            ),
+            created_at=candidate.created_at,
+            retryable=False,
+        )
+        run_id = await self._run_control.cancel_source(
+            source_entity_type="resource_build",
+            source_entity_id=build_id,
+            owner_scope=scope,
+            reason="requested_by_user",
+        )
+        if run_id is None:
+            raise ConflictError("active knowledge build has no execution Run")
         return projection
 
-    async def _get_projection_version(
+    async def _project_version(
         self,
         uow: IUnitOfWork,
-        version_id: str,
-        resource_id: str,
-    ) -> KnowledgeBaseVersion | None:
-        return await uow.knowledge_version.get_version(
-            version_id,
-            knowledge_base_id=resource_id,
+        resource: KnowledgeBase,
+        version: KnowledgeBaseVersion,
+    ) -> KnowledgeVersionProjection:
+        del uow
+        is_published = (
+            version.published_at is not None and version.state in _PUBLISHED_KB_VERSION_STATES
+        )
+        if version.id == resource.active_version_id and not is_published:
+            raise ConflictError("knowledge base active version is not published")
+        scope = _resource_scope(resource)
+        view = await self._resource_build_view(version.build_id, scope)
+        fallback_status = {
+            KnowledgeVersionState.BUILDING: RunStatus.QUEUED,
+            KnowledgeVersionState.READY: RunStatus.COMPLETED,
+            KnowledgeVersionState.DEGRADED: RunStatus.COMPLETED,
+            KnowledgeVersionState.FAILED: RunStatus.FAILED,
+        }[version.state]
+        build = self._knowledge_build_projection(
+            view,
+            fallback=ResourceBuildIntent(
+                build_id=version.build_id,
+                resource_kind=ResourceKind.KNOWLEDGE_BASE,
+                resource_id=resource.id,
+                version_id=version.id,
+                parent_version_id=version.parent_version_id,
+            ),
+            created_at=version.created_at,
+            retryable=(
+                version.state is KnowledgeVersionState.FAILED
+                and version.parent_version_id == resource.active_version_id
+            ),
+            fallback_status=fallback_status,
+        )
+        return self._build_version_projection(
+            version,
+            is_active=version.id == resource.active_version_id,
+            is_published=is_published,
+            is_candidate=not is_published,
+            build=build,
+        )
+
+    async def _resource_build_view(
+        self,
+        build_id: str,
+        scope: OwnerScope,
+    ) -> ResourceBuildView | None:
+        return await self._run_projection.resource_build(
+            build_id=build_id,
+            owner_scope=scope,
+        )
+
+    @staticmethod
+    def _knowledge_build_projection(
+        view: ResourceBuildView | None,
+        *,
+        fallback: ResourceBuildIntent,
+        created_at,
+        retryable: bool,
+        fallback_status: RunStatus = RunStatus.QUEUED,
+    ) -> KnowledgeBuildProjection:
+        status = view.status if view is not None else fallback_status
+        active_statuses = {
+            RunStatus.NEW,
+            RunStatus.QUEUED,
+            RunStatus.RUNNING,
+            RunStatus.WAITING,
+        }
+        return KnowledgeBuildProjection(
+            id=fallback.build_id,
+            run_id=str(view.run_id) if view is not None else None,
+            knowledge_base_id=fallback.resource_id,
+            version_id=fallback.version_id,
+            status=status,
+            phase=view.phase if view is not None else None,
+            progress=view.progress if view is not None else 0,
+            failure_code=view.failure_code if view is not None else None,
+            created_at=view.created_at if view is not None else created_at,
+            updated_at=view.updated_at if view is not None else created_at,
+            terminal_at=view.terminal_at if view is not None else None,
+            can_retry=retryable and status in {RunStatus.FAILED, RunStatus.CANCELLED},
+            can_cancel=status in active_statuses,
         )
 
     def _build_version_projection(
@@ -837,40 +847,10 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             build=build,
         )
 
-    @staticmethod
-    def _build_projection(
-        build: ResourceBuild,
-        *,
-        active_version_id: str | None,
-    ) -> KnowledgeBuildProjection:
-        return KnowledgeBuildProjection(
-            id=build.id,
-            knowledge_base_id=build.resource_id,
-            version_id=build.version_id,
-            parent_version_id=build.parent_version_id,
-            command_key=build.command_key,
-            state=build.state,
-            phase=build.phase,
-            progress=build.progress,
-            capabilities=tuple(build.capabilities),
-            degraded_reasons=tuple(build.degraded_reasons),
-            metrics=mutable_json_value(build.metrics),
-            error_code=build.error_code,
-            error_message=build.error_message,
-            heartbeat_at=build.heartbeat_at,
-            last_event_seq=build.last_event_seq,
-            created_at=build.created_at,
-            started_at=build.started_at,
-            finished_at=build.finished_at,
-            can_retry=build.state in _RETRYABLE_BUILD_STATES
-            and build.parent_version_id == active_version_id,
-            can_cancel=build.state in _ACTIVE_BUILD_STATES,
-        )
-
-    @classmethod
-    def _project_candidate_result(
-        cls,
+    async def _project_candidate_result(
+        self,
         result: CandidateBuildResult,
+        scope: OwnerScope,
     ) -> KnowledgeVersionProjection:
         # Not hoisted: the signature diverges from the codebase variant
         # (resource read from ``result.resource`` vs an explicit arg) and the
@@ -890,48 +870,43 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             is_active=version.id == result.resource.active_version_id,
             is_published=False,
             is_candidate=True,
-            build=cls._build_projection(
-                result.build,
-                active_version_id=result.resource.active_version_id,
+            build=self._knowledge_build_projection(
+                await self._resource_build_view(result.build.build_id, scope),
+                fallback=result.build,
+                created_at=version.created_at,
+                retryable=False,
             ),
         )
 
     async def stream_ingest(
-            self,
-            kb_id: str,
-            latest_event_id: Optional[str] = None,
-            scope: Optional[OwnerScope] = None,
-    ) -> AsyncGenerator[BaseEvent, None]:
+        self,
+        kb_id: str,
+        latest_event_id: str | None = None,
+        scope: OwnerScope | None = None,
+    ) -> AsyncGenerator[PublicExecutionEvent, None]:
         kb = await self.get_kb(kb_id, scope=scope)
-        if not kb.ingest_task_id:
+        if scope is None:
+            raise BadRequestError("knowledge events require owner scope")
+        async with self._uow_factory() as uow:
+            candidate = await uow.knowledge_version.get_active_candidate(kb.id)
+        if candidate is None:
             return
-        output = RedisStreamMessageQueue(f"task:output:{kb.ingest_task_id}")
-        cursor = latest_event_id or "0"
-        adapter = TypeAdapter(Event)
-        while True:
-            if await self._task_state.is_cancelled(kb.ingest_task_id):
-                break
-            event_id, event_str = await output.get(start_id=cursor, block_ms=1000)
-            if event_str is not None:
-                cursor = event_id
-                event_payload = json.loads(event_str)
-                event = adapter.validate_python(upgrade_event_payload(event_payload))
-                event.id = event_id
-                yield event
-                if event.type in {"done", "error"}:
-                    return
-                continue
-            if await self._task_state.is_done(kb.ingest_task_id):
-                return
+        async for event in self._run_control.stream_source(
+            source_entity_type="resource_build",
+            source_entity_id=candidate.build_id,
+            owner_scope=scope,
+            after=latest_event_id,
+        ):
+            yield event
 
     async def create_session_for_kb(
-            self,
-            kb_id: str,
-            mode: SessionMode = SessionMode.ASK,
-            model_id: Optional[str] = None,
-            skill_id: Optional[str] = None,
-            knowledge_base_version_id: Optional[str] = None,
-            scope: Optional[OwnerScope] = None,
+        self,
+        kb_id: str,
+        mode: SessionMode = SessionMode.ASK,
+        model_id: str | None = None,
+        skill_id: str | None = None,
+        knowledge_base_version_id: str | None = None,
+        scope: OwnerScope | None = None,
     ) -> Session:
         kb = await self.get_kb(kb_id, scope=scope)
         validated = None
@@ -958,105 +933,74 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
             await uow.session.save(session)
             if validated and self._resource_binding_service and scope:
                 binding = await self._resource_binding_service.bind_initial_resolved(
-                    uow, session_id=session.id, resolved=validated.knowledge_base,
-                    scope=scope, actor_id=scope.user_id,
+                    uow,
+                    session_id=session.id,
+                    resolved=validated.knowledge_base,
+                    scope=scope,
+                    actor_id=scope.user_id,
                 )
                 session.resource_bindings.append(binding.to_projection())
+            await uow.commit()
         return session
 
-    async def read_document(
-            self,
-            doc_id: str,
-            page: Optional[int] = None,
-            limit: int = 30,
-            *,
-            kb_id: Optional[str] = None,
-            scope: Optional[OwnerScope] = None,
-    ) -> tuple[KnowledgeDocument, str]:
-        async with self._uow_factory() as uow:
-            doc = await uow.knowledge_base.get_document(doc_id)
-            if not doc:
-                raise NotFoundError(f"文档[{doc_id}]不存在")
-            if kb_id and doc.kb_id != kb_id:
-                raise NotFoundError(f"文档[{doc_id}]不属于知识库[{kb_id}]")
-            if await uow.knowledge_base.get_kb(doc.kb_id, scope=scope) is None:
-                raise NotFoundError(f"知识库[{doc.kb_id}]不存在")
-            chunks = await uow.knowledge_base.list_chunks_for_document(doc_id, page_no=page, limit=limit)
-        content = "\n\n".join(chunk.content for chunk in chunks if chunk.level.value == "parent")
-        return doc, content
-
     async def read_document_page(
-            self,
-            kb_id: str,
-            version_id: str,
-            doc_id: str,
-            *,
-            page: Optional[int] = None,
-            cursor: Optional[str] = None,
-            limit: int = 30,
-            scope: Optional[OwnerScope] = None,
+        self,
+        kb_id: str,
+        version_id: str,
+        doc_id: str,
+        *,
+        page: int | None = None,
+        cursor: str | None = None,
+        limit: int = 30,
+        scope: OwnerScope | None = None,
     ) -> tuple[KnowledgeDocument, str, DocumentPage]:
-        if page is not None and (
-            isinstance(page, bool) or not isinstance(page, int) or page < 1
-        ):
+        if page is not None and (isinstance(page, bool) or not isinstance(page, int) or page < 1):
             raise BadRequestError("页码必须大于等于 1")
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or limit < 1
-            or limit > 200
-        ):
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1 or limit > 200:
             raise BadRequestError("分页大小必须在 1 到 200 之间")
         await self.get_kb(kb_id, scope=scope)
         async with self._uow_factory() as uow:
-            resolved = (
-                await uow.knowledge_base.get_document_for_version(
+            resolved = await uow.knowledge_base.get_document_for_version(
+                kb_id,
+                version_id,
+                doc_id,
+            )
+            if resolved is None:
+                raise NotFoundError(f"版本[{version_id}]中不存在可读取文档[{doc_id}]")
+            document, revision_id = resolved
+            try:
+                source_page = await uow.knowledge_base.read_document_page_for_version(
                     kb_id,
                     version_id,
                     doc_id,
-                )
-            )
-            if resolved is None:
-                raise NotFoundError(
-                    f"版本[{version_id}]中不存在可读取文档[{doc_id}]"
-                )
-            document, revision_id = resolved
-            try:
-                source_page = (
-                    await uow.knowledge_base
-                    .read_document_page_for_version(
-                        kb_id,
-                        version_id,
-                        doc_id,
-                        revision_id,
-                        page_no=page,
-                        cursor=cursor,
-                        limit=limit,
-                    )
+                    revision_id,
+                    page_no=page,
+                    cursor=cursor,
+                    limit=limit,
                 )
             except ValueError as exc:
                 raise BadRequestError(str(exc)) from exc
         return document, revision_id, source_page
 
-    async def delete_kb(self, kb_id: str, scope: Optional[OwnerScope] = None) -> None:
+    async def delete_kb(self, kb_id: str, scope: OwnerScope | None = None) -> None:
         kb = await self.get_kb(kb_id, scope=scope)
-        if await self._ingest_in_progress(kb):
+        async with self._uow_factory() as uow:
+            active = await uow.knowledge_version.get_active_candidate(kb.id)
+        if active is not None:
             raise ConflictError(
                 "知识库正在索引中，请等待当前任务完成后再删除",
                 error_key="errors.kbIndexingInProgress",
             )
-        if kb.ingest_task_id:
-            await self._task_state.request_cancel(kb.ingest_task_id)
-            await self._wait_for_task_drain(kb.ingest_task_id)
         async with self._uow_factory() as uow:
             await uow.knowledge_base.delete_kb(kb_id)
+            await uow.commit()
         logger.info("删除知识库[%s]成功", kb_id)
 
     async def delete_document(
-            self,
-            kb_id: str,
-            doc_id: str,
-            scope: Optional[OwnerScope] = None,
+        self,
+        kb_id: str,
+        doc_id: str,
+        scope: OwnerScope | None = None,
     ) -> KnowledgeBase:
         kb = await self.get_kb(kb_id, scope=scope)
         normalized_scope = _require_scope(scope, kb)
@@ -1067,8 +1011,11 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
                 actor_id=_require_actor(normalized_scope, kb),
             ),
             scope=normalized_scope,
+            before_commit=partial(
+                self._enqueue_candidate,
+                scope=normalized_scope,
+            ),
         )
-        await self._dispatch_created_build(result)
         return result.resource
 
     async def replace_document(
@@ -1078,7 +1025,7 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
         *,
         file_id: str,
         source_type: KBSourceType = KBSourceType.UPLOAD,
-        scope: Optional[OwnerScope] = None,
+        scope: OwnerScope | None = None,
     ) -> KnowledgeBase:
         kb = await self.get_kb(kb_id, scope=scope)
         normalized_scope = _require_scope(scope, kb)
@@ -1088,17 +1035,11 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
                 scope=normalized_scope,
             )
         if file_info is None:
-            raise BadRequestError(
-                f"文件[{file_id}]不存在或无权访问"
-            )
+            raise BadRequestError(f"文件[{file_id}]不存在或无权访问")
         try:
-            stream, stored_file = await self._file_storage.download_file(
-                file_id
-            )
-        except Exception as exc:
-            raise BadRequestError(
-                f"文件[{file_id}]不存在或无法下载: {exc}"
-            ) from exc
+            stream, stored_file = await self._file_storage.download_file(file_id)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise BadRequestError(f"文件[{file_id}]不存在或无法下载: {exc}") from exc
         if stored_file.id != file_info.id:
             raise BadRequestError(f"文件[{file_id}]不存在或无法下载")
         inferred = self._infer_file_source_type(
@@ -1129,8 +1070,11 @@ class KnowledgeBaseService(ResourceBuildSupport, IngestTaskSupport):
                 actor_id=_require_actor(normalized_scope, kb),
             ),
             scope=normalized_scope,
+            before_commit=partial(
+                self._enqueue_candidate,
+                scope=normalized_scope,
+            ),
         )
-        await self._dispatch_created_build(result)
         return result.resource
 
 
@@ -1163,9 +1107,7 @@ def _decode_graph_page_cursor(
 ) -> tuple[str, str]:
     try:
         padding = "=" * (-len(value) % 4)
-        payload = json.loads(
-            base64.urlsafe_b64decode(value + padding).decode()
-        )
+        payload = json.loads(base64.urlsafe_b64decode(value + padding).decode())
         if (
             payload.get("kb") != kb_id
             or payload.get("version") != version_id
@@ -1174,20 +1116,15 @@ def _decode_graph_page_cursor(
             raise ValueError
         name = payload["name"]
         entity_id = payload["id"]
-        if (
-            not isinstance(name, str)
-            or not name
-            or not isinstance(entity_id, str)
-            or not entity_id
-        ):
+        if not isinstance(name, str) or not name or not isinstance(entity_id, str) or not entity_id:
             raise ValueError
         return name, entity_id
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise BadRequestError("invalid knowledge graph cursor") from exc
 
 
 def _require_scope(
-    scope: Optional[OwnerScope],
+    scope: OwnerScope | None,
     kb: KnowledgeBase,
 ) -> OwnerScope:
     if scope is not None:
@@ -1199,8 +1136,16 @@ def _require_scope(
     raise NotFoundError("knowledge base not found in owner scope")
 
 
+def _resource_scope(kb: KnowledgeBase) -> OwnerScope:
+    if kb.team_id:
+        return OwnerScope.team(kb.owner_user_id or "projection", kb.team_id)
+    if kb.owner_user_id:
+        return OwnerScope.personal(kb.owner_user_id)
+    raise ConflictError("knowledge base owner scope is malformed")
+
+
 def _require_actor(
-    scope: Optional[OwnerScope],
+    scope: OwnerScope | None,
     kb: KnowledgeBase,
 ) -> str:
     return _require_scope(scope, kb).user_id
@@ -1225,10 +1170,8 @@ def _file_id_from_source_ref(source_ref: str) -> str | None:
 
 def _sha256_stream(stream) -> str:
     digest = hashlib.sha256()
-    try:
+    with contextlib.suppress(AttributeError, OSError):
         stream.seek(0)
-    except (AttributeError, OSError):
-        pass
     while True:
         chunk = stream.read(1024 * 1024)
         if not chunk:
@@ -1236,8 +1179,6 @@ def _sha256_stream(stream) -> str:
         if isinstance(chunk, str):
             chunk = chunk.encode("utf-8")
         digest.update(chunk)
-    try:
+    with contextlib.suppress(AttributeError, OSError):
         stream.seek(0)
-    except (AttributeError, OSError):
-        pass
     return digest.hexdigest()

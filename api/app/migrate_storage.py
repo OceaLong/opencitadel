@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """One-shot object storage migration between COS and MinIO."""
+
 from __future__ import annotations
 
 import argparse
@@ -17,9 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from app.infrastructure.logging import setup_logging
 from app.infrastructure.storage.cos import Cos
 from app.infrastructure.storage.minio import Minio
-from app.runtime_role import ProcessRole, set_role
-
-set_role(ProcessRole.MIGRATE)
+from core.config import DeploymentSettings, load_deployment_settings
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +48,8 @@ class StorageBackend(Protocol):
 
 
 class CosBackend:
-    def __init__(self) -> None:
-        self._cos = Cos()
+    def __init__(self, settings: DeploymentSettings) -> None:
+        self._cos = Cos(settings)
 
     async def init(self) -> None:
         await self._cos.init()
@@ -71,8 +68,9 @@ class CosBackend:
                 kwargs["Marker"] = marker
             response = await run_in_threadpool(self._cos.client.list_objects, **kwargs)
             contents = response.get("Contents") or []
-            for item in contents:
-                results.append(ObjectInfo(key=item["Key"], size=int(item.get("Size", 0))))
+            results.extend(
+                ObjectInfo(key=item["Key"], size=int(item.get("Size", 0))) for item in contents
+            )
             if not response.get("IsTruncated"):
                 break
             marker = response.get("NextMarker") or (results[-1].key if results else "")
@@ -94,13 +92,13 @@ class CosBackend:
                 Key=key,
             )
             return int(response.get("Content-Length", 0))
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             return None
 
 
 class MinioBackend:
-    def __init__(self) -> None:
-        self._minio = Minio()
+    def __init__(self, settings: DeploymentSettings) -> None:
+        self._minio = Minio(settings)
 
     async def init(self) -> None:
         await self._minio.init()
@@ -119,10 +117,7 @@ class MinioBackend:
                 ),
             ),
         )
-        return [
-            ObjectInfo(key=obj.object_name, size=int(obj.size or 0))
-            for obj in objects
-        ]
+        return [ObjectInfo(key=obj.object_name, size=int(obj.size or 0)) for obj in objects]
 
     async def get_bytes(self, key: str) -> bytes:
         return await self._minio.get_bytes(key)
@@ -138,22 +133,25 @@ class MinioBackend:
                 key,
             )
             return int(stat.size)
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             return None
 
 
-def create_backend(provider: Provider) -> StorageBackend:
+def create_backend(
+    provider: Provider,
+    settings: DeploymentSettings,
+) -> StorageBackend:
     if provider == "cos":
-        return CosBackend()
-    return MinioBackend()
+        return CosBackend(settings)
+    return MinioBackend(settings)
 
 
 async def copy_object(
-        source: StorageBackend,
-        target: StorageBackend,
-        obj: ObjectInfo,
-        *,
-        dry_run: bool,
+    source: StorageBackend,
+    target: StorageBackend,
+    obj: ObjectInfo,
+    *,
+    dry_run: bool,
 ) -> str:
     """Copy one object. Returns 'copied', 'skipped', or raises on failure."""
     target_size = await target.object_size(obj.key)
@@ -177,7 +175,7 @@ async def copy_object(
             data = await source.get_bytes(obj.key)
             await target.put_bytes(obj.key, data)
             return "copied"
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             last_exc = exc
             if attempt < _OBJECT_MAX_RETRIES:
                 await asyncio.sleep(1.0 * attempt)
@@ -185,12 +183,12 @@ async def copy_object(
 
 
 async def migrate_objects(
-        source: StorageBackend,
-        target: StorageBackend,
-        *,
-        prefix: str = "",
-        dry_run: bool = False,
-        concurrency: int = 4,
+    source: StorageBackend,
+    target: StorageBackend,
+    *,
+    prefix: str = "",
+    dry_run: bool = False,
+    concurrency: int = 4,
 ) -> tuple[int, int, list[str]]:
     await source.init()
     await target.init()
@@ -214,7 +212,7 @@ async def migrate_objects(
                         skipped += 1
                     if (index + 1) % _PROGRESS_INTERVAL == 0:
                         logger.info("Progress: %s/%s objects processed", index + 1, len(objects))
-                except Exception as exc:
+                except (OSError, RuntimeError, ValueError) as exc:
                     logger.error("Copy failed for %s: %s", obj.key, exc)
                     failed.append(obj.key)
 
@@ -226,11 +224,11 @@ async def migrate_objects(
 
 
 async def verify_migration(
-        source: StorageBackend,
-        target: StorageBackend,
-        *,
-        prefix: str = "",
-        sample_size: int = _VERIFY_SAMPLE_SIZE,
+    source: StorageBackend,
+    target: StorageBackend,
+    *,
+    prefix: str = "",
+    sample_size: int = _VERIFY_SAMPLE_SIZE,
 ) -> tuple[list[str], list[str]]:
     """Return (size_mismatches, hash_mismatches)."""
     await source.init()
@@ -250,15 +248,17 @@ async def verify_migration(
                 )
 
         extra_on_target = set(target_objects) - {obj.key for obj in source_objects}
-        for key in sorted(extra_on_target):
-            size_mismatches.append(f"{key}: extra on target")
+        size_mismatches.extend(f"{key}: extra on target" for key in sorted(extra_on_target))
 
         hash_mismatches: list[str] = []
         candidates = [
-            obj for obj in source_objects
+            obj
+            for obj in source_objects
             if obj.key in target_objects and target_objects[obj.key] == obj.size
         ]
-        sample = candidates if len(candidates) <= sample_size else random.sample(candidates, sample_size)
+        sample = (
+            candidates if len(candidates) <= sample_size else random.sample(candidates, sample_size)
+        )
         for obj in sample:
             source_hash = hashlib.md5(await source.get_bytes(obj.key)).hexdigest()
             target_hash = hashlib.md5(await target.get_bytes(obj.key)).hexdigest()
@@ -276,19 +276,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source", choices=["cos", "minio"], required=True)
     parser.add_argument("--target", choices=["cos", "minio"], required=True)
     parser.add_argument("--prefix", default="", help="Only migrate keys with this prefix")
-    parser.add_argument("--dry-run", action="store_true", help="List objects to copy without writing")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="List objects to copy without writing"
+    )
     parser.add_argument("--verify-only", action="store_true", help="Verify target matches source")
     parser.add_argument("--concurrency", type=int, default=4)
     return parser.parse_args(argv)
 
 
-async def run(args: argparse.Namespace) -> int:
+async def run(args: argparse.Namespace, settings: DeploymentSettings) -> int:
     if args.source == args.target:
         logger.error("Source and target must differ")
         return 1
 
-    source = create_backend(args.source)
-    target = create_backend(args.target)
+    source = create_backend(args.source, settings)
+    target = create_backend(args.target, settings)
 
     if args.verify_only:
         size_mismatches, hash_mismatches = await verify_migration(
@@ -332,9 +334,10 @@ async def run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> None:
-    setup_logging()
+    settings = load_deployment_settings()
+    setup_logging(settings)
     args = parse_args(argv)
-    exit_code = asyncio.run(run(args))
+    exit_code = asyncio.run(run(args, settings))
     if exit_code != 0:
         sys.exit(exit_code)
 

@@ -1,7 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from fastapi import Depends, Header, Request
 
+from app.application.ports.crypto import CsrfPort, ServiceKeyPort
+from app.application.request_context import get_request_id
 from app.application.security.authorization_context import (
     get_authorization_context,
     set_authorization_context,
@@ -9,12 +9,13 @@ from app.application.security.authorization_context import (
 from app.domain.errors import ForbiddenError, UnauthorizedError
 from app.domain.models.authorization import AuthorizationContext, AuthorizationMode
 from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
-from app.infrastructure.security.csrf import CsrfService
-from app.infrastructure.security.service_api_key import ServiceApiKeyHasher
-from app.infrastructure.storage.postgres import get_uow
-from app.interfaces.auth_context import get_principal
-from app.interfaces.auth_context import set_principal
-from app.infrastructure.observability.logging_context import get_request_id
+from app.domain.repositories.uow import UnitOfWorkFactory
+from app.interfaces.auth_context import get_principal, set_principal
+from app.interfaces.service_dependencies import (
+    get_csrf_service,
+    get_service_key_hasher,
+    get_uow_factory,
+)
 
 
 async def get_current_principal() -> Principal:
@@ -67,7 +68,7 @@ async def enforce_auditor_read_only(
 
 
 async def get_workspace_context(
-        x_workspace_id: str | None = Header(default=None, alias="X-Workspace-Id"),
+    x_workspace_id: str | None = Header(default=None, alias="X-Workspace-Id"),
 ) -> WorkspaceContext:
     principal = await get_current_principal()
     workspace_id = (x_workspace_id or "").strip()
@@ -100,17 +101,22 @@ async def get_workspace_context(
     return context
 
 
-async def verify_csrf(request: Request) -> None:
-    CsrfService().verify_request(request)
+async def verify_csrf(
+    request: Request,
+    csrf: CsrfPort = Depends(get_csrf_service),
+) -> None:
+    csrf.verify_request(request)
 
 
 async def require_service_api_key(
-        x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
+    x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
+    hasher: ServiceKeyPort = Depends(get_service_key_hasher),
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
 ) -> Principal:
     if not x_api_key:
         raise UnauthorizedError("缺少服务 API Key")
-    key_hash = ServiceApiKeyHasher().hash(x_api_key)
-    async with get_uow() as uow:
+    key_hash = hasher.hash(x_api_key)
+    async with uow_factory() as uow:
         key = await uow.service_api_key.get_by_hash(key_hash)
         if not key:
             raise UnauthorizedError("服务 API Key 无效")
@@ -124,9 +130,7 @@ async def require_service_api_key(
             team_roles={},
         )
         if principal.is_auditor:
-            raise ForbiddenError(
-                "审计员为只读角色，无法使用服务 API Key 执行操作"
-            )
+            raise ForbiddenError("审计员为只读角色，无法使用服务 API Key 执行操作")
         set_principal(principal)
         set_authorization_context(
             AuthorizationContext.for_principal(

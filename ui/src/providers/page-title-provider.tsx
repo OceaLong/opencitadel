@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  createContext,
-  type ReactNode,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 
 type PageTitleContextValue = {
   title: string | undefined;

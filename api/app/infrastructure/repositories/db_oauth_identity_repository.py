@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Optional
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +10,9 @@ class DBOAuthIdentityRepository(OAuthIdentityRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
-    async def get_by_provider_identity(self, provider: str, provider_user_id: str) -> Optional[OAuthIdentity]:
+    async def get_by_provider_identity(
+        self, provider: str, provider_user_id: str
+    ) -> OAuthIdentity | None:
         stmt = select(OAuthIdentityORM).where(
             OAuthIdentityORM.provider == provider,
             OAuthIdentityORM.provider_user_id == provider_user_id,

@@ -1,16 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Route-level RBAC + wiring coverage for GET /admin/governance/overview.
 
 App-building pattern mirrors test_compliance_routes.py: a bare FastAPI app
 with the real router mounted and only the auth/service dependencies
 overridden, exercised through TestClient.
 """
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.domain.errors import ForbiddenError
-from app.domain.models.scope import Principal, WorkspaceContext, OwnerScope
+from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
 from app.domain.models.user import GlobalRole
 from app.interfaces.auth_dependencies import get_workspace_context, require_auditor_or_admin
 from app.interfaces.endpoints import compliance_routes
@@ -28,9 +27,11 @@ class _FakeGovernanceOverviewService:
             "approvals": {
                 "pending_count": 2,
                 "avg_decision_seconds": 12.5,
-                "outcomes": {"approved": 3, "rejected": 1, "expired": 0, "consumed": 3},
+                "outcomes": {"approved": 3, "rejected": 1, "cancelled": 0},
             },
-            "interceptions": [{"date": "2026-08-01", "approval_decisions": 2, "denials": 1}],
+            "interceptions": [
+                {"date": "2026-08-01", "approval_requests": 2, "activity_failures": 1}
+            ],
             "patrol": [{"date": "2026-08-01", "runs": 1, "findings": 1}],
             "remediation": {
                 "by_status": {
@@ -72,9 +73,7 @@ def _app(service, *, role: GlobalRole, allow: bool) -> FastAPI:
         return Principal(user_id="caller-1", global_role=role)
 
     app.dependency_overrides[get_workspace_context] = ctx
-    app.dependency_overrides[require_auditor_or_admin] = (
-        allow_gate if allow else _deny_auditor_gate
-    )
+    app.dependency_overrides[require_auditor_or_admin] = allow_gate if allow else _deny_auditor_gate
     app.dependency_overrides[get_governance_overview_service] = lambda: service
     return app
 
@@ -89,7 +88,9 @@ def test_auditor_can_get_governance_overview():
     assert response.status_code == 200
     body = response.json()["data"]
     assert body["approvals"]["pending_count"] == 2
-    assert body["interceptions"] == [{"date": "2026-08-01", "approval_decisions": 2, "denials": 1}]
+    assert body["interceptions"] == [
+        {"date": "2026-08-01", "approval_requests": 2, "activity_failures": 1}
+    ]
     assert body["patrol"] == [{"date": "2026-08-01", "runs": 1, "findings": 1}]
     assert body["remediation"]["success_rate"] == 2 / 3
     assert body["chain"]["ok"] is True

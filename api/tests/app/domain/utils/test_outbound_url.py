@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import pytest
 
 from app.domain.utils.outbound_url import (
@@ -9,10 +7,7 @@ from app.domain.utils.outbound_url import (
 
 
 def _answers(*addresses: str):
-    return [
-        (2, 1, 6, "", (address, 443))
-        for address in addresses
-    ]
+    return [(2, 1, 6, "", (address, 443)) for address in addresses]
 
 
 def test_outbound_url_rejects_credentials_and_unapproved_ports():

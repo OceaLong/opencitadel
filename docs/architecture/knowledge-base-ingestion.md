@@ -6,10 +6,9 @@ index in place. It creates a candidate closure, validates it, and atomically
 moves `knowledge_bases.active_version_id` only after the closure is safe to
 read.
 
-This is the authoritative model for new code. The unversioned document-content
-routes remain compatibility surfaces for older clients; retrieval, citations,
-source expansion, GraphRAG, Ask, and Agent execution must use an explicit
-published `version_id`.
+Every retrieval, citation, source expansion, GraphRAG query, Ask Run, and Agent
+Run uses an explicit published `version_id`. There is no unversioned production
+read or write path.
 
 ## Identity and storage model
 
@@ -21,7 +20,7 @@ published `version_id`.
 | Document revision | Immutable source digest and processing state for one document payload |
 | Version manifest | Ordered mapping from a version to exact `(document_id, document_revision_id)` pairs |
 | Chunk and graph rows | Derived data carrying both `kb_id` and `version_id`; never shared by inference across versions |
-| Resource build | Durable queued/running/terminal operation associated with one candidate version |
+| Source Run | Sole lifecycle/progress authority for the candidate; exposed through the formal resource-build projection |
 | Session binding | Immutable record pinning an Ask or Agent session to one concrete published version |
 
 A version is a readable closure only when every manifest entry resolves to its
@@ -53,20 +52,21 @@ building -> ready
 
 `ready` and `degraded` are published terminal states. `degraded` is truthful:
 mandatory keyword retrieval and source reading work, while one or more optional
-capabilities are disabled and the reason is exposed by the version/build status
+capabilities are disabled and the reason is exposed by the version and formal Run status
 surface.
 
-Resource builds move through durable `queued` and `running` states to exactly
-one of `succeeded`, `degraded`, `failed`, or `cancelled`. A cancellation request
-does not manufacture a terminal state in the HTTP request; the worker observes
-the request, checkpoints safely, and owns terminalization.
+The source Run uses `new`, `queued`, `running`, `waiting`, `completed`, `failed`,
+or `cancelled`. Candidate `ready`/`degraded` is product capability state, not a
+second execution lifecycle. Cancellation is recorded by the kernel; the
+Activity stops at a fenced boundary and the unpublished candidate becomes
+`failed` while the Run becomes `cancelled`.
 
 ## Candidate build pipeline
 
 Every add, removal, reindex, or retry operates on a candidate:
 
-1. Lock the knowledge-base mutation boundary and create one durable build and
-   one `building` version whose parent is the current active version.
+1. Lock the mutation boundary, create one `building` version whose parent is
+   the current active version, and atomically admit its `kb_ingest` Run.
 2. Copy the parent manifest, then apply the requested additions or removals.
    Unchanged revisions are reused by identity; changed source bytes produce new
    immutable revisions.
@@ -76,16 +76,16 @@ Every add, removal, reindex, or retry operates on a candidate:
 6. Optionally build embeddings and the graph, each within explicit budgets.
 7. Validate the complete candidate closure and its identity constraints.
 8. In one transaction, compare the expected parent with the current active
-   pointer, finalize version/build status, and publish by swapping
+   pointer, finalize candidate state, and publish by swapping
    `active_version_id`.
 
 The compare-and-swap at publication prevents a stale concurrent candidate from
-overwriting a newer active version. A failed dispatch leaves the durable queued
-build available to worker reconciliation; it does not create a duplicate.
+overwriting a newer active version. The command inbox and `request_key` make
+admission idempotent; the database enforces at most one building candidate.
 
 ## Failure semantics
 
-| Failure point | Candidate/build result | Active version |
+| Failure point | Candidate / Run result | Active version |
 | --- | --- | --- |
 | Parse | Failed | Unchanged and readable |
 | Chunking | Failed | Unchanged and readable |
@@ -101,14 +101,14 @@ from an incomplete attempt are not exposed as a half-finished graph.
 
 The current reason codes include `DOCUMENT_PARTIAL`,
 `EMBEDDING_UNAVAILABLE`, and GraphRAG failure/budget reasons. Read them from
-version or build status. The Graph endpoint itself returns
+version or formal Run status. The Graph endpoint itself returns
 `capability=false` with empty nodes and edges when graph search is unavailable.
 
 ## Retrieval and session consistency
 
 Both Ask and Agent session creation resolve a published version, recheck it at
 the final transaction boundary, and persist exactly one knowledge-base binding
-with the session. `ready_doc_count` is a display/compatibility count, not an
+with the session. Derived document counters are display values, never an
 authorization predicate.
 
 The runner authorizes the persisted binding again and passes the same
@@ -156,8 +156,8 @@ placeholder nodes are not synthesized. Edge endpoints must exist in the
 returned node set, and evidence uses the same five-part citation identity.
 
 Graph construction is bounded by `max_parent_chunks_per_doc`, `max_chunks`,
-`max_llm_calls`, `max_tokens`, concurrency, and a durable deadline. Checkpoints
-store the candidate version, cursor, accumulated call/token counts, and deadline
+`max_llm_calls`, `max_tokens`, concurrency, and a durable deadline. Durable
+progress markers store the candidate version, cursor, accumulated call/token counts, and deadline
 so retries cannot reset the budget. A cap, deadline, or extraction failure
 degrades graph capability rather than blocking mandatory keyword publication.
 
@@ -184,9 +184,10 @@ Removing a document edits the next candidate manifest. It does not synchronously
 delete the logical document, revision, chunks, graph evidence, or older
 versions. The active pointer changes only when the removal candidate publishes.
 
-Worker reconciliation detects durable queued builds that were not dispatched
-and stale running builds whose lease/heartbeat is no longer valid. Recovery
-resumes from durable state or terminalizes the candidate without changing the
+The execution kernel reclaims expired Activity claims and pending commands from
+PostgreSQL. Knowledge graph budget/cursor metrics are candidate progress markers;
+Run progress remains in the formal projection. Recovery either resumes the
+same invocation safely or terminalizes the candidate without changing the
 active version.
 
 ## Retention and garbage collection
@@ -202,7 +203,7 @@ knowledge_base:
 ```
 
 The scheduler runs bounded GC under a leader lease. Active versions, candidates
-referenced by nonterminal builds, and **every version referenced by any session
+referenced by nonterminal Runs, and **every version referenced by any session
 binding, including `is_current=false` history**, are permanent roots for that
 collection pass. Parent pointers are GC-safe, and deletion order preserves
 foreign keys across graph rows, chunks, manifests, revisions, and logical
@@ -212,21 +213,10 @@ version references them. GC reports protected counts and reclaimed rows/bytes.
 Enable GC only after observing a dry operational window and choosing retention
 values that match audit requirements.
 
-## Migration and compatibility
+## Greenfield schema contract
 
-The versioned schema is a linear Alembic chain:
-
-```text
-b8d9e0f1a2b3 -> c7d8e9f0a1b2 -> d8e9f0a1b2c3 (head)
-```
-
-`b8d9e0f1a2b3` marks resources that were already ready at the compatibility
-boundary. `c7d8e9f0a1b2` expands the schema, backfills immutable legacy-v1
-versions/revisions/manifests, and adds version identity to derived data.
-`d8e9f0a1b2c3` makes the version parent relationship and GC lookup indexes safe.
-The current and only head is `d8e9f0a1b2c3`, whose parent is
-`c7d8e9f0a1b2`.
-
-Legacy readiness and unversioned source routes remain for compatibility, but
-new writes must provide candidate version identity and new production reads
-must follow a published session/version binding.
+The initial schema creates version identity, manifest closure, `build_id`, and
+`request_key` as required data. It creates no unversioned content authority and
+no separate resource-build lifecycle tables. Destructive schema evolution is
+acceptable before the first production release; future schema changes must
+preserve the candidate/Run split and its single source of truth.

@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from types import SimpleNamespace
-
 import pytest
 
 from app.infrastructure.repositories.db_codebase_repository import DBCodebaseRepository
@@ -47,7 +43,7 @@ async def test_search_vector_uses_exact_version_and_pgvector_ordering():
     assert await repo.search_vector("cb1", "cbv1", [0.1, 0.2], limit=7) == []
 
     sql, params = session.calls[-1]
-    assert "embedding <=> :query::vector" in sql
+    assert "embedding <=> CAST(:query AS vector)" in sql
     assert "version_id = :version_id" in sql
     assert params == {
         "codebase_id": "cb1",

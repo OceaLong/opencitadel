@@ -80,9 +80,14 @@ jobs:
           --health-retries 5
     env:
       ENV: test
+      OPENCITADEL_REQUIRE_POSTGRES_TESTS: "1"
       POSTGRES_HOST: localhost
       POSTGRES_USER: opencitadel_app
       POSTGRES_PASSWORD: ci-postgres-app-password
+      POSTGRES_ADMIN_USER: postgres
+      POSTGRES_ADMIN_PASSWORD: postgres
+      POSTGRES_KERNEL_USER: opencitadel_execution_kernel_runtime
+      POSTGRES_KERNEL_PASSWORD: ci-kernel-postgres-password
       POSTGRES_DB: opencitadel
       REDIS_HOST: localhost
       REDIS_PORT: 6379
@@ -99,16 +104,39 @@ jobs:
         run: pip install uv==0.11.19
       - name: Install dependencies
         run: uv sync --frozen --all-groups
-      - name: Import contracts (lint-imports)
-        run: uv run lint-imports
+      - name: Ruff lint and format (all first-party Python)
+        run: |
+          uv run ruff check --config ../ruff.toml . ../ops-actuator ../ops-collector ../sandbox ../scripts
+          uv run ruff format --config ../ruff.toml --check . ../ops-actuator ../ops-collector ../sandbox ../scripts
+      - name: Import boundaries (zero waivers)
+        run: |
+          uv run lint-imports
+          uv run pytest -q \
+            tests/app/contracts/test_architecture_debt.py \
+            tests/app/contracts/test_explicit_composition_boundaries.py
       - name: Prepare non-superuser application database role
         env:
           POSTGRES_ADMIN_PASSWORD: postgres
           POSTGRES_APP_USER: opencitadel_app
           POSTGRES_APP_PASSWORD: ci-postgres-app-password
+          POSTGRES_MIGRATION_USER: opencitadel_migration_runtime
+          POSTGRES_MIGRATION_PASSWORD: ci-migration-postgres-password
+          POSTGRES_KERNEL_USER: opencitadel_execution_kernel_runtime
+          POSTGRES_KERNEL_PASSWORD: ci-kernel-postgres-password
         run: uv run python scripts/prepare_ci_database.py
       - name: Run database migrations
+        env:
+          POSTGRES_ADMIN_USER: opencitadel_migration_runtime
+          POSTGRES_ADMIN_PASSWORD: ci-migration-postgres-password
         run: uv run python -m app.migrate
+      - name: execution-contracts
+        run: |
+          uv run pytest -q tests/app/contracts
+          uv run pytest -q \
+            tests/app/contracts/test_runtime_deployment_contract.py \
+            tests/app/test_app_factory_process.py \
+            tests/app/test_execution_kernel_process.py
+          uv run pytest -q tests/app/infrastructure/security/test_tenant_rls_integration.py
       - name: Run pytest
         run: uv run pytest
 
@@ -125,8 +153,14 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: ui/package-lock.json
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install uv==0.11.19
       - run: npm ci
+      - run: npm run format:check
       - run: npm run i18n:check
+      - run: npm run api:check
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test
@@ -139,7 +173,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix: ${{ github.event_name == 'pull_request' && fromJSON('{"include":[{"name":"api","context":"api","file":"api/Dockerfile","target":"api"},{"name":"worker","context":"api","file":"api/Dockerfile","target":"worker"},{"name":"migrate","context":"api","file":"api/Dockerfile","target":"api"},{"name":"ui","context":"ui","file":"ui/Dockerfile","target":"runner"},{"name":"sandbox","context":"sandbox","file":"sandbox/Dockerfile","target":""},{"name":"ops-collector","context":"ops-collector","file":"ops-collector/Dockerfile","target":""},{"name":"ops-actuator","context":"ops-actuator","file":"ops-actuator/Dockerfile","target":""}]}') || fromJSON('{"include":[{"name":"sandbox","context":"sandbox","file":"sandbox/Dockerfile","target":""},{"name":"ops-collector","context":"ops-collector","file":"ops-collector/Dockerfile","target":""},{"name":"ops-actuator","context":"ops-actuator","file":"ops-actuator/Dockerfile","target":""}]}') }}
+      matrix: ${{ github.event_name == 'pull_request' && fromJSON('{"include":[{"name":"api","context":"api","file":"api/Dockerfile","target":"api"},{"name":"execution-kernel","context":"api","file":"api/Dockerfile","target":"execution-kernel"},{"name":"migrate","context":"api","file":"api/Dockerfile","target":"api"},{"name":"ui","context":"ui","file":"ui/Dockerfile","target":"runner"},{"name":"sandbox","context":"sandbox","file":"sandbox/Dockerfile","target":""},{"name":"ops-collector","context":"ops-collector","file":"ops-collector/Dockerfile","target":""},{"name":"ops-actuator","context":"ops-actuator","file":"ops-actuator/Dockerfile","target":""}]}') || fromJSON('{"include":[{"name":"sandbox","context":"sandbox","file":"sandbox/Dockerfile","target":""},{"name":"ops-collector","context":"ops-collector","file":"ops-collector/Dockerfile","target":""},{"name":"ops-actuator","context":"ops-actuator","file":"ops-actuator/Dockerfile","target":""}]}') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -317,6 +351,15 @@ jobs:
           echo "::add-mask::${password}"
           sed -i "s/^BOOTSTRAP_ADMIN_PASSWORD=.*/BOOTSTRAP_ADMIN_PASSWORD=${password}/" .env.e2e
           echo "PATROL_E2E_PASSWORD=${password}" >> "$GITHUB_ENV"
+      # The broker creates dynamic containers from this image. The service that
+      # declares its build belongs to the inactive fixed-sandbox profile, so an
+      # ordinary profile-scoped `up --build` cannot make the image available.
+      - name: Build dynamic sandbox image
+        run: docker compose --env-file .env.e2e build opencitadel-sandbox
+        env:
+          PIP_INDEX_URL: https://pypi.org/simple/
+          UV_INDEX_URL: https://pypi.org/simple/
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
       - name: Start platform and demo stack
         run: >-
           docker compose --env-file .env.e2e
@@ -348,7 +391,7 @@ jobs:
         env:
           # PATROL_E2E stays gated behind vars.PATROL_E2E_ENABLED rather than
           # being unconditionally on: patrol.spec needs a tool-capable LLM
-          # behind Worker/Collector, which CI does not have, so enabling it
+          # behind the execution kernel and Collector, which CI does not have, so enabling it
           # here would always fail. Enable only in protected environments
           # that have a real model configured.
           PATROL_E2E: ${{ vars.PATROL_E2E_ENABLED }}

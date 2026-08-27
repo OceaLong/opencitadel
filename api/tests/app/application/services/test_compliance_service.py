@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Unit tests for the 13+1 compliance evaluators that used to be
 unconditional/near-unconditional passes (Task 4: 合规评估器真化).
 
@@ -10,7 +8,8 @@ so they pin down the *decision logic* independent of how the inputs are
 collected (that wiring is covered separately by
 ``test_compliance_report.py``'s ``_collect_metrics`` monkeypatch smoke test).
 """
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
 
 from app.application.services.compliance_service import ComplianceService
 
@@ -25,10 +24,10 @@ class TestAuthPresent:
         assert status == "pass"
         assert any("3" in e for e in evidence)
 
-    def test_attention_when_no_login_actions(self):
+    def test_not_verified_when_no_login_actions(self):
         status, evidence = ComplianceService._eval_auth_present({"auth_event_count": 0}, {})
-        assert status == "attention"
-        assert any("0" in e for e in evidence)
+        assert status == "not_verified"
+        assert evidence
 
 
 class TestRbacPresent:
@@ -39,34 +38,30 @@ class TestRbacPresent:
         assert status == "pass"
 
     def test_attention_when_everyone_is_admin(self):
-        status, _ = ComplianceService._eval_rbac_present(
-            {"role_distribution": {"admin": 3}}, {}
-        )
+        status, _ = ComplianceService._eval_rbac_present({"role_distribution": {"admin": 3}}, {})
         assert status == "attention"
 
     def test_attention_when_no_admin_at_all(self):
-        status, _ = ComplianceService._eval_rbac_present(
-            {"role_distribution": {"user": 3}}, {}
-        )
+        status, _ = ComplianceService._eval_rbac_present({"role_distribution": {"user": 3}}, {})
         assert status == "attention"
 
 
 class TestGateApprovals:
     def test_pass_when_approvals_recorded(self):
-        status, _ = ComplianceService._eval_gate_approvals(
-            {"gate_approval_count": 2, "agent_session_count": 5}, {}
+        status, _ = ComplianceService._eval_approval_coverage(
+            {"approval_request_count": 2, "run_count": 5}, {}
         )
         assert status == "pass"
 
     def test_attention_when_sessions_but_no_approvals(self):
-        status, _ = ComplianceService._eval_gate_approvals(
-            {"gate_approval_count": 0, "agent_session_count": 4}, {}
+        status, _ = ComplianceService._eval_approval_coverage(
+            {"approval_request_count": 0, "run_count": 4}, {}
         )
         assert status == "attention"
 
     def test_not_verified_when_no_sessions_at_all(self):
-        status, _ = ComplianceService._eval_gate_approvals(
-            {"gate_approval_count": 0, "agent_session_count": 0}, {}
+        status, _ = ComplianceService._eval_approval_coverage(
+            {"approval_request_count": 0, "run_count": 0}, {}
         )
         assert status == "not_verified"
 
@@ -74,19 +69,19 @@ class TestGateApprovals:
 class TestToolAudit:
     def test_pass_when_tool_invocations_recorded(self):
         status, _ = ComplianceService._eval_tool_audit(
-            {"tool_invoke_count": 10, "agent_session_count": 3}, {}
+            {"tool_activity_count": 10, "run_count": 3}, {}
         )
         assert status == "pass"
 
     def test_attention_when_sessions_but_no_tool_invocations(self):
         status, _ = ComplianceService._eval_tool_audit(
-            {"tool_invoke_count": 0, "agent_session_count": 2}, {}
+            {"tool_activity_count": 0, "run_count": 2}, {}
         )
         assert status == "attention"
 
     def test_not_verified_when_no_sessions_at_all(self):
         status, _ = ComplianceService._eval_tool_audit(
-            {"tool_invoke_count": 0, "agent_session_count": 0}, {}
+            {"tool_activity_count": 0, "run_count": 0}, {}
         )
         assert status == "not_verified"
 
@@ -110,45 +105,35 @@ class TestRedactionOn:
         assert status == "attention"
 
 
-class TestRollbackCapable:
-    def test_pass_when_checkpoints_created_in_window(self):
-        status, _ = ComplianceService._eval_rollback_capable({"checkpoint_count": 2}, {})
-        assert status == "pass"
-
-    def test_attention_when_no_checkpoints_in_window(self):
-        status, _ = ComplianceService._eval_rollback_capable({"checkpoint_count": 0}, {})
-        assert status == "attention"
-
-
 class TestSelfHosted:
     def test_pass_when_all_hosts_private(self):
         status, _ = ComplianceService._eval_self_hosted(
-            {"llm_endpoint_hosts": ["llm.internal.corp", "10.0.0.5"]}, {}
+            {"inference_endpoint_hosts": ["inference.internal.corp", "10.0.0.5"]}, {}
         )
         assert status == "pass"
 
     def test_attention_when_public_saas_host_present(self):
         status, evidence = ComplianceService._eval_self_hosted(
-            {"llm_endpoint_hosts": ["llm.internal.corp", "api.openai.com"]}, {}
+            {"inference_endpoint_hosts": ["inference.internal.corp", "api.openai.com"]}, {}
         )
         assert status == "attention"
         assert any("api.openai.com" in e for e in evidence)
 
     def test_not_verified_when_no_endpoints_configured(self):
-        status, _ = ComplianceService._eval_self_hosted({"llm_endpoint_hosts": []}, {})
+        status, _ = ComplianceService._eval_self_hosted({"inference_endpoint_hosts": []}, {})
         assert status == "not_verified"
 
     def test_attention_for_azure_openai_resource_subdomain(self):
         # Azure OpenAI hostnames are per-resource: <resource>.openai.azure.com
         status, evidence = ComplianceService._eval_self_hosted(
-            {"llm_endpoint_hosts": ["my-resource.openai.azure.com"]}, {}
+            {"inference_endpoint_hosts": ["my-resource.openai.azure.com"]}, {}
         )
         assert status == "attention"
         assert any("openai.azure.com" in e for e in evidence)
 
     def test_attention_for_bedrock_regional_subdomain(self):
         status, _ = ComplianceService._eval_self_hosted(
-            {"llm_endpoint_hosts": ["bedrock-runtime.us-east-1.amazonaws.com"]}, {}
+            {"inference_endpoint_hosts": ["bedrock-runtime.us-east-1.amazonaws.com"]}, {}
         )
         assert status == "attention"
 
@@ -156,19 +141,26 @@ class TestSelfHosted:
         # Same TLD/base domain as Bedrock but no "bedrock" keyword -- must
         # not be flagged (S3/other AWS services aren't LLM SaaS).
         status, _ = ComplianceService._eval_self_hosted(
-            {"llm_endpoint_hosts": ["my-bucket.s3.amazonaws.com"]}, {}
+            {"inference_endpoint_hosts": ["my-bucket.s3.amazonaws.com"]}, {}
         )
         assert status == "pass"
 
     def test_attention_for_vertex_aiplatform_regional_subdomain(self):
         status, _ = ComplianceService._eval_self_hosted(
-            {"llm_endpoint_hosts": ["us-central1-aiplatform.googleapis.com"]}, {}
+            {"inference_endpoint_hosts": ["us-central1-aiplatform.googleapis.com"]}, {}
         )
         assert status == "attention"
 
     def test_attention_for_cn_providers(self):
-        for host in ("dashscope.aliyuncs.com", "api.deepseek.com", "open.bigmodel.cn", "api.moonshot.cn"):
-            status, _ = ComplianceService._eval_self_hosted({"llm_endpoint_hosts": [host]}, {})
+        for host in (
+            "dashscope.aliyuncs.com",
+            "api.deepseek.com",
+            "open.bigmodel.cn",
+            "api.moonshot.cn",
+        ):
+            status, _ = ComplianceService._eval_self_hosted(
+                {"inference_endpoint_hosts": [host]}, {}
+            )
             assert status == "attention", host
 
 
@@ -236,13 +228,11 @@ class TestTimestampIntegrity:
     """
 
     def test_not_verified_when_sample_empty(self):
-        status, _ = ComplianceService._eval_timestamp_integrity(
-            {"timestamp_chain_sample": []}, {}
-        )
+        status, _ = ComplianceService._eval_timestamp_integrity({"timestamp_chain_sample": []}, {})
         assert status == "not_verified"
 
     def test_pass_when_all_aware_and_created_at_tracks_chain_seq_order(self):
-        base = datetime(2026, 8, 1, tzinfo=timezone.utc)
+        base = datetime(2026, 8, 1, tzinfo=UTC)
         # chain_seq 101, 102, 103 (ascending, as list_recent_chained
         # returns) with created_at increasing in lockstep -- the expected
         # steady-state shape when the schema is tz-aware.
@@ -256,28 +246,30 @@ class TestTimestampIntegrity:
         )
         assert status == "pass"
 
-    def test_attention_when_created_at_naive_and_monotonic(self):
-        # Real production shape: AuditLogORM.created_at is DateTime without
-        # timezone=True, so rows read back naive. Monotonic along chain_seq
-        # order is still a real, checkable property -- this must not be a
-        # permanent gap.
+    def test_gap_when_created_at_is_naive(self):
         sample = [
-            {"chain_seq": 101, "created_at": datetime(2026, 8, 1, 0, 0)},
-            {"chain_seq": 102, "created_at": datetime(2026, 8, 1, 0, 1)},
-            {"chain_seq": 103, "created_at": datetime(2026, 8, 1, 0, 2)},
+            {
+                "chain_seq": 101,
+                "created_at": datetime(2026, 8, 1, 0, 0, tzinfo=UTC).replace(tzinfo=None),
+            },
+            {
+                "chain_seq": 102,
+                "created_at": datetime(2026, 8, 1, 0, 1, tzinfo=UTC).replace(tzinfo=None),
+            },
+            {
+                "chain_seq": 103,
+                "created_at": datetime(2026, 8, 1, 0, 2, tzinfo=UTC).replace(tzinfo=None),
+            },
         ]
         status, evidence = ComplianceService._eval_timestamp_integrity(
             {"timestamp_chain_sample": sample}, {}
         )
-        assert status == "attention"
-        assert any("TIMESTAMP WITHOUT TIME ZONE" in e or "tz-aware" in e for e in evidence)
+        assert status == "gap"
+        assert any("带时区" in e for e in evidence)
 
     def test_gap_when_created_at_goes_backwards_along_chain_seq(self):
-        # naive datetimes -- the real pipeline shape -- with chain_seq
-        # strictly ascending (101 < 102 < 103, guaranteed by DB write
-        # order) but created_at at chain_seq=102 earlier than at
-        # chain_seq=101 -- e.g. clock skew or a backdated write.
-        base = datetime(2026, 8, 1)
+        # Invalid naive input plus a timestamp reversal must fail closed.
+        base = datetime(2026, 8, 1, tzinfo=UTC).replace(tzinfo=None)
         sample = [
             {"chain_seq": 101, "created_at": base + timedelta(minutes=5)},
             {"chain_seq": 102, "created_at": base},

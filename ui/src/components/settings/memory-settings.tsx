@@ -71,7 +71,7 @@ export function MemorySettings({ embedded = false }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [filterScope]);
+  }, [filterScope, tCommon]);
 
   useEffect(() => {
     load();
@@ -185,21 +185,21 @@ export function MemorySettings({ embedded = false }: Props) {
           {entries.map((e) => (
             <div
               key={e.id}
-              className="group border-border/70 bg-card hover:border-border overflow-hidden rounded-xl border shadow-card transition-all hover:shadow-card-hover"
+              className="group border-border/70 bg-card hover:border-border shadow-card hover:shadow-card-hover overflow-hidden rounded-xl border transition-all"
             >
               <div className="border-border/60 bg-muted/30 flex items-start justify-between gap-3 border-b px-4 py-3">
                 <div className="min-w-0 flex-1">
                   <h3 className="text-foreground truncate text-sm font-semibold">{e.title}</h3>
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    <Badge variant="outline" className="px-1.5 py-0 text-2xs">
+                    <Badge variant="outline" className="text-2xs px-1.5 py-0">
                       {e.scope}
                     </Badge>
                     {e.session_id && (
-                      <Badge variant="outline" className="px-1.5 py-0 font-mono text-2xs">
+                      <Badge variant="outline" className="text-2xs px-1.5 py-0 font-mono">
                         {e.session_id.slice(0, 8)}…
                       </Badge>
                     )}
-                    <Badge variant="secondary" className="px-1.5 py-0 text-2xs">
+                    <Badge variant="secondary" className="text-2xs px-1.5 py-0">
                       {e.source}
                     </Badge>
                     {e.use_count > 0 && (
@@ -213,7 +213,7 @@ export function MemorySettings({ embedded = false }: Props) {
                       {e.tags.map((tag) => (
                         <span
                           key={tag}
-                          className="bg-background border-border/60 text-muted-foreground rounded border px-1.5 py-0.5 text-2xs"
+                          className="bg-background border-border/60 text-muted-foreground text-2xs rounded border px-1.5 py-0.5"
                         >
                           {tag}
                         </span>
@@ -245,9 +245,7 @@ export function MemorySettings({ embedded = false }: Props) {
               </div>
             </div>
           ))}
-          {entries.length === 0 && (
-            <EmptyState title={t("noEntries")} className="py-8" />
-          )}
+          {entries.length === 0 && <EmptyState title={t("noEntries")} className="py-8" />}
         </div>
       )}
 

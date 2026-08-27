@@ -1,83 +1,47 @@
-# 自动化与调度
+# 自动化与 Scheduler
 
 [English](automation-scheduler.md)
 
-本文档说明定时任务、Webhook 触发、Leader 选举与通知投递。
-
-## 概览
+Scheduled Definition 是产品记录；每次 Firing 都是正式 Automation Run，并准入关联 Agent
+或 Patrol Run。
 
 ```mermaid
-flowchart TD
-  Cron["Cron / 间隔任务"] --> Leader["Worker Leader 循环"]
-  Webhook["POST /api/webhooks/{token}"] --> Dispatch["创建会话 + 派发任务"]
-  Leader --> Poll["轮询到期 scheduled_jobs"]
-  Poll --> Dispatch
-  Dispatch --> Redis["Redis task:dispatch"]
-  Redis --> Worker["Agent Worker"]
-  Worker --> Session["会话终态回调"]
-  Session --> Notify["站内信 + 可选 IM"]
-  Notify --> SSE["GET /notifications/stream"]
+flowchart LR
+  Cron[Cron / Interval] --> Leader[Leased Scheduler Tick]
+  Webhook[Signed Webhook] --> Service[ScheduledJobService]
+  Manual[Manual Trigger] --> Service
+  Leader --> Service
+  Service --> DB[(Job Row + Session + Run Command)]
+  DB --> Kernel[Execution Kernel]
+  Kernel --> Automation[Automation Run]
+  Automation --> Child[Agent / Patrol Child Run]
+  Child --> Projection[Run Projection]
+  Projection --> Reconcile[Job Summary + Notification]
 ```
 
-- **调度循环**在 Worker 进程中运行；仅 Redis 租约持有者轮询 cron/interval 任务。
-- **Webhook 任务**通过 HTTP 触发，不参与轮询。
-- **通知**持久化到 PostgreSQL，并通过 Redis 频道 `notify:{user_id}` 推送。
+Scheduler Loop 位于执行内核副本。短 Redis Leader Lease 只减少重复 Poll，不是正确性状态。
+Database Row Lock、确定性 Firing ID、Command Idempotency 与 Active-Run Projection 共同防止重复
+Admission。Redis 丢失只会让另一副本开始 Poll。
 
-## Leader 选举
+## Trigger
 
-- Redis 键：`scheduler:leader`
-- 每个 Worker 使用唯一 ID（`hostname-uuid`）。
-- `SET scheduler:leader <worker_id> NX EX <lease>` 获取领导权。
-- 非 Leader **不得**续租。
-- 当前 Leader 仅在 `GET scheduler:leader == worker_id` 时用 `EXPIRE` 续期。
+- Cron/Interval Tick 使用计划 `next_run_at` 生成 Firing ID。
+- Manual Trigger 使用新的显式 Firing ID。
+- Webhook 校验 `HMAC-SHA256(raw_body, secret)`，并由 Body/时间窗口生成 Firing ID。
+  Secret 以版本化加密信封存储，仅在创建/轮换时显示。
+- Patrol 绑定 Job 准入 Patrol Run；通用 Job 创建 Session 与 Automation Run，并关联 Agent
+  Child Run。
 
-实现：`Worker` 进程中的 `run_scheduler_loop`。
+Command Transaction 提交前验证 Resource Access 并绑定具体 Active Version。Job 已有活动正式 Run
+时不再次准入。
 
-## 到期任务轮询
+## 状态与恢复
 
-- 查询 `enabled`、`next_run_at <= now()` 且 `last_run_status != running` 的 `scheduled_jobs`。
-- Webhook 触发任务在轮询中跳过（走 HTTP 端点）。
-- 触发失败时设置 `last_run_status=failed` 并退避 `next_run_at`。
+`last_run_*` 只是查询 Summary；`last_execution_run_id` 关联权威 Run Projection。Reconciliation
+把 Terminal Run State 投影到 Summary，并发送持久 Inbox Notification 与可选 MCP IM。进程死亡
+不会制造 Terminal State。
 
-## 运行生命周期
+同一个 Leased Loop 还运行有界 Knowledge/Codebase Version GC 与 Patrol Retention。它们使用独立
+数据库 Lease，且不会删除 Active/Bound Version 或 Audit Row。
 
-| 阶段 | `last_run_status` | 说明 |
-|------|-------------------|------|
-| 触发 | `running` | 创建会话，派发 Redis Stream 任务 |
-| 会话完成 | `completed` | 由 `ScheduledJobService.on_session_terminal` 更新 |
-| 会话失败/取消 | `failed` / `cancelled` | 同上 |
-
-## Webhook 安全
-
-- `POST /api/webhooks/{token}` 需要请求头 `X-Webhook-Signature`。
-- 签名 = `HMAC-SHA256(raw_body, webhook_secret)` 十六进制摘要。
-- 密钥 Fernet 加密存储（`API_KEY_SECRET`）；创建/轮换时仅展示一次明文。
-- 幂等 Redis 键：`webhook:idem:{token}:{sha256(body)}`，按 job token 隔离。
-- 重复 payload 返回已有 `session_id` 及 `{ duplicate: true }`。
-- 缺失/无效签名 → HTTP 401。
-
-另见 [安全模型 — Webhook 自动化](security-model.zh-CN.md#webhook-自动化)。
-
-## 通知
-
-| 通道 | 机制 |
-|------|------|
-| **站内信** | `notifications` 表；UI 列表与已读 |
-| **SSE** | `GET /api/notifications/stream` 订阅 Redis `notify:{user_id}` |
-| **IM 回退** | 定时任务可选 MCP `notify_channels`（失败静默） |
-
-自动化运行时会发送 `job_started`、`job_complete` 等事件类型。
-
-## UI 入口
-
-- 路由：`/automation`
-- 支持 cron、间隔或 Webhook 触发；可绑定 Skill、模型、代码库或知识库。
-
-## 配置
-
-见 `AppConfig` 中的 `SchedulerConfig`（`api/config.yaml` 或 `USE_DB_APP_CONFIG=true` 时的数据库）。
-
-## 相关文档
-
-- [安全模型](security-model.zh-CN.md)
-- [事件系统](events.zh-CN.md)
+调度准入、轮询、Lease、并发与 Webhook 幂等配置位于 Operations Policy `scheduler`；Job Definition 的 UI 入口为 `/automation`。

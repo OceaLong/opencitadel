@@ -1,23 +1,20 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import hashlib
 import secrets
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Literal
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
 import jwt
-
 
 TokenKind = Literal["access", "refresh"]
 
 
 class JwtService:
     def __init__(
-            self,
-            secret: str,
-            access_ttl_seconds: int = 900,
-            refresh_ttl_seconds: int = 60 * 60 * 24 * 30,
-            issuer: str = "opencitadel",
+        self,
+        secret: str,
+        access_ttl_seconds: int = 900,
+        refresh_ttl_seconds: int = 60 * 60 * 24 * 30,
+        issuer: str = "opencitadel",
     ) -> None:
         self.secret = secret
         self.access_ttl_seconds = access_ttl_seconds
@@ -28,8 +25,8 @@ class JwtService:
     def hash_token(token: str) -> str:
         return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
-    def _encode(self, payload: Dict[str, Any], ttl_seconds: int, token_type: TokenKind) -> str:
-        now = datetime.now(timezone.utc)
+    def _encode(self, payload: dict[str, Any], ttl_seconds: int, token_type: TokenKind) -> str:
+        now = datetime.now(UTC)
         claims = {
             **payload,
             "typ": token_type,
@@ -54,7 +51,7 @@ class JwtService:
             "refresh",
         )
 
-    def decode(self, token: str, expected_type: TokenKind | None = None) -> Dict[str, Any]:
+    def decode(self, token: str, expected_type: TokenKind | None = None) -> dict[str, Any]:
         claims = jwt.decode(token, self.secret, algorithms=["HS256"], issuer=self.issuer)
         if expected_type is not None and claims.get("typ") != expected_type:
             raise jwt.InvalidTokenError("unexpected token type")

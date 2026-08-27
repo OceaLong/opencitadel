@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Deterministic, LLM-free harness for fixture 21's remediation flow.
 
 Drives a *real* Ops Actuator MCP server (streamable-http, no mocks) against
@@ -53,6 +52,7 @@ Exit code 0 on success. Any failed assertion raises HarnessError, which is
 printed together with kubectl/actuator-log diagnostics before exiting
 non-zero.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -63,8 +63,9 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Self
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMESPACE = "opencitadel-patrol-demo"
@@ -75,7 +76,9 @@ ACTUATOR_PORT = int(os.environ.get("OPS_ACTUATOR_PORT", "8091"))
 LOCAL_PORT = int(os.environ.get("OPS_ACTUATOR_LOCAL_PORT", "18091"))
 IDEMPOTENCY_ANNOTATION = "opencitadel.io/remediation-key"
 RESTARTED_AT_ANNOTATION = "opencitadel.io/restarted-at"
-HEALTHY_MANIFEST = ROOT / "deploy" / "patrol-demo" / "fixtures" / "21-remediation-crashloop" / "healthy.yaml"
+HEALTHY_MANIFEST = (
+    ROOT / "deploy" / "patrol-demo" / "fixtures" / "21-remediation-crashloop" / "healthy.yaml"
+)
 REQUIRED_TOOLS = {"restart_workload", "scale_workload", "rollback_workload"}
 
 
@@ -123,9 +126,8 @@ def pod_template_annotations(deployment: dict) -> dict:
     This is where the same restart() call patches RESTARTED_AT_ANNOTATION
     (opencitadel.io/restarted-at), via the patch body's
     ``"spec": {"template": {"metadata": {"annotations": {...}}}}`` key.
-    Deliberately a different accessor from object_annotations(): reading
-    both annotations off this one path was the Task 3 review Blocker --
-    the idempotency key is never here, only on the object's own metadata.
+    This is deliberately distinct from object_annotations(): the idempotency
+    key exists only on the workload object's own metadata.
     """
     return deployment["spec"]["template"]["metadata"].get("annotations") or {}
 
@@ -139,20 +141,33 @@ class PortForward:
 
     def __init__(self, namespace: str, service: str, local_port: int, remote_port: int) -> None:
         self._cmd = [
-            "kubectl", "--context", context(), "-n", namespace, "port-forward",
-            "--address", "127.0.0.1", f"service/{service}", f"{local_port}:{remote_port}",
+            "kubectl",
+            "--context",
+            context(),
+            "-n",
+            namespace,
+            "port-forward",
+            "--address",
+            "127.0.0.1",
+            f"service/{service}",
+            f"{local_port}:{remote_port}",
         ]
         self._process: subprocess.Popen | None = None
 
-    def __enter__(self) -> "PortForward":
+    def __enter__(self) -> Self:
         self._process = subprocess.Popen(
-            self._cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+            self._cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         )
         self._wait_ready(timeout=30)
         return self
 
     def _wait_ready(self, timeout: float) -> None:
-        assert self._process is not None and self._process.stdout is not None
+        assert self._process is not None
+        assert self._process.stdout is not None
         deadline = time.monotonic() + timeout
         buffer = ""
         while time.monotonic() < deadline:
@@ -171,9 +186,11 @@ class PortForward:
             print(f"[port-forward] {line.rstrip()}", file=sys.stderr)
             if "Forwarding from" in line:
                 return
-        raise HarnessError(f"kubectl port-forward did not become ready before timeout; output so far: {buffer}")
+        raise HarnessError(
+            f"kubectl port-forward did not become ready before timeout; output so far: {buffer}"
+        )
 
-    def __exit__(self, *exc_info: Any) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         if self._process is None:
             return
         self._process.terminate()
@@ -204,17 +221,26 @@ async def _call_tool_async(url: str, tool_name: str, arguments: dict, attempts: 
     last_exc: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
-            async with streamablehttp_client(url=url) as (read_stream, write_stream, _get_session_id):
-                async with ClientSession(read_stream, write_stream) as session:
-                    await session.initialize()
-                    result = await session.call_tool(tool_name, arguments)
-                    return _extract_tool_result(result, tool_name)
+            async with (
+                streamablehttp_client(url=url) as (
+                    read_stream,
+                    write_stream,
+                    _get_session_id,
+                ),
+                ClientSession(read_stream, write_stream) as session,
+            ):
+                await session.initialize()
+                result = await session.call_tool(tool_name, arguments)
+                return _extract_tool_result(result, tool_name)
         except HarnessError:
             raise
-        except Exception as exc:  # connection-level flakiness only (port-forward warmup, etc.)
+        except (ExceptionGroup, OSError, RuntimeError, ValueError) as exc:
             last_exc = exc
-            print(f"[mcp] attempt {attempt}/{attempts} for {tool_name} failed: {exc!r}", file=sys.stderr)
-            time.sleep(1.5 * attempt)
+            print(
+                f"[mcp] attempt {attempt}/{attempts} for {tool_name} failed: {exc!r}",
+                file=sys.stderr,
+            )
+            await asyncio.sleep(1.5 * attempt)
     raise HarnessError(f"MCP call {tool_name} failed after {attempts} attempts: {last_exc!r}")
 
 
@@ -284,18 +310,27 @@ def main() -> int:
             print("[2/7] get_capabilities", file=sys.stderr)
             manifest = call_tool(actuator_url, "get_capabilities", {})
             if not manifest.get("overall_capability_hash"):
-                raise HarnessError(f"get_capabilities response missing overall_capability_hash: {manifest}")
+                raise HarnessError(
+                    f"get_capabilities response missing overall_capability_hash: {manifest}"
+                )
             enabled = set(manifest.get("enabled_tools", []))
             missing_tools = REQUIRED_TOOLS - enabled
             if missing_tools:
-                raise HarnessError(f"get_capabilities missing required tools {missing_tools}: {manifest}")
+                raise HarnessError(
+                    f"get_capabilities missing required tools {missing_tools}: {manifest}"
+                )
 
             idempotency_key = f"phaseB-task3-{uuid.uuid4().hex[:16]}"
             print(f"[3/7] restart_workload (idempotency_key={idempotency_key})", file=sys.stderr)
             envelope_1 = call_tool(
                 actuator_url,
                 "restart_workload",
-                {"namespace": NAMESPACE, "workload": DEPLOYMENT, "kind": "deployment", "idempotency_key": idempotency_key},
+                {
+                    "namespace": NAMESPACE,
+                    "workload": DEPLOYMENT,
+                    "kind": "deployment",
+                    "idempotency_key": idempotency_key,
+                },
             )
             if envelope_1.get("action_outcome") != "applied":
                 raise HarnessError(f"first restart_workload call did not apply: {envelope_1}")
@@ -318,7 +353,12 @@ def main() -> int:
             envelope_2 = call_tool(
                 actuator_url,
                 "restart_workload",
-                {"namespace": NAMESPACE, "workload": DEPLOYMENT, "kind": "deployment", "idempotency_key": idempotency_key},
+                {
+                    "namespace": NAMESPACE,
+                    "workload": DEPLOYMENT,
+                    "kind": "deployment",
+                    "idempotency_key": idempotency_key,
+                },
             )
             if envelope_2.get("action_outcome") != "skipped_idempotent":
                 raise HarnessError(f"replayed restart_workload was not a no-op: {envelope_2}")
@@ -356,7 +396,7 @@ def main() -> int:
         print(f"\nFAILED: {exc}", file=sys.stderr)
         dump_diagnostics(ctx)
         return 1
-    except Exception as exc:  # noqa: BLE001 - dump diagnostics before propagating anything unexpected
+    except Exception as exc:
         print(f"\nFAILED (unexpected): {exc!r}", file=sys.stderr)
         dump_diagnostics(ctx)
         raise

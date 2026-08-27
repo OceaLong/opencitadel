@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Shared GC skeleton for immutable resource-version repositories.
 
 `VersionGarbageCollector` lifts the reference-safe, deterministic garbage
@@ -14,8 +12,8 @@ Only the pieces that genuinely differ by domain stay in the subclasses, exposed
 here as abstract hooks:
 
 * ORM identity (``_version_model``, ``_resource_model``, ``_resource_fk_column``,
-  ``_ranked_cte_name``) and governance identity (``_resource_kind``,
-  ``_active_build_states``) -- pure naming / ORM differences.
+  ``_ranked_cte_name``) and governance identity (``_resource_kind``) -- pure
+  naming / ORM differences.
 * ``_delete_version_closure`` -- the per-domain dependency closure delete
   (KB: manifests/revisions/chunks/entities/relations/entity_refs; CB:
   files/symbols/edges/chunks/artifacts + snapshot bookkeeping).
@@ -29,16 +27,14 @@ here as abstract hooks:
   That is a real semantic difference, so the merge loop is kept in the
   subclasses rather than lifted.
 """
+
 import abc
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infrastructure.models.resource_governance import (
-    ResourceBuildORM,
-    SessionResourceBindingORM,
-)
+from app.infrastructure.models.session_resource_binding import SessionResourceBindingORM
 
 
 class VersionGarbageCollector(abc.ABC):
@@ -74,11 +70,6 @@ class VersionGarbageCollector(abc.ABC):
     def _resource_kind(self) -> str:
         """The ``ResourceKind`` value for governance lookups."""
 
-    @property
-    @abc.abstractmethod
-    def _active_build_states(self):
-        """The build states that block collection (queued/running)."""
-
     @abc.abstractmethod
     async def _delete_version_closure(self, version) -> dict:
         """Delete the per-domain dependency closure and return counters."""
@@ -110,11 +101,7 @@ class VersionGarbageCollector(abc.ABC):
         batch_size: int,
     ):
         """Collect one deterministic batch under resource -> version row locks."""
-        if (
-            not isinstance(retain_count, int)
-            or isinstance(retain_count, bool)
-            or retain_count < 0
-        ):
+        if not isinstance(retain_count, int) or isinstance(retain_count, bool) or retain_count < 0:
             raise ValueError("retain_count must be a non-negative integer")
         if not isinstance(older_than, datetime) or older_than.tzinfo is None:
             raise ValueError("GC cutoff must be timezone-aware")
@@ -136,10 +123,6 @@ class VersionGarbageCollector(abc.ABC):
             ranked_resource_id,
             ranked.c.version_id,
         )
-        active_build = self._active_build_exists(
-            ranked_resource_id,
-            ranked.c.version_id,
-        )
         candidates_result = await self.db_session.execute(
             select(
                 ranked.c.version_id,
@@ -158,7 +141,7 @@ class VersionGarbageCollector(abc.ABC):
                     resource_model.active_version_id != ranked.c.version_id,
                 ),
                 ~bound,
-                ~active_build,
+                ranked.c.state != "building",
             )
             .order_by(
                 ranked.c.created_at.asc(),
@@ -183,9 +166,7 @@ class VersionGarbageCollector(abc.ABC):
 
             # Shared mutex and lock order used by publish and binding writes.
             resource_result = await self.db_session.execute(
-                select(resource_model)
-                .where(resource_model.id == resource_id)
-                .with_for_update()
+                select(resource_model).where(resource_model.id == resource_id).with_for_update()
             )
             resource = resource_result.scalar_one_or_none()
             if resource is None or resource.active_version_id == version_id:
@@ -222,23 +203,21 @@ class VersionGarbageCollector(abc.ABC):
     def _ranked_versions(self):
         version_model = self._version_model
         fk = self._resource_fk_column
-        return (
-            select(
-                version_model.id.label("version_id"),
-                fk.label(fk.key),
-                version_model.created_at.label("created_at"),
-                func.row_number()
-                .over(
-                    partition_by=fk,
-                    order_by=(
-                        version_model.created_at.desc(),
-                        version_model.id.desc(),
-                    ),
-                )
-                .label("retention_rank"),
+        return select(
+            version_model.id.label("version_id"),
+            fk.label(fk.key),
+            version_model.created_at.label("created_at"),
+            version_model.state.label("state"),
+            func.row_number()
+            .over(
+                partition_by=fk,
+                order_by=(
+                    version_model.created_at.desc(),
+                    version_model.id.desc(),
+                ),
             )
-            .cte(self._ranked_cte_name)
-        )
+            .label("retention_rank"),
+        ).cte(self._ranked_cte_name)
 
     def _binding_reference_exists(self, resource_id, version_id):
         return exists(
@@ -246,16 +225,6 @@ class VersionGarbageCollector(abc.ABC):
                 SessionResourceBindingORM.resource_kind == self._resource_kind,
                 SessionResourceBindingORM.resource_id == resource_id,
                 SessionResourceBindingORM.version_id == version_id,
-            )
-        )
-
-    def _active_build_exists(self, resource_id, version_id):
-        return exists(
-            select(ResourceBuildORM.id).where(
-                ResourceBuildORM.resource_kind == self._resource_kind,
-                ResourceBuildORM.resource_id == resource_id,
-                ResourceBuildORM.version_id == version_id,
-                ResourceBuildORM.state.in_(self._active_build_states),
             )
         )
 
@@ -288,15 +257,8 @@ class VersionGarbageCollector(abc.ABC):
                 )
             )
         )
-        active_build = await self.db_session.execute(
-            select(func.count())
-            .select_from(version_model)
-            .where(
-                self._active_build_exists(
-                    fk,
-                    version_model.id,
-                )
-            )
+        building = await self.db_session.execute(
+            select(func.count()).select_from(version_model).where(version_model.state == "building")
         )
         age = await self.db_session.execute(
             select(func.count())
@@ -304,14 +266,12 @@ class VersionGarbageCollector(abc.ABC):
             .where(version_model.created_at >= older_than)
         )
         retention = await self.db_session.execute(
-            select(func.count())
-            .select_from(ranked)
-            .where(ranked.c.retention_rank <= retain_count)
+            select(func.count()).select_from(ranked).where(ranked.c.retention_rank <= retain_count)
         )
         return {
             "active": int(active.scalar_one()),
             "bound": int(bound.scalar_one()),
-            "active_build": int(active_build.scalar_one()),
+            "building": int(building.scalar_one()),
             "age": int(age.scalar_one()),
             "retention": int(retention.scalar_one()),
         }
@@ -328,8 +288,10 @@ class VersionGarbageCollector(abc.ABC):
         resource_id = getattr(version, fk.key)
         created_at = version.created_at
         if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
+            created_at = created_at.replace(tzinfo=UTC)
         if created_at >= older_than:
+            return False
+        if version.state == "building":
             return False
         newer_result = await self.db_session.execute(
             select(func.count())
@@ -355,17 +317,7 @@ class VersionGarbageCollector(abc.ABC):
                 )
             )
         )
-        if bool(bound_result.scalar_one()):
-            return False
-        active_build_result = await self.db_session.execute(
-            select(
-                self._active_build_exists(
-                    resource_id,
-                    version.id,
-                )
-            )
-        )
-        return not bool(active_build_result.scalar_one())
+        return not bool(bound_result.scalar_one())
 
     async def _delete_returning_count(self, statement) -> int:
         result = await self.db_session.execute(statement)

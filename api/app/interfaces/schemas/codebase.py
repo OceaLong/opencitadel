@@ -1,10 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.domain.execution.run import RunStatus
 from app.domain.models.codebase import (
     ArtifactFormat,
     ArtifactKind,
@@ -15,15 +14,14 @@ from app.domain.models.codebase import (
     SymbolKind,
 )
 from app.domain.models.codebase_version import CodebaseVersionState
-from app.domain.models.resource_governance import BuildState
 
 
 class CreateCodebaseRequest(BaseModel):
     name: str = "未命名代码库"
     source_type: CodebaseSourceType = CodebaseSourceType.FILES
-    file_id: Optional[str] = None
-    git_url: Optional[str] = None
-    file_ids: Optional[List[str]] = Field(default_factory=list)
+    file_id: str | None = None
+    git_url: str | None = None
+    file_ids: list[str] | None = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_source_payload(self) -> "CreateCodebaseRequest":
@@ -42,24 +40,23 @@ class CodebaseResponse(BaseModel):
     source_type: CodebaseSourceType
     source_ref: str = ""
     status: CodebaseStatus
-    language_stats: Dict[str, int] = Field(default_factory=dict)
+    language_stats: dict[str, int] = Field(default_factory=dict)
     file_count: int = 0
-    sandbox_id: Optional[str] = None
+    sandbox_id: str | None = None
     workspace_path: str = ""
-    ingest_task_id: Optional[str] = None
-    error: Optional[str] = None
+    error: str | None = None
     vector_degraded: bool = False
-    active_version_id: Optional[str] = None
+    active_version_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class ListCodebasesResponse(BaseModel):
-    codebases: List[CodebaseResponse]
+    codebases: list[CodebaseResponse]
 
 
 class FileTreeResponse(BaseModel):
-    tree: List[FileTreeNode]
+    tree: list[FileTreeNode]
 
 
 class SymbolResponse(BaseModel):
@@ -71,60 +68,53 @@ class SymbolResponse(BaseModel):
     signature: str = ""
     start_line: int = 0
     end_line: int = 0
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
 
 
 class ListSymbolsResponse(BaseModel):
-    symbols: List[SymbolResponse]
+    symbols: list[SymbolResponse]
 
 
 class ArtifactResponse(BaseModel):
     id: str
-    version_id: Optional[str] = None
+    version_id: str | None = None
     kind: ArtifactKind
     format: ArtifactFormat
     title: str
     content: str
-    meta: Dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 
 class ListArtifactsResponse(BaseModel):
-    artifacts: List[ArtifactResponse]
+    artifacts: list[ArtifactResponse]
 
 
 class ReadSourceRequest(BaseModel):
     path: str
-    start_line: Optional[int] = None
-    end_line: Optional[int] = None
+    start_line: int | None = None
+    end_line: int | None = None
 
 
 class ReadSourceResponse(BaseModel):
     path: str
     content: str
-    start_line: Optional[int] = None
-    end_line: Optional[int] = None
+    start_line: int | None = None
+    end_line: int | None = None
 
 
 class CodebaseBuildResponse(BaseModel):
     id: str
+    run_id: str | None = None
     codebase_id: str
     version_id: str
-    parent_version_id: Optional[str] = None
-    command_key: str
-    state: BuildState
-    phase: Optional[str] = None
-    progress: float = 0.0
-    capabilities: List[Any] = Field(default_factory=list)
-    degraded_reasons: List[Any] = Field(default_factory=list)
-    metrics: Dict[str, Any] = Field(default_factory=dict)
-    error_code: Optional[str] = None
-    error_message: Optional[str] = None
-    heartbeat_at: Optional[datetime] = None
-    last_event_seq: int = 0
+    status: RunStatus
+    phase: str | None = None
+    progress: int = 0
+    failure_code: str | None = None
     created_at: datetime
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
+    updated_at: datetime
+    terminal_at: datetime | None = None
     can_retry: bool = False
     can_cancel: bool = False
 
@@ -132,35 +122,35 @@ class CodebaseBuildResponse(BaseModel):
 class CodebaseVersionResponse(BaseModel):
     id: str
     codebase_id: str
-    parent_version_id: Optional[str] = None
-    build_id: Optional[str] = None
+    parent_version_id: str | None = None
+    build_id: str
     state: CodebaseVersionState
-    source_snapshot_key: Optional[str] = None
+    source_snapshot_key: str | None = None
     source_revision: str = ""
     source_digest: str = ""
-    capabilities: Dict[str, Any] = Field(default_factory=dict)
-    degraded_reasons: List[str] = Field(default_factory=list)
-    metrics: Dict[str, Any] = Field(default_factory=dict)
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    degraded_reasons: list[str] = Field(default_factory=list)
+    metrics: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
-    published_at: Optional[datetime] = None
+    published_at: datetime | None = None
     is_active: bool = False
     is_published: bool = False
     is_candidate: bool = False
-    build: Optional[CodebaseBuildResponse] = None
+    build: CodebaseBuildResponse | None = None
 
 
 class ListCodebaseVersionsResponse(BaseModel):
     codebase_id: str
-    active_version_id: Optional[str] = None
-    active_build: Optional[CodebaseBuildResponse] = None
-    versions: List[CodebaseVersionResponse] = Field(default_factory=list)
+    active_version_id: str | None = None
+    active_build: CodebaseBuildResponse | None = None
+    versions: list[CodebaseVersionResponse] = Field(default_factory=list)
 
 
 class CreateCodebaseSessionRequest(BaseModel):
     mode: SessionMode = SessionMode.ASK
-    model_id: Optional[str] = None
-    skill_id: Optional[str] = None
-    codebase_version_id: Optional[str] = None
+    model_id: str | None = None
+    skill_id: str | None = None
+    codebase_version_id: str | None = None
 
 
 class CreateCodebaseSessionResponse(BaseModel):

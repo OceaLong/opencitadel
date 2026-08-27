@@ -121,8 +121,10 @@ export const adminApi = {
   patchUser: (userId: string, payload: PatchUserPayload) =>
     patch<AdminUser>(`/admin/users/${userId}`, payload),
 
-  deleteUser: (userId: string, strategy: "cascade" | "transfer_to_team" | "anonymize" = "anonymize") =>
-    del<{ strategy: string }>(`/admin/users/${userId}?strategy=${strategy}`),
+  deleteUser: (
+    userId: string,
+    strategy: "cascade" | "transfer_to_team" | "anonymize" = "anonymize",
+  ) => del<{ strategy: string }>(`/admin/users/${userId}?strategy=${strategy}`),
 
   getQuota: (userId: string) => get<Quota>(`/admin/users/${userId}/quota`),
 
@@ -131,7 +133,10 @@ export const adminApi = {
   invite: (email: string) => post<{ url: string }>("/admin/invitations", { email }),
 
   invitations: (params?: { limit?: number; offset?: number }) =>
-    get<{ invitations: PlatformInvitation[]; total: number }>("/admin/invitations", buildParams(params)),
+    get<{ invitations: PlatformInvitation[]; total: number }>(
+      "/admin/invitations",
+      buildParams(params),
+    ),
 
   usageSummary: (params?: AdminDateRangeParams) =>
     get<UsageSummary>("/admin/usage/summary", buildParams(params)),
@@ -183,7 +188,8 @@ export const adminApi = {
   teams: (params?: { limit?: number; offset?: number }) =>
     get<{ teams: AdminTeam[]; total: number }>("/admin/teams", buildParams(params)),
 
-  teamMembers: (teamId: string) => get<{ members: TeamMemberDetail[] }>(`/admin/teams/${teamId}/members`),
+  teamMembers: (teamId: string) =>
+    get<{ members: TeamMemberDetail[] }>(`/admin/teams/${teamId}/members`),
 
   deleteTeam: (teamId: string) => del(`/admin/teams/${teamId}`),
 

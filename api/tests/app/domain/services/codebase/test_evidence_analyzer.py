@@ -1,32 +1,26 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-import pytest
-
 from app.domain.models.codebase import EdgeKind, SymbolKind
+from app.domain.runtime_policy import CodebaseAnalysisPolicy
 from app.domain.services.codebase.static_analyzer import StaticAnalyzer
 
 
+def _analyzer() -> StaticAnalyzer:
+    return StaticAnalyzer(policy=CodebaseAnalysisPolicy())
+
+
 def test_same_named_methods_are_not_deduplicated():
-    analyzer = StaticAnalyzer()
+    analyzer = _analyzer()
 
     result = analyzer.analyze(
         files={
-            "a.ts": (
-                "class A { run() { return 1 } }\n"
-                "class B { run() { return 2 } }\n"
-            ),
+            "a.ts": ("class A { run() { return 1 } }\nclass B { run() { return 2 } }\n"),
         },
     )
 
-    assert {
-        s.qualified_name
-        for s in result.symbols
-        if s.name == "run"
-    } == {"A.run", "B.run"}
+    assert {s.qualified_name for s in result.symbols if s.name == "run"} == {"A.run", "B.run"}
 
 
 def test_ambiguous_call_is_not_bound_to_first_symbol():
-    analyzer = StaticAnalyzer()
+    analyzer = _analyzer()
 
     result = analyzer.analyze(
         files={
@@ -43,7 +37,7 @@ def test_ambiguous_call_is_not_bound_to_first_symbol():
 
 
 def test_non_python_symbol_range_contains_body():
-    analyzer = StaticAnalyzer()
+    analyzer = _analyzer()
 
     symbol = analyzer.analyze(
         files={"a.ts": "function f() {\n  return 1\n}\n"},
@@ -56,14 +50,12 @@ def test_non_python_symbol_range_contains_body():
 
 
 def test_python_symbols_have_qualified_names_parser_and_confidence():
-    analyzer = StaticAnalyzer()
+    analyzer = _analyzer()
 
     result = analyzer.analyze(
         files={
             "pkg/service.py": (
-                "class UserService:\n"
-                "    def create_user(self, name):\n"
-                "        return name\n"
+                "class UserService:\n    def create_user(self, name):\n        return name\n"
             )
         },
     )
@@ -77,17 +69,10 @@ def test_python_symbols_have_qualified_names_parser_and_confidence():
 
 
 def test_unique_call_resolves_with_evidence_and_version():
-    analyzer = StaticAnalyzer()
+    analyzer = _analyzer()
 
     result = analyzer.analyze(
-        files={
-            "src/main.py": (
-                "def work():\n"
-                "    return 1\n\n"
-                "def caller():\n"
-                "    return work()\n"
-            )
-        },
+        files={"src/main.py": ("def work():\n    return 1\n\ndef caller():\n    return work()\n")},
         version_id="cbv1",
     )
 

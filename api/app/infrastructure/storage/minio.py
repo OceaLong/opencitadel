@@ -1,41 +1,42 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
 import io
 import logging
 from datetime import timedelta
-from typing import Optional
 from urllib.parse import urlparse
 
 from minio import Minio as MinioClient
 from minio.error import S3Error
 from starlette.concurrency import run_in_threadpool
 
-from core.config import Settings, get_settings
+from core.config import DeploymentSettings
 
 logger = logging.getLogger(__name__)
 
-_BUCKET_EXISTS_CODES = frozenset({
-    "BucketAlreadyOwnedByYou",
-    "BucketAlreadyExists",
-})
+_BUCKET_EXISTS_CODES = frozenset(
+    {
+        "BucketAlreadyOwnedByYou",
+        "BucketAlreadyExists",
+    }
+)
 
 _INIT_MAX_ATTEMPTS = 15
 _INIT_RETRY_DELAY_SECONDS = 2.0
-_AUTH_ERROR_CODES = frozenset({
-    "AccessDenied",
-    "InvalidAccessKeyId",
-    "SignatureDoesNotMatch",
-})
+_AUTH_ERROR_CODES = frozenset(
+    {
+        "AccessDenied",
+        "InvalidAccessKeyId",
+        "SignatureDoesNotMatch",
+    }
+)
 
 
 class Minio:
     """MinIO 对象存储客户端。"""
 
-    def __init__(self) -> None:
-        self._settings: Settings = get_settings()
-        self._client: Optional[MinioClient] = None
-        self._presign_client: Optional[MinioClient] = None
+    def __init__(self, settings: DeploymentSettings) -> None:
+        self._settings = settings
+        self._client: MinioClient | None = None
+        self._presign_client: MinioClient | None = None
 
     async def init(self) -> None:
         if self._client is not None:
@@ -73,7 +74,7 @@ class Minio:
                     logger.error("MinIO 对象存储认证失败: %s", exc)
                     raise
                 last_exc = exc
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 last_exc = exc
 
             if attempt < _INIT_MAX_ATTEMPTS:
@@ -88,7 +89,7 @@ class Minio:
         logger.error("MinIO 对象存储初始化失败: %s", last_exc)
         raise last_exc  # type: ignore[misc]
 
-    def _build_presign_client(self) -> Optional[MinioClient]:
+    def _build_presign_client(self) -> MinioClient | None:
         public_endpoint = (self._settings.minio_public_endpoint or "").strip()
         if not public_endpoint:
             return None
@@ -149,7 +150,7 @@ class Minio:
             key,
         )
 
-    async def presigned_get_url(self, key: str, expires_seconds: int = 604800) -> Optional[str]:
+    async def presigned_get_url(self, key: str, expires_seconds: int = 604800) -> str | None:
         if self._settings.env == "test":
             return f"https://example.com/{key}"
         if self._presign_client is None:

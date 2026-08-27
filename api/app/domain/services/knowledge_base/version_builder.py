@@ -1,14 +1,13 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Copy-on-write construction of immutable knowledge-base candidates."""
+
 from __future__ import annotations
 
 import hashlib
 import json
 import uuid
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from datetime import datetime
-from enum import Enum
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -30,9 +29,8 @@ from app.domain.models.knowledge_version import (
     KnowledgeVersionDocument,
     KnowledgeVersionState,
 )
-from app.domain.models.resource_governance import (
-    BuildState,
-    ResourceBuild,
+from app.domain.models.resource_bindings import (
+    ResourceBuildIntent,
     ResourceKind,
 )
 from app.domain.models.scope import OwnerScope, OwnerScopeType
@@ -40,7 +38,7 @@ from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.knowledge_base.url_guard import validate_public_url
 
 
-class KnowledgeBuildOperation(str, Enum):
+class KnowledgeBuildOperation(StrEnum):
     ADD = "add"
     REMOVE = "remove"
     REPLACE = "replace"
@@ -103,18 +101,14 @@ class KnowledgeBuildSource(BaseModel):
         return value.strip().lower()
 
     @model_validator(mode="after")
-    def _validate_canonical_source_shape(self) -> "KnowledgeBuildSource":
+    def _validate_canonical_source_shape(self) -> KnowledgeBuildSource:
         if self.source_type in {KBSourceType.UPLOAD, KBSourceType.ZIP}:
             if self.file_id is None:
                 raise ValueError("file sources require an owner-scoped file id")
             if self.source_ref != _canonical_file_source_ref(self.file_id):
-                raise ValueError(
-                    "file source reference must be canonical for its file id"
-                )
+                raise ValueError("file source reference must be canonical for its file id")
             if self.source_identity != f"file:{self.file_id}":
-                raise ValueError(
-                    "file source identity must match its immutable file id"
-                )
+                raise ValueError("file source identity must match its immutable file id")
             return self
         if self.source_type not in {
             KBSourceType.WEB,
@@ -132,12 +126,8 @@ class KnowledgeBuildSource(BaseModel):
             or parsed.password is not None
         ):
             raise ValueError("URL sources require a canonical public URL")
-        if self.source_identity != (
-            f"{self.source_type.value}:{self.source_ref}"
-        ):
-            raise ValueError(
-                "URL source identity must match its typed canonical URL"
-            )
+        if self.source_identity != (f"{self.source_type.value}:{self.source_ref}"):
+            raise ValueError("URL source identity must match its typed canonical URL")
         return self
 
 
@@ -176,9 +166,7 @@ class KnowledgeBuildCommand(BaseModel):
         identities = [item.source_identity for item in sources]
         if len(identities) != len(set(identities)):
             raise ValueError("duplicate source identities are not allowed")
-        logical_ids = [
-            item.document_id for item in sources if item.document_id is not None
-        ]
+        logical_ids = [item.document_id for item in sources if item.document_id is not None]
         if len(logical_ids) != len(set(logical_ids)):
             raise ValueError("duplicate logical document ids are not allowed")
         return tuple(
@@ -214,42 +202,29 @@ class KnowledgeBuildCommand(BaseModel):
         if value is None:
             return ()
         items = value.items() if isinstance(value, Mapping) else value
-        return tuple(
-            sorted(
-                (str(key), _freeze_option(item))
-                for key, item in items
-            )
-        )
+        return tuple(sorted((str(key), _freeze_option(item)) for key, item in items))
 
     @model_validator(mode="after")
-    def _validate_shape(self) -> "KnowledgeBuildCommand":
+    def _validate_shape(self) -> KnowledgeBuildCommand:
         if self.operation is KnowledgeBuildOperation.ADD:
             if not self.sources or self.document_ids:
                 raise ValueError("add requires sources and no document ids")
             if any(source.document_id is not None for source in self.sources):
-                raise ValueError(
-                    "add does not accept a caller-supplied document id"
-                )
+                raise ValueError("add does not accept a caller-supplied document id")
         elif self.operation is KnowledgeBuildOperation.REMOVE:
             if len(self.document_ids) != 1 or self.sources:
                 raise ValueError("remove requires exactly one document id")
         elif self.operation is KnowledgeBuildOperation.REPLACE:
             if len(self.document_ids) != 1 or len(self.sources) != 1:
-                raise ValueError(
-                    "replace requires one document id and one source"
-                )
+                raise ValueError("replace requires one document id and one source")
             source_id = self.sources[0].document_id
             if source_id is not None and source_id != self.document_ids[0]:
-                raise ValueError(
-                    "replacement source document id must match its target"
-                )
+                raise ValueError("replacement source document id must match its target")
         elif self.operation is KnowledgeBuildOperation.REINDEX:
             if self.document_ids:
                 raise ValueError("reindex does not accept removal ids")
             if any(item.document_id is None for item in self.sources):
-                raise ValueError(
-                    "reindex sources require logical document ids"
-                )
+                raise ValueError("reindex sources require logical document ids")
         return self
 
     @classmethod
@@ -260,7 +235,7 @@ class KnowledgeBuildCommand(BaseModel):
         *,
         actor_id: str,
         options: Mapping[str, Any] | None = None,
-    ) -> "KnowledgeBuildCommand":
+    ) -> KnowledgeBuildCommand:
         return cls(
             knowledge_base_id=knowledge_base_id,
             operation=KnowledgeBuildOperation.ADD,
@@ -277,7 +252,7 @@ class KnowledgeBuildCommand(BaseModel):
         *,
         actor_id: str,
         options: Mapping[str, Any] | None = None,
-    ) -> "KnowledgeBuildCommand":
+    ) -> KnowledgeBuildCommand:
         return cls(
             knowledge_base_id=knowledge_base_id,
             operation=KnowledgeBuildOperation.REMOVE,
@@ -295,7 +270,7 @@ class KnowledgeBuildCommand(BaseModel):
         *,
         actor_id: str,
         options: Mapping[str, Any] | None = None,
-    ) -> "KnowledgeBuildCommand":
+    ) -> KnowledgeBuildCommand:
         return cls(
             knowledge_base_id=knowledge_base_id,
             operation=KnowledgeBuildOperation.REPLACE,
@@ -313,7 +288,7 @@ class KnowledgeBuildCommand(BaseModel):
         *,
         actor_id: str,
         options: Mapping[str, Any] | None = None,
-    ) -> "KnowledgeBuildCommand":
+    ) -> KnowledgeBuildCommand:
         return cls(
             knowledge_base_id=knowledge_base_id,
             operation=KnowledgeBuildOperation.REINDEX,
@@ -365,7 +340,7 @@ class CandidateBuildResult(BaseModel):
 
     resource: KnowledgeBase
     version: KnowledgeBaseVersion
-    build: ResourceBuild
+    build: ResourceBuildIntent
     created: bool
 
 
@@ -380,12 +355,17 @@ class KnowledgeVersionBuilder:
         command: KnowledgeBuildCommand,
         *,
         scope: OwnerScope,
+        before_commit: Callable[[IUnitOfWork, CandidateBuildResult], Awaitable[None]] | None = None,
     ) -> CandidateBuildResult:
         if command.actor_id != scope.user_id:
             raise NotFoundError("knowledge base not found in owner scope")
         self._validate_prepared_sources(command.sources)
         try:
-            return await self._create_once(command, scope=scope)
+            return await self._create_once(
+                command,
+                scope=scope,
+                before_commit=before_commit,
+            )
         except IntegrityError as exc:
             if not _is_active_build_uniqueness_violation(exc):
                 raise
@@ -403,6 +383,7 @@ class KnowledgeVersionBuilder:
         *,
         actor_id: str,
         scope: OwnerScope,
+        before_commit: Callable[[IUnitOfWork, CandidateBuildResult], Awaitable[None]] | None = None,
     ) -> CandidateBuildResult:
         """Clone one terminal candidate into a fresh, retryable generation."""
         if actor_id != scope.user_id:
@@ -413,6 +394,7 @@ class KnowledgeVersionBuilder:
                 build_id,
                 actor_id=actor_id,
                 scope=scope,
+                before_commit=before_commit,
             )
         except IntegrityError as exc:
             if not _is_active_build_uniqueness_violation(exc):
@@ -436,17 +418,13 @@ class KnowledgeVersionBuilder:
                 scope=scope,
             )
             if resource is None:
-                raise NotFoundError(
-                    "knowledge base version not found in owner scope"
-                )
+                raise NotFoundError("knowledge base version not found in owner scope")
             version = await uow.knowledge_version.get_version(
                 version_id,
                 knowledge_base_id=knowledge_base_id,
             )
             if version is None:
-                raise NotFoundError(
-                    "knowledge base version not found in owner scope"
-                )
+                raise NotFoundError("knowledge base version not found in owner scope")
             return await uow.knowledge_version.get_manifest(
                 version_id,
                 knowledge_base_id=knowledge_base_id,
@@ -457,6 +435,7 @@ class KnowledgeVersionBuilder:
         command: KnowledgeBuildCommand,
         *,
         scope: OwnerScope,
+        before_commit: Callable[[IUnitOfWork, CandidateBuildResult], Awaitable[None]] | None,
     ) -> CandidateBuildResult:
         async with self._uow_factory() as uow:
             self._require_builder_wiring(uow)
@@ -471,10 +450,7 @@ class KnowledgeVersionBuilder:
                 owner_identity=owner_identity,
                 base_version_id=resource.active_version_id,
             )
-            active = await uow.resource_governance.get_active_build(
-                ResourceKind.KNOWLEDGE_BASE,
-                resource.id,
-            )
+            active = await uow.knowledge_version.get_active_candidate(resource.id)
             if active is not None:
                 return await self._resolve_active(
                     uow,
@@ -493,12 +469,10 @@ class KnowledgeVersionBuilder:
                 resource.id,
                 base_manifest,
             )
-            historical_revisions = (
-                await self._load_historical_source_revisions(
-                    uow,
-                    command.sources,
-                    knowledge_base_id=resource.id,
-                )
+            historical_revisions = await self._load_historical_source_revisions(
+                uow,
+                command.sources,
+                knowledge_base_id=resource.id,
             )
             await self._validate_source_ownership(
                 uow,
@@ -506,20 +480,18 @@ class KnowledgeVersionBuilder:
                 scope=scope,
             )
             candidate_id = str(uuid.uuid4())
-            build = ResourceBuild(
+            build = ResourceBuildIntent(
                 resource_kind=ResourceKind.KNOWLEDGE_BASE,
                 resource_id=resource.id,
                 version_id=candidate_id,
                 parent_version_id=resource.active_version_id,
-                command_key=key,
-                state=BuildState.QUEUED,
-                created_by=command.actor_id,
             )
             candidate = KnowledgeBaseVersion(
                 id=candidate_id,
                 knowledge_base_id=resource.id,
                 parent_version_id=resource.active_version_id,
-                build_id=build.id,
+                build_id=build.build_id,
+                request_key=key,
             )
             manifest, new_documents, new_revisions = self._materialize(
                 command,
@@ -532,7 +504,6 @@ class KnowledgeVersionBuilder:
 
             for document in new_documents:
                 await uow.knowledge_base.insert_document(document)
-            await uow.resource_governance.add_build(build)
             await uow.knowledge_version.create_candidate(candidate)
             for revision in new_revisions:
                 await uow.knowledge_version.add_revision(
@@ -544,22 +515,25 @@ class KnowledgeVersionBuilder:
                 manifest,
                 knowledge_base_id=resource.id,
             )
-            compatibility = resource.model_copy(
+            candidate_resource = resource.model_copy(
                 update={
-                    "ingest_task_id": build.id,
                     "status": KBStatus.PENDING,
                     "doc_count": len(manifest),
                     "error": None,
-                    "updated_at": datetime.now(),
+                    "updated_at": datetime.now(UTC),
                 }
             )
-            await uow.knowledge_base.save_kb(compatibility)
-            return CandidateBuildResult(
-                resource=compatibility,
+            await uow.knowledge_base.save_kb(candidate_resource)
+            result = CandidateBuildResult(
+                resource=candidate_resource,
                 version=candidate,
                 build=build,
                 created=True,
             )
+            if before_commit is not None:
+                await before_commit(uow, result)
+            await uow.commit()
+            return result
 
     async def _retry_once(
         self,
@@ -568,6 +542,7 @@ class KnowledgeVersionBuilder:
         *,
         actor_id: str,
         scope: OwnerScope,
+        before_commit: Callable[[IUnitOfWork, CandidateBuildResult], Awaitable[None]] | None,
     ) -> CandidateBuildResult:
         async with self._uow_factory() as uow:
             self._require_retry_wiring(uow)
@@ -577,44 +552,20 @@ class KnowledgeVersionBuilder:
             )
             if resource is None:
                 raise NotFoundError("knowledge build not found in owner scope")
-            original = await uow.resource_governance.get_build(build_id)
-            if (
-                original is None
-                or original.resource_kind is not ResourceKind.KNOWLEDGE_BASE
-                or original.resource_id != resource.id
-            ):
+            original_result = await uow.knowledge_version.get_build_candidate(build_id)
+            if original_result is None:
                 raise NotFoundError("knowledge build not found in owner scope")
-            if original.state not in {
-                BuildState.FAILED,
-                BuildState.CANCELLED,
-            }:
-                raise ConflictError(
-                    "only a failed or cancelled knowledge build can be retried"
-                )
+            original, manifest = original_result
+            if original.knowledge_base_id != resource.id:
+                raise NotFoundError("knowledge build not found in owner scope")
+            if original.state is not KnowledgeVersionState.FAILED:
+                raise ConflictError("only a failed knowledge candidate can be retried")
             if original.parent_version_id != resource.active_version_id:
-                raise ConflictError(
-                    "knowledge build parent is not the current active version"
-                )
+                raise ConflictError("knowledge build parent is not the current active version")
 
-            candidate = await uow.knowledge_version.get_version(
-                original.version_id,
-                knowledge_base_id=resource.id,
-            )
-            if (
-                candidate is None
-                or candidate.knowledge_base_id != resource.id
-                or candidate.build_id != original.id
-                or candidate.parent_version_id != original.parent_version_id
-                or candidate.state is not KnowledgeVersionState.FAILED
-                or candidate.published_at is not None
-            ):
-                raise ConflictError(
-                    "knowledge build candidate closure is malformed"
-                )
-            manifest = await uow.knowledge_version.get_manifest(
-                candidate.id,
-                knowledge_base_id=resource.id,
-            )
+            candidate = original
+            if candidate.published_at is not None:
+                raise ConflictError("knowledge build candidate closure is malformed")
             await self._validate_retry_manifest(
                 uow,
                 resource.id,
@@ -626,10 +577,7 @@ class KnowledgeVersionBuilder:
                 owner_identity=_owner_identity(resource, scope),
                 active_version_id=resource.active_version_id,
             )
-            active = await uow.resource_governance.get_active_build(
-                ResourceKind.KNOWLEDGE_BASE,
-                resource.id,
-            )
+            active = await uow.knowledge_version.get_active_candidate(resource.id)
             if active is not None:
                 return await self._resolve_active(
                     uow,
@@ -639,48 +587,45 @@ class KnowledgeVersionBuilder:
                 )
 
             retry_version_id = str(uuid.uuid4())
-            retry_build = ResourceBuild(
+            retry_build = ResourceBuildIntent(
                 resource_kind=ResourceKind.KNOWLEDGE_BASE,
                 resource_id=resource.id,
                 version_id=retry_version_id,
                 parent_version_id=resource.active_version_id,
-                command_key=retry_key,
-                state=BuildState.QUEUED,
-                created_by=actor_id,
             )
             retry_version = KnowledgeBaseVersion(
                 id=retry_version_id,
                 knowledge_base_id=resource.id,
                 parent_version_id=resource.active_version_id,
-                build_id=retry_build.id,
+                build_id=retry_build.build_id,
+                request_key=retry_key,
             )
-            cloned_manifest = [
-                _reuse_entry(entry, retry_version_id)
-                for entry in manifest
-            ]
-            await uow.resource_governance.add_build(retry_build)
+            cloned_manifest = [_reuse_entry(entry, retry_version_id) for entry in manifest]
             await uow.knowledge_version.create_candidate(retry_version)
             await uow.knowledge_version.add_manifest(
                 retry_version.id,
                 cloned_manifest,
                 knowledge_base_id=resource.id,
             )
-            compatibility = resource.model_copy(
+            candidate_resource = resource.model_copy(
                 update={
-                    "ingest_task_id": retry_build.id,
                     "status": KBStatus.PENDING,
                     "doc_count": len(cloned_manifest),
                     "error": None,
-                    "updated_at": datetime.now(),
+                    "updated_at": datetime.now(UTC),
                 }
             )
-            await uow.knowledge_base.save_kb(compatibility)
-            return CandidateBuildResult(
-                resource=compatibility,
+            await uow.knowledge_base.save_kb(candidate_resource)
+            result = CandidateBuildResult(
+                resource=candidate_resource,
                 version=retry_version,
                 build=retry_build,
                 created=True,
             )
+            if before_commit is not None:
+                await before_commit(uow, result)
+            await uow.commit()
+            return result
 
     async def _recover_retry_winner(
         self,
@@ -696,31 +641,24 @@ class KnowledgeVersionBuilder:
             )
             if resource is None:
                 raise NotFoundError("knowledge build not found in owner scope")
-            original = await uow.resource_governance.get_build(build_id)
+            original_result = await uow.knowledge_version.get_build_candidate(build_id)
+            if original_result is None:
+                raise ConflictError("knowledge retry race lost its valid source build")
+            original, _ = original_result
             if (
-                original is None
-                or original.resource_kind is not ResourceKind.KNOWLEDGE_BASE
-                or original.resource_id != resource.id
-                or original.state
-                not in {BuildState.FAILED, BuildState.CANCELLED}
+                original.knowledge_base_id != resource.id
+                or original.state is not KnowledgeVersionState.FAILED
                 or original.parent_version_id != resource.active_version_id
             ):
-                raise ConflictError(
-                    "knowledge retry race lost its valid source build"
-                )
+                raise ConflictError("knowledge retry race lost its valid source build")
             key = _retry_command_key(
                 original,
                 owner_identity=_owner_identity(resource, scope),
                 active_version_id=resource.active_version_id,
             )
-            active = await uow.resource_governance.get_active_build(
-                ResourceKind.KNOWLEDGE_BASE,
-                resource.id,
-            )
+            active = await uow.knowledge_version.get_active_candidate(resource.id)
             if active is None:
-                raise ConflictError(
-                    "knowledge retry race ended without an active winner"
-                )
+                raise ConflictError("knowledge retry race ended without an active winner")
             return await self._resolve_active(
                 uow,
                 resource,
@@ -740,37 +678,30 @@ class KnowledgeVersionBuilder:
             }:
                 safe_url = validate_public_url(source.source_ref)
                 if safe_url != source.source_ref:
-                    raise ValueError(
-                        "URL source reference must be canonical"
-                    )
+                    raise ValueError("URL source reference must be canonical")
 
     @staticmethod
     def _require_builder_wiring(uow: IUnitOfWork) -> None:
         knowledge_base = getattr(uow, "knowledge_base", None)
         knowledge_version = getattr(uow, "knowledge_version", None)
-        resource_governance = getattr(uow, "resource_governance", None)
         required = (
             (knowledge_base, "insert_document"),
             (knowledge_version, "create_candidate"),
             (knowledge_version, "get_revision_by_digest"),
             (knowledge_version, "add_revision"),
             (knowledge_version, "add_manifest"),
-            (resource_governance, "get_active_build"),
-            (resource_governance, "add_build"),
+            (knowledge_version, "get_active_candidate"),
         )
         if any(
             repository is None or not callable(getattr(repository, method, None))
             for repository, method in required
         ):
-            raise RuntimeError(
-                "knowledge version build wiring is unavailable"
-            )
+            raise RuntimeError("knowledge version build wiring is unavailable")
 
     @staticmethod
     def _require_retry_wiring(uow: IUnitOfWork) -> None:
         knowledge_base = getattr(uow, "knowledge_base", None)
         knowledge_version = getattr(uow, "knowledge_version", None)
-        resource_governance = getattr(uow, "resource_governance", None)
         required = (
             (knowledge_base, "get_kb_for_update"),
             (knowledge_base, "get_document"),
@@ -780,13 +711,11 @@ class KnowledgeVersionBuilder:
             (knowledge_version, "get_revisions"),
             (knowledge_version, "create_candidate"),
             (knowledge_version, "add_manifest"),
-            (resource_governance, "get_build"),
-            (resource_governance, "get_active_build"),
-            (resource_governance, "add_build"),
+            (knowledge_version, "get_build_candidate"),
+            (knowledge_version, "get_active_candidate"),
         )
         if any(
-            repository is None
-            or not callable(getattr(repository, method, None))
+            repository is None or not callable(getattr(repository, method, None))
             for repository, method in required
         ):
             raise RuntimeError("knowledge retry build wiring is unavailable")
@@ -799,8 +728,7 @@ class KnowledgeVersionBuilder:
         manifest: Sequence[KnowledgeVersionDocument],
     ) -> None:
         if any(
-            entry.version_id != version_id
-            or entry.ordinal != ordinal
+            entry.version_id != version_id or entry.ordinal != ordinal
             for ordinal, entry in enumerate(manifest)
         ):
             raise ConflictError("knowledge retry manifest closure is malformed")
@@ -811,14 +739,10 @@ class KnowledgeVersionBuilder:
             [entry.document_revision_id for entry in manifest],
             knowledge_base_id=knowledge_base_id,
         )
-        if len(revisions) != len(
-            {entry.document_revision_id for entry in manifest}
-        ):
+        if len(revisions) != len({entry.document_revision_id for entry in manifest}):
             raise ConflictError("knowledge retry manifest closure is malformed")
         for entry in manifest:
-            document = await uow.knowledge_base.get_document(
-                entry.document_id
-            )
+            document = await uow.knowledge_base.get_document(entry.document_id)
             revision = revisions.get(entry.document_revision_id)
             if (
                 document is None
@@ -826,9 +750,7 @@ class KnowledgeVersionBuilder:
                 or revision is None
                 or revision.document_id != entry.document_id
             ):
-                raise ConflictError(
-                    "knowledge retry manifest closure is malformed"
-                )
+                raise ConflictError("knowledge retry manifest closure is malformed")
 
     @staticmethod
     async def _load_historical_source_revisions(
@@ -847,9 +769,7 @@ class KnowledgeVersionBuilder:
                 knowledge_base_id=knowledge_base_id,
             )
             if revision is not None:
-                historical[(source.document_id, source.source_digest)] = (
-                    revision
-                )
+                historical[(source.document_id, source.source_digest)] = revision
         return historical
 
     async def _recover_concurrent_winner(
@@ -869,14 +789,9 @@ class KnowledgeVersionBuilder:
                 owner_identity=_owner_identity(resource, scope),
                 base_version_id=resource.active_version_id,
             )
-            active = await uow.resource_governance.get_active_build(
-                ResourceKind.KNOWLEDGE_BASE,
-                resource.id,
-            )
+            active = await uow.knowledge_version.get_active_candidate(resource.id)
             if active is None:
-                raise ConflictError(
-                    "knowledge build race ended without an active winner"
-                )
+                raise ConflictError("knowledge build race ended without an active winner")
             return await self._resolve_active(
                 uow,
                 resource,
@@ -888,32 +803,29 @@ class KnowledgeVersionBuilder:
     async def _resolve_active(
         uow: IUnitOfWork,
         resource: KnowledgeBase,
-        active: ResourceBuild,
+        active: KnowledgeBaseVersion,
         command_key: str,
     ) -> CandidateBuildResult:
-        if active.command_key != command_key:
-            raise ConflictError(
-                "a different knowledge build command is already active"
-            )
-        candidate = await uow.knowledge_version.get_version(
-            active.version_id,
-            knowledge_base_id=resource.id,
-        )
-        if candidate is None or candidate.build_id != active.id:
-            raise ConflictError(
-                "active knowledge build has no matching candidate version"
-            )
-        compatibility = resource.model_copy(
+        if active.request_key != command_key:
+            raise ConflictError("a different knowledge build command is already active")
+        if active.knowledge_base_id != resource.id:
+            raise ConflictError("active knowledge build has no matching candidate version")
+        candidate_resource = resource.model_copy(
             update={
-                "ingest_task_id": active.id,
                 "status": KBStatus.PENDING,
                 "error": None,
             }
         )
         return CandidateBuildResult(
-            resource=compatibility,
-            version=candidate,
-            build=active,
+            resource=candidate_resource,
+            version=active,
+            build=ResourceBuildIntent(
+                build_id=active.build_id,
+                resource_kind=ResourceKind.KNOWLEDGE_BASE,
+                resource_id=resource.id,
+                version_id=active.id,
+                parent_version_id=active.parent_version_id,
+            ),
             created=False,
         )
 
@@ -929,9 +841,7 @@ class KnowledgeVersionBuilder:
             knowledge_base_id=resource.id,
         )
         if version is None:
-            raise ConflictError(
-                "knowledge base active version is not readable"
-            )
+            raise ConflictError("knowledge base active version is not readable")
         return await uow.knowledge_version.get_manifest(
             version.id,
             knowledge_base_id=resource.id,
@@ -945,13 +855,9 @@ class KnowledgeVersionBuilder:
     ) -> dict[str, KnowledgeDocument]:
         documents: dict[str, KnowledgeDocument] = {}
         for entry in manifest:
-            document = await uow.knowledge_base.get_document(
-                entry.document_id
-            )
+            document = await uow.knowledge_base.get_document(entry.document_id)
             if document is None or document.kb_id != knowledge_base_id:
-                raise ConflictError(
-                    "knowledge manifest contains an invalid document owner"
-                )
+                raise ConflictError("knowledge manifest contains an invalid document owner")
             documents[document.id] = document
         return documents
 
@@ -971,27 +877,20 @@ class KnowledgeVersionBuilder:
                 safe_url = validate_public_url(source.source_ref)
                 if (
                     safe_url != source.source_ref
-                    or source.source_identity
-                    != f"{source.source_type.value}:{safe_url}"
+                    or source.source_identity != f"{source.source_type.value}:{safe_url}"
                 ):
-                    raise ValueError(
-                        "URL source identity must match its validated URL"
-                    )
+                    raise ValueError("URL source identity must match its validated URL")
             if source.file_id is None:
                 continue
             if source.source_identity != f"file:{source.file_id}":
-                raise ValueError(
-                    "file source identity must match its immutable file id"
-                )
+                raise ValueError("file source identity must match its immutable file id")
             file_info = await uow.file.get_by_id(
                 source.file_id,
                 scope=scope,
             )
             if file_info is None or file_info.id != source.file_id:
                 # Deliberately avoid revealing whether a foreign file exists.
-                raise NotFoundError(
-                    "knowledge build source not found in owner scope"
-                )
+                raise NotFoundError("knowledge build source not found in owner scope")
 
     def _materialize(
         self,
@@ -1012,13 +911,8 @@ class KnowledgeVersionBuilder:
     ]:
         for entry in base_manifest:
             revision = revisions.get(entry.document_revision_id)
-            if (
-                revision is None
-                or revision.document_id != entry.document_id
-            ):
-                raise ConflictError(
-                    "knowledge manifest revision closure is incomplete"
-                )
+            if revision is None or revision.document_id != entry.document_id:
+                raise ConflictError("knowledge manifest revision closure is incomplete")
         if command.operation is KnowledgeBuildOperation.ADD:
             return self._add(
                 command,
@@ -1073,14 +967,10 @@ class KnowledgeVersionBuilder:
         existing_ids = set(documents)
         for source in command.sources:
             if source.source_identity in identities:
-                raise ValueError(
-                    "duplicate source identity already exists in manifest"
-                )
+                raise ValueError("duplicate source identity already exists in manifest")
             document_id = source.document_id or str(uuid.uuid4())
             if document_id in existing_ids:
-                raise ValueError(
-                    "duplicate logical document id already exists in manifest"
-                )
+                raise ValueError("duplicate logical document id already exists in manifest")
             document = _document_from_source(
                 source,
                 knowledge_base_id=command.knowledge_base_id,
@@ -1113,9 +1003,7 @@ class KnowledgeVersionBuilder:
         if target not in documents:
             raise NotFoundError("document not found in knowledge base manifest")
         entries = [
-            _reuse_entry(item, candidate_id)
-            for item in base_manifest
-            if item.document_id != target
+            _reuse_entry(item, candidate_id) for item in base_manifest if item.document_id != target
         ]
         return _normalize_ordinals(entries), [], []
 
@@ -1144,12 +1032,8 @@ class KnowledgeVersionBuilder:
             if item.document_id != target
         }
         if source.source_identity in identities:
-            raise ValueError(
-                "duplicate source identity already exists in manifest"
-            )
-        revision = historical_revisions.get(
-            (target, source.source_digest)
-        )
+            raise ValueError("duplicate source identity already exists in manifest")
+        revision = historical_revisions.get((target, source.source_digest))
         created_revision = revision is None
         if revision is None:
             revision = _revision_from_source(source, document_id=target)
@@ -1199,9 +1083,7 @@ class KnowledgeVersionBuilder:
         for document_id, source in by_document.items():
             resulting_identities[document_id] = source.source_identity
         if len(set(resulting_identities.values())) != len(resulting_identities):
-            raise ValueError(
-                "duplicate source identity already exists in manifest"
-            )
+            raise ValueError("duplicate source identity already exists in manifest")
 
         entries: list[KnowledgeVersionDocument] = []
         new_revisions: list[KnowledgeDocumentRevision] = []
@@ -1211,9 +1093,7 @@ class KnowledgeVersionBuilder:
             if source is None or source.source_digest == previous.source_digest:
                 entries.append(_reuse_entry(item, candidate_id))
                 continue
-            revision = historical_revisions.get(
-                (item.document_id, source.source_digest)
-            )
+            revision = historical_revisions.get((item.document_id, source.source_digest))
             if revision is None:
                 revision = _revision_from_source(
                     source,
@@ -1243,7 +1123,7 @@ def _owner_identity(resource: KnowledgeBase, scope: OwnerScope) -> str:
 
 
 def _retry_command_key(
-    original: ResourceBuild,
+    original: KnowledgeBaseVersion,
     *,
     owner_identity: str,
     active_version_id: str | None,
@@ -1251,9 +1131,9 @@ def _retry_command_key(
     payload = {
         "operation": "retry",
         "resource_kind": ResourceKind.KNOWLEDGE_BASE.value,
-        "resource_id": original.resource_id,
-        "source_build_id": original.id,
-        "source_version_id": original.version_id,
+        "resource_id": original.knowledge_base_id,
+        "source_build_id": original.build_id,
+        "source_version_id": original.id,
         "source_parent_version_id": original.parent_version_id,
         "active_version_id": active_version_id,
         "owner_identity": owner_identity,
@@ -1270,12 +1150,7 @@ def _retry_command_key(
 
 def _freeze_option(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return tuple(
-            sorted(
-                (str(key), _freeze_option(item))
-                for key, item in value.items()
-            )
-        )
+        return tuple(sorted((str(key), _freeze_option(item)) for key, item in value.items()))
     if isinstance(value, (list, tuple)):
         return tuple(_freeze_option(item) for item in value)
     if isinstance(value, (set, frozenset)):
@@ -1310,30 +1185,19 @@ def _is_active_build_uniqueness_violation(exc: IntegrityError) -> bool:
             continue
         visited.add(id(current))
         if getattr(current, "constraint_name", None) == (
-            "uq_resource_builds_active"
+            "uq_knowledge_base_versions_building_candidate"
         ):
             return True
         diag = getattr(current, "diag", None)
         if getattr(diag, "constraint_name", None) == (
-            "uq_resource_builds_active"
+            "uq_knowledge_base_versions_building_candidate"
         ):
             return True
         message = str(current)
-        if message == "uq_resource_builds_active":
+        if message == "uq_knowledge_base_versions_building_candidate":
             return True
         normalized = " ".join(message.lower().split())
-        if normalized in {
-            (
-                "unique constraint failed: "
-                "resource_builds.resource_kind, "
-                "resource_builds.resource_id"
-            ),
-            (
-                "unique constraint failed: "
-                "resource_builds.resource_id, "
-                "resource_builds.resource_kind"
-            ),
-        }:
+        if normalized == "unique constraint failed: knowledge_base_versions.knowledge_base_id":
             return True
         pending.extend(
             (
@@ -1410,7 +1274,4 @@ def _reuse_entry(
 def _normalize_ordinals(
     entries: Sequence[KnowledgeVersionDocument],
 ) -> list[KnowledgeVersionDocument]:
-    return [
-        entry.model_copy(update={"ordinal": ordinal})
-        for ordinal, entry in enumerate(entries)
-    ]
+    return [entry.model_copy(update={"ordinal": ordinal}) for ordinal, entry in enumerate(entries)]

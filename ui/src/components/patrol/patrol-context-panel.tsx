@@ -9,7 +9,6 @@ import { AccountMenu } from "@/components/account-menu";
 import { StatusBadge } from "@/components/status-badge";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarTrigger } from "@/components/ui/sidebar";
 
-import { useFeatureFlags } from "@/hooks/use-feature-flags";
 import { patrolStatusVariant, usePatrolLabels } from "@/hooks/use-patrol-labels";
 import { usePatrolPacks } from "@/hooks/use-patrol-packs";
 import { cn } from "@/lib/utils";
@@ -21,10 +20,7 @@ export function PatrolContextPanel() {
   const labels = usePatrolLabels();
   const { user } = useAuth();
   const readOnly = user?.global_role === "auditor";
-  const { loading: flagLoading, opsPatrolEnabled } = useFeatureFlags();
   const { packs, latestRuns, loading } = usePatrolPacks();
-
-  if (flagLoading || !opsPatrolEnabled) return null;
 
   return (
     <Sidebar>
@@ -66,7 +62,7 @@ export function PatrolContextPanel() {
                     </span>
                     {run ? (
                       <span className="text-muted-foreground font-mono text-xs">
-                        PASS {run.counts.pass} · FAIL {run.counts.fail}
+                        {t("status.pass")} {run.counts.pass} · {t("status.fail")} {run.counts.fail}
                       </span>
                     ) : null}
                   </Link>

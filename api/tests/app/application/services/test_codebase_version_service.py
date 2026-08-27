@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Codebase-specific provider contract, plus cross-provider mirror cases.
 
 ``resolve_published_version``/``list_published_versions`` behave identically
@@ -13,20 +11,21 @@ keyset pagination, UoW commit-failure propagation, DB wiring) stay in
 case (added in Task 13) stays duplicated per file on purpose, per the task
 brief, since it is a domain-specific regression guard rather than a mirror.
 """
+
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 
-from app.domain.errors import BadRequestError, NotFoundError
 from app.application.services.codebase_version_service import CodebaseVersionService
 from app.application.services.knowledge_version_service import KnowledgeVersionService
+from app.domain.errors import BadRequestError, NotFoundError
 from app.domain.models.codebase import Codebase
 from app.domain.models.codebase_version import CodebaseVersionState
 from app.domain.models.knowledge_base import KnowledgeBase
 from app.domain.models.knowledge_version import KnowledgeVersionState
-from app.domain.models.resource_governance import BuildState, ResourceKind
-
+from app.domain.models.resource_bindings import PublicationState, ResourceKind
 from tests.conftest import (
     FakeCodebaseRepo,
     FakeCodebaseVersionRepo,
@@ -146,23 +145,21 @@ async def test_resolve_published_version_active_and_explicit_degraded(
     service = service_cls(uow_factory=lambda: case["uow"]([ready, degraded]))
     scope = make_owner_scope(user_id="owner")
 
-    active = await service.resolve_published_version(
-        case["resource"].id, None, scope
-    )
+    active = await service.resolve_published_version(case["resource"].id, None, scope)
     explicit_degraded = await service.resolve_published_version(
         case["resource"].id, "degraded-v2", scope
     )
 
     assert active.resource_kind is resource_kind
     assert active.version_id == "ready-v1"
-    assert active.state is BuildState.SUCCEEDED
+    assert active.state is PublicationState.READY
     assert explicit_degraded.version_id == "degraded-v2"
-    assert explicit_degraded.state is BuildState.DEGRADED
+    assert explicit_degraded.state is PublicationState.DEGRADED
     assert explicit_degraded.degraded_reasons == ["EMBEDDING_UNAVAILABLE"]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("state_name", ("BUILDING", "FAILED", "READY", "DEGRADED"))
+@pytest.mark.parametrize("state_name", ["BUILDING", "FAILED", "READY", "DEGRADED"])
 @pytest.mark.parametrize(
     ("service_cls", "resource_kind", "case_builder", "version_label"), _PROVIDERS
 )
@@ -177,9 +174,7 @@ async def test_resolve_published_version_rejects_unpublished_or_nonterminal(
     version = case["version"]("v1", state=case[state_name], published=False)
     service = service_cls(uow_factory=lambda: case["uow"]([version]))
 
-    with pytest.raises(
-        BadRequestError, match=re.escape(f"{version_label} is not published")
-    ):
+    with pytest.raises(BadRequestError, match=re.escape(f"{version_label} is not published")):
         await service.resolve_published_version(
             case["resource"].id, "v1", make_owner_scope(user_id="owner")
         )
@@ -188,7 +183,7 @@ async def test_resolve_published_version_rejects_unpublished_or_nonterminal(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "foreign_state_name",
-    (
+    [
         # A ready, published version belonging to a *different* resource must
         # still be a plain "not found" — the id lookup, not the state, is
         # what gates access.
@@ -200,7 +195,7 @@ async def test_resolve_published_version_rejects_unpublished_or_nonterminal(
         # from "doesn't exist in my scope" across resource boundaries (a
         # cross-resource state-enumeration side channel).
         "BUILDING",
-    ),
+    ],
 )
 @pytest.mark.parametrize(
     ("service_cls", "resource_kind", "case_builder", "version_label"), _PROVIDERS
@@ -220,13 +215,9 @@ async def test_resolve_published_version_rejects_foreign_version_id(
         published=foreign_state_name == "READY",
         **{case["resource_id_field"]: "other-resource"},
     )
-    service = service_cls(
-        uow_factory=lambda: case["uow"]([own_version, foreign_version])
-    )
+    service = service_cls(uow_factory=lambda: case["uow"]([own_version, foreign_version]))
 
-    with pytest.raises(
-        NotFoundError, match=re.escape(f"{version_label} not found in owner scope")
-    ):
+    with pytest.raises(NotFoundError, match=re.escape(f"{version_label} not found in owner scope")):
         await service.resolve_published_version(
             case["resource"].id, "foreign-v1", make_owner_scope(user_id="owner")
         )
@@ -246,12 +237,8 @@ async def test_list_published_versions_filters_and_orders_desc(
     versions = [
         case["version"]("old", offset=0),
         case["version"]("active", offset=1),
-        case["version"](
-            "building", state=case["BUILDING"], published=False, offset=2
-        ),
-        case["version"](
-            "failed", state=case["FAILED"], published=False, offset=3
-        ),
+        case["version"]("building", state=case["BUILDING"], published=False, offset=2),
+        case["version"]("failed", state=case["FAILED"], published=False, offset=3),
     ]
     service = service_cls(uow_factory=lambda: case["uow"](versions))
 
@@ -266,18 +253,16 @@ async def test_list_published_versions_filters_and_orders_desc(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("state", "reasons"),
-    (
+    [
         (CodebaseVersionState.READY, ["CONTRADICTORY"]),
         (CodebaseVersionState.DEGRADED, []),
-    ),
+    ],
 )
 async def test_fix1_red_p1_3_provider_rejects_inconsistent_persisted_rows(
     state: CodebaseVersionState,
     reasons: list[str],
 ):
-    codebase = Codebase(
-        id="cb1", owner_user_id="owner", active_version_id="inconsistent"
-    )
+    codebase = Codebase(id="cb1", owner_user_id="owner", active_version_id="inconsistent")
     version = make_codebase_version(
         "inconsistent",
         codebase_id="cb1",
@@ -291,6 +276,4 @@ async def test_fix1_red_p1_3_provider_rejects_inconsistent_persisted_rows(
     service = CodebaseVersionService(uow_factory=lambda: uow)
 
     with pytest.raises(BadRequestError, match="inconsistent"):
-        await service.resolve_published_version(
-            "cb1", None, make_owner_scope(user_id="owner")
-        )
+        await service.resolve_published_version("cb1", None, make_owner_scope(user_id="owner"))

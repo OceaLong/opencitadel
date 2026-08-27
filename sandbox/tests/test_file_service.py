@@ -1,7 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import pytest
-
 from app.interfaces.errors.exceptions import BadRequestException
 from app.services.file import FileService
 

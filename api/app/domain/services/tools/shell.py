@@ -1,15 +1,13 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Optional
-
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
+
 from .base import BaseTool, tool
 from .capability_policy import SHELL_INTERACTIVE
 
 
 class ShellTool(BaseTool):
     """Shell工具箱，提供Shell交互相关功能"""
+
     name: str = "shell"
 
     def __init__(self, sandbox: Sandbox) -> None:
@@ -38,10 +36,10 @@ class ShellTool(BaseTool):
         policy=SHELL_INTERACTIVE,
     )
     async def shell_execute(
-            self,
-            session_id: str,
-            exec_dir: str,
-            command: str,
+        self,
+        session_id: str,
+        exec_dir: str,
+        command: str,
     ) -> ToolResult:
         """执行shell脚本"""
         return await self.sandbox.exec_command(session_id, exec_dir, command)
@@ -73,12 +71,12 @@ class ShellTool(BaseTool):
             "seconds": {
                 "type": "integer",
                 "description": "可选参数, 等待时长（秒）",
-            }
+            },
         },
         required=["session_id"],
         policy=SHELL_INTERACTIVE,
     )
-    async def shell_wait_process(self, session_id: str, seconds: Optional[int] = None) -> ToolResult:
+    async def shell_wait_process(self, session_id: str, seconds: int | None = None) -> ToolResult:
         """等待指定shell会话中正在运行的进程返回"""
         return await self.sandbox.wait_process(session_id, seconds)
 
@@ -97,16 +95,16 @@ class ShellTool(BaseTool):
             "press_enter": {
                 "type": "boolean",
                 "description": "输入后是否按下回车键",
-            }
+            },
         },
         required=["session_id", "input_text", "press_enter"],
         policy=SHELL_INTERACTIVE,
     )
     async def shell_write_input(
-            self,
-            session_id: str,
-            input_text: str,
-            press_enter: str,
+        self,
+        session_id: str,
+        input_text: str,
+        press_enter: str,
     ) -> ToolResult:
         """向指定shell会话正在运行的进程写入输入"""
         return await self.sandbox.write_shell_input(session_id, input_text, press_enter)

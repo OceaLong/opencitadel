@@ -71,7 +71,7 @@ opsActuator:
         kind: deployment
         min_replicas: 2
         max_replicas: 10
-      opencitadel-worker:
+      opencitadel-execution-kernel:
         kind: deployment
         min_replicas: 1
         max_replicas: 6

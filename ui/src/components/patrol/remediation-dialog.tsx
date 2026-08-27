@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
@@ -36,33 +36,18 @@ import type {
 
 type ProbeCheck = PatrolPackConfig["checks"][number];
 
-const ALL_ACTIONS: PatrolRemediationAction[] = [
-  "restart_workload",
-  "scale_workload",
-  "rollback_workload",
-];
-
-// Mirrors api/app/application/services/patrol_remediation_service.py::
-// _allowed_actions_for_probe_tool — only k8s_* probes have an Actuator
-// counterpart. `PatrolFindingResponse.allowed_actions` now carries the
-// server-authoritative answer (see app/interfaces/endpoints/patrol_routes.py
-// ::_finding_allowed_actions), so this is only a fallback for callers whose
-// `finding` predates that field (stale cache, older API); propose()
-// enforces the same rule server-side regardless of which path computed it.
-function allowedActionsForProbeTool(tool: string): PatrolRemediationAction[] {
-  return tool.startsWith("k8s_") ? ALL_ACTIONS : [];
-}
-
 export function RemediationDialog({
   open,
   onOpenChange,
   finding,
   run,
+  executionAvailable,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   finding: PatrolFinding;
   run: PatrolRunDetail;
+  executionAvailable: boolean;
 }) {
   const t = useTranslations("patrol");
   const labels = usePatrolLabels();
@@ -103,16 +88,7 @@ export function RemediationDialog({
     };
   }, [open, finding.check_result_id, run.pack_id, run.check_results, t]);
 
-  const probeTool = check?.probe.tool ?? "";
-  // Prefer the server-computed set on the Finding itself; it's authoritative
-  // (an empty array from the server means "genuinely no actions", not
-  // "field missing") and doesn't require the pack fetch above to have
-  // resolved yet. Only fall back to the local mirror when the field itself
-  // is absent (`undefined`) — see the comment on `allowedActionsForProbeTool`.
-  const allowedActions = useMemo(
-    () => finding.allowed_actions ?? allowedActionsForProbeTool(probeTool),
-    [finding.allowed_actions, probeTool],
-  );
+  const allowedActions = finding.allowed_actions;
   const namespace = String(check?.probe.args.namespace ?? "");
   const kind = String(check?.probe.args.kind ?? "Deployment");
   const detectedWorkload = String(check?.probe.args.workload ?? "");
@@ -162,6 +138,11 @@ export function RemediationDialog({
           <DialogTitle>{t("remediation.dialog.title")}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
+          {!executionAvailable && (
+            <p className="border-warning/30 bg-warning/5 rounded-lg border p-3 text-sm">
+              {t("remediation.proposeOnlyNotice")}
+            </p>
+          )}
           <div className="grid gap-2">
             <Label htmlFor="remediation-action">{t("remediation.dialog.actionLabel")}</Label>
             <Select

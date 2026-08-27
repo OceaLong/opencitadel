@@ -56,7 +56,11 @@ function remediationFixture(overrides: Partial<PatrolRemediation> = {}): PatrolR
   };
 }
 
-async function renderList(remediations: PatrolRemediation[], locale: "en" | "zh", messages: typeof en) {
+async function renderList(
+  remediations: PatrolRemediation[],
+  locale: "en" | "zh",
+  messages: typeof en,
+) {
   return renderComponent(
     <NextIntlClientProvider locale={locale} messages={messages}>
       <RemediationStatusList remediations={remediations} />
@@ -82,7 +86,11 @@ describe.each([
   it("shows the recheck run link only when recheck_run_id is present", async () => {
     const remediations = [
       remediationFixture({ id: "no-recheck", status: "executing", recheck_run_id: null }),
-      remediationFixture({ id: "with-recheck", status: "verified", recheck_run_id: "run-recheck-1" }),
+      remediationFixture({
+        id: "with-recheck",
+        status: "verified",
+        recheck_run_id: "run-recheck-1",
+      }),
     ];
     const { container, unmount } = await renderList(remediations, locale, messages);
     const links = Array.from(container.querySelectorAll("a")).map((a) => a.getAttribute("href"));

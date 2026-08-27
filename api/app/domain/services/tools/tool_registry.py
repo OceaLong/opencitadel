@@ -1,25 +1,21 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Central registry for agent tools."""
-from typing import Dict, List, Optional
 
 from app.domain.external.browser import Browser
 from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
 from app.domain.external.search import SearchEngine
+from app.domain.models.codebase import SessionMode
 from app.domain.services import vision_service
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool, PolicyBoundTool
 from app.domain.services.tools.browser import BrowserTool
+from app.domain.services.tools.capability_policy import CapabilityPolicy
 from app.domain.services.tools.file import FileTool
 from app.domain.services.tools.mcp import MCPTool
-from app.domain.services.tools.message import MessageTool
 from app.domain.services.tools.search import SearchTool
 from app.domain.services.tools.shell import ShellTool
 from app.domain.services.tools.vision import VisionTool
 from app.domain.services.tools.vision_grounding import VisionGroundingTool
-from app.domain.services.tools.capability_policy import CapabilityPolicy
-from app.domain.models.codebase import SessionMode
 
 
 class ToolRegistry:
@@ -27,30 +23,31 @@ class ToolRegistry:
 
     @staticmethod
     def build_default_tools(
-            *,
-            sandbox: Sandbox,
-            browser: Browser,
-            search_engine: SearchEngine,
-            llm: LLM,
-            mcp_tool: MCPTool,
-            a2a_tool: A2ATool,
-            extra_tools: Optional[List[BaseTool]] = None,
-            policy: Optional[CapabilityPolicy] = None,
-    ) -> List[BaseTool]:
-        tools: List[BaseTool] = [
+        *,
+        sandbox: Sandbox,
+        browser: Browser,
+        search_engine: SearchEngine,
+        llm: LLM,
+        mcp_tool: MCPTool,
+        a2a_tool: A2ATool,
+        extra_tools: list[BaseTool] | None = None,
+        policy: CapabilityPolicy | None = None,
+    ) -> list[BaseTool]:
+        tools: list[BaseTool] = [
             FileTool(sandbox=sandbox),
             ShellTool(sandbox=sandbox),
             BrowserTool(browser=browser),
             SearchTool(search_engine=search_engine),
-            MessageTool(),
             mcp_tool,
             a2a_tool,
         ]
         if vision_service.vision_enabled(llm):
-            tools.extend([
-                VisionTool(sandbox=sandbox, llm=llm),
-                VisionGroundingTool(sandbox=sandbox, llm=llm),
-            ])
+            tools.extend(
+                [
+                    VisionTool(sandbox=sandbox, llm=llm),
+                    VisionGroundingTool(sandbox=sandbox, llm=llm),
+                ]
+            )
         if extra_tools:
             tools.extend(extra_tools)
         return ToolRegistry.build_tools(
@@ -60,15 +57,14 @@ class ToolRegistry:
 
     @staticmethod
     def build_ask_tools(
-            *,
-            mcp_tool: MCPTool,
-            a2a_tool: A2ATool,
-            extra_tools: Optional[List[BaseTool]] = None,
-            policy: Optional[CapabilityPolicy] = None,
-    ) -> List[BaseTool]:
+        *,
+        mcp_tool: MCPTool,
+        a2a_tool: A2ATool,
+        extra_tools: list[BaseTool] | None = None,
+        policy: CapabilityPolicy | None = None,
+    ) -> list[BaseTool]:
         """Assemble read-only tool packs for Ask-mode flows (no shell/file/browser)."""
-        tools: List[BaseTool] = [
-            MessageTool(),
+        tools: list[BaseTool] = [
             mcp_tool,
             a2a_tool,
         ]
@@ -80,20 +76,19 @@ class ToolRegistry:
         )
 
     @staticmethod
-    def collect_schemas(tools: List[BaseTool]) -> List[Dict]:
-        schemas: List[Dict] = []
+    def collect_schemas(tools: list[BaseTool]) -> list[dict]:
+        schemas: list[dict] = []
         for tool in tools:
             schemas.extend(tool.get_tools())
         return schemas
+
     @staticmethod
     def build_tools(
-            *,
-            policy: CapabilityPolicy,
-            candidate_tools: List[BaseTool],
-    ) -> List[BaseTool]:
+        *,
+        policy: CapabilityPolicy,
+        candidate_tools: list[BaseTool],
+    ) -> list[BaseTool]:
         return [
-            PolicyBoundTool(candidate, policy)
-            if isinstance(candidate, BaseTool)
-            else candidate
+            PolicyBoundTool(candidate, policy) if isinstance(candidate, BaseTool) else candidate
             for candidate in candidate_tools
         ]

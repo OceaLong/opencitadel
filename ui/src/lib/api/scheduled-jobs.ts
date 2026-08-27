@@ -24,9 +24,7 @@ export const scheduledJobsApi = {
     return del<{ deleted: boolean }>(`/scheduled-jobs/${jobId}`);
   },
 
-  rotateSecret: (
-    jobId: string,
-  ): Promise<{ webhook_secret: string; webhook_token: string }> => {
+  rotateSecret: (jobId: string): Promise<{ webhook_secret: string; webhook_token: string }> => {
     return post<{ webhook_secret: string; webhook_token: string }>(
       `/scheduled-jobs/${jobId}/rotate-secret`,
       {},

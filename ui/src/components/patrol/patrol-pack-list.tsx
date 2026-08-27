@@ -22,6 +22,7 @@ export function PatrolPackList({
   triggeringId,
   actionId,
   readOnly,
+  runAdmissionDisabled,
 }: {
   packs: PatrolPack[];
   latestRuns: Record<string, PatrolRun>;
@@ -31,6 +32,7 @@ export function PatrolPackList({
   triggeringId: string | null;
   actionId: string | null;
   readOnly: boolean;
+  runAdmissionDisabled: boolean;
 }) {
   const t = useTranslations("patrol");
   const labels = usePatrolLabels();
@@ -78,7 +80,7 @@ export function PatrolPackList({
                   <StatusBadge variant={patrolStatusVariant(pack.status)}>
                     {labels.status[pack.status] ?? pack.status}
                   </StatusBadge>
-                  <span className="text-muted-foreground text-xs">
+                  <span className="text-muted-foreground text-xs" translate="no">
                     v{pack.version} · {pack.config.scope.environment}
                   </span>
                 </div>
@@ -101,13 +103,13 @@ export function PatrolPackList({
                     </StatusBadge>
                     <span className="inline-flex items-center gap-1">
                       <CheckCircle2 className="size-3.5" />
-                      PASS <span className="font-mono">{run.counts.pass}</span>
+                      {t("status.pass")} <span className="font-mono">{run.counts.pass}</span>
                     </span>
                     <span className="inline-flex items-center gap-1">
                       <AlertTriangle className="size-3.5" />
-                      WARN <span className="font-mono">{run.counts.warn}</span> · FAIL{" "}
-                      <span className="font-mono">{run.counts.fail}</span> · ERROR{" "}
-                      <span className="font-mono">{run.counts.error}</span>
+                      {t("status.warn")} <span className="font-mono">{run.counts.warn}</span> ·{" "}
+                      {t("status.fail")} <span className="font-mono">{run.counts.fail}</span> ·{" "}
+                      {t("status.error")} <span className="font-mono">{run.counts.error}</span>
                     </span>
                     <span>
                       {t("evidencePercent", {
@@ -141,7 +143,9 @@ export function PatrolPackList({
                       {pack.status === "active" ? t("actions.pause") : t("actions.activate")}
                     </Button>
                     <Button
-                      disabled={pack.status !== "active" || triggeringId === pack.id}
+                      disabled={
+                        runAdmissionDisabled || pack.status !== "active" || triggeringId === pack.id
+                      }
                       onClick={() => onTrigger(pack)}
                     >
                       <Play className="size-4" />

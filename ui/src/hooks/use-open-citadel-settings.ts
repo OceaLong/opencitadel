@@ -4,141 +4,112 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import type { AgentConfig, ListA2AServerItem, ListMCPServerItem, MCPServerConfig } from "@/lib/api";
-import { configApi } from "@/lib/api";
+import {
+  type A2AServer,
+  type CreateMCPServerRequest,
+  integrationsApi,
+  type MCPServer,
+  type UpdateMCPServerRequest,
+} from "@/lib/api";
 
 export type SettingTab =
   | "common-setting"
-  | "agent-setting"
-  | "models-setting"
+  | "inference-setting"
   | "skills-setting"
   | "memory-setting"
   | "integrations-setting"
-  | "hitl-setting"
   | "runtime-setting";
 
-export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab) {
+export function useOpenCitadelSettings(open: boolean) {
   const t = useTranslations("settings");
   const tErrors = useTranslations("errors");
   const tCommon = useTranslations("common");
-  const [agentConfig, setAgentConfig] = useState<AgentConfig>({});
-  const [mcpServers, setMcpServers] = useState<ListMCPServerItem[]>([]);
-  const [a2aServers, setA2aServers] = useState<ListA2AServerItem[]>([]);
-  const [loadingConfig, setLoadingConfig] = useState(false);
+  const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
+  const [a2aServers, setA2aServers] = useState<A2AServer[]>([]);
   const [loadingMCP, setLoadingMCP] = useState(false);
   const [loadingA2A, setLoadingA2A] = useState(false);
-  const [saving, setSaving] = useState(false);
   const fetchingRef = useRef(false);
 
   const refreshMcpServersSilently = useCallback(async () => {
     try {
-      const data = await configApi.getMCPServers();
-      setMcpServers(data?.mcp_servers ?? []);
+      setMcpServers((await integrationsApi.listMCPServers()).items);
     } catch {
-      // Best-effort silent refresh after MCP mutations.
+      // A mutation has already completed; the next panel load will reconcile state.
     }
   }, []);
 
-  const fetchAllConfigs = useCallback(() => {
+  const refreshA2aServersSilently = useCallback(async () => {
+    try {
+      setA2aServers((await integrationsApi.listA2AServers()).items);
+    } catch {
+      // A mutation has already completed; the next panel load will reconcile state.
+    }
+  }, []);
+
+  const fetchAllIntegrations = useCallback(() => {
     if (fetchingRef.current) return;
     fetchingRef.current = true;
 
-    setLoadingConfig(true);
-    configApi
-      .getAgentConfig()
-      .then(setAgentConfig)
-      .catch(() => {
-        toast.error(t("toastLoadAgentConfigFailed"));
-      })
-      .finally(() => {
-        setLoadingConfig(false);
-      });
-
     setLoadingMCP(true);
-    configApi
-      .getMCPServers()
-      .then((data) => {
-        setMcpServers(data?.mcp_servers ?? []);
-      })
-      .catch(() => {
-        toast.error(t("toastLoadMcpFailed"));
-      })
-      .finally(() => {
-        setLoadingMCP(false);
-      });
+    integrationsApi
+      .listMCPServers()
+      .then((data) => setMcpServers(data.items))
+      .catch(() => toast.error(t("toastLoadMcpFailed")))
+      .finally(() => setLoadingMCP(false));
 
     setLoadingA2A(true);
-    configApi
-      .getA2AServers()
-      .then((data) => {
-        setA2aServers(data?.a2a_servers ?? []);
-      })
-      .catch(() => {
-        toast.error(t("toastLoadA2aFailed"));
-      })
-      .finally(() => {
-        setLoadingA2A(false);
-      });
+    integrationsApi
+      .listA2AServers()
+      .then((data) => setA2aServers(data.items))
+      .catch(() => toast.error(t("toastLoadA2aFailed")))
+      .finally(() => setLoadingA2A(false));
   }, [t]);
 
   useEffect(() => {
     if (open) {
-      fetchAllConfigs();
-      return;
+      const timer = window.setTimeout(fetchAllIntegrations, 0);
+      return () => window.clearTimeout(timer);
     }
     fetchingRef.current = false;
-  }, [open, fetchAllConfigs]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      if (activeSetting === "agent-setting") {
-        await configApi.updateAgentConfig(agentConfig);
-        toast.success(t("toastAgentConfigSaved"));
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : tErrors("saveFailed");
-      toast.error(msg);
-    } finally {
-      setSaving(false);
-    }
-  };
+  }, [open, fetchAllIntegrations]);
 
   const handleMCPToggle = useCallback(
-    async (serverName: string, enabled: boolean) => {
-      setMcpServers((prev) =>
-        prev.map((server) => (server.server_name === serverName ? { ...server, enabled } : server)),
+    async (serverId: string, enabled: boolean) => {
+      const server = mcpServers.find((item) => item.id === serverId);
+      setMcpServers((previous) =>
+        previous.map((item) => (item.id === serverId ? { ...item, enabled } : item)),
       );
       try {
-        await configApi.updateMCPServerEnabled(serverName, enabled);
+        const updated = await integrationsApi.setMCPServerEnabled(serverId, { enabled });
+        setMcpServers((previous) =>
+          previous.map((item) => (item.id === serverId ? updated : item)),
+        );
         toast.success(
           t("toastServerToggled", {
-            name: serverName,
+            name: server?.name ?? serverId,
             state: enabled ? tCommon("enabled") : tCommon("disabledState"),
           }),
         );
-        await refreshMcpServersSilently();
       } catch {
-        setMcpServers((prev) =>
-          prev.map((server) =>
-            server.server_name === serverName ? { ...server, enabled: !enabled } : server,
-          ),
+        setMcpServers((previous) =>
+          previous.map((item) => (item.id === serverId ? { ...item, enabled: !enabled } : item)),
         );
         toast.error(tErrors("operationFailedRetry"));
       }
     },
-    [t, tCommon, tErrors, refreshMcpServersSilently],
+    [mcpServers, t, tCommon, tErrors],
   );
 
   const handleMCPDelete = useCallback(
-    async (serverName: string) => {
-      const prev = mcpServers;
-      setMcpServers((list) => list.filter((server) => server.server_name !== serverName));
+    async (serverId: string) => {
+      const previous = mcpServers;
+      const target = previous.find((server) => server.id === serverId);
+      setMcpServers((servers) => servers.filter((server) => server.id !== serverId));
       try {
-        await configApi.deleteMCPServer(serverName);
-        toast.success(t("toastMcpDeleted", { name: serverName }));
+        await integrationsApi.deleteMCPServer(serverId);
+        toast.success(t("toastMcpDeleted", { name: target?.name ?? serverId }));
       } catch {
-        setMcpServers(prev);
+        setMcpServers(previous);
         toast.error(tErrors("deleteFailedRetry"));
       }
     },
@@ -146,34 +117,39 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
   );
 
   const handleMCPEdit = useCallback(
-    async (serverName: string, config: MCPServerConfig): Promise<boolean> => {
+    async (serverId: string, body: UpdateMCPServerRequest): Promise<boolean> => {
       try {
-        await configApi.updateMCPServer(serverName, { mcpServers: { [serverName]: config } });
+        const updated = await integrationsApi.updateMCPServer(serverId, body);
+        setMcpServers((previous) =>
+          previous.map((server) => (server.id === serverId ? updated : server)),
+        );
         toast.success(t("toastMcpUpdated"));
-        await refreshMcpServersSilently();
         return true;
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : tErrors("updateFailed"));
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : tErrors("updateFailed"));
         return false;
       }
     },
-    [t, tErrors, refreshMcpServersSilently],
+    [t, tErrors],
   );
 
   const handleMCPAdd = useCallback(
     async (configText: string): Promise<boolean> => {
       try {
-        const parsed = JSON.parse(configText);
-        await configApi.addMCPServer(parsed);
+        const parsed = JSON.parse(configText) as CreateMCPServerRequest;
+        const created = await integrationsApi.createMCPServer(parsed);
+        setMcpServers((previous) => [...previous, created]);
         toast.success(t("toastMcpAdded"));
         await refreshMcpServersSilently();
         return true;
-      } catch (err) {
-        if (err instanceof SyntaxError) {
-          toast.error(tErrors("jsonInvalid"));
-        } else {
-          toast.error(err instanceof Error ? err.message : tErrors("addFailed"));
-        }
+      } catch (error) {
+        toast.error(
+          error instanceof SyntaxError
+            ? tErrors("jsonInvalid")
+            : error instanceof Error
+              ? error.message
+              : tErrors("addFailed"),
+        );
         return false;
       }
     },
@@ -181,22 +157,25 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
   );
 
   const handleA2AToggle = useCallback(
-    async (id: string, enabled: boolean) => {
-      setA2aServers((prev) =>
-        prev.map((server) => (server.id === id ? { ...server, enabled } : server)),
+    async (serverId: string, enabled: boolean) => {
+      const server = a2aServers.find((item) => item.id === serverId);
+      setA2aServers((previous) =>
+        previous.map((item) => (item.id === serverId ? { ...item, enabled } : item)),
       );
       try {
-        await configApi.updateA2AServerEnabled(id, enabled);
-        const server = a2aServers.find((item) => item.id === id);
+        const updated = await integrationsApi.setA2AServerEnabled(serverId, { enabled });
+        setA2aServers((previous) =>
+          previous.map((item) => (item.id === serverId ? updated : item)),
+        );
         toast.success(
           t("toastServerToggled", {
-            name: server?.name ?? "Agent",
+            name: server?.base_url ?? serverId,
             state: enabled ? tCommon("enabled") : tCommon("disabledState"),
           }),
         );
       } catch {
-        setA2aServers((prev) =>
-          prev.map((server) => (server.id === id ? { ...server, enabled: !enabled } : server)),
+        setA2aServers((previous) =>
+          previous.map((item) => (item.id === serverId ? { ...item, enabled: !enabled } : item)),
         );
         toast.error(tErrors("operationFailedRetry"));
       }
@@ -205,15 +184,15 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
   );
 
   const handleA2ADelete = useCallback(
-    async (id: string) => {
-      const prev = a2aServers;
-      const target = a2aServers.find((server) => server.id === id);
-      setA2aServers((list) => list.filter((server) => server.id !== id));
+    async (serverId: string) => {
+      const previous = a2aServers;
+      const target = previous.find((server) => server.id === serverId);
+      setA2aServers((servers) => servers.filter((server) => server.id !== serverId));
       try {
-        await configApi.deleteA2AServer(id);
-        toast.success(t("toastA2aDeleted", { name: target?.name ?? id }));
+        await integrationsApi.deleteA2AServer(serverId);
+        toast.success(t("toastA2aDeleted", { name: target?.base_url ?? serverId }));
       } catch {
-        setA2aServers(prev);
+        setA2aServers(previous);
         toast.error(tErrors("deleteFailedRetry"));
       }
     },
@@ -223,34 +202,28 @@ export function useOpenCitadelSettings(open: boolean, activeSetting: SettingTab)
   const handleA2AAdd = useCallback(
     async (baseUrl: string): Promise<boolean> => {
       try {
-        await configApi.addA2AServer({ base_url: baseUrl });
+        const created = await integrationsApi.createA2AServer({
+          base_url: baseUrl,
+          enabled: true,
+          visibility: "private",
+        });
+        setA2aServers((previous) => [...previous, created]);
         toast.success(t("toastA2aAdded"));
-
-        try {
-          const data = await configApi.getA2AServers();
-          setA2aServers(data?.a2a_servers ?? []);
-        } catch {
-          // Best-effort refresh; the add result has already been saved.
-        }
+        await refreshA2aServersSilently();
         return true;
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : tErrors("addFailed"));
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : tErrors("addFailed"));
         return false;
       }
     },
-    [t, tErrors],
+    [t, tErrors, refreshA2aServersSilently],
   );
 
   return {
-    agentConfig,
-    setAgentConfig,
     mcpServers,
     a2aServers,
-    loadingConfig,
     loadingMCP,
     loadingA2A,
-    saving,
-    handleSave,
     handleMCPToggle,
     handleMCPDelete,
     handleMCPAdd,

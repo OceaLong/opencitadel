@@ -1,16 +1,16 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Redis-backed distributed circuit breaker for LLM providers."""
+
 from __future__ import annotations
 
 import logging
-from enum import Enum
-from typing import Any, Dict, Optional
 import time
+from enum import StrEnum
+from typing import Any
 
-from app.application.services.config_provider import get_runtime_config
+from redis.asyncio import Redis
+
+from app.domain.runtime_policy import ModelResiliencePolicy
 from app.domain.utils.llm_retry import is_breaker_eligible_error
-from app.infrastructure.storage.redis import get_redis
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ _ERRORS_PREFIX = "cb:errors:"
 _PROBE_PREFIX = "cb:probe:"
 
 
-class BreakerState(str, Enum):
+class BreakerState(StrEnum):
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
@@ -73,8 +73,8 @@ return 'allow'
 class LLMCircuitBreaker:
     """Per-model_id circuit breaker with Redis Lua atomicity."""
 
-    def __init__(self) -> None:
-        self._redis = get_redis()
+    def __init__(self, redis: Redis) -> None:
+        self._redis = redis
 
     @staticmethod
     def _open_until_key(model_id: str) -> str:
@@ -88,14 +88,14 @@ class LLMCircuitBreaker:
     def _probe_key(model_id: str) -> str:
         return f"{_PROBE_PREFIX}{model_id}"
 
-    def _config(self):
-        return get_runtime_config().model_resilience
-
-    async def get_state(self, model_id: str) -> BreakerState:
+    async def get_state(
+        self,
+        model_id: str,
+        policy: ModelResiliencePolicy,
+    ) -> BreakerState:
         if not model_id:
             return BreakerState.CLOSED
-        cfg = self._config()
-        if not cfg.enabled:
+        if not policy.enabled:
             return BreakerState.CLOSED
         try:
             open_until = await self._get_open_until(model_id)
@@ -104,81 +104,88 @@ class LLMCircuitBreaker:
             if open_until > time.time():
                 return BreakerState.OPEN
             return BreakerState.HALF_OPEN
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("熔断状态读取失败 (fail-open): model_id=%s error=%s", model_id, exc)
             return BreakerState.CLOSED
 
-    async def is_open(self, model_id: str) -> bool:
-        if not model_id or not self._config().enabled:
+    async def is_open(self, model_id: str, policy: ModelResiliencePolicy) -> bool:
+        if not model_id or not policy.enabled:
             return False
         try:
             return await self._get_open_until(model_id) > time.time()
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("熔断开路查询失败 (fail-open): model_id=%s error=%s", model_id, exc)
             return False
 
-    async def allow_request(self, model_id: str) -> str:
+    async def allow_request(self, model_id: str, policy: ModelResiliencePolicy) -> str:
         """Return allow/probe/deny for closed, half-open probe, and open states."""
-        cfg = self._config()
-        if not model_id or not cfg.enabled:
+        if not model_id or not policy.enabled:
             return "allow"
         try:
-            result = await self._redis.client.eval(
+            result = await self._redis.eval(
                 _ALLOW_REQUEST_LUA,
                 2,
                 self._open_until_key(model_id),
                 self._probe_key(model_id),
                 str(time.time()),
-                str(cfg.breaker_halfopen_probe_timeout_seconds),
+                str(policy.breaker_halfopen_probe_timeout_seconds),
             )
             return result.decode() if isinstance(result, bytes) else str(result)
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("熔断放行判定失败 (fail-open): model_id=%s error=%s", model_id, exc)
             return "allow"
 
-    async def record_success(self, model_id: str) -> None:
-        if not model_id:
+    async def record_success(self, model_id: str, policy: ModelResiliencePolicy) -> None:
+        if not model_id or not policy.enabled:
             return
         try:
-            await self._redis.client.delete(
+            await self._redis.delete(
                 self._open_until_key(model_id),
                 self._errors_key(model_id),
                 self._probe_key(model_id),
             )
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("熔断成功记录失败: model_id=%s error=%s", model_id, exc)
 
-    async def record_failure(self, model_id: str, error: Exception) -> None:
+    async def record_failure(
+        self,
+        model_id: str,
+        error: Exception,
+        policy: ModelResiliencePolicy,
+    ) -> None:
         if not model_id or not is_breaker_eligible_error(error):
             return
-        cfg = self._config()
-        if not cfg.enabled:
+        if not policy.enabled:
             return
         try:
             now = time.time()
-            result = await self._redis.client.eval(
+            result = await self._redis.eval(
                 _RECORD_ERROR_LUA,
                 3,
                 self._errors_key(model_id),
                 self._open_until_key(model_id),
                 self._probe_key(model_id),
                 str(now),
-                str(cfg.breaker_window_seconds),
-                str(cfg.breaker_error_threshold),
-                str(cfg.breaker_open_ttl_seconds),
-                str(cfg.breaker_open_ttl_seconds + cfg.breaker_window_seconds + 60),
+                str(policy.breaker_window_seconds),
+                str(policy.breaker_error_threshold),
+                str(policy.breaker_open_ttl_seconds),
+                str(policy.breaker_open_ttl_seconds + policy.breaker_window_seconds + 60),
             )
             if result == b"open" or result == "open":
                 logger.warning("熔断器开路: model_id=%s", model_id)
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("熔断失败记录失败 (fail-open): model_id=%s error=%s", model_id, exc)
 
-    async def snapshot(self, model_id: str) -> Dict[str, Any]:
-        state = await self.get_state(model_id)
+    async def snapshot(
+        self,
+        model_id: str,
+        policy: ModelResiliencePolicy,
+    ) -> dict[str, Any]:
+        state = await self.get_state(model_id, policy)
         return {"model_id": model_id, "state": state.value}
 
     async def _get_open_until(self, model_id: str) -> float:
-        raw = await self._redis.client.get(self._open_until_key(model_id))
+        raw = await self._redis.get(self._open_until_key(model_id))
         if not raw:
             return 0.0
         value = raw.decode() if isinstance(raw, bytes) else str(raw)
@@ -186,13 +193,3 @@ class LLMCircuitBreaker:
             return float(value)
         except (TypeError, ValueError):
             return 0.0
-
-
-_breaker: Optional[LLMCircuitBreaker] = None
-
-
-def get_llm_circuit_breaker() -> LLMCircuitBreaker:
-    global _breaker
-    if _breaker is None:
-        _breaker = LLMCircuitBreaker()
-    return _breaker

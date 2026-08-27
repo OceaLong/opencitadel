@@ -1,13 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""One ownership/readiness gate for every resource-backed session."""
+"""One ownership/readiness validator for every resource-backed session."""
+
 from dataclasses import dataclass
-from typing import Optional
 
 from app.domain.errors import BadRequestError
 from app.domain.models.codebase import SessionMode
-from app.domain.models.resource_governance import (
-    BuildState,
+from app.domain.models.resource_bindings import (
+    PublicationState,
     PublishedResourceVersion,
     ResourceKind,
 )
@@ -24,15 +22,13 @@ class ValidatedSessionResources:
     """Resolved immutable resource versions, pinned at session creation."""
 
     mode: SessionMode
-    codebase: Optional[PublishedResourceVersion] = None
-    knowledge_base: Optional[PublishedResourceVersion] = None
+    codebase: PublishedResourceVersion | None = None
+    knowledge_base: PublishedResourceVersion | None = None
 
     @property
     def versions(self) -> tuple[PublishedResourceVersion, ...]:
         return tuple(
-            version
-            for version in (self.codebase, self.knowledge_base)
-            if version is not None
+            version for version in (self.codebase, self.knowledge_base) if version is not None
         )
 
 
@@ -91,8 +87,8 @@ class ResourceGuardService:
         if version_id is not None and resolved.version_id != version_id:
             raise BadRequestError("resource version provider returned a foreign version")
         if not resolved.published or resolved.state not in {
-            BuildState.SUCCEEDED,
-            BuildState.DEGRADED,
+            PublicationState.READY,
+            PublicationState.DEGRADED,
         }:
             raise BadRequestError("resource version is not published")
         return resolved

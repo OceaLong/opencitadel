@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from app.domain.services.tools.tool_names import is_tool_allowed
 
 
@@ -32,8 +30,3 @@ def test_is_tool_allowed_a2a_group():
     assert is_tool_allowed("get_remote_agent_cards", allowed) is True
     assert is_tool_allowed("call_remote_agent", allowed) is True
     assert is_tool_allowed("read_file", allowed) is False
-
-
-def test_is_tool_allowed_legacy_alias():
-    allowed = ["file_read"]
-    assert is_tool_allowed("read_file", allowed) is True

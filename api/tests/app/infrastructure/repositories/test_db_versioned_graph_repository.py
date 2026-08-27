@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """SQL-shape contracts for race-safe versioned graph persistence."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -107,33 +106,20 @@ def _batch():
 async def test_atomic_entity_upsert_uses_exact_identity_and_returning():
     session = _Session(["persisted-product", "persisted-org"])
     repo = _Repo(session)
-    await repo.upsert_candidate_graph_batch(
-        "kb1", "v1", *_batch()
-    )
+    await repo.upsert_candidate_graph_batch("kb1", "v1", *_batch())
 
-    entity_sql = [
-        sql
-        for sql, _params in session.calls
-        if "INSERT INTO knowledge_entities" in sql
-    ]
+    entity_sql = [sql for sql, _params in session.calls if "INSERT INTO knowledge_entities" in sql]
     assert len(entity_sql) == 2
     assert all("ON CONFLICT (version_id, normalized_name, type)" in sql for sql in entity_sql)
     assert all("RETURNING knowledge_entities.id" in sql for sql in entity_sql)
     assert all("least(" in sql.lower() for sql in entity_sql)
     assert all("CASE WHEN" in sql for sql in entity_sql)
-    assert not any(
-        sql.lstrip().startswith("SELECT")
-        for sql, _params in session.calls
-    )
+    assert not any(sql.lstrip().startswith("SELECT") for sql, _params in session.calls)
     relation_sql = next(
-        sql
-        for sql, _params in session.calls
-        if "INSERT INTO knowledge_relations" in sql
+        sql for sql, _params in session.calls if "INSERT INTO knowledge_relations" in sql
     )
     ref_sql = next(
-        sql
-        for sql, _params in session.calls
-        if "INSERT INTO knowledge_entity_refs" in sql
+        sql for sql, _params in session.calls if "INSERT INTO knowledge_entity_refs" in sql
     )
     assert "ON CONFLICT (id) DO NOTHING" in relation_sql
     assert "ON CONFLICT (entity_id, doc_id) DO NOTHING" in ref_sql
@@ -144,23 +130,14 @@ async def test_atomic_entity_upsert_uses_exact_identity_and_returning():
 async def test_retry_and_same_name_different_type_keep_distinct_identity():
     first = _Session(["persisted-product", "persisted-org"])
     second = _Session(["persisted-product", "persisted-org"])
-    await _Repo(first).upsert_candidate_graph_batch(
-        "kb1", "v1", *_batch()
-    )
-    await _Repo(second).upsert_candidate_graph_batch(
-        "kb1", "v1", *_batch()
-    )
+    await _Repo(first).upsert_candidate_graph_batch("kb1", "v1", *_batch())
+    await _Repo(second).upsert_candidate_graph_batch("kb1", "v1", *_batch())
 
-    assert len(
-        [
-            sql
-            for sql, _params in second.calls
-            if "INSERT INTO knowledge_entities" in sql
-        ]
-    ) == 2
+    assert (
+        len([sql for sql, _params in second.calls if "INSERT INTO knowledge_entities" in sql]) == 2
+    )
     assert not any(
-        "DELETE FROM knowledge_" in sql
-        for sql, _params in [*first.calls, *second.calls]
+        "DELETE FROM knowledge_" in sql for sql, _params in [*first.calls, *second.calls]
     )
 
 

@@ -5,13 +5,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { Languages, SunMoon } from "lucide-react";
 
-import {
-  Item,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@/components/ui/item";
+import { Item, ItemContent, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item";
 import {
   Select,
   SelectContent,

@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from app.application.security.authorization_context import (
     authorization_scope,
     get_authorization_context,

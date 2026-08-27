@@ -40,7 +40,7 @@ import {
 
 import { type AdminTimeRange, formatDateTime, getAdminDateRange } from "@/lib/admin-utils";
 import { adminApi, type AuditLog, type AuditLogDetail } from "@/lib/api/admin";
-import { type ChainVerifyResult,complianceApi } from "@/lib/api/compliance";
+import { type ChainVerifyResult, complianceApi } from "@/lib/api/compliance";
 import { IconCopy, IconDownload } from "@/lib/icons";
 
 const PAGE_SIZE = 20;
@@ -191,7 +191,12 @@ export default function AdminAuditPage() {
                 {chainStatusLabel}
               </StatusBadge>
             )}
-            <Button variant="outline" size="sm" disabled={chainLoading} onClick={() => void verifyChain()}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={chainLoading}
+              onClick={() => void verifyChain()}
+            >
               {chainLoading ? <LoadingSpinner /> : t("verifyChain")}
             </Button>
             <Button variant="outline" asChild>
@@ -301,7 +306,7 @@ export default function AdminAuditPage() {
                         {item.action}
                       </StatusBadge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground font-mono text-dense">
+                    <TableCell className="text-muted-foreground text-dense font-mono">
                       {formatDateTime(item.created_at)}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
@@ -312,9 +317,7 @@ export default function AdminAuditPage() {
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       <span className="inline-flex items-center gap-1">
-                        <span className="font-mono text-dense">
-                          {item.request_id.slice(0, 8)}…
-                        </span>
+                        <span className="text-dense font-mono">{item.request_id.slice(0, 8)}…</span>
                         <Button
                           variant="ghost"
                           size="icon-xs"
@@ -372,7 +375,10 @@ export default function AdminAuditPage() {
         </CardContent>
       </Card>
 
-      <Sheet open={detail != null || detailLoading} onOpenChange={(open) => !open && setDetail(null)}>
+      <Sheet
+        open={detail != null || detailLoading}
+        onOpenChange={(open) => !open && setDetail(null)}
+      >
         <SheetContent className="overflow-y-auto sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>{t("auditDetailTitle")}</SheetTitle>
@@ -393,7 +399,9 @@ export default function AdminAuditPage() {
                 <dd className="mt-0.5">{detail.actor_ip || "—"}</dd>
               </div>
               <div>
-                <dt className="text-muted-foreground text-xs">request_id</dt>
+                <dt className="text-muted-foreground text-xs" translate="no">
+                  request_id
+                </dt>
                 <dd className="mt-0.5 flex items-center gap-1">
                   <span className="font-mono text-xs">{detail.request_id || "—"}</span>
                   {detail.request_id ? (
@@ -433,7 +441,9 @@ export default function AdminAuditPage() {
                 </dd>
               </div>
               <div>
-                <dt className="text-muted-foreground text-xs">{formatDateTime(detail.created_at)}</dt>
+                <dt className="text-muted-foreground text-xs">
+                  {formatDateTime(detail.created_at)}
+                </dt>
               </div>
             </dl>
           ) : null}

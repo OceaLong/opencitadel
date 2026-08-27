@@ -1,8 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Protocol, Tuple
+from typing import Protocol
 
+from app.domain.models.inference import PLATFORM_EMBEDDING_DIMENSIONS
 from app.domain.models.knowledge_base import (
     DocStatus,
     KBStatus,
@@ -16,7 +15,7 @@ from app.domain.models.knowledge_base import (
 from app.domain.models.scope import OwnerScope
 from app.domain.repositories.patch import UNSET, UnsetType
 
-KNOWLEDGE_EMBEDDING_DIMENSION = 1536
+KNOWLEDGE_EMBEDDING_DIMENSION = PLATFORM_EMBEDDING_DIMENSIONS
 
 
 @dataclass(frozen=True)
@@ -34,7 +33,7 @@ class DocumentPageItem:
     """Frozen scalar snapshot of one parent source chunk."""
 
     id: str
-    page_no: Optional[int]
+    page_no: int | None
     heading_path: str
     ordinal: int
     content: str
@@ -48,21 +47,12 @@ class DocumentPageItem:
             or isinstance(self.ordinal, bool)
             or (
                 self.page_no is not None
-                and (
-                    not isinstance(self.page_no, int)
-                    or isinstance(self.page_no, bool)
-                )
+                and (not isinstance(self.page_no, int) or isinstance(self.page_no, bool))
             )
         ):
             raise TypeError("document page items must contain scalar values")
-        if (
-            not self.id
-            or (self.page_no is not None and self.page_no < 1)
-            or self.ordinal < 0
-        ):
-            raise ValueError(
-                "document page item identity and ordering values are invalid"
-            )
+        if not self.id or (self.page_no is not None and self.page_no < 1) or self.ordinal < 0:
+            raise ValueError("document page item identity and ordering values are invalid")
 
     @classmethod
     def from_chunk(cls, chunk: KnowledgeChunk) -> "DocumentPageItem":
@@ -79,8 +69,8 @@ class DocumentPageItem:
 class DocumentPage:
     """One immutable page of parent source chunk snapshots."""
 
-    items: Tuple[DocumentPageItem, ...]
-    next_cursor: Optional[str]
+    items: tuple[DocumentPageItem, ...]
+    next_cursor: str | None
     total: int
     truncated: bool
 
@@ -89,321 +79,276 @@ class DocumentPage:
             self,
             "items",
             tuple(
-                item
-                if isinstance(item, DocumentPageItem)
-                else DocumentPageItem.from_chunk(item)
+                item if isinstance(item, DocumentPageItem) else DocumentPageItem.from_chunk(item)
                 for item in self.items
             ),
         )
         if self.total < 0 or self.total < len(self.items):
             raise ValueError("document page total cannot be smaller than items")
         if self.truncated != (self.next_cursor is not None):
-            raise ValueError(
-                "document page truncated must match next_cursor presence"
-            )
+            raise ValueError("document page truncated must match next_cursor presence")
 
 
 class KnowledgeBaseRepository(Protocol):
-    async def save_kb(self, kb: KnowledgeBase) -> None:
-        ...
+    async def save_kb(self, kb: KnowledgeBase) -> None: ...
 
-    async def get_kb(self, kb_id: str, scope: Optional[OwnerScope] = None) -> Optional[KnowledgeBase]:
-        ...
+    async def get_kb(self, kb_id: str, scope: OwnerScope | None = None) -> KnowledgeBase | None: ...
 
     async def get_kb_for_update(
-            self,
-            kb_id: str,
-            scope: Optional[OwnerScope] = None,
-    ) -> Optional[KnowledgeBase]:
+        self,
+        kb_id: str,
+        scope: OwnerScope | None = None,
+    ) -> KnowledgeBase | None:
         """Return and row-lock one owner-scoped KB for a write decision."""
         ...
 
-    async def list_kbs(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[KnowledgeBase]:
-        ...
+    async def list_kbs(
+        self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
+    ) -> list[KnowledgeBase]: ...
 
-    async def list_stuck_ingesting(self, limit: int = 100) -> List[KnowledgeBase]:
-        ...
-
-    async def delete_kb(self, kb_id: str) -> None:
-        ...
+    async def delete_kb(self, kb_id: str) -> None: ...
 
     async def update_status(
-            self,
-            kb_id: str,
-            status: KBStatus,
-            error: Optional[str] = None,
-    ) -> None:
-        ...
+        self,
+        kb_id: str,
+        status: KBStatus,
+        error: str | None = None,
+    ) -> None: ...
 
-    async def save_document(self, document: KnowledgeDocument) -> None:
-        ...
+    async def save_document(self, document: KnowledgeDocument) -> None: ...
 
     async def insert_document(self, document: KnowledgeDocument) -> None:
         """Insert a new logical document without updating an existing row."""
         ...
 
-    async def list_documents(self, kb_id: str) -> List[KnowledgeDocument]:
-        ...
+    async def list_documents(self, kb_id: str) -> list[KnowledgeDocument]: ...
 
-    async def get_document(self, doc_id: str) -> Optional[KnowledgeDocument]:
-        ...
+    async def get_document(self, doc_id: str) -> KnowledgeDocument | None: ...
 
     async def get_document_for_build(
-            self,
-            doc_id: str,
-    ) -> Optional[KnowledgeDocument]:
+        self,
+        doc_id: str,
+    ) -> KnowledgeDocument | None:
         """Internal raw logical-document lookup for candidate construction."""
         ...
 
-    async def delete_document(self, doc_id: str) -> None:
-        ...
+    async def delete_document(self, doc_id: str) -> None: ...
 
-    async def count_documents(self, kb_id: str) -> int:
-        ...
+    async def count_documents(self, kb_id: str) -> int: ...
 
     async def update_document_status(
-            self,
-            doc_id: str,
-            status: DocStatus,
-            error: str | None | UnsetType = UNSET,
-            warning: str | None | UnsetType = UNSET,
-            page_count: Optional[int] = None,
-    ) -> None:
-        ...
+        self,
+        doc_id: str,
+        status: DocStatus,
+        error: str | UnsetType | None = UNSET,
+        warning: str | UnsetType | None = UNSET,
+        page_count: int | None = None,
+    ) -> None: ...
 
-    async def clear_index_data(self, kb_id: str) -> None:
-        ...
+    async def clear_index_data(self, kb_id: str) -> None: ...
 
-    async def replace_index_chunks(self, kb_id: str, chunks: List[KnowledgeChunk]) -> None:
+    async def replace_index_chunks(self, kb_id: str, chunks: list[KnowledgeChunk]) -> None:
         """Atomically replace all chunk index data for a knowledge base."""
         ...
 
-    async def save_chunks(self, chunks: List[KnowledgeChunk]) -> None:
-        ...
+    async def save_chunks(self, chunks: list[KnowledgeChunk]) -> None: ...
 
     async def replace_candidate_chunks(
-            self,
-            kb_id: str,
-            version_id: str,
-            chunks: List[KnowledgeChunk],
+        self,
+        kb_id: str,
+        version_id: str,
+        chunks: list[KnowledgeChunk],
     ) -> None:
         """Replace only one building candidate's chunk rows."""
         ...
 
-    async def clone_version_chunks(
-            self,
-            kb_id: str,
-            source_version_id: str,
-            target_version_id: str,
-            document_ids: List[str],
-    ) -> List[KnowledgeChunk]:
-        """Clone manifest-selected active chunks into one building candidate."""
-        ...
-
     async def replace_candidate_graph(
-            self,
-            kb_id: str,
-            version_id: str,
-            entities: List[KnowledgeEntity],
-            relations: List[KnowledgeRelation],
-            refs: List[KnowledgeEntityRef],
+        self,
+        kb_id: str,
+        version_id: str,
+        entities: list[KnowledgeEntity],
+        relations: list[KnowledgeRelation],
+        refs: list[KnowledgeEntityRef],
     ) -> None:
         """Replace only one building candidate's graph rows."""
         ...
 
     async def upsert_candidate_graph_batch(
-            self,
-            kb_id: str,
-            version_id: str,
-            entities: List[KnowledgeEntity],
-            relations: List[KnowledgeRelation],
-            refs: List[KnowledgeEntityRef],
+        self,
+        kb_id: str,
+        version_id: str,
+        entities: list[KnowledgeEntity],
+        relations: list[KnowledgeRelation],
+        refs: list[KnowledgeEntityRef],
     ) -> None:
         """Atomically merge one retry-safe graph extraction batch."""
         ...
 
     async def get_candidate_index_metrics(
-            self,
-            kb_id: str,
-            version_id: str,
-    ) -> Dict[str, int]:
+        self,
+        kb_id: str,
+        version_id: str,
+    ) -> dict[str, int]:
         """Validate same-version closure and return committed row counts."""
         ...
 
     async def vector_search_chunks(
-            self,
-            kb_id: str,
-            query_embedding: List[float],
-            limit: int = 20,
-    ) -> List[Tuple[KnowledgeChunk, KnowledgeDocument, float]]:
-        ...
+        self,
+        kb_id: str,
+        query_embedding: list[float],
+        limit: int = 20,
+    ) -> list[tuple[KnowledgeChunk, KnowledgeDocument, float]]: ...
 
     async def bm25_search_chunks(
-            self,
-            kb_id: str,
-            segmented_query: str,
-            limit: int = 20,
-    ) -> List[Tuple[KnowledgeChunk, KnowledgeDocument, float]]:
-        ...
+        self,
+        kb_id: str,
+        segmented_query: str,
+        limit: int = 20,
+    ) -> list[tuple[KnowledgeChunk, KnowledgeDocument, float]]: ...
 
     async def vector_search_chunks_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            query_embedding: List[float],
-            limit: int = 20,
-    ) -> List[VersionedKnowledgeChunk]:
+        self,
+        kb_id: str,
+        version_id: str,
+        query_embedding: list[float],
+        limit: int = 20,
+    ) -> list[VersionedKnowledgeChunk]:
         """Search only one exact published version; never use active/NULL."""
         ...
 
     async def bm25_search_chunks_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            segmented_query: str,
-            limit: int = 20,
-    ) -> List[VersionedKnowledgeChunk]:
+        self,
+        kb_id: str,
+        version_id: str,
+        segmented_query: str,
+        limit: int = 20,
+    ) -> list[VersionedKnowledgeChunk]:
         """Search mandatory keyword rows in one exact published version."""
         ...
 
     async def get_parents_by_ids_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            parent_ids: List[str],
-    ) -> List[KnowledgeChunk]:
-        ...
+        self,
+        kb_id: str,
+        version_id: str,
+        parent_ids: list[str],
+    ) -> list[KnowledgeChunk]: ...
 
     async def get_chunks_by_ids_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            chunk_ids: List[str],
-    ) -> List[VersionedKnowledgeChunk]:
-        ...
+        self,
+        kb_id: str,
+        version_id: str,
+        chunk_ids: list[str],
+    ) -> list[VersionedKnowledgeChunk]: ...
 
     async def get_document_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            doc_id: str,
-    ) -> Optional[Tuple[KnowledgeDocument, str]]:
+        self,
+        kb_id: str,
+        version_id: str,
+        doc_id: str,
+    ) -> tuple[KnowledgeDocument, str] | None:
         """Return the logical document plus exact manifest revision."""
         ...
 
     async def list_chunks_for_document_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            doc_id: str,
-            page_no: Optional[int] = None,
-            limit: int = 20,
-    ) -> List[KnowledgeChunk]:
-        ...
+        self,
+        kb_id: str,
+        version_id: str,
+        doc_id: str,
+        page_no: int | None = None,
+        limit: int = 20,
+    ) -> list[KnowledgeChunk]: ...
 
     async def read_document_page_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            doc_id: str,
-            document_revision_id: str,
-            *,
-            page_no: Optional[int] = None,
-            cursor: Optional[str] = None,
-            limit: int = 30,
+        self,
+        kb_id: str,
+        version_id: str,
+        doc_id: str,
+        document_revision_id: str,
+        *,
+        page_no: int | None = None,
+        cursor: str | None = None,
+        limit: int = 30,
     ) -> DocumentPage:
         """Read parent chunks from one exact published manifest revision."""
         ...
 
-    async def get_parents_by_ids(self, parent_ids: List[str]) -> List[KnowledgeChunk]:
-        ...
+    async def get_parents_by_ids(self, parent_ids: list[str]) -> list[KnowledgeChunk]: ...
 
-    async def get_chunks_by_ids(self, chunk_ids: List[str]) -> List[KnowledgeChunk]:
-        ...
+    async def get_chunks_by_ids(self, chunk_ids: list[str]) -> list[KnowledgeChunk]: ...
 
     async def list_chunks_for_document(
-            self,
-            doc_id: str,
-            page_no: Optional[int] = None,
-            limit: int = 20,
-    ) -> List[KnowledgeChunk]:
-        ...
+        self,
+        doc_id: str,
+        page_no: int | None = None,
+        limit: int = 20,
+    ) -> list[KnowledgeChunk]: ...
 
-    async def purge_documents_index_data(self, doc_ids: List[str]) -> None:
-        ...
+    async def purge_documents_index_data(self, doc_ids: list[str]) -> None: ...
 
-    async def count_ready_documents(self, kb_ids: List[str]) -> Dict[str, int]:
-        ...
+    async def count_ready_documents(self, kb_ids: list[str]) -> dict[str, int]: ...
 
-    async def count_child_chunks(self, kb_id: str) -> int:
-        ...
+    async def count_child_chunks(self, kb_id: str) -> int: ...
 
     async def list_documents_page(
-            self,
-            kb_id: str,
-            limit: int = 50,
-            offset: int = 0,
-    ) -> Tuple[List[KnowledgeDocument], int]:
-        ...
+        self,
+        kb_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[KnowledgeDocument], int]: ...
 
-    async def mark_documents_pending(self, kb_id: str) -> None:
-        ...
+    async def mark_documents_pending(self, kb_id: str) -> None: ...
 
-    async def list_entities(self, kb_id: str, name: Optional[str] = None) -> List[KnowledgeEntity]:
-        ...
+    async def list_entities(self, kb_id: str, name: str | None = None) -> list[KnowledgeEntity]: ...
 
     async def list_relations_for_entities(
-            self,
-            kb_id: str,
-            entity_ids: List[str],
-    ) -> List[KnowledgeRelation]:
-        ...
+        self,
+        kb_id: str,
+        entity_ids: list[str],
+    ) -> list[KnowledgeRelation]: ...
 
-    async def get_related_chunk_ids(self, kb_id: str, chunk_ids: List[str], limit: int = 20) -> List[str]:
-        ...
+    async def get_related_chunk_ids(
+        self, kb_id: str, chunk_ids: list[str], limit: int = 20
+    ) -> list[str]: ...
 
     async def list_entities_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            name: Optional[str] = None,
-    ) -> List[KnowledgeEntity]:
-        ...
+        self,
+        kb_id: str,
+        version_id: str,
+        name: str | None = None,
+    ) -> list[KnowledgeEntity]: ...
 
     async def list_entities_page_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            *,
-            q: Optional[str],
-            after: Optional[Tuple[str, str]],
-            limit: int,
-    ) -> Tuple[List[KnowledgeEntity], Optional[Tuple[str, str]]]:
+        self,
+        kb_id: str,
+        version_id: str,
+        *,
+        q: str | None,
+        after: tuple[str, str] | None,
+        limit: int,
+    ) -> tuple[list[KnowledgeEntity], tuple[str, str] | None]:
         """Return a deterministic keyset page from one published graph."""
         ...
 
     async def get_entities_by_ids_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            entity_ids: List[str],
-    ) -> List[KnowledgeEntity]:
+        self,
+        kb_id: str,
+        version_id: str,
+        entity_ids: list[str],
+    ) -> list[KnowledgeEntity]:
         """Resolve exact-version relation endpoints."""
         ...
 
     async def list_relations_for_entities_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            entity_ids: List[str],
-    ) -> List[KnowledgeRelation]:
-        ...
+        self,
+        kb_id: str,
+        version_id: str,
+        entity_ids: list[str],
+    ) -> list[KnowledgeRelation]: ...
 
     async def get_related_chunk_ids_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            chunk_ids: List[str],
-            limit: int = 20,
-    ) -> List[str]:
-        ...
+        self,
+        kb_id: str,
+        version_id: str,
+        chunk_ids: list[str],
+        limit: int = 20,
+    ) -> list[str]: ...

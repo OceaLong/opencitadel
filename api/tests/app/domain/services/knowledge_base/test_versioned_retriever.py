@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -17,9 +15,18 @@ from app.domain.repositories.knowledge_base_repository import (
     KNOWLEDGE_EMBEDDING_DIMENSION,
     VersionedKnowledgeChunk,
 )
-from app.domain.services.knowledge_base.retriever import (
-    HybridRetriever,
-    RerankSettings,
+from app.domain.runtime_policy import (
+    KnowledgeRerankPolicy,
+    KnowledgeRetrievalPolicy,
+    KnowledgeRetrievalRunPolicy,
+)
+from app.domain.services.knowledge_base.retriever import HybridRetriever
+
+_POLICY = KnowledgeRetrievalRunPolicy(
+    vector_enabled=True,
+    graph_enabled=True,
+    retrieval=KnowledgeRetrievalPolicy(),
+    rerank=KnowledgeRerankPolicy(enabled=False),
 )
 
 
@@ -60,14 +67,11 @@ def _version(
         id=version_id,
         knowledge_base_id="kb1",
         state=state,
-        capabilities=capabilities
-        or {"vector_search": True, "graph_search": False},
+        capabilities=capabilities or {"vector_search": True, "graph_search": False},
         degraded_reasons=(
-            ("VECTOR_INDEX_UNAVAILABLE",)
-            if state is KnowledgeVersionState.DEGRADED
-            else ()
+            ("VECTOR_INDEX_UNAVAILABLE",) if state is KnowledgeVersionState.DEGRADED else ()
         ),
-        published_at=datetime.now(timezone.utc) if published else None,
+        published_at=datetime.now(UTC) if published else None,
     )
 
 
@@ -106,8 +110,8 @@ def _retriever(
     uow = _Uow(repo, _VersionRepo(version))
     retriever = HybridRetriever(
         uow_factory=lambda: uow,
+        policy=_POLICY,
         vector_service=vector,
-        rerank_settings=RerankSettings(enabled=False),
     )
     retriever._rerank = MagicMock()
     retriever._rerank.rerank = AsyncMock(
@@ -158,9 +162,7 @@ async def test_embedding_failure_returns_bm25_with_truthful_effective_metadata()
     vector = MagicMock()
     vector.embed = AsyncMock(side_effect=TimeoutError("embedding timeout"))
 
-    response = await _retriever(repo, _version(), vector).retrieve(
-        "kb1", "kbv1", "关键词", limit=5
-    )
+    response = await _retriever(repo, _version(), vector).retrieve("kb1", "kbv1", "关键词", limit=5)
 
     assert response.items
     assert response.capabilities["vector_search"] is False
@@ -194,10 +196,12 @@ async def test_vector_disabled_skips_embedding_and_vector_sql():
 
     response = await _retriever(
         repo,
-        _version(capabilities={
-            "vector_search": False,
-            "graph_search": False,
-        }),
+        _version(
+            capabilities={
+                "vector_search": False,
+                "graph_search": False,
+            }
+        ),
         vector,
     ).retrieve("kb1", "kbv1", "keyword", limit=3)
 
@@ -215,24 +219,18 @@ async def test_bm25_failure_is_not_silently_converted_to_empty_success():
     vector.embed = AsyncMock(return_value=_valid_embedding())
 
     with pytest.raises(RuntimeError, match="tsvector down"):
-        await _retriever(repo, _version(), vector).retrieve(
-            "kb1", "kbv1", "keyword", limit=3
-        )
+        await _retriever(repo, _version(), vector).retrieve("kb1", "kbv1", "keyword", limit=3)
 
 
 @pytest.mark.anyio
 async def test_missing_revision_identity_fails_closed():
     repo = _KnowledgeRepo()
-    repo.bm25_search_chunks_for_version.return_value = [
-        _record(revision_id=None)
-    ]
+    repo.bm25_search_chunks_for_version.return_value = [_record(revision_id=None)]
     vector = MagicMock()
     vector.embed = AsyncMock(return_value=_valid_embedding())
 
     with pytest.raises(ValueError, match="revision"):
-        await _retriever(repo, _version(), vector).retrieve(
-            "kb1", "kbv1", "keyword", limit=3
-        )
+        await _retriever(repo, _version(), vector).retrieve("kb1", "kbv1", "keyword", limit=3)
 
 
 @pytest.mark.anyio
@@ -253,9 +251,7 @@ async def test_candidate_failed_and_missing_versions_return_no_partial_data(
     vector.embed = AsyncMock(return_value=_valid_embedding())
 
     with pytest.raises(ValueError, match=message):
-        await _retriever(repo, version, vector).retrieve(
-            "kb1", "kbv1", "keyword", limit=3
-        )
+        await _retriever(repo, version, vector).retrieve("kb1", "kbv1", "keyword", limit=3)
 
     repo.bm25_search_chunks_for_version.assert_not_awaited()
     repo.vector_search_chunks_for_version.assert_not_awaited()
@@ -264,9 +260,7 @@ async def test_candidate_failed_and_missing_versions_return_no_partial_data(
 @pytest.mark.anyio
 async def test_parent_expansion_rejects_cross_version_parent():
     repo = _KnowledgeRepo()
-    repo.bm25_search_chunks_for_version.return_value = [
-        _record(parent_id="parent-v1")
-    ]
+    repo.bm25_search_chunks_for_version.return_value = [_record(parent_id="parent-v1")]
     repo.get_parents_by_ids_for_version.return_value = [
         KnowledgeChunk(
             id="parent-v1",
@@ -284,18 +278,14 @@ async def test_parent_expansion_rejects_cross_version_parent():
     )
 
     assert response.items[0].content == "v1 only"
-    repo.get_parents_by_ids_for_version.assert_awaited_once_with(
-        "kb1", "kbv1", ["parent-v1"]
-    )
+    repo.get_parents_by_ids_for_version.assert_awaited_once_with("kb1", "kbv1", ["parent-v1"])
 
 
 @pytest.mark.anyio
 async def test_vector_sql_failure_keeps_bm25_and_one_degradation_reason():
     repo = _KnowledgeRepo()
     repo.bm25_search_chunks_for_version.return_value = [_record()]
-    repo.vector_search_chunks_for_version.side_effect = RuntimeError(
-        "pgvector unavailable"
-    )
+    repo.vector_search_chunks_for_version.side_effect = RuntimeError("pgvector unavailable")
     vector = MagicMock()
     vector.embed = AsyncMock(return_value=_valid_embedding())
 
@@ -345,17 +335,15 @@ async def test_vector_transaction_rolls_back_before_bm25_fallback_returns():
     vector.embed = AsyncMock(return_value=_valid_embedding())
     retriever = HybridRetriever(
         uow_factory=factory,
+        policy=_POLICY,
         vector_service=vector,
-        rerank_settings=RerankSettings(enabled=False),
     )
     retriever._rerank = MagicMock()
     retriever._rerank.rerank = AsyncMock(
         side_effect=lambda query, candidates, top_k: candidates[:top_k]
     )
 
-    response = await retriever.retrieve(
-        "kb1", "kbv1", "keyword", limit=3
-    )
+    response = await retriever.retrieve("kb1", "kbv1", "keyword", limit=3)
 
     assert [item.chunk.id for item in response.items] == ["chunk-v1"]
     assert response.capabilities["vector_search"] is False
@@ -366,18 +354,18 @@ async def test_vector_transaction_rolls_back_before_bm25_fallback_returns():
 async def test_graph_failure_keeps_core_results_and_degrades_graph_only():
     repo = _KnowledgeRepo()
     repo.bm25_search_chunks_for_version.return_value = [_record()]
-    repo.get_related_chunk_ids_for_version.side_effect = RuntimeError(
-        "graph unavailable"
-    )
+    repo.get_related_chunk_ids_for_version.side_effect = RuntimeError("graph unavailable")
     vector = MagicMock()
     vector.embed = AsyncMock()
 
     response = await _retriever(
         repo,
-        _version(capabilities={
-            "vector_search": False,
-            "graph_search": True,
-        }),
+        _version(
+            capabilities={
+                "vector_search": False,
+                "graph_search": True,
+            }
+        ),
         vector,
     ).retrieve("kb1", "kbv1", "keyword", limit=3)
 
@@ -398,10 +386,12 @@ async def test_rrf_ties_and_limit_are_deterministic():
 
     response = await _retriever(
         repo,
-        _version(capabilities={
-            "vector_search": False,
-            "graph_search": False,
-        }),
+        _version(
+            capabilities={
+                "vector_search": False,
+                "graph_search": False,
+            }
+        ),
         vector,
     ).retrieve("kb1", "kbv1", "keyword", limit=1)
 
@@ -428,9 +418,7 @@ async def test_degradation_reasons_are_stably_deduplicated():
         }
     )
 
-    response = await _retriever(repo, version, vector).retrieve(
-        "kb1", "kbv1", "keyword", limit=3
-    )
+    response = await _retriever(repo, version, vector).retrieve("kb1", "kbv1", "keyword", limit=3)
 
     assert response.degraded_reasons == (
         "VECTOR_INDEX_UNAVAILABLE",

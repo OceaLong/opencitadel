@@ -1,14 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+from app.domain.models.scheduled_job import ScheduledRunStatus
 
 
 class NotifyChannelRequest(BaseModel):
     type: str = "mcp"
-    server_name: str = ""
+    server_id: str = ""
     channel_arg: str = ""
 
 
@@ -17,69 +18,67 @@ class CreateScheduledJobRequest(BaseModel):
     trigger_type: Literal["cron", "interval", "webhook"] = "interval"
     trigger_spec: str = "3600"
     prompt_template: str
-    skill_id: Optional[str] = None
-    model_id: Optional[str] = None
-    codebase_id: Optional[str] = None
-    knowledge_base_id: Optional[str] = None
-    notify_channels: List[NotifyChannelRequest] = Field(default_factory=list)
-    operator_scope: Optional[str] = None
-    operator_domains: List[str] = Field(default_factory=list)
-    gate_profile: Optional[str] = None
+    skill_id: str | None = None
+    model_id: str | None = None
+    codebase_id: str | None = None
+    knowledge_base_id: str | None = None
+    notify_channels: list[NotifyChannelRequest] = Field(default_factory=list)
+    operator_scope: str | None = None
+    operator_domains: list[str] = Field(default_factory=list)
     enabled: bool = True
     timezone: str = "UTC"
 
 
 class UpdateScheduledJobRequest(BaseModel):
-    name: Optional[str] = None
-    trigger_type: Optional[Literal["cron", "interval", "webhook"]] = None
-    trigger_spec: Optional[str] = None
-    prompt_template: Optional[str] = None
-    skill_id: Optional[str] = None
-    model_id: Optional[str] = None
-    codebase_id: Optional[str] = None
-    knowledge_base_id: Optional[str] = None
-    notify_channels: Optional[List[NotifyChannelRequest]] = None
-    operator_scope: Optional[str] = None
-    operator_domains: Optional[List[str]] = None
-    gate_profile: Optional[str] = None
-    enabled: Optional[bool] = None
-    timezone: Optional[str] = None
+    name: str | None = None
+    trigger_type: Literal["cron", "interval", "webhook"] | None = None
+    trigger_spec: str | None = None
+    prompt_template: str | None = None
+    skill_id: str | None = None
+    model_id: str | None = None
+    codebase_id: str | None = None
+    knowledge_base_id: str | None = None
+    notify_channels: list[NotifyChannelRequest] | None = None
+    operator_scope: str | None = None
+    operator_domains: list[str] | None = None
+    enabled: bool | None = None
+    timezone: str | None = None
 
 
 class ScheduledJobResponse(BaseModel):
     id: str
     name: str
     owner_user_id: str
-    team_id: Optional[str] = None
+    team_id: str | None = None
     trigger_type: str
     trigger_spec: str
     prompt_template: str
-    skill_id: Optional[str] = None
-    model_id: Optional[str] = None
-    codebase_id: Optional[str] = None
-    knowledge_base_id: Optional[str] = None
-    notify_channels: List[NotifyChannelRequest] = Field(default_factory=list)
-    operator_scope: Optional[str] = None
-    operator_domains: List[str] = Field(default_factory=list)
-    gate_profile: Optional[str] = None
+    skill_id: str | None = None
+    model_id: str | None = None
+    codebase_id: str | None = None
+    knowledge_base_id: str | None = None
+    notify_channels: list[NotifyChannelRequest] = Field(default_factory=list)
+    operator_scope: str | None = None
+    operator_domains: list[str] = Field(default_factory=list)
     enabled: bool
     timezone: str = "UTC"
     source_type: str = "generic"
-    source_id: Optional[str] = None
-    next_run_at: Optional[datetime] = None
-    last_run_at: Optional[datetime] = None
-    last_run_status: Optional[str] = None
-    last_run_session_id: Optional[str] = None
-    webhook_token: Optional[str] = None
+    source_id: str | None = None
+    next_run_at: datetime | None = None
+    last_run_at: datetime | None = None
+    last_run_status: ScheduledRunStatus | None = None
+    last_run_session_id: str | None = None
+    last_execution_run_id: UUID | None = None
+    webhook_token: str | None = None
 
 
 class CreateScheduledJobResponse(BaseModel):
     job: ScheduledJobResponse
-    webhook_secret: Optional[str] = None
+    webhook_secret: str | None = None
 
 
 class ScheduledJobListResponse(BaseModel):
-    jobs: List[ScheduledJobResponse]
+    jobs: list[ScheduledJobResponse]
 
 
 class WebhookSecretResponse(BaseModel):

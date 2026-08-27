@@ -1,9 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+import builtins
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.audit_log import AuditLog
@@ -15,12 +14,23 @@ from app.domain.services.audit_chain import (
     entry_fields,
 )
 from app.infrastructure.models.audit_log import AuditLogORM
-from core.config import get_settings
 
 
 class DBAuditRepository(AuditRepository):
-    def __init__(self, db_session: AsyncSession) -> None:
+    def __init__(
+        self,
+        db_session: AsyncSession,
+        *,
+        signing_key: str,
+        signing_key_id: str,
+    ) -> None:
+        if not signing_key:
+            raise ValueError("audit signing key must not be empty")
+        if not signing_key_id.strip():
+            raise ValueError("audit signing key id must not be empty")
         self.db_session = db_session
+        self._signing_key = signing_key
+        self._signing_key_id = signing_key_id
 
     async def add(self, log: AuditLog) -> None:
         await self.db_session.execute(
@@ -36,10 +46,8 @@ class DBAuditRepository(AuditRepository):
         result = await self.db_session.execute(last_stmt)
         last = result.first()
         next_seq = (last.chain_seq if last and last.chain_seq else 0) + 1
-        prev_hash = (last.entry_hash if last and last.entry_hash else GENESIS)
+        prev_hash = last.entry_hash if last and last.entry_hash else GENESIS
 
-        settings = get_settings()
-        secret = settings.audit_signing_key
         fields = entry_fields(
             chain_seq=next_seq,
             id=log.id,
@@ -53,9 +61,9 @@ class DBAuditRepository(AuditRepository):
             metadata=log.metadata,
             created_at=log.created_at,
         )
-        entry_hash = compute_entry_hash(secret, fields, prev_hash)
+        entry_hash = compute_entry_hash(self._signing_key, fields, prev_hash)
         log.chain_seq = next_seq
-        log.signing_key_id = settings.audit_signing_key_id
+        log.signing_key_id = self._signing_key_id
         log.prev_hash = prev_hash
         log.entry_hash = entry_hash
         self.db_session.add(AuditLogORM.from_domain(log))
@@ -63,15 +71,15 @@ class DBAuditRepository(AuditRepository):
     async def list(
         self,
         *,
-        actor_user_id: Optional[str] = None,
-        action: Optional[str] = None,
-        start_at: Optional[datetime] = None,
-        end_at: Optional[datetime] = None,
-        resource_id: Optional[str] = None,
-        resource_type: Optional[str] = None,
+        actor_user_id: str | None = None,
+        action: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        resource_id: str | None = None,
+        resource_type: str | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[AuditLog]:
+    ) -> list[AuditLog]:
         stmt = select(AuditLogORM)
         if actor_user_id:
             stmt = stmt.where(AuditLogORM.actor_user_id == actor_user_id)
@@ -93,7 +101,7 @@ class DBAuditRepository(AuditRepository):
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
 
-    async def get_by_id(self, log_id: str) -> Optional[AuditLog]:
+    async def get_by_id(self, log_id: str) -> AuditLog | None:
         stmt = select(AuditLogORM).where(AuditLogORM.id == log_id)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
@@ -102,9 +110,9 @@ class DBAuditRepository(AuditRepository):
     async def list_chained(
         self,
         *,
-        limit: Optional[int] = None,
-        resource_id: Optional[str] = None,
-    ) -> List[AuditLog]:
+        limit: int | None = None,
+        resource_id: str | None = None,
+    ) -> builtins.list[AuditLog]:
         stmt = select(AuditLogORM).where(AuditLogORM.chain_seq.isnot(None))
         if resource_id:
             stmt = stmt.where(AuditLogORM.resource_id == resource_id)
@@ -117,12 +125,12 @@ class DBAuditRepository(AuditRepository):
     async def count(
         self,
         *,
-        actor_user_id: Optional[str] = None,
-        action: Optional[str] = None,
-        start_at: Optional[datetime] = None,
-        end_at: Optional[datetime] = None,
-        resource_id: Optional[str] = None,
-        resource_type: Optional[str] = None,
+        actor_user_id: str | None = None,
+        action: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        resource_id: str | None = None,
+        resource_type: str | None = None,
     ) -> int:
         stmt = select(func.count()).select_from(AuditLogORM)
         if actor_user_id:
@@ -142,16 +150,14 @@ class DBAuditRepository(AuditRepository):
 
     async def count_by_actions(
         self,
-        actions: List[str],
+        actions: builtins.list[str],
         *,
-        start_at: Optional[datetime] = None,
-        end_at: Optional[datetime] = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
     ) -> int:
         if not actions:
             return 0
-        stmt = select(func.count()).select_from(AuditLogORM).where(
-            AuditLogORM.action.in_(actions)
-        )
+        stmt = select(func.count()).select_from(AuditLogORM).where(AuditLogORM.action.in_(actions))
         if start_at:
             stmt = stmt.where(AuditLogORM.created_at >= start_at)
         if end_at:
@@ -163,13 +169,15 @@ class DBAuditRepository(AuditRepository):
         self,
         prefix: str,
         *,
-        start_at: Optional[datetime] = None,
-        end_at: Optional[datetime] = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
     ) -> int:
         if not prefix:
             return 0
-        stmt = select(func.count()).select_from(AuditLogORM).where(
-            AuditLogORM.action.like(f"{prefix}%")
+        stmt = (
+            select(func.count())
+            .select_from(AuditLogORM)
+            .where(AuditLogORM.action.like(f"{prefix}%"))
         )
         if start_at:
             stmt = stmt.where(AuditLogORM.created_at >= start_at)
@@ -178,7 +186,7 @@ class DBAuditRepository(AuditRepository):
         result = await self.db_session.execute(stmt)
         return int(result.scalar_one() or 0)
 
-    async def list_recent_chained(self, limit: int = 20) -> List[AuditLog]:
+    async def list_recent_chained(self, limit: int = 20) -> builtins.list[AuditLog]:
         # Same ordering key as the tail lookup in add() above (chain_seq
         # desc) -- chain_seq is the tamper-evident write-order sequence,
         # not created_at, so this sample is fit for checking whether
@@ -197,16 +205,15 @@ class DBAuditRepository(AuditRepository):
 
     async def daily_action_counts(
         self,
-        actions: List[str],
+        actions: builtins.list[str],
         *,
-        since: Optional[datetime] = None,
-    ) -> List[Dict[str, Any]]:
+        since: datetime | None = None,
+    ) -> builtins.list[dict[str, Any]]:
         if not actions:
             return []
         date_col = func.date(AuditLogORM.created_at)
-        stmt = (
-            select(date_col.label("date"), AuditLogORM.action, func.count())
-            .where(AuditLogORM.action.in_(actions))
+        stmt = select(date_col.label("date"), AuditLogORM.action, func.count()).where(
+            AuditLogORM.action.in_(actions)
         )
         if since is not None:
             stmt = stmt.where(AuditLogORM.created_at >= since)

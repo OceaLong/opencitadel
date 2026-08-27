@@ -1,14 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from types import SimpleNamespace
 
 import pytest
-
 from app.services import file as file_module
-from app.services.shell import ShellService
 from app.services import shell as shell_module
-from app.services.supervisor import SupervisorService
 from app.services import supervisor as supervisor_module
+from app.services.shell import ShellService
+from app.services.supervisor import SupervisorService
 
 
 @pytest.fixture

@@ -2,82 +2,53 @@
 
 [简体中文](automation-scheduler.zh-CN.md)
 
-This document describes scheduled jobs, webhook triggers, leader election, and notification delivery.
-
-## Overview
+Scheduled definitions are product records; each firing is a formal Automation
+Run that admits a linked Agent or Patrol Run.
 
 ```mermaid
-flowchart TD
-  Cron["Cron / interval jobs"] --> Leader["Worker leader loop"]
-  Webhook["POST /api/webhooks/{token}"] --> Dispatch["Create session + dispatch task"]
-  Leader --> Poll["Poll due scheduled_jobs"]
-  Poll --> Dispatch
-  Dispatch --> Redis["Redis task:dispatch"]
-  Redis --> Worker["Agent Worker"]
-  Worker --> Session["Session terminal hook"]
-  Session --> Notify["Inbox + optional IM"]
-  Notify --> SSE["GET /notifications/stream"]
+flowchart LR
+  Cron[Cron / interval] --> Leader[Leased scheduler tick]
+  Webhook[Signed webhook] --> Service[ScheduledJobService]
+  Manual[Manual trigger] --> Service
+  Leader --> Service
+  Service --> DB[(Job row + session + Run command)]
+  DB --> Kernel[Execution kernel]
+  Kernel --> Automation[Automation Run]
+  Automation --> Child[Agent / Patrol child Run]
+  Child --> Projection[Run projection]
+  Projection --> Reconcile[Job summary + notification]
 ```
 
-- **Scheduler loop** runs on Worker processes; only the Redis lease holder polls cron/interval jobs.
-- **Webhook jobs** are triggered via HTTP and skip the poll loop.
-- **Notifications** persist to PostgreSQL and publish on Redis channel `notify:{user_id}`.
+The scheduler loop runs inside execution-kernel replicas. A short Redis leader
+lease reduces duplicate polling, but it is not correctness state. Database row
+locking, deterministic firing ids, command idempotency, and the active-Run
+projection prevent duplicate admission. Losing Redis only causes another
+replica to poll.
 
-## Leader election
+## Triggers
 
-- Redis key: `scheduler:leader`
-- Each worker uses a unique ID (`hostname-uuid`).
-- `SET scheduler:leader <worker_id> NX EX <lease>` acquires leadership.
-- Non-leaders **must not** extend the lease.
-- The current leader renews with `EXPIRE` only when `GET scheduler:leader == worker_id`.
+- Cron and interval ticks use the scheduled `next_run_at` in the firing id.
+- Manual triggers use a new explicit firing id.
+- Webhooks verify `HMAC-SHA256(raw_body, secret)` and derive a body/time-window
+  firing id. The secret is stored in a versioned encrypted envelope and shown
+  only at creation/rotation.
+- Patrol-bound jobs admit a Patrol Run; generic jobs create a session and an
+  Automation Run linked to an Agent child Run.
 
-Implementation: `run_scheduler_loop` in the Worker process.
+Resource access and concrete active versions are validated/bound before the
+command transaction commits. A job that already has an active formal Run is
+not admitted again.
 
-## Due job polling
+## Status and recovery
 
-- Polls `scheduled_jobs` where `enabled`, `next_run_at <= now()`, and `last_run_status != running`.
-- Skips webhook-triggered jobs in the poll loop (webhooks use the HTTP endpoint).
-- On trigger failure, sets `last_run_status=failed` and backs off `next_run_at`.
+`last_run_*` fields are query summaries. `last_execution_run_id` links the job
+to the authoritative Run projection. Reconciliation copies terminal Run state
+to the summary and sends durable inbox notifications plus optional MCP IM.
+Process death cannot manufacture a terminal state.
 
-## Run lifecycle
+The same leased loop runs bounded knowledge/codebase version GC and patrol
+retention. These operations use their own database leases and never delete
+active/bound versions or audit rows.
 
-| Phase | `last_run_status` | Notes |
-|-------|-------------------|-------|
-| Trigger | `running` | Creates session, dispatches Redis Stream task |
-| Session completed | `completed` | Updated via `ScheduledJobService.on_session_terminal` |
-| Session failed/cancelled | `failed` / `cancelled` | Same hook |
-
-## Webhook security
-
-- `POST /api/webhooks/{token}` requires header `X-Webhook-Signature`.
-- Signature = `HMAC-SHA256(raw_body, webhook_secret)` hex digest.
-- Secret stored encrypted (Fernet via `API_KEY_SECRET`); shown once on create/rotate.
-- Idempotency Redis key: `webhook:idem:{token}:{sha256(body)}` — scoped per job token.
-- Duplicate payload returns existing `session_id` with `{ duplicate: true }`.
-- Missing/invalid signature → HTTP 401.
-
-See also [Security model — Webhook automation](security-model.md#webhook-automation).
-
-## Notifications
-
-| Channel | Mechanism |
-|---------|-----------|
-| **Inbox** | Rows in `notifications` table; UI lists and marks read |
-| **SSE** | `GET /api/notifications/stream` subscribes to Redis `notify:{user_id}` |
-| **IM fallback** | Optional MCP `notify_channels` on scheduled jobs (fail-silent) |
-
-Event types include `job_started` and `job_complete` when automation runs.
-
-## UI entry
-
-- Route: `/automation`
-- Create jobs with cron, interval, or webhook trigger; bind skill, model, codebase, or knowledge base.
-
-## Configuration
-
-See `SchedulerConfig` in `AppConfig` (`api/config.yaml` or DB when `USE_DB_APP_CONFIG=true`).
-
-## Related docs
-
-- [Security model](security-model.md)
-- [Events](events.md)
+Live scheduler admission, polling, lease, concurrency, and webhook idempotency
+are under `scheduler` in the Operations Policy. Job definitions live at `/automation`.

@@ -1,12 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-import base64
 import asyncio
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from app.domain.models.llm_model import ModelCapabilities
+from app.domain.models.inference import InferenceCapabilities
 from app.infrastructure.observability.llm_metrics import record_multimodal_fallback
 
 logger = logging.getLogger(__name__)
@@ -18,7 +15,7 @@ _FALLBACK_IMAGE_NOTE = "原始消息包含图片附件，因模型服务连接�
 
 def _guess_image_mime_from_url(url: str) -> str:
     lower = url.lower().split("?")[0]
-    if lower.endswith(".jpg") or lower.endswith(".jpeg"):
+    if lower.endswith((".jpg", ".jpeg")):
         return "image/jpeg"
     if lower.endswith(".webp"):
         return "image/webp"
@@ -27,7 +24,7 @@ def _guess_image_mime_from_url(url: str) -> str:
     return "image/png"
 
 
-def _has_multimodal_image_content(messages: List[Dict[str, Any]]) -> bool:
+def _has_multimodal_image_content(messages: list[dict[str, Any]]) -> bool:
     for message in messages:
         content = message.get("content")
         if not isinstance(content, list):
@@ -38,8 +35,8 @@ def _has_multimodal_image_content(messages: List[Dict[str, Any]]) -> bool:
     return False
 
 
-def _strip_multimodal_to_text(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    fallback_messages: List[Dict[str, Any]] = []
+def _strip_multimodal_to_text(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    fallback_messages: list[dict[str, Any]] = []
     for message in messages:
         cleaned = {k: v for k, v in message.items() if not k.startswith("_")}
         content = cleaned.get("content")
@@ -47,7 +44,7 @@ def _strip_multimodal_to_text(messages: List[Dict[str, Any]]) -> List[Dict[str, 
             fallback_messages.append(cleaned)
             continue
 
-        text_parts: List[str] = []
+        text_parts: list[str] = []
         had_image = False
         for part in content:
             if not isinstance(part, dict):
@@ -96,13 +93,13 @@ def is_retriable_multimodal_error(error: Exception) -> bool:
 class MultimodalFallbackMixin:
     """OpenAI-compatible LLM 多模态失败降级 mixin。"""
 
-    _capabilities: ModelCapabilities
+    _capabilities: InferenceCapabilities
 
     async def _apply_multimodal_fallback(
-            self,
-            error: Exception,
-            request_kwargs: Dict[str, Any],
-            create_fn,
+        self,
+        error: Exception,
+        request_kwargs: dict[str, Any],
+        create_fn,
     ) -> Any:
         messages = request_kwargs.get("messages") or []
         if not _has_multimodal_image_content(messages):
@@ -143,7 +140,7 @@ def openai_content_to_anthropic_parts(content: Any) -> Any:
         return content
     if not isinstance(content, list):
         return content if content is not None else ""
-    parts: List[Dict[str, Any]] = []
+    parts: list[dict[str, Any]] = []
     for part in content:
         if not isinstance(part, dict):
             continue
@@ -158,25 +155,29 @@ def openai_content_to_anthropic_parts(content: Any) -> Any:
                 continue
             if url.startswith("data:"):
                 mime_type, data = parse_data_url(url)
-                parts.append({
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": mime_type, "data": data},
-                })
-            elif url.startswith("http://") or url.startswith("https://"):
-                parts.append({
-                    "type": "image",
-                    "source": {"type": "url", "url": url},
-                })
-    return parts if parts else ""
+                parts.append(
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": mime_type, "data": data},
+                    }
+                )
+            elif url.startswith(("http://", "https://")):
+                parts.append(
+                    {
+                        "type": "image",
+                        "source": {"type": "url", "url": url},
+                    }
+                )
+    return parts or ""
 
 
-def openai_content_to_gemini_parts(content: Any) -> List[Dict[str, Any]]:
+def openai_content_to_gemini_parts(content: Any) -> list[dict[str, Any]]:
     """将 OpenAI 风格 content 转为 Gemini parts 列表。"""
     if isinstance(content, str):
         return [{"text": content}] if content else [{"text": ""}]
     if not isinstance(content, list):
         return [{"text": str(content) if content is not None else ""}]
-    parts: List[Dict[str, Any]] = []
+    parts: list[dict[str, Any]] = []
     for part in content:
         if not isinstance(part, dict):
             continue
@@ -192,13 +193,13 @@ def openai_content_to_gemini_parts(content: Any) -> List[Dict[str, Any]]:
             if url.startswith("data:"):
                 mime_type, data = parse_data_url(url)
                 parts.append({"inlineData": {"mimeType": mime_type, "data": data}})
-            elif url.startswith("http://") or url.startswith("https://"):
+            elif url.startswith(("http://", "https://")):
                 mime_type = part.get("mime_type") or _guess_image_mime_from_url(url)
                 parts.append({"fileData": {"mimeType": mime_type, "fileUri": url}})
-    return parts if parts else [{"text": ""}]
+    return parts or [{"text": ""}]
 
 
-def _int_from_path(raw: Dict[str, Any], *path: str) -> int:
+def _int_from_path(raw: dict[str, Any], *path: str) -> int:
     value: Any = raw
     for key in path:
         if not isinstance(value, dict):
@@ -210,7 +211,7 @@ def _int_from_path(raw: Dict[str, Any], *path: str) -> int:
         return 0
 
 
-def normalize_usage(raw: Optional[Dict[str, Any]]) -> Dict[str, int]:
+def normalize_usage(raw: dict[str, Any] | None) -> dict[str, int]:
     """统一 usage 字段为 prompt/completion/total/cache tokens。"""
     if not raw:
         return {
@@ -221,10 +222,7 @@ def normalize_usage(raw: Optional[Dict[str, Any]]) -> Dict[str, int]:
             "cache_write_tokens": 0,
         }
     prompt = int(
-        raw.get("prompt_tokens")
-        or raw.get("input_tokens")
-        or raw.get("promptTokenCount")
-        or 0
+        raw.get("prompt_tokens") or raw.get("input_tokens") or raw.get("promptTokenCount") or 0
     )
     completion = int(
         raw.get("completion_tokens")
@@ -242,9 +240,7 @@ def normalize_usage(raw: Optional[Dict[str, Any]]) -> Dict[str, int]:
         or 0
     )
     cache_write = int(
-        raw.get("prompt_cache_miss_tokens")
-        or raw.get("cache_creation_input_tokens")
-        or 0
+        raw.get("prompt_cache_miss_tokens") or raw.get("cache_creation_input_tokens") or 0
     )
     return {
         "prompt_tokens": prompt,

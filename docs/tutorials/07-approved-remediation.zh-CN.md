@@ -2,41 +2,25 @@
 
 # 审批通过后执行 Ops Patrol 修复
 
-教程 06 只涉及只读检查。本教程在同一个 Pack 之上增加一条范围收窄、需人工审批的写入通道：独立的 Ops Actuator 仅执行三个注册制动作——重启、扩缩容、回滚——作用于 Kubernetes Deployment/StatefulSet，且只有在 Operator 于受治理会话内批准该具体调用后才会执行。审批会话之外没有任何代码路径能调用 Actuator。
+教程 06 只有只读巡检。本教程增加独立写路径：正式 `remediation` Run 只有在持久审批
+被批准后，才能调用一个白名单 Actuator 操作。模型永远拿不到 Actuator 工具。
 
 ## 开始前
 
-需要先完成 [运行只读每日运维巡检](06-ops-patrol.zh-CN.md) 中的全部准备，并额外具备：
+先完成[只读每日 Ops Patrol](06-ops-patrol.zh-CN.md)，再准备：
 
-- 部署在目标集群中的 Ops Actuator，使用专属最小权限 ServiceAccount（仅对 Deployment/StatefulSet 有 `get`/`list`/`watch`/`patch`，对 ReplicaSet 仅 `get`/`list`——绝不涉及 Secret、`exec`、`attach`）；
-- 已注册为 Streamable HTTP MCP Server、名称严格为 `ops-actuator` 的 Actuator（执行服务按这个固定名称解析；与按 Pack 绑定的 Collector 不同，每个平台部署只有一个 Actuator）；
-- 内置 `ops-patrol-remediation` Skill——API/Worker 启动时自动 Seed，无需手工注册；
-- 除教程 06 的 `enable_ops_patrol` 外，还需要管理员启用全局功能开关 `enable_ops_patrol_remediation`；
-- 可以发起修复提案的 Operator 权限。审批发生在提案创建出的会话内，因此审批人需要拥有该会话的正常访问权限；Auditor 事后可复核结果，但不能发起或审批。
+- 使用专用最小权限 ServiceAccount 的 Ops Actuator；
+- 名称严格为 `ops-actuator` 的 Streamable HTTP 集成；
+- 全局运行时设置 `patrol_policy.remediation=enabled`；
+- 可发起和审批的 Operator；Auditor 始终只读。
 
-仅验证本地传输时可以启动：
+Actuator 只能对已注册 Deployment/StatefulSet 执行 `get/list/watch/patch`，对
+ReplicaSet 执行 `get/list`，绝不能读取 Secret 或使用 `exec`/`attach`。
 
-```bash
-docker compose --profile actuator up -d --build opencitadel-ops-actuator
-```
+## 配置 Actuator
 
-Compose Profile 与 Collector 一样不会挂载宿主机 kubeconfig。真实 Kubernetes 写操作应使用 Helm/Kustomize ServiceAccount，且绝不能将 Actuator 暴露到公网。
-
-## 准备 Actuator
-
-配置仅通过环境变量（`OPS_ACTUATOR_` 前缀）。下表中的白名单是每次写调用真正的门禁——无论会话提案什么内容，未列入白名单的 Workload 都会在任何 Kubernetes 调用前被拒绝：
-
-| 变量 | 默认值 / 范围 | 用途 |
-|------|---------------|------|
-| `TARGET_REF` | `opencitadel-local` | Pack 匹配的稳定身份标识 |
-| `ALLOWED_NAMESPACES` | `["opencitadel"]` | 非空 Namespace 白名单 |
-| `ALLOWED_WORKLOADS` | `{}` | Namespace → Workload id → `{kind, min_replicas, max_replicas}` 的 JSON 映射；未列入的 Workload 不能被任何写动作定位 |
-| `TRANSPORT` | `streamable-http` | `streamable-http` 或仅限开发用的 `stdio` |
-| `CONCURRENCY` | `4`，范围 1–8 | 同时进行的写动作上限 |
-
-完整参考（含输出上限）见 [Ops Actuator README](../../ops-actuator/README.zh-CN.md#配置参考)。
-
-Helm Values 示例：
+Actuator 配置均使用 `OPS_ACTUATOR_` 环境变量前缀。最终目标边界来自白名单，而不是
+提案文字。
 
 ```yaml
 opsActuator:
@@ -51,51 +35,62 @@ opsActuator:
         max_replicas: 10
 ```
 
-在 **设置 → 集成** 中，把内部 URL（默认 Helm Release 为 `http://opencitadel-ops-actuator:8091/mcp`）注册为 Streamable HTTP、启用，并命名为 `ops-actuator`。与 Collector 不同，Actuator 的写工具从不暴露给模型——后端执行服务直接调用它们——因此这次注册不需要额外持久化 Tool Policy Payload。
+以精确名称 `ops-actuator` 注册 `http://opencitadel-ops-actuator:8091/mcp`。
+后端 Activity 直接调用它；不得把 Actuator 加入 Agent Skill 或模型 Tool Policy。
 
-管理员打开 **设置 → 运行时 → feature_flags**，启用 `enable_ops_patrol_remediation`。
+## 发起提案
 
-## 发起修复提案
+1. 在 **Ops Patrol → Runs** 中打开可处理 Finding。
+2. 选择 **发起修复**。
+3. 选择 Restart、Scale 或 Rollback。Scale 要求正整数副本数；Rollback 固定回到上一
+   Revision。
+4. 确认精确 Workload、影响摘要与回滚说明。
+5. 提交提案。
 
-1. 打开有可处理 Finding 的 Run，进入 **Ops Patrol → Runs → {run}**。
-2. 在 Finding 卡片上点击 **发起修复**。只有依赖 `k8s_*` 探针的 Finding（工作负载可用性、重启突增）才提供自动化动作；HTTP、证书、备份、依赖等探针的检查项会显示"该检查项没有可用的自动化修复动作"。
-3. 选择动作——**重启工作负载**、**调整副本数**或**回滚工作负载**。`调整副本数` 要求正整数目标副本；`回滚工作负载` 可选填目标版本号。
-4. 确认或填写 Workload 名称。如果该检查探针从未记录过 Workload，此字段为必填才能提交。
-5. 勾选 **我已阅读影响面说明与回滚方案，确认可以执行此修复**，然后点击 **发起修复并打开审批会话**。
+API 会持久化 `PatrolRemediation(status=proposed)`，创建关联 Session，并准入一个
+`remediation` Run。在工作流发出正式审批请求前，唯一的 `remediation.execute`
+Activity 不会被创建。
 
-提交后会创建一条 `PatrolRemediation` 记录（状态 `proposed`），并打开一个运行内置 `ops-patrol-remediation` Skill、`gate_profile=strict` 的新会话，页面会自动跳转到该会话。
+## 批准或拒绝
 
-## 审批与执行
+打开关联 Session。审批卡展示 Subject `remediation.execute` 与冻结 Risk Summary。
 
-新会话只有一个工具可用——`patrol_execute_remediation`，其审批模式声明为 `always`：任何调用在真正运行前都必须先经过人工决策，会话内没有 MCP、A2A、记忆或任何其他工具访问权限。Agent 自己的这一轮对话会在会话记录中先陈述动作、目标、影响面说明与回滚提示，再调用一次工具；审批卡片本身只展示原始工具调用，因此这段自然语言说明请在对话记录中查看。
+- **批准** 发出 OwnerScope 约束的 `DecideApproval` Command；Run 恢复并调度 Activity。
+- **拒绝** 必须填写反馈；Command 使用 `rejected`，Run 以
+  `approval_rejected` 原因取消。
 
-调用到达时，会话会展示一张 **工具操作需要审批** 卡片，包含：
+审批前，本提案的 Actuator 调用次数恒为零。执行时，服务重新校验 Owner Binding、
+不可变参数 Hash、实时 Capability Baseline、Action/Target 白名单与持久化修复幂等键，
+随后流转 `proposed → executing → executed`，或记录稳定错误码。Activity 重复投递不能
+产生第二次 Mutation。
 
-- 工具名 `patrol_execute_remediation`；
-- 调用参数的原始 JSON 预览；
-- **批准** 与 **拒绝** 按钮。
+**管理后台 → 合规** 的 Governance Profile 展示审批身份、决策人、反馈、Run/Event
+链与证据。
 
-点击 **拒绝** 会打开必填的拒绝原因输入框；确认后拒绝结果会作为工具结果返回给 Agent。由于这个 Skill 被限定只能调用这一个工具，会话会自然走向它自己的正常结束，而不是被强制杀死。一旦会话到达任意终态，仍处于 `proposed` 的修复记录会被自动转为 `cancelled`，`error_code=SESSION_TERMINATED`——这条路径上 Actuator 始终没有被调用过。点击 **批准** 则放行该调用。
+## 验证闭环
 
-**在你做出决策之前，本次提案对 Actuator 的调用次数恒为零。** 该工具的审批模式是 `always`，批执行器只会把调用排队，绝不会在人工决策前调用它——放弃或拒绝会话都会让 Actuator 保持未被触碰的状态。批准后，服务会重新校验提案的参数 Hash，确认 Actuator 的实时 Capability Hash 仍与本会话构建时捕获的基线一致（漂移则拒绝），然后使用该修复记录自身持久化的幂等键——绝非工具调用本身携带的值——恰好调用一次 Actuator。修复记录随之从 `executing` 流转到 `executed`；若以上任一校验或 Actuator 调用本身失败，则流转到 `failed` 并带有稳定错误码。
+修复执行成功后，会自动针对同一冻结 Pack 准入一个验证 Patrol Run。
 
-要查看这一具体会话的完整治理档案——审批决策、工具调用链、证据完整性——切换到 **管理后台 → 合规 → {会话}**（`/admin/compliance/sessions/{sessionId}`）。
+- 关联 Check 通过：修复变为 `verified`，且只关闭原始 Finding。
+- Check 为 Warn/Fail/Error：修复以 `recheck_failed` 变为 `failed`，Finding 保持开放。
 
-## 复检闭环
+按教程 06 验证复检 Run Evidence ZIP 的 Manifest Hash 与 HMAC。修复 Run 与审批记录在
+Governance Profile 中独立可见。
 
-`executed` 状态的修复会自动对同一个 Pack 触发一次新 Run（`trigger_type=remediation`），无需手动重新运行。可从原 Run 详情页的 **修复记录** 区块的 **查看复检 Run** 链接打开。
+在临时集群中演练：
 
-- 若复检 Run 中对应检查项转为通过，修复记录变为 `verified`，原 Finding 自动被标记为已处理（`decided_by=system:remediation`），决策原因引用该修复记录与复检 Run。
-- 若检查项仍然失败或告警，修复记录变为 `failed`（`error_code=recheck_failed`），Finding 保持开放、等待人工决策。
+```bash
+PATROL_RUN_REMEDIATION_FIXTURE=true ./scripts/run-patrol-fixtures.sh
+```
 
-下载复检 Run 的证据 ZIP，按教程 06 相同的方式验证其 SHA-256 Manifest 与 HMAC——修复触发的复检产生的就是普通的巡检证据，没有单独的导出路径。发起修复的会话本身另有独立的证据与审批记录，可从上文的治理档案页面查看。
+Fixture 在无 LLM 条件下验证真实 Collector、Actuator、Kubernetes Mutation、幂等重放与
+复检路径。
 
-要在没有真实集群故障的情况下在本地演练整个闭环，可在运行 `./scripts/run-patrol-fixtures.sh` 前设置 `PATROL_RUN_REMEDIATION_FIXTURE=true`。Fixture 21（`fixture-remediation-crashloop`）会注入一个有界崩溃循环，预期 `restart_workload` 依次经过 `proposed → executing → executed → verified`，复检时 `k8s-workload-availability` 与 `k8s-restart-spike` 均转为通过。
+## 安全停用
 
-## 安全回滚
+设置 `patrol_policy.remediation=disabled`。新提案与执行 Fail Closed；只读 Patrol、既有修复
+Run、审批、Audit 与 Evidence 仍可读取。设置 `patrol_policy.admission=paused` 可停止全部新的
+Patrol/Remediation Run，同时保留导航与历史。
 
-在全局运行时设置中设 `feature_flags.enable_ops_patrol_remediation=false`。新提案会被立即拒绝——`propose()` 在触碰任何数据前就已按此开关拒绝——而教程 06 的只读巡检、既有修复历史与证据仍完全可读。重新启用不会丢失任何 `PatrolRemediation` 记录。
-
-关闭 `enable_ops_patrol`（教程 06 的开关）同样会停止修复功能，因为提案与执行都依赖同一套 Patrol Run/Finding 机制。
-
-信任边界与状态机见 [Ops Patrol 架构 — Remediation](../architecture/ops-patrol.zh-CN.md#remediation)，部署与证据细节见 [Ops Patrol 运维手册](../operations/ops-patrol.zh-CN.md)。
+参见 [Ops Patrol 架构](../architecture/ops-patrol.zh-CN.md)与
+[运维手册](../operations/ops-patrol.zh-CN.md)。

@@ -1,17 +1,18 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from app.domain.models.llm_model import LLMModel, LLMProvider
+from app.domain.models.inference import InferenceCapabilities, InferenceProvider
 from app.infrastructure.external.llm.openai_llm import OpenAILLM
+from tests.app.infrastructure.external.llm.inference_model_factory import (
+    resolved_chat_model,
+)
 
 
-def test_openai_llm_exposes_supports_multimodal():
+def test_openai_llm_exposes_vision_capability():
     llm = OpenAILLM(
-        LLMModel(
-            provider=LLMProvider.OPENAI,
+        resolved_chat_model(
+            provider=InferenceProvider.OPENAI,
             base_url="https://api.openai.com/v1",
-            api_key="sk-test",
+            credential="sk-test",
             model_name="gpt-4o",
-            supports_multimodal=True,
+            capabilities=InferenceCapabilities(vision=True),
         )
     )
-    assert llm.supports_multimodal is True
+    assert llm.capabilities.vision is True

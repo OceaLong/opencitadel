@@ -1,14 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Kubernetes Pod-based dynamic sandbox driver."""
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import logging
 import time
 import uuid
-from typing import BinaryIO, Optional, Self
+from typing import BinaryIO, Self
 
 import httpx
 
@@ -17,12 +17,13 @@ from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
 from app.infrastructure.external.browser.playwright_browser import PlaywrightBrowser
-from app.infrastructure.external.runtime_settings import get_sandbox_runtime_settings
+from app.infrastructure.external.sandbox.admission import SandboxQuota
+from app.infrastructure.external.sandbox.settings import (
+    SandboxEffectiveSettings,
+    SandboxHostAccess,
+)
 
 logger = logging.getLogger(__name__)
-
-_POD_LABEL_KEY = "app"
-_POD_LABEL_VALUE = "opencitadel-sandbox"
 
 
 def _parse_memory_limit(limit: str) -> str:
@@ -35,10 +36,21 @@ def _parse_memory_limit(limit: str) -> str:
 
 
 class KubernetesSandbox(Sandbox):
-    def __init__(self, ip: Optional[str] = None, pod_name: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        *,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+        quota: SandboxQuota,
+        ip: str | None = None,
+        pod_name: str | None = None,
+    ) -> None:
         self.client = httpx.AsyncClient(timeout=600)
         self._ip = ip
         self._pod_name = pod_name
+        self.settings = settings
+        self._host = host
+        self._quota = quota
         self._base_url = f"http://{ip}:8080" if ip else ""
         self._vnc_url = f"ws://{ip}:5901" if ip else ""
         self._cdp_url = f"http://{ip}:9222" if ip else ""
@@ -61,25 +73,24 @@ class KubernetesSandbox(Sandbox):
 
         try:
             config.load_incluster_config()
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             config.load_kube_config()
         return client.CoreV1Api()
 
     @classmethod
-    def _settings(cls):
-        return get_sandbox_runtime_settings()
+    async def list_live_sandbox_ids(
+        cls,
+        settings: SandboxEffectiveSettings,
+    ) -> set[str]:
+        return await asyncio.to_thread(cls._list_live_sync, settings)
 
     @classmethod
-    async def list_live_sandbox_ids(cls) -> set[str]:
-        return await asyncio.to_thread(cls._list_live_sync)
-
-    @classmethod
-    def _list_live_sync(cls) -> set[str]:
-        settings = cls._settings()
+    def _list_live_sync(cls, settings: SandboxEffectiveSettings) -> set[str]:
+        deployment = settings.deployment
         api = cls._api()
         pods = api.list_namespaced_pod(
-            namespace=settings.k8s_namespace,
-            label_selector=f"{_POD_LABEL_KEY}={_POD_LABEL_VALUE}",
+            namespace=deployment.k8s_namespace,
+            label_selector=deployment.k8s_pod_label,
         )
         return {
             p.metadata.name
@@ -88,55 +99,76 @@ class KubernetesSandbox(Sandbox):
         }
 
     @classmethod
-    async def _create_and_warm(cls, max_retries: Optional[int] = None) -> Self:
-        settings = cls._settings()
-        if settings.address:
-            return await cls._create_fresh()
+    async def create_and_warm(
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+        quota: SandboxQuota,
+        *,
+        max_retries: int | None = None,
+    ) -> Self:
+        deployment = settings.deployment
+        if deployment.address:
+            from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
 
-        from app.infrastructure.external.sandbox.admission import get_sandbox_quota
-
-        quota = get_sandbox_quota()
-        pod_name = f"{settings.name_prefix}-{str(uuid.uuid4())[:8]}"
-        if not await quota.acquire(pod_name):
+            ip = await DockerSandbox._resolve_hostname_to_ip(deployment.address)
+            return cls(settings=settings, host=host, quota=quota, ip=ip)
+        if not deployment.name_prefix:
+            raise RuntimeError("sandbox name prefix is not configured")
+        pod_name = f"{deployment.name_prefix}-{str(uuid.uuid4())[:8]}"
+        if not await quota.acquire(pod_name, settings.policy):
             raise RuntimeError("沙箱准入未通过：集群配额不足")
+        sandbox: Self | None = None
         try:
-            sandbox = await cls._create_fresh_with_name(pod_name)
+            ip = await asyncio.to_thread(cls._create_pod_sync, settings, pod_name)
+            sandbox = cls(
+                settings=settings,
+                host=host,
+                quota=quota,
+                ip=ip,
+                pod_name=pod_name,
+            )
             await sandbox.ensure_sandbox(max_retries=max_retries)
-        except Exception:
-            await quota.release(pod_name)
+        except BaseException:
+            try:
+                if sandbox is None:
+                    await quota.release(pod_name)
+                else:
+                    await asyncio.shield(sandbox.destroy())
+            except Exception:
+                logger.exception("Failed to compensate sandbox warmup failure: %s", pod_name)
             raise
-        from app.infrastructure.external.sandbox.sandbox_pool import SandboxPool
-
-        await SandboxPool.touch_activity(sandbox.id)
         return sandbox
 
     @classmethod
-    async def _create_fresh_with_name(cls, pod_name: str) -> Self:
-        ip = await asyncio.to_thread(cls._create_pod_sync, pod_name)
-        return cls(ip=ip, pod_name=pod_name)
-
-    @classmethod
-    def _create_pod_sync(cls, pod_name: str) -> str:
-        settings = cls._settings()
+    def _create_pod_sync(
+        cls,
+        settings: SandboxEffectiveSettings,
+        pod_name: str,
+    ) -> str:
+        deployment = settings.deployment
+        policy = settings.policy
         api = cls._api()
         from kubernetes import client
 
-        mem = _parse_memory_limit(settings.memory_limit or "1g")
-        cpu = str(settings.cpu_limit or 2)
+        mem = _parse_memory_limit(policy.memory_limit)
+        cpu = str(policy.cpu_limit)
+        configured_label_key, _, configured_label_value = deployment.k8s_pod_label.partition("=")
         pod = client.V1Pod(
             metadata=client.V1ObjectMeta(
                 name=pod_name,
                 labels={
-                    _POD_LABEL_KEY: _POD_LABEL_VALUE,
+                    configured_label_key: configured_label_value,
                     "opencitadel.io/sandbox": "true",
                     "app.kubernetes.io/component": "sandbox",
+                    "opencitadel.io/operations-revision": str(settings.operations_revision_id),
                 },
             ),
             spec=client.V1PodSpec(
                 restart_policy="Never",
                 active_deadline_seconds=max(
                     60,
-                    int((settings.ttl_minutes or 60) * 60),
+                    policy.ttl_minutes * 60,
                 ),
                 automount_service_account_token=False,
                 enable_service_links=False,
@@ -145,14 +177,12 @@ class KubernetesSandbox(Sandbox):
                     run_as_user=1000,
                     run_as_group=1000,
                     fs_group=1000,
-                    seccomp_profile=client.V1SeccompProfile(
-                        type="RuntimeDefault"
-                    ),
+                    seccomp_profile=client.V1SeccompProfile(type="RuntimeDefault"),
                 ),
                 containers=[
                     client.V1Container(
                         name="sandbox",
-                        image=settings.image or "opencitadel-sandbox",
+                        image=deployment.image or "opencitadel-sandbox",
                         ports=[
                             client.V1ContainerPort(container_port=8080),
                             client.V1ContainerPort(container_port=5901),
@@ -170,9 +200,7 @@ class KubernetesSandbox(Sandbox):
                             run_as_user=1000,
                             run_as_group=1000,
                             capabilities=client.V1Capabilities(drop=["ALL"]),
-                            seccomp_profile=client.V1SeccompProfile(
-                                type="RuntimeDefault"
-                            ),
+                            seccomp_profile=client.V1SeccompProfile(type="RuntimeDefault"),
                         ),
                         volume_mounts=[
                             client.V1VolumeMount(
@@ -191,7 +219,7 @@ class KubernetesSandbox(Sandbox):
                         env=[
                             client.V1EnvVar(
                                 name="SERVER_TIMEOUT_MINUTES",
-                                value=str(settings.ttl_minutes or 60),
+                                value=str(policy.ttl_minutes),
                             ),
                         ],
                     )
@@ -220,98 +248,129 @@ class KubernetesSandbox(Sandbox):
                 ],
             ),
         )
-        api.create_namespaced_pod(namespace=settings.k8s_namespace, body=pod)
-        deadline = time.time() + 180
-        while time.time() < deadline:
-            p = api.read_namespaced_pod(pod_name, settings.k8s_namespace)
-            if p.status and p.status.phase == "Running" and p.status.pod_ip:
-                return p.status.pod_ip
-            time.sleep(2)
-        raise RuntimeError(f"沙箱 Pod 启动超时: {pod_name}")
+        api.create_namespaced_pod(namespace=deployment.k8s_namespace, body=pod)
+        try:
+            deadline = time.time() + 180
+            while time.time() < deadline:
+                p = api.read_namespaced_pod(pod_name, deployment.k8s_namespace)
+                if p.status and p.status.phase == "Running" and p.status.pod_ip:
+                    return p.status.pod_ip
+                time.sleep(2)
+            raise RuntimeError(f"沙箱 Pod 启动超时: {pod_name}")
+        except BaseException:
+            with contextlib.suppress(Exception):
+                api.delete_namespaced_pod(
+                    pod_name,
+                    deployment.k8s_namespace,
+                    grace_period_seconds=0,
+                )
+            raise
 
     @classmethod
-    async def create(cls) -> Self:
-        settings = cls._settings()
-        if settings.address:
+    async def get(
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+        quota: SandboxQuota,
+        sandbox_id: str,
+    ) -> Self | None:
+        deployment = settings.deployment
+        if deployment.address:
             from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
 
-            ip = await DockerSandbox._resolve_hostname_to_ip(settings.address)
-            return cls(ip=ip)
-        from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
-
-        pool = get_sandbox_pool()
-        if pool.enabled:
-            return await pool.acquire()
-        return await cls._create_and_warm()
-
-    @classmethod
-    async def get(cls, id: str) -> Optional[Self]:
-        settings = cls._settings()
-        if settings.address:
-            from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox
-
-            ip = await DockerSandbox._resolve_hostname_to_ip(settings.address)
-            return cls(ip=ip, pod_name=id)
-        ip = await asyncio.to_thread(cls._get_pod_ip_sync, id)
+            ip = await DockerSandbox._resolve_hostname_to_ip(deployment.address)
+            return cls(
+                settings=settings,
+                host=host,
+                quota=quota,
+                ip=ip,
+                pod_name=sandbox_id,
+            )
+        ip = await asyncio.to_thread(cls._get_pod_ip_sync, settings, sandbox_id)
         if not ip:
             return None
-        return cls(ip=ip, pod_name=id)
+        return cls(
+            settings=settings,
+            host=host,
+            quota=quota,
+            ip=ip,
+            pod_name=sandbox_id,
+        )
 
     @classmethod
-    def _get_pod_ip_sync(cls, pod_name: str) -> Optional[str]:
-        settings = cls._settings()
+    def _get_pod_ip_sync(
+        cls,
+        settings: SandboxEffectiveSettings,
+        pod_name: str,
+    ) -> str | None:
         api = cls._api()
         try:
-            p = api.read_namespaced_pod(pod_name, settings.k8s_namespace)
+            p = api.read_namespaced_pod(
+                pod_name,
+                settings.deployment.k8s_namespace,
+            )
             if p.status and p.status.phase == "Running" and p.status.pod_ip:
                 return p.status.pod_ip
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             return None
         return None
 
     async def destroy(self) -> bool:
         holder_id = self._pod_name
+        destroyed = True
         try:
             if self.client:
                 await self.client.aclose()
             if self._pod_name:
-                await asyncio.to_thread(self._delete_pod_sync, self._pod_name)
-            if holder_id:
-                from app.infrastructure.external.sandbox.admission import get_sandbox_quota
-
-                await get_sandbox_quota().release(holder_id)
-            return True
-        except Exception as exc:
+                await asyncio.to_thread(
+                    self._delete_pod_sync,
+                    self.settings,
+                    self._pod_name,
+                )
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.error("销毁 K8s 沙箱[%s]失败: %s", self._pod_name, exc)
-            return False
+            destroyed = False
+        finally:
+            if holder_id:
+                await self._quota.release(holder_id)
+        return destroyed
 
     @classmethod
-    def _delete_pod_sync(cls, pod_name: str) -> None:
-        settings = cls._settings()
+    def _delete_pod_sync(
+        cls,
+        settings: SandboxEffectiveSettings,
+        pod_name: str,
+    ) -> None:
         api = cls._api()
-        try:
+        with contextlib.suppress(Exception):
             api.delete_namespaced_pod(
                 pod_name,
-                settings.k8s_namespace,
+                settings.deployment.k8s_namespace,
                 grace_period_seconds=0,
             )
-        except Exception:
-            pass
 
     @classmethod
-    async def cleanup_orphaned_containers(cls) -> int:
-        return await asyncio.to_thread(cls._cleanup_sync)
+    async def cleanup_orphaned_containers(
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+    ) -> int:
+        return await asyncio.to_thread(cls._cleanup_sync, settings, host)
 
     @classmethod
-    def _cleanup_sync(cls) -> int:
-        settings = cls._settings()
+    def _cleanup_sync(
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+    ) -> int:
+        deployment = settings.deployment
         api = cls._api()
         removed = 0
-        idle_timeout_seconds = max(60, (settings.idle_timeout_minutes or 30) * 60)
+        idle_timeout_seconds = max(60, settings.policy.idle_timeout_minutes * 60)
         now = time.time()
         pods = api.list_namespaced_pod(
-            namespace=settings.k8s_namespace,
-            label_selector=f"{_POD_LABEL_KEY}={_POD_LABEL_VALUE}",
+            namespace=deployment.k8s_namespace,
+            label_selector=deployment.k8s_pod_label,
         )
         for pod in pods.items:
             name = pod.metadata.name
@@ -319,47 +378,46 @@ class KubernetesSandbox(Sandbox):
                 continue
             phase = pod.status.phase if pod.status else ""
             if phase in {"Failed", "Succeeded"}:
-                cls._delete_pod_sync(name)
+                cls._delete_pod_sync(settings, name)
                 removed += 1
                 continue
             if phase != "Running":
                 continue
             try:
                 import redis as sync_redis
-                from core.config import get_settings
 
-                cfg = get_settings()
                 redis_client = sync_redis.Redis(
-                    host=cfg.redis_host,
-                    port=cfg.redis_port,
-                    db=cfg.redis_db,
-                    password=cfg.redis_password,
+                    host=host.redis_host,
+                    port=host.redis_port,
+                    db=host.redis_db,
+                    password=host.redis_password,
                     decode_responses=True,
                 )
                 last_active_raw = redis_client.get(f"sandbox:last_active:{name}")
                 if last_active_raw and now - int(last_active_raw) < idle_timeout_seconds:
                     continue
-            except Exception:
+            except (OSError, RuntimeError, ValueError):
                 continue
-            cls._delete_pod_sync(name)
+            cls._delete_pod_sync(settings, name)
             removed += 1
         return removed
 
     async def get_browser(
-            self,
-            supports_multimodal: bool = False,
-            llm: Optional[LLM] = None,
+        self,
+        llm: LLM | None = None,
+        allowed_domains: frozenset[str] | None = None,
     ) -> Browser:
         return PlaywrightBrowser(
             self.cdp_url,
-            supports_multimodal=supports_multimodal,
+            vision_enabled=bool(llm and llm.capabilities.vision),
             vision_llm=llm,
+            allowed_domains=allowed_domains,
         )
 
-    async def ensure_sandbox(self, max_retries: Optional[int] = None) -> None:
-        settings = self._settings()
-        max_retries = max(1, max_retries or settings.warmup_max_retries)
-        retry_interval = max(0.5, settings.warmup_retry_interval_seconds)
+    async def ensure_sandbox(self, max_retries: int | None = None) -> None:
+        policy = self.settings.policy
+        max_retries = max(1, max_retries or policy.warmup_max_retries)
+        retry_interval = max(0.5, policy.warmup_retry_interval_seconds)
         for _ in range(max_retries):
             try:
                 response = await self.client.get(f"{self._base_url}/api/supervisor/status")
@@ -368,45 +426,62 @@ class KubernetesSandbox(Sandbox):
                 if tool_result.success and tool_result.data:
                     services = tool_result.data
                     if all(s.get("statename") == "RUNNING" for s in services):
-                        from app.infrastructure.external.sandbox.sandbox_pool import SandboxPool
-
-                        await SandboxPool.touch_activity(self.id)
                         return
-            except Exception as exc:
+            except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
                 logger.warning("K8s sandbox warmup: %s", exc)
             await asyncio.sleep(retry_interval)
         raise RuntimeError("K8s 沙箱 Supervisor 未就绪")
 
-    async def read_file(self, filepath: str, start_line: Optional[int] = None, end_line: Optional[int] = None,
-                        sudo: bool = False, max_length: int = 10000) -> ToolResult:
+    async def read_file(
+        self,
+        filepath: str,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        sudo: bool = False,
+        max_length: int = 10000,
+    ) -> ToolResult:
         response = await self.client.post(
             f"{self._base_url}/api/file/read-file",
-            json={"filepath": filepath, "start_line": start_line, "end_line": end_line, "sudo": sudo,
-                  "max_length": max_length},
+            json={
+                "filepath": filepath,
+                "start_line": start_line,
+                "end_line": end_line,
+                "sudo": sudo,
+                "max_length": max_length,
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
     async def read_files(
-            self,
-            filepaths: list[str],
-            *,
-            sudo: bool = False,
-            max_length: int = 10000,
+        self,
+        filepaths: list[str],
+        *,
+        sudo: bool = False,
+        max_length: int = 10000,
     ) -> list[ToolResult]:
         return await asyncio.gather(
-            *(
-                self.read_file(path, sudo=sudo, max_length=max_length)
-                for path in filepaths
-            )
+            *(self.read_file(path, sudo=sudo, max_length=max_length) for path in filepaths)
         )
 
-    async def write_file(self, filepath: str, content: str, append: bool = False,
-                         leading_newline: bool = False, trailing_newline: bool = False,
-                         sudo: bool = False) -> ToolResult:
+    async def write_file(
+        self,
+        filepath: str,
+        content: str,
+        append: bool = False,
+        leading_newline: bool = False,
+        trailing_newline: bool = False,
+        sudo: bool = False,
+    ) -> ToolResult:
         response = await self.client.post(
             f"{self._base_url}/api/file/write-file",
-            json={"filepath": filepath, "content": content, "append": append,
-                  "leading_newline": leading_newline, "trailing_newline": trailing_newline, "sudo": sudo},
+            json={
+                "filepath": filepath,
+                "content": content,
+                "append": append,
+                "leading_newline": leading_newline,
+                "trailing_newline": trailing_newline,
+                "sudo": sudo,
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
@@ -425,7 +500,9 @@ class KubernetesSandbox(Sandbox):
         response.raise_for_status()
         return io.BytesIO(response.content)
 
-    async def upload_file(self, file_data: BinaryIO, filepath: str, filename: str = None) -> ToolResult:
+    async def upload_file(
+        self, file_data: BinaryIO, filepath: str, filename: str | None = None
+    ) -> ToolResult:
         files = {"file": (filename or "upload", file_data, "application/octet-stream")}
         response = await self.client.post(
             f"{self._base_url}/api/file/upload-file",
@@ -457,7 +534,9 @@ class KubernetesSandbox(Sandbox):
             filename=f"cp_restore_{snapshot_id}.tgz",
         )
         if not upload_result.success:
-            raise RuntimeError(f"上传 K8s 沙箱快照失败: {upload_result.message or upload_result.data}")
+            raise RuntimeError(
+                f"上传 K8s 沙箱快照失败: {upload_result.message or upload_result.data}"
+            )
         restore_cmd = (
             "find /home/ubuntu -mindepth 1 -maxdepth 1 "
             "! -name '.snapshots' ! -name '.browser-profile' -exec rm -rf {} + && "
@@ -479,7 +558,9 @@ class KubernetesSandbox(Sandbox):
         finally:
             await self.exec_command("checkpoint", "/home/ubuntu", f"rm -f {archive_path}")
 
-    async def restore_browser_profile_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
+    async def restore_browser_profile_snapshot(
+        self, snapshot_id: str, snapshot_data: BinaryIO
+    ) -> None:
         archive_path = f"/tmp/bp_restore_{snapshot_id}.tgz"
         upload_result = await self.upload_file(
             file_data=snapshot_data,
@@ -487,7 +568,9 @@ class KubernetesSandbox(Sandbox):
             filename=f"bp_restore_{snapshot_id}.tgz",
         )
         if not upload_result.success:
-            raise RuntimeError(f"上传 K8s 浏览器快照失败: {upload_result.message or upload_result.data}")
+            raise RuntimeError(
+                f"上传 K8s 浏览器快照失败: {upload_result.message or upload_result.data}"
+            )
         restore_cmd = (
             "rm -rf /home/ubuntu/.browser-profile && "
             f"tar xzf {archive_path} -C /home/ubuntu && rm -f {archive_path}"

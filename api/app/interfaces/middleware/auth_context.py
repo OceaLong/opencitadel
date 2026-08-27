@@ -1,13 +1,13 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+import contextlib
 import logging
-from typing import Callable
+from collections.abc import Callable
 
-import jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.application.ports.crypto import ACCESS_COOKIE, TokenCodecError
+from app.application.request_context import get_request_id
 from app.application.security.authorization_context import (
     reset_authorization_context,
     set_authorization_context,
@@ -15,27 +15,23 @@ from app.application.security.authorization_context import (
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.scope import Principal
 from app.domain.models.user import UserStatus
-from app.infrastructure.security.cookie import ACCESS_COOKIE
-from app.infrastructure.security.jwt_service import JwtService
-from app.infrastructure.storage.postgres import get_uow
 from app.interfaces.auth_context import set_principal
-from app.infrastructure.observability.logging_context import get_request_id
+from app.interfaces.service_dependencies import require_api_runtime
 
 logger = logging.getLogger(__name__)
 
 
 class AuthContextMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, jwt_service: JwtService) -> None:
-        super().__init__(app)
-        self.jwt_service = jwt_service
-
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         token = request.cookies.get(ACCESS_COOKIE)
         principal_token = set_principal(None)
         authorization_token = set_authorization_context(AuthorizationContext.anonymous())
         try:
             if token:
-                principal = await self._principal_from_token(token)
+                principal = await self._principal_from_token(
+                    token,
+                    runtime=require_api_runtime(request),
+                )
                 set_principal(principal)
                 if principal is not None:
                     set_authorization_context(
@@ -46,25 +42,21 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
                     )
             return await call_next(request)
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 reset_authorization_context(authorization_token)
-            except Exception:
-                pass
-            try:
+            with contextlib.suppress(Exception):
                 principal_token.var.reset(principal_token)
-            except Exception:
-                pass
 
-    async def _principal_from_token(self, token: str) -> Principal | None:
+    async def _principal_from_token(self, token: str, *, runtime) -> Principal | None:
         try:
-            claims = self.jwt_service.decode(token, expected_type="access")
-        except jwt.PyJWTError:
+            claims = runtime.token_codec.decode(token, expected_type="access")
+        except TokenCodecError:
             return None
         user_id = str(claims.get("sub") or "")
         if not user_id:
             return None
         try:
-            async with get_uow() as uow:
+            async with runtime.uow_factory() as uow:
                 user = await uow.user.get_by_id(user_id)
                 if not user or user.status != UserStatus.ACTIVE:
                     return None
@@ -82,6 +74,6 @@ class AuthContextMiddleware(BaseHTTPMiddleware):
                     token_version=user.token_version,
                     team_roles=team_roles,
                 )
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("auth context lookup failed: %s", exc)
             return None

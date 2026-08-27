@@ -61,19 +61,16 @@ function makeHistory(envelopeIdKey: "knowledge_base_id" | "codebase_id", envelop
     active_version_id: "v-published",
     active_build: {
       id: "build-candidate",
+      run_id: "run-candidate",
       [envelopeIdKey]: envelopeId,
       version_id: "v-candidate",
-      parent_version_id: "v-published",
-      command_key: "command",
-      state: "running",
+      status: "running",
       phase: "chunk",
-      progress: 0.5,
-      capabilities: [],
-      degraded_reasons: [],
-      metrics: {},
-      heartbeat_at: "2026-07-30T00:00:30Z",
-      last_event_seq: 1,
+      progress: 50,
       created_at: "2026-07-30T00:00:00Z",
+      updated_at: "2026-07-30T00:00:30Z",
+      terminal_at: null,
+      failure_code: null,
       can_retry: false,
       can_cancel: true,
     },
@@ -114,12 +111,12 @@ function makePollSequence(envelopeIdKey: "knowledge_base_id" | "codebase_id", en
   const base = makeHistory(envelopeIdKey, envelopeId);
   const running = {
     ...base,
-    active_build: { ...base.active_build, progress: 0.1, last_event_seq: 1 },
+    active_build: { ...base.active_build, progress: 10 },
     versions: base.versions.slice(0, 1),
   };
   const progressed = {
     ...running,
-    active_build: { ...running.active_build, phase: "graph", progress: 0.7, last_event_seq: 2 },
+    active_build: { ...running.active_build, phase: "graph", progress: 70 },
   };
   const terminal = {
     [envelopeIdKey]: envelopeId,
@@ -140,13 +137,13 @@ function makePollSequence(envelopeIdKey: "knowledge_base_id" | "codebase_id", en
         is_candidate: true,
         build: {
           ...base.active_build,
-          state: "failed",
+          status: "failed",
           phase: "graph",
-          progress: 0.7,
-          last_event_seq: 3,
+          progress: 70,
           can_retry: true,
           can_cancel: false,
-          error_message: "graph failed",
+          failure_code: "GRAPH_BUILD_FAILED",
+          terminal_at: "2026-07-30T00:01:00Z",
         },
       },
     ],
@@ -206,11 +203,8 @@ describe.each(CASES)("ResourceVersionStatus ($ns)", ({ ns, resourceId, history }
     expect(text).toContain("running");
     expect(text).toContain("chunk");
     expect(text).toContain("50%");
-    expect(text).toContain(
-      "Capabilities: keyword_search: available, graph_search: unavailable",
-    );
+    expect(text).toContain("Capabilities: keyword_search: available, graph_search: unavailable");
     expect(text).toContain("Cancel");
-    expect(text).toContain("Heartbeat: 2026-07-30T00:00:30Z");
 
     await act(async () => {
       Array.from(container.querySelectorAll("button"))
@@ -245,7 +239,7 @@ describe.each(CASES)("ResourceVersionStatus ($ns)", ({ ns, resourceId, history }
       await vi.advanceTimersByTimeAsync(5000);
     });
     expect(container.textContent).toContain("Active version: v2");
-    expect(container.textContent).toContain("graph failed");
+    expect(container.textContent).toContain("GRAPH_BUILD_FAILED");
     expect(container.textContent).toContain("Retry");
 
     await act(async () => {
@@ -280,7 +274,6 @@ describe("ResourceVersionStatus (knowledge) localization", () => {
       "Cancel",
       "Capabilities: keyword_search: available, graph_search: unavailable",
       "View version v-old",
-      "Heartbeat: 2026-07-30T00:00:30Z",
     ],
     [
       "zh",
@@ -288,17 +281,15 @@ describe("ResourceVersionStatus (knowledge) localization", () => {
       "取消",
       "能力：keyword_search: 可用, graph_search: 不可用",
       "查看版本 v-old",
-      "心跳：2026-07-30T00:00:30Z",
     ],
   ] as const)(
     "renders real %s messages",
-    async (locale, activeText, cancelText, capabilitiesText, historyText, heartbeatText) => {
+    async (locale, activeText, cancelText, capabilitiesText, historyText) => {
       const { container, unmount } = await renderLocale(locale);
       expect(container.textContent).toContain(activeText);
       expect(container.textContent).toContain(cancelText);
       expect(container.textContent).toContain(capabilitiesText);
       expect(container.textContent).toContain(historyText);
-      expect(container.textContent).toContain(heartbeatText);
       await act(async () => {
         Array.from(container.querySelectorAll("button"))
           .find((button) => button.textContent === historyText)
@@ -361,19 +352,16 @@ describe("ResourceVersionStatus (codebase) degraded/unsupported info", () => {
       active_version_id: "active",
       active_build: {
         id: "build-1",
+        run_id: "run-build-1",
         codebase_id: "cb1",
         version_id: "candidate",
-        parent_version_id: "active",
-        command_key: "reanalyze:cb1",
-        state: "running",
+        status: "running",
         phase: "artifacts",
-        progress: 0.75,
-        capabilities: [],
-        degraded_reasons: [],
-        metrics: {},
-        heartbeat_at: "2026-07-30T00:00:30Z",
-        last_event_seq: 2,
+        progress: 75,
         created_at: "2026-07-30T00:00:00Z",
+        updated_at: "2026-07-30T00:00:30Z",
+        terminal_at: null,
+        failure_code: null,
         can_retry: false,
         can_cancel: true,
       },

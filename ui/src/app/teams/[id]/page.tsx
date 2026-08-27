@@ -23,14 +23,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { memberDisplayName, type Team, teamApi, type TeamMember, type TeamMemberDetail } from "@/lib/api/team";
-import { resetWorkspaceIfMatches } from "@/lib/workspace-utils";
+import {
+  memberDisplayName,
+  type Team,
+  teamApi,
+  type TeamMember,
+  type TeamMemberDetail,
+} from "@/lib/api/team";
 import { useAuth } from "@/providers/auth-provider";
+import { useClientDataScope } from "@/providers/client-data-provider";
 
 export default function TeamDetailPage() {
   const params = useParams<{ id: string }>();
   const teamId = params.id;
   const { user } = useAuth();
+  const { resetWorkspaceIfMatches } = useClientDataScope();
   const t = useTranslations("teams");
   const tCommon = useTranslations("common");
   const [team, setTeam] = useState<Team | null>(null);
@@ -51,7 +58,10 @@ export default function TeamDetailPage() {
   );
   const isOwner = myRole === "owner";
   const canManageMembers = myRole === "owner" || myRole === "admin";
-  const ownerCount = useMemo(() => members.filter((member) => member.role === "owner").length, [members]);
+  const ownerCount = useMemo(
+    () => members.filter((member) => member.role === "owner").length,
+    [members],
+  );
   const isSoleOwner = isOwner && ownerCount <= 1;
 
   function roleLabel(role: TeamMember["role"]) {
@@ -188,13 +198,26 @@ export default function TeamDetailPage() {
                 disabled={leaving || isSoleOwner}
                 title={isSoleOwner ? t("soleOwnerCannotLeave") : undefined}
               >
-                {leaving ? <Loader2 className="animate-spin" /> : <LogOut className="mr-1 size-4" />}
+                {leaving ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <LogOut className="mr-1 size-4" />
+                )}
                 {t("leaveTeam")}
               </Button>
             ) : null}
             {isOwner ? (
-              <Button variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)} disabled={deleting}>
-                {deleting ? <Loader2 className="animate-spin" /> : <Trash2 className="mr-1 size-4" />}
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setDeleteDialogOpen(true)}
+                disabled={deleting}
+              >
+                {deleting ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <Trash2 className="mr-1 size-4" />
+                )}
                 {t("deleteTeam")}
               </Button>
             ) : null}
@@ -210,7 +233,10 @@ export default function TeamDetailPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as TeamMember["role"])}>
+              <Select
+                value={inviteRole}
+                onValueChange={(value) => setInviteRole(value as TeamMember["role"])}
+              >
                 <SelectTrigger className="w-40">
                   <SelectValue />
                 </SelectTrigger>
@@ -251,9 +277,7 @@ export default function TeamDetailPage() {
           <CardDescription>{t("membersDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          {members.length === 0 ? (
-            <EmptyState title={t("emptyMembers")} className="py-8" />
-          ) : null}
+          {members.length === 0 ? <EmptyState title={t("emptyMembers")} className="py-8" /> : null}
           {members.map((member) => (
             <div
               key={member.user_id}
@@ -277,7 +301,9 @@ export default function TeamDetailPage() {
                 {isOwner && member.user_id !== user?.id ? (
                   <Select
                     value={member.role}
-                    onValueChange={(value) => void handleRoleChange(member.user_id, value as TeamMember["role"])}
+                    onValueChange={(value) =>
+                      void handleRoleChange(member.user_id, value as TeamMember["role"])
+                    }
                   >
                     <SelectTrigger className="w-32">
                       <SelectValue />
@@ -292,7 +318,11 @@ export default function TeamDetailPage() {
                   <Badge variant="secondary">{roleLabel(member.role)}</Badge>
                 )}
                 {canManageMembers && member.user_id !== user?.id ? (
-                  <Button variant="ghost" size="icon-sm" onClick={() => void handleRemoveMember(member.user_id)}>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => void handleRemoveMember(member.user_id)}
+                  >
                     <Trash2 className="text-destructive size-4" />
                   </Button>
                 ) : null}

@@ -1,14 +1,12 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Auditable execution outcomes for governed tool calls."""
+
 from datetime import datetime
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class ToolExecutionStatus(str, Enum):
+class ToolExecutionStatus(StrEnum):
     SUCCESS = "success"
     FAILED = "failed"
     OUTCOME_UNKNOWN = "outcome_unknown"
@@ -23,4 +21,4 @@ class ToolExecutionAttempt(BaseModel):
     status: ToolExecutionStatus
     result_summary: str = ""
     transient_failure: bool = False
-    idempotency_key: Optional[str] = None
+    idempotency_key: str | None = None

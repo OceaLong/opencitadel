@@ -4,8 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { SessionDebugSheet } from "@/components/session/session-debug-sheet";
-import { SessionMemorySheet } from "@/components/session/session-memory-sheet";
+import { SessionErrorSheet } from "@/components/session/session-error-sheet";
 import { Avatar, AvatarGroupCount } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,7 +31,12 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { fileApi, sessionApi } from "@/lib/api";
-import type { SessionFile, SSEEventData, TokenUsageRecord,TokenUsageSummary } from "@/lib/api/types";
+import type {
+  SessionFile,
+  SSEEventData,
+  TokenUsageRecord,
+  TokenUsageSummary,
+} from "@/lib/api/types";
 import {
   IconActivity,
   IconCoins,
@@ -88,16 +92,10 @@ export type SessionHeaderProps = {
   onFileClick?: (file: AttachmentFile) => void;
   /** 会话 ID，用于记忆按钮 */
   sessionId?: string;
-  /** 记忆是否可编辑 */
-  memoryEditable?: boolean;
   /** 会话 token 用量汇总 */
   tokenUsage?: TokenUsageSummary | null;
-  /** 会话事件列表，用于调试面板 */
+  /** Formal public Run events used for failure diagnostics. */
   events?: SSEEventData[];
-  /** 是否已开启 debug 事件加载 */
-  includeDebug?: boolean;
-  /** 打开调试面板时触发 debug 事件订阅 */
-  onDebugOpen?: () => void;
   /** 单任务观测摘要 */
   observationSummary?: TaskObservationSummary;
   /** 左侧操作区（如移动端上下文入口） */
@@ -111,11 +109,8 @@ export const SessionHeader = memo(function SessionHeader({
   onFetchFiles,
   onFileClick,
   sessionId,
-  memoryEditable = true,
   tokenUsage,
   events = [],
-  includeDebug = false,
-  onDebugOpen,
   observationSummary,
   leadingActions,
 }: SessionHeaderProps) {
@@ -140,16 +135,15 @@ export const SessionHeader = memo(function SessionHeader({
     [isControlled, onFileListOpenChange, onFetchFiles],
   );
 
-  const fileList = Array.isArray(files) ? files : [];
-
   const uniqueFileList = useMemo(() => {
+    const fileList = Array.isArray(files) ? files : [];
     const map = new Map<string, SessionFile>();
     for (const file of fileList) {
       const key = file.filepath || file.filename;
       map.set(key, file);
     }
     return Array.from(map.values());
-  }, [fileList]);
+  }, [files]);
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [tokenDetailOpen, setTokenDetailOpen] = useState(false);
@@ -219,16 +213,15 @@ export const SessionHeader = memo(function SessionHeader({
 
   const observationPill = showObservationPill ? (
     <HeaderPill
-      className="hidden shadow-card sm:flex"
+      className="shadow-card hidden sm:flex"
       title={t("observationTitle", {
         tools: observationSummary!.toolCount,
         errors: observationSummary!.errorCount,
-        waits: observationSummary!.waitCount,
       })}
     >
       <IconActivity className="size-3.5 shrink-0" />
       <span className="font-mono">{observationSummary!.toolCount}</span>
-      <span>tools</span>
+      <span>{t("toolsUnit")}</span>
       {observationSummary!.durationMs !== undefined && (
         <span className="text-muted-foreground/70">
           · <span className="font-mono">{formatDuration(observationSummary!.durationMs)}</span>
@@ -240,16 +233,16 @@ export const SessionHeader = memo(function SessionHeader({
   const tokenPill = showTokenPill ? (
     <HeaderPill
       onClick={handleOpenTokenDetail}
-      className="hidden shadow-card sm:flex"
+      className="shadow-card hidden sm:flex"
       title={t("tokenUsageTitle", {
         prompt: tokenUsage!.prompt_tokens.toLocaleString(),
         completion: tokenUsage!.completion_tokens.toLocaleString(),
         calls: tokenUsage!.call_count,
       })}
     >
-      <IconCoins className="size-3.5 shrink-0 text-muted-foreground" />
+      <IconCoins className="text-muted-foreground size-3.5 shrink-0" />
       <span className="font-mono">{tokenUsage!.total_tokens.toLocaleString()}</span>
-      <span>tok</span>
+      <span>{t("tokenUnit")}</span>
       {tokenUsage!.estimated_cost_usd > 0 && (
         <span className="text-muted-foreground/70">
           · <span className="font-mono">${tokenUsage!.estimated_cost_usd.toFixed(4)}</span>
@@ -260,25 +253,36 @@ export const SessionHeader = memo(function SessionHeader({
 
   return (
     <header className="bg-background/95 sticky top-0 z-10 flex flex-shrink-0 flex-row flex-wrap items-center justify-between gap-2 px-4 pt-2 pb-2">
-      {leadingActions ? <div className="flex shrink-0 items-center gap-1">{leadingActions}</div> : <div />}
+      {leadingActions ? (
+        <div className="flex shrink-0 items-center gap-1">{leadingActions}</div>
+      ) : (
+        <div />
+      )}
       <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-0.5">
         {(showObservationPill || showTokenPill) && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm" className="sm:hidden" aria-label={t("moreStats")}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="sm:hidden"
+                aria-label={t("moreStats")}
+              >
                 <IconMore className="size-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               {showObservationPill && (
                 <DropdownMenuItem className="flex flex-col items-start gap-0.5">
-                  <span className="text-xs font-medium">{t("observationTitle", {
-                    tools: observationSummary!.toolCount,
-                    errors: observationSummary!.errorCount,
-                    waits: observationSummary!.waitCount,
-                  })}</span>
+                  <span className="text-xs font-medium">
+                    {t("observationTitle", {
+                      tools: observationSummary!.toolCount,
+                      errors: observationSummary!.errorCount,
+                    })}
+                  </span>
                   <span className="text-muted-foreground text-xs">
-                    <span className="font-mono">{observationSummary!.toolCount}</span> tools
+                    <span className="font-mono">{observationSummary!.toolCount}</span>{" "}
+                    {t("toolsUnit")}
                     {observationSummary!.durationMs !== undefined ? (
                       <>
                         {" · "}
@@ -295,7 +299,7 @@ export const SessionHeader = memo(function SessionHeader({
               {showTokenPill && (
                 <DropdownMenuItem onClick={handleOpenTokenDetail}>
                   <span className="font-mono">{tokenUsage!.total_tokens.toLocaleString()}</span>{" "}
-                  tok
+                  {t("tokenUnit")}
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
@@ -303,15 +307,7 @@ export const SessionHeader = memo(function SessionHeader({
         )}
         {observationPill}
         {tokenPill}
-        {sessionId && (
-          <SessionMemorySheet sessionId={sessionId} editable={memoryEditable} compact />
-        )}
-        <SessionDebugSheet
-          events={events}
-          includeDebug={includeDebug}
-          compact
-          onOpen={onDebugOpen}
-        />
+        <SessionErrorSheet events={events} compact />
         {mounted ? (
           <Dialog open={openState} onOpenChange={setOpenState}>
             <DialogTrigger asChild>
@@ -393,12 +389,14 @@ export const SessionHeader = memo(function SessionHeader({
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-medium">{record.agent || record.call_type}</span>
                           <span className="text-muted-foreground">
-                            <span className="font-mono">{record.total_tokens}</span> tok
+                            <span className="font-mono">{record.total_tokens}</span>{" "}
+                            {t("tokenUnit")}
                           </span>
                         </div>
                         <div className="text-muted-foreground mt-1">
-                          {record.model_name} · prompt{" "}
-                          <span className="font-mono">{record.prompt_tokens}</span> · completion{" "}
+                          {record.model_name} · {t("promptTokensLabel")}{" "}
+                          <span className="font-mono">{record.prompt_tokens}</span> ·{" "}
+                          {t("completionTokensLabel")}{" "}
                           <span className="font-mono">{record.completion_tokens}</span>
                         </div>
                       </div>

@@ -1,4 +1,5 @@
 """Typed patch-field sentinel shared by repository contracts."""
+
 from typing import Final, final
 
 

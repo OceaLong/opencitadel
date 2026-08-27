@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import pytest
 
 from app.infrastructure.external.sandbox.docker_sandbox import DockerSandbox

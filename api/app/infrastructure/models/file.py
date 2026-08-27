@@ -1,28 +1,25 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    String,
-    Integer,
     DateTime,
     ForeignKey,
-    text,
+    Integer,
     PrimaryKeyConstraint,
+    String,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
 from ...domain.models.file import File
+from .base import Base
 
 
 class FileModel(Base):
     """文件数据ORM模型"""
+
     __tablename__ = "files"
-    __table_args__ = (
-        PrimaryKeyConstraint("id", name="pk_files_id"),
-    )
+    __table_args__ = (PrimaryKeyConstraint("id", name="pk_files_id"),)
 
     id: Mapped[str] = mapped_column(
         String(255),
@@ -71,13 +68,13 @@ class FileModel(Base):
         nullable=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         onupdate=datetime.now,
         server_default=text("CURRENT_TIMESTAMP(0)"),
     )  # 更新时间
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP(0)"),
     )  # 创建时间

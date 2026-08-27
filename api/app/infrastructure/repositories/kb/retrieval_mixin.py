@@ -1,13 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""KBRetrievalMixin: vector/BM25 search, versioned retrieval, and
-non-versioned chunk/document read methods for DBKnowledgeBaseRepository.
+"""Vector/BM25 search and versioned knowledge retrieval."""
 
-Pure re-homed methods split out of db_knowledge_base_repository.py
-(Phase C task 5, KB repository mixin split).
-"""
 import math
-from typing import List, Optional, Tuple
 
 from sqlalchemy import and_, func, or_, select, text
 
@@ -16,10 +9,14 @@ from app.domain.models.knowledge_base import (
     KnowledgeChunk,
     KnowledgeDocument,
 )
+from app.domain.models.knowledge_version import (
+    DocumentRevisionState,
+    KnowledgeVersionState,
+)
 from app.domain.repositories.knowledge_base_repository import (
+    KNOWLEDGE_EMBEDDING_DIMENSION,
     DocumentPage,
     DocumentPageItem,
-    KNOWLEDGE_EMBEDDING_DIMENSION,
     VersionedKnowledgeChunk,
 )
 from app.infrastructure.models.knowledge_base import (
@@ -31,10 +28,6 @@ from app.infrastructure.models.knowledge_version import (
     KnowledgeBaseVersionORM,
     KnowledgeDocumentRevisionORM,
     KnowledgeVersionDocumentORM,
-)
-from app.domain.models.knowledge_version import (
-    DocumentRevisionState,
-    KnowledgeVersionState,
 )
 from app.infrastructure.repositories.kb._shared import (
     _decode_document_cursor,
@@ -49,11 +42,11 @@ class KBRetrievalMixin:
     chunk/document read methods for DBKnowledgeBaseRepository."""
 
     async def vector_search_chunks(
-            self,
-            kb_id: str,
-            query_embedding: List[float],
-            limit: int = 20,
-    ) -> List[Tuple[KnowledgeChunk, KnowledgeDocument, float]]:
+        self,
+        kb_id: str,
+        query_embedding: list[float],
+        limit: int = 20,
+    ) -> list[tuple[KnowledgeChunk, KnowledgeDocument, float]]:
         if not query_embedding:
             return []
         result = await self.db_session.execute(
@@ -64,7 +57,7 @@ class KBRetrievalMixin:
                        c.page_no, c.heading_path, c.ordinal,
                        d.title, d.source_type, d.source_ref, d.mime, d.file_id,
                        d.page_count, d.status, d.error, d.warning, d.created_at, d.updated_at,
-                       1 - (c.embedding <=> :query::vector) AS score
+                       1 - (c.embedding <=> CAST(:query AS vector)) AS score
                 FROM knowledge_chunks c
                 JOIN knowledge_bases kb
                   ON kb.id = c.kb_id
@@ -76,7 +69,7 @@ class KBRetrievalMixin:
                   AND c.version_id = kb.active_version_id
                   AND c.level = 'child'
                   AND c.embedding IS NOT NULL
-                ORDER BY c.embedding <=> :query::vector
+                ORDER BY c.embedding <=> CAST(:query AS vector)
                 LIMIT :limit
                 """
             ),
@@ -85,11 +78,11 @@ class KBRetrievalMixin:
         return [self._row_to_chunk_doc_score(row) for row in result.fetchall()]
 
     async def bm25_search_chunks(
-            self,
-            kb_id: str,
-            segmented_query: str,
-            limit: int = 20,
-    ) -> List[Tuple[KnowledgeChunk, KnowledgeDocument, float]]:
+        self,
+        kb_id: str,
+        segmented_query: str,
+        limit: int = 20,
+    ) -> list[tuple[KnowledgeChunk, KnowledgeDocument, float]]:
         if not segmented_query.strip():
             return []
         result = await self.db_session.execute(
@@ -121,22 +114,19 @@ class KBRetrievalMixin:
         return [self._row_to_chunk_doc_score(row) for row in result.fetchall()]
 
     async def vector_search_chunks_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            query_embedding: List[float],
-            limit: int = 20,
-    ) -> List[VersionedKnowledgeChunk]:
+        self,
+        kb_id: str,
+        version_id: str,
+        query_embedding: list[float],
+        limit: int = 20,
+    ) -> list[VersionedKnowledgeChunk]:
         if not self._valid_embedding(query_embedding):
             raise ValueError("query embedding is empty or malformed")
         try:
-            await self.db_session.execute(
-                text("SET LOCAL hnsw.iterative_scan = 'strict_order'")
-            )
-        except Exception as exc:
+            await self.db_session.execute(text("SET LOCAL hnsw.iterative_scan = 'strict_order'"))
+        except (OSError, RuntimeError, ValueError) as exc:
             raise RuntimeError(
-                "pgvector filtered ANN requires hnsw.iterative_scan "
-                "support (pgvector 0.8.0+)"
+                "pgvector filtered ANN requires hnsw.iterative_scan support (pgvector 0.8.0+)"
             ) from exc
         result = await self.db_session.execute(
             build_versioned_vector_search_statement(),
@@ -147,18 +137,15 @@ class KBRetrievalMixin:
                 "limit": max(1, min(limit, 200)),
             },
         )
-        return [
-            self._row_to_versioned_chunk(row)
-            for row in result.fetchall()
-        ]
+        return [self._row_to_versioned_chunk(row) for row in result.fetchall()]
 
     async def bm25_search_chunks_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            segmented_query: str,
-            limit: int = 20,
-    ) -> List[VersionedKnowledgeChunk]:
+        self,
+        kb_id: str,
+        version_id: str,
+        segmented_query: str,
+        limit: int = 20,
+    ) -> list[VersionedKnowledgeChunk]:
         if not segmented_query.strip():
             return []
         result = await self.db_session.execute(
@@ -209,46 +196,28 @@ class KBRetrievalMixin:
                 "limit": max(1, min(limit, 200)),
             },
         )
-        return [
-            self._row_to_versioned_chunk(row)
-            for row in result.fetchall()
-        ]
+        return [self._row_to_versioned_chunk(row) for row in result.fetchall()]
 
     async def get_parents_by_ids_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            parent_ids: List[str],
-    ) -> List[KnowledgeChunk]:
+        self,
+        kb_id: str,
+        version_id: str,
+        parent_ids: list[str],
+    ) -> list[KnowledgeChunk]:
         if not parent_ids:
             return []
         stmt = (
             select(KnowledgeChunkModel)
             .join(
                 KnowledgeBaseVersionORM,
-                (
-                    KnowledgeBaseVersionORM.id
-                    == KnowledgeChunkModel.version_id
-                )
-                & (
-                    KnowledgeBaseVersionORM.knowledge_base_id
-                    == KnowledgeChunkModel.kb_id
-                ),
+                (KnowledgeBaseVersionORM.id == KnowledgeChunkModel.version_id)
+                & (KnowledgeBaseVersionORM.knowledge_base_id == KnowledgeChunkModel.kb_id),
             )
             .join(
                 KnowledgeVersionDocumentORM,
-                (
-                    KnowledgeVersionDocumentORM.version_id
-                    == KnowledgeChunkModel.version_id
-                )
-                & (
-                    KnowledgeVersionDocumentORM.knowledge_base_id
-                    == KnowledgeChunkModel.kb_id
-                )
-                & (
-                    KnowledgeVersionDocumentORM.document_id
-                    == KnowledgeChunkModel.doc_id
-                ),
+                (KnowledgeVersionDocumentORM.version_id == KnowledgeChunkModel.version_id)
+                & (KnowledgeVersionDocumentORM.knowledge_base_id == KnowledgeChunkModel.kb_id)
+                & (KnowledgeVersionDocumentORM.document_id == KnowledgeChunkModel.doc_id),
             )
             .join(
                 KnowledgeDocumentRevisionORM,
@@ -273,10 +242,8 @@ class KBRetrievalMixin:
                     )
                 ),
                 KnowledgeBaseVersionORM.published_at.is_not(None),
-                KnowledgeVersionDocumentORM.state
-                == DocumentRevisionState.INDEXED.value,
-                KnowledgeDocumentRevisionORM.state
-                == DocumentRevisionState.INDEXED.value,
+                KnowledgeVersionDocumentORM.state == DocumentRevisionState.INDEXED.value,
+                KnowledgeDocumentRevisionORM.state == DocumentRevisionState.INDEXED.value,
             )
             .order_by(
                 KnowledgeChunkModel.ordinal.asc(),
@@ -287,11 +254,11 @@ class KBRetrievalMixin:
         return [record.to_domain() for record in result.scalars().all()]
 
     async def get_chunks_by_ids_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            chunk_ids: List[str],
-    ) -> List[VersionedKnowledgeChunk]:
+        self,
+        kb_id: str,
+        version_id: str,
+        chunk_ids: list[str],
+    ) -> list[VersionedKnowledgeChunk]:
         if not chunk_ids:
             return []
         result = await self.db_session.execute(
@@ -335,17 +302,14 @@ class KBRetrievalMixin:
                 "chunk_ids": list(dict.fromkeys(chunk_ids)),
             },
         )
-        return [
-            self._row_to_versioned_chunk(row)
-            for row in result.fetchall()
-        ]
+        return [self._row_to_versioned_chunk(row) for row in result.fetchall()]
 
     async def get_document_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            doc_id: str,
-    ) -> Optional[Tuple[KnowledgeDocument, str]]:
+        self,
+        kb_id: str,
+        version_id: str,
+        doc_id: str,
+    ) -> tuple[KnowledgeDocument, str] | None:
         result = await self.db_session.execute(
             select(
                 KnowledgeDocumentModel,
@@ -353,21 +317,12 @@ class KBRetrievalMixin:
             )
             .join(
                 KnowledgeVersionDocumentORM,
-                (
-                    KnowledgeVersionDocumentORM.document_id
-                    == KnowledgeDocumentModel.id
-                )
-                & (
-                    KnowledgeVersionDocumentORM.knowledge_base_id
-                    == KnowledgeDocumentModel.kb_id
-                ),
+                (KnowledgeVersionDocumentORM.document_id == KnowledgeDocumentModel.id)
+                & (KnowledgeVersionDocumentORM.knowledge_base_id == KnowledgeDocumentModel.kb_id),
             )
             .join(
                 KnowledgeBaseVersionORM,
-                (
-                    KnowledgeBaseVersionORM.id
-                    == KnowledgeVersionDocumentORM.version_id
-                )
+                (KnowledgeBaseVersionORM.id == KnowledgeVersionDocumentORM.version_id)
                 & (
                     KnowledgeBaseVersionORM.knowledge_base_id
                     == KnowledgeVersionDocumentORM.knowledge_base_id
@@ -388,10 +343,8 @@ class KBRetrievalMixin:
                 KnowledgeDocumentModel.id == doc_id,
                 KnowledgeDocumentModel.kb_id == kb_id,
                 KnowledgeVersionDocumentORM.version_id == version_id,
-                KnowledgeVersionDocumentORM.state
-                == DocumentRevisionState.INDEXED.value,
-                KnowledgeDocumentRevisionORM.state
-                == DocumentRevisionState.INDEXED.value,
+                KnowledgeVersionDocumentORM.state == DocumentRevisionState.INDEXED.value,
+                KnowledgeDocumentRevisionORM.state == DocumentRevisionState.INDEXED.value,
                 KnowledgeBaseVersionORM.state.in_(
                     (
                         KnowledgeVersionState.READY.value,
@@ -408,40 +361,25 @@ class KBRetrievalMixin:
         return document.to_domain(), str(revision_id)
 
     async def list_chunks_for_document_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            doc_id: str,
-            page_no: Optional[int] = None,
-            limit: int = 20,
-    ) -> List[KnowledgeChunk]:
+        self,
+        kb_id: str,
+        version_id: str,
+        doc_id: str,
+        page_no: int | None = None,
+        limit: int = 20,
+    ) -> list[KnowledgeChunk]:
         stmt = (
             select(KnowledgeChunkModel)
             .join(
                 KnowledgeBaseVersionORM,
-                (
-                    KnowledgeBaseVersionORM.id
-                    == KnowledgeChunkModel.version_id
-                )
-                & (
-                    KnowledgeBaseVersionORM.knowledge_base_id
-                    == KnowledgeChunkModel.kb_id
-                ),
+                (KnowledgeBaseVersionORM.id == KnowledgeChunkModel.version_id)
+                & (KnowledgeBaseVersionORM.knowledge_base_id == KnowledgeChunkModel.kb_id),
             )
             .join(
                 KnowledgeVersionDocumentORM,
-                (
-                    KnowledgeVersionDocumentORM.version_id
-                    == KnowledgeChunkModel.version_id
-                )
-                & (
-                    KnowledgeVersionDocumentORM.knowledge_base_id
-                    == KnowledgeChunkModel.kb_id
-                )
-                & (
-                    KnowledgeVersionDocumentORM.document_id
-                    == KnowledgeChunkModel.doc_id
-                ),
+                (KnowledgeVersionDocumentORM.version_id == KnowledgeChunkModel.version_id)
+                & (KnowledgeVersionDocumentORM.knowledge_base_id == KnowledgeChunkModel.kb_id)
+                & (KnowledgeVersionDocumentORM.document_id == KnowledgeChunkModel.doc_id),
             )
             .join(
                 KnowledgeDocumentRevisionORM,
@@ -465,10 +403,8 @@ class KBRetrievalMixin:
                     )
                 ),
                 KnowledgeBaseVersionORM.published_at.is_not(None),
-                KnowledgeVersionDocumentORM.state
-                == DocumentRevisionState.INDEXED.value,
-                KnowledgeDocumentRevisionORM.state
-                == DocumentRevisionState.INDEXED.value,
+                KnowledgeVersionDocumentORM.state == DocumentRevisionState.INDEXED.value,
+                KnowledgeDocumentRevisionORM.state == DocumentRevisionState.INDEXED.value,
             )
             .order_by(
                 KnowledgeChunkModel.ordinal.asc(),
@@ -482,23 +418,19 @@ class KBRetrievalMixin:
         return [record.to_domain() for record in result.scalars().all()]
 
     async def read_document_page_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            doc_id: str,
-            document_revision_id: str,
-            *,
-            page_no: Optional[int] = None,
-            cursor: Optional[str] = None,
-            limit: int = 30,
+        self,
+        kb_id: str,
+        version_id: str,
+        doc_id: str,
+        document_revision_id: str,
+        *,
+        page_no: int | None = None,
+        cursor: str | None = None,
+        limit: int = 30,
     ) -> DocumentPage:
         if limit < 1 or limit > 200:
-            raise ValueError(
-                "document page limit must be between 1 and 200"
-            )
-        if page_no is not None and (
-            not _is_cursor_int(page_no) or page_no < 1
-        ):
+            raise ValueError("document page limit must be between 1 and 200")
+        if page_no is not None and (not _is_cursor_int(page_no) or page_no < 1):
             raise ValueError("document page number must be at least 1")
         cursor_key = (
             _decode_document_cursor(
@@ -516,29 +448,14 @@ class KBRetrievalMixin:
             select(KnowledgeChunkModel)
             .join(
                 KnowledgeBaseVersionORM,
-                (
-                    KnowledgeBaseVersionORM.id
-                    == KnowledgeChunkModel.version_id
-                )
-                & (
-                    KnowledgeBaseVersionORM.knowledge_base_id
-                    == KnowledgeChunkModel.kb_id
-                ),
+                (KnowledgeBaseVersionORM.id == KnowledgeChunkModel.version_id)
+                & (KnowledgeBaseVersionORM.knowledge_base_id == KnowledgeChunkModel.kb_id),
             )
             .join(
                 KnowledgeVersionDocumentORM,
-                (
-                    KnowledgeVersionDocumentORM.version_id
-                    == KnowledgeChunkModel.version_id
-                )
-                & (
-                    KnowledgeVersionDocumentORM.knowledge_base_id
-                    == KnowledgeChunkModel.kb_id
-                )
-                & (
-                    KnowledgeVersionDocumentORM.document_id
-                    == KnowledgeChunkModel.doc_id
-                ),
+                (KnowledgeVersionDocumentORM.version_id == KnowledgeChunkModel.version_id)
+                & (KnowledgeVersionDocumentORM.knowledge_base_id == KnowledgeChunkModel.kb_id)
+                & (KnowledgeVersionDocumentORM.document_id == KnowledgeChunkModel.doc_id),
             )
             .join(
                 KnowledgeDocumentRevisionORM,
@@ -556,14 +473,10 @@ class KBRetrievalMixin:
                 KnowledgeChunkModel.version_id == version_id,
                 KnowledgeChunkModel.doc_id == doc_id,
                 KnowledgeChunkModel.level == ChunkLevel.PARENT.value,
-                KnowledgeVersionDocumentORM.document_revision_id
-                == document_revision_id,
-                KnowledgeVersionDocumentORM.state
-                == DocumentRevisionState.INDEXED.value,
-                KnowledgeDocumentRevisionORM.id
-                == document_revision_id,
-                KnowledgeDocumentRevisionORM.state
-                == DocumentRevisionState.INDEXED.value,
+                KnowledgeVersionDocumentORM.document_revision_id == document_revision_id,
+                KnowledgeVersionDocumentORM.state == DocumentRevisionState.INDEXED.value,
+                KnowledgeDocumentRevisionORM.id == document_revision_id,
+                KnowledgeDocumentRevisionORM.state == DocumentRevisionState.INDEXED.value,
                 KnowledgeBaseVersionORM.state.in_(
                     (
                         KnowledgeVersionState.READY.value,
@@ -574,9 +487,7 @@ class KBRetrievalMixin:
             )
         )
         if page_no is not None:
-            base_stmt = base_stmt.where(
-                KnowledgeChunkModel.page_no == page_no
-            )
+            base_stmt = base_stmt.where(KnowledgeChunkModel.page_no == page_no)
         if cursor_key is not None:
             key_page, key_ordinal, key_id = cursor_key
             anchor_page_predicate = (
@@ -585,8 +496,7 @@ class KBRetrievalMixin:
                 else KnowledgeChunkModel.page_no == key_page
             )
             anchor_stmt = (
-                base_stmt
-                .with_only_columns(KnowledgeChunkModel.id)
+                base_stmt.with_only_columns(KnowledgeChunkModel.id)
                 .where(
                     KnowledgeChunkModel.id == key_id,
                     KnowledgeChunkModel.ordinal == key_ordinal,
@@ -596,13 +506,9 @@ class KBRetrievalMixin:
             )
             anchor_result = await self.db_session.execute(anchor_stmt)
             if anchor_result.scalar_one_or_none() is None:
-                raise ValueError(
-                    "document cursor anchor does not exist in requested source"
-                )
+                raise ValueError("document cursor anchor does not exist in requested source")
         count_stmt = select(func.count()).select_from(
-            base_stmt.with_only_columns(
-                KnowledgeChunkModel.id
-            ).order_by(None).subquery()
+            base_stmt.with_only_columns(KnowledgeChunkModel.id).order_by(None).subquery()
         )
         total_result = await self.db_session.execute(count_stmt)
         total = int(total_result.scalar_one())
@@ -637,20 +543,13 @@ class KBRetrievalMixin:
                         ),
                     )
                 )
-        page_stmt = (
-            page_stmt
-            .order_by(
-                KnowledgeChunkModel.page_no.asc().nulls_first(),
-                KnowledgeChunkModel.ordinal.asc(),
-                KnowledgeChunkModel.id.asc(),
-            )
-            .limit(limit + 1)
-        )
+        page_stmt = page_stmt.order_by(
+            KnowledgeChunkModel.page_no.asc().nulls_first(),
+            KnowledgeChunkModel.ordinal.asc(),
+            KnowledgeChunkModel.id.asc(),
+        ).limit(limit + 1)
         page_result = await self.db_session.execute(page_stmt)
-        chunks = [
-            record.to_domain()
-            for record in page_result.scalars().all()
-        ]
+        chunks = [record.to_domain() for record in page_result.scalars().all()]
         has_more = len(chunks) > limit
         page_chunks = chunks[:limit]
         next_cursor = (
@@ -666,16 +565,13 @@ class KBRetrievalMixin:
             else None
         )
         return DocumentPage(
-            items=tuple(
-                DocumentPageItem.from_chunk(chunk)
-                for chunk in page_chunks
-            ),
+            items=tuple(DocumentPageItem.from_chunk(chunk) for chunk in page_chunks),
             next_cursor=next_cursor,
             total=total,
             truncated=next_cursor is not None,
         )
 
-    async def get_parents_by_ids(self, parent_ids: List[str]) -> List[KnowledgeChunk]:
+    async def get_parents_by_ids(self, parent_ids: list[str]) -> list[KnowledgeChunk]:
         if not parent_ids:
             return []
         stmt = (
@@ -689,16 +585,12 @@ class KBRetrievalMixin:
                 self._active_version_join_predicate(),
             )
             .where(KnowledgeChunkModel.id.in_(parent_ids))
-            .where(
-                self._active_version_row_predicate(
-                    KnowledgeChunkModel.version_id
-                )
-            )
+            .where(self._active_version_row_predicate(KnowledgeChunkModel.version_id))
         )
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
 
-    async def get_chunks_by_ids(self, chunk_ids: List[str]) -> List[KnowledgeChunk]:
+    async def get_chunks_by_ids(self, chunk_ids: list[str]) -> list[KnowledgeChunk]:
         if not chunk_ids:
             return []
         stmt = (
@@ -712,21 +604,17 @@ class KBRetrievalMixin:
                 self._active_version_join_predicate(),
             )
             .where(KnowledgeChunkModel.id.in_(chunk_ids))
-            .where(
-                self._active_version_row_predicate(
-                    KnowledgeChunkModel.version_id
-                )
-            )
+            .where(self._active_version_row_predicate(KnowledgeChunkModel.version_id))
         )
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
 
     async def list_chunks_for_document(
-            self,
-            doc_id: str,
-            page_no: Optional[int] = None,
-            limit: int = 20,
-    ) -> List[KnowledgeChunk]:
+        self,
+        doc_id: str,
+        page_no: int | None = None,
+        limit: int = 20,
+    ) -> list[KnowledgeChunk]:
         stmt = (
             select(KnowledgeChunkModel)
             .join(
@@ -738,11 +626,7 @@ class KBRetrievalMixin:
                 self._active_version_join_predicate(),
             )
             .where(KnowledgeChunkModel.doc_id == doc_id)
-            .where(
-                self._active_version_row_predicate(
-                    KnowledgeChunkModel.version_id
-                )
-            )
+            .where(self._active_version_row_predicate(KnowledgeChunkModel.version_id))
             .order_by(KnowledgeChunkModel.ordinal.asc())
             .limit(max(1, min(limit, 200)))
         )
@@ -752,7 +636,7 @@ class KBRetrievalMixin:
         return [record.to_domain() for record in result.scalars().all()]
 
     @staticmethod
-    def _row_to_chunk_doc_score(row) -> Tuple[KnowledgeChunk, KnowledgeDocument, float]:
+    def _row_to_chunk_doc_score(row) -> tuple[KnowledgeChunk, KnowledgeDocument, float]:
         chunk = KnowledgeChunk(
             id=row.id,
             kb_id=row.kb_id,
@@ -787,9 +671,7 @@ class KBRetrievalMixin:
         chunk, document, score = cls._row_to_chunk_doc_score(row)
         revision_id = str(row.document_revision_id or "").strip()
         if not revision_id:
-            raise ValueError(
-                "versioned knowledge row is missing manifest revision"
-            )
+            raise ValueError("versioned knowledge row is missing manifest revision")
         return VersionedKnowledgeChunk(
             chunk=chunk,
             document=document,
@@ -799,10 +681,7 @@ class KBRetrievalMixin:
 
     @staticmethod
     def _valid_embedding(value: object) -> bool:
-        if (
-            not isinstance(value, (list, tuple))
-            or len(value) != KNOWLEDGE_EMBEDDING_DIMENSION
-        ):
+        if not isinstance(value, (list, tuple)) or len(value) != KNOWLEDGE_EMBEDDING_DIMENSION:
             return False
         try:
             return all(math.isfinite(float(item)) for item in value)

@@ -79,8 +79,18 @@ export function InterceptionsChart({ data }: { data: GovernanceDailyCount[] }) {
               <YAxis allowDecimals={false} tick={{ fontSize: 12 }} width={40} />
               <Tooltip content={<ChartTooltip />} />
               <Legend />
-              <Bar dataKey="approval_decisions" name={t("approvalDecisions")} fill={CHART_COLORS[0]} radius={[6, 6, 0, 0]} />
-              <Bar dataKey="denials" name={t("denials")} fill={CHART_COLORS[3]} radius={[6, 6, 0, 0]} />
+              <Bar
+                dataKey="approval_requests"
+                name={t("approvalRequests")}
+                fill={CHART_COLORS[0]}
+                radius={[6, 6, 0, 0]}
+              />
+              <Bar
+                dataKey="activity_failures"
+                name={t("activityFailures")}
+                fill={CHART_COLORS[3]}
+                radius={[6, 6, 0, 0]}
+              />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -112,8 +122,18 @@ export function PatrolTrendChart({ data }: { data: GovernanceDailyPatrolStat[] }
               <YAxis allowDecimals={false} tick={{ fontSize: 12 }} width={40} />
               <Tooltip content={<ChartTooltip />} />
               <Legend />
-              <Bar dataKey="runs" name={t("patrolRuns")} fill={CHART_COLORS[1]} radius={[6, 6, 0, 0]} />
-              <Bar dataKey="findings" name={t("patrolFindings")} fill={CHART_COLORS[2]} radius={[6, 6, 0, 0]} />
+              <Bar
+                dataKey="runs"
+                name={t("patrolRuns")}
+                fill={CHART_COLORS[1]}
+                radius={[6, 6, 0, 0]}
+              />
+              <Bar
+                dataKey="findings"
+                name={t("patrolFindings")}
+                fill={CHART_COLORS[2]}
+                radius={[6, 6, 0, 0]}
+              />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -154,7 +174,14 @@ export function RemediationStatusChart({ remediation }: { remediation: Remediati
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={data} dataKey="value" nameKey="name" innerRadius={56} outerRadius={92} paddingAngle={2}>
+              <Pie
+                data={data}
+                dataKey="value"
+                nameKey="name"
+                innerRadius={56}
+                outerRadius={92}
+                paddingAngle={2}
+              >
                 {data.map((entry, index) => (
                   <Cell key={entry.name} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                 ))}

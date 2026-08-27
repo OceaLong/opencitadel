@@ -1,4 +1,4 @@
 #!/bin/bash
 
-# 启用uvicorn运行服务（使用exec让uvicorn成为主进程）
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers --timeout-graceful-shutdown 5
+# Keep uvicorn as PID 1 and use the same bounded drain window as TaskSupervisor.
+exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --no-proxy-headers --timeout-graceful-shutdown "${OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS:-30}"

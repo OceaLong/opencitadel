@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -23,9 +21,9 @@ def test_shell_output_from_dict():
     assert shell_output(result) == "line1\nline2\n"
 
 
-def test_shell_output_from_string():
+def test_shell_output_rejects_unstructured_payload():
     result = ToolResult(success=True, data="plain text")
-    assert shell_output(result) == "plain text"
+    assert shell_output(result) == ""
 
 
 def test_shell_output_empty():
@@ -38,9 +36,10 @@ def test_file_content_from_dict():
     assert file_content(result) == "code"
 
 
-def test_file_content_from_string():
-    result = ToolResult(success=True, data="legacy body")
-    assert file_content(result) == "legacy body"
+def test_file_content_rejects_unstructured_payload():
+    result = ToolResult(success=True, data="plain body")
+    with pytest.raises(ValueError, match="structured content"):
+        file_content(result)
 
 
 @pytest.mark.anyio
@@ -69,7 +68,13 @@ async def test_exec_command_await_running_waits():
     sandbox.read_shell_output = AsyncMock(
         return_value=ToolResult(success=True, data={"output": "cloned\n"}),
     )
-    output = await exec_command_await(sandbox, "s1", "/tmp", "git clone", timeout=300)
+    output = await exec_command_await(
+        sandbox,
+        "s1",
+        "/tmp",
+        "git clone",
+        timeout_seconds=300,
+    )
     assert output == "cloned\n"
     sandbox.wait_process.assert_awaited_once_with("s1", seconds=300)
 

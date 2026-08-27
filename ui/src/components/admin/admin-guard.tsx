@@ -13,8 +13,7 @@ export function AdminGuard({ children }: { children: ReactNode }) {
   const tCommon = useTranslations("common");
   const { user, loading } = useAuth();
 
-  const canAccess =
-    user?.global_role === "admin" || user?.global_role === "auditor";
+  const canAccess = user?.global_role === "admin" || user?.global_role === "auditor";
 
   if (loading) {
     return (

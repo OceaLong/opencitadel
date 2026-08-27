@@ -1,8 +1,12 @@
 import pytest
-
 from opencitadel_ops_collector.config import CollectorSettings
 from opencitadel_ops_collector.main import build_parser
-from opencitadel_ops_collector.security import ProbeDenied, require_namespace, require_registered, validate_redirect
+from opencitadel_ops_collector.security import (
+    ProbeDenied,
+    require_namespace,
+    require_registered,
+    validate_redirect,
+)
 
 
 def test_streamable_http_is_default_transport():
@@ -18,7 +22,10 @@ def test_namespace_and_probe_allowlists_fail_closed():
         require_registered({}, "unknown")
 
 
-@pytest.mark.parametrize("target", ["http://127.0.0.1/admin", "http://169.254.169.254/latest", "https://evil.example/path"])
+@pytest.mark.parametrize(
+    "target",
+    ["http://127.0.0.1/admin", "http://169.254.169.254/latest", "https://evil.example/path"],
+)
 def test_redirect_cannot_escape_registered_origin(target):
     with pytest.raises(ProbeDenied):
         validate_redirect("https://service.example/health", target)

@@ -1,7 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from datetime import datetime
-from typing import List, Optional
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,14 +12,16 @@ class DBInvitationRepository(InvitationRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
-    async def get_by_token(self, token: str) -> Optional[Invitation]:
-        result = await self.db_session.execute(select(InvitationORM).where(InvitationORM.token == token))
+    async def get_by_token(self, token: str) -> Invitation | None:
+        result = await self.db_session.execute(
+            select(InvitationORM).where(InvitationORM.token == token)
+        )
         record = result.scalar_one_or_none()
         return record.to_domain() if record else None
 
-    async def get_pending_team_invitation(self, team_id: str, email: str) -> Optional[Invitation]:
+    async def get_pending_team_invitation(self, team_id: str, email: str) -> Invitation | None:
         normalized_email = email.strip().lower()
-        now = datetime.now()
+        now = datetime.now(UTC)
         result = await self.db_session.execute(
             select(InvitationORM).where(
                 InvitationORM.type == InvitationType.TEAM.value,
@@ -35,7 +34,9 @@ class DBInvitationRepository(InvitationRepository):
         record = result.scalar_one_or_none()
         return record.to_domain() if record else None
 
-    async def list(self, invitation_type: InvitationType | None = None, limit: int = 100, offset: int = 0) -> List[Invitation]:
+    async def list(
+        self, invitation_type: InvitationType | None = None, limit: int = 100, offset: int = 0
+    ) -> list[Invitation]:
         stmt = select(InvitationORM).order_by(InvitationORM.created_at.desc())
         if invitation_type is not None:
             stmt = stmt.where(InvitationORM.type == invitation_type.value)
@@ -58,4 +59,6 @@ class DBInvitationRepository(InvitationRepository):
             self.db_session.add(InvitationORM.from_domain(invitation))
 
     async def delete_by_id(self, invitation_id: str) -> None:
-        await self.db_session.execute(delete(InvitationORM).where(InvitationORM.id == invitation_id))
+        await self.db_session.execute(
+            delete(InvitationORM).where(InvitationORM.id == invitation_id)
+        )

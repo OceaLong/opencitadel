@@ -1,29 +1,34 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""Langfuse / Phoenix agent tracing helpers (uses OTel when configured)."""
-from typing import Optional
+"""OpenTelemetry-backed agent tracing helpers."""
 
-from app.application.services.config_provider import get_runtime_config
+from core.config import DeploymentSettings
+
 
 class AgentTracer:
     """Lightweight agent step tracer backed by OpenTelemetry spans."""
 
-    def __init__(self, session_id: str, agent_name: str = "") -> None:
+    def __init__(
+        self,
+        session_id: str,
+        agent_name: str = "",
+        *,
+        settings: DeploymentSettings,
+    ) -> None:
         self._session_id = session_id
         self._agent_name = agent_name
-        observability = get_runtime_config().observability
-        self._enabled = observability.otel_enabled
+        self._enabled = settings.otel_enabled
         self._tracer = None
         if self._enabled:
             try:
                 from app.infrastructure.observability.otel import get_tracer
+
                 self._tracer = get_tracer("opencitadel.agent")
-            except Exception:
+            except (OSError, RuntimeError, ValueError):
                 self._enabled = False
 
-    def span(self, name: str, attributes: Optional[dict] = None):
+    def span(self, name: str, attributes: dict | None = None):
         if not self._enabled or not self._tracer:
             from contextlib import nullcontext
+
             return nullcontext()
         attrs = {
             "session_id": self._session_id,

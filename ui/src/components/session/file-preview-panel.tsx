@@ -188,7 +188,7 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
       {/* 头部：文件名 + 操作按钮 - 添加背景色区分 */}
       <div className="border-border/70 bg-muted/30 flex flex-shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-info/15 text-info">
+          <div className="bg-info/15 text-info flex h-8 w-8 shrink-0 items-center justify-center rounded-md">
             <FileText size={16} />
           </div>
           <div className="min-w-0 flex-1">
@@ -252,6 +252,8 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
 
         {!loading && !error && fileType.type === "image" && imageUrl && (
           <div className="h-full overflow-y-auto p-4">
+            {/* Blob URLs are session-local and cannot use Next image optimization. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={imageUrl}
               alt={file.filename}

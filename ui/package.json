@@ -6,14 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint --max-warnings=0",
     "lint:fix": "eslint --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "i18n:build": "node scripts/build-messages.mjs",
-    "i18n:check": "node scripts/check-i18n-keys.mjs"
+    "i18n:check": "node --test scripts/i18n/catalog-checker.test.mjs && node scripts/check-i18n-keys.mjs",
+    "api:generate": "node scripts/generate-api-contract.mjs --write",
+    "api:check": "node scripts/generate-api-contract.mjs --check"
   },
   "dependencies": {
     "@novnc/novnc": "^1.5.0",
@@ -56,6 +57,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-simple-import-sort": "^13.0.0",
     "jsdom": "^26.1.0",
+    "openapi-typescript": "^7.10.1",
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "tailwindcss": "^4",

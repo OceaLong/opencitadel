@@ -1,83 +1,73 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-import asyncio
 import logging
-import time
-from typing import List, Callable, Type, Optional, Tuple
+from collections.abc import Callable
+from typing import Protocol
+from uuid import UUID
 
 from app.application.dto.session_io import FileReadResult, ShellReadResult
+from app.application.ports.streams import SessionListPublisher
 from app.application.services.resource_binding_service import ResourceBindingService
 from app.application.services.resource_guard_service import ResourceGuardService
-from app.domain.errors import NotFoundError, ServerRequestsError
-from app.domain.external.sandbox import Sandbox
-from app.domain.external.session_list_notifier import NoopSessionListNotifier, SessionListNotifierPort
-from app.domain.external.task_state_port import TaskStatePort
-from app.domain.models.file import File
+from app.domain.errors import BadRequestError, NotFoundError, ServerRequestsError
+from app.domain.external.sandbox import SandboxFactoryPort
 from app.domain.models.codebase import SessionMode
+from app.domain.models.file import File
+from app.domain.models.operator import normalize_operator_domains
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.session import Session
-from app.domain.models.event import BaseEvent
 from app.domain.repositories.uow import IUnitOfWork
 
 logger = logging.getLogger(__name__)
 
-_DELETE_TASK_DRAIN_TIMEOUT_SECONDS = 30.0
-_DELETE_TASK_POLL_INTERVAL_SECONDS = 0.5
+
+class ActiveRunProjection(Protocol):
+    async def latest_active_run_id(
+        self,
+        *,
+        source_entity_type: str,
+        source_entity_id: str,
+        owner_scope: OwnerScope,
+    ) -> UUID | None: ...
 
 
 class SessionService:
     """会话服务"""
 
     def __init__(
-            self,
-            uow_factory: Callable[[], IUnitOfWork],
-            sandbox_cls: Type[Sandbox],
-            session_list_notifier: Optional[SessionListNotifierPort] = None,
-            task_state_port: Optional[TaskStatePort] = None,
-            resource_guard: Optional[ResourceGuardService] = None,
-            resource_binding_service: Optional[ResourceBindingService] = None,
+        self,
+        uow_factory: Callable[[], IUnitOfWork],
+        sandbox_factory: SandboxFactoryPort,
+        run_projection: ActiveRunProjection,
+        session_list_publisher: SessionListPublisher,
+        resource_guard: ResourceGuardService | None = None,
+        resource_binding_service: ResourceBindingService | None = None,
     ) -> None:
         """构造函数，完成会话服务初始化"""
         self._uow_factory = uow_factory
-        self._sandbox_cls = sandbox_cls
-        self._session_list_notifier = session_list_notifier or NoopSessionListNotifier()
-        self._task_state = task_state_port
+        self._sandbox_factory = sandbox_factory
+        self._run_projection = run_projection
+        self._session_list_publisher = session_list_publisher
         self._resource_guard = resource_guard
         self._resource_binding_service = resource_binding_service
 
-    async def _wait_for_task_drain(self, task_id: str) -> None:
-        if not self._task_state:
-            return
-        deadline = time.monotonic() + _DELETE_TASK_DRAIN_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
-            snapshot = await self._task_state.get_runtime_snapshot(task_id)
-            if snapshot.get("is_done"):
-                return
-            await asyncio.sleep(_DELETE_TASK_POLL_INTERVAL_SECONDS)
-        logger.warning("等待任务结束超时 task_id=%s", task_id)
-
     async def create_session(
-            self,
-            title: str = "新对话",
-            model_id: Optional[str] = None,
-            skill_id: Optional[str] = None,
-            thinking_enabled: bool = False,
-            codebase_id: Optional[str] = None,
-            codebase_version_id: Optional[str] = None,
-            knowledge_base_id: Optional[str] = None,
-            knowledge_base_version_id: Optional[str] = None,
-            mode: Optional[SessionMode] = None,
-            operator_scope: Optional[str] = None,
-            operator_domains: Optional[List[str]] = None,
-            gate_profile: Optional[str] = None,
-            scope: Optional[OwnerScope] = None,
+        self,
+        title: str = "新对话",
+        model_id: str | None = None,
+        skill_id: str | None = None,
+        thinking_enabled: bool = False,
+        codebase_id: str | None = None,
+        codebase_version_id: str | None = None,
+        knowledge_base_id: str | None = None,
+        knowledge_base_version_id: str | None = None,
+        mode: SessionMode | None = None,
+        operator_scope: str | None = None,
+        operator_domains: list[str] | None = None,
+        scope: OwnerScope | None = None,
     ) -> Session:
         """创建一个空白的新任务会话"""
-        logger.info(f"创建一个空白新任务会话")
+        logger.info("创建一个空白新任务会话")
         default_mode = (
-            SessionMode.ASK
-            if knowledge_base_id and not codebase_id
-            else SessionMode.AGENT
+            SessionMode.ASK if knowledge_base_id and not codebase_id else SessionMode.AGENT
         )
         resolved_mode = mode or default_mode
         validated_resources = None
@@ -97,13 +87,12 @@ class SessionService:
             thinking_enabled=thinking_enabled,
             operator_scope=operator_scope,
             operator_domains=list(operator_domains or []),
-            gate_profile=gate_profile or ("standard" if operator_scope else None),
             owner_user_id=scope.user_id if scope else None,
             team_id=scope.team_id if scope and scope.type == OwnerScopeType.TEAM else None,
             mode=resolved_mode,
         )
         async with self._uow_factory() as uow:
-            if model_id and await uow.llm_model.get_by_id(model_id, scope=scope) is None:
+            if model_id and await uow.inference_model.get_by_id(model_id, scope=scope) is None:
                 raise NotFoundError("指定模型不存在或无权访问", error_key="errors.modelNotFound")
             if skill_id and await uow.skill.get_by_id(skill_id, scope=scope) is None:
                 raise NotFoundError("指定 Skill 不存在或无权访问")
@@ -118,125 +107,142 @@ class SessionService:
             if validated_resources and self._resource_binding_service and scope:
                 for version in validated_resources.versions:
                     binding = await self._resource_binding_service.bind_initial_resolved(
-                        uow, session_id=session.id, resolved=version,
-                        scope=scope, actor_id=scope.user_id,
+                        uow,
+                        session_id=session.id,
+                        resolved=version,
+                        scope=scope,
+                        actor_id=scope.user_id,
                     )
                     session.resource_bindings.append(binding.to_projection())
-        await self._session_list_notifier.notify_sessions_changed()
-        logger.info(f"成功创建一个新任务会话: {session.id}")
+            await uow.commit()
+        await self._publish_session_list_hint()
+        logger.info("成功创建一个新任务会话: %s", session.id)
         return session
 
     async def update_session_config(
-            self,
-            session_id: str,
-            model_id: Optional[str] = None,
-            skill_id: Optional[str] = None,
-            thinking_enabled: Optional[bool] = None,
-            gate_profile: Optional[str] = None,
-            operator_domains: Optional[list] = None,
-            scope: Optional[OwnerScope] = None,
+        self,
+        session_id: str,
+        model_id: str | None = None,
+        skill_id: str | None = None,
+        thinking_enabled: bool | None = None,
+        operator_domains: list | None = None,
+        scope: OwnerScope | None = None,
     ) -> Session:
         async with self._uow_factory() as uow:
-            if scope is not None and await uow.session.get_metadata(session_id, scope=scope) is None:
-                raise NotFoundError("该会话不存在，请核实后重试", error_key="errors.sessionNotFound")
-            if model_id and model_id != "" and await uow.llm_model.get_by_id(model_id, scope=scope) is None:
+            current = await uow.session.get_by_id(session_id, scope=scope)
+            if current is None:
+                raise NotFoundError(
+                    "该会话不存在，请核实后重试", error_key="errors.sessionNotFound"
+                )
+            if (
+                model_id
+                and model_id != ""
+                and await uow.inference_model.get_by_id(model_id, scope=scope) is None
+            ):
                 raise NotFoundError("指定模型不存在或无权访问", error_key="errors.modelNotFound")
-            if skill_id and skill_id != "" and await uow.skill.get_by_id(skill_id, scope=scope) is None:
+            if (
+                skill_id
+                and skill_id != ""
+                and await uow.skill.get_by_id(skill_id, scope=scope) is None
+            ):
                 raise NotFoundError("指定 Skill 不存在或无权访问")
+            normalized_domains = (
+                normalize_operator_domains(operator_domains)
+                if operator_domains is not None
+                else None
+            )
+            if current.operator_scope is not None and normalized_domains == []:
+                raise ValueError("operator sessions require at least one allowed domain")
             await uow.session.update_session_config(
                 session_id,
                 model_id=model_id,
                 skill_id=skill_id,
                 thinking_enabled=thinking_enabled,
-                gate_profile=gate_profile,
-                operator_domains=operator_domains,
+                operator_domains=normalized_domains,
                 clear_model=model_id == "",
                 clear_skill=skill_id == "",
             )
-            return await uow.session.get_by_id(session_id, scope=scope)
+            updated = await uow.session.get_by_id(session_id, scope=scope)
+            await uow.commit()
+            return updated
 
-    async def get_all_sessions(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[Session]:
+    async def get_all_sessions(
+        self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
+    ) -> list[Session]:
         """获取项目所有任务会话列表"""
         async with self._uow_factory() as uow:
             return await uow.session.get_all(limit=limit, offset=offset, scope=scope)
 
     async def clear_unread_message_count(self, session_id: str) -> None:
         """清空指定会话未读消息数"""
-        logger.info(f"清除会话[{session_id}]未读消息数")
+        logger.info("清除会话[%s]未读消息数", session_id)
         async with self._uow_factory() as uow:
             await uow.session.update_unread_message_count(session_id, 0)
+            await uow.commit()
 
-    async def delete_session(self, session_id: str, scope: Optional[OwnerScope] = None) -> None:
+    async def delete_session(self, session_id: str, scope: OwnerScope | None = None) -> None:
         """根据传递的会话id删除任务会话"""
+        if scope is None:
+            raise ValueError("session deletion requires an owner scope")
         # 1.先检查会话是否存在
-        logger.info(f"正在删除会话, 会话id: {session_id}")
+        logger.info("正在删除会话, 会话id: %s", session_id)
         async with self._uow_factory() as uow:
             session = await uow.session.get_by_id(session_id, scope=scope)
         if not session:
-            logger.error(f"会话[{session_id}]不存在, 删除失败")
+            logger.error("会话[%s]不存在, 删除失败", session_id)
             raise NotFoundError(f"会话[{session_id}]不存在, 删除失败")
 
-        if session.task_id and self._task_state:
-            await self._task_state.request_cancel(session.task_id)
-            await self._wait_for_task_drain(session.task_id)
+        active_run_id = await self._run_projection.latest_active_run_id(
+            source_entity_type="session",
+            source_entity_id=session_id,
+            owner_scope=scope,
+        )
+        if active_run_id is not None:
+            raise BadRequestError("会话仍有活动 Run，请先停止并等待进入终态")
 
         # 2.销毁关联 sandbox 后删除会话
         if session.sandbox_id:
             try:
-                sandbox = await self._sandbox_cls.get(session.sandbox_id)
+                sandbox = await self._sandbox_factory.get(session.sandbox_id)
                 if sandbox:
                     await sandbox.destroy()
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.warning("删除会话时销毁 sandbox 失败 session=%s: %s", session_id, e)
 
         async with self._uow_factory() as uow:
             await uow.session.delete_by_id(session_id)
-        await self._session_list_notifier.notify_sessions_changed()
-        logger.info(f"删除会话[{session_id}]成功")
+            await uow.commit()
+        await self._publish_session_list_hint()
+        logger.info("删除会话[%s]成功", session_id)
 
-    async def get_session(self, session_id: str, scope: Optional[OwnerScope] = None) -> Session:
+    async def _publish_session_list_hint(self) -> None:
+        try:
+            await self._session_list_publisher.publish_changed()
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning("Session list hint publication failed after commit: %s", exc)
+
+    async def get_session(self, session_id: str, scope: OwnerScope | None = None) -> Session:
         """获取指定会话详情信息"""
         async with self._uow_factory() as uow:
             return await uow.session.get_by_id(session_id, scope=scope)
 
-    async def get_session_events(
-            self,
-            session_id: str,
-            after: Optional[int] = None,
-            before: Optional[int] = None,
-            limit: int = 100,
-            latest: bool = False,
-            scope: Optional[OwnerScope] = None,
-    ) -> List[Tuple[int, BaseEvent]]:
-        """分页获取会话事件"""
-        async with self._uow_factory() as uow:
-            if await uow.session.get_metadata(session_id, scope=scope) is None:
-                raise NotFoundError("该会话不存在，请核实后重试", error_key="errors.sessionNotFound")
-            return await uow.session.list_events(
-                session_id,
-                after=after,
-                before=before,
-                limit=limit,
-                latest=latest,
-            )
-
-    async def has_events_before(self, session_id: str, seq: int) -> bool:
-        async with self._uow_factory() as uow:
-            return await uow.session.has_events_before(session_id, seq)
-
-    async def get_session_files(self, session_id: str, scope: Optional[OwnerScope] = None) -> List[File]:
+    async def get_session_files(
+        self, session_id: str, scope: OwnerScope | None = None
+    ) -> list[File]:
         """根据传递的会话id获取指定会话的文件列表信息"""
-        logger.info(f"获取指定会话[{session_id}]下的文件列表信息")
+        logger.info("获取指定会话[%s]下的文件列表信息", session_id)
         async with self._uow_factory() as uow:
             files = await uow.session.get_files(session_id, scope=scope)
         if files is None:
             raise RuntimeError(f"当前会话不存在[{session_id}], 请核实后重试")
         return files
 
-    async def read_file(self, session_id: str, filepath: str, scope: Optional[OwnerScope] = None) -> FileReadResult:
+    async def read_file(
+        self, session_id: str, filepath: str, scope: OwnerScope | None = None
+    ) -> FileReadResult:
         """根据传递的信息查看会话中指定文件的内容"""
         # 1.检查会话是否存在
-        logger.info(f"获取会话[{session_id}]中的文件内容, 文件路径: {filepath}")
+        logger.info("获取会话[%s]中的文件内容, 文件路径: %s", session_id, filepath)
         async with self._uow_factory() as uow:
             session = await uow.session.get_metadata(session_id, scope=scope)
         if not session:
@@ -244,7 +250,7 @@ class SessionService:
 
         if not session.sandbox_id:
             raise NotFoundError("当前会话无沙箱环境")
-        sandbox = await self._sandbox_cls.get(session.sandbox_id)
+        sandbox = await self._sandbox_factory.get(session.sandbox_id)
         if not sandbox:
             raise NotFoundError("当前会话沙箱不存在或已销毁")
 
@@ -255,10 +261,12 @@ class SessionService:
 
         raise ServerRequestsError(result.message)
 
-    async def read_shell_output(self, session_id: str, shell_session_id: str, scope: Optional[OwnerScope] = None) -> ShellReadResult:
+    async def read_shell_output(
+        self, session_id: str, shell_session_id: str, scope: OwnerScope | None = None
+    ) -> ShellReadResult:
         """根据传递的任务会话id+Shell会话id获取Shell执行结果"""
         # 1.检查会话是否存在
-        logger.info(f"获取会话[{session_id}]中的Shell内容输出, Shell标识符: {shell_session_id}")
+        logger.info("获取会话[%s]中的Shell内容输出, Shell标识符: %s", session_id, shell_session_id)
         async with self._uow_factory() as uow:
             session = await uow.session.get_metadata(session_id, scope=scope)
         if not session:
@@ -266,7 +274,7 @@ class SessionService:
 
         if not session.sandbox_id:
             raise NotFoundError("当前会话无沙箱环境")
-        sandbox = await self._sandbox_cls.get(session.sandbox_id)
+        sandbox = await self._sandbox_factory.get(session.sandbox_id)
         if not sandbox:
             raise NotFoundError("当前会话沙箱不存在或已销毁")
 
@@ -277,10 +285,10 @@ class SessionService:
 
         raise ServerRequestsError(result.message)
 
-    async def get_vnc_url(self, session_id: str, scope: Optional[OwnerScope] = None) -> str:
+    async def get_vnc_url(self, session_id: str, scope: OwnerScope | None = None) -> str:
         """获取指定会话的vnc链接"""
         # 1.检查会话是否存在
-        logger.info(f"获取会话[{session_id}]的VNC链接")
+        logger.info("获取会话[%s]的VNC链接", session_id)
         async with self._uow_factory() as uow:
             session = await uow.session.get_metadata(session_id, scope=scope)
         if not session:
@@ -288,7 +296,7 @@ class SessionService:
 
         if not session.sandbox_id:
             raise NotFoundError("当前会话无沙箱环境")
-        sandbox = await self._sandbox_cls.get(session.sandbox_id)
+        sandbox = await self._sandbox_factory.get(session.sandbox_id)
         if not sandbox:
             raise NotFoundError("当前会话沙箱不存在或已销毁")
 

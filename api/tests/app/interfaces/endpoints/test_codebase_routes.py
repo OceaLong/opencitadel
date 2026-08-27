@@ -1,5 +1,6 @@
 """Snapshot endpoint contract tests."""
-from datetime import datetime
+
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +15,9 @@ def _ctx() -> WorkspaceContext:
 
 class _SnapshotService:
     def __init__(self):
-        self.codebase = SimpleNamespace(snapshot_key="stored.tgz", updated_at=datetime(2026, 1, 1))
+        self.codebase = SimpleNamespace(
+            snapshot_key="stored.tgz", updated_at=datetime(2026, 1, 1, tzinfo=UTC)
+        )
         self.package_calls = 0
 
     async def get_codebase(self, codebase_id, *, scope):
@@ -31,6 +34,8 @@ class _SnapshotService:
 async def test_post_snapshot_is_the_only_snapshot_mutation():
     """Catches POST snapshots becoming a no-op."""
     service = _SnapshotService()
-    response = await codebase_routes.create_codebase_snapshot("cb1", _ctx(), Principal(user_id="u1"), service, object())
+    response = await codebase_routes.create_codebase_snapshot(
+        "cb1", _ctx(), Principal(user_id="u1"), service, object()
+    )
     assert response.data.snapshot_key == "new.tgz"
     assert service.package_calls == 1

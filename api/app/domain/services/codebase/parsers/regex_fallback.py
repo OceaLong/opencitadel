@@ -1,10 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Conservative regex parser fallback for languages without a parser."""
+
 from __future__ import annotations
 
 import re
-from typing import Iterable
+from collections.abc import Iterable
 
 from app.domain.models.codebase import SymbolKind
 from app.domain.services.codebase.parsers.base import (
@@ -13,7 +12,6 @@ from app.domain.services.codebase.parsers.base import (
     ParsedSymbol,
     SourceRange,
 )
-
 
 _CONTROL_NAMES = {
     "if",
@@ -29,10 +27,10 @@ _CONTROL_NAMES = {
 
 class RegexFallbackParser:
     def __init__(
-            self,
-            *,
-            parser_name: str = "regex",
-            confidence: float = 0.3,
+        self,
+        *,
+        parser_name: str = "regex",
+        confidence: float = 0.3,
     ) -> None:
         self.parser_name = parser_name
         self.confidence = confidence
@@ -50,10 +48,10 @@ class RegexFallbackParser:
         return ParsedFile(symbols=symbols, calls=calls)
 
     def _extract_classes(
-            self,
-            lines: list[str],
-            symbols: list[ParsedSymbol],
-            seen: set[str],
+        self,
+        lines: list[str],
+        symbols: list[ParsedSymbol],
+        seen: set[str],
     ) -> list[tuple[str, int, int]]:
         class_ranges: list[tuple[str, int, int]] = []
         for idx, line in enumerate(lines):
@@ -80,11 +78,11 @@ class RegexFallbackParser:
         return class_ranges
 
     def _extract_methods(
-            self,
-            lines: list[str],
-            class_ranges: Iterable[tuple[str, int, int]],
-            symbols: list[ParsedSymbol],
-            seen: set[str],
+        self,
+        lines: list[str],
+        class_ranges: Iterable[tuple[str, int, int]],
+        symbols: list[ParsedSymbol],
+        seen: set[str],
     ) -> None:
         for class_name, start, end in class_ranges:
             for idx in range(start - 1, min(end, len(lines))):
@@ -115,20 +113,22 @@ class RegexFallbackParser:
                     )
 
     def _extract_functions(
-            self,
-            lines: list[str],
-            class_ranges: Iterable[tuple[str, int, int]],
-            symbols: list[ParsedSymbol],
-            seen: set[str],
+        self,
+        lines: list[str],
+        class_ranges: Iterable[tuple[str, int, int]],
+        symbols: list[ParsedSymbol],
+        seen: set[str],
     ) -> None:
         ranges = list(class_ranges)
         patterns = [
             r"\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_]\w*)\s*\(",
             r"\bfunc\s+([A-Za-z_]\w*)\s*\(",
             r"\b(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*(?:\(|<)",
-            r"^\s*(?:public|private|protected|static|\s)*"
-            r"(?:void|int|String|bool|float|double|[A-Za-z_]\w*)\s+"
-            r"([A-Za-z_]\w*)\s*\(",
+            (
+                r"^\s*(?:public|private|protected|static|\s)*"
+                r"(?:void|int|String|bool|float|double|[A-Za-z_]\w*)\s+"
+                r"([A-Za-z_]\w*)\s*\("
+            ),
         ]
         for idx, line in enumerate(lines):
             line_no = idx + 1
@@ -159,16 +159,16 @@ class RegexFallbackParser:
                     break
 
     def _extract_calls(
-            self,
-            lines: list[str],
-            symbols: list[ParsedSymbol],
-            calls: list[ParsedCallSite],
+        self,
+        lines: list[str],
+        symbols: list[ParsedSymbol],
+        calls: list[ParsedCallSite],
     ) -> None:
         for symbol in symbols:
             if symbol.kind not in {SymbolKind.FUNCTION, SymbolKind.METHOD}:
                 continue
             block_lines = lines[
-                max(0, symbol.range.start_line - 1): min(len(lines), symbol.range.end_line)
+                max(0, symbol.range.start_line - 1) : min(len(lines), symbol.range.end_line)
             ]
             for offset, line in enumerate(block_lines):
                 line_no = symbol.range.start_line + offset
@@ -188,9 +188,9 @@ class RegexFallbackParser:
 
     @staticmethod
     def _brace_end_line(
-            lines: list[str],
-            start_idx: int,
-            start_col: int = 0,
+        lines: list[str],
+        start_idx: int,
+        start_col: int = 0,
     ) -> int:
         balance = 0
         saw_open = False

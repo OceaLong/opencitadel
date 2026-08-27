@@ -77,7 +77,6 @@ ENV=production
 COOKIE_SECURE=true
 FRONTEND_BASE_URL=https://your-domain.com
 OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
-USE_DB_APP_CONFIG=true
 ```
 
 For **local HTTP quickstart** only (`make quickstart`), use `ENV=development` with `COOKIE_SECURE=false` and `FRONTEND_BASE_URL=http://localhost:8088` instead.
@@ -140,7 +139,7 @@ sudo ufw reload
 
 ### WebSocket / SSE issues
 
-Templates include `Upgrade` / `Connection` headers and long timeouts; extra Nginx changes are usually unnecessary. If problems persist, check external service URLs in `api/config.yaml` use HTTPS.
+Templates include `Upgrade` / `Connection` headers and long timeouts; extra Nginx changes are usually unnecessary. If problems persist, verify first-class Inference and Integration resource URLs use HTTPS.
 
 ---
 

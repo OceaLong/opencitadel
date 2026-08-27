@@ -87,10 +87,10 @@ export function AccountMenu() {
       <SidebarFooter className="p-2">
         <button
           type="button"
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-muted/50 px-2.5 py-2 text-sm transition-colors hover:bg-muted/80"
+          className="bg-muted/50 hover:bg-muted/80 flex w-full items-center justify-center gap-2 rounded-xl px-2.5 py-2 text-sm transition-colors"
           onClick={() => promptLogin()}
         >
-          <LogIn className="size-4 text-muted-foreground" />
+          <LogIn className="text-muted-foreground size-4" />
           {tAuth("loginRegister")}
         </button>
       </SidebarFooter>
@@ -102,7 +102,7 @@ export function AccountMenu() {
   return (
     <SidebarFooter ref={footerRef} className="p-2">
       {open ? (
-        <div className="bg-popover mb-1 animate-in fade-in-0 slide-in-from-bottom-2 rounded-xl border py-1 shadow-sm duration-200">
+        <div className="bg-popover animate-in fade-in-0 slide-in-from-bottom-2 mb-1 rounded-xl border py-1 shadow-sm duration-200">
           {user.global_role === "admin" ? (
             <AccountMenuItem href="/admin" onClick={closeMenu}>
               <LayoutDashboard />
@@ -135,7 +135,7 @@ export function AccountMenu() {
       ) : null}
       <button
         type="button"
-        className="flex w-full items-center gap-2.5 rounded-xl bg-muted/50 px-2.5 py-2 transition-colors hover:bg-muted/80"
+        className="bg-muted/50 hover:bg-muted/80 flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 transition-colors"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
       >

@@ -1,11 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
 import os.path
 import uuid
-from datetime import datetime
+from collections.abc import Callable
+from datetime import UTC, datetime
 from io import BytesIO
-from typing import Tuple, BinaryIO, Callable
+from typing import BinaryIO
+
 from starlette.concurrency import run_in_threadpool
 
 from app.domain.external.file_storage import FileStorage, FileUploadPayload
@@ -20,10 +20,10 @@ class CosFileStorage(FileStorage):
     """基于COS的文件存储扩展"""
 
     def __init__(
-            self,
-            bucket: str,
-            cos: Cos,
-            uow_factory: Callable[[], IUnitOfWork],
+        self,
+        bucket: str,
+        cos: Cos,
+        uow_factory: Callable[[], IUnitOfWork],
     ) -> None:
         """构造函数，完成cos文件存储桶扩展初始化"""
         self.bucket = bucket
@@ -41,7 +41,7 @@ class CosFileStorage(FileStorage):
                 file_extension = ""
 
             # 2.生成日期路径并拼接最终key
-            date_path = datetime.now().strftime("%Y/%m/%d")
+            date_path = datetime.now(UTC).strftime("%Y/%m/%d")
             cos_key = f"{date_path}/{file_id}{file_extension}"
 
             # 3.使用fastapi的线程池来上传文件
@@ -51,7 +51,7 @@ class CosFileStorage(FileStorage):
                 Body=payload.file,
                 Key=cos_key,
             )
-            logger.info(f"文件上传成功: {payload.filename} (ID: {file_id})")
+            logger.info("文件上传成功: %s (ID: %s)", payload.filename, file_id)
 
             # 4.构建file模型并将数据存储到数据库中
             file = File(
@@ -66,13 +66,14 @@ class CosFileStorage(FileStorage):
             )
             async with self._uow_factory() as uow:
                 await uow.file.save(file)
+                await uow.commit()
 
             return file
-        except Exception as e:
-            logger.error(f"上传文件[{payload.filename}]失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("上传文件[%s]失败: %s", payload.filename, e)
             raise
 
-    async def download_file(self, file_id: str) -> Tuple[BinaryIO, File]:
+    async def download_file(self, file_id: str) -> tuple[BinaryIO, File]:
         """根据文件id查询数据并下载文件"""
         try:
             # 1.查询对应的文件记录是否存在
@@ -86,6 +87,17 @@ class CosFileStorage(FileStorage):
 
             # 3.返回文件流+文件信息
             return BytesIO(data), file
-        except Exception as e:
-            logger.error(f"下载文件[{file_id}]失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("下载文件[%s]失败: %s", file_id, e)
             raise
+
+    async def presigned_get_url(
+        self,
+        key: str,
+        *,
+        expires_seconds: int,
+    ) -> str | None:
+        return await self.cos.presigned_get_url(
+            key,
+            expires_seconds=expires_seconds,
+        )

@@ -1,84 +1,47 @@
-[English](integrations-a2a-service-keys.md) · [简体中文](integrations-a2a-service-keys.zh-CN.md)
+# MCP, A2A, and Service Keys
 
-# A2A & Service API Keys
+[简体中文](integrations-a2a-service-keys.zh-CN.md)
 
-Outbound A2A (call remote agents) and inbound A2A (OpenCitadel as a remote agent), plus Service API Key authentication.
+Integrations are owner-scoped resources. They are resolved at Activity time
+under the Run's frozen OwnerScope and selected Skill references.
 
-## Outbound A2A (Agent calls remote agents)
+## Outbound MCP and A2A
 
-Configure remote A2A servers in `api/config.yaml` → `a2a_config.a2a_servers` or via **Settings → Integrations** (MCP/A2A/Service Keys tab).
+MCP records define transport, endpoint/command, headers/env, enabled state,
+tool policies, visibility, and owner/team. A2A records define endpoint,
+enabled state, tool policies, visibility, and owner/team. HTTP destinations
+pass outbound SSRF validation. Stdio MCP is administrator-only because it
+starts a local process in the execution-kernel trust boundary.
 
-| Field | Description |
-|-------|-------------|
-| `id` | Server reference ID |
-| `base_url` | Remote agent base URL |
-| `enabled` | Whether the server is active |
+The Agent tool catalog resolves only enabled, accessible records. A Skill with
+server refs narrows the set further. Tool definitions are filtered by mode and
+policy before the model sees them, then resolved and checked again before
+invocation. Missing or ambiguous tool names fail closed.
 
-Skills can restrict which A2A servers are available via `a2a_server_refs`. The Agent uses the `a2a` tool at runtime; Worker maintains an outbound connection pool with stale release.
+Secret values in MCP URLs, headers, and environment dictionaries use versioned
+encrypted envelopes. Responses mask them. Masked/blank update fields retain
+the current value; a real new value is encrypted with the active key.
 
-Remote agent discovery uses `GET {base_url}/.well-known/agent-card.json`.
+## Inbound A2A
 
-```mermaid
-flowchart TB
-  subgraph outbound ["Outbound A2A"]
-    Agent["AgentTaskRunner"] --> A2ATool["a2a tool"]
-    A2ATool --> Pool["Worker connection pool"]
-    Pool --> Remote["Remote agent base_url"]
-  end
-  subgraph inbound ["Inbound A2A"]
-    External["External caller"] -->|"X-Api-Key"| A2AEndpoint["POST /api/a2a"]
-    A2AEndpoint --> Session["Create/run session"]
-  end
-  subgraph keys ["Service API Keys"]
-    User["User"] --> CreateKey["POST /api/service-keys"]
-    CreateKey --> Hash["SHA-256 hash in DB"]
-  end
-```
+Inbound `/api/a2a` uses a service API key and submits normal Agent execution
+under the key owner's authority. Service keys are shown once, stored as hashes,
+revocable, and audited. An auditor-owned key cannot invoke A2A. Service keys do
+not implicitly select a team; team-scoped interactive APIs use session auth and
+`X-Workspace-Id`.
 
-## Inbound A2A (OpenCitadel as remote agent)
+Remote Agent calls are nondeterministic Activities. Request identity,
+timeout/call-start, result reference, and failure are durable. Circuit/open
+state can block a provider call but cannot decide Run terminal state.
 
-When `feature_flags.enable_agent_features=true`, OpenCitadel exposes:
+## Security rules
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/.well-known/agent-card.json` | Public | Agent card for discovery |
-| POST | `/api/a2a` | `X-Api-Key` | JSON-RPC (`message/send`, `message/stream`) |
-
-Inbound calls authenticate via **Service API Key** (`require_service_api_key`). The principal inherits the key owner's `global_role` and user id.
-
-## Service API Keys
-
-Long-lived keys for automation and inbound A2A. Managed per user via session JWT:
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/service-keys` | List keys (hash only, no plaintext) |
-| POST | `/api/service-keys` | Create key — **plaintext returned once** |
-| DELETE | `/api/service-keys/{id}` | Revoke key |
-
-**UI entry**: Settings → Integrations → **Service API Keys** panel (`ServiceKeysSettings` in `ui/src/components/settings/service-keys-settings.tsx`).
-
-Usage:
-
-```http
-X-Api-Key: <plaintext-key>
-```
-
-Keys are stored as SHA-256 hashes (`service_api_keys` table). Plaintext is shown only at creation; list/revoke operations never return the secret. Revoked keys fail authentication immediately.
-
-**Scope note**: Service API Key principals have empty `team_roles`; team-scoped resources require JWT session auth with `X-Workspace-Id`. Inbound A2A (`POST /api/a2a`) uses `require_service_api_key` — the principal inherits the key owner's `global_role` and user id, not team membership.
-
-## MCP vs A2A
-
-| Protocol | Direction | Configuration | Tool name |
-|----------|-----------|---------------|-----------|
-| MCP | Outbound tools | `mcp_config.mcpServers` | `mcp` |
-| A2A outbound | Outbound delegation | `a2a_config.a2a_servers` | `a2a` |
-| A2A inbound | External callers → OpenCitadel | `feature_flags.enable_agent_features` | `/api/a2a` |
-
-See [Tutorial 3: MCP integrations](../tutorials/03-mcp-integrations.md) for MCP setup.
-
-## Related documentation
-
-- [Security model](security-model.md) — Service API Key storage
-- [Config source governance](config-source-governance.md) — AppConfig seed for MCP/A2A
+- Global integrations require admin creation; private integrations bind to one
+  personal/team OwnerScope.
+- Global Skills may reference only global integrations.
+- Every integration tool needs an explicit policy; undeclared tools are
+  conservative and approval-required.
+- Private hosts/ports require deployment allowlisting and redirects are
+  revalidated.
+- Logs, public events, and evidence omit credentials and raw authentication
+  headers.

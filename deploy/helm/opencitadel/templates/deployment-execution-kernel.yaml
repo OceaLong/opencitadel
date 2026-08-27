@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-execution-kernel
+  labels:
+    app.kubernetes.io/component: execution-kernel
+spec:
+  replicas: {{ .Values.executionKernel.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: execution-kernel
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: execution-kernel
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.shutdown.terminationGracePeriodSeconds }}
+      {{- if .Values.rbac.create }}
+      serviceAccountName: {{ include "opencitadel.fullname" . }}-execution-kernel
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: execution-kernel
+          image: "{{ .Values.image.executionKernel.repository }}:{{ .Values.image.executionKernel.tag }}"
+          imagePullPolicy: {{ .Values.image.executionKernel.pullPolicy }}
+          command: ["python", "-m", "app.execution_kernel_main"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.executionKernel.metricsPort }}
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -m
+                - app.execution_kernel_health
+                - readiness
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -m
+                - app.execution_kernel_health
+                - liveness
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.resources.executionKernel | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: {{ include "opencitadel.fullname" . }}-secret
+          env:
+            - name: OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS
+              value: {{ .Values.shutdown.timeoutSeconds | quote }}
+            {{- range $key, $value := .Values.env }}
+            {{- if and (ne $key "POSTGRES_HOST") (ne $key "POSTGRES_USER") (ne $key "REDIS_HOST") (ne $key "MINIO_ENDPOINT") }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+            - name: POSTGRES_USER
+              value: {{ .Values.executionKernel.databaseUser | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "opencitadel.fullname" . }}-execution-kernel-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_HOST
+              value: {{ include "opencitadel.postgresHost" . | quote }}
+            - name: POSTGRES_ADMIN_USER
+              value: ""
+            - name: POSTGRES_ADMIN_PASSWORD
+              value: ""
+            - name: REDIS_HOST
+              value: {{ include "opencitadel.redisHost" . | quote }}
+            - name: MINIO_ENDPOINT
+              value: {{ include "opencitadel.minioEndpoint" . | quote }}
+            - name: EXECUTION_KERNEL_METRICS_PORT
+              value: {{ .Values.executionKernel.metricsPort | quote }}
+            - name: OPENCITADEL_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

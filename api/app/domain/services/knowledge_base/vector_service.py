@@ -1,26 +1,40 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""Embedding service for knowledge-base chunks."""
-from app.domain.config_port import get_runtime_config
-from app.domain.vector_port import get_vector_memory
+"""Scoped embedding facade for knowledge-base chunks."""
+
+from app.domain.models.scope import OwnerScope
+from app.domain.vector_port import EmbeddingPort
 
 
 class KBVectorService:
-    def __init__(self) -> None:
-        self._vector = get_vector_memory()
-        runtime = get_runtime_config()
-        self.enabled = (
-            runtime.knowledge_base.vector_enabled
-            and runtime.feature_flags.enable_embeddings
-        )
+    def __init__(
+        self,
+        embeddings: EmbeddingPort,
+        *,
+        scope: OwnerScope | None,
+        enabled: bool,
+        model_id: str | None = None,
+    ) -> None:
+        self._embeddings = embeddings
+        self._scope = scope
+        self.enabled = enabled
+        self._model_id = model_id
 
     async def embed(self, content: str) -> list[float]:
         if not self.enabled or not content.strip():
             return []
-        vectors = await self._vector.embed_batch_unconditional([content])
+        vectors = await self._embeddings.embed(
+            [content],
+            scope=self._scope,
+            purpose_context="knowledge_base.query",
+            model_id=self._model_id,
+        )
         return vectors[0] if vectors else []
 
     async def embed_batch(self, contents: list[str]) -> list[list[float]]:
         if not self.enabled:
             return [[] for _ in contents]
-        return await self._vector.embed_batch_unconditional(contents)
+        return await self._embeddings.embed(
+            contents,
+            scope=self._scope,
+            purpose_context="knowledge_base.index",
+            model_id=self._model_id,
+        )

@@ -1,13 +1,5 @@
-"""Static RBAC scan for the actuator's ServiceAccount, mirroring the scan
-approach in ops-collector/tests/integration/test_golden_fixtures.py's
-test_collector_rbac_is_get_list_watch_only, adjusted for the actuator's
-registered write verb (patch) in addition to get/list/watch.
+"""Static least-privilege checks for the Actuator ServiceAccount."""
 
-The actuator RBAC manifests are produced by Task 5 of this remediation plan
-(deploy/patrol-demo/manifests/actuator-rbac.yaml and
-deploy/kustomize/ops-actuator/rbac.yaml) and now exist, so this scan runs
-for real rather than skipping.
-"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,7 +17,7 @@ NETWORK_POLICY = ROOT / "deploy" / "kustomize" / "ops-actuator" / "network-polic
 
 @pytest.mark.parametrize("manifest", RBAC_FILES, ids=lambda path: path.parent.name)
 def test_actuator_rbac_is_registered_write_verbs_only(manifest: Path):
-    assert manifest.exists(), f"{manifest} is required (Task 5 of this remediation plan)"
+    assert manifest.exists(), f"required RBAC manifest is missing: {manifest}"
     documents = [item for item in yaml.safe_load_all(manifest.read_text()) if item]
     roles = [item for item in documents if item.get("kind") in {"Role", "ClusterRole"}]
     assert roles
@@ -48,9 +40,7 @@ def test_actuator_network_policy_reaches_kubernetes_api_service_and_endpoint_por
     in-cluster writer can hang before it ever reaches its RBAC checks.
     """
     policy = yaml.safe_load(NETWORK_POLICY.read_text())
-    unrestricted_destination_rules = [
-        rule for rule in policy["spec"]["egress"] if "to" not in rule
-    ]
+    unrestricted_destination_rules = [rule for rule in policy["spec"]["egress"] if "to" not in rule]
     allowed_tcp_ports = {
         int(port["port"])
         for rule in unrestricted_destination_rules

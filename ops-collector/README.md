@@ -53,7 +53,7 @@ opsCollector:
   targetRef: production-cluster-a
   allowedNamespaces: [opencitadel]
   allowedWorkloads:
-    opencitadel: [opencitadel-api, opencitadel-worker]
+    opencitadel: [opencitadel-api, opencitadel-execution-kernel]
   registeredPrometheusQueries:
     app-5xx-ratio:
       base_url: http://prometheus.monitoring.svc:9090
@@ -98,7 +98,7 @@ Never enable stdio in the production deployment.
 
 - Helm: set `opsCollector.enabled=true` and configure the registries in `deploy/helm/opencitadel/values.yaml`.
 - Kustomize: use `deploy/kustomize/ops-collector` as a base and patch its image, target ref, allowlists, and registered-target environment values.
-- Keep the Service `ClusterIP`; only API and Worker should reach port 8090.
+- Keep the Service `ClusterIP`; only API and the execution kernel should reach port 8090.
 - Keep the read-only ServiceAccount. It excludes Secrets, exec, attach, impersonation, and all mutation verbs.
 - Review NetworkPolicy egress against the exact Kubernetes API and registered target locations. The registry is the application-layer SSRF boundary; NetworkPolicy is defense in depth.
 

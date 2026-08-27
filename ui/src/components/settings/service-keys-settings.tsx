@@ -20,7 +20,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 import { formatDateTime } from "@/lib/admin-utils";
-import { type CreatedServiceApiKey, type ServiceApiKey,serviceKeysApi } from "@/lib/api/service-keys";
+import {
+  type CreatedServiceApiKey,
+  type ServiceApiKey,
+  serviceKeysApi,
+} from "@/lib/api/service-keys";
 
 export function ServiceKeysSettings() {
   const t = useTranslations("settingsServiceKeys");
@@ -179,7 +183,11 @@ export function ServiceKeysSettings() {
               <div className="bg-muted/40 rounded-lg border p-3 font-mono text-xs break-all">
                 {createdKey.plaintext}
               </div>
-              <Button type="button" variant="outline" onClick={() => void copyPlaintext(createdKey.plaintext)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void copyPlaintext(createdKey.plaintext)}
+              >
                 <Copy className="mr-1 size-4" />
                 {t("copyKey")}
               </Button>

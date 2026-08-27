@@ -1,26 +1,23 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Task 6 RED/GREEN contracts for bounded, resumable versioned GraphRAG."""
+
 from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 import pytest
-import yaml
 
-from app.domain.models.app_config import AppConfig
 from app.domain.models.knowledge_base import ChunkLevel, KnowledgeChunk
+from app.domain.runtime_policy import KnowledgeChunkPolicy
 from app.domain.services.knowledge_base.chunker import KBChunker
-from app.domain.services.knowledge_base.parsers import PageBlock
 from app.domain.services.knowledge_base.graph_builder import (
     GraphBudget,
     GraphBuilder,
     normalize_entity_name,
 )
+from app.domain.services.knowledge_base.parsers import PageBlock
 
 
 @pytest.fixture
@@ -54,7 +51,7 @@ class _Parser:
     async def invoke(self, text, default_value=None):
         try:
             return json.loads(text)
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             return default_value
 
 
@@ -72,12 +69,15 @@ class _LLM:
         self.calls = 0
         self.active = 0
         self.max_active = 0
+        self.concurrent_started = asyncio.Event()
 
     async def invoke(self, messages):
         index = self.calls
         self.calls += 1
         self.active += 1
         self.max_active = max(self.max_active, self.active)
+        if self.active >= 2:
+            self.concurrent_started.set()
         try:
             if self.delay:
                 await asyncio.sleep(self.delay)
@@ -97,12 +97,8 @@ class _Repo:
         self.relations: dict[str, object] = {}
         self.refs: dict[str, object] = {}
 
-    async def upsert_candidate_graph_batch(
-        self, kb_id, version_id, entities, relations, refs
-    ):
-        chunk_ids = {
-            relation.chunk_id for relation in relations if relation.chunk_id
-        }
+    async def upsert_candidate_graph_batch(self, kb_id, version_id, entities, relations, refs):
+        chunk_ids = {relation.chunk_id for relation in relations if relation.chunk_id}
         if self.fail_on_chunk and self.fail_on_chunk in chunk_ids:
             raise RuntimeError("injected graph persistence failure")
         self.persisted_chunk_ids.extend(sorted(chunk_ids))
@@ -130,6 +126,9 @@ class _Uow:
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
+
+    async def commit(self) -> None:
+        return None
 
 
 def _chunks(count: int, *, version_id: str = "v1") -> list[KnowledgeChunk]:
@@ -171,9 +170,7 @@ async def test_version_identity_is_required_and_mixed_chunks_fail_closed():
 
 def test_normalization_is_unicode_case_and_space_stable_but_type_is_distinct():
     assert normalize_entity_name("  ＯpenＣitadel  ") == "opencitadel"
-    assert normalize_entity_name("OpenCitadel") == normalize_entity_name(
-        "opencitadel"
-    )
+    assert normalize_entity_name("OpenCitadel") == normalize_entity_name("opencitadel")
 
 
 @pytest.mark.anyio
@@ -242,9 +239,7 @@ async def test_expired_durable_deadline_performs_zero_provider_calls():
         _chunks(2),
         version_id="v1",
         budget=GraphBudget(deadline_seconds=30),
-        deadline_utc=(
-            datetime.now(timezone.utc) - timedelta(seconds=1)
-        ).isoformat(),
+        deadline_utc=(datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
     )
 
     assert llm.calls == 0
@@ -404,10 +399,7 @@ async def test_out_of_order_overage_is_checkpointed_before_prefix_unblocks():
 
     async def checkpoint(metrics: dict) -> None:
         checkpoints.append(dict(metrics))
-        if (
-            metrics["graph_actual_token_count"] >= 50_000
-            and metrics["graph_processed_count"] == 0
-        ):
+        if metrics["graph_actual_token_count"] >= 50_000 and metrics["graph_processed_count"] == 0:
             overage_checkpointed.set()
             release_first.set()
 
@@ -424,14 +416,9 @@ async def test_out_of_order_overage_is_checkpointed_before_prefix_unblocks():
 
     assert overage_checkpointed.is_set()
     pre_overage_checkpoints = [
-        item
-        for item in checkpoints
-        if item["graph_actual_token_count"] < 50_000
+        item for item in checkpoints if item["graph_actual_token_count"] < 50_000
     ]
-    assert all(
-        item["graph_reserved_token_count"] <= 10_000
-        for item in pre_overage_checkpoints
-    )
+    assert all(item["graph_reserved_token_count"] <= 10_000 for item in pre_overage_checkpoints)
     assert any(
         item["graph_actual_token_count"] >= 50_000
         and item["graph_cursor"] is None
@@ -498,9 +485,7 @@ async def test_blocked_outcomes_checkpoint_consumption_without_cursor_advance(
         version_id="v1",
         budget=GraphBudget(max_llm_calls=1),
         consumed_llm_calls=checkpoints[-1]["graph_llm_call_count"],
-        consumed_tokens=checkpoints[-1][
-            "graph_reserved_token_count"
-        ],
+        consumed_tokens=checkpoints[-1]["graph_reserved_token_count"],
     )
     assert retry_llm.calls == 0
     assert retry.calls == 0
@@ -542,8 +527,7 @@ async def test_external_cancellation_awaits_workers_and_prevents_late_effects():
             checkpoint=checkpoint,
         )
     )
-    while llm.active < 2:
-        await asyncio.sleep(0)
+    await llm.concurrent_started.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -588,13 +572,9 @@ async def test_durable_cursor_resume_never_reprocesses_checkpointed_chunks():
         resume_cursor=first.cursor,
         checkpoint=checkpoint,
     )
-    assert not set(first_ids).intersection(
-        repo.persisted_chunk_ids[len(first_ids) :]
-    )
+    assert not set(first_ids).intersection(repo.persisted_chunk_ids[len(first_ids) :])
     assert second.complete is True
-    assert set(repo.persisted_chunk_ids) == {
-        f"chunk-{index:03d}" for index in range(5)
-    }
+    assert set(repo.persisted_chunk_ids) == {f"chunk-{index:03d}" for index in range(5)}
 
 
 @pytest.mark.anyio
@@ -630,11 +610,7 @@ async def test_cursor_never_advances_past_an_invalid_middle_chunk():
     repo = _Repo()
     first = await _builder(
         repo,
-        _LLM(
-            payload_for_call=lambda index: (
-                "{}" if index == 1 else _payload()
-            )
-        ),
+        _LLM(payload_for_call=lambda index: "{}" if index == 1 else _payload()),
         concurrency=1,
     ).build(
         "kb1",
@@ -695,57 +671,20 @@ async def test_per_document_cap_is_truthful_partial():
 
 
 def test_parent_and_child_chunk_ids_are_retry_stable_and_version_isolated():
-    chunker = KBChunker()
+    chunker = KBChunker(policy=KnowledgeChunkPolicy())
     blocks = [PageBlock(text="alpha beta", page_no=1, heading_path="H")]
-    first_parents = chunker._build_parent_chunks(
-        "kb1", "doc1", blocks, version_id="v1"
-    )
-    second_parents = chunker._build_parent_chunks(
-        "kb1", "doc1", blocks, version_id="v1"
-    )
-    other_parents = chunker._build_parent_chunks(
-        "kb1", "doc1", blocks, version_id="v2"
-    )
-    first_children = chunker._build_child_chunks(
-        "kb1", "doc1", first_parents, version_id="v1"
-    )
-    second_children = chunker._build_child_chunks(
-        "kb1", "doc1", second_parents, version_id="v1"
-    )
-    other_children = chunker._build_child_chunks(
-        "kb1", "doc1", other_parents, version_id="v2"
-    )
+    first_parents = chunker._build_parent_chunks("kb1", "doc1", blocks, version_id="v1")
+    second_parents = chunker._build_parent_chunks("kb1", "doc1", blocks, version_id="v1")
+    other_parents = chunker._build_parent_chunks("kb1", "doc1", blocks, version_id="v2")
+    first_children = chunker._build_child_chunks("kb1", "doc1", first_parents, version_id="v1")
+    second_children = chunker._build_child_chunks("kb1", "doc1", second_parents, version_id="v1")
+    other_children = chunker._build_child_chunks("kb1", "doc1", other_parents, version_id="v2")
 
-    assert [item.id for item in first_parents] == [
-        item.id for item in second_parents
-    ]
-    assert [item.id for item in first_children] == [
-        item.id for item in second_children
-    ]
+    assert [item.id for item in first_parents] == [item.id for item in second_parents]
+    assert [item.id for item in first_children] == [item.id for item in second_children]
     assert first_parents[0].id != other_parents[0].id
     assert first_children[0].id != other_children[0].id
     assert first_children[0].parent_id == first_parents[0].id
-
-
-def test_graph_budget_config_seed_and_schema_roundtrip():
-    seed = yaml.safe_load(
-        (Path(__file__).parents[5] / "config.yaml").read_text()
-    )
-    graph_seed = seed["knowledge_base"]["graphrag"]
-    assert graph_seed == {
-        "enabled": True,
-        "max_parent_chunks_per_doc": 200,
-        "concurrency": 3,
-        "max_chunks": 10000,
-        "max_llm_calls": 10000,
-        "max_tokens": 1000000,
-        "deadline_seconds": 300,
-    }
-    config = AppConfig.model_validate(seed)
-    roundtrip = AppConfig.model_validate(
-        config.model_dump(mode="python")
-    )
-    assert roundtrip.knowledge_base.graphrag.model_dump() == graph_seed
 
 
 @pytest.mark.anyio
@@ -802,9 +741,7 @@ async def test_resume_after_final_checkpoint_reuses_committed_graph_as_complete(
 
 @pytest.mark.anyio
 async def test_invalid_payload_and_persistence_failure_never_report_complete():
-    invalid = await _builder(
-        _Repo(), _LLM(payload_for_call=lambda _index: "{}")
-    ).build(
+    invalid = await _builder(_Repo(), _LLM(payload_for_call=lambda _index: "{}")).build(
         "kb1",
         _chunks(1),
         version_id="v1",
@@ -813,9 +750,7 @@ async def test_invalid_payload_and_persistence_failure_never_report_complete():
     assert invalid.invalid == 1
     assert invalid.complete is False
 
-    failed = await _builder(
-        _Repo(fail_on_chunk="chunk-000"), _LLM()
-    ).build(
+    failed = await _builder(_Repo(fail_on_chunk="chunk-000"), _LLM()).build(
         "kb1",
         _chunks(1),
         version_id="v1",

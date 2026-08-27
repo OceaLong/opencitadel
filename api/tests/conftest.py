@@ -1,15 +1,16 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import os
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, Self
 
 import pytest
 from fastapi.testclient import TestClient
+from redis import Redis
+from redis.exceptions import RedisError
+from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 
 os.environ.setdefault("ENV", "test")
 
-from app.main import app
 from app.domain.models.codebase import Codebase
 from app.domain.models.codebase_version import CodebaseVersion, CodebaseVersionState
 from app.domain.models.knowledge_base import KnowledgeBase
@@ -18,14 +19,96 @@ from app.domain.models.knowledge_version import (
     KnowledgeVersionState,
 )
 from app.domain.models.scope import OwnerScope, OwnerScopeType
+from app.main import create_app
+from core.config import DeploymentSettings
+
+app = create_app(DeploymentSettings(env="test"))
+
+_POSTGRES_SETTING_FIELDS = {
+    "postgres_host",
+    "postgres_user",
+    "postgres_password",
+    "postgres_db",
+    "sqlalchemy_database_uri",
+}
+_REDIS_SETTING_FIELDS = {
+    "redis_host",
+    "redis_port",
+    "redis_db",
+    "redis_password",
+}
 
 
 @pytest.fixture(scope="session")
-def _db_schema() -> None:
-    from alembic import command
+def _postgres_available() -> None:
+    from core.config import load_deployment_settings, sqlalchemy_sync_database_uri
+
+    settings = load_deployment_settings()
+    try:
+        engine = create_engine(
+            sqlalchemy_sync_database_uri(settings),
+            connect_args={"connect_timeout": 2},
+            pool_pre_ping=True,
+        )
+        with engine.connect():
+            pass
+    except SQLAlchemyError as exc:
+        strict = os.getenv("OPENCITADEL_REQUIRE_POSTGRES_TESTS") == "1"
+        explicitly_configured = bool(
+            _POSTGRES_SETTING_FIELDS.intersection(settings.model_fields_set)
+        )
+        message = f"PostgreSQL test database is unavailable: {exc}"
+        if strict or explicitly_configured:
+            pytest.fail(message, pytrace=False)
+        pytest.skip(message)
+    finally:
+        if "engine" in locals():
+            engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def _db_schema(_postgres_available) -> None:
     from alembic.config import Config
 
+    from alembic import command
+
     command.upgrade(Config("alembic.ini"), "head")
+
+
+@pytest.fixture(scope="session")
+def postgres_integration(_db_schema) -> None:
+    """Canonical PostgreSQL proof gate with fail-closed CI availability."""
+
+
+@pytest.fixture(scope="session")
+def _redis_available() -> None:
+    from core.config import load_deployment_settings
+
+    settings = load_deployment_settings()
+    client = Redis(
+        host=settings.redis_host,
+        port=settings.redis_port,
+        db=settings.redis_db,
+        password=settings.redis_password,
+        socket_connect_timeout=2,
+        socket_timeout=2,
+    )
+    try:
+        client.ping()
+    except (OSError, RedisError) as exc:
+        strict = os.getenv("OPENCITADEL_REQUIRE_REDIS_TESTS") == "1"
+        explicitly_configured = bool(_REDIS_SETTING_FIELDS.intersection(settings.model_fields_set))
+        message = f"Redis test service is unavailable: {exc}"
+        if strict or explicitly_configured:
+            pytest.fail(message, pytrace=False)
+        pytest.skip(message)
+    finally:
+        client.close()
+
+
+@pytest.fixture(scope="session")
+def redis_integration(_redis_available) -> None:
+    """Canonical Redis proof gate with fail-closed CI availability."""
 
 
 @pytest.fixture(scope="session")
@@ -39,7 +122,7 @@ def client(_db_schema) -> TestClient:
 # (KnowledgeVersionService / CodebaseVersionService, see task-19 brief).
 # ---------------------------------------------------------------------------
 
-FAKE_NOW = datetime(2026, 7, 29, 2, 0, tzinfo=timezone.utc)
+FAKE_NOW = datetime(2026, 7, 29, 2, 0, tzinfo=UTC)
 
 
 class FakeUnitOfWork:
@@ -51,8 +134,8 @@ class FakeUnitOfWork:
         FakeUnitOfWork(knowledge_base=kb_repo, knowledge_version=version_repo)
         FakeUnitOfWork(codebase=cb_repo, codebase_version=version_repo)
 
-    Pass ``exit_error=...`` to simulate a commit/rollback failure raised from
-    ``__aexit__`` when the wrapped body did not itself raise.
+    Pass ``exit_error=...`` to simulate an explicit commit failure. The name is
+    retained only in test data while production callers migrate atomically.
     """
 
     def __init__(self, *, exit_error: Exception | None = None, **repos: Any) -> None:
@@ -61,15 +144,33 @@ class FakeUnitOfWork:
         self.exit_error = exit_error
         self.entered = 0
         self.exited = 0
+        self.commits = 0
+        self.rollbacks = 0
+        self._committed = False
+        self._rolled_back = False
 
-    async def __aenter__(self) -> "FakeUnitOfWork":
+    async def __aenter__(self) -> Self:
         self.entered += 1
+        self._committed = False
+        self._rolled_back = False
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         self.exited += 1
-        if exc_type is None and self.exit_error is not None:
+        if not self._committed and not self._rolled_back:
+            await self.rollback()
+
+    async def commit(self) -> None:
+        self.commits += 1
+        if self.exit_error is not None:
             raise self.exit_error
+        self._committed = True
+
+    async def rollback(self) -> None:
+        if self._rolled_back:
+            return
+        self.rollbacks += 1
+        self._rolled_back = True
 
 
 def make_owner_scope(**overrides: Any) -> OwnerScope:
@@ -95,9 +196,7 @@ def make_kb_version(version_id: str = "v1", **overrides: Any) -> KnowledgeBaseVe
         "capabilities": {"keyword_search": True},
         "degraded_reasons": [],
         "created_at": created_at,
-        "published_at": overrides.pop(
-            "published_at", created_at if published else None
-        ),
+        "published_at": overrides.pop("published_at", created_at if published else None),
     }
     fields.update(overrides)
     return KnowledgeBaseVersion(**fields)
@@ -115,9 +214,7 @@ def make_codebase_version(version_id: str = "v1", **overrides: Any) -> CodebaseV
         "capabilities": {"lexical_search": True, "vector_search": True},
         "degraded_reasons": [],
         "created_at": created_at,
-        "published_at": overrides.pop(
-            "published_at", created_at if published else None
-        ),
+        "published_at": overrides.pop("published_at", created_at if published else None),
     }
     fields.update(overrides)
     return CodebaseVersion(**fields)
@@ -138,11 +235,7 @@ class FakeKnowledgeBaseRepo:
             return None
         if scope.type is OwnerScopeType.TEAM:
             return kb if kb.team_id == scope.team_id else None
-        return (
-            kb
-            if kb.owner_user_id == scope.user_id and kb.team_id is None
-            else None
-        )
+        return kb if kb.owner_user_id == scope.user_id and kb.team_id is None else None
 
 
 class FakeKnowledgeVersionRepo:

@@ -1,14 +1,20 @@
 import type { SessionStatus, SSEEventData, SSEEventType } from "@/lib/api/types";
 
 /** 后端返回的原始事件（可能用 event 或 type 表示类型） */
-type RawEvent = { event?: string; type?: string; data?: unknown };
+type RawEvent = {
+  event?: string;
+  type?: string;
+  data?: unknown;
+  event_type?: string;
+  payload?: unknown;
+};
 
 /**
  * 将后端单条事件转为前端 SSEEventData（统一 type + data）
  */
 export function normalizeEvent(raw: RawEvent): SSEEventData | null {
-  const type = (raw.type ?? raw.event) as SSEEventType | undefined;
-  const data = raw.data;
+  const type = (raw.type ?? raw.event ?? raw.event_type) as SSEEventType | undefined;
+  const data = raw.data ?? raw.payload;
   if (!type || data === undefined) return null;
   return { type, data } as SSEEventData;
 }
@@ -66,13 +72,11 @@ export function reduceSessionStatusState(
 
     const persisted = data.persist !== false;
     const parsedSeq = persisted ? Number(data.event_id) : Number.NaN;
-    const seq = Number.isInteger(parsedSeq) && parsedSeq > 0
-      ? parsedSeq
-      : undefined;
+    const seq = Number.isInteger(parsedSeq) && parsedSeq > 0 ? parsedSeq : undefined;
     if (
-      seq !== undefined
-      && state.lastPersistedSeq !== undefined
-      && seq <= state.lastPersistedSeq
+      seq !== undefined &&
+      state.lastPersistedSeq !== undefined &&
+      seq <= state.lastPersistedSeq
     ) {
       continue;
     }

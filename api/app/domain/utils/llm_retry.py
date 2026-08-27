@@ -1,7 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Pure LLM retry / breaker classification helpers (no infrastructure dependencies)."""
-from typing import Iterator, Optional
+
+from collections.abc import Iterator
 
 from app.domain.models import error_codes as EC
 
@@ -17,7 +16,7 @@ _QUOTA_MARKERS = (
 
 def _iter_error_chain(error: BaseException, *, max_depth: int = 3) -> Iterator[BaseException]:
     seen: set[int] = set()
-    current: Optional[BaseException] = error
+    current: BaseException | None = error
     depth = 0
     while current is not None and id(current) not in seen and depth < max_depth:
         seen.add(id(current))
@@ -53,10 +52,7 @@ def is_retriable_llm_error(error: Exception) -> bool:
 
 
 def is_quota_exhausted_error(error: Exception) -> bool:
-    for exc in _iter_error_chain(error):
-        if _text_matches_quota_marker(str(exc)):
-            return True
-    return False
+    return any(_text_matches_quota_marker(str(exc)) for exc in _iter_error_chain(error))
 
 
 def is_quota_fallback_eligible(error: Exception) -> bool:
@@ -86,22 +82,15 @@ def is_breaker_eligible_error(error: Exception) -> bool:
 
 
 def classify_llm_error_code(error: Exception) -> str:
-    """Map an exception to a graded error code for ErrorEvent / DLQ."""
-    from app.domain.services.agents.retry_budget import RetryBudgetExceeded
-
-    if isinstance(error, RetryBudgetExceeded):
-        return EC.TASK_INFRA_FAILED
-
+    """Map an exception to a stable public model failure code."""
     text = str(error).lower()
     raw = str(error)
-    if "重试预算" in raw or "structured_validation_retry" in text:
-        return EC.TASK_INFRA_FAILED
     if "not configured" in text or "未配置" in raw:
         return EC.MODEL_NOT_CONFIGURED
     if (
         "content field is a required field" in text
         or "content field is required" in text
-        or "invalid_parameter_error" in text and "content" in text
+        or ("invalid_parameter_error" in text and "content" in text)
     ):
         return EC.MODEL_INVALID_REQUEST
     if is_quota_exhausted_error(error):
@@ -114,4 +103,4 @@ def classify_llm_error_code(error: Exception) -> str:
         return EC.MODEL_UNAVAILABLE
     if is_retriable_llm_error(error):
         return EC.MODEL_UNAVAILABLE
-    return EC.TASK_INFRA_FAILED
+    return EC.INFRASTRUCTURE_FAILED

@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,7 +8,16 @@ from app.domain.models.codebase import (
     CodebaseSymbol,
     SymbolKind,
 )
+from app.domain.runtime_policy import (
+    CodebaseRetrievalPolicy,
+    CodebaseRetrievalRunPolicy,
+)
 from app.domain.services.codebase.hybrid_retriever import HybridCodeRetriever
+
+_POLICY = CodebaseRetrievalRunPolicy(
+    vector_enabled=True,
+    retrieval=CodebaseRetrievalPolicy(),
+)
 
 
 def _chunk(
@@ -90,7 +97,11 @@ async def test_vector_failure_returns_lexical_results():
     repo.search_lexical.return_value = [(_chunk(), 0.9)]
     vector = _Vector()
     vector.embed.side_effect = TimeoutError("embedding unavailable")
-    retriever = HybridCodeRetriever(lambda: _Uow(repo), vector_service=vector)
+    retriever = HybridCodeRetriever(
+        lambda: _Uow(repo),
+        policy=_POLICY,
+        vector_service=vector,
+    )
 
     response = await retriever.retrieve("cb1", "cbv1", "create user", limit=5)
 
@@ -114,7 +125,11 @@ async def test_hybrid_search_is_version_isolated():
         (_chunk("vector-foreign", version_id="cbv2", file_id="file2", symbol_id=None), 0.99),
         (_chunk("vector-legacy", version_id="cbv1", symbol_id=None), 0.7),
     ]
-    retriever = HybridCodeRetriever(lambda: _Uow(repo), vector_service=_Vector())
+    retriever = HybridCodeRetriever(
+        lambda: _Uow(repo),
+        policy=_POLICY,
+        vector_service=_Vector(),
+    )
 
     response = await retriever.retrieve("cb1", "cbv1", "legacyOnly", limit=10)
 
@@ -128,7 +143,11 @@ async def test_rrf_fuses_lexical_and_vector_sources_for_same_chunk():
     chunk = _chunk()
     repo.search_lexical.return_value = [(chunk, 0.8)]
     repo.search_vector.return_value = [(chunk, 0.7)]
-    retriever = HybridCodeRetriever(lambda: _Uow(repo), vector_service=_Vector())
+    retriever = HybridCodeRetriever(
+        lambda: _Uow(repo),
+        policy=_POLICY,
+        vector_service=_Vector(),
+    )
 
     response = await retriever.retrieve("cb1", "cbv1", "create user", limit=5)
 

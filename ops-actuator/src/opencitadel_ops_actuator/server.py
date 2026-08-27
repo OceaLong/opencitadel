@@ -5,6 +5,7 @@ Unlike the Collector (every tool annotated READ_ONLY), the three write
 tools here are annotated readOnlyHint=False, destructiveHint=True so
 callers cannot mistake restart/scale/rollback for safe, repeatable reads.
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -16,9 +17,12 @@ from .actuator import Actuator
 from .capabilities import capability_manifest
 from .config import ActuatorSettings
 
-
-READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
-WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
+READ_ONLY = ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+)
+WRITE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+)
 
 
 def create_server(settings: ActuatorSettings | None = None) -> FastMCP:

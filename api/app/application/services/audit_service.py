@@ -1,20 +1,17 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import csv
 import io
 import json
 import logging
-from datetime import datetime, timezone
-from typing import AsyncGenerator, Callable, Optional, Any, Dict, List
+from collections.abc import AsyncGenerator, Callable
+from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import desc, func, select
-
+from app.application.ports.observability import GovernanceMetricsPort
+from app.application.ports.queries import AuditSummaryQueryPort
+from app.application.ports.reporting import AuditVerificationKeyring
 from app.domain.models.audit_log import AuditLog
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.audit_chain import GENESIS, compute_entry_hash, entry_fields
-from app.infrastructure.models.audit_log import AuditLogORM
-from app.infrastructure.observability.governance_metrics import record_chain_verification
-from core.config import get_settings
 
 _AUDIT_SECRET_KEY_HINTS = (
     "api_key",
@@ -35,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 def sanitize_audit_metadata(value: Any) -> Any:
     if isinstance(value, dict):
-        sanitized: Dict[str, Any] = {}
+        sanitized: dict[str, Any] = {}
         for key, item in value.items():
             normalized = str(key).lower()
             if any(hint in normalized for hint in _AUDIT_SECRET_KEY_HINTS):
@@ -49,27 +46,35 @@ def sanitize_audit_metadata(value: Any) -> Any:
 
 
 class AuditService:
-    def __init__(self, uow_factory: Callable[[], IUnitOfWork]) -> None:
+    def __init__(
+        self,
+        uow_factory: Callable[[], IUnitOfWork],
+        verification_keyring: AuditVerificationKeyring,
+        governance_metrics: GovernanceMetricsPort,
+        summary_query: AuditSummaryQueryPort,
+    ) -> None:
         self._uow_factory = uow_factory
+        self._verification_keyring = verification_keyring
+        self._governance_metrics = governance_metrics
+        self._summary_query = summary_query
 
     async def record(self, log: AuditLog) -> None:
-        sanitized = log.model_copy(
-            update={"metadata": sanitize_audit_metadata(log.metadata)}
-        )
+        sanitized = log.model_copy(update={"metadata": sanitize_audit_metadata(log.metadata)})
         async with self._uow_factory() as uow:
             await uow.audit.add(sanitized)
+            await uow.commit()
 
     async def list_logs(
-            self,
-            *,
-            actor_user_id: Optional[str] = None,
-            action: Optional[str] = None,
-            resource_id: Optional[str] = None,
-            resource_type: Optional[str] = None,
-            start_at: Optional[datetime] = None,
-            end_at: Optional[datetime] = None,
-            limit: int = 100,
-            offset: int = 0,
+        self,
+        *,
+        actor_user_id: str | None = None,
+        action: str | None = None,
+        resource_id: str | None = None,
+        resource_type: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[AuditLog]:
         async with self._uow_factory() as uow:
             return await uow.audit.list(
@@ -83,7 +88,7 @@ class AuditService:
                 offset=offset,
             )
 
-    async def get_log(self, log_id: str) -> Optional[AuditLog]:
+    async def get_log(self, log_id: str) -> AuditLog | None:
         async with self._uow_factory() as uow:
             return await uow.audit.get_by_id(log_id)
 
@@ -91,62 +96,40 @@ class AuditService:
         payload = await self.build_session_audit_report_json(session_id)
         lines = [
             f"# 会话审计报告\n\nSession: `{session_id}`\n\n",
-            "## 治理动作\n\n",
+            "## 审计条目\n\n",
         ]
-        governance = payload.get("governance_actions") or []
-        if not governance:
-            lines.append("_无治理动作记录_\n\n")
+        entries = payload.get("entries") or []
+        if not entries:
+            lines.append("_无审计条目_\n\n")
         else:
-            for item in governance:
-                lines.append(
+            lines.extend(
+                (
                     f"- **{item.get('created_at')}** `{item.get('action')}` "
                     f"actor={item.get('actor_user_id') or 'system'} metadata={item.get('metadata')}\n"
                 )
-            lines.append("\n")
-        lines.append("## 工具调用明细\n\n")
-        tools = payload.get("tool_invocations") or []
-        if not tools:
-            lines.append("_无工具调用记录_\n\n")
-        else:
-            for item in tools:
-                lines.append(
-                    f"- **{item.get('created_at')}** `{item.get('tool')}` "
-                    f"success={item.get('success')} duration_ms={item.get('duration_ms')} "
-                    f"args={item.get('args')} result={item.get('result_summary')}\n"
-                )
+                for item in entries
+            )
         return "".join(lines)
 
-    async def build_session_audit_report_json(self, session_id: str) -> Dict[str, Any]:
+    async def build_session_audit_report_json(self, session_id: str) -> dict[str, Any]:
         logs = await self.list_logs(resource_id=session_id, limit=1000)
-        governance: List[Dict[str, Any]] = []
-        tool_invocations: List[Dict[str, Any]] = []
-        for log in logs:
-            entry = {
+        entries = [
+            {
                 "id": log.id,
                 "created_at": log.created_at.isoformat(),
                 "action": log.action,
                 "actor_user_id": log.actor_user_id,
                 "metadata": log.metadata,
             }
-            if log.action == "agent_tool_invoke":
-                meta = log.metadata or {}
-                tool_invocations.append({
-                    **entry,
-                    "tool": meta.get("tool"),
-                    "args": meta.get("args"),
-                    "success": meta.get("success"),
-                    "result_summary": meta.get("result_summary"),
-                    "duration_ms": meta.get("duration_ms"),
-                    "gate_profile": meta.get("gate_profile"),
-                    "gated": meta.get("gated"),
-                })
-            else:
-                governance.append(entry)
+            for log in logs
+        ]
         return {
             "session_id": session_id,
-            "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-            "governance_actions": governance,
-            "tool_invocations": tool_invocations,
+            "generated_at": datetime.now(UTC)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            "entries": entries,
         }
 
     async def build_session_audit_report_json_text(self, session_id: str) -> str:
@@ -156,12 +139,11 @@ class AuditService:
             indent=2,
         )
 
-    async def verify_chain(self, *, limit: Optional[int] = None) -> dict:
-        settings = get_settings()
+    async def verify_chain(self, *, limit: int | None = None) -> dict:
         async with self._uow_factory() as uow:
             logs = await uow.audit.list_chained(limit=limit)
-        result = self._verify_logs(logs, self._verification_keys(settings))
-        record_chain_verification("intact" if result["ok"] else "broken")
+        result = self._verify_logs(logs, dict(self._verification_keyring.keys))
+        self._governance_metrics.record_chain_verification("intact" if result["ok"] else "broken")
         if not result["ok"]:
             logger.critical(
                 "AUDIT_CHAIN_INTEGRITY_FAILURE first_broken_seq=%s total=%s",
@@ -194,31 +176,14 @@ class AuditService:
         }
 
     @staticmethod
-    def _verification_keys(settings) -> dict[str, tuple[str, ...]]:
-        keys: dict[str, tuple[str, ...]] = {
-            settings.audit_signing_key_id: (settings.audit_signing_key,),
-            "legacy": tuple(
-                dict.fromkeys(
-                    [
-                        settings.api_key_secret,
-                        *(settings.api_key_previous_secrets or {}).values(),
-                    ]
-                )
-            ),
-        }
-        for key_id, secret in (settings.audit_previous_signing_keys or {}).items():
-            keys[str(key_id)] = (str(secret),)
-        return keys
-
-    @staticmethod
     def _verify_logs(
         logs: list[AuditLog],
         keys: dict[str, tuple[str, ...]],
     ) -> dict:
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         prev_hash = GENESIS
-        first_broken: Optional[int] = None
+        first_broken: int | None = None
         for log in logs:
             if log.chain_seq is None or not log.entry_hash:
                 first_broken = log.chain_seq
@@ -239,15 +204,7 @@ class AuditService:
                 metadata=log.metadata,
                 created_at=log.created_at,
             )
-            key_id = log.signing_key_id or next(
-                (
-                    candidate
-                    for candidate in keys
-                    if candidate != "legacy"
-                ),
-                "legacy",
-            )
-            candidates = keys.get(key_id, ())
+            candidates = keys.get(log.signing_key_id, ())
             if not candidates or not any(
                 compute_entry_hash(secret, fields, prev_hash) == log.entry_hash
                 for secret in candidates
@@ -259,56 +216,35 @@ class AuditService:
             "ok": first_broken is None,
             "total": len(logs),
             "first_broken_seq": first_broken,
-            "checked_at": datetime.now(timezone.utc)
+            "checked_at": datetime.now(UTC)
             .replace(microsecond=0)
             .isoformat()
             .replace("+00:00", "Z"),
         }
 
     async def summarize(
-            self,
-            *,
-            start_at: Optional[datetime] = None,
-            end_at: Optional[datetime] = None,
+        self,
+        *,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
     ) -> dict:
-        async with self._uow_factory() as uow:
-            day_bucket = func.date(AuditLogORM.created_at).label("date")
-            day_stmt = select(day_bucket, func.count(AuditLogORM.id)).group_by(day_bucket).order_by(day_bucket)
-            action_stmt = (
-                select(AuditLogORM.action, func.count(AuditLogORM.id))
-                .group_by(AuditLogORM.action)
-                .order_by(desc(func.count(AuditLogORM.id)))
-            )
-            if start_at:
-                day_stmt = day_stmt.where(AuditLogORM.created_at >= start_at)
-                action_stmt = action_stmt.where(AuditLogORM.created_at >= start_at)
-            if end_at:
-                day_stmt = day_stmt.where(AuditLogORM.created_at <= end_at)
-                action_stmt = action_stmt.where(AuditLogORM.created_at <= end_at)
-
-            day_result = await uow.db_session.execute(day_stmt)  # type: ignore[attr-defined]
-            action_result = await uow.db_session.execute(action_stmt)  # type: ignore[attr-defined]
-
+        summary = await self._summary_query.summarize(start_at=start_at, end_at=end_at)
         return {
-            "by_day": [
-                {"date": str(day), "count": int(count or 0)}
-                for day, count in day_result.all()
-            ],
+            "by_day": [{"date": point.key, "count": point.count} for point in summary.by_day],
             "by_action": [
-                {"action": action, "count": int(count or 0)}
-                for action, count in action_result.all()
+                {"action": point.key, "count": point.count} for point in summary.by_action
             ],
         }
 
     async def export_csv(
-            self,
-            *,
-            actor_user_id: Optional[str] = None,
-            action: Optional[str] = None,
-            resource_id: Optional[str] = None,
-            resource_type: Optional[str] = None,
-            start_at: Optional[datetime] = None,
-            end_at: Optional[datetime] = None,
+        self,
+        *,
+        actor_user_id: str | None = None,
+        action: str | None = None,
+        resource_id: str | None = None,
+        resource_type: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
     ) -> AsyncGenerator[str, None]:
         yield "id,actor_user_id,action,resource_type,resource_id,team_id,request_id,created_at\n"
         offset = 0
@@ -328,15 +264,17 @@ class AuditService:
             buffer = io.StringIO()
             writer = csv.writer(buffer)
             for log in logs:
-                writer.writerow([
-                    log.id,
-                    log.actor_user_id or "",
-                    log.action,
-                    log.resource_type,
-                    log.resource_id,
-                    log.team_id or "",
-                    log.request_id,
-                    log.created_at.isoformat(),
-                ])
+                writer.writerow(
+                    [
+                        log.id,
+                        log.actor_user_id or "",
+                        log.action,
+                        log.resource_type,
+                        log.resource_id,
+                        log.team_id or "",
+                        log.request_id,
+                        log.created_at.isoformat(),
+                    ]
+                )
             yield buffer.getvalue()
             offset += len(logs)

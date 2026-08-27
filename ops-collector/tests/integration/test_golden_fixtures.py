@@ -7,10 +7,8 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from opencitadel_ops_collector.collector import OpsCollector
 from opencitadel_ops_collector.config import CollectorSettings
-
 
 ROOT = Path(__file__).parents[3]
 FIXTURES = ROOT / "deploy" / "patrol-demo" / "fixtures"
@@ -35,7 +33,9 @@ def test_exact_twenty_case_contract_is_machine_readable():
         assert expected["expected_results"]
         assert isinstance(expected["required_evidence"], list)
         assert expected["teardown"]["strategy"] == "reset-baseline"
-        documents = [item for item in yaml.safe_load_all((directory / "setup.yaml").read_text()) if item]
+        documents = [
+            item for item in yaml.safe_load_all((directory / "setup.yaml").read_text()) if item
+        ]
         assert documents
         assert all(item.get("kind") != "Secret" for item in documents)
 
@@ -105,12 +105,18 @@ async def test_real_collector_observes_selected_live_fixture():
             await asyncio.sleep(1)
         pytest.fail(f"fixture {case_id} was not observed before timeout; last={last}")
 
-    workload = lambda: collector.k8s_workload_summary("opencitadel-patrol-demo", [], 3600)
+    def workload():
+        return collector.k8s_workload_summary("opencitadel-patrol-demo", [], 3600)
+
     expectations = {
         "01-healthy": lambda data: data["unavailable_replicas"] == 0,
         "02-unavailable-replica": lambda data: data["unavailable_replicas"] >= 1,
-        "03-crashloop": lambda data: data["unavailable_replicas"] >= 1 and data["restart_count_1h"] >= 11,
-        "04-image-pull": lambda data: any(item["reason"] in {"ImagePullBackOff", "ErrImagePull"} for item in data["pending_pods"]),
+        "03-crashloop": lambda data: (
+            data["unavailable_replicas"] >= 1 and data["restart_count_1h"] >= 11
+        ),
+        "04-image-pull": lambda data: any(
+            item["reason"] in {"ImagePullBackOff", "ErrImagePull"} for item in data["pending_pods"]
+        ),
         "06-restarts-warn": lambda data: 4 <= data["restart_count_1h"] <= 10,
         "07-restarts-fail": lambda data: data["restart_count_1h"] >= 11,
         "08-failed-job": lambda data: "job/fixture-failed-job" in data["failed_jobs"],

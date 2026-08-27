@@ -1,18 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
-from typing import Awaitable, Callable, List, Optional
+from collections.abc import Awaitable, Callable
 
-from app.domain.models.event import BaseEvent
 from app.domain.models.tool_result import ToolResult
 from app.domain.services.tools.base import BaseTool, tool
 from app.domain.services.tools.capability_policy import WORKSPACE_WRITE
 
-WriteArtifactFn = Callable[..., Awaitable[tuple[dict, BaseEvent]]]
-FinalizeArtifactFn = Callable[[str], Awaitable[tuple[dict, BaseEvent]]]
+WriteArtifactFn = Callable[..., Awaitable[dict]]
+FinalizeArtifactFn = Callable[[str], Awaitable[dict]]
 
 
-def _normalize_artifact_id(artifact_id: Optional[str], *, required: bool = False) -> Optional[str]:
+def _normalize_artifact_id(artifact_id: str | None, *, required: bool = False) -> str | None:
     if artifact_id is None or not str(artifact_id).strip():
         if required:
             raise ValueError("artifact_id 不能为空")
@@ -32,19 +29,13 @@ class ArtifactTool(BaseTool):
     name: str = "artifact"
 
     def __init__(
-            self,
-            write_fn: WriteArtifactFn,
-            finalize_fn: FinalizeArtifactFn,
+        self,
+        write_fn: WriteArtifactFn,
+        finalize_fn: FinalizeArtifactFn,
     ) -> None:
         super().__init__()
         self._write_fn = write_fn
         self._finalize_fn = finalize_fn
-        self._pending_events: List[BaseEvent] = []
-
-    def drain_events(self) -> List[BaseEvent]:
-        events = list(self._pending_events)
-        self._pending_events.clear()
-        return events
 
     @tool(
         name="artifact_write",
@@ -79,12 +70,12 @@ class ArtifactTool(BaseTool):
         policy=WORKSPACE_WRITE,
     )
     async def artifact_write(
-            self,
-            kind: str,
-            title: str,
-            content: Optional[str] = None,
-            artifact_id: Optional[str] = None,
-            source_path: Optional[str] = None,
+        self,
+        kind: str,
+        title: str,
+        content: str | None = None,
+        artifact_id: str | None = None,
+        source_path: str | None = None,
     ) -> ToolResult:
         if not content and not source_path:
             return ToolResult(
@@ -93,16 +84,15 @@ class ArtifactTool(BaseTool):
             )
         try:
             normalized_id = _normalize_artifact_id(artifact_id)
-            data, event = await self._write_fn(
+            data = await self._write_fn(
                 artifact_id=normalized_id,
                 kind=kind,
                 title=title,
                 content=content or "",
                 source_path=source_path,
             )
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             return ToolResult(success=False, message=str(exc))
-        self._pending_events.append(event)
         saved_id = data.get("id", "")
         saved_title = data.get("title", title)
         return ToolResult(
@@ -126,8 +116,7 @@ class ArtifactTool(BaseTool):
     async def artifact_finalize(self, artifact_id: str) -> ToolResult:
         try:
             normalized_id = _normalize_artifact_id(artifact_id, required=True)
-            data, event = await self._finalize_fn(normalized_id)
-        except Exception as exc:
+            data = await self._finalize_fn(normalized_id)
+        except (OSError, RuntimeError, ValueError) as exc:
             return ToolResult(success=False, message=str(exc))
-        self._pending_events.append(event)
         return ToolResult(success=True, message="交付物已定稿", data=data)

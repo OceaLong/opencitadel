@@ -1,13 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
+from app.application.request_context import get_request_id
 from app.domain.errors import AppException
-from app.infrastructure.observability.logging_context import get_request_id
 from app.interfaces.schemas import Response
 
 logger = logging.getLogger(__name__)
@@ -30,7 +28,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=Response(
                 code=e.status_code,
                 msg=e.msg,
-                data={},
+                data=e.data if e.data is not None else {},
                 error_key=e.error_key,
                 error_params=e.error_params,
             ).model_dump(exclude_none=True),
@@ -52,7 +50,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def exception_handler(req: Request, e: Exception) -> JSONResponse:
         """处理 OpenCitadel 中抛出的未定义的任意异常，将状态码统一设置为500"""
-        logger.exception("未捕获异常: %s (%s)", e, _request_context(req))
+        logger.error("未捕获异常: %s (%s)", e, _request_context(req))
         return JSONResponse(
             status_code=500,
             content=Response(

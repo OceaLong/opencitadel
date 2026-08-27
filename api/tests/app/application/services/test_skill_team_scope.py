@@ -1,9 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import pytest
 
-from app.domain.errors import BadRequestError, ForbiddenError
 from app.application.services.skill_service import SkillService
+from app.domain.errors import BadRequestError, ForbiddenError
 from app.domain.models.scope import OwnerScope
 from app.domain.models.skill import ResourceVisibility, Skill
 
@@ -26,10 +24,15 @@ class _SkillRepo:
 class _Uow:
     def __init__(self, repo):
         self.skill = repo
-        self.llm_model = _DeniedModelRepo()
+        self.inference_model = _DeniedModelRepo()
+        self.mcp_server = _DeniedIntegrationRepo()
+        self.a2a_server = _DeniedIntegrationRepo()
 
     async def __aenter__(self):
         return self
+
+    async def commit(self):
+        return None
 
     async def __aexit__(self, *_args):
         return False
@@ -37,6 +40,14 @@ class _Uow:
 
 class _DeniedModelRepo:
     async def get_by_id(self, _model_id, scope=None):
+        return None
+
+
+class _DeniedIntegrationRepo:
+    async def get_by_name(self, _name, scope=None):
+        return None
+
+    async def get_by_id(self, _server_id, scope=None):
         return None
 
 
@@ -73,6 +84,33 @@ async def test_create_skill_rejects_cross_scope_recommended_model():
         )
 
     assert repo.saved is None
+
+
+@pytest.mark.asyncio
+async def test_create_skill_rejects_unbound_or_inaccessible_integration_tools():
+    repo = _SkillRepo()
+    service = SkillService(lambda: _Uow(repo))
+
+    with pytest.raises(BadRequestError, match="必须绑定"):
+        await service.create_skill(
+            Skill(
+                name="MCP skill",
+                allowed_tools=["mcp_*"],
+                visibility=ResourceVisibility.PRIVATE,
+            ),
+            scope=OwnerScope.personal("user-1"),
+        )
+
+    with pytest.raises(BadRequestError, match="不存在或不可访问"):
+        await service.create_skill(
+            Skill(
+                name="MCP skill",
+                allowed_tools=["mcp_*"],
+                mcp_server_refs=["missing"],
+                visibility=ResourceVisibility.PRIVATE,
+            ),
+            scope=OwnerScope.personal("user-1"),
+        )
 
 
 @pytest.mark.asyncio

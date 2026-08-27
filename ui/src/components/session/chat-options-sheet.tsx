@@ -1,17 +1,11 @@
 "use client";
 
-import { type ReactNode,useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useTranslations } from "next-intl";
 import { SlidersHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 type ChatOptionsSheetProps = {
   children: ReactNode;

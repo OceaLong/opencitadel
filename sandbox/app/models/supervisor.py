@@ -1,12 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Optional, Any
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 class ProcessInfo(BaseModel):
     """进程信息模型"""
+
     name: str = Field(..., description="进程名字")
     group: str = Field(..., description="进程分组")
     description: str = Field(..., description="进程描述")
@@ -25,18 +24,20 @@ class ProcessInfo(BaseModel):
 
 class SupervisorActionResult(BaseModel):
     """Supervisor动作/执行结果"""
+
     status: str = Field(..., description="执行状态")
-    result: Optional[Any] = Field(default=None, description="执行结果")
-    stop_result: Optional[Any] = Field(default=None, description="停止结果")
-    start_result: Optional[Any] = Field(default=None, description="开始结果")
-    shutdown_result: Optional[Any] = Field(default=None, description="关闭结果")
-    process: Optional[str] = Field(default=None, description="进程名称")
+    result: Any | None = Field(default=None, description="执行结果")
+    stop_result: Any | None = Field(default=None, description="停止结果")
+    start_result: Any | None = Field(default=None, description="开始结果")
+    shutdown_result: Any | None = Field(default=None, description="关闭结果")
+    process: str | None = Field(default=None, description="进程名称")
 
 
 class SupervisorTimeout(BaseModel):
     """Supervisor超时销毁模型"""
-    status: Optional[str] = Field(default=None, description="超时设置状态")
+
+    status: str | None = Field(default=None, description="超时设置状态")
     active: bool = Field(default=False, description="超时销毁是否激活")
-    shutdown_time: Optional[str] = Field(default=None, description="销毁时间")
-    timeout_minutes: Optional[float] = Field(default=None, description="超时时间, 单位为分钟")
-    remaining_seconds: Optional[float] = Field(default=None, description="超时剩余秒数")
+    shutdown_time: str | None = Field(default=None, description="销毁时间")
+    timeout_minutes: float | None = Field(default=None, description="超时时间, 单位为分钟")
+    remaining_seconds: float | None = Field(default=None, description="超时剩余秒数")

@@ -1,13 +1,12 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Immutable audit hash chain utilities."""
+
 from __future__ import annotations
 
 import hashlib
 import hmac
 import json
-from datetime import datetime
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 GENESIS = "0" * 64
 ADVISORY_LOCK_KEY = 0x0A0D17C4
@@ -21,19 +20,19 @@ def entry_fields(
     *,
     chain_seq: int,
     id: str,
-    actor_user_id: Optional[str],
+    actor_user_id: str | None,
     actor_ip: str,
     action: str,
     resource_type: str,
     resource_id: str,
-    team_id: Optional[str],
+    team_id: str | None,
     request_id: str,
-    metadata: Dict[str, Any],
+    metadata: dict[str, Any],
     created_at: datetime,
 ) -> dict[str, Any]:
-    created_iso = created_at.isoformat()
     if created_at.tzinfo is None:
-        created_iso = created_at.replace(tzinfo=None).isoformat()
+        raise ValueError("audit entry created_at must be timezone-aware")
+    created_iso = created_at.astimezone(UTC).isoformat()
     return {
         "chain_seq": chain_seq,
         "id": id,

@@ -43,11 +43,13 @@ beforeAll(() => {
   HTMLElement.prototype.focus = function () {};
 });
 
-function packFixture(overrides: {
-  checkId?: string;
-  probeTool?: string;
-  probeArgs?: Record<string, unknown>;
-} = {}): PatrolPack {
+function packFixture(
+  overrides: {
+    checkId?: string;
+    probeTool?: string;
+    probeArgs?: Record<string, unknown>;
+  } = {},
+): PatrolPack {
   const checkId = overrides.checkId ?? "check-1";
   return {
     id: "pack-1",
@@ -70,7 +72,11 @@ function packFixture(overrides: {
           enabled: true,
           probe: {
             tool: overrides.probeTool ?? "k8s_workload_summary",
-            args: overrides.probeArgs ?? { namespace: "opencitadel", workload: "api", kind: "Deployment" },
+            args: overrides.probeArgs ?? {
+              namespace: "opencitadel",
+              workload: "api",
+              kind: "Deployment",
+            },
             output_schema_hash: "hash",
           },
           assertions: [],
@@ -100,6 +106,7 @@ function findingFixture(overrides: Partial<PatrolFinding> = {}): PatrolFinding {
     first_seen_at: "2026-08-04T00:00:00Z",
     last_seen_at: "2026-08-04T00:00:00Z",
     occurrence_count: 1,
+    allowed_actions: [],
     ...overrides,
   };
 }
@@ -138,7 +145,13 @@ async function renderDialog(finding: PatrolFinding, run: PatrolRunDetail) {
   const onOpenChange = vi.fn();
   const result = await renderComponent(
     <NextIntlClientProvider locale="en" messages={en}>
-      <RemediationDialog open onOpenChange={onOpenChange} finding={finding} run={run} />
+      <RemediationDialog
+        open
+        onOpenChange={onOpenChange}
+        finding={finding}
+        run={run}
+        executionAvailable
+      />
     </NextIntlClientProvider>,
   );
   // The check-loading effect resolves `patrolsApi.getPack` asynchronously;
@@ -151,7 +164,7 @@ async function renderDialog(finding: PatrolFinding, run: PatrolRunDetail) {
 }
 
 async function selectAction(actionLabel: string) {
-  const trigger = document.querySelector('#remediation-action') as HTMLElement;
+  const trigger = document.querySelector("#remediation-action") as HTMLElement;
   await act(async () => {
     trigger.click();
     await Promise.resolve();
@@ -166,8 +179,8 @@ async function selectAction(actionLabel: string) {
 }
 
 function submitButton() {
-  return Array.from(document.querySelectorAll("button")).find(
-    (button) => button.textContent?.includes(en.patrol.remediation.dialog.submit),
+  return Array.from(document.querySelectorAll("button")).find((button) =>
+    button.textContent?.includes(en.patrol.remediation.dialog.submit),
   ) as HTMLButtonElement | undefined;
 }
 
@@ -204,19 +217,7 @@ describe("RemediationDialog — backend allowed_actions", () => {
     await unmount();
   });
 
-  it("falls back to the local probe-tool mirror when allowed_actions is absent", async () => {
-    mocks.getPack.mockResolvedValue(packFixture({ probeTool: "k8s_workload_summary" }));
-    const finding = findingFixture({ allowed_actions: undefined });
-    const { unmount } = await renderDialog(finding, runFixture());
-
-    await selectAction(en.patrol.remediation.action.scale_workload);
-    expect(document.body.textContent).toContain(en.patrol.remediation.dialog.replicasLabel);
-    await unmount();
-  });
-
-  it("treats a server-provided empty allowed_actions as authoritative (no fallback)", async () => {
-    // A k8s_* probe tool would make the local mirror say "3 actions
-    // allowed", but the server explicitly says none -- server wins.
+  it("treats an empty server-provided allowed_actions set as authoritative", async () => {
     mocks.getPack.mockResolvedValue(packFixture({ probeTool: "k8s_workload_summary" }));
     const finding = findingFixture({ allowed_actions: [] });
     const { unmount } = await renderDialog(finding, runFixture());
@@ -226,7 +227,7 @@ describe("RemediationDialog — backend allowed_actions", () => {
   });
 });
 
-describe("RemediationDialog — workload required gate", () => {
+describe("RemediationDialog — workload validation", () => {
   it("blocks submit until a workload override is entered when the probe has no workload", async () => {
     mocks.getPack.mockResolvedValue(
       packFixture({ probeArgs: { namespace: "opencitadel", kind: "Deployment" } }),
@@ -234,9 +235,7 @@ describe("RemediationDialog — workload required gate", () => {
     const finding = findingFixture({ allowed_actions: ["restart_workload"] });
     const { unmount } = await renderDialog(finding, runFixture());
 
-    expect(document.body.textContent).toContain(
-      en.patrol.remediation.dialog.workloadRequiredHint,
-    );
+    expect(document.body.textContent).toContain(en.patrol.remediation.dialog.workloadRequiredHint);
 
     await selectAction(en.patrol.remediation.action.restart_workload);
     const checkbox = impactCheckbox();
@@ -370,7 +369,13 @@ describe("RemediationDialog — canSubmit", () => {
     const onOpenChange = vi.fn();
     const { unmount } = await renderComponent(
       <NextIntlClientProvider locale="en" messages={en}>
-        <RemediationDialog open onOpenChange={onOpenChange} finding={finding} run={runFixture()} />
+        <RemediationDialog
+          open
+          onOpenChange={onOpenChange}
+          finding={finding}
+          run={runFixture()}
+          executionAvailable
+        />
       </NextIntlClientProvider>,
     );
 

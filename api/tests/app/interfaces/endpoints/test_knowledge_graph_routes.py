@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Task 6 published graph API contracts."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -9,8 +8,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.domain.errors import BadRequestError
 from app.application.services.knowledge_base_service import KnowledgeBaseService
+from app.domain.errors import BadRequestError
 from app.domain.models.knowledge_base import (
     KnowledgeBase,
     KnowledgeEntity,
@@ -51,16 +50,12 @@ class _KbRepo:
         self.scope = scope
         if kb_id != "kb1":
             return None
-        return KnowledgeBase(
-            id="kb1", name="KB", owner_user_id="u1", active_version_id="v2"
-        )
+        return KnowledgeBase(id="kb1", name="KB", owner_user_id="u1", active_version_id="v2")
 
     async def count_ready_documents(self, kb_ids):
         return {"kb1": 1}
 
-    async def list_entities_page_for_version(
-        self, kb_id, version_id, *, q, after, limit
-    ):
+    async def list_entities_page_for_version(self, kb_id, version_id, *, q, after, limit):
         self.page_calls.append((kb_id, version_id, q, after, limit))
         return (
             [
@@ -76,9 +71,7 @@ class _KbRepo:
             ("opencitadel", "e1"),
         )
 
-    async def list_relations_for_entities_for_version(
-        self, kb_id, version_id, entity_ids
-    ):
+    async def list_relations_for_entities_for_version(self, kb_id, version_id, entity_ids):
         return [
             KnowledgeRelation(
                 id="r1",
@@ -91,9 +84,7 @@ class _KbRepo:
             )
         ]
 
-    async def get_entities_by_ids_for_version(
-        self, kb_id, version_id, entity_ids
-    ):
+    async def get_entities_by_ids_for_version(self, kb_id, version_id, entity_ids):
         return [
             KnowledgeEntity(
                 id="e2",
@@ -105,9 +96,7 @@ class _KbRepo:
             )
         ]
 
-    async def get_chunks_by_ids_for_version(
-        self, kb_id, version_id, chunk_ids
-    ):
+    async def get_chunks_by_ids_for_version(self, kb_id, version_id, chunk_ids):
         from app.domain.models.knowledge_base import (
             KnowledgeChunk,
             KnowledgeDocument,
@@ -125,9 +114,7 @@ class _KbRepo:
                     doc_id="doc1",
                     page_no=4,
                 ),
-                document=KnowledgeDocument(
-                    id="doc1", kb_id="kb1", title="Handbook"
-                ),
+                document=KnowledgeDocument(id="doc1", kb_id="kb1", title="Handbook"),
                 document_revision_id="rev1",
             )
         ]
@@ -142,17 +129,11 @@ class _VersionRepo:
             id=version_id,
             knowledge_base_id=knowledge_base_id,
             state=(
-                KnowledgeVersionState.READY
-                if self.capability
-                else KnowledgeVersionState.DEGRADED
+                KnowledgeVersionState.READY if self.capability else KnowledgeVersionState.DEGRADED
             ),
             capabilities={"graph_search": self.capability},
-            degraded_reasons=(
-                () if self.capability else ("GRAPH_PARTIAL",)
-            ),
-            published_at=__import__("datetime").datetime.now(
-                __import__("datetime").timezone.utc
-            ),
+            degraded_reasons=(() if self.capability else ("GRAPH_PARTIAL",)),
+            published_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
         )
 
 
@@ -172,6 +153,10 @@ def _service(kb_repo, version_repo):
     return KnowledgeBaseService(
         lambda: _Uow(kb_repo, version_repo),
         _Storage(),
+        run_admission_service=SimpleNamespace(),
+        run_control_service=SimpleNamespace(),
+        run_projection=SimpleNamespace(),
+        web_documents=SimpleNamespace(),
     )
 
 
@@ -208,9 +193,7 @@ async def test_owner_scoped_graph_has_every_endpoint_and_exact_evidence():
 @pytest.mark.anyio
 async def test_capability_false_suppresses_partial_rows():
     repo = _KbRepo(capability=False)
-    response = await _service(
-        repo, _VersionRepo(capability=False)
-    ).get_version_graph(
+    response = await _service(repo, _VersionRepo(capability=False)).get_version_graph(
         "kb1",
         "v1",
         q=None,
@@ -291,11 +274,9 @@ def test_real_fastapi_route_uses_workspace_context_scope():
 
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[get_workspace_context] = lambda: (
-        WorkspaceContext(
-            principal=Principal(user_id="u1"),
-            scope=expected_scope,
-        )
+    app.dependency_overrides[get_workspace_context] = lambda: WorkspaceContext(
+        principal=Principal(user_id="u1"),
+        scope=expected_scope,
     )
     app.dependency_overrides[get_knowledge_base_service] = Service
 

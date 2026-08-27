@@ -1,13 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
 from app.domain.utils.memory_recall import rank_entries_with_decay
 
 
 def test_rank_entries_with_decay_prefers_recent_and_used():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old = MemoryEntry(
         title="old",
         content="old",

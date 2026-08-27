@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from app.domain.models.tool_policy import (
     ApprovalMode,
     ToolCapability,
@@ -19,7 +17,7 @@ class ReadTool(BaseTool):
         parameters={},
         required=[],
         policy=ToolExecutionPolicy(
-            capability=ToolCapability.MESSAGE,
+            capability=ToolCapability.KNOWLEDGE_READ,
             effect=ToolEffect.READ_ONLY,
             idempotency=ToolIdempotency.SAFE,
             approval=ApprovalMode.NEVER,
@@ -37,14 +35,14 @@ def test_tool_descriptor_exposes_execution_policy():
 
 
 def test_missing_policy_is_conservative():
-    class LegacyTool(BaseTool):
-        name = "legacy"
+    class UndeclaredPolicyTool(BaseTool):
+        name = "undeclared_policy"
 
-        @tool(name="legacy_call", description="legacy", parameters={}, required=[])
-        async def legacy_call(self):
+        @tool(name="undeclared_call", description="undeclared", parameters={}, required=[])
+        async def undeclared_call(self):
             return "ok"
 
-    policy = LegacyTool().get_tool_descriptor("legacy_call").policy
+    policy = UndeclaredPolicyTool().get_tool_descriptor("undeclared_call").policy
 
     assert policy.capability == ToolCapability.UNKNOWN
     assert policy.effect == ToolEffect.INTERACTIVE

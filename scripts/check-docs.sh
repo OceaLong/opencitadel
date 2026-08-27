@@ -61,7 +61,6 @@ echo "==> Checking docs/ bilingual pairs ..."
 check_pair_dir docs/architecture
 check_pair_dir docs/operations
 check_pair_dir docs/tutorials
-# docs/superpowers/ 为审计/内部治理文档,单语(zh)豁免双语校验——有意不检查,勿加 check_pair_dir
 check_pair docs/DOCUMENTATION_INVENTORY.md
 
 check_size_parity() {
@@ -118,7 +117,7 @@ for f in docs/DOCUMENTATION_INVENTORY.md docs/DOCUMENTATION_INVENTORY.zh-CN.md; 
 done
 
 echo "==> Checking new architecture docs in indexes ..."
-for topic in llm-endpoints-and-models frontend-ui task-recovery technical-decisions knowledge-base-ingestion; do
+for topic in inference-control-plane frontend-ui execution-kernel technical-decisions knowledge-base-ingestion; do
   for f in docs/README.md docs/README.zh-CN.md; do
     if ! grep -q "$topic" "$f"; then
       fail "architecture doc $topic not listed in $f"
@@ -141,19 +140,13 @@ fi
 echo "==> Checking stale single 200MB upload claim for KB ..."
 if rg -n 'upload.*200\s*MB|200\s*MB.*upload' docs/tutorials/02-internal-knowledge-base.md \
   docs/tutorials/02-internal-knowledge-base.zh-CN.md 2>/dev/null | rg -v '50 MB|50\s*MB|gateway|网关|nginx|CODEBASE'; then
-  fail "KB tutorial should not imply 200MB document limit without 50MB AppConfig caveat"
+  fail "KB tutorial should not imply 200MB document limit without the 50MB Execution Policy caveat"
 fi
 
 echo "==> Checking stale /settings/integrations references in docs ..."
 if rg -n '/settings/integrations' docs README.md README.zh-CN.md ui/README.md ui/README.zh-CN.md \
   --glob '!MAINTENANCE_CHECKLIST*.md' 2>/dev/null; then
   fail "found stale /settings/integrations route in documentation (use Settings modal → Integrations tab)"
-fi
-
-echo "==> Checking stale checkpoint rollback API path ..."
-if rg -n 'checkpoints/\{[^}]+\}/rollback' docs/architecture/checkpoints-and-hitl.md \
-  docs/architecture/checkpoints-and-hitl.zh-CN.md 2>/dev/null; then
-  fail "checkpoint API should use /restore not /rollback"
 fi
 
 echo "==> Checking stale /admin/usage UI route in docs ..."
@@ -177,7 +170,7 @@ for f in docs/architecture/security-model.md docs/architecture/security-model.zh
     AuthorizationContext \
     "FORCE ROW LEVEL SECURITY" \
     AUDITOR \
-    llm_model_preferences \
+    inference_bindings \
     AUDIT_SIGNING_KEY \
     /api/status \
     /api/metrics \
@@ -213,7 +206,7 @@ for f in docs/operations/deployment.md docs/operations/deployment.zh-CN.md; do
     require_marker "$f" "$marker" "production configuration"
   done
   for marker in \
-    10-opencitadel-app-role.sh \
+    files/postgres/init-app-role.sh \
     rolsuper \
     rolbypassrls \
     security.yml \
@@ -226,11 +219,11 @@ for f in docs/operations/deployment.md docs/operations/deployment.zh-CN.md; do
   done
 done
 
-echo "==> Checking Helm existing-PVC contracts ..."
+echo "==> Checking Helm greenfield database-role contracts ..."
 for f in deploy/helm/opencitadel/README.md deploy/helm/opencitadel/README.zh-CN.md; do
-  require_marker "$f" "files/postgres/init-app-role.sh" "existing-PVC role migration"
-  require_marker "$f" "rolsuper" "application-role verification"
-  require_marker "$f" "rolbypassrls" "application-role verification"
+  require_marker "$f" "files/postgres/init-app-role.sh" "greenfield role bootstrap"
+  require_marker "$f" "rolsuper" "runtime-role verification"
+  require_marker "$f" "rolbypassrls" "runtime-role verification"
 done
 
 echo "==> Checking production examples for empty Redis passwords ..."
@@ -252,6 +245,27 @@ if rg -n \
   api/README.md \
   api/README.zh-CN.md 2>/dev/null; then
   fail "found obsolete manual endpoint re-save instruction for API key rotation"
+fi
+
+echo "==> Checking explicit composition and lifecycle documentation ..."
+for f in docs/architecture/overview.md docs/architecture/overview.zh-CN.md; do
+  for marker in ApiRuntime KernelRuntime TaskSupervisor 'uow.commit()' post-commit 'userId + workspaceId'; do
+    require_marker "$f" "$marker" "explicit composition"
+  done
+done
+for f in docs/operations/deployment.md docs/operations/deployment.zh-CN.md; do
+  for marker in /api/health/live /api/health/ready OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS; do
+    require_marker "$f" "$marker" "runtime lifecycle"
+  done
+done
+for f in docs/architecture/frontend-ui.md docs/architecture/frontend-ui.zh-CN.md; do
+  require_marker "$f" 'userId + workspaceId' "authenticated cache scope"
+done
+if rg -n 'dependency-injector|dependency_injector|api/app/container\.py|app\.container' \
+  README.md README.zh-CN.md api/README.md api/README.zh-CN.md \
+  docs/architecture docs/operations docs/DOCUMENTATION_INVENTORY.md \
+  docs/DOCUMENTATION_INVENTORY.zh-CN.md 2>/dev/null; then
+  fail "found removed dependency-injector/container architecture in current documentation"
 fi
 
 if [[ "$errors" -gt 0 ]]; then

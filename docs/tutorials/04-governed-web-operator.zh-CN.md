@@ -1,71 +1,44 @@
+# 受治理 Web Operator
+
 [English](04-governed-web-operator.md)
 
-# 受治理 Web Operator（端到端教程）
+本教程使用内置 OpsConsole 作为企业自有浏览器目标。
 
-本教程使用内置 **OpsConsole** 演示后台，走通**受治理的企业内网 Web Operator** 场景。
-
-## 前置条件
-
-- Docker Compose
-- 在 OpenCitadel 设置中配置 LLM API Key
-- 启用 Web Operator Skill
-
-## 1. 启动平台 + 演示后台
+## 启动
 
 ```bash
 cp .env.example .env
-# 设置 BOOTSTRAP_ADMIN_PASSWORD 与 LLM Key
-
-docker compose --profile local --profile demo up --build
+# 设置必填 Secret，并配置支持工具调用的模型。
+docker compose --profile local --profile demo up -d --build
 ```
 
-- OpenCitadel UI：http://localhost:8088
-- OpsConsole（工单运营后台）：http://localhost:9099（Docker 网络内：`ops-console:9099`）
+OpenCitadel 位于 `http://localhost:8088`；OpsConsole 位于
+`http://localhost:9099`（`agent` / `agent123`）。
 
-演示账号：`agent` / `agent123`
+## 运行
 
-## 2. 创建 Web Operator 会话
+1. 选择 **Web Operator** Skill。
+2. 要求它打开 OpsConsole、登录、检查一条工单并执行指定更新。
+3. 在归属对话框选择**企业自有/自建**，保留精确允许 Host `ops-console, localhost`。
+4. 启动 Session。
 
-1. 首页选择 **Web Operator** Skill。
-2. 发送任务，例如：*登录 OpsConsole，打开工单 #2，将状态改为 in_progress，然后走退款确认流程。*
-3. 在**归属声明对话框**中选择：
-   - **企业自有/自建**
-   - 域名白名单：`ops-console`（宿主机测试可用 `localhost`）
-   - 门控档位：**标准**（计划 + 首访域名 + 高危操作）
+每次 Browser Navigation 都会检查冻结 Host List。Read-only 页面检查按只读 Policy 运行；
+Navigation、Click、Input 等 Interactive Call 会生成持久 Approval Card。检查冻结 Tool/Risk
+细节后，通过 Card Approve/Reject。Approval 是专用 Command，不是聊天短语。
 
-## 3. 观察治理行为
+需要检查或直接操作隔离浏览器时使用 VNC。VNC 交互不会把 Agent Pending Activity 标记完成；
+Run 仍只通过正式 Result/Decision 协议推进。
 
-| 步骤 | 预期门控 |
-|------|----------|
-| 计划 | 一次性计划审批 |
-| 首次导航到 OpsConsole | 域名审批（白名单内免审） |
-| 改状态/指派 | 标准档下免逐次审批 |
-| 退款/关单 | 逐工具审批 |
-| 卡住 | VNC 人工接管 |
-| 操作失误 | 检查点回滚（Docker 含浏览器 Profile） |
-| 接管超时（30 分钟） | 会话暂停 → **待人工** |
+## 验证
 
-## 4. 审计产物
+Run 终止后：
 
-会话结束后下载：
+- 在 `/admin/audit` 验证 Audit Chain；
+- 在 `/admin/compliance/sessions/{sessionId}` 查看 Run、Approval 与 Activity Timeline；
+- 从 `/admin/compliance` 下载 Evidence Package，并检查 `manifest.json` 与
+  `chain-signature.txt`。
 
-- `audit-report.md` — 人类可读摘要
-- `audit-report.json` — 结构化导出（治理动作 + 脱敏工具调用）
+若需定时执行，创建绑定该 Skill、精确 Operator Domain、Model 与可选 Resource Binding 的
+Automation Job。每次 Firing 创建正式 Automation Run，并关联 Agent Run。
 
-也可在 `/admin/audit` 检索导出。
-
-## 5. 排期自动化
-
-1. 打开 **自动化** → 新建任务，选择 Web Operator Skill。
-2. 配置 `operator_scope`、域名、门控档位、可选 MCP 通知渠道。
-3. 使用 interval/cron/webhook 触发。
-
-## 6. E2E 测试
-
-```bash
-cd e2e && npm install && npx playwright test
-```
-
-demo profile 运行时设置 `OPS_CONSOLE_URL=http://localhost:9099`。
-
-详见：[Web Operator 架构](../architecture/web-operator.zh-CN.md)
+参见 [Web Operator 架构](../architecture/web-operator.zh-CN.md)。

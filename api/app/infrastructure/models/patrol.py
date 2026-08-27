@@ -1,11 +1,23 @@
 """SQLAlchemy records for Ops Patrol."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.models.patrol import (
@@ -32,8 +44,8 @@ def _utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 class PatrolPackModel(Base):
@@ -57,22 +69,41 @@ class PatrolPackModel(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    owner_user_id: Mapped[str] = mapped_column(String(255), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    team_id: Mapped[str | None] = mapped_column(String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
+    owner_user_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    team_id: Mapped[str | None] = mapped_column(
+        String(255), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="draft")
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    mcp_server_id: Mapped[str] = mapped_column(String(255), ForeignKey("mcp_servers.id", ondelete="RESTRICT"), nullable=False)
-    skill_id: Mapped[str] = mapped_column(String(255), ForeignKey("skills.id", ondelete="RESTRICT"), nullable=False)
-    scheduled_job_id: Mapped[str | None] = mapped_column(String(255), ForeignKey("scheduled_jobs.id", ondelete="SET NULL"), nullable=True)
-    last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    mcp_server_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("mcp_servers.id", ondelete="RESTRICT"), nullable=False
+    )
+    scheduled_job_id: Mapped[str | None] = mapped_column(
+        String(255), ForeignKey("scheduled_jobs.id", ondelete="SET NULL"), nullable=True
+    )
+    last_validated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_validated_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    validation_summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    validation_summary: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
 
     def to_domain(self) -> PatrolPack:
         return PatrolPack(
@@ -85,7 +116,6 @@ class PatrolPackModel(Base):
             version=self.version,
             config=PatrolPackConfig.model_validate(self.config),
             mcp_server_id=self.mcp_server_id,
-            skill_id=self.skill_id,
             scheduled_job_id=self.scheduled_job_id,
             last_validated_at=_utc(self.last_validated_at),
             last_validated_version=self.last_validated_version,
@@ -96,7 +126,7 @@ class PatrolPackModel(Base):
         )
 
     @classmethod
-    def from_domain(cls, pack: PatrolPack) -> "PatrolPackModel":
+    def from_domain(cls, pack: PatrolPack) -> PatrolPackModel:
         return cls(
             id=pack.id,
             owner_user_id=pack.owner_user_id,
@@ -107,7 +137,6 @@ class PatrolPackModel(Base):
             version=pack.version,
             config=pack.config.model_dump(mode="json"),
             mcp_server_id=pack.mcp_server_id,
-            skill_id=pack.skill_id,
             scheduled_job_id=pack.scheduled_job_id,
             last_validated_at=pack.last_validated_at,
             last_validated_version=pack.last_validated_version,
@@ -140,18 +169,29 @@ class PatrolRunModel(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    pack_id: Mapped[str] = mapped_column(String(36), ForeignKey("patrol_packs.id", ondelete="RESTRICT"), nullable=False)
-    session_id: Mapped[str | None] = mapped_column(String(255), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
+    pack_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patrol_packs.id", ondelete="RESTRICT"), nullable=False
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        String(255), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    execution_run_id: Mapped[Any] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     pack_version: Mapped[int] = mapped_column(Integer, nullable=False)
     pack_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     trigger_type: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="queued")
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
-    submission_idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
-    collector_capability_hash: Mapped[str] = mapped_column(String(128), nullable=False, server_default="")
+    submission_idempotency_key: Mapped[str] = mapped_column(
+        String(255), nullable=False, server_default=""
+    )
+    collector_capability_hash: Mapped[str] = mapped_column(
+        String(128), nullable=False, server_default=""
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    first_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     pass_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     warn_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
@@ -159,16 +199,29 @@ class PatrolRunModel(Base):
     error_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     evidence_completeness: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
-    summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
-    report_artifact_id: Mapped[str | None] = mapped_column(String(255), ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    summary: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    report_artifact_id: Mapped[str | None] = mapped_column(
+        String(255), ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
 
     def to_domain(self) -> PatrolRun:
         return PatrolRun(
             id=self.id,
             pack_id=self.pack_id,
             session_id=self.session_id,
+            execution_run_id=self.execution_run_id,
             pack_version=self.pack_version,
             pack_snapshot=dict(self.pack_snapshot or {}),
             trigger_type=PatrolTriggerType(self.trigger_type),
@@ -185,7 +238,9 @@ class PatrolRunModel(Base):
             fail_count=self.fail_count,
             error_count=self.error_count,
             skipped_count=self.skipped_count,
-            evidence_completeness=float(self.evidence_completeness) if self.evidence_completeness is not None else None,
+            evidence_completeness=float(self.evidence_completeness)
+            if self.evidence_completeness is not None
+            else None,
             summary=dict(self.summary or {}),
             report_artifact_id=self.report_artifact_id,
             created_at=_utc(self.created_at),
@@ -193,12 +248,14 @@ class PatrolRunModel(Base):
         )
 
     @classmethod
-    def from_domain(cls, run: PatrolRun) -> "PatrolRunModel":
-        return cls(**{
-            **run.model_dump(mode="python"),
-            "trigger_type": run.trigger_type.value,
-            "status": run.status.value,
-        })
+    def from_domain(cls, run: PatrolRun) -> PatrolRunModel:
+        return cls(
+            **{
+                **run.model_dump(mode="python"),
+                "trigger_type": run.trigger_type.value,
+                "status": run.status.value,
+            }
+        )
 
     def update_from_domain(self, run: PatrolRun) -> None:
         replacement = self.from_domain(run)
@@ -215,13 +272,21 @@ class PatrolCheckResultModel(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    run_id: Mapped[str] = mapped_column(String(36), ForeignKey("patrol_runs.id", ondelete="CASCADE"), nullable=False)
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patrol_runs.id", ondelete="CASCADE"), nullable=False
+    )
     check_id: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     severity: Mapped[str] = mapped_column(String(32), nullable=False)
-    observed: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
-    assertion_results: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
-    evidence_refs: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    observed: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    assertion_results: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    evidence_refs: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
     explanation: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -248,12 +313,14 @@ class PatrolCheckResultModel(Base):
         )
 
     @classmethod
-    def from_domain(cls, item: PatrolCheckResult) -> "PatrolCheckResultModel":
-        return cls(**{
-            **item.model_dump(mode="python"),
-            "status": item.status.value,
-            "severity": item.severity.value,
-        })
+    def from_domain(cls, item: PatrolCheckResult) -> PatrolCheckResultModel:
+        return cls(
+            **{
+                **item.model_dump(mode="python"),
+                "status": item.status.value,
+                "severity": item.severity.value,
+            }
+        )
 
 
 class PatrolFindingModel(Base):
@@ -264,8 +331,14 @@ class PatrolFindingModel(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    run_id: Mapped[str] = mapped_column(String(36), ForeignKey("patrol_runs.id", ondelete="CASCADE"), nullable=False)
-    check_result_id: Mapped[str] = mapped_column(String(36), ForeignKey("patrol_check_results.id", ondelete="CASCADE"), nullable=False)
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patrol_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    check_result_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("patrol_check_results.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     severity: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="open")
@@ -274,7 +347,9 @@ class PatrolFindingModel(Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
-    decided_by: Mapped[str | None] = mapped_column(String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(
+        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -297,12 +372,14 @@ class PatrolFindingModel(Base):
         )
 
     @classmethod
-    def from_domain(cls, finding: PatrolFinding) -> "PatrolFindingModel":
-        return cls(**{
-            **finding.model_dump(mode="python"),
-            "severity": finding.severity.value,
-            "status": finding.status.value,
-        })
+    def from_domain(cls, finding: PatrolFinding) -> PatrolFindingModel:
+        return cls(
+            **{
+                **finding.model_dump(mode="python"),
+                "severity": finding.severity.value,
+                "status": finding.status.value,
+            }
+        )
 
     def update_from_domain(self, finding: PatrolFinding) -> None:
         replacement = self.from_domain(finding)
@@ -331,17 +408,33 @@ class PatrolRemediationModel(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    pack_id: Mapped[str] = mapped_column(String(36), ForeignKey("patrol_packs.id", ondelete="RESTRICT"), nullable=False)
-    run_id: Mapped[str] = mapped_column(String(36), ForeignKey("patrol_runs.id", ondelete="CASCADE"), nullable=False)
-    finding_id: Mapped[str] = mapped_column(String(36), ForeignKey("patrol_findings.id", ondelete="CASCADE"), nullable=False)
-    check_result_id: Mapped[str] = mapped_column(String(36), ForeignKey("patrol_check_results.id", ondelete="CASCADE"), nullable=False)
+    pack_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patrol_packs.id", ondelete="RESTRICT"), nullable=False
+    )
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patrol_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    finding_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patrol_findings.id", ondelete="CASCADE"), nullable=False
+    )
+    check_result_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("patrol_check_results.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    session_id: Mapped[str | None] = mapped_column(String(255), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
+    session_id: Mapped[str | None] = mapped_column(
+        String(255), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True
+    )
     action: Mapped[str] = mapped_column(String(32), nullable=False)
     target_namespace: Mapped[str] = mapped_column(String(255), nullable=False)
     target_workload: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
-    target_kind: Mapped[str] = mapped_column(String(64), nullable=False, server_default="Deployment")
-    params: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    target_kind: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default="Deployment"
+    )
+    params: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     params_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     impact_summary: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     rollback_hint: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
@@ -350,12 +443,24 @@ class PatrolRemediationModel(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="proposed")
     before_observation: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     after_observation: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    recheck_run_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("patrol_runs.id", ondelete="SET NULL"), nullable=True)
+    recheck_run_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("patrol_runs.id", ondelete="SET NULL"), nullable=True
+    )
     error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_by: Mapped[str] = mapped_column(String(255), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    created_by: Mapped[str] = mapped_column(
+        String(255), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
 
     def to_domain(self) -> PatrolRemediation:
         return PatrolRemediation(
@@ -377,8 +482,12 @@ class PatrolRemediationModel(Base):
             idempotency_key=self.idempotency_key,
             actuator_capability_hash=self.actuator_capability_hash,
             status=PatrolRemediationStatus(self.status),
-            before_observation=dict(self.before_observation) if self.before_observation is not None else None,
-            after_observation=dict(self.after_observation) if self.after_observation is not None else None,
+            before_observation=dict(self.before_observation)
+            if self.before_observation is not None
+            else None,
+            after_observation=dict(self.after_observation)
+            if self.after_observation is not None
+            else None,
             recheck_run_id=self.recheck_run_id,
             error_code=self.error_code,
             error_message=self.error_message,
@@ -388,12 +497,14 @@ class PatrolRemediationModel(Base):
         )
 
     @classmethod
-    def from_domain(cls, remediation: PatrolRemediation) -> "PatrolRemediationModel":
-        return cls(**{
-            **remediation.model_dump(mode="python"),
-            "action": remediation.action.value,
-            "status": remediation.status.value,
-        })
+    def from_domain(cls, remediation: PatrolRemediation) -> PatrolRemediationModel:
+        return cls(
+            **{
+                **remediation.model_dump(mode="python"),
+                "action": remediation.action.value,
+                "status": remediation.status.value,
+            }
+        )
 
     def update_from_domain(self, remediation: PatrolRemediation) -> None:
         replacement = self.from_domain(remediation)

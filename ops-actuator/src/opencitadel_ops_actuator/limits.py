@@ -6,6 +6,7 @@ only to accept ActuatorSettings instead of CollectorSettings, since both
 settings classes expose the same max_string_chars/max_array_items/max_rows/
 max_output_bytes fields.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,7 +34,9 @@ def bound(value: Any, settings: ActuatorSettings) -> tuple[Any, list[str]]:
         return item
 
     bounded = visit(value)
-    encoded = json.dumps(bounded, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    encoded = json.dumps(
+        bounded, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    ).encode("utf-8")
     if len(encoded) > settings.max_output_bytes:
         raise ValueError("OUTPUT_TOO_LARGE")
     return bounded, sorted(set(warnings))

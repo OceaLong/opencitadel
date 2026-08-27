@@ -1,4 +1,4 @@
-import { type Locale,LOCALE_COOKIE_NAME, routing } from "./routing";
+import { type Locale, LOCALE_COOKIE_NAME, routing } from "./routing";
 
 /** Map a BCP 47 language tag (or Accept-Language value) to a supported locale. */
 export function detectLocaleFromLanguageTag(tag: string | null | undefined): Locale {

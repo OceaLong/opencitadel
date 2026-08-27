@@ -1,9 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """统一多模态 content-part 类型与附件模型。"""
-from typing import Any, Dict, Literal, Optional
 
-from pydantic import BaseModel, Field
+from typing import Any, Literal
+
+from pydantic import BaseModel
 
 # OpenAI-compatible content part types
 CONTENT_TYPE_TEXT = "text"
@@ -16,6 +15,7 @@ IMAGE_PART_TYPES = frozenset({CONTENT_TYPE_IMAGE_URL, CONTENT_TYPE_IMAGE_REF})
 
 class MediaAttachment(BaseModel):
     """通用多模态附件（图片 / 音频 / 视频帧）。"""
+
     mime_type: str = ""
     data_base64: str = ""
     ref_url: str = ""
@@ -25,13 +25,13 @@ class MediaAttachment(BaseModel):
     transcript: str = ""
 
 
-def is_image_part(part: Dict[str, Any]) -> bool:
+def is_image_part(part: dict[str, Any]) -> bool:
     return isinstance(part, dict) and part.get("type") in IMAGE_PART_TYPES
 
 
-def build_text_part(text: str) -> Dict[str, Any]:
+def build_text_part(text: str) -> dict[str, Any]:
     return {"type": CONTENT_TYPE_TEXT, "text": text}
 
 
-def build_audio_part(data_base64: str, mime_type: str = "audio/wav") -> Dict[str, Any]:
+def build_audio_part(data_base64: str, mime_type: str = "audio/wav") -> dict[str, Any]:
     return {"type": CONTENT_TYPE_AUDIO, "mime_type": mime_type, "data": data_base64}

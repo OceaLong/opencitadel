@@ -1,219 +1,62 @@
-# Model Resilience Design
+# Model Resilience
 
 [简体中文](model-resilience.zh-CN.md)
 
-This document is the authoritative reference for OpenCitadel model isolation, circuit breaking, fallback, SLO, and runtime governance.
+Model calls have two explicit reliability layers with different scopes.
 
-## Goals and Scope
+## Provider-call layer
 
-When all models are unavailable, the platform must still satisfy:
+`ResilientLLMClient` owns bounded attempts for one Activity execution. It uses
+`model_resilience.max_attempts_per_call` and
+`max_call_budget_seconds`, classifies transient transport/provider errors,
+records circuit-breaker state, and may select an eligible configured fallback
+model. Quota failures can move directly to another candidate. Cross-provider
+fallback is disabled unless explicitly configured.
 
-- Configurable: model probe is decoupled from config save.
-- Health visible: `/api/status` reflects platform domain health; `/api/llm/status` reflects model domain health.
-- Non-model features available: file operations and catalog endpoints that do not depend on chat LLM.
-- Model entry points fail fast: Agent and A2A terminate with explicit error codes, without accumulating Worker, sandbox, or Redis resources.
+Streaming is retried or rerouted only before the first output chunk. Once
+streaming begins, changing provider or repeating the request could duplicate
+visible output, so the current call fails and the Activity protocol handles
+the result.
 
-### P0 Scope
+The circuit breaker is operational protection, not workflow state. Opening a
+circuit prevents a provider call but does not complete or cancel a Run.
 
-| Capability | Description |
-|------------|-------------|
-| DB config cold-start seed | When `AppConfig` is empty, initialized from `config.yaml` / Helm `appConfig` |
-| `ModelResilienceConfig` | Single source of truth for model resilience behavior |
-| `feature_flags` | Controls model-dependent entry points such as Agent / A2A |
-| Probe decoupling | User-initiated probes use raw LLM, not the chat circuit-breaker domain |
-| Health surface split | `/api/status` and `/api/llm/status` separated |
-| Tiered error codes | `ErrorEvent.code` carries machine-readable reasons such as `MODEL_*` |
-| Circuit breaking and fast fail | Redis circuit state drives Worker, reconcile, and A2A fast fail |
-| Embedding degradation | Codebase ingest can complete in degraded mode when vectors are unavailable |
+## Activity layer
 
-### Non-P0 Enhancements
+The execution kernel persists model-call input references, invocation identity,
+claim generation, timeout, call-start, heartbeat, and result. An Activity
+retry is a workflow decision and remains visible in the event stream. It never
+depends on a process-local counter. A stale worker cannot submit a completion
+for an older claim generation.
 
-| Capability | Current positioning |
-|------------|---------------------|
-| Cross-provider fallback | Off by default; requires separate gradual rollout |
-| DLQ auto replay | Off by default; currently controlled manually per runbook |
-| Full container split | Long-term structural isolation direction |
-| UI badge full coverage | Partially implemented; to be completed |
+The two layers must not share a mutable retry counter: provider attempts are
+bounded inside one invocation; Activity retry creates or advances durable
+execution state.
 
-## Architecture
+## Failure codes
 
-```mermaid
-flowchart LR
-  TaskRunnerFactory["TaskRunnerFactory"] -->|"resolve LLM"| ResilientLLMClient["ResilientLLMClient"]
-  KBIngestJob["AgentWorker._execute_kb_ingest_job"] -->|"resolve text or vision LLM"| ResilientLLMClient
-  AgentRunner["AgentTaskRunner"] --> MemoryExtractorService["MemoryExtractorService"]
-  AgentRunner --> VisionGroundingTool["VisionGroundingTool"]
-  MemoryExtractorService --> ResilientLLMClient
-  VisionGroundingTool --> ResilientLLMClient
-  ResilientLLMClient --> CircuitBreaker["Redis CircuitBreaker"]
-  ResilientLLMClient --> RawLLM["Provider LLM Client"]
-  LLMStatus["/api/llm/status"] --> CircuitBreaker
-  LLMProbe["LLMModelService probe"] --> RawProbe["Raw LLMFactory Client"]
-```
+Public model failures use stable codes such as `MODEL_NOT_CONFIGURED`,
+`MODEL_RATE_LIMITED`, `MODEL_TIMEOUT`, `MODEL_QUOTA_EXCEEDED`,
+`MODEL_INVALID_REQUEST`, `MODEL_UNAVAILABLE`, and `INFRASTRUCTURE_FAILED`.
+Provider error bodies are not exposed directly to public events. Operational
+logs and metrics retain the diagnostic category and model id without logging
+credentials.
 
-### Call-Site Boundaries
+## Configuration
 
-| Call site | Path | Failure domain |
-|-----------|------|----------------|
-| Agent main path | `TaskRunnerFactory._resolve_llm_and_config` -> `create_resilient_llm` | chat LLM |
-| MemoryExtractorService | Inherits runner-injected `llm` | chat LLM |
-| VisionGroundingTool | Inherits Agent-injected `llm` | chat LLM |
-| KB ingestion LLM | `LLMModelService.resolve_model` / `resolve_vision_model` | chat LLM |
-| ImageGenerationTool / `generate_image()` | Image generation | Independent tool domain; no chat LLM fallback |
-| `LLMModelService._run_vision_probe` | User-initiated probe | Raw `LLMFactory.create`; bypasses resilience layer |
+The active Execution Policy `model_resilience` section controls:
 
-## Circuit Breaker State Machine
+- bounded attempts and wall-clock call budget;
+- breaker window, threshold, open TTL, and half-open probe timeout;
+- fallback enablement, quota behavior, and cross-provider permission;
+- fast failure when a circuit is open.
 
-```mermaid
-stateDiagram-v2
-  [*] --> Closed
-  Closed --> Open: failure_window_exceeds_threshold
-  Closed --> Closed: success_or_non_retryable_error
-  Open --> HalfOpen: open_ttl_expired
-  Open --> Open: fast_fail
-  HalfOpen --> Closed: probe_success
-  HalfOpen --> Open: probe_failure
-  Closed --> [*]
-```
+Fallback candidates still pass OwnerScope, enabled-state, capability, and
+provider-policy checks. A vision request cannot silently fall back to a model
+without the required capability.
 
-| State | Behavior |
-|-------|----------|
-| `closed` | Normal Provider calls; failures counted in window |
-| `open` | No Provider calls; return model unavailable error directly |
-| `half_open` | Allow limited probe requests; success closes, failure reopens |
+## Verification
 
-Circuit state is stored in Redis `cb:open_until:*`, `cb:errors:*`, `cb:probe:*`; window thresholds come from `AppConfig.model_resilience`. Circuit error classification counts only recoverable failures such as 429, 5xx, and timeout; non-recoverable errors like auth and missing config should fail fast and do not participate in fallback.
-
-## Fallback and Retry Boundaries
-
-| Phase | Behavior |
-|-------|----------|
-| Before first token / first delta emitted | May use `ResilientLLMClient` transient retry and same-provider capability-matched fallback |
-| After any delta emitted | Mid-stream model switch prohibited; terminate with `ErrorEvent.code=MODEL_*` |
-| Non-streaming `invoke` | Not subject to mid-stream restriction; may retry or fallback |
-
-Implementation constraints:
-
-- `ResilientLLMClient.streaming_started` is set after the first chunk is yielded.
-- `stream_invoke` throws `ModelUnavailableError` directly on error when `streaming_started=true`; does not switch candidate models.
-- OpenAI path no longer retains an independent retry helper; chat LLM retry authority is centralized in `ResilientLLMClient`.
-- `allow_cross_provider_fallback=false` is the default; cross-provider fallback is not a P0 capability.
-
-### Quota-exhausted fallback
-
-Unlike transient 429/5xx retries, `insufficient_quota` (`MODEL_QUOTA_EXCEEDED`) is **not retried on the same model**, but when configured the platform can automatically switch to other DB-configured models:
-
-| Setting | Default | Role |
-|---------|---------|------|
-| `fallback_on_quota_exceeded` | `true` | Walk alternate models on quota errors |
-| `allow_cross_provider_fallback_on_quota` | `true` | Allow cross-provider alternates for quota (e.g. Alibaba → Ollama) |
-
-Notes:
-
-- **Independent of** `fallback_enabled`: quota fallback works without enabling general transient fallback.
-- Candidates come from `llm_models` rows (same `endpoint_id` sibling models first, same provider, then cross-provider); no runtime probe—call directly and continue on failure. See [LLM endpoints and models](llm-endpoints-and-models.md).
-- Different `model_name` values under the same endpoint / API Key may have **independent quotas**; quota fallback walks all configured models (including same-endpoint siblings) with **no retry on the same model**.
-- Models confirmed quota-exhausted are skipped on subsequent LLM calls within the same task.
-- Quota-driven model switches **do not consume** Agent retry budget; `MODEL_QUOTA_EXCEEDED` is raised only when all candidates fail.
-- On success, Agent emits `assistant_notice` (`sessionDetail.modelFallbackNotice`) and the task continues; if all candidates fail, behavior remains `MODEL_QUOTA_EXCEEDED` + session failed.
-- Requires at least two valid configured models.
-
-## Health, SLO, and Alerting
-
-### Platform Domain L0
-
-| Metric | Target |
-|--------|--------|
-| `/api/status` availability | >= 99.9% |
-| P95 latency | < 500ms |
-
-### Model Domain L2 / L3
-
-| Metric | Description |
-|--------|-------------|
-| Success rate by provider / model_id | From resilience_events |
-| 429 / 5xx / timeout ratio | Counted in circuit window |
-| Circuit open duration | Redis `cb:open_until:*` TTL |
-| Fallback hit rate | `fallback_success` events |
-
-### Embedding Domain
-
-| Metric | Description |
-|--------|-------------|
-| Index task success rate | Codebase ingest |
-| Degradation trigger rate | `vector_degraded=true` |
-
-### `/api/llm/status`
-
-| Metric | Target |
-|--------|--------|
-| Availability | > 99.5% |
-| P95 | < 200ms, read-only aggregation |
-
-Initial thresholds are in `AppConfig.model_resilience`; review and tune weekly.
-
-## Runbook
-
-### Gradual Rollout Order
-
-1. Observe only: deploy `/api/llm/status` and resilience metrics; do not enable fallback.
-2. Tiered error codes: frontend and backend recognize `ErrorEvent.code`.
-3. Circuit breaking: `model_resilience.enabled=true`, `fallback_enabled=false`.
-4. Fallback: optionally enable `fallback_enabled=true`; keep `allow_cross_provider_fallback=false`.
-
-### Kill Switches
-
-| Switch | Effect |
-|--------|--------|
-| `model_resilience.enabled=false` | Disable circuit breaking and `ResilientLLMClient` fast fail |
-| `model_resilience.fallback_enabled=false` | Disable same-provider fallback |
-| `model_resilience.fallback_on_quota_exceeded=false` | Disable auto-switch on quota exhaustion |
-| `feature_flags.enable_agent_features=false` | Disable Agent / A2A entry points |
-
-### DLQ Replay
-
-`dlq_replay_enabled=false` is the current default. For manual replay:
-
-1. Replay only entries whose `error_code` starts with `MODEL_`.
-2. Confirm the corresponding `model_id` circuit state is `closed`.
-3. Batch size must not exceed `dlq_replay_batch_size`; interval must be at least `dlq_replay_interval_seconds`.
-4. Pause replay when the model enters `open` again.
-
-### A2A Fixed Error
-
-When models are unavailable, A2A JSON-RPC returns:
-
-| Field | Value |
-|-------|-------|
-| `code` | `-32001` |
-| `message` | `Model service temporarily unavailable (circuit open); please retry later` |
-
-## Rollout Phases
-
-| Phase | Content |
-|-------|---------|
-| Short-term, shipped / low risk | DB config migration, `AppConfig` schema, probe decoupling, health split, `/api/llm/status`, `ErrorEvent.code` |
-| Mid-term, core resilience | Redis circuit + half_open Lua, `ResilientLLMClient`, DLQ `error_code`, Worker fast fail, reconcile circuit linkage, Embedding ingest degradation, A2A entry governance |
-| Long-term, structural isolation | `feature_flags` route grouping, Worker runner registry, full UI visualization, Codebase reindex UI |
-
-## Regression Focus
-
-| Test | Coverage |
-|------|----------|
-| `test_model_error_fixes.py` | Model error classification and frontend/backend compatibility |
-| `test_llm_endpoint_service.py` | LLM endpoint CRUD and encryption |
-| `test_recoverable_retry.py` | Infra failure checkpoint recovery and requeue |
-| `test_resilient_llm.py` | Fallback and circuit breaker integration |
-| `test_reconcile.py` | Orphan task reconcile |
-| `test_reconcile_circuit.py` | Reconcile and circuit linkage |
-| `test_status_routes.py` | `/api/status` |
-| `api/tests/app/infrastructure/external/llm/test_circuit_breaker.py` | Redis circuit state transitions |
-| `api/tests/app/domain/models/test_event_upgrader.py` | Legacy event `ErrorEvent.code` compatibility |
-
-## Related Documentation
-
-- [Architecture Overview](overview.md)
-- [Event System](events.md)
-- [Configuration Source Governance](config-source-governance.md)
-- [API/SSE Protocol Compatibility](contract-compatibility.md)
-- [Codebase Vector Degradation and Reindex](codebase-reindex.md)
+Tests cover retry bounds, wall-clock exhaustion, breaker open/half-open paths,
+quota fallback, capability filtering, streaming-after-first-chunk behavior,
+multimodal text downgrade, and Activity duplicate/stale completion fencing.

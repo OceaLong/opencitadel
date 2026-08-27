@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
 
@@ -7,6 +5,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, 
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.models.oauth_identity import OAuthIdentity
+
 from .base import Base
 
 
@@ -16,14 +15,24 @@ class OAuthIdentityORM(Base):
         UniqueConstraint("provider", "provider_user_id", name="uq_oauth_provider_user"),
     )
 
-    id: Mapped[str] = mapped_column(String(255), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str] = mapped_column(String(255), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id: Mapped[str] = mapped_column(
+        String(255), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     provider_user_id: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
-    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)"))
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+    )
 
     @classmethod
     def from_domain(cls, identity: OAuthIdentity) -> "OAuthIdentityORM":

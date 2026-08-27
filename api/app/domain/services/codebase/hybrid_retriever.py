@@ -1,15 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Version-closed hybrid retrieval for codebase chunks."""
+
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Optional
 
 from app.domain.models.codebase import CodebaseChunk, CodebaseFile, CodebaseSymbol
 from app.domain.repositories.uow import IUnitOfWork
+from app.domain.runtime_policy import CodebaseRetrievalRunPolicy
 from app.domain.services.codebase.vector_service import CodebaseVectorService
 
 logger = logging.getLogger(__name__)
@@ -22,7 +21,7 @@ class CodeSearchResult:
     version_id: str
     path: str
     lines: tuple[int, int]
-    symbol_id: Optional[str]
+    symbol_id: str | None
     sources: tuple[str, ...]
     score: float
     content: str = ""
@@ -37,22 +36,22 @@ class CodeSearchResponse:
 
 class HybridCodeRetriever:
     def __init__(
-            self,
-            uow_factory: Callable[[], IUnitOfWork],
-            *,
-            vector_service: Optional[CodebaseVectorService] = None,
-            rrf_k: int = 60,
+        self,
+        uow_factory: Callable[[], IUnitOfWork],
+        *,
+        policy: CodebaseRetrievalRunPolicy,
+        vector_service: CodebaseVectorService | None = None,
     ) -> None:
         self._uow_factory = uow_factory
-        self.vector = vector_service or CodebaseVectorService()
-        self._rrf_k = rrf_k
+        self._policy = policy
+        self.vector = vector_service
 
     async def retrieve(
-            self,
-            codebase_id: str,
-            version_id: str,
-            query: str,
-            limit: int = 5,
+        self,
+        codebase_id: str,
+        version_id: str,
+        query: str,
+        limit: int,
     ) -> CodeSearchResponse:
         if not str(codebase_id or "").strip():
             raise ValueError("codebase id is required")
@@ -61,7 +60,8 @@ class HybridCodeRetriever:
         if limit < 1:
             raise ValueError("retrieval limit must be positive")
 
-        fetch_limit = max(limit * 3, limit)
+        final_limit = min(limit, self._policy.retrieval.final_top_k)
+        fetch_limit = final_limit * self._policy.retrieval.fetch_multiplier
         async with self._uow_factory() as uow:
             lexical_hits = await uow.codebase.search_lexical(
                 codebase_id,
@@ -72,32 +72,34 @@ class HybridCodeRetriever:
 
         capabilities = {
             "lexical_search": True,
-            "vector_search": True,
+            "vector_search": self._policy.vector_enabled,
         }
         degraded_reasons: list[str] = []
         vector_hits: list[tuple[CodebaseChunk, float]] = []
-        try:
-            if getattr(self.vector, "enabled", True) is False:
-                raise ValueError("embedding service disabled")
-            embedding = await self.vector.embed(query)
-            if not self._valid_embedding(embedding):
-                raise ValueError("embedding is empty or malformed")
-            async with self._uow_factory() as uow:
-                vector_hits = await uow.codebase.search_vector(
+        if self._policy.vector_enabled:
+            try:
+                if self.vector is None or getattr(self.vector, "enabled", True) is False:
+                    raise ValueError("embedding service disabled")
+                assert self.vector is not None
+                embedding = await self.vector.embed(query)
+                if not self._valid_embedding(embedding):
+                    raise ValueError("embedding is empty or malformed")
+                async with self._uow_factory() as uow:
+                    vector_hits = await uow.codebase.search_vector(
+                        codebase_id,
+                        version_id,
+                        [float(item) for item in embedding],
+                        limit=fetch_limit,
+                    )
+            except (OSError, RuntimeError, ValueError):
+                logger.warning(
+                    "代码库向量检索不可用，降级为 lexical-only codebase=%s version=%s",
                     codebase_id,
                     version_id,
-                    [float(item) for item in embedding],
-                    limit=fetch_limit,
+                    exc_info=True,
                 )
-        except Exception:
-            logger.warning(
-                "代码库向量检索不可用，降级为 lexical-only codebase=%s version=%s",
-                codebase_id,
-                version_id,
-                exc_info=True,
-            )
-            capabilities["vector_search"] = False
-            degraded_reasons.append(EMBEDDING_UNAVAILABLE)
+                capabilities["vector_search"] = False
+                degraded_reasons.append(EMBEDDING_UNAVAILABLE)
 
         fused = self._rrf_fuse(
             codebase_id,
@@ -120,11 +122,7 @@ class HybridCodeRetriever:
                     version_id=version_id,
                 )
             }
-            symbol_ids = [
-                chunk.symbol_id
-                for chunk, _score, _sources in fused
-                if chunk.symbol_id
-            ]
+            symbol_ids = [chunk.symbol_id for chunk, _score, _sources in fused if chunk.symbol_id]
             symbols = {
                 symbol.id: symbol
                 for symbol in await uow.codebase.list_symbols_by_ids(
@@ -135,7 +133,7 @@ class HybridCodeRetriever:
             }
 
         items: list[CodeSearchResult] = []
-        for chunk, score, sources in fused[:limit]:
+        for chunk, score, sources in fused[:final_limit]:
             file = files.get(chunk.file_id or "")
             symbol = symbols.get(chunk.symbol_id or "")
             items.append(
@@ -156,17 +154,17 @@ class HybridCodeRetriever:
         )
 
     def _rrf_fuse(
-            self,
-            codebase_id: str,
-            version_id: str,
-            *ranked_lists: tuple[str, list[tuple[CodebaseChunk, float]]],
+        self,
+        codebase_id: str,
+        version_id: str,
+        *ranked_lists: tuple[str, list[tuple[CodebaseChunk, float]]],
     ) -> list[tuple[CodebaseChunk, float, list[str]]]:
         by_id: dict[str, tuple[CodebaseChunk, float, list[str]]] = {}
         for source, ranked in ranked_lists:
             for rank, (chunk, raw_score) in enumerate(ranked, start=1):
                 if chunk.codebase_id != codebase_id or chunk.version_id != version_id:
                     continue
-                fused_score = 1.0 / (self._rrf_k + rank)
+                fused_score = 1.0 / (self._policy.retrieval.rrf_k + rank)
                 fused_score += float(raw_score or 0) * 0.001
                 existing = by_id.get(chunk.id)
                 if existing is None:
@@ -200,12 +198,12 @@ class HybridCodeRetriever:
     @staticmethod
     def _path_for(
         chunk: CodebaseChunk,
-        file: Optional[CodebaseFile],
+        file: CodebaseFile | None,
     ) -> str:
         return file.path if file is not None else "?"
 
     @staticmethod
-    def _lines_for(symbol: Optional[CodebaseSymbol]) -> tuple[int, int]:
+    def _lines_for(symbol: CodebaseSymbol | None) -> tuple[int, int]:
         if symbol is None:
             return (0, 0)
         return (symbol.start_line or 0, symbol.end_line or 0)

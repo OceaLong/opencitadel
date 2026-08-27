@@ -1,9 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Persistence contract for immutable knowledge-base versions."""
+
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from app.domain.models.knowledge_version import (
     DocumentRevisionState,
@@ -28,12 +27,10 @@ class KnowledgeVersionGCResult:
     deleted_entities: int = 0
     deleted_relations: int = 0
     deleted_entity_refs: int = 0
-    deleted_builds: int = 0
-    deleted_build_events: int = 0
     retained_shared_revisions: int = 0
     protected_active_versions: int = 0
     protected_bound_versions: int = 0
-    protected_active_build_versions: int = 0
+    protected_building_versions: int = 0
     protected_age_versions: int = 0
     protected_retention_versions: int = 0
 
@@ -52,32 +49,25 @@ class KnowledgeVersionGCResult:
             self.deleted_entities,
             self.deleted_relations,
             self.deleted_entity_refs,
-            self.deleted_builds,
-            self.deleted_build_events,
             self.retained_shared_revisions,
             self.protected_active_versions,
             self.protected_bound_versions,
-            self.protected_active_build_versions,
+            self.protected_building_versions,
             self.protected_age_versions,
             self.protected_retention_versions,
         )
         if any(
-            not isinstance(value, int)
-            or isinstance(value, bool)
-            or value < 0
-            for value in counters
+            not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in counters
         ):
             raise ValueError("knowledge-version GC counters must be non-negative")
         if self.deleted_versions != len(self.collected_version_ids):
-            raise ValueError(
-                "deleted version count must match collected version identities"
-            )
+            raise ValueError("deleted version count must match collected version identities")
 
     @property
     def retained_reference_count(self) -> int:
         return (
             self.protected_bound_versions
-            + self.protected_active_build_versions
+            + self.protected_building_versions
             + self.retained_shared_revisions
         )
 
@@ -85,8 +75,6 @@ class KnowledgeVersionGCResult:
         """Return stable, non-content metrics suitable for logs and audits."""
         return {
             "collected_versions": len(self.collected_version_ids),
-            "deleted_build_events": self.deleted_build_events,
-            "deleted_builds": self.deleted_builds,
             "deleted_chunks": self.deleted_chunks,
             "deleted_entities": self.deleted_entities,
             "deleted_entity_refs": self.deleted_entity_refs,
@@ -94,15 +82,11 @@ class KnowledgeVersionGCResult:
             "deleted_relations": self.deleted_relations,
             "deleted_revisions": self.deleted_revisions,
             "deleted_versions": self.deleted_versions,
-            "protected_active_build_versions": (
-                self.protected_active_build_versions
-            ),
+            "protected_building_versions": self.protected_building_versions,
             "protected_active_versions": self.protected_active_versions,
             "protected_age_versions": self.protected_age_versions,
             "protected_bound_versions": self.protected_bound_versions,
-            "protected_retention_versions": (
-                self.protected_retention_versions
-            ),
+            "protected_retention_versions": (self.protected_retention_versions),
             "reclaimed_logical_bytes": self.reclaimed_logical_bytes,
             "retained_reference_count": self.retained_reference_count,
             "retained_shared_revisions": self.retained_shared_revisions,
@@ -162,6 +146,13 @@ class KnowledgeVersionRepository(Protocol):
         """Resolve the exact build-backed candidate and complete manifest."""
         ...
 
+    async def get_active_candidate(
+        self,
+        knowledge_base_id: str,
+    ) -> KnowledgeBaseVersion | None:
+        """Return the sole building candidate for a knowledge base."""
+        ...
+
     async def transition_document(
         self,
         version_id: str,
@@ -169,10 +160,10 @@ class KnowledgeVersionRepository(Protocol):
         *,
         knowledge_base_id: str,
         state: DocumentRevisionState,
-        parsed_blocks: list[dict] | None | UnsetType = UNSET,
-        page_count: int | None | UnsetType = UNSET,
-        error: str | None | UnsetType = UNSET,
-        warning: str | None | UnsetType = UNSET,
+        parsed_blocks: list[dict] | UnsetType | None = UNSET,
+        page_count: int | UnsetType | None = UNSET,
+        error: str | UnsetType | None = UNSET,
+        warning: str | UnsetType | None = UNSET,
     ) -> KnowledgeVersionDocument:
         """Persist a closed revision/manifest transition for one candidate."""
         ...
@@ -237,4 +228,14 @@ class KnowledgeVersionRepository(Protocol):
         metrics: dict[str, int | float] | None = None,
     ) -> bool:
         """Move a building candidate to failed without changing the active pin."""
+        ...
+
+    async def update_candidate_metrics(
+        self,
+        version_id: str,
+        *,
+        knowledge_base_id: str,
+        metrics: dict[str, Any],
+    ) -> bool:
+        """Merge artifact-processing checkpoints into a building candidate."""
         ...

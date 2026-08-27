@@ -1,15 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from datetime import datetime, timedelta
-from types import SimpleNamespace
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.domain.errors import BadRequestError, ConflictError
+from app.application.ports.crypto import ApplicationUrls
 from app.application.services.team_service import TeamService
+from app.domain.errors import BadRequestError, ConflictError
 from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.team import Team, TeamMember, TeamRole
 from app.domain.models.user import User
+from app.infrastructure.security.password_hasher import PasswordHasher
 from app.interfaces.schemas.admin import InvitationStatus
 
 
@@ -22,14 +21,14 @@ class InMemoryInvitationRepo:
 
     async def get_pending_team_invitation(self, team_id: str, email: str):
         normalized = email.strip().lower()
-        now = datetime.now()
+        now = datetime.now(UTC)
         for invitation in self.invitations.values():
             if (
-                    invitation.type == InvitationType.TEAM
-                    and invitation.team_id == team_id
-                    and invitation.email == normalized
-                    and invitation.accepted_at is None
-                    and invitation.expires_at > now
+                invitation.type == InvitationType.TEAM
+                and invitation.team_id == team_id
+                and invitation.email == normalized
+                and invitation.accepted_at is None
+                and invitation.expires_at > now
             ):
                 return invitation
         return None
@@ -38,7 +37,7 @@ class InMemoryInvitationRepo:
         items = list(self.invitations.values())
         if invitation_type is not None:
             items = [item for item in items if item.type == invitation_type]
-        return items[offset: offset + limit]
+        return items[offset : offset + limit]
 
     async def count(self, invitation_type=None) -> int:
         return len(await self.list(invitation_type=invitation_type))
@@ -55,7 +54,9 @@ class InMemoryInvitationRepo:
 
 
 class InMemoryTeamRepo:
-    def __init__(self, teams: list[Team] | None = None, members: list[TeamMember] | None = None) -> None:
+    def __init__(
+        self, teams: list[Team] | None = None, members: list[TeamMember] | None = None
+    ) -> None:
         self.teams = {team.id: team for team in (teams or [])}
         self.members = {(member.team_id, member.user_id): member for member in (members or [])}
 
@@ -76,7 +77,7 @@ class InMemoryTeamRepo:
         return [member for member in self.members.values() if member.team_id == team_id]
 
     async def list_all(self, limit: int = 100, offset: int = 0):
-        return list(self.teams.values())[offset: offset + limit]
+        return list(self.teams.values())[offset : offset + limit]
 
     async def count(self) -> int:
         return len(self.teams)
@@ -132,6 +133,9 @@ class FakeUow:
     async def __aenter__(self):
         return self
 
+    async def commit(self):
+        return None
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         return False
 
@@ -142,15 +146,19 @@ def anyio_backend():
 
 
 def _build_service(
-        *,
-        invitation: Invitation,
-        team: Team,
-        users: list[User] | None = None,
+    *,
+    invitation: Invitation,
+    team: Team,
+    users: list[User] | None = None,
 ) -> TeamService:
     invitation_repo = InMemoryInvitationRepo([invitation])
     team_repo = InMemoryTeamRepo([team])
     user_repo = InMemoryUserRepo(users or [])
-    return TeamService(uow_factory=lambda: FakeUow(invitation_repo, team_repo, user_repo))
+    return TeamService(
+        uow_factory=lambda: FakeUow(invitation_repo, team_repo, user_repo),
+        password_hasher=PasswordHasher(),
+        application_urls=ApplicationUrls(frontend_base_url="https://app.example.test"),
+    )
 
 
 @pytest.mark.anyio
@@ -162,7 +170,7 @@ async def test_preview_invitation_requires_registration_for_new_email():
         team_id=team.id,
         team_role=TeamRole.MEMBER,
         token="token-1",
-        expires_at=datetime.now() + timedelta(days=1),
+        expires_at=datetime.now(UTC) + timedelta(days=1),
     )
     service = _build_service(invitation=invitation, team=team)
 
@@ -183,7 +191,7 @@ async def test_register_and_accept_invitation_creates_user_and_member():
         team_id=team.id,
         team_role=TeamRole.ADMIN,
         token="token-1",
-        expires_at=datetime.now() + timedelta(days=1),
+        expires_at=datetime.now(UTC) + timedelta(days=1),
     )
     service = _build_service(invitation=invitation, team=team)
 
@@ -207,7 +215,7 @@ async def test_register_and_accept_rejects_open_invite_without_email():
         team_id=team.id,
         team_role=TeamRole.MEMBER,
         token="token-1",
-        expires_at=datetime.now() + timedelta(days=1),
+        expires_at=datetime.now(UTC) + timedelta(days=1),
     )
     service = _build_service(invitation=invitation, team=team)
 
@@ -229,7 +237,7 @@ async def test_accept_invitation_enforces_email_match():
         team_id=team.id,
         team_role=TeamRole.MEMBER,
         token="token-1",
-        expires_at=datetime.now() + timedelta(days=1),
+        expires_at=datetime.now(UTC) + timedelta(days=1),
     )
     user = User(id="user-1", email="other@example.com", username="other")
     service = _build_service(invitation=invitation, team=team, users=[user])
@@ -247,15 +255,17 @@ async def test_create_team_invitation_rejects_duplicate_pending_email(monkeypatc
         team_id=team.id,
         team_role=TeamRole.MEMBER,
         token="token-1",
-        expires_at=datetime.now() + timedelta(days=1),
+        expires_at=datetime.now(UTC) + timedelta(days=1),
     )
     invitation_repo = InMemoryInvitationRepo([invitation])
-    team_repo = InMemoryTeamRepo([team], [TeamMember(team_id=team.id, user_id="owner-1", role=TeamRole.OWNER)])
+    team_repo = InMemoryTeamRepo(
+        [team], [TeamMember(team_id=team.id, user_id="owner-1", role=TeamRole.OWNER)]
+    )
     user_repo = InMemoryUserRepo()
-    service = TeamService(uow_factory=lambda: FakeUow(invitation_repo, team_repo, user_repo))
-    monkeypatch.setattr(
-        "app.application.services.team_service.get_settings",
-        lambda: SimpleNamespace(frontend_base_url="http://localhost:8088"),
+    service = TeamService(
+        uow_factory=lambda: FakeUow(invitation_repo, team_repo, user_repo),
+        password_hasher=PasswordHasher(),
+        application_urls=ApplicationUrls(frontend_base_url="http://localhost:8088"),
     )
 
     with pytest.raises(ConflictError, match="已有待处理的团队邀请"):
@@ -318,7 +328,9 @@ async def test_leave_team_keeps_all_repository_calls_inside_unit_of_work():
             InMemoryInvitationRepo(),
             team_repo,
             InMemoryUserRepo(),
-        )
+        ),
+        password_hasher=PasswordHasher(),
+        application_urls=ApplicationUrls(frontend_base_url="https://app.example.test"),
     )
 
     await service.leave_team(team_id=team.id, user_id="owner-1")

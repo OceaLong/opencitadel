@@ -1,10 +1,16 @@
 from app.application.patrol_templates import load_patrol_template
 
-
 EXPECTED = {
-    "k8s-workload-availability", "k8s-restart-spike", "k8s-pending-failed",
-    "k8s-warning-events", "k8s-resource-pressure", "app-error-rate",
-    "tls-expiry", "backup-freshness", "dependency-health", "endpoint-health",
+    "k8s-workload-availability",
+    "k8s-restart-spike",
+    "k8s-pending-failed",
+    "k8s-warning-events",
+    "k8s-resource-pressure",
+    "app-error-rate",
+    "tls-expiry",
+    "backup-freshness",
+    "dependency-health",
+    "endpoint-health",
 }
 
 

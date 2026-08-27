@@ -60,7 +60,9 @@ export default function AdminUsersPage() {
   const [quota, setQuota] = useState<Quota>({});
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
-  const [deleteStrategy, setDeleteStrategy] = useState<"anonymize" | "cascade" | "transfer_to_team">("anonymize");
+  const [deleteStrategy, setDeleteStrategy] = useState<
+    "anonymize" | "cascade" | "transfer_to_team"
+  >("anonymize");
   const [deleting, setDeleting] = useState(false);
 
   const loadUsers = useCallback(
@@ -220,12 +222,22 @@ export default function AdminUsersPage() {
                       <div className="text-muted-foreground mt-0.5 text-xs">{user.email}</div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={user.global_role === "admin" ? "default" : user.global_role === "auditor" ? "outline" : "secondary"}>
+                      <Badge
+                        variant={
+                          user.global_role === "admin"
+                            ? "default"
+                            : user.global_role === "auditor"
+                              ? "outline"
+                              : "secondary"
+                        }
+                      >
                         {user.global_role}
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={user.status === "active" ? "outline" : "destructive"}>{user.status}</Badge>
+                      <Badge variant={user.status === "active" ? "outline" : "destructive"}>
+                        {user.status}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground font-mono text-xs">
                       {formatDateTime(user.last_login_at)}
@@ -238,14 +250,24 @@ export default function AdminUsersPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => setEditing({ ...user })}>{tCommon("edit")}</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => void openQuota(user)}>{t("quota")}</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setEditing({ ...user })}>
+                            {tCommon("edit")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => void openQuota(user)}>
+                            {t("quota")}
+                          </DropdownMenuItem>
                           {user.status === "active" ? (
-                            <DropdownMenuItem variant="destructive" onClick={() => void disableUser(user)}>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onClick={() => void disableUser(user)}
+                            >
                               {t("disableUser")}
                             </DropdownMenuItem>
                           ) : null}
-                          <DropdownMenuItem variant="destructive" onClick={() => setDeleteTarget(user)}>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={() => setDeleteTarget(user)}
+                          >
                             {t("deleteUser")}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -263,7 +285,12 @@ export default function AdminUsersPage() {
                 {tCommon("pageOf", { current: currentPage, total: totalPages })}
               </span>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => void loadUsers(Math.max(0, offset - PAGE_SIZE))}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={offset === 0}
+                  onClick={() => void loadUsers(Math.max(0, offset - PAGE_SIZE))}
+                >
                   {tCommon("previousPage")}
                 </Button>
                 <Button
@@ -298,7 +325,9 @@ export default function AdminUsersPage() {
                 <Label>{t("role")}</Label>
                 <Select
                   value={editing.global_role}
-                  onValueChange={(value: "admin" | "user" | "auditor") => setEditing({ ...editing, global_role: value })}
+                  onValueChange={(value: "admin" | "user" | "auditor") =>
+                    setEditing({ ...editing, global_role: value })
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -314,7 +343,9 @@ export default function AdminUsersPage() {
                 <Label>{t("status")}</Label>
                 <Select
                   value={editing.status}
-                  onValueChange={(value: "active" | "disabled") => setEditing({ ...editing, status: value })}
+                  onValueChange={(value: "active" | "disabled") =>
+                    setEditing({ ...editing, status: value })
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -344,10 +375,26 @@ export default function AdminUsersPage() {
             <DialogTitle>{t("userQuota")}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-3">
-            <Field label={t("quotaMonthlyTokenLimit")} value={quota.monthly_token_limit} onChange={(value) => setQuota({ ...quota, monthly_token_limit: value })} />
-            <Field label={t("quotaDailySessionLimit")} value={quota.daily_session_limit} onChange={(value) => setQuota({ ...quota, daily_session_limit: value })} />
-            <Field label={t("quotaMaxConcurrentTasks")} value={quota.max_concurrent_tasks} onChange={(value) => setQuota({ ...quota, max_concurrent_tasks: value })} />
-            <Field label={t("quotaMaxStorageBytes")} value={quota.max_storage_bytes} onChange={(value) => setQuota({ ...quota, max_storage_bytes: value })} />
+            <Field
+              label={t("quotaMonthlyTokenLimit")}
+              value={quota.monthly_token_limit}
+              onChange={(value) => setQuota({ ...quota, monthly_token_limit: value })}
+            />
+            <Field
+              label={t("quotaDailySessionLimit")}
+              value={quota.daily_session_limit}
+              onChange={(value) => setQuota({ ...quota, daily_session_limit: value })}
+            />
+            <Field
+              label={t("quotaMaxConcurrentTasks")}
+              value={quota.max_concurrent_tasks}
+              onChange={(value) => setQuota({ ...quota, max_concurrent_tasks: value })}
+            />
+            <Field
+              label={t("quotaMaxStorageBytes")}
+              value={quota.max_storage_bytes}
+              onChange={(value) => setQuota({ ...quota, max_storage_bytes: value })}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setQuotaOpen(false)}>

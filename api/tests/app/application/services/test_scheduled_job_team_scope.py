@@ -1,10 +1,17 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+from types import SimpleNamespace
+
 import pytest
 
-from app.domain.errors import BadRequestError
 from app.application.services.scheduled_job_service import ScheduledJobService
+from app.domain.errors import BadRequestError
 from app.domain.models.scope import OwnerScope
+from tests.runtime_policy_support import MutablePolicyReader
+
+_SECRET_CIPHER = SimpleNamespace(
+    current_key_id="test",
+    encrypt_versioned=lambda value: f"encrypted:{value}",
+    decrypt_versioned=lambda value: value.removeprefix("encrypted:"),
+)
 
 
 class _JobRepo:
@@ -22,7 +29,7 @@ class _JobRepo:
 class _Uow:
     def __init__(self, repo):
         self.scheduled_job = repo
-        self.llm_model = _DeniedRepo()
+        self.inference_model = _DeniedRepo()
         self.skill = _DeniedRepo()
         self.codebase = _DeniedRepo()
         self.knowledge_base = _DeniedRepo()
@@ -45,10 +52,24 @@ class _DeniedRepo:
         return None
 
 
+def _service(repo) -> ScheduledJobService:
+    return ScheduledJobService(
+        lambda: _Uow(repo),
+        patrol_run_service=SimpleNamespace(),
+        resource_guard=SimpleNamespace(),
+        resource_binding_service=SimpleNamespace(),
+        run_admission_service=SimpleNamespace(),
+        run_projection=SimpleNamespace(),
+        policy_reader=MutablePolicyReader(),
+        notification_service=SimpleNamespace(),
+        secret_cipher=_SECRET_CIPHER,
+    )
+
+
 @pytest.mark.asyncio
 async def test_create_job_binds_team_scope():
     repo = _JobRepo()
-    service = ScheduledJobService(lambda: _Uow(repo))
+    service = _service(repo)
 
     job, _ = await service.create_job(
         owner_user_id="creator-1",
@@ -66,7 +87,7 @@ async def test_create_job_binds_team_scope():
 @pytest.mark.asyncio
 async def test_create_job_rejects_cross_scope_model_reference():
     repo = _JobRepo()
-    service = ScheduledJobService(lambda: _Uow(repo))
+    service = _service(repo)
 
     with pytest.raises(BadRequestError, match="模型"):
         await service.create_job(
@@ -96,7 +117,7 @@ async def test_patch_job_rejects_cross_scope_model_reference():
         prompt_template="run",
     )
     repo = _JobRepo(existing)
-    service = ScheduledJobService(lambda: _Uow(repo))
+    service = _service(repo)
 
     with pytest.raises(BadRequestError, match="模型"):
         await service.patch_job(

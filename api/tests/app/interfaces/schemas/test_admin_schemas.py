@@ -1,25 +1,23 @@
-#!/usr/bin/env python
-# -*- coding: utf-8
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.domain.models.invitation import Invitation
 from app.interfaces.schemas.admin import InvitationStatus, PlatformInvitationResponse
-from app.domain.models.invitation import Invitation, InvitationType
 
 
 def test_platform_invitation_status_pending():
     invitation = Invitation(
         email="user@example.com",
         token="token",
-        expires_at=datetime.now() + timedelta(days=1),
+        expires_at=datetime.now(UTC) + timedelta(days=1),
     )
-    response = PlatformInvitationResponse.from_domain(invitation, now=datetime.now())
+    response = PlatformInvitationResponse.from_domain(invitation, now=datetime.now(UTC))
     assert response.status == InvitationStatus.PENDING
 
 
 def test_platform_invitation_status_accepted():
-    now = datetime.now()
+    now = datetime.now(UTC)
     invitation = Invitation(
         email="user@example.com",
         token="token",
@@ -31,7 +29,7 @@ def test_platform_invitation_status_accepted():
 
 
 def test_platform_invitation_status_expired():
-    now = datetime.now()
+    now = datetime.now(UTC)
     invitation = Invitation(
         email="user@example.com",
         token="token",
@@ -42,15 +40,14 @@ def test_platform_invitation_status_expired():
 
 
 @pytest.mark.parametrize(
-    ("dimension",),
+    "dimension",
     [
-        ("model",),
-        ("user",),
-        ("team",),
-        ("agent",),
+        "model",
+        "user",
+        "team",
+        "agent",
     ],
 )
 def test_usage_breakdown_dimension_literal(dimension: str) -> None:
-    from app.application.services.usage_stats_service import UsageBreakdownDimension
 
     assert dimension in ("model", "user", "team", "agent")

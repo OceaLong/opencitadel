@@ -19,6 +19,8 @@ ENV UV_INDEX_URL=${UV_INDEX_URL}
 ENV UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT}
 ENV UV_PROJECT_ENVIRONMENT=/venv
 ENV UV_LINK_MODE=copy
+ENV UV_PYTHON=/usr/bin/python3.12
+ENV UV_PYTHON_DOWNLOADS=never
 
 # 3.将ubuntu默认的apt软件源地址统一换成阿里云镜像源
 RUN sed -i 's|http://archive.ubuntu.com/ubuntu/|http://mirrors.aliyun.com/ubuntu/|g' /etc/apt/sources.list && \
@@ -36,11 +38,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -d /home/ubuntu -s /bin/bash ubuntu && \
     install -d -o ubuntu -g ubuntu /sandbox
 
-# 6.安装Python 3.10版本(非uv)
+# 6.安装镜像内自包含的Python 3.12运行时（不使用root目录下的uv托管解释器）
 RUN add-apt-repository ppa:deadsnakes/ppa && \
     apt-get update && \
-    apt-get install -y --no-install-recommends python3.10 python3.10-venv python3.10-dev python3-pip && \
-    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
+    apt-get install -y --no-install-recommends python3.12 python3.12-venv python3.12-dev python3-pip && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -104,7 +105,8 @@ RUN if [ -n "${PYPI_FILES_MIRROR}" ]; then \
       sed -i "s|https://files.pythonhosted.org/packages/|${PYPI_FILES_MIRROR}|g" uv.lock; \
     fi
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --no-install-project \
+      --python /usr/bin/python3.12 --no-managed-python
 
 # 15.拷贝当前整个项目文件
 COPY . .

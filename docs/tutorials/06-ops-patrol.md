@@ -8,11 +8,11 @@ Ops Patrol checks a self-hosted Kubernetes application through a fixed, read-onl
 
 You need:
 
-- a running API, Worker, PostgreSQL, Redis, and tool-capable model;
+- a running API, execution kernel, PostgreSQL, Redis, and tool-capable model;
 - an Ops Collector deployed in the target cluster with its dedicated read-only ServiceAccount;
 - reviewed namespace/workload allowlists and registered probes;
 - an enabled streamable-HTTP MCP Server whose nine tool policies are fixed read-only;
-- an administrator who can enable the global feature flag;
+- an administrator who can manage the global Patrol policy;
 - Operator access to the target workspace. Auditors can review but cannot create, trigger, or decide Findings.
 
 For a transport-only local check, you may start:
@@ -40,7 +40,9 @@ The four Kubernetes checks use the Pack namespace and the Collector namespace/wo
 
 In **Settings → Integrations**, register the internal URL (for the default Helm release, `http://opencitadel-ops-collector:8090/mcp`) as streamable HTTP and enable it. Then use the authenticated management API payload in [Ops Patrol operations](../operations/ops-patrol.md#register-the-mcp-server) to persist all nine Tool Policies; the current UI form does not author those policies.
 
-As an administrator, open **Settings → Runtime → feature_flags**, enable `enable_ops_patrol`, and keep `enable_ops_patrol_fixture_replay` disabled. If DB AppConfig is enabled, changing only `api/config.yaml` does not overwrite the existing global configuration row.
+As an administrator, open **Settings → Runtime policy → Operations → Patrol**
+and confirm `admission=accepting`. Fixture replay is a non-production deployment
+option and never changes the active policy revision.
 
 ## Create and validate a Pack
 
@@ -79,7 +81,10 @@ The Pack detail shows 30-day scheduled-run success, Finding and false-positive c
 
 ## Safe rollback
 
-Set `feature_flags.enable_ops_patrol=false` in global Runtime settings. Navigation and new work disappear, schedules stop creating Runs, and existing authorized Runs/evidence remain readable. Re-enabling the flag does not discard configuration or history.
+Set `patrol_policy.admission=paused` in global Runtime settings. Navigation and
+existing authorized Runs/evidence remain readable, while manual and scheduled
+admission of new Runs fails closed. Restore `admission=accepting` after the
+dependency is healthy; no configuration or history is discarded.
 
 See [Ops Patrol operations](../operations/ops-patrol.md) for deployment, permissions, evidence verification, backup/restore, recovery, and troubleshooting.
 

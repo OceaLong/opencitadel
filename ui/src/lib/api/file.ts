@@ -43,7 +43,9 @@ export const fileApi = {
     const response = await authenticatedFetch(`/files/${fileId}/download`);
 
     if (!response.ok) {
-      throw new Error(translate("errors.downloadFailedWithStatus", { status: response.statusText }));
+      throw new Error(
+        translate("errors.downloadFailedWithStatus", { status: response.statusText }),
+      );
     }
 
     return response.blob();

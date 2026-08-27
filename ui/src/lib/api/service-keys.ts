@@ -14,8 +14,7 @@ export type CreatedServiceApiKey = ServiceApiKey & {
 };
 
 export const serviceKeysApi = {
-  list: (): Promise<{ keys: ServiceApiKey[] }> =>
-    get<{ keys: ServiceApiKey[] }>("/service-keys"),
+  list: (): Promise<{ keys: ServiceApiKey[] }> => get<{ keys: ServiceApiKey[] }>("/service-keys"),
 
   create: (name: string): Promise<CreatedServiceApiKey> =>
     post<CreatedServiceApiKey>("/service-keys", { name }),

@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """AuthService: register_with_invitation / login / logout / issue_tokens_for_user.
 
 Only `refresh` had coverage before this file
@@ -7,16 +5,19 @@ Only `refresh` had coverage before this file
 the other four public methods. Fake uow + repo shapes mirror that file's
 `_FakeUow`/`_FakeUserRepo`/`_FakeRefreshRepo` construction pattern.
 """
-from datetime import datetime, timedelta
+
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.domain.errors import BadRequestError, ConflictError, UnauthorizedError
 from app.application.services.auth_service import AuthService
+from app.domain.errors import BadRequestError, ConflictError, UnauthorizedError
+from app.domain.models.audit_log import AuditLog
 from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.refresh_token import RefreshToken
-from app.domain.models.user import User, UserStatus
 from app.domain.models.team import TeamRole
+from app.domain.models.user import User, UserStatus
+from app.infrastructure.adapters.security_ports import JwtTokenCodecAdapter
 from app.infrastructure.security.jwt_service import JwtService
 from app.infrastructure.security.password_hasher import PasswordHasher
 
@@ -78,34 +79,69 @@ class _FakeRefreshRepo:
             token.revoked_at = token.created_at
 
 
+class _FakeAuditRepo:
+    def __init__(self) -> None:
+        self.logs: list[AuditLog] = []
+
+    async def add(self, log: AuditLog) -> None:
+        self.logs.append(log)
+
+
 class _FakeUow:
-    def __init__(self, invitation_repo=None, user_repo=None, refresh_repo=None) -> None:
+    def __init__(
+        self,
+        invitation_repo=None,
+        user_repo=None,
+        refresh_repo=None,
+        audit_repo=None,
+    ) -> None:
         self.invitation = invitation_repo or _FakeInvitationRepo()
         self.user = user_repo or _FakeUserRepo()
         self.refresh_token = refresh_repo or _FakeRefreshRepo()
+        self.audit = audit_repo or _FakeAuditRepo()
 
     async def __aenter__(self):
         return self
+
+    async def commit(self):
+        return None
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
 
-def _build_service(*, invitation_repo=None, user_repo=None, refresh_repo=None) -> AuthService:
+def _build_service(
+    *,
+    invitation_repo=None,
+    user_repo=None,
+    refresh_repo=None,
+    audit_repo=None,
+) -> AuthService:
     return AuthService(
-        uow_factory=lambda: _FakeUow(invitation_repo, user_repo, refresh_repo),
+        uow_factory=lambda: _FakeUow(
+            invitation_repo,
+            user_repo,
+            refresh_repo,
+            audit_repo,
+        ),
         password_hasher=PasswordHasher(),
-        jwt_service=JwtService(secret="test-secret", access_ttl_seconds=60, refresh_ttl_seconds=120),
+        token_codec=JwtTokenCodecAdapter(
+            JwtService(
+                secret="test-jwt-secret-at-least-32-characters",
+                access_ttl_seconds=60,
+                refresh_ttl_seconds=120,
+            )
+        ),
     )
 
 
 def _platform_invitation(**overrides) -> Invitation:
-    fields = dict(
-        type=InvitationType.PLATFORM,
-        email="new@example.com",
-        token="invite-token",
-        expires_at=datetime.now() + timedelta(days=1),
-    )
+    fields = {
+        "type": InvitationType.PLATFORM,
+        "email": "new@example.com",
+        "token": "invite-token",
+        "expires_at": datetime.now(UTC) + timedelta(days=1),
+    }
     fields.update(overrides)
     return Invitation(**fields)
 
@@ -113,6 +149,7 @@ def _platform_invitation(**overrides) -> Invitation:
 # ---------------------------------------------------------------------------
 # register_with_invitation
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_register_with_invitation_success_creates_user_and_marks_accepted():
@@ -152,7 +189,9 @@ async def test_register_with_invitation_invalid_token_raises_bad_request():
 @pytest.mark.asyncio
 async def test_register_with_invitation_wrong_type_raises_bad_request():
     """A TEAM invitation token must not be usable for platform registration."""
-    invitation = _platform_invitation(type=InvitationType.TEAM, team_id="team-1", team_role=TeamRole.MEMBER)
+    invitation = _platform_invitation(
+        type=InvitationType.TEAM, team_id="team-1", team_role=TeamRole.MEMBER
+    )
     service = _build_service(invitation_repo=_FakeInvitationRepo([invitation]))
 
     with pytest.raises(BadRequestError, match="邀请链接无效"):
@@ -166,7 +205,7 @@ async def test_register_with_invitation_wrong_type_raises_bad_request():
 
 @pytest.mark.asyncio
 async def test_register_with_invitation_already_used_raises_bad_request():
-    invitation = _platform_invitation(accepted_at=datetime.now(), accepted_user_id="someone")
+    invitation = _platform_invitation(accepted_at=datetime.now(UTC), accepted_user_id="someone")
     service = _build_service(invitation_repo=_FakeInvitationRepo([invitation]))
 
     with pytest.raises(BadRequestError, match="邀请链接已被使用"):
@@ -180,7 +219,7 @@ async def test_register_with_invitation_already_used_raises_bad_request():
 
 @pytest.mark.asyncio
 async def test_register_with_invitation_expired_raises_bad_request():
-    invitation = _platform_invitation(expires_at=datetime.now() - timedelta(days=1))
+    invitation = _platform_invitation(expires_at=datetime.now(UTC) - timedelta(days=1))
     service = _build_service(invitation_repo=_FakeInvitationRepo([invitation]))
 
     with pytest.raises(BadRequestError, match="邀请链接已过期"):
@@ -246,24 +285,42 @@ async def test_register_with_invitation_username_taken_raises_conflict():
 # login
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_login_success_returns_user_and_tokens():
     hasher = PasswordHasher()
-    user = User(email="u@example.com", username="u1", password_hash=hasher.hash("correct-pw"), status=UserStatus.ACTIVE)
-    service = _build_service(user_repo=_FakeUserRepo([user]))
+    user = User(
+        email="u@example.com",
+        username="u1",
+        password_hash=hasher.hash("correct-pw"),
+        status=UserStatus.ACTIVE,
+    )
+    audit_repo = _FakeAuditRepo()
+    service = _build_service(
+        user_repo=_FakeUserRepo([user]),
+        audit_repo=audit_repo,
+    )
 
-    logged_in, tokens = await service.login(email_or_username="u@example.com", password="correct-pw")
+    logged_in, tokens = await service.login(
+        email_or_username="u@example.com", password="correct-pw"
+    )
 
     assert logged_in.id == user.id
     assert logged_in.last_login_at is not None
     assert tokens.access_token
     assert tokens.refresh_token
+    assert [(log.action, log.actor_user_id) for log in audit_repo.logs] == [("login", user.id)]
 
 
 @pytest.mark.asyncio
 async def test_login_by_username_success():
     hasher = PasswordHasher()
-    user = User(email="u@example.com", username="u1", password_hash=hasher.hash("correct-pw"), status=UserStatus.ACTIVE)
+    user = User(
+        email="u@example.com",
+        username="u1",
+        password_hash=hasher.hash("correct-pw"),
+        status=UserStatus.ACTIVE,
+    )
     service = _build_service(user_repo=_FakeUserRepo([user]))
 
     logged_in, _ = await service.login(email_or_username="u1", password="correct-pw")
@@ -274,7 +331,12 @@ async def test_login_by_username_success():
 @pytest.mark.asyncio
 async def test_login_wrong_password_raises_unauthorized():
     hasher = PasswordHasher()
-    user = User(email="u@example.com", username="u1", password_hash=hasher.hash("correct-pw"), status=UserStatus.ACTIVE)
+    user = User(
+        email="u@example.com",
+        username="u1",
+        password_hash=hasher.hash("correct-pw"),
+        status=UserStatus.ACTIVE,
+    )
     service = _build_service(user_repo=_FakeUserRepo([user]))
 
     with pytest.raises(UnauthorizedError, match="账号或密码错误"):
@@ -311,23 +373,39 @@ async def test_login_disabled_account_raises_unauthorized():
 # logout
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_logout_revokes_refresh_token():
-    jwt_service = JwtService(secret="test-secret", access_ttl_seconds=60, refresh_ttl_seconds=120)
+    jwt_service = JwtService(
+        secret="test-jwt-secret-at-least-32-characters",
+        access_ttl_seconds=60,
+        refresh_ttl_seconds=120,
+    )
     refresh_repo = _FakeRefreshRepo()
+    audit_repo = _FakeAuditRepo()
     service = AuthService(
-        uow_factory=lambda: _FakeUow(refresh_repo=refresh_repo),
+        uow_factory=lambda: _FakeUow(
+            refresh_repo=refresh_repo,
+            audit_repo=audit_repo,
+        ),
         password_hasher=PasswordHasher(),
-        jwt_service=jwt_service,
+        token_codec=JwtTokenCodecAdapter(jwt_service),
     )
     refresh_token = jwt_service.issue_refresh_token(user_id="user-1", token_version=0)
     token_hash = jwt_service.hash_token(refresh_token)
-    await refresh_repo.save(RefreshToken(user_id="user-1", token_hash=token_hash, expires_at=datetime.now() + timedelta(days=1)))
+    await refresh_repo.save(
+        RefreshToken(
+            user_id="user-1",
+            token_hash=token_hash,
+            expires_at=datetime.now(UTC) + timedelta(days=1),
+        )
+    )
 
     await service.logout(refresh_token)
 
     assert token_hash in refresh_repo.revoked_hashes
     assert refresh_repo.tokens[token_hash].revoked is True
+    assert [(log.action, log.actor_user_id) for log in audit_repo.logs] == [("logout", "user-1")]
 
 
 @pytest.mark.asyncio
@@ -344,13 +422,16 @@ async def test_logout_with_no_token_is_a_noop():
 # issue_tokens_for_user
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_issue_tokens_for_user_persists_refresh_token_and_returns_pair():
     refresh_repo = _FakeRefreshRepo()
     service = _build_service(refresh_repo=refresh_repo)
     user = User(email="u@example.com", username="u1", token_version=2)
 
-    tokens = await service.issue_tokens_for_user(user, user_agent="pytest-agent", ip_address="127.0.0.1")
+    tokens = await service.issue_tokens_for_user(
+        user, user_agent="pytest-agent", ip_address="127.0.0.1"
+    )
 
     assert tokens.access_token
     assert tokens.refresh_token
@@ -359,3 +440,24 @@ async def test_issue_tokens_for_user_persists_refresh_token_and_returns_pair():
     assert stored.user_id == user.id
     assert stored.user_agent == "pytest-agent"
     assert stored.ip_address == "127.0.0.1"
+
+
+@pytest.mark.asyncio
+async def test_oauth_token_issue_records_oauth_login_in_same_uow():
+    refresh_repo = _FakeRefreshRepo()
+    audit_repo = _FakeAuditRepo()
+    service = _build_service(
+        refresh_repo=refresh_repo,
+        audit_repo=audit_repo,
+    )
+    user = User(email="oauth@example.com", username="oauth")
+
+    await service.issue_tokens_for_user(
+        user,
+        ip_address="127.0.0.1",
+        audit_action="oauth_login",
+    )
+
+    assert [(log.action, log.actor_user_id) for log in audit_repo.logs] == [
+        ("oauth_login", user.id)
+    ]

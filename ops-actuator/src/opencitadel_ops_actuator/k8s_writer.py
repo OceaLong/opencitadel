@@ -20,12 +20,12 @@ the idempotency key silently fail to stick on a real cluster (it would
 still appear to succeed in a naive fake). Patching the main resource keeps
 the atomicity guarantee real.
 """
+
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
-
 
 IDEMPOTENCY_ANNOTATION = "opencitadel.io/remediation-key"
 RESTARTED_AT_ANNOTATION = "opencitadel.io/restarted-at"
@@ -45,7 +45,7 @@ def load_incluster_config() -> None:
 
     try:
         config.load_incluster_config()
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         config.load_kube_config(context=os.getenv("PATROL_DEMO_CONTEXT") or None)
 
 
@@ -67,7 +67,7 @@ class KubernetesWriter:
             if kind == "deployment":
                 return self.apps.read_namespaced_deployment(name, namespace)
             return self.apps.read_namespaced_stateful_set(name, namespace)
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             if getattr(exc, "status", None) == 404:
                 raise WorkloadNotFound(f"{kind}/{name} not found in {namespace}") from exc
             raise
@@ -83,7 +83,8 @@ class KubernetesWriter:
             item
             for item in items
             if any(
-                getattr(ref, "kind", None) == "Deployment" and getattr(ref, "name", None) == deployment_name
+                getattr(ref, "kind", None) == "Deployment"
+                and getattr(ref, "name", None) == deployment_name
                 for ref in (item.metadata.owner_references or [])
             )
         ]
@@ -111,17 +112,21 @@ class KubernetesWriter:
 
     def restart(self, namespace: str, name: str, kind: str, idempotency_key: str) -> dict[str, Any]:
         before = self._snapshot(self._read(namespace, name, kind))
-        restarted_at = datetime.now(timezone.utc).isoformat()
+        restarted_at = datetime.now(UTC).isoformat()
         body = {
             "metadata": {"annotations": {IDEMPOTENCY_ANNOTATION: idempotency_key}},
-            "spec": {"template": {"metadata": {"annotations": {RESTARTED_AT_ANNOTATION: restarted_at}}}},
+            "spec": {
+                "template": {"metadata": {"annotations": {RESTARTED_AT_ANNOTATION: restarted_at}}}
+            },
         }
         after_item = self._patch(namespace, name, kind, body)
         after = self._snapshot(after_item)
         after["restarted_at"] = restarted_at
         return {"before": before, "after": after}
 
-    def scale(self, namespace: str, name: str, kind: str, replicas: int, idempotency_key: str) -> dict[str, Any]:
+    def scale(
+        self, namespace: str, name: str, kind: str, replicas: int, idempotency_key: str
+    ) -> dict[str, Any]:
         before_item = self._read(namespace, name, kind)
         before = {"replicas": int(getattr(before_item.spec, "replicas", 0) or 0)}
         body = {
@@ -132,7 +137,11 @@ class KubernetesWriter:
         # docstring for why the subresource cannot carry the idempotency
         # annotation on real clusters.
         after_item = self._patch(namespace, name, kind, body)
-        after = {"replicas": int(getattr(getattr(after_item, "spec", None), "replicas", replicas) or replicas)}
+        after = {
+            "replicas": int(
+                getattr(getattr(after_item, "spec", None), "replicas", replicas) or replicas
+            )
+        }
         return {"before": before, "after": after}
 
     def rollback(self, namespace: str, name: str, idempotency_key: str) -> dict[str, Any]:
@@ -153,5 +162,7 @@ class KubernetesWriter:
         }
         after_item = self._patch(namespace, name, "deployment", body)
         after = self._snapshot(after_item)
-        after["rolled_back_to_revision"] = self._object_annotations(target_rs).get(REVISION_ANNOTATION)
+        after["rolled_back_to_revision"] = self._object_annotations(target_rs).get(
+            REVISION_ANNOTATION
+        )
         return {"before": before, "after": after}

@@ -6,7 +6,6 @@ import type {
   CreateSessionParams,
   ResourceBindingUpgrade,
   Session,
-  SessionCheckpointsData,
   SessionDetail,
   SessionEventsPage,
   SessionFile,
@@ -19,12 +18,7 @@ import type {
 } from "./types";
 
 type SessionDetailParams = {
-  include_debug?: boolean;
   events_limit?: number;
-};
-
-type ChatStreamOptions = {
-  include_debug?: boolean;
 };
 
 function compactParams(
@@ -120,7 +114,9 @@ export const sessionApi = {
         }
       } catch (error) {
         if (!controller.signal.aborted && onError) {
-          onError(error instanceof Error ? error : new Error(translate("errors.sseConnectionFailed")));
+          onError(
+            error instanceof Error ? error : new Error(translate("errors.sseConnectionFailed")),
+          );
         }
       }
     };
@@ -151,11 +147,10 @@ export const sessionApi = {
   getSessionEvents: (
     sessionId: string,
     params?: {
-      after?: number | null;
-      before?: number | null;
+      after?: string | null;
+      before?: string | null;
       latest?: boolean;
       limit?: number;
-      include_debug?: boolean;
     },
   ): Promise<SessionEventsPage> => {
     const search = new URLSearchParams();
@@ -163,7 +158,6 @@ export const sessionApi = {
     if (params?.before != null) search.set("before", String(params.before));
     if (params?.latest != null) search.set("latest", String(params.latest));
     if (params?.limit != null) search.set("limit", String(params.limit));
-    if (params?.include_debug != null) search.set("include_debug", String(params.include_debug));
     const suffix = search.toString() ? `?${search.toString()}` : "";
     return get<SessionEventsPage>(`/sessions/${sessionId}/events${suffix}`);
   },
@@ -173,6 +167,17 @@ export const sessionApi = {
     params: UpdateSessionConfigParams,
   ): Promise<SessionDetail> => {
     return patch<SessionDetail>(`/sessions/${sessionId}`, params);
+  },
+
+  decideApproval: (
+    approvalId: string,
+    decision: "approved" | "rejected",
+    feedback = "",
+  ): Promise<{ run_id: string; approval_id: string; decision: string }> => {
+    return post(`/approval-batches/${approvalId}/commands/decide`, {
+      decision,
+      feedback,
+    });
   },
 
   getResourceBindings: (sessionId: string): Promise<SessionResourceBinding[]> => {
@@ -212,18 +217,12 @@ export const sessionApi = {
     params: ChatParams,
     onEvent: SSEEventHandler,
     onError?: (error: Error) => void,
-    options?: ChatStreamOptions,
   ): (() => void) => {
     const controller = new AbortController();
-    const search = new URLSearchParams();
-    if (options?.include_debug != null) {
-      search.set("include_debug", String(options.include_debug));
-    }
-    const suffix = search.toString() ? `?${search.toString()}` : "";
 
     const startStream = async () => {
       try {
-        const stream = await createSSEStream(`/sessions/${sessionId}/chat${suffix}`, params, {
+        const stream = await createSSEStream(`/sessions/${sessionId}/chat`, params, {
           signal: controller.signal,
           // 流式连接需要很长时间，设置为 5 分钟超时
           timeout: 5 * 60 * 1000,
@@ -262,7 +261,9 @@ export const sessionApi = {
           return;
         }
         if (!controller.signal.aborted && onError) {
-          onError(error instanceof Error ? error : new Error(translate("errors.chatStreamStartFailed")));
+          onError(
+            error instanceof Error ? error : new Error(translate("errors.chatStreamStartFailed")),
+          );
         }
       }
     };
@@ -273,23 +274,6 @@ export const sessionApi = {
     return () => {
       controller.abort();
     };
-  },
-
-  /**
-   * 获取会话还原点列表
-   */
-  listCheckpoints: (sessionId: string): Promise<SessionCheckpointsData> => {
-    return get<SessionCheckpointsData>(`/sessions/${sessionId}/checkpoints`);
-  },
-
-  /**
-   * 回退到指定还原点
-   */
-  restoreCheckpoint: (sessionId: string, checkpointId: string): Promise<{ success: boolean; message: string }> => {
-    return post<{ success: boolean; message: string }>(
-      `/sessions/${sessionId}/checkpoints/${checkpointId}/restore`,
-      {},
-    );
   },
 
   /**

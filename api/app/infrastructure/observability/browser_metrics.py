@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Prometheus metrics for browser automation (vision fallback, etc.)."""
+
 try:
     from prometheus_client import Counter, Histogram
 
@@ -14,7 +13,7 @@ try:
         "Latency of vision grounding fallback click path",
         buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0),
     )
-except Exception:  # pragma: no cover - optional prometheus
+except (OSError, RuntimeError, ValueError):  # pragma: no cover - optional prometheus
     BROWSER_VISION_FALLBACK_TOTAL = None
     BROWSER_VISION_FALLBACK_LATENCY = None
 

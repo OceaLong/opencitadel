@@ -1,21 +1,52 @@
 import { appApi, expect, test } from "./patrol.fixture";
+import type { components } from "../ui/src/lib/api/generated/schema";
 
 const enabled = process.env.PATROL_E2E === "1";
 
+type ActiveOperationsPolicy = components["schemas"]["ActiveOperationsPolicyResponse"];
+type OperationsPolicy = components["schemas"]["OperationsPolicy-Input"];
+
+async function activateOperationsPolicy(
+  page: Parameters<typeof appApi>[0],
+  update: (policy: OperationsPolicy) => OperationsPolicy,
+  note: string,
+): Promise<ActiveOperationsPolicy> {
+  const active = await appApi<ActiveOperationsPolicy>(page, "/runtime-policies/operations");
+  return appApi<ActiveOperationsPolicy>(page, "/runtime-policies/operations/revisions", {
+    method: "POST",
+    body: {
+      expected_head_version: active.head.version,
+      expected_active_revision_id: active.revision.id,
+      policy: update(active.revision.policy),
+      note,
+    },
+  });
+}
+
 test.describe("Ops Patrol real runtime", () => {
-  test.skip(!enabled, "Set PATROL_E2E=1 for a stack with Worker, Collector, and a tool-capable model");
+  test.skip(!enabled, "Set PATROL_E2E=1 for a stack with the execution kernel, Collector, and a tool-capable model");
 
   test("operator creates, validates, runs, reviews evidence, and rolls back safely", async ({
     operatorPage: page,
   }) => {
     test.setTimeout(10 * 60_000);
-    const flags = await appApi<Record<string, boolean>>(page, "/app-config/sections/feature_flags");
-    await appApi(page, "/app-config/sections/feature_flags", {
-      method: "PUT",
-      body: { ...flags, enable_ops_patrol: true },
-    });
-    await appApi(page, "/app-config/mcp-servers/ops-collector/enabled", {
-      method: "POST",
+    const original = await appApi<ActiveOperationsPolicy>(
+      page,
+      "/runtime-policies/operations",
+    );
+    await activateOperationsPolicy(
+      page,
+      (policy) => ({ ...policy, patrol: { ...policy.patrol, admission: "accepting" } }),
+      "E2E: accept patrol runs",
+    );
+    const integrations = await appApi<components["schemas"]["MCPServerListResponse"]>(
+      page,
+      "/integrations/mcp-servers",
+    );
+    const collector = integrations.items.find((server) => server.name === "ops-collector");
+    if (!collector) throw new Error("ops-collector Integration is missing");
+    await appApi(page, `/integrations/mcp-servers/${encodeURIComponent(collector.id)}/enabled`, {
+      method: "PATCH",
       body: { enabled: true },
     });
 
@@ -58,21 +89,23 @@ test.describe("Ops Patrol real runtime", () => {
       await page.reload();
       expect(await page.locator("body").evaluate((body) => body.scrollWidth <= 390)).toBe(true);
 
-      await appApi(page, "/app-config/sections/feature_flags", {
-        method: "PUT",
-        body: { ...flags, enable_ops_patrol: false },
-      });
+      await activateOperationsPolicy(
+        page,
+        (policy) => ({ ...policy, patrol: { ...policy.patrol, admission: "paused" } }),
+        "E2E: verify paused patrol admission",
+      );
       await page.goto("/patrols/new");
-      await expect(page.getByText(/not enabled|未启用/)).toBeVisible();
+      await expect(page.getByText(/paused|已暂停/)).toBeVisible();
       await page.goto(runUrl);
       await expect(page.getByRole("button", { name: /Download evidence package|下载证据包/ })).toBeVisible();
       await page.goto("/");
       await expect(page.locator("body")).toBeVisible();
     } finally {
-      await appApi(page, "/app-config/sections/feature_flags", {
-        method: "PUT",
-        body: flags,
-      });
+      await activateOperationsPolicy(
+        page,
+        () => original.revision.policy,
+        "E2E: restore original Operations Policy",
+      );
     }
   });
 });

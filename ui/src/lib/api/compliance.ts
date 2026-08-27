@@ -15,7 +15,6 @@ export type EvidenceSessionItem = {
   session_id: string;
   title: string;
   operator_scope?: string | null;
-  gate_profile?: string | null;
   status: string;
   updated_at?: string | null;
   chain_ok: boolean;
@@ -53,58 +52,57 @@ export type GovernanceProfileSession = {
   id: string;
   title: string;
   status: string;
-  gate_profile?: string | null;
   operator_scope?: string | null;
+  operator_domains: string[];
   created_at: string;
   updated_at: string;
 };
 
 export type GovernanceApprovalRow = {
-  action: string;
+  approval_id: string;
+  run_id: string;
+  approval_kind: string;
+  subject_activity_id: string;
+  subject_label: string;
+  risk_summary: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
   decision?: string | null;
-  actor_user_id?: string | null;
-  created_at: string;
-  pending_phase?: string | null;
-  tool?: string | null;
-  approval_batch_id?: string | null;
-  feedback?: string | null;
+  decided_by_user_id?: string | null;
+  feedback: string;
+  requested_at: string;
+  decided_at?: string | null;
 };
 
-export type GovernanceGateHitRow = {
-  tool?: string | null;
-  gated?: boolean | null;
-  gate_profile?: string | null;
+export type GovernanceRunRow = {
+  run_id: string;
+  family: string;
+  status: string;
   created_at: string;
+  updated_at: string;
+  terminal_at?: string | null;
 };
 
-export type GovernanceCheckpointRow = {
-  id: string;
-  anchor_type: string;
-  label?: string | null;
+export type GovernanceActivityRow = {
+  activity_id: string;
+  run_id: string;
+  activity_type: string;
+  status: string;
+  attempt: number;
+  failure_code?: string | null;
   created_at: string;
-};
-
-export type GovernanceDenialRow = {
-  tool?: string | null;
-  layer?: string | null;
-  reason?: string | null;
-  created_at: string;
+  terminal_at?: string | null;
 };
 
 export type GovernanceProfile = {
   session: GovernanceProfileSession;
   chain: {
     verified: boolean;
-    checked_entries?: number | null;
+    checked_runs: number;
+    checked_entries: number;
   };
+  runs: GovernanceRunRow[];
   approvals: GovernanceApprovalRow[];
-  gate_hits: GovernanceGateHitRow[];
-  checkpoints: GovernanceCheckpointRow[];
-  terminal: {
-    status: string;
-    reached_at: string;
-  };
-  denials: GovernanceDenialRow[];
+  activities: GovernanceActivityRow[];
 };
 
 export type ApprovalStats = {
@@ -113,15 +111,14 @@ export type ApprovalStats = {
   outcomes: {
     approved: number;
     rejected: number;
-    expired: number;
-    consumed: number;
+    cancelled: number;
   };
 };
 
 export type GovernanceDailyCount = {
   date: string;
-  approval_decisions: number;
-  denials: number;
+  approval_requests: number;
+  activity_failures: number;
 };
 
 export type GovernanceDailyPatrolStat = {
@@ -161,13 +158,10 @@ export const complianceApi = {
     if (params?.limit != null) qs.set("limit", String(params.limit));
     if (params?.offset != null) qs.set("offset", String(params.offset));
     const q = qs.toString();
-    return get<{ sessions: EvidenceSessionItem[] }>(
-      `/admin/evidence/sessions${q ? `?${q}` : ""}`,
-    );
+    return get<{ sessions: EvidenceSessionItem[] }>(`/admin/evidence/sessions${q ? `?${q}` : ""}`);
   },
 
-  evidencePackageUrl: (sessionId: string) =>
-    `/api/admin/evidence/sessions/${sessionId}/package`,
+  evidencePackageUrl: (sessionId: string) => `/api/admin/evidence/sessions/${sessionId}/package`,
 
   getGovernanceProfile: (sessionId: string) =>
     get<GovernanceProfile>(`/admin/governance/sessions/${sessionId}/profile`),
@@ -179,11 +173,7 @@ export const complianceApi = {
     return get<GovernanceOverview>(`/admin/governance/overview${q ? `?${q}` : ""}`);
   },
 
-  getComplianceReport: (params?: {
-    framework?: string;
-    start?: string;
-    end?: string;
-  }) => {
+  getComplianceReport: (params?: { framework?: string; start?: string; end?: string }) => {
     const qs = new URLSearchParams();
     if (params?.framework) qs.set("framework", params.framework);
     if (params?.start) qs.set("start", params.start);

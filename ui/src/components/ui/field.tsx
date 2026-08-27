@@ -120,11 +120,4 @@ function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
   );
 }
 
-export {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-};
+export { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet };

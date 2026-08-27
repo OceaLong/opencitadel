@@ -1,16 +1,12 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Identifier-aware lexical documents for codebase search."""
+
 from __future__ import annotations
 
 import re
 from collections.abc import Iterable
 
-
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+")
-_CAMEL_BOUNDARY_RE = re.compile(
-    r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
-)
+_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 _CONTENT_LIMIT = 8000
 
 

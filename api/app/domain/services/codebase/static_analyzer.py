@@ -1,38 +1,67 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Multi-language static analysis for symbols, imports, and call sites."""
+
 import hashlib
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from app.domain.models.codebase import (
-    CodeEvidenceRef,
     CodebaseEdge,
     CodebaseFile,
     CodebaseSymbol,
+    CodeEvidenceRef,
     EdgeKind,
-    SymbolKind,
 )
+from app.domain.runtime_policy import CodebaseAnalysisPolicy
 from app.domain.services.codebase.parsers.base import ParsedCallSite, ParsedFile
 from app.domain.services.codebase.parsers.python_parser import PythonParser
 from app.domain.services.codebase.parsers.regex_fallback import RegexFallbackParser
 from app.domain.services.codebase.parsers.tree_sitter_parser import TreeSitterParser
 
 IGNORE_DIRS = {
-    ".git", ".svn", "node_modules", "__pycache__", ".venv", "venv",
-    "dist", "build", ".next", "target", ".idea", ".vscode", "coverage",
+    ".git",
+    ".svn",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    ".next",
+    "target",
+    ".idea",
+    ".vscode",
+    "coverage",
 }
 IGNORE_EXTENSIONS = {
-    ".pyc", ".pyo", ".so", ".dll", ".exe", ".bin", ".o", ".a",
-    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2",
-    ".ttf", ".eot", ".mp4", ".mp3", ".zip", ".tar", ".gz", ".jar",
-    ".lock", ".min.js", ".min.css",
+    ".pyc",
+    ".pyo",
+    ".so",
+    ".dll",
+    ".exe",
+    ".bin",
+    ".o",
+    ".a",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".ico",
+    ".svg",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".mp4",
+    ".mp3",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".jar",
+    ".lock",
+    ".min.js",
+    ".min.css",
 }
-MAX_FILE_SIZE = 512_000
-MAX_FILES = 5000
-
 LANG_MAP = {
     ".py": "python",
     ".js": "javascript",
@@ -66,11 +95,11 @@ LANG_MAP = {
 
 @dataclass
 class AnalysisResult:
-    files: List[CodebaseFile] = field(default_factory=list)
-    symbols: List[CodebaseSymbol] = field(default_factory=list)
-    edges: List[CodebaseEdge] = field(default_factory=list)
-    language_stats: Dict[str, int] = field(default_factory=dict)
-    file_contents: Dict[str, str] = field(default_factory=dict)
+    files: list[CodebaseFile] = field(default_factory=list)
+    symbols: list[CodebaseSymbol] = field(default_factory=list)
+    edges: list[CodebaseEdge] = field(default_factory=list)
+    language_stats: dict[str, int] = field(default_factory=dict)
+    file_contents: dict[str, str] = field(default_factory=dict)
 
 
 def detect_language(path: str) -> str:
@@ -89,17 +118,18 @@ def should_skip_path(rel_path: str) -> bool:
 class StaticAnalyzer:
     """Extract symbols and coarse call edges from source files."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, policy: CodebaseAnalysisPolicy) -> None:
+        self._policy = policy
         self._python = PythonParser()
         self._tree_sitter = TreeSitterParser()
         self._regex = RegexFallbackParser()
 
     def analyze(
-            self,
-            files: Dict[str, str],
-            *,
-            codebase_id: str = "cb1",
-            version_id: Optional[str] = None,
+        self,
+        files: dict[str, str],
+        *,
+        codebase_id: str = "cb1",
+        version_id: str | None = None,
     ) -> AnalysisResult:
         return self.analyze_tree(
             codebase_id,
@@ -109,11 +139,11 @@ class StaticAnalyzer:
         )
 
     def analyze_tree(
-            self,
-            codebase_id: str,
-            root_dir: str,
-            file_entries: List[Tuple[str, str]],
-            version_id: Optional[str] = None,
+        self,
+        codebase_id: str,
+        root_dir: str,
+        file_entries: list[tuple[str, str]],
+        version_id: str | None = None,
     ) -> AnalysisResult:
         result = AnalysisResult()
         parsed_calls: list[tuple[ParsedCallSite, str, str]] = []
@@ -121,8 +151,8 @@ class StaticAnalyzer:
         for rel_path, content in file_entries:
             if should_skip_path(rel_path):
                 continue
-            if len(content) > MAX_FILE_SIZE:
-                content = content[:MAX_FILE_SIZE]
+            if len(content) > self._policy.max_file_size_bytes:
+                content = content[: self._policy.max_file_size_bytes]
             lang = detect_language(rel_path)
             result.language_stats[lang] = result.language_stats.get(lang, 0) + 1
             sha = hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()[:16]
@@ -146,10 +176,7 @@ class StaticAnalyzer:
                 version_id=version_id,
             )
             result.symbols.extend(symbols)
-            parsed_calls.extend(
-                (call, file_id, rel_path)
-                for call in parsed.calls
-            )
+            parsed_calls.extend((call, file_id, rel_path) for call in parsed.calls)
 
         result.edges = self.build_call_edges(
             codebase_id,
@@ -170,51 +197,44 @@ class StaticAnalyzer:
 
     @staticmethod
     def _to_domain_symbols(
-            codebase_id: str,
-            file_id: str,
-            parsed: ParsedFile,
-            *,
-            version_id: Optional[str],
-    ) -> List[CodebaseSymbol]:
-        id_by_qualified = {
-            symbol.qualified_name: str(uuid.uuid4())
-            for symbol in parsed.symbols
-        }
-        symbols: List[CodebaseSymbol] = []
-        for symbol in parsed.symbols:
-            symbols.append(
-                CodebaseSymbol(
-                    id=id_by_qualified[symbol.qualified_name],
-                    codebase_id=codebase_id,
-                    version_id=version_id,
-                    file_id=file_id,
-                    name=symbol.name,
-                    qualified_name=symbol.qualified_name or symbol.name,
-                    kind=symbol.kind,
-                    signature=symbol.signature,
-                    start_line=symbol.range.start_line,
-                    end_line=symbol.range.end_line,
-                    parent_id=id_by_qualified.get(
-                        symbol.parent_qualified_name or ""
-                    ),
-                    parser=symbol.parser,
-                    confidence=symbol.confidence,
-                )
+        codebase_id: str,
+        file_id: str,
+        parsed: ParsedFile,
+        *,
+        version_id: str | None,
+    ) -> list[CodebaseSymbol]:
+        id_by_qualified = {symbol.qualified_name: str(uuid.uuid4()) for symbol in parsed.symbols}
+        return [
+            CodebaseSymbol(
+                id=id_by_qualified[symbol.qualified_name],
+                codebase_id=codebase_id,
+                version_id=version_id,
+                file_id=file_id,
+                name=symbol.name,
+                qualified_name=symbol.qualified_name or symbol.name,
+                kind=symbol.kind,
+                signature=symbol.signature,
+                start_line=symbol.range.start_line,
+                end_line=symbol.range.end_line,
+                parent_id=id_by_qualified.get(symbol.parent_qualified_name or ""),
+                parser=symbol.parser,
+                confidence=symbol.confidence,
             )
-        return symbols
+            for symbol in parsed.symbols
+        ]
 
     def build_call_edges(
-            self,
-            codebase_id: str,
-            symbols: List[CodebaseSymbol],
-            files: List[CodebaseFile],
-            file_contents: Dict[str, str],
-            parsed_calls: List[tuple[ParsedCallSite, str, str]],
-    ) -> List[CodebaseEdge]:
-        edges: List[CodebaseEdge] = []
+        self,
+        codebase_id: str,
+        symbols: list[CodebaseSymbol],
+        files: list[CodebaseFile],
+        file_contents: dict[str, str],
+        parsed_calls: list[tuple[ParsedCallSite, str, str]],
+    ) -> list[CodebaseEdge]:
+        edges: list[CodebaseEdge] = []
         path_by_file_id = {f.id: f.path for f in files}
         symbol_by_qualified = {s.qualified_name: s for s in symbols}
-        name_index: Dict[str, List[CodebaseSymbol]] = {}
+        name_index: dict[str, list[CodebaseSymbol]] = {}
         for s in symbols:
             name_index.setdefault(s.name, []).append(s)
 
@@ -261,19 +281,13 @@ class StaticAnalyzer:
 
     @staticmethod
     def _resolve_call(
-            src: CodebaseSymbol,
-            candidates: List[CodebaseSymbol],
-    ) -> tuple[Optional[CodebaseSymbol], str]:
-        candidates = [
-            candidate for candidate in candidates
-            if candidate.id != src.id
-        ]
+        src: CodebaseSymbol,
+        candidates: list[CodebaseSymbol],
+    ) -> tuple[CodebaseSymbol | None, str]:
+        candidates = [candidate for candidate in candidates if candidate.id != src.id]
         if not candidates:
             return None, "unresolved"
-        same_file = [
-            candidate for candidate in candidates
-            if candidate.file_id == src.file_id
-        ]
+        same_file = [candidate for candidate in candidates if candidate.file_id == src.file_id]
         if len(same_file) == 1:
             return same_file[0], "resolved"
         if len(candidates) == 1:

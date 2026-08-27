@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import pytest
 
 from app.domain.utils.safe_redirect import resolve_safe_redirect_path

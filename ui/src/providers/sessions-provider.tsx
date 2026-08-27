@@ -22,20 +22,6 @@ const RETRY_CONFIG = {
   maxDelay: 30_000,
 } as const;
 
-/**
- * 从 API 返回值中安全提取 Session 数组
- * 兼容 data 为 { sessions: [...] } / 直接数组 / null 等格式
- */
-function normalizeSessions(raw: unknown): Session[] {
-  if (Array.isArray(raw)) return raw as Session[];
-  if (raw && typeof raw === "object" && "sessions" in raw) {
-    return Array.isArray((raw as Record<string, unknown>).sessions)
-      ? ((raw as Record<string, unknown>).sessions as Session[])
-      : [];
-  }
-  return [];
-}
-
 // ==================== Context ====================
 
 type SessionsContextValue = {
@@ -69,6 +55,13 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const messages = useMemo(
+    () => ({
+      fetchFailed: t("fetchFailed"),
+      streamDisconnected: t("streamDisconnected"),
+    }),
+    [t],
+  );
 
   const cleanupRef = useRef<(() => void) | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -76,21 +69,21 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   const initialFetchedRef = useRef(false);
   /** 标记 SSE 是否已经推送过数据，防止 REST 回调覆盖更新的 SSE 数据 */
   const sseReceivedRef = useRef(false);
-  const tRef = useRef(t);
+  const messagesRef = useRef(messages);
 
   useEffect(() => {
-    tRef.current = t;
-  }, [t]);
+    messagesRef.current = messages;
+  }, [messages]);
 
   // ---------- 手动刷新 ----------
   const refresh = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const raw = await sessionApi.getSessions();
-      setSessions(normalizeSessions(raw));
+      const data = await sessionApi.getSessions();
+      setSessions(data.sessions);
     } catch (err) {
-      setError(err instanceof Error ? err.message : tRef.current("fetchFailed"));
+      setError(err instanceof Error ? err.message : messagesRef.current.fetchFailed);
     } finally {
       setLoading(false);
     }
@@ -111,16 +104,16 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
 
     sessionApi
       .getSessions()
-      .then((raw) => {
+      .then((data) => {
         // 仅在 SSE 尚未推送过数据时更新，防止用旧数据覆盖 SSE 已推送的新数据
         if (!sseReceivedRef.current) {
-          setSessions(normalizeSessions(raw));
+          setSessions(data.sessions);
         }
         setLoading(false);
         setError(null);
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : tRef.current("fetchFailed"));
+        setError(err instanceof Error ? err.message : messagesRef.current.fetchFailed);
         setLoading(false);
       });
   }, [authLoading, userId]);
@@ -170,7 +163,7 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
           if (!mounted) return;
 
           if (retryCount >= RETRY_CONFIG.maxRetries) {
-            setError(tRef.current("streamDisconnected"));
+            setError(messagesRef.current.streamDisconnected);
             return;
           }
 

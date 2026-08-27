@@ -84,10 +84,7 @@ export default function AdminInvitationsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={t("platformInvite")}
-        description={t("invitationsSubtitle")}
-      />
+      <PageHeader title={t("platformInvite")} description={t("invitationsSubtitle")} />
 
       <div className="grid gap-3 md:grid-cols-3">
         <AdminStatCard label={t("summaryPending")} value={pending} />
@@ -105,6 +102,7 @@ export default function AdminInvitationsPage() {
             <Input
               value={inviteEmail}
               onChange={(event) => setInviteEmail(event.target.value)}
+              translate="no"
               placeholder="user@example.com"
             />
             <Button disabled={creating} onClick={() => void createInvite()}>

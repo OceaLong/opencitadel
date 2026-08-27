@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import pytest
 
 from app.infrastructure.security.outbound_http import (
@@ -13,7 +11,7 @@ class _RecordingBackend:
         self.port = None
         self.stream = object()
 
-    async def connect_tcp(
+    def connect_tcp(
         self,
         host,
         port,
@@ -21,6 +19,9 @@ class _RecordingBackend:
         local_address=None,
         socket_options=None,
     ):
+        return self._connect_tcp(host, port)
+
+    async def _connect_tcp(self, host, port):
         self.host = host
         self.port = port
         return self.stream

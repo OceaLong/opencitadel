@@ -1,17 +1,20 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from app.domain.models.llm_model import LLMModel
 from app.domain.models.session import Session
 from app.infrastructure.external.llm.openai_llm import (
     _merge_thinking_request_kwargs,
     _resolve_request_model,
     _resolve_request_timeout,
 )
+from tests.app.infrastructure.external.llm.inference_model_factory import (
+    resolved_chat_model,
+)
 
 
 def test_resolve_request_model_reasoner_with_tools():
     extra = {}
-    assert _resolve_request_model("deepseek-reasoner", [{"type": "function"}], extra) == "deepseek-chat"
+    assert (
+        _resolve_request_model("deepseek-reasoner", [{"type": "function"}], extra)
+        == "deepseek-chat"
+    )
 
 
 def test_resolve_request_model_reasoner_without_tools():
@@ -20,22 +23,28 @@ def test_resolve_request_model_reasoner_without_tools():
 
 def test_resolve_request_model_thinking_model_without_tools():
     extra = {"thinking_model_name": "deepseek-reasoner"}
-    assert _resolve_request_model(
-        "deepseek-chat",
-        None,
-        extra,
-        thinking_enabled=True,
-    ) == "deepseek-reasoner"
+    assert (
+        _resolve_request_model(
+            "deepseek-chat",
+            None,
+            extra,
+            thinking_enabled=True,
+        )
+        == "deepseek-reasoner"
+    )
 
 
 def test_resolve_request_model_thinking_disabled_uses_base_model():
     extra = {"thinking_model_name": "deepseek-reasoner"}
-    assert _resolve_request_model(
-        "deepseek-chat",
-        None,
-        extra,
-        thinking_enabled=False,
-    ) == "deepseek-chat"
+    assert (
+        _resolve_request_model(
+            "deepseek-chat",
+            None,
+            extra,
+            thinking_enabled=False,
+        )
+        == "deepseek-chat"
+    )
 
 
 def test_resolve_request_model_custom_tool_model():
@@ -66,11 +75,11 @@ def test_session_thinking_enabled_default_false():
     assert session.thinking_enabled is False
 
 
-def test_llm_model_defaults():
-    llm = LLMModel(
+def test_resolved_inference_model_defaults():
+    llm = resolved_chat_model(
         base_url="http://localhost:11434/v1",
         model_name="llama3",
-        api_key="",
+        credential="",
     )
     assert llm.model_name == "llama3"
     assert llm.temperature == 0.7

@@ -1,0 +1,25 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-execution-kernel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: execution-kernel
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: {{ .Values.executionKernel.metricsPort }}
+  egress:
+    - ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - ports:
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 6379}
+        - {protocol: TCP, port: 8090}
+        - {protocol: TCP, port: 80}
+        - {protocol: TCP, port: 443}
+{{- end }}

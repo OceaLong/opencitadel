@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
 
 from app.domain.external.health_checker import HealthChecker
@@ -19,10 +17,9 @@ class RedisHealthChecker(HealthChecker):
         try:
             if await self._redis_client.client.ping():
                 return HealthStatus(service="redis", status="ok")
-            else:
-                return HealthStatus(service="redis", status="error", details="Redis服务Ping失败")
-        except Exception as e:
-            logger.error(f"Redis健康检查失败: {str(e)}")
+            return HealthStatus(service="redis", status="error", details="Redis服务Ping失败")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("Redis健康检查失败: %s", e)
             return HealthStatus(
                 service="redis",
                 status="error",

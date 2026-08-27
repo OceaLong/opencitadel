@@ -25,7 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import { type AdminTimeRange, formatDateTime,getAdminDateRange } from "@/lib/admin-utils";
+import { type AdminTimeRange, formatDateTime, getAdminDateRange } from "@/lib/admin-utils";
 import {
   adminApi,
   type AdminOverview,
@@ -34,13 +34,7 @@ import {
   type UsageSummary,
   type UsageTimeseriesPoint,
 } from "@/lib/api/admin";
-import {
-  IconInvitation,
-  IconLayers,
-  IconModel,
-  IconPhoneCall,
-  IconUsers,
-} from "@/lib/icons";
+import { IconInvitation, IconLayers, IconModel, IconPhoneCall, IconUsers } from "@/lib/icons";
 
 export default function AdminOverviewPage() {
   const t = useTranslations("admin");
@@ -49,9 +43,15 @@ export default function AdminOverviewPage() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [timeseries, setTimeseries] = useState<UsageTimeseriesPoint[]>([]);
-  const [modelBreakdown, setModelBreakdown] = useState<Array<{ key: string; total_tokens: number; call_count: number }>>([]);
-  const [userBreakdown, setUserBreakdown] = useState<Array<{ key: string; total_tokens: number; call_count: number }>>([]);
-  const [teamBreakdown, setTeamBreakdown] = useState<Array<{ key: string; total_tokens: number; call_count: number }>>([]);
+  const [modelBreakdown, setModelBreakdown] = useState<
+    Array<{ key: string; total_tokens: number; call_count: number }>
+  >([]);
+  const [userBreakdown, setUserBreakdown] = useState<
+    Array<{ key: string; total_tokens: number; call_count: number }>
+  >([]);
+  const [teamBreakdown, setTeamBreakdown] = useState<
+    Array<{ key: string; total_tokens: number; call_count: number }>
+  >([]);
   const [recentAudit, setRecentAudit] = useState<AuditLog[]>([]);
   const [auditByDay, setAuditByDay] = useState<Array<{ date: string; count: number }>>([]);
   const [recentInvitations, setRecentInvitations] = useState<PlatformInvitation[]>([]);
@@ -129,12 +129,42 @@ export default function AdminOverviewPage() {
       />
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <AdminStatCard label={t("statTotalUsers")} value={overview?.total_users ?? 0} hint={t("statActiveHint", { count: overview?.active_users ?? 0 })} icon={IconUsers} />
-        <AdminStatCard label={t("statTotalTeams")} value={overview?.total_teams ?? 0} hint={t("statTotalSessionsHint", { count: overview?.total_sessions ?? 0 })} icon={IconLayers} />
-        <AdminStatCard label={t("statTotalTokens")} value={usage?.total_tokens ?? 0} hint={t("statPromptHint", { count: usage?.prompt_tokens ?? 0 })} icon={IconModel} />
-        <AdminStatCard label={t("statLlmCalls")} value={usage?.call_count ?? 0} hint={t("statCachedHint", { count: usage?.cached_tokens ?? 0 })} icon={IconPhoneCall} />
-        <AdminStatCard label={t("statPendingInvites")} value={overview?.pending_invitations ?? 0} hint={t("statAcceptedHint", { count: overview?.accepted_invitations ?? 0 })} icon={IconInvitation} />
-        <AdminStatCard label={t("statTotalSessions")} value={overview?.total_sessions ?? 0} hint={t("statTotalSessionsDesc")} icon={IconLayers} />
+        <AdminStatCard
+          label={t("statTotalUsers")}
+          value={overview?.total_users ?? 0}
+          hint={t("statActiveHint", { count: overview?.active_users ?? 0 })}
+          icon={IconUsers}
+        />
+        <AdminStatCard
+          label={t("statTotalTeams")}
+          value={overview?.total_teams ?? 0}
+          hint={t("statTotalSessionsHint", { count: overview?.total_sessions ?? 0 })}
+          icon={IconLayers}
+        />
+        <AdminStatCard
+          label={t("statTotalTokens")}
+          value={usage?.total_tokens ?? 0}
+          hint={t("statPromptHint", { count: usage?.prompt_tokens ?? 0 })}
+          icon={IconModel}
+        />
+        <AdminStatCard
+          label={t("statLlmCalls")}
+          value={usage?.call_count ?? 0}
+          hint={t("statCachedHint", { count: usage?.cached_tokens ?? 0 })}
+          icon={IconPhoneCall}
+        />
+        <AdminStatCard
+          label={t("statPendingInvites")}
+          value={overview?.pending_invitations ?? 0}
+          hint={t("statAcceptedHint", { count: overview?.accepted_invitations ?? 0 })}
+          icon={IconInvitation}
+        />
+        <AdminStatCard
+          label={t("statTotalSessions")}
+          value={overview?.total_sessions ?? 0}
+          hint={t("statTotalSessionsDesc")}
+          icon={IconLayers}
+        />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -143,9 +173,21 @@ export default function AdminOverviewPage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-3">
-        <UsageBreakdownChart title={t("modelUsageTitle")} description={t("modelUsageDesc")} items={modelBreakdown} />
-        <UsageBreakdownChart title={t("userUsageTitle")} description={t("userUsageDesc")} items={userBreakdown} />
-        <UsageBreakdownChart title={t("teamUsageTitle")} description={t("teamUsageDesc")} items={teamBreakdown} />
+        <UsageBreakdownChart
+          title={t("modelUsageTitle")}
+          description={t("modelUsageDesc")}
+          items={modelBreakdown}
+        />
+        <UsageBreakdownChart
+          title={t("userUsageTitle")}
+          description={t("userUsageDesc")}
+          items={userBreakdown}
+        />
+        <UsageBreakdownChart
+          title={t("teamUsageTitle")}
+          description={t("teamUsageDesc")}
+          items={teamBreakdown}
+        />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -158,8 +200,14 @@ export default function AdminOverviewPage() {
           <CardContent className="grid gap-3 sm:grid-cols-2">
             <MetricRow label={t("metricAdminUsers")} value={overview?.admin_users ?? 0} />
             <MetricRow label={t("metricDisabledUsers")} value={overview?.disabled_users ?? 0} />
-            <MetricRow label={t("metricAcceptedInvitations")} value={overview?.accepted_invitations ?? 0} />
-            <MetricRow label={t("metricExpiredInvitations")} value={overview?.expired_invitations ?? 0} />
+            <MetricRow
+              label={t("metricAcceptedInvitations")}
+              value={overview?.accepted_invitations ?? 0}
+            />
+            <MetricRow
+              label={t("metricExpiredInvitations")}
+              value={overview?.expired_invitations ?? 0}
+            />
           </CardContent>
         </Card>
       </div>

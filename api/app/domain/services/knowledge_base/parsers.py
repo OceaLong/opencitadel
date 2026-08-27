@@ -1,11 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Document parsers for enterprise knowledge-base ingestion."""
+
 import asyncio
 import io
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +17,9 @@ class PageBlock:
 
 @dataclass
 class ParseResult:
-    blocks: List[PageBlock]
+    blocks: list[PageBlock]
     page_count: int = 0
-    warning: Optional[str] = None
+    warning: str | None = None
 
 
 def validate_pdf_integrity(data: bytes, expected_size: int | None = None) -> None:
@@ -44,15 +42,15 @@ def decode_text(data: bytes) -> str:
 
 
 async def parse_document(
-        file_bytes: bytes,
-        mime: str,
-        filename: str = "",
-        *,
-        max_bytes: int,
-        max_pages: int,
-        ocr_mode: str = "off",
-        ocr_max_pages: int = 0,
-        expected_size: int | None = None,
+    file_bytes: bytes,
+    mime: str,
+    filename: str = "",
+    *,
+    max_bytes: int,
+    max_pages: int,
+    ocr_mode: str = "off",
+    ocr_max_pages: int = 0,
+    expected_size: int | None = None,
 ) -> ParseResult:
     data = file_bytes
     warning_parts: list[str] = []
@@ -98,7 +96,7 @@ def _parse_document_sync(data: bytes, mime: str, filename: str, max_pages: int) 
 def _parse_pdf(data: bytes, max_pages: int) -> ParseResult:
     try:
         import fitz  # PyMuPDF
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         logger.warning("PyMuPDF 不可用，回退到 pypdf")
         return _parse_pdf_pypdf(data, max_pages)
 
@@ -148,14 +146,18 @@ def _parse_docx(data: bytes) -> ParseResult:
         style = (para.style.name or "").lower() if para.style else ""
         if style.startswith("heading"):
             if parts:
-                blocks.append(PageBlock(page_no=ordinal, heading_path=current_heading, text="\n".join(parts)))
+                blocks.append(
+                    PageBlock(page_no=ordinal, heading_path=current_heading, text="\n".join(parts))
+                )
                 ordinal += 1
                 parts = []
             current_heading = text
         else:
             parts.append(text)
     if parts:
-        blocks.append(PageBlock(page_no=ordinal, heading_path=current_heading, text="\n".join(parts)))
+        blocks.append(
+            PageBlock(page_no=ordinal, heading_path=current_heading, text="\n".join(parts))
+        )
     return ParseResult(blocks=blocks, page_count=max(1, len(blocks)))
 
 
@@ -181,7 +183,11 @@ def _parse_xlsx(data: bytes, max_pages: int) -> ParseResult:
     workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     blocks: list[PageBlock] = []
     sheet_names = workbook.sheetnames[:max_pages]
-    warning = f"Excel 共 {len(workbook.sheetnames)} 个工作表，仅解析前 {max_pages} 个" if len(workbook.sheetnames) > max_pages else None
+    warning = (
+        f"Excel 共 {len(workbook.sheetnames)} 个工作表，仅解析前 {max_pages} 个"
+        if len(workbook.sheetnames) > max_pages
+        else None
+    )
     for idx, sheet_name in enumerate(sheet_names, start=1):
         sheet = workbook[sheet_name]
         rows: list[str] = []
@@ -203,7 +209,9 @@ def _text_to_blocks(text: str, heading_path: str, max_pages: int) -> ParseResult
         stripped = line.strip()
         if stripped.startswith("#"):
             if parts:
-                blocks.append(PageBlock(page_no=ordinal, heading_path=current_heading, text="\n".join(parts)))
+                blocks.append(
+                    PageBlock(page_no=ordinal, heading_path=current_heading, text="\n".join(parts))
+                )
                 ordinal += 1
                 parts = []
                 if ordinal > max_pages:
@@ -213,7 +221,9 @@ def _text_to_blocks(text: str, heading_path: str, max_pages: int) -> ParseResult
         if stripped:
             parts.append(stripped)
     if parts and ordinal <= max_pages:
-        blocks.append(PageBlock(page_no=ordinal, heading_path=current_heading, text="\n".join(parts)))
+        blocks.append(
+            PageBlock(page_no=ordinal, heading_path=current_heading, text="\n".join(parts))
+        )
     if not blocks and text.strip():
         blocks.append(PageBlock(page_no=1, heading_path=heading_path, text=text.strip()))
     warning = f"文本分段超过 {max_pages} 段，已截断" if ordinal > max_pages else None

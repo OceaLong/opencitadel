@@ -77,7 +77,7 @@ export function ArtifactWorkbench({
     if (active) {
       setSelectedVersion(active.version);
     }
-  }, [active?.artifact_id, active?.version]);
+  }, [active]);
 
   useEffect(() => {
     if (!selectedId || selectedVersion == null) {
@@ -181,7 +181,7 @@ export function ArtifactWorkbench({
             </SelectTrigger>
             <SelectContent>
               {versionOptions.map((version) => (
-                <SelectItem key={version} value={String(version)}>
+                <SelectItem key={version} value={String(version)} translate="no">
                   v{version}
                 </SelectItem>
               ))}

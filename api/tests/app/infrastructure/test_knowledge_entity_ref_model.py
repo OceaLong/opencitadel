@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from app.infrastructure.models.knowledge_base import KnowledgeEntityRefModel
 
 

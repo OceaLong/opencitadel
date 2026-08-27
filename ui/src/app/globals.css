@@ -61,8 +61,8 @@
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
   --color-link: var(--link);
-  --color-gate: var(--gate);
-  --color-gate-foreground: var(--gate-foreground);
+  --color-approval: var(--approval);
+  --color-approval-foreground: var(--approval-foreground);
   --color-terminal: var(--terminal);
   --color-terminal-foreground: var(--terminal-foreground);
   --color-terminal-muted: var(--terminal-muted);
@@ -111,15 +111,15 @@
   --sidebar-accent-foreground: oklch(0.25 0.02 260);
   --sidebar-border: oklch(0.895 0.008 250);
   --sidebar-ring: oklch(0.5 0.15 262);
-  --success: oklch(0.50 0.11 155);
+  --success: oklch(0.5 0.11 155);
   --success-foreground: oklch(0.985 0 0);
   --warning: oklch(0.56 0.12 80);
   --warning-foreground: oklch(0.3 0.06 80);
   --info: oklch(0.51 0.1 255);
   --info-foreground: oklch(0.985 0 0);
   --link: oklch(0.5 0.15 262);
-  --gate: var(--warning);
-  --gate-foreground: var(--warning-foreground);
+  --approval: var(--warning);
+  --approval-foreground: var(--warning-foreground);
   --terminal: oklch(0.235 0.014 262);
   --terminal-foreground: oklch(0.9 0.005 250);
   --terminal-muted: oklch(0.28 0.014 262);
@@ -214,12 +214,12 @@
     line-height: 1.45;
   }
 
-  .bg-gate-subtle {
-    background-color: color-mix(in oklch, var(--gate) 12%, transparent);
+  .bg-approval-subtle {
+    background-color: color-mix(in oklch, var(--approval) 12%, transparent);
   }
 
-  .border-gate-subtle {
-    border-color: color-mix(in oklch, var(--gate) 35%, transparent);
+  .border-approval-subtle {
+    border-color: color-mix(in oklch, var(--approval) 35%, transparent);
   }
 
   .bg-warning-subtle {
@@ -238,8 +238,8 @@
     border-color: color-mix(in oklch, var(--info) 35%, transparent);
   }
 
-  .border-l-accent-gate {
-    border-left-color: var(--gate);
+  .border-l-accent-approval {
+    border-left-color: var(--approval);
   }
 
   .border-l-accent-info {
@@ -270,21 +270,21 @@
     padding-bottom: calc(var(--mobile-bottom-nav-height) + var(--safe-area-bottom));
   }
 
-  @keyframes gate-pulse {
+  @keyframes approval-pulse {
     from {
-      box-shadow: 0 0 0 0 color-mix(in oklch, var(--gate) 45%, transparent);
+      box-shadow: 0 0 0 0 color-mix(in oklch, var(--approval) 45%, transparent);
     }
     to {
       box-shadow: 0 0 0 8px transparent;
     }
   }
 
-  .animate-gate-pulse {
-    animation: gate-pulse 600ms ease-out 1;
+  .animate-approval-pulse {
+    animation: approval-pulse 600ms ease-out 1;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .animate-gate-pulse {
+    .animate-approval-pulse {
       animation: none;
     }
   }

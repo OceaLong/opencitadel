@@ -1,13 +1,12 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Production-service boundary proofs for atomic session resource pinning."""
+
 from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import count
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -27,8 +26,8 @@ from app.domain.models.knowledge_version import (
     KnowledgeBaseVersion,
     KnowledgeVersionState,
 )
-from app.domain.models.resource_governance import (
-    BuildState,
+from app.domain.models.resource_bindings import (
+    PublicationState,
     PublishedResourceVersion,
     ResourceKind,
     SessionResourceBinding,
@@ -54,7 +53,7 @@ class _Provider:
             resource_kind=self.kind,
             resource_id=resource_id,
             version_id=requested_version_id or f"{resource_id}-v1",
-            state=BuildState.SUCCEEDED,
+            state=PublicationState.READY,
             published=True,
         )
 
@@ -67,37 +66,39 @@ class _Store:
     fail_binding_kind: ResourceKind | None = None
     fail_write_commit: bool = False
     uow_ids: count = field(default_factory=lambda: count(1))
-    knowledge_bases: dict[str, KnowledgeBase] = field(default_factory=lambda: {
-        "kb1": KnowledgeBase(
-            id="kb1",
-            name="KB",
-            status=KBStatus.READY,
-            active_version_id="kb1-v1",
-            ready_doc_count=1,
-            owner_user_id="owner",
-        ),
-    })
-    codebases: dict[str, Codebase] = field(default_factory=lambda: {
-        "cb1": Codebase(
-            id="cb1",
-            name="Code",
-            source_type=CodebaseSourceType.FILES,
-            status=CodebaseStatus.READY,
-            owner_user_id="owner",
-        ),
-    })
+    knowledge_bases: dict[str, KnowledgeBase] = field(
+        default_factory=lambda: {
+            "kb1": KnowledgeBase(
+                id="kb1",
+                name="KB",
+                status=KBStatus.READY,
+                active_version_id="kb1-v1",
+                ready_doc_count=1,
+                owner_user_id="owner",
+            ),
+        }
+    )
+    codebases: dict[str, Codebase] = field(
+        default_factory=lambda: {
+            "cb1": Codebase(
+                id="cb1",
+                name="Code",
+                source_type=CodebaseSourceType.FILES,
+                status=CodebaseStatus.READY,
+                owner_user_id="owner",
+            ),
+        }
+    )
 
 
 class _SessionRepository:
-    def __init__(self, uow: "_AtomicUow") -> None:
+    def __init__(self, uow: _AtomicUow) -> None:
         self._uow = uow
 
     async def save(self, session: Session) -> None:
         self._uow.sessions[session.id] = session
         self._uow.dirty = True
-        self._uow.store.operations.append(
-            (self._uow.id, "session", session.id)
-        )
+        self._uow.store.operations.append((self._uow.id, "session", session.id))
 
     async def get_metadata(self, session_id: str, scope=None):
         session = self._uow.sessions.get(session_id)
@@ -111,8 +112,8 @@ class _SessionRepository:
         return await self.get_metadata(session_id, scope=scope)
 
 
-class _ResourceGovernanceRepository:
-    def __init__(self, uow: "_AtomicUow") -> None:
+class _SessionResourceBindingRepository:
+    def __init__(self, uow: _AtomicUow) -> None:
         self._uow = uow
 
     async def get_current_binding(
@@ -149,7 +150,7 @@ class _ResourceGovernanceRepository:
 
 
 class _KnowledgeBaseRepository:
-    def __init__(self, uow: "_AtomicUow") -> None:
+    def __init__(self, uow: _AtomicUow) -> None:
         self._uow = uow
 
     async def get_kb(self, kb_id: str, scope=None):
@@ -164,7 +165,7 @@ class _KnowledgeBaseRepository:
         return await self.get_kb(kb_id, scope=scope)
 
     async def count_ready_documents(self, kb_ids: list[str]):
-        return {kb_id: 1 for kb_id in kb_ids}
+        return dict.fromkeys(kb_ids, 1)
 
 
 class _KnowledgeVersionRepository:
@@ -174,21 +175,18 @@ class _KnowledgeVersionRepository:
         *,
         knowledge_base_id: str,
     ):
-        if (
-            knowledge_base_id == "kb1"
-            and version_id == "kb1-v1"
-        ):
+        if knowledge_base_id == "kb1" and version_id == "kb1-v1":
             return KnowledgeBaseVersion(
                 id=version_id,
                 knowledge_base_id=knowledge_base_id,
                 state=KnowledgeVersionState.READY,
-                published_at=datetime.now(timezone.utc),
+                published_at=datetime.now(UTC),
             )
         return None
 
 
 class _CodebaseRepository:
-    def __init__(self, uow: "_AtomicUow") -> None:
+    def __init__(self, uow: _AtomicUow) -> None:
         self._uow = uow
 
     async def get_by_id(self, codebase_id: str, scope=None):
@@ -203,7 +201,6 @@ class _CodebaseRepository:
 class _OptionalRepository:
     async def get_by_id(self, _item_id: str, scope=None):
         del scope
-        return None
 
 
 class _AtomicUow:
@@ -218,31 +215,35 @@ class _AtomicUow:
         self.sessions = deepcopy(self.store.sessions)
         self.bindings = deepcopy(self.store.bindings)
         self.session = _SessionRepository(self)
-        self.resource_governance = _ResourceGovernanceRepository(self)
+        self.resource_bindings = _SessionResourceBindingRepository(self)
         self.knowledge_base = _KnowledgeBaseRepository(self)
         self.knowledge_version = _KnowledgeVersionRepository()
         self.codebase = _CodebaseRepository(self)
-        self.llm_model = _OptionalRepository()
+        self.inference_model = _OptionalRepository()
         self.skill = _OptionalRepository()
         return self
 
-    async def __aexit__(self, exc_type, _exc, _tb):
-        if exc_type is not None:
-            return False
+    async def commit(self):
         if self.dirty and self.store.fail_write_commit:
             raise RuntimeError("injected commit failure")
         if self.dirty:
             self.store.sessions = self.sessions
             self.store.bindings = self.bindings
+
+    async def __aexit__(self, exc_type, _exc, _tb):
         return False
 
 
 def _services(store: _Store):
-    factory = lambda: _AtomicUow(store)
-    providers = ResourceVersionProviderRegistry([
-        _Provider(ResourceKind.CODEBASE),
-        _Provider(ResourceKind.KNOWLEDGE_BASE),
-    ])
+    def factory():
+        return _AtomicUow(store)
+
+    providers = ResourceVersionProviderRegistry(
+        [
+            _Provider(ResourceKind.CODEBASE),
+            _Provider(ResourceKind.KNOWLEDGE_BASE),
+        ]
+    )
     guard = ResourceGuardService(providers=providers)
     binding = ResourceBindingService(
         uow_factory=factory,
@@ -251,20 +252,29 @@ def _services(store: _Store):
     return {
         "generic": SessionService(
             uow_factory=factory,
-            sandbox_cls=MagicMock(),
+            sandbox_factory=MagicMock(),
+            run_projection=AsyncMock(),
+            session_list_publisher=AsyncMock(),
             resource_guard=guard,
             resource_binding_service=binding,
         ),
         "knowledge_base": KnowledgeBaseService(
             uow_factory=factory,
             file_storage=MagicMock(),
+            run_admission_service=AsyncMock(),
+            run_control_service=AsyncMock(),
+            run_projection=AsyncMock(),
+            web_documents=AsyncMock(),
             resource_guard=guard,
             resource_binding_service=binding,
         ),
         "codebase": CodebaseService(
             uow_factory=factory,
-            sandbox_cls=MagicMock(),
+            sandbox_factory=MagicMock(),
             file_storage=MagicMock(),
+            run_admission_service=AsyncMock(),
+            run_control_service=AsyncMock(),
+            run_projection=AsyncMock(),
             resource_guard=guard,
             resource_binding_service=binding,
         ),
@@ -311,10 +321,7 @@ async def test_successful_creation_commits_session_and_all_pins_in_one_uow(
 
     session = await _create(factory, store)
 
-    committed = [
-        binding for binding in store.bindings
-        if binding.session_id == session.id
-    ]
+    committed = [binding for binding in store.bindings if binding.session_id == session.id]
     assert session.id in store.sessions
     assert {binding.resource_kind for binding in committed} == expected_kinds
     operation_uows = {

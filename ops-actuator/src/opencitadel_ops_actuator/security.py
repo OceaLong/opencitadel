@@ -5,6 +5,7 @@ adapted to return the registered WorkloadTarget (kind + replica bounds)
 instead of only validating membership, since write actions must know the
 registered kind/bounds to enforce KIND_MISMATCH and REPLICAS_OUT_OF_BOUNDS.
 """
+
 from __future__ import annotations
 
 from .config import ActuatorSettings, WorkloadTarget
@@ -19,7 +20,9 @@ def require_namespace(settings: ActuatorSettings, namespace: str) -> None:
         raise TargetDenied("NAMESPACE_DENIED")
 
 
-def require_workload(settings: ActuatorSettings, namespace: str, workload_id: str) -> WorkloadTarget:
+def require_workload(
+    settings: ActuatorSettings, namespace: str, workload_id: str
+) -> WorkloadTarget:
     require_namespace(settings, namespace)
     configured = settings.allowed_workloads.get(namespace, {})
     target = configured.get(workload_id)

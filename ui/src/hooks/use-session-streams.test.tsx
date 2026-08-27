@@ -30,11 +30,9 @@ type VolatileCallbacks = {
   applySessionPatch: () => void;
   setError: () => void;
   onReconnect: () => Promise<void>;
-  onDebugModeChange: (enabled: boolean) => void;
 };
 
 const lastEventIdRef = { current: "10" as string | null };
-const lastPersistedSeqRef = { current: 10 as number | null };
 
 function makeCallbacks(): VolatileCallbacks {
   return {
@@ -43,7 +41,6 @@ function makeCallbacks(): VolatileCallbacks {
     applySessionPatch: () => undefined,
     setError: () => undefined,
     onReconnect: async () => undefined,
-    onDebugModeChange: () => undefined,
   };
 }
 
@@ -56,10 +53,8 @@ function Harness({ callbacks }: { callbacks: VolatileCallbacks }) {
     applySessionPatch: callbacks.applySessionPatch,
     setError: callbacks.setError,
     lastEventIdRef,
-    lastPersistedSeqRef,
     initialEventsLoaded: true,
     onReconnect: callbacks.onReconnect,
-    onDebugModeChange: callbacks.onDebugModeChange,
   });
   return null;
 }

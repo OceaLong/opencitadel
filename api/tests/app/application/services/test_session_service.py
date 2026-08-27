@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
@@ -11,10 +9,16 @@ async def _create_kb_agent_session():
     uow = MagicMock()
     uow.__aenter__ = AsyncMock(return_value=uow)
     uow.__aexit__ = AsyncMock(return_value=None)
+    uow.commit = AsyncMock()
     uow.session.save = AsyncMock()
     uow.knowledge_base.get_kb = AsyncMock(return_value=MagicMock())
 
-    service = SessionService(uow_factory=lambda: uow, sandbox_cls=MagicMock())
+    service = SessionService(
+        uow_factory=lambda: uow,
+        sandbox_factory=MagicMock(),
+        run_projection=AsyncMock(),
+        session_list_publisher=AsyncMock(),
+    )
     session = await service.create_session(
         knowledge_base_id="kb-1",
         mode=SessionMode.AGENT,

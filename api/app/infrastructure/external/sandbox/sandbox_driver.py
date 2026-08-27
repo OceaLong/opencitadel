@@ -1,23 +1,16 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""Sandbox driver resolution (docker vs kubernetes)."""
+"""Explicit Sandbox driver resolution without runtime globals."""
+
 from __future__ import annotations
 
-from typing import Type
-
 from app.domain.external.sandbox import Sandbox
-from app.infrastructure.external.runtime_settings import SandboxRuntimeSettings
 from app.infrastructure.external.sandbox.driver_resolve import resolve_sandbox_driver
+from app.infrastructure.external.sandbox.settings import SandboxDeployment
 
-__all__ = ["resolve_sandbox_driver", "get_sandbox_class"]
+__all__ = ["get_sandbox_class", "resolve_sandbox_driver"]
 
 
-def get_sandbox_class(settings: SandboxRuntimeSettings | None = None) -> Type[Sandbox]:
-    from app.infrastructure.external.runtime_settings import get_sandbox_runtime_settings
-
-    settings = settings or get_sandbox_runtime_settings()
-    driver = resolve_sandbox_driver(settings.driver)
-    if driver == "kubernetes":
+def get_sandbox_class(deployment: SandboxDeployment) -> type[Sandbox]:
+    if deployment.driver == "kubernetes":
         from app.infrastructure.external.sandbox.kubernetes_sandbox import KubernetesSandbox
 
         return KubernetesSandbox

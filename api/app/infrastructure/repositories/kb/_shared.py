@@ -1,20 +1,13 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""Shared module-level helpers for the KB repository mixins.
+"""Shared helpers for knowledge repository mixins."""
 
-Pure re-homed utilities split out of db_knowledge_base_repository.py
-(Phase C task 5, KB repository mixin split).
-"""
 import base64
 import binascii
 import json
 import unicodedata
-from typing import List, Optional
 
 from sqlalchemy import text
 
 from app.domain.models.knowledge_base import KnowledgeChunk
-
 
 _CHUNK_INSERT_BATCH_SIZE = 500
 
@@ -29,7 +22,7 @@ def _encode_document_cursor(
     version_id: str,
     doc_id: str,
     document_revision_id: str,
-    page_no: Optional[int],
+    page_no: int | None,
     chunk: KnowledgeChunk,
 ) -> str:
     payload = {
@@ -55,8 +48,8 @@ def _decode_document_cursor(
     version_id: str,
     doc_id: str,
     document_revision_id: str,
-    page_no: Optional[int],
-) -> tuple[Optional[int], int, str]:
+    page_no: int | None,
+) -> tuple[int | None, int, str]:
     try:
         if not isinstance(cursor, str) or not cursor or len(cursor) > 4096:
             raise ValueError
@@ -76,7 +69,7 @@ def _decode_document_cursor(
     ) as exc:
         raise ValueError("invalid document cursor") from exc
     if not isinstance(payload, dict):
-        raise ValueError("invalid document cursor")
+        raise TypeError("invalid document cursor")
     if (
         payload.get("kb") != kb_id
         or payload.get("version") != version_id
@@ -90,13 +83,7 @@ def _decode_document_cursor(
         raise ValueError("invalid document cursor key")
     key_page, key_ordinal, key_id = key
     if (
-        (
-            key_page is not None
-            and (
-                not _is_cursor_int(key_page)
-                or key_page < 1
-            )
-        )
+        (key_page is not None and (not _is_cursor_int(key_page) or key_page < 1))
         or not _is_cursor_int(key_ordinal)
         or key_ordinal < 0
         or not isinstance(key_id, str)
@@ -104,9 +91,7 @@ def _decode_document_cursor(
     ):
         raise ValueError("invalid document cursor key")
     if page_no is not None and key_page != page_no:
-        raise ValueError(
-            "document cursor key does not match requested page filter"
-        )
+        raise ValueError("document cursor key does not match requested page filter")
     return key_page, key_ordinal, key_id
 
 
@@ -118,7 +103,7 @@ SELECT c.id, c.kb_id, c.doc_id, c.version_id,
        d.page_count, d.status, d.error, d.warning,
        d.created_at, d.updated_at,
        manifest.document_revision_id,
-       1 - (c.embedding <=> :query::vector) AS score
+       1 - (c.embedding <=> CAST(:query AS vector)) AS score
 FROM knowledge_chunks c
 JOIN knowledge_base_versions version
   ON version.id = c.version_id
@@ -141,9 +126,7 @@ WHERE c.kb_id = :kb_id
   AND c.version_id = :version_id
   AND c.level = 'child'
   AND c.embedding IS NOT NULL
-ORDER BY c.embedding <=> :query::vector,
-         c.ordinal ASC,
-         c.id ASC
+ORDER BY c.embedding <=> CAST(:query AS vector)
 LIMIT :limit
 """.strip()
 
@@ -153,15 +136,11 @@ def build_versioned_vector_search_statement(
     explain: bool = False,
 ):
     """Single production-owned SQL shape used by retrieval and ANN gate."""
-    prefix = (
-        "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)\n"
-        if explain
-        else ""
-    )
+    prefix = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)\n" if explain else ""
     return text(prefix + _VERSIONED_VECTOR_SEARCH_SQL)
 
 
-def _parse_vector_text(value: object) -> List[float]:
+def _parse_vector_text(value: object) -> list[float]:
     if value is None:
         return []
     raw = str(value).strip()

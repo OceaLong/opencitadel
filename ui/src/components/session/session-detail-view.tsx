@@ -2,17 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Layers,Loader2, Settings2 } from "lucide-react";
+import { Layers, Loader2, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
+import { ApprovalActionsBar } from "@/components/session/approval-actions-bar";
 import { ChatInput } from "@/components/session/chat-input";
-import { CheckpointRestoreDialog } from "@/components/session/checkpoint-restore-dialog";
 import { FilePreviewPanel } from "@/components/session/file-preview-panel";
-import { GateActionsBar } from "@/components/session/gate-actions-bar";
-import { type GateProfile,OperatorScopeDialog } from "@/components/session/operator-scope-dialog";
-import { PlanApprovalBar } from "@/components/session/plan-approval-bar";
-import { PlanPanel } from "@/components/session/plan-panel";
+import { OperatorScopeDialog } from "@/components/session/operator-scope-dialog";
 import { SessionHeader } from "@/components/session/session-header";
 import { SessionModeToggle } from "@/components/session/session-mode-toggle";
 import { ThinkingToggle } from "@/components/session/thinking-toggle";
@@ -53,9 +50,9 @@ export function SessionDetailView({
   const tCommon = useTranslations("common");
   const { isMobile, isReady } = useIsMobile();
   const [mode, setMode] = useState<SessionMode>("ask");
-  const [gateSettingsOpen, setGateSettingsOpen] = useState(false);
+  const [operatorScopeOpen, setOperatorScopeOpen] = useState(false);
   const [contextSheetOpen, setContextSheetOpen] = useState(false);
-  const [savingGateSettings, setSavingGateSettings] = useState(false);
+  const [savingOperatorScope, setSavingOperatorScope] = useState(false);
   const { codeSourceRef, kbSourceRef, handleTimelineSourceClick } = useSessionContextRefs();
   const {
     session,
@@ -75,7 +72,6 @@ export function SessionDetailView({
     setActiveSkill,
     configEditable,
     timeline,
-    planSteps,
     sessionArtifacts,
     latestApproval,
     observationSummary,
@@ -88,28 +84,18 @@ export function SessionDetailView({
     chatInputRef,
     scrollContainerRef,
     handleSend,
-    handleGateSend,
+    handleApprovalSend,
     handleThinkingChange,
     handleModelChange,
     handleSkillChange,
     handleViewAllFiles,
     handleFileClick,
     handleToolClick,
-    handleClarifyAnswer,
     handleClosePreview,
     handleJumpToLatest,
     handleOpenVNC,
     handleCloseVNC,
     handleStop,
-    includeDebug,
-    handleDebugOpen,
-    resolveCheckpoint,
-    handleRestoreCheckpoint,
-    restoringCheckpoint,
-    checkpointDialogOpen,
-    setCheckpointDialogOpen,
-    pendingCheckpoint,
-    confirmRestoreCheckpoint,
   } = useSessionDetailView({
     sessionId,
     initialMessage,
@@ -135,22 +121,18 @@ export function SessionDetailView({
   const hasContext = Boolean(codebaseId || knowledgeBaseId);
   const showModeToggle = Boolean(codebaseId);
 
-  const handleGateSettingsSave = async (config: {
-    operatorDomains: string[];
-    gateProfile: GateProfile;
-  }) => {
-    setSavingGateSettings(true);
+  const handleOperatorScopeSave = async (config: { operatorDomains: string[] }) => {
+    setSavingOperatorScope(true);
     try {
       await sessionApi.updateSessionConfig(sessionId, {
-        gate_profile: config.gateProfile,
         operator_domains: config.operatorDomains,
       });
-      toast.success(t("operator.gateSettingsSaved"));
+      toast.success(t("operator.domainSettingsSaved"));
       await refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : tCommon("retry"));
     } finally {
-      setSavingGateSettings(false);
+      setSavingOperatorScope(false);
     }
   };
 
@@ -159,9 +141,7 @@ export function SessionDetailView({
 
   const previewPanel = (
     <>
-      {previewFile && (
-        <FilePreviewPanel file={previewFile} onClose={handleClosePreview} />
-      )}
+      {previewFile && <FilePreviewPanel file={previewFile} onClose={handleClosePreview} />}
       {resolvedPreviewTool || sessionArtifacts.length > 0 ? (
         <ToolPreviewPanel
           sessionId={sessionId}
@@ -169,7 +149,11 @@ export function SessionDetailView({
           artifacts={sessionArtifacts}
           onClose={handleClosePreview}
           onJumpToLatest={handleJumpToLatest}
-          onOpenVNC={resolvedPreviewTool && getToolKind(resolvedPreviewTool) === "browser" ? handleOpenVNC : undefined}
+          onOpenVNC={
+            resolvedPreviewTool && getToolKind(resolvedPreviewTool) === "browser"
+              ? handleOpenVNC
+              : undefined
+          }
         />
       ) : null}
     </>
@@ -230,12 +214,9 @@ export function SessionDetailView({
                 onFetchFiles={refreshFiles}
                 onFileClick={handleFileClick}
                 sessionId={sessionId}
-                memoryEditable={configEditable}
                 tokenUsage={session.token_usage}
                 events={events}
-                includeDebug={includeDebug}
                 observationSummary={observationSummary}
-                onDebugOpen={handleDebugOpen}
                 leadingActions={
                   hasContext && showMobilePanels ? (
                     <Button
@@ -267,11 +248,7 @@ export function SessionDetailView({
                               : session.operator_scope === "owned"
                                 ? t("operator.owned")
                                 : t("operator.webOperator")}
-                            {session.gate_profile
-                              ? ` · ${t("operator.gateProfileLabel", { profile: session.gate_profile })}`
-                              : ""}
                             {session.status === "waiting" && ` · ${t("operator.waitingApproval")}`}
-                            {Boolean(session.awaiting_human) && ` · ${t("operator.awaitingHuman")}`}
                           </p>
                           {session.operator_domains && session.operator_domains.length > 0 && (
                             <p>
@@ -286,11 +263,11 @@ export function SessionDetailView({
                           size="sm"
                           variant="outline"
                           className="h-7 shrink-0 text-xs"
-                          disabled={savingGateSettings}
-                          onClick={() => setGateSettingsOpen(true)}
+                          disabled={savingOperatorScope}
+                          onClick={() => setOperatorScopeOpen(true)}
                         >
                           <Settings2 className="size-3.5" />
-                          {t("operator.editGateSettings")}
+                          {t("operator.editDomains")}
                         </Button>
                       </div>
                     </AlertDescription>
@@ -348,14 +325,9 @@ export function SessionDetailView({
                 <VirtualizedTimeline
                   timeline={timeline}
                   scrollContainerRef={scrollContainerRef}
-                  sessionStatus={session.status}
                   onViewAllFiles={handleViewAllFiles}
                   onFileClick={handleFileClick}
                   onToolClick={handleToolClick}
-                  onClarifyAnswer={handleClarifyAnswer}
-                  resolveCheckpoint={resolveCheckpoint}
-                  onRestoreCheckpoint={handleRestoreCheckpoint}
-                  restoringCheckpoint={restoringCheckpoint}
                   streaming={streaming}
                   onSourceClick={hasContext ? handleTimelineSourceClick : undefined}
                 />
@@ -368,7 +340,7 @@ export function SessionDetailView({
                   </div>
                 )}
 
-                <div className="min-h-[140px] pb-mobile-nav md:min-h-[140px] md:pb-0" />
+                <div className="pb-mobile-nav min-h-[140px] md:min-h-[140px] md:pb-0" />
               </div>
             </div>
 
@@ -379,7 +351,7 @@ export function SessionDetailView({
                     <button
                       key={ex}
                       type="button"
-                      className="border-border/60 bg-card text-muted-foreground hover:bg-muted/70 hover:text-foreground rounded-full border px-2.5 py-1 text-xs shadow-card transition-colors"
+                      className="border-border/60 bg-card text-muted-foreground hover:bg-muted/70 hover:text-foreground shadow-card rounded-full border px-2.5 py-1 text-xs transition-colors"
                       onClick={() => chatInputRef.current?.setInputText(ex)}
                     >
                       {ex}
@@ -387,27 +359,13 @@ export function SessionDetailView({
                   ))}
                 </div>
               )}
-              <PlanPanel className="mb-2" steps={planSteps} />
-              {latestApproval?.kind === "plan" && (
-                <PlanApprovalBar
-                  key={latestApproval.approval_id}
-                  className="mb-2"
-                  sessionId={sessionId}
-                  approval={latestApproval}
-                  onSend={handleGateSend}
-                  disabled={streaming}
-                />
-              )}
-              {latestApproval && (latestApproval.kind === "tool" || latestApproval.kind === "takeover") && (
-                <GateActionsBar
+              {latestApproval && (
+                <ApprovalActionsBar
                   key={latestApproval.approval_id}
                   className="mb-2"
                   approval={latestApproval}
-                  onSend={handleGateSend}
+                  onSend={handleApprovalSend}
                   disabled={streaming}
-                  operatorScope={
-                    typeof session?.operator_scope === "string" ? session.operator_scope : null
-                  }
                 />
               )}
               <ChatInput
@@ -418,9 +376,7 @@ export function SessionDetailView({
                 onStop={handleStop}
                 toolbarRight={
                   <>
-                    {showModeToggle && (
-                      <SessionModeToggle mode={mode} onChange={setMode} />
-                    )}
+                    {showModeToggle && <SessionModeToggle mode={mode} onChange={setMode} />}
                     <ThinkingToggle
                       enabled={session?.thinking_enabled ?? false}
                       onChange={handleThinkingChange}
@@ -466,7 +422,10 @@ export function SessionDetailView({
 
       {showMobilePanels && (
         <Sheet open={hasPreview} onOpenChange={(open) => !open && handleClosePreview()}>
-          <SheetContent side="right" className="w-full max-w-full overflow-hidden p-2 sm:max-w-[600px]">
+          <SheetContent
+            side="right"
+            className="w-full max-w-full overflow-hidden p-2 sm:max-w-[600px]"
+          >
             {previewPanel}
           </SheetContent>
         </Sheet>
@@ -490,25 +449,15 @@ export function SessionDetailView({
 
       {vncOpen && <VNCOverlay sessionId={sessionId} onClose={handleCloseVNC} />}
 
-      <CheckpointRestoreDialog
-        checkpoint={pendingCheckpoint}
-        open={checkpointDialogOpen}
-        restoring={restoringCheckpoint}
-        onOpenChange={setCheckpointDialogOpen}
-        onConfirm={confirmRestoreCheckpoint}
-      />
-
       <OperatorScopeDialog
-        open={gateSettingsOpen}
-        onOpenChange={setGateSettingsOpen}
+        open={operatorScopeOpen}
+        onOpenChange={setOperatorScopeOpen}
         mode="edit"
         initialConfig={{
-          scope:
-            session?.operator_scope === "third_party_saas" ? "third_party_saas" : "owned",
+          scope: session?.operator_scope === "third_party_saas" ? "third_party_saas" : "owned",
           operatorDomains: session?.operator_domains ?? [],
-          gateProfile: (session?.gate_profile as GateProfile | undefined) ?? "standard",
         }}
-        onConfirm={(config) => void handleGateSettingsSave(config)}
+        onConfirm={(config) => void handleOperatorScopeSave(config)}
       />
     </>
   );

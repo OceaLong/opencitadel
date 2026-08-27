@@ -1,16 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""KBIndexMixin: chunk/index write path, candidate metrics, and
-document count/purge/pagination for DBKnowledgeBaseRepository.
+"""Chunk/index writes, candidate metrics, counts, purge, and pagination."""
 
-Pure re-homed methods split out of db_knowledge_base_repository.py
-(Phase C task 5, KB repository mixin split).
-"""
-from datetime import datetime
-import uuid
-from typing import Dict, List, Tuple
+from datetime import UTC, datetime
 
-from sqlalchemy import and_, delete, func, or_, select, text, update
+from sqlalchemy import delete, func, select, text, update
 
 from app.domain.models.knowledge_base import (
     ChunkLevel,
@@ -18,6 +10,7 @@ from app.domain.models.knowledge_base import (
     KnowledgeChunk,
     KnowledgeDocument,
 )
+from app.domain.models.knowledge_version import KnowledgeVersionState
 from app.infrastructure.models.knowledge_base import (
     KnowledgeBaseModel,
     KnowledgeChunkModel,
@@ -30,12 +23,9 @@ from app.infrastructure.models.knowledge_version import (
     KnowledgeBaseVersionORM,
     KnowledgeVersionDocumentORM,
 )
-from app.domain.models.knowledge_version import KnowledgeVersionState
 from app.infrastructure.repositories.kb._shared import (
     _CHUNK_INSERT_BATCH_SIZE,
-    _parse_vector_text,
 )
-
 
 _CHUNK_INSERT_WITH_EMBEDDING_SQL = text(
     """
@@ -48,7 +38,7 @@ _CHUNK_INSERT_WITH_EMBEDDING_SQL = text(
            CAST(:content_tsv AS tsvector),
            to_tsvector('simple', :segmented_content)
          ),
-         :page_no, :heading_path, :ordinal, :embedding::vector)
+         :page_no, :heading_path, :ordinal, CAST(:embedding AS vector))
     """
 )
 
@@ -78,35 +68,38 @@ class KBIndexMixin:
             delete(KnowledgeRelationModel).where(KnowledgeRelationModel.kb_id == kb_id)
         )
         await self.db_session.execute(
+            delete(KnowledgeEntityRefModel).where(KnowledgeEntityRefModel.kb_id == kb_id)
+        )
+        await self.db_session.execute(
             delete(KnowledgeEntityModel).where(KnowledgeEntityModel.kb_id == kb_id)
         )
         await self.db_session.execute(
             delete(KnowledgeChunkModel).where(KnowledgeChunkModel.kb_id == kb_id)
         )
 
-    async def replace_index_chunks(self, kb_id: str, chunks: List[KnowledgeChunk]) -> None:
+    async def replace_index_chunks(self, kb_id: str, chunks: list[KnowledgeChunk]) -> None:
         await self.clear_index_data(kb_id)
         await self.save_chunks(chunks)
 
-    async def save_chunks(self, chunks: List[KnowledgeChunk]) -> None:
+    async def save_chunks(self, chunks: list[KnowledgeChunk]) -> None:
         embedded = [c for c in chunks if c.embedding]
         plain = [c for c in chunks if not c.embedding]
-        for batch_source, sql in ((embedded, _CHUNK_INSERT_WITH_EMBEDDING_SQL), (plain, _CHUNK_INSERT_PLAIN_SQL)):
+        for batch_source, sql in (
+            (embedded, _CHUNK_INSERT_WITH_EMBEDDING_SQL),
+            (plain, _CHUNK_INSERT_PLAIN_SQL),
+        ):
             for start in range(0, len(batch_source), _CHUNK_INSERT_BATCH_SIZE):
-                batch = batch_source[start:start + _CHUNK_INSERT_BATCH_SIZE]
+                batch = batch_source[start : start + _CHUNK_INSERT_BATCH_SIZE]
                 await self.db_session.execute(sql, [self._chunk_params(chunk) for chunk in batch])
 
     async def replace_candidate_chunks(
-            self,
-            kb_id: str,
-            version_id: str,
-            chunks: List[KnowledgeChunk],
+        self,
+        kb_id: str,
+        version_id: str,
+        chunks: list[KnowledgeChunk],
     ) -> None:
         await self._require_building_candidate(kb_id, version_id)
-        if any(
-            chunk.kb_id != kb_id or chunk.version_id != version_id
-            for chunk in chunks
-        ):
+        if any(chunk.kb_id != kb_id or chunk.version_id != version_id for chunk in chunks):
             raise ValueError("candidate chunks must carry exact version ownership")
         await self._delete_candidate_graph(version_id)
         await self.db_session.execute(
@@ -117,166 +110,11 @@ class KBIndexMixin:
         )
         await self.save_chunks(chunks)
 
-    async def clone_version_chunks(
-            self,
-            kb_id: str,
-            source_version_id: str,
-            target_version_id: str,
-            document_ids: List[str],
-    ) -> List[KnowledgeChunk]:
-        """Read active source rows and deterministically remap them to target."""
-        if not document_ids:
-            return []
-        if len(document_ids) != len(set(document_ids)):
-            raise ValueError("legacy clone document ids must be unique")
-        await self._require_building_candidate(kb_id, target_version_id)
-        ownership = await self.db_session.execute(
-            text(
-                """
-                SELECT count(*)
-                FROM knowledge_bases kb
-                JOIN knowledge_base_versions target
-                  ON target.id = :target_version_id
-                 AND target.knowledge_base_id = kb.id
-                JOIN knowledge_base_versions source
-                  ON source.id = :source_version_id
-                 AND source.knowledge_base_id = kb.id
-                WHERE kb.id = :kb_id
-                  AND kb.active_version_id = source.id
-                  AND target.parent_version_id = source.id
-                  AND target.state = 'building'
-                  AND target.published_at IS NULL
-                  AND source.published_at IS NOT NULL
-                  AND source.state IN ('ready', 'degraded')
-                """
-            ),
-            {
-                "kb_id": kb_id,
-                "source_version_id": source_version_id,
-                "target_version_id": target_version_id,
-            },
-        )
-        if int(ownership.scalar_one()) != 1:
-            raise ValueError(
-                "legacy clone requires the exact active published parent"
-            )
-        manifest_result = await self.db_session.execute(
-            text(
-                """
-                SELECT count(*)
-                FROM knowledge_base_version_documents target_manifest
-                JOIN knowledge_base_version_documents source_manifest
-                  ON source_manifest.version_id = :source_version_id
-                 AND source_manifest.knowledge_base_id =
-                     target_manifest.knowledge_base_id
-                 AND source_manifest.document_id =
-                     target_manifest.document_id
-                 AND source_manifest.document_revision_id =
-                     target_manifest.document_revision_id
-                 AND source_manifest.state = 'indexed'
-                JOIN knowledge_document_revisions revision
-                  ON revision.id = target_manifest.document_revision_id
-                 AND revision.document_id = target_manifest.document_id
-                 AND revision.state = 'indexed'
-                 AND revision.needs_chunk_clone IS TRUE
-                 AND revision.parsed_blocks = '[]'::jsonb
-                WHERE target_manifest.version_id = :target_version_id
-                  AND target_manifest.knowledge_base_id = :kb_id
-                  AND target_manifest.state = 'indexed'
-                  AND target_manifest.document_id = ANY(:document_ids)
-                """
-            ),
-            {
-                "kb_id": kb_id,
-                "source_version_id": source_version_id,
-                "target_version_id": target_version_id,
-                "document_ids": document_ids,
-            },
-        )
-        if int(manifest_result.scalar_one()) != len(document_ids):
-            raise ValueError(
-                "legacy clone requires exact marked revision identity "
-                "in source and target manifests"
-            )
-        result = await self.db_session.execute(
-            text(
-                """
-                SELECT id, kb_id, doc_id, parent_id, level, content,
-                       page_no, heading_path, ordinal,
-                       embedding::text AS embedding_text,
-                       content_tsv::text AS content_tsv_text
-                FROM knowledge_chunks
-                WHERE kb_id = :kb_id
-                  AND version_id = :source_version_id
-                  AND doc_id = ANY(:document_ids)
-                ORDER BY doc_id,
-                         CASE level WHEN 'parent' THEN 0 ELSE 1 END,
-                         ordinal,
-                         id
-                """
-            ),
-            {
-                "kb_id": kb_id,
-                "source_version_id": source_version_id,
-                "document_ids": document_ids,
-            },
-        )
-        rows = list(result.fetchall())
-        returned_docs = {str(row.doc_id) for row in rows}
-        if returned_docs != set(document_ids):
-            raise ValueError(
-                "legacy active chunks are incomplete for retained manifest"
-            )
-        id_map = {
-            str(row.id): str(
-                uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    f"opencitadel:kb-chunk:{target_version_id}:{row.id}",
-                )
-            )
-            for row in rows
-        }
-        clones: list[KnowledgeChunk] = []
-        for row in rows:
-            parent_id = (
-                id_map.get(str(row.parent_id))
-                if row.parent_id is not None
-                else None
-            )
-            if row.parent_id is not None and parent_id is None:
-                raise ValueError(
-                    "legacy child-parent clone closure is incomplete"
-                )
-            clones.append(
-                KnowledgeChunk(
-                    id=id_map[str(row.id)],
-                    kb_id=kb_id,
-                    doc_id=str(row.doc_id),
-                    version_id=target_version_id,
-                    parent_id=parent_id,
-                    level=ChunkLevel(str(row.level)),
-                    content=str(row.content or ""),
-                    segmented_content=str(row.content or ""),
-                    content_tsv=(
-                        str(row.content_tsv_text)
-                        if row.content_tsv_text is not None
-                        else None
-                    ),
-                    embedding=_parse_vector_text(
-                        getattr(row, "embedding_text", None)
-                    ),
-                    page_no=row.page_no,
-                    heading_path=str(row.heading_path or ""),
-                    ordinal=int(row.ordinal or 0),
-                )
-            )
-        return clones
-
     async def get_candidate_index_metrics(
-            self,
-            kb_id: str,
-            version_id: str,
-    ) -> Dict[str, int]:
+        self,
+        kb_id: str,
+        version_id: str,
+    ) -> dict[str, int]:
         await self._require_building_candidate(kb_id, version_id)
         manifest_total = await self._count(
             KnowledgeVersionDocumentORM,
@@ -329,14 +167,8 @@ class KBIndexMixin:
                     .select_from(KnowledgeChunkModel)
                     .outerjoin(
                         KnowledgeVersionDocumentORM,
-                        (
-                            KnowledgeVersionDocumentORM.version_id
-                            == KnowledgeChunkModel.version_id
-                        )
-                        & (
-                            KnowledgeVersionDocumentORM.document_id
-                            == KnowledgeChunkModel.doc_id
-                        ),
+                        (KnowledgeVersionDocumentORM.version_id == KnowledgeChunkModel.version_id)
+                        & (KnowledgeVersionDocumentORM.document_id == KnowledgeChunkModel.doc_id),
                     )
                     .where(
                         KnowledgeChunkModel.version_id == version_id,
@@ -528,16 +360,15 @@ class KBIndexMixin:
         return int(result.scalar_one())
 
     async def _require_building_candidate(
-            self,
-            kb_id: str,
-            version_id: str,
+        self,
+        kb_id: str,
+        version_id: str,
     ) -> None:
         result = await self.db_session.execute(
             select(KnowledgeBaseVersionORM.id).where(
                 KnowledgeBaseVersionORM.id == version_id,
                 KnowledgeBaseVersionORM.knowledge_base_id == kb_id,
-                KnowledgeBaseVersionORM.state
-                == KnowledgeVersionState.BUILDING.value,
+                KnowledgeBaseVersionORM.state == KnowledgeVersionState.BUILDING.value,
                 KnowledgeBaseVersionORM.published_at.is_(None),
             )
         )
@@ -562,12 +393,16 @@ class KBIndexMixin:
             "embedding": str(chunk.embedding),
         }
 
-    async def purge_documents_index_data(self, doc_ids: List[str]) -> None:
+    async def purge_documents_index_data(self, doc_ids: list[str]) -> None:
         if not doc_ids:
             return
-        chunk_ids_stmt = select(KnowledgeChunkModel.id).where(KnowledgeChunkModel.doc_id.in_(doc_ids))
+        chunk_ids_stmt = select(KnowledgeChunkModel.id).where(
+            KnowledgeChunkModel.doc_id.in_(doc_ids)
+        )
         await self.db_session.execute(
-            delete(KnowledgeRelationModel).where(KnowledgeRelationModel.chunk_id.in_(chunk_ids_stmt))
+            delete(KnowledgeRelationModel).where(
+                KnowledgeRelationModel.chunk_id.in_(chunk_ids_stmt)
+            )
         )
         candidate_result = await self.db_session.execute(
             select(KnowledgeEntityRefModel.entity_id)
@@ -591,7 +426,7 @@ class KBIndexMixin:
             delete(KnowledgeChunkModel).where(KnowledgeChunkModel.doc_id.in_(doc_ids))
         )
 
-    async def count_ready_documents(self, kb_ids: List[str]) -> Dict[str, int]:
+    async def count_ready_documents(self, kb_ids: list[str]) -> dict[str, int]:
         if not kb_ids:
             return {}
         stmt = (
@@ -606,18 +441,9 @@ class KBIndexMixin:
             )
             .outerjoin(
                 KnowledgeVersionDocumentORM,
-                (
-                    KnowledgeVersionDocumentORM.document_id
-                    == KnowledgeDocumentModel.id
-                )
-                & (
-                    KnowledgeVersionDocumentORM.knowledge_base_id
-                    == KnowledgeDocumentModel.kb_id
-                )
-                & (
-                    KnowledgeVersionDocumentORM.version_id
-                    == KnowledgeBaseModel.active_version_id
-                ),
+                (KnowledgeVersionDocumentORM.document_id == KnowledgeDocumentModel.id)
+                & (KnowledgeVersionDocumentORM.knowledge_base_id == KnowledgeDocumentModel.kb_id)
+                & (KnowledgeVersionDocumentORM.version_id == KnowledgeBaseModel.active_version_id),
             )
             .where(KnowledgeDocumentModel.kb_id.in_(kb_ids))
             .where(self._active_document_predicate())
@@ -625,7 +451,7 @@ class KBIndexMixin:
             .group_by(KnowledgeDocumentModel.kb_id)
         )
         result = await self.db_session.execute(stmt)
-        counts = {kb_id: 0 for kb_id in kb_ids}
+        counts = dict.fromkeys(kb_ids, 0)
         for kb_id, count in result.all():
             counts[str(kb_id)] = int(count)
         return counts
@@ -643,22 +469,18 @@ class KBIndexMixin:
                 self._active_version_join_predicate(),
             )
             .where(KnowledgeChunkModel.kb_id == kb_id)
-            .where(
-                self._active_version_row_predicate(
-                    KnowledgeChunkModel.version_id
-                )
-            )
+            .where(self._active_version_row_predicate(KnowledgeChunkModel.version_id))
             .where(KnowledgeChunkModel.level == ChunkLevel.CHILD.value)
         )
         result = await self.db_session.execute(stmt)
         return int(result.scalar_one())
 
     async def list_documents_page(
-            self,
-            kb_id: str,
-            limit: int = 50,
-            offset: int = 0,
-    ) -> Tuple[List[KnowledgeDocument], int]:
+        self,
+        kb_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[KnowledgeDocument], int]:
         stmt = (
             select(KnowledgeDocumentModel)
             .join(
@@ -671,18 +493,9 @@ class KBIndexMixin:
             )
             .outerjoin(
                 KnowledgeVersionDocumentORM,
-                (
-                    KnowledgeVersionDocumentORM.document_id
-                    == KnowledgeDocumentModel.id
-                )
-                & (
-                    KnowledgeVersionDocumentORM.knowledge_base_id
-                    == KnowledgeDocumentModel.kb_id
-                )
-                & (
-                    KnowledgeVersionDocumentORM.version_id
-                    == KnowledgeBaseModel.active_version_id
-                ),
+                (KnowledgeVersionDocumentORM.document_id == KnowledgeDocumentModel.id)
+                & (KnowledgeVersionDocumentORM.knowledge_base_id == KnowledgeDocumentModel.kb_id)
+                & (KnowledgeVersionDocumentORM.version_id == KnowledgeBaseModel.active_version_id),
             )
             .where(KnowledgeDocumentModel.kb_id == kb_id)
             .where(self._active_document_predicate())
@@ -699,5 +512,5 @@ class KBIndexMixin:
         await self.db_session.execute(
             update(KnowledgeDocumentModel)
             .where(KnowledgeDocumentModel.kb_id == kb_id)
-            .values(status=DocStatus.PENDING.value, error=None, updated_at=datetime.now())
+            .values(status=DocStatus.PENDING.value, error=None, updated_at=datetime.now(UTC))
         )

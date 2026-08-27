@@ -1,9 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class ArtifactResponse(BaseModel):
@@ -12,14 +10,14 @@ class ArtifactResponse(BaseModel):
     kind: Literal["doc", "web"]
     title: str
     storage_ref: str
-    version_refs: List[str]
+    version_refs: list[str]
     status: Literal["draft", "updated", "final"]
     created_at: datetime
     updated_at: datetime
 
 
 class ArtifactListResponse(BaseModel):
-    artifacts: List[ArtifactResponse]
+    artifacts: list[ArtifactResponse]
 
 
 class ArtifactShareResponse(BaseModel):

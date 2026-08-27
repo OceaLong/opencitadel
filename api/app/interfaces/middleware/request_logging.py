@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """HTTP request logging middleware with request_id propagation."""
+
 import logging
 import time
 import uuid
@@ -9,7 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.infrastructure.observability.logging_context import bind_context
+from app.application.request_context import bind_context
 
 logger = logging.getLogger(__name__)
 

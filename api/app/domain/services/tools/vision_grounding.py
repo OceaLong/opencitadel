@@ -1,16 +1,16 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """视觉 grounding 工具：区域裁剪/缩放后再观察。"""
+
 import asyncio
 import logging
 import mimetypes
-from typing import Any, Dict, Optional
+from typing import Any
 
 from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
 from app.domain.services import vision_service
 from app.domain.utils.vision import build_image_content_part, is_image_mime
+
 from .base import BaseTool, tool
 from .capability_policy import WEB_READ
 
@@ -47,13 +47,13 @@ class VisionGroundingTool(BaseTool):
         policy=WEB_READ,
     )
     async def inspect_image_region(
-            self,
-            filepath: str,
-            x: float,
-            y: float,
-            width: float,
-            height: float,
-            prompt: Optional[str] = None,
+        self,
+        filepath: str,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        prompt: str | None = None,
     ) -> ToolResult:
         if not vision_service.vision_enabled(self._llm):
             return ToolResult(success=False, message="当前模型未开启多模态能力。")
@@ -65,7 +65,7 @@ class VisionGroundingTool(BaseTool):
         try:
             file_data = await self.sandbox.download_file(filepath)
             image_bytes = file_data.read()
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             return ToolResult(success=False, message=f"读取图片失败: {exc}")
 
         capabilities = vision_service.resolve_capabilities(self._llm)
@@ -73,27 +73,32 @@ class VisionGroundingTool(BaseTool):
             vision_service.crop_image_region,
             image_bytes,
             mime_type,
-            x, y, width, height,
+            x,
+            y,
+            width,
+            height,
             max_bytes=capabilities.max_image_bytes,
         )
         user_prompt = (prompt or "请详细描述这个裁剪区域的内容，若有文字请 OCR。").strip()
-        messages = [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": user_prompt},
-                build_image_content_part(cropped, mime_type),
-            ],
-        }]
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_prompt},
+                    build_image_content_part(cropped, mime_type),
+                ],
+            }
+        ]
         try:
             response = await self._llm.invoke(messages)
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             return ToolResult(success=False, message=f"区域分析失败: {exc}")
 
         content = response.get("content") or response.get("reasoning_content") or ""
         if not content:
             return ToolResult(success=False, message="模型未返回有效分析结果")
 
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "filepath": filepath,
             "region": {"x": x, "y": y, "width": width, "height": height},
             "analysis": content,

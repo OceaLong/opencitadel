@@ -3,20 +3,8 @@ import type { ToolEvent } from "@/lib/api/types";
 import type { Locale } from "@/i18n/routing";
 import { translate } from "@/i18n/translate";
 
-import type { TimelineItem } from "../session-events";
-
 export function stableId(prefix: string, index: number, suffix: string): string {
   return `${prefix}-${index}-${suffix}`;
-}
-
-export function markLatestClarifyAnswered(list: TimelineItem[]): void {
-  for (let i = list.length - 1; i >= 0; i--) {
-    const item = list[i];
-    if (item.kind === "clarify" && item.interactive) {
-      list[i] = { ...item, interactive: false };
-      return;
-    }
-  }
 }
 
 export function toMillis(ts: number | string | undefined | null): number | undefined {
@@ -40,10 +28,7 @@ export function formatDuration(ms: number | undefined | null): string | undefine
 }
 
 /** 将时间戳格式化为相对时间，如 2天前、刚刚 */
-function formatTimeLabel(
-  ts: number | string | undefined,
-  locale?: Locale,
-): string | undefined {
+function formatTimeLabel(ts: number | string | undefined, locale?: Locale): string | undefined {
   if (ts === undefined || ts === null) return undefined;
   let t = typeof ts === "string" ? parseInt(ts, 10) : ts;
   if (Number.isNaN(t)) return undefined;

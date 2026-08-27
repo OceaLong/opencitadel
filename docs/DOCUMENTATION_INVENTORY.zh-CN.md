@@ -26,40 +26,38 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 
 | 路径 | 主题 | 权威性 | 双语 | 图示 | 代码锚点 | 过期风险 |
 |------|------|--------|------|------|----------|----------|
-| [overview.md](architecture/overview.zh-CN.md) | 系统设计、API/Worker、DI、沙箱 | primary | paired | mermaid | `api/app/container.py`、`runner_bindings/` | medium |
-| [governance-plane.md](architecture/governance-plane.zh-CN.md) | 效果契约、能力收窄、整批审批、终态闩、证据 | primary | paired | mermaid | `tool_policy.py`、`capability_policy.py`、`tool_batch_executor.py`、`governance_profile_service.py`、`evidence_service.py` | medium |
+| [overview.md](architecture/overview.zh-CN.md) | 系统设计、强类型装配、API/Kernel、沙箱 | primary | paired | mermaid | `api/app/composition/`、`api/app/execution_kernel.py` | low |
+| [governance-plane.md](architecture/governance-plane.zh-CN.md) | 效果契约、能力收窄、审批、终态闩、证据 | primary | paired | mermaid | `tool_policy.py`、`application/execution/`、`governance_profile_service.py`、`evidence_service.py` | medium |
 | [security-model.md](architecture/security-model.zh-CN.md) | 信任边界、认证、密钥 | primary | paired | mermaid | `infrastructure/security/` | medium |
-| [events.md](architecture/events.zh-CN.md) | 领域事件、SSE、回放 | primary | paired | mermaid | `domain/models/event.py` | medium |
-| [checkpoints-and-hitl.md](architecture/checkpoints-and-hitl.zh-CN.md) | HITL 门控、检查点、Web Operator | primary | paired | mermaid | `checkpoint_service.py`、`session/approval_routes.py` | medium |
-| [web-operator.md](architecture/web-operator.zh-CN.md) | 门控档位、审计契约 | primary | paired | mermaid | `domain/services/agents/` | low |
+| [execution-kernel.md](architecture/execution-kernel.zh-CN.md) | Command、Event、Activity、投影、SSE 与恢复 | primary | paired | mermaid | `domain/execution/`、`application/execution/`、`execution_kernel.py` | low |
+| [web-operator.md](architecture/web-operator.zh-CN.md) | 精确主机边界、审批、证据 | primary | paired | mermaid | `application/execution/agent_tool_catalog.py`、`tools/browser.py` | low |
 | [teams-and-workspaces.md](architecture/teams-and-workspaces.zh-CN.md) | 团队、`X-Workspace-Id` | primary | paired | mermaid | `team_routes.py` | low |
 | [admin-auditor-compliance.md](architecture/admin-auditor-compliance.zh-CN.md) | 管理、审计、合规 | primary | paired | mermaid | `admin_routes.py` | medium |
 | [integrations-a2a-service-keys.md](architecture/integrations-a2a-service-keys.zh-CN.md) | A2A、服务 API Key | primary | paired | mermaid | `a2a_routes.py` | low |
-| [skills.md](architecture/skills.zh-CN.md) | Skill 模板、运行时 | primary | paired | mermaid | `skill_service.py`、`runner_bindings/` | low |
+| [skills.md](architecture/skills.zh-CN.md) | Skill 模板、运行时 | primary | paired | mermaid | `skill_service.py`、`application/execution/agent_tool_catalog.py` | low |
 | [artifacts-sharing.md](architecture/artifacts-sharing.zh-CN.md) | 交付物、公开分享 | primary | paired | mermaid | `artifact_routes.py` | low |
 | [automation-scheduler.md](architecture/automation-scheduler.zh-CN.md) | Cron、Webhook、Leader 选举 | primary | paired | mermaid | `scheduling_routes.py` | low |
 | [ops-patrol.md](architecture/ops-patrol.zh-CN.md) | Pack/Run 生命周期、Collector 边界与证据 | primary | paired | mermaid | `patrol_routes.py`、`patrol_run_service.py` | low |
-| [config-source-governance.md](architecture/config-source-governance.zh-CN.md) | AppConfig 与 env 边界 | primary | paired | mermaid | `core/config.py` | medium |
+| [config-source-governance.md](architecture/config-source-governance.zh-CN.md) | 部署、Policy、Integration 权威边界 | primary | paired | none | `core/config.py`、`runtime_policy_service.py` | medium |
+| [runtime-policy-control-plane.md](architecture/runtime-policy-control-plane.zh-CN.md) | Runtime Policy Revision、Head、Reader、Consumer Model | primary | paired | mermaid | `runtime_policy_service.py`、`runtime_policy_reader.py` | medium |
 | [model-resilience.md](architecture/model-resilience.zh-CN.md) | 熔断、回退 | primary | paired | mermaid | `resilient_llm.py` | low |
-| [contract-compatibility.md](architecture/contract-compatibility.zh-CN.md) | API/SSE 兼容窗口 | primary | paired | mermaid | `event_upgrader.py` | low |
 | [codebase-reindex.md](architecture/codebase-reindex.zh-CN.md) | Codebase 摄取、向量恢复 | primary | paired | mermaid | `codebase/ingestion_runner.py` | medium |
 | [knowledge-base-ingestion.md](architecture/knowledge-base-ingestion.zh-CN.md) | KB 解析、OCR、GraphRAG、摄取失败 | primary | paired | mermaid | `knowledge_base/ingestion_runner.py` | medium |
 | [architecture-evolution.md](architecture/architecture-evolution.zh-CN.md) | Compose → K8s 演进 | primary | paired | mermaid | `deploy/helm/` | low |
-| [llm-endpoints-and-models.md](architecture/llm-endpoints-and-models.zh-CN.md) | LLM 端点/模型拆分 | primary | paired | mermaid | `llm_endpoint_routes.py` | low |
+| [inference-control-plane.md](architecture/inference-control-plane.zh-CN.md) | 推理 Endpoint/Model/Binding 控制面 | primary | paired | mermaid | `inference_routes.py`、`inference-settings.tsx` | low |
 | [frontend-ui.md](architecture/frontend-ui.zh-CN.md) | Next.js 前端架构 | primary | paired | mermaid | `ui/src/` | low |
-| [task-recovery.md](architecture/task-recovery.zh-CN.md) | 可恢复任务重试 | primary | paired | mermaid | `recoverable_task_retry.py` | low |
 | [technical-decisions.md](architecture/technical-decisions.zh-CN.md) | 技术选型与对比 | primary | paired | mermaid | — | low |
 
 ## 运维与教程
 
 | 路径 | 主题 | 权威性 | 双语 | 图示 | 代码锚点 | 过期风险 |
 |------|------|--------|------|------|----------|----------|
-| [operations/deployment.md](operations/deployment.zh-CN.md) | 生产部署 | primary | paired | mermaid | `docker-compose.yml` | low |
+| [operations/deployment.md](operations/deployment.zh-CN.md) | 生产部署、探针、有界排空 | primary | paired | mermaid | `docker-compose.yml`、`deploy/helm/opencitadel/` | low |
 | [operations/ops-patrol.md](operations/ops-patrol.zh-CN.md) | Patrol 启用、部署、证据与恢复 | primary | paired | mermaid | `ops-collector/`、`ops-actuator/`、`deploy/helm/` | low |
 | [operations/https-domain-setup.md](operations/https-domain-setup.zh-CN.md) | HTTPS 与域名 | primary | paired | none | `.env.example` | low |
 | [tutorials/01-self-host-10-minutes.md](tutorials/01-self-host-10-minutes.zh-CN.md) | 10 分钟自托管 | tutorial | paired | none | `scripts/quickstart.sh` | low |
 | [tutorials/02-internal-knowledge-base.md](tutorials/02-internal-knowledge-base.zh-CN.md) | 知识库 RAG | tutorial | paired | mermaid | `knowledge-base-ingestion.md` | low |
-| [tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.md) | MCP 集成 | tutorial | paired | none | `app_config_routes.py` | low |
+| [tutorials/03-mcp-integrations.md](tutorials/03-mcp-integrations.zh-CN.md) | MCP 集成 | tutorial | paired | none | `integration_routes.py` | low |
 | [tutorials/04-governed-web-operator.md](tutorials/04-governed-web-operator.zh-CN.md) | Web Operator 教程 | tutorial | paired | none | `operator-scope-dialog.tsx` | low |
 | [tutorials/05-refund-reconciliation-compliance.md](tutorials/05-refund-reconciliation-compliance.zh-CN.md) | 合规演示 | tutorial | paired | none | `compliance_routes.py` | low |
 | [tutorials/06-ops-patrol.md](tutorials/06-ops-patrol.zh-CN.md) | Kubernetes 只读巡检教程 | tutorial | paired | none | `ui/src/app/patrols/` | low |
@@ -91,23 +89,6 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [SECURITY.md](../.github/SECURITY.zh-CN.md) | 漏洞披露 | governance | paired | low |
 | [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.zh-CN.md) | 行为准则 | governance | paired | low |
 | [pull_request_template.md](../.github/pull_request_template.zh-CN.md) | PR 模板 | governance | paired | low |
-
-## 审计（`docs/superpowers/audits/`）
-
-| 路径 | 主题 | 权威性 | 双语 | 图示 | 代码锚点 | 过期风险 |
-|------|------|--------|------|------|----------|----------|
-| [2026-07-28-agent-kb-codebase-governance-audit.md](superpowers/audits/2026-07-28-agent-kb-codebase-governance-audit.md) | 已过时的治理审计 — 资源版本化缺口结论（见文首状态块） | historical | zh-only (exempt) | none | `api/app/application/services/*_version_service.py` | low |
-| [2026-08-04-governance-p0-reverification.md](superpowers/audits/2026-08-04-governance-p0-reverification.md) | 对 2026-07-28 治理审计 P0 结论的复核 | historical | zh-only (exempt) | none | — | low |
-
-## 废弃候选（已处理 — 保留供 grep 回归）
-
-| 位置 | 问题 | 处理 |
-|------|------|------|
-| `ui/README.md` | “Settings 待接入语言切换” | 已修复 — 设置 → 通用（`GeneralSettings`） |
-| `admin-auditor-compliance.md` | `/admin/usage` UI 路由 | 已修复 — 用量图表在 `/admin` 概览 |
-| 教程 | “Knowledge 在侧边栏” | 已修复 — Header 工作区菜单 |
-| 多文档 | 重复的仅模型配置步骤 | 去重 — 链接到 `deployment.md` |
-| `DOCUMENTATION_INVENTORY` | `technical-decisions` 图示误标为 none | 已修复 — 含 Mermaid |
 
 ## 维护
 

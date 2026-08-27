@@ -1,12 +1,10 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Parent/child chunking for enterprise document RAG."""
+
 import logging
 import uuid
-from dataclasses import dataclass
-from typing import List, Tuple
 
 from app.domain.models.knowledge_base import ChunkLevel, KnowledgeChunk
+from app.domain.runtime_policy import KnowledgeChunkPolicy
 from app.domain.services.knowledge_base.parsers import PageBlock
 from app.domain.services.knowledge_base.vector_service import KBVectorService
 from app.domain.services.knowledge_base.zh_tokenizer import segment_for_bm25
@@ -15,30 +13,24 @@ logger = logging.getLogger(__name__)
 _CHUNK_ID_NAMESPACE = uuid.UUID("75c22383-d8f9-4679-9461-71d965303eda")
 
 
-@dataclass
-class ChunkSettings:
-    parent_max_chars: int = 2000
-    child_max_chars: int = 400
-    overlap: int = 50
-
-
 class KBChunker:
     def __init__(
-            self,
-            vector_service: KBVectorService | None = None,
-            settings: ChunkSettings | None = None,
+        self,
+        *,
+        policy: KnowledgeChunkPolicy,
+        vector_service: KBVectorService | None = None,
     ) -> None:
-        self._vector = vector_service or KBVectorService()
-        self._settings = settings or ChunkSettings()
+        self._vector = vector_service
+        self._policy = policy
 
     async def build_chunks(
-            self,
-            kb_id: str,
-            doc_id: str,
-            blocks: List[PageBlock],
-            *,
-            version_id: str,
-    ) -> Tuple[List[KnowledgeChunk], List[KnowledgeChunk]]:
+        self,
+        kb_id: str,
+        doc_id: str,
+        blocks: list[PageBlock],
+        *,
+        version_id: str,
+    ) -> tuple[list[KnowledgeChunk], list[KnowledgeChunk]]:
         if not version_id.strip():
             raise ValueError("candidate version_id is required")
         parents = self._build_parent_chunks(
@@ -54,31 +46,31 @@ class KBChunker:
             version_id=version_id,
         )
         embeddings: list[list[float]] = [[] for _ in children]
-        if children and self._vector.enabled:
+        if children and self._vector is not None and self._vector.enabled:
             try:
                 embeddings = await self._vector.embed_batch([chunk.content for chunk in children])
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 logger.warning("文档向量化降级 doc=%s: %s", doc_id, exc)
                 embeddings = [[] for _ in children]
-        for chunk, embedding in zip(children, embeddings):
+        for chunk, embedding in zip(children, embeddings, strict=False):
             chunk.embedding = embedding
         return parents, children
 
     def _build_parent_chunks(
-            self,
-            kb_id: str,
-            doc_id: str,
-            blocks: List[PageBlock],
-            *,
-            version_id: str,
-    ) -> List[KnowledgeChunk]:
+        self,
+        kb_id: str,
+        doc_id: str,
+        blocks: list[PageBlock],
+        *,
+        version_id: str,
+    ) -> list[KnowledgeChunk]:
         parents: list[KnowledgeChunk] = []
         ordinal = 0
         for block in blocks:
             text = (block.text or "").strip()
             if not text:
                 continue
-            for part in _split_by_size(text, self._settings.parent_max_chars, 0):
+            for part in _split_by_size(text, self._policy.parent_max_chars, 0):
                 parent = KnowledgeChunk(
                     id=_stable_chunk_id(
                         version_id,
@@ -101,20 +93,20 @@ class KBChunker:
         return parents
 
     def _build_child_chunks(
-            self,
-            kb_id: str,
-            doc_id: str,
-            parents: List[KnowledgeChunk],
-            *,
-            version_id: str,
-    ) -> List[KnowledgeChunk]:
+        self,
+        kb_id: str,
+        doc_id: str,
+        parents: list[KnowledgeChunk],
+        *,
+        version_id: str,
+    ) -> list[KnowledgeChunk]:
         children: list[KnowledgeChunk] = []
         ordinal = 0
         for parent in parents:
             for part in _split_by_size(
                 _strip_header(parent.content),
-                self._settings.child_max_chars,
-                self._settings.overlap,
+                self._policy.child_max_chars,
+                self._policy.overlap,
             ):
                 child = KnowledgeChunk(
                     id=_stable_chunk_id(
@@ -139,7 +131,7 @@ class KBChunker:
         return children
 
 
-def _split_by_size(text: str, max_chars: int, overlap: int) -> List[str]:
+def _split_by_size(text: str, max_chars: int, overlap: int) -> list[str]:
     text = text.strip()
     if not text:
         return []

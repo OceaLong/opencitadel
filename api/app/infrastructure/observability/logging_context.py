@@ -1,16 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Structured logging with request/session/task correlation."""
+
 import json
 import logging
-from contextlib import contextmanager
-from contextvars import ContextVar, Token
-from typing import Iterator, Optional
 
-session_id_var: ContextVar[Optional[str]] = ContextVar("session_id", default=None)
-task_id_var: ContextVar[Optional[str]] = ContextVar("task_id", default=None)
-worker_id_var: ContextVar[Optional[str]] = ContextVar("worker_id", default=None)
-request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+from app.application.request_context import (
+    request_id_var,
+    session_id_var,
+    task_id_var,
+    worker_id_var,
+)
 
 
 class CorrelationContextFilter(logging.Filter):
@@ -52,39 +50,9 @@ def _text_formatter() -> logging.Formatter:
     )
 
 
-def get_request_id() -> Optional[str]:
-    return request_id_var.get()
-@contextmanager
-def bind_context(
-        *,
-        session_id: Optional[str] = None,
-        task_id: Optional[str] = None,
-        worker_id: Optional[str] = None,
-        request_id: Optional[str] = None,
-) -> Iterator[None]:
-    """Bind correlation fields for the current async context; reset on exit."""
-    tokens: list[tuple[ContextVar[Optional[str]], Token]] = []
-    try:
-        if session_id is not None:
-            tokens.append((session_id_var, session_id_var.set(session_id)))
-        if task_id is not None:
-            tokens.append((task_id_var, task_id_var.set(task_id)))
-        if worker_id is not None:
-            tokens.append((worker_id_var, worker_id_var.set(worker_id)))
-        if request_id is not None:
-            tokens.append((request_id_var, request_id_var.set(request_id)))
-        yield
-    finally:
-        for var, token in reversed(tokens):
-            var.reset(token)
-
-
-def configure_structured_logging() -> None:
+def configure_structured_logging(*, log_format: str) -> None:
     """Install correlation filter and formatter on all root handlers."""
-    from core.config import get_settings
-
-    settings = get_settings()
-    use_json = (settings.log_format or "text").lower() == "json"
+    use_json = (log_format or "text").lower() == "json"
     formatter: logging.Formatter = JsonLogFormatter() if use_json else _text_formatter()
 
     root = logging.getLogger()

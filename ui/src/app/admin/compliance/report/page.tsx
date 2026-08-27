@@ -49,10 +49,7 @@ export default function AdminComplianceReportPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={t("reportTitle")}
-        description={t("reportDesc")}
-      />
+      <PageHeader title={t("reportTitle")} description={t("reportDesc")} />
 
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 pt-6">
@@ -135,9 +132,7 @@ export default function AdminComplianceReportPage() {
                     <span className="font-medium">
                       [{c.framework}] {c.control_id} {c.title}
                     </span>
-                    <StatusBadge variant={controlStatusVariant(c.status)}>
-                      {c.status}
-                    </StatusBadge>
+                    <StatusBadge variant={controlStatusVariant(c.status)}>{c.status}</StatusBadge>
                   </div>
                   <p className="text-muted-foreground mt-1 text-xs">{c.requirement}</p>
                   <p className="mt-1 text-xs">{c.evidence.join(" · ")}</p>
@@ -148,9 +143,7 @@ export default function AdminComplianceReportPage() {
         </Card>
       )}
 
-      {!report && !loading && (
-        <EmptyState title={t("reportHint")} className="py-10" />
-      )}
+      {!report && !loading && <EmptyState title={t("reportHint")} className="py-10" />}
     </div>
   );
 }

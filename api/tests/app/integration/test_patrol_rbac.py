@@ -2,7 +2,6 @@ from pathlib import Path
 
 import yaml
 
-
 ROOT = Path(__file__).parents[4]
 
 
@@ -19,6 +18,14 @@ def test_every_collector_rbac_template_excludes_write_secret_exec_and_impersonat
         assert not any(f'"{value}"' in text for value in forbidden_verbs)
         assert not any(f'"{value}"' in text for value in forbidden_resources)
         if "{{" not in text:
-            roles = [item for item in yaml.safe_load_all(text) if item and item.get("kind") in {"Role", "ClusterRole"}]
+            roles = [
+                item
+                for item in yaml.safe_load_all(text)
+                if item and item.get("kind") in {"Role", "ClusterRole"}
+            ]
             assert roles
-            assert all(set(rule["verbs"]) <= {"get", "list", "watch"} for role in roles for rule in role["rules"])
+            assert all(
+                set(rule["verbs"]) <= {"get", "list", "watch"}
+                for role in roles
+                for rule in role["rules"]
+            )

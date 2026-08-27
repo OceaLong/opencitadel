@@ -68,7 +68,9 @@ export function ConfirmDeleteDialog({
             onClick={handleConfirm}
             disabled={deleting}
           >
-            {deleting ? (confirmingLabel ?? tCommon("deleting")) : (confirmLabel ?? tCommon("delete"))}
+            {deleting
+              ? (confirmingLabel ?? tCommon("deleting"))
+              : (confirmLabel ?? tCommon("delete"))}
           </Button>
         </DialogFooter>
       </DialogContent>

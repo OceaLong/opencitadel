@@ -1,23 +1,20 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
-from datetime import datetime
-from enum import Enum
-from typing import Optional, List, Dict, Any
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Literal
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .event import Event, PlanEvent
-from .file import File
-from .memory import Memory
-from .plan import Plan
-from .skill import SkillSummary
 from .codebase import SessionMode
-from .resource_governance import ResourceBindingProjection, ResourceKind
+from .file import File
+from .operator import normalize_operator_domains
+from .resource_bindings import ResourceBindingProjection, ResourceKind
 
 
-class SessionStatus(str, Enum):
+class SessionStatus(StrEnum):
     """会话状态类型枚举"""
+
     PENDING = "pending"  # 等待任务
     RUNNING = "running"  # 运行中
     WAITING = "waiting"  # 等待人类响应
@@ -28,56 +25,48 @@ class SessionStatus(str, Enum):
 
 class Session(BaseModel):
     """会话领域模型"""
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))  # 会话id
-    sandbox_id: Optional[str] = None  # 沙箱id
-    task_id: Optional[str] = None  # 任务id
+    sandbox_id: str | None = None  # 沙箱id
     title: str = ""  # 标题
     unread_message_count: int = 0  # 未读消息数
     latest_message: str = ""  # 最新消息
-    latest_message_at: Optional[datetime] = None  # 最新消息时间
-    events: List[Event] = Field(default_factory=list)  # 事件列表
-    files: List[File] = Field(default_factory=list)  # 文件列表
-    memories: Dict[str, Memory] = Field(default_factory=dict)  # 记忆
-    model_id: Optional[str] = None  # 会话级模型id，null使用全局默认
-    skill_id: Optional[str] = None  # 会话级Skill id，null表示不启用
+    latest_message_at: datetime | None = None  # 最新消息时间
+    files: list[File] = Field(default_factory=list)  # 文件列表
+    model_id: str | None = None  # 会话级模型id，null使用全局默认
+    skill_id: str | None = None  # 会话级Skill id，null表示不启用
     thinking_enabled: bool = False  # 会话级思考模式，默认关闭
-    resource_bindings: List[ResourceBindingProjection] = Field(
+    resource_bindings: list[ResourceBindingProjection] = Field(
         default_factory=list
     )  # 当前不可变资源版本投影；历史回答以事件快照为准
-    owner_user_id: Optional[str] = None  # 所属用户
-    team_id: Optional[str] = None  # 所属团队工作区
+    owner_user_id: str | None = None  # 所属用户
+    team_id: str | None = None  # 所属团队工作区
     mode: SessionMode = SessionMode.AGENT  # ask=快速问答, agent=规划改码
-    pending_phase: Optional[str] = None  # 等待恢复的内部阶段
-    pending_metadata: Optional[Dict[str, Any]] = None  # 门控状态细节（Plan、tool call 等）
-    operator_scope: Optional[str] = None  # owned | third_party_saas — Web Operator 目标系统归属
-    operator_domains: List[str] = Field(default_factory=list)  # 域名白名单
-    gate_profile: Optional[str] = None  # loose | standard | strict
+    operator_scope: Literal["owned", "third_party_saas"] | None = None
+    operator_domains: list[str] = Field(default_factory=list)  # 域名白名单
     status: SessionStatus = SessionStatus.PENDING  # 状态
-    updated_at: datetime = Field(default_factory=datetime.now)  # 更新时间
-    created_at: datetime = Field(default_factory=datetime.now)  # 创建时间
+    active_execution_run_id: UUID | None = None
+    active_execution_request_id: UUID | None = None
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))  # 更新时间
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))  # 创建时间
 
-    def get_latest_plan(self) -> Optional[Plan]:
-        """获取会话中的最新计划"""
-        # 1.倒序遍历会话中所有事件消息
-        for event in reversed(self.events):
-            # 2.判断事件的类型是否为PlanEvent，如果是则提取计划后返回
-            if isinstance(event, PlanEvent):
-                return event.plan
+    @field_validator("operator_domains")
+    @classmethod
+    def validate_operator_domains(cls, value: list[str]) -> list[str]:
+        return normalize_operator_domains(value)
 
-        return None
+    @model_validator(mode="after")
+    def validate_operator_boundary(self) -> "Session":
+        if self.operator_scope is not None and not self.operator_domains:
+            raise ValueError("operator sessions require at least one allowed domain")
+        return self
 
     def binding_for(
-            self,
-            kind: ResourceKind,
-    ) -> Optional[ResourceBindingProjection]:
+        self,
+        kind: ResourceKind,
+    ) -> ResourceBindingProjection | None:
         """Return the sole current binding of ``kind`` for this session."""
-        matches = [
-            binding
-            for binding in self.resource_bindings
-            if binding.resource_kind == kind
-        ]
+        matches = [binding for binding in self.resource_bindings if binding.resource_kind == kind]
         if len(matches) > 1:
-            raise ValueError(
-                f"会话[{self.id}]存在重复的[{kind.value}]资源绑定"
-            )
+            raise ValueError(f"会话[{self.id}]存在重复的[{kind.value}]资源绑定")
         return matches[0] if matches else None

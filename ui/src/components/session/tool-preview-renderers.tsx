@@ -32,7 +32,7 @@ export function JumpToLatestButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="bg-card/90 text-foreground hover:bg-card border-border/70 inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm shadow-card backdrop-blur transition-colors"
+      className="bg-card/90 text-foreground hover:bg-card border-border/70 shadow-card inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm backdrop-blur transition-colors"
     >
       <Play size={12} className="fill-current" />
       <span>{t("jumpToLive")}</span>
@@ -98,6 +98,8 @@ function BrowserPreview({ tool, onOpenVNC }: { tool: ToolEvent; onOpenVNC?: () =
       <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg border">
         {screenshot ? (
           <ScrollArea className="h-full">
+            {/* Tool screenshots may be data URLs and cannot use Next image optimization. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={screenshot} alt={t("browserScreenshot")} className="h-auto w-full" />
           </ScrollArea>
         ) : (
@@ -221,7 +223,9 @@ function MCPPreview({ tool }: { tool: ToolEvent }) {
     <ScrollArea className="h-full">
       <div className="flex flex-col gap-4 p-4">
         <div className="flex flex-col gap-1">
-          <div className="text-muted-foreground text-xs tracking-wide uppercase">{t("toolInfo")}</div>
+          <div className="text-muted-foreground text-xs tracking-wide uppercase">
+            {t("toolInfo")}
+          </div>
           <div className="border-border/70 bg-muted/40 rounded-lg border p-3 text-sm">
             <div>
               <span className="text-muted-foreground">{t("nameLabel")}</span>

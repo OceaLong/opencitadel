@@ -12,8 +12,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 
 import { teamApi, type TeamInvitationPreview, type TeamMember } from "@/lib/api/team";
-import { ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
 import { useAuth } from "@/providers/auth-provider";
+import { useClientDataScope } from "@/providers/client-data-provider";
 
 function roleLabel(role: TeamMember["role"], t: ReturnType<typeof useTranslations<"teams">>) {
   if (role === "owner") return t("roleOwner");
@@ -34,6 +34,7 @@ export default function AcceptInvitationPage() {
   const token = params.token;
   const router = useRouter();
   const { user, loading, refresh } = useAuth();
+  const { setWorkspaceId } = useClientDataScope();
   const t = useTranslations("teams");
   const tAuth = useTranslations("auth");
   const tCommon = useTranslations("common");
@@ -79,16 +80,17 @@ export default function AcceptInvitationPage() {
 
   const finishJoin = useCallback(
     (member: TeamMember) => {
-      window.localStorage.setItem(ACTIVE_WORKSPACE_KEY, member.team_id);
+      setWorkspaceId(member.team_id);
       setAccepted(true);
       toast.success(t("acceptSuccess"));
       router.replace("/");
     },
-    [router, t],
+    [router, setWorkspaceId, t],
   );
 
   useEffect(() => {
-    if (loading || !user || accepting || accepted || !preview || preview.status !== "pending") return;
+    if (loading || !user || accepting || accepted || !preview || preview.status !== "pending")
+      return;
     if (preview.requires_registration) return;
     setAccepting(true);
     void teamApi
@@ -224,14 +226,14 @@ export default function AcceptInvitationPage() {
                   variant="outline"
                   onClick={() => (window.location.href = oauthHref("google", token))}
                 >
-                  Google
+                  <span translate="no">Google</span>
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => (window.location.href = oauthHref("github", token))}
                 >
-                  GitHub
+                  <span translate="no">GitHub</span>
                 </Button>
               </div>
             </form>

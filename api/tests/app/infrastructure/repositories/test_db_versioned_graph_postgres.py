@@ -1,17 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""Opt-in PostgreSQL gates for Task 6 graph races and filtered ANN."""
+"""Canonical PostgreSQL gates for graph races and filtered ANN."""
+
 from __future__ import annotations
 
 import json
-import os
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import delete, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.domain.models.authorization import AuthorizationContext
 from app.domain.models.knowledge_base import (
@@ -19,26 +17,17 @@ from app.domain.models.knowledge_base import (
     KnowledgeEntityRef,
     KnowledgeRelation,
 )
-from app.infrastructure.models.knowledge_base import KnowledgeBaseModel
-from app.infrastructure.repositories import (
-    db_knowledge_base_repository as knowledge_repository_module,
-)
 from app.infrastructure.repositories.db_knowledge_base_repository import (
     DBKnowledgeBaseRepository,
+)
+from app.infrastructure.repositories.kb._shared import (
+    build_versioned_vector_search_statement,
 )
 from app.infrastructure.security.db_authorization import (
     configure_session_authorization,
 )
-from core.config import get_settings
-
-
-pytestmark = pytest.mark.skipif(
-    os.getenv("OPENCITADEL_RUN_POSTGRES_INTEGRATION") != "1",
-    reason=(
-        "set OPENCITADEL_RUN_POSTGRES_INTEGRATION=1 for graph race and "
-        "filtered ANN recall/EXPLAIN release gates"
-    ),
-)
+from core.config import load_deployment_settings
+from tests.app.execution_test_support import authenticated_session_factory
 
 
 async def _execute_statements(session, sql: str, params: dict) -> None:
@@ -53,17 +42,17 @@ async def _seed_graph_candidate(session, ids, now):
         """
             INSERT INTO knowledge_bases
                 (id, name, status, doc_count, chunk_count,
-                 vector_degraded, legacy_v1_migrated, settings,
+                 vector_degraded, settings,
                  created_at, updated_at)
             VALUES
-                (:kb, 'task6 graph', 'pending', 1, 1, false, true,
+                (:kb, 'task6 graph', 'pending', 1, 1, false,
                  '{}'::jsonb, :now, :now);
             INSERT INTO knowledge_base_versions
                 (id, knowledge_base_id, state, capabilities,
-                 degraded_reasons, metrics, legacy_snapshot, created_at)
+                 degraded_reasons, metrics, created_at)
             VALUES
                 (:version, :kb, 'building', '{}'::jsonb, '[]'::jsonb,
-                 '{}'::jsonb, false, :now);
+                 '{}'::jsonb, :now);
             INSERT INTO knowledge_documents
                 (id, kb_id, title, source_type, source_ref, mime,
                  page_count, status, created_at, updated_at)
@@ -72,11 +61,10 @@ async def _seed_graph_candidate(session, ids, now):
                  1, 'ready', :now, :now);
             INSERT INTO knowledge_document_revisions
                 (id, document_id, source_ref, source_digest,
-                 parsed_blocks, page_count, state, needs_chunk_clone,
-                 created_at)
+                 parsed_blocks, page_count, state, created_at)
             VALUES
                 (:revision, :doc, '', :digest, '[]'::jsonb, 1,
-                 'indexed', false, :now);
+                 'indexed', :now);
             INSERT INTO knowledge_base_version_documents
                 (version_id, knowledge_base_id, document_id,
                  document_revision_id, ordinal, state)
@@ -94,18 +82,18 @@ async def _seed_graph_candidate(session, ids, now):
 
 
 @pytest.mark.asyncio
-async def test_concurrent_graph_upsert_and_retry_create_one_identity(
-    _db_schema,
-):
-    engine = create_async_engine(get_settings().sqlalchemy_database_uri)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
+@pytest.mark.usefixtures("postgres_integration")
+async def test_concurrent_graph_upsert_and_retry_create_one_identity():
+    settings = load_deployment_settings()
+    engine = create_async_engine(settings.sqlalchemy_database_uri)
+    sessions = authenticated_session_factory(
+        engine,
+        signing_secret=settings.session_secret,
+    )
     suffix = uuid.uuid4().hex
-    ids = {
-        key: f"task6-{key}-{suffix}"
-        for key in ("kb", "version", "doc", "revision", "chunk")
-    }
+    ids = {key: f"task6-{key}-{suffix}" for key in ("kb", "version", "doc", "revision", "chunk")}
     system = AuthorizationContext.system("task6-graph-race")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     try:
         async with sessions() as session:
             await configure_session_authorization(session, system)
@@ -122,7 +110,7 @@ async def test_concurrent_graph_upsert_and_retry_create_one_identity(
                 await configure_session_authorization(session, system)
                 repo = DBKnowledgeBaseRepository(session)
                 product = KnowledgeEntity(
-                    id=f"temp-product-{temp_suffix}",
+                    id=f"temp-product-{suffix}-{temp_suffix}",
                     kb_id=ids["kb"],
                     version_id=ids["version"],
                     name=display_name,
@@ -131,7 +119,7 @@ async def test_concurrent_graph_upsert_and_retry_create_one_identity(
                     description=description,
                 )
                 organization = KnowledgeEntity(
-                    id=f"temp-org-{temp_suffix}",
+                    id=f"temp-org-{suffix}-{temp_suffix}",
                     kb_id=ids["kb"],
                     version_id=ids["version"],
                     name="OpenCitadel",
@@ -273,10 +261,7 @@ async def test_concurrent_graph_upsert_and_retry_create_one_identity(
                 )
             ).one()
             assert merged.name in {"opencitadel", "OpenCitadel"}
-            assert (
-                merged.description
-                == "a much longer deterministic description"
-            )
+            assert merged.description == "a much longer deterministic description"
             forward_reverse = (
                 await session.execute(
                     text(
@@ -299,11 +284,7 @@ async def test_concurrent_graph_upsert_and_retry_create_one_identity(
     finally:
         async with sessions() as session:
             await configure_session_authorization(session, system)
-            await session.execute(
-                delete(KnowledgeBaseModel).where(
-                    KnowledgeBaseModel.id == ids["kb"]
-                )
-            )
+            await DBKnowledgeBaseRepository(session).delete_kb(ids["kb"])
             await session.commit()
         await engine.dispose()
 
@@ -314,12 +295,16 @@ def _vector(rank: float) -> str:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("postgres_integration")
 async def test_filtered_hnsw_iterative_scan_recall_and_explain_gate(
-    _db_schema,
     capsys,
 ):
-    engine = create_async_engine(get_settings().sqlalchemy_database_uri)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    settings = load_deployment_settings()
+    engine = create_async_engine(settings.sqlalchemy_database_uri)
+    sessions = authenticated_session_factory(
+        engine,
+        signing_secret=settings.session_secret,
+    )
     suffix = uuid.uuid4().hex
     kb = f"task6-ann-kb-{suffix}"
     foreign_kb = f"task6-ann-foreign-kb-{suffix}"
@@ -329,7 +314,7 @@ async def test_filtered_hnsw_iterative_scan_recall_and_explain_gate(
     foreign_version = f"task6-ann-foreign-v1-{suffix}"
     doc = f"task6-ann-doc-{suffix}"
     foreign_doc = f"task6-ann-foreign-doc-{suffix}"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     system = AuthorizationContext.system("task6-filtered-ann")
     query = _vector(0.0)
     try:
@@ -340,16 +325,16 @@ async def test_filtered_hnsw_iterative_scan_recall_and_explain_gate(
                 """
                     INSERT INTO knowledge_bases
                         (id, name, status, doc_count, chunk_count,
-                         vector_degraded, legacy_v1_migrated, settings,
+                         vector_degraded, settings,
                          created_at, updated_at)
-                    VALUES (:kb, 'ann', 'ready', 1, 360, false, true,
+                    VALUES (:kb, 'ann', 'ready', 1, 360, false,
                             '{}'::jsonb, :now, :now);
                     INSERT INTO knowledge_bases
                         (id, name, status, doc_count, chunk_count,
-                         vector_degraded, legacy_v1_migrated, settings,
+                         vector_degraded, settings,
                          created_at, updated_at)
                     VALUES (:foreign_kb, 'foreign ann', 'ready', 1, 120,
-                            false, true, '{}'::jsonb, :now, :now);
+                            false, '{}'::jsonb, :now, :now);
                     INSERT INTO knowledge_documents
                         (id, kb_id, title, source_type, source_ref, mime,
                          page_count, status, created_at, updated_at)
@@ -398,18 +383,17 @@ async def test_filtered_hnsw_iterative_scan_recall_and_explain_gate(
                     """
                         INSERT INTO knowledge_base_versions
                             (id, knowledge_base_id, state, capabilities,
-                             degraded_reasons, metrics, legacy_snapshot,
-                             created_at, published_at)
+                             degraded_reasons, metrics, created_at,
+                             published_at)
                         VALUES (:version, :kb, :state,
-                                '{"vector_search":true}'::jsonb,
-                                '[]'::jsonb, '{}'::jsonb, false,
-                                :now, :published);
+                                jsonb_build_object('vector_search', true),
+                                '[]'::jsonb, '{}'::jsonb, :now,
+                                :published);
                         INSERT INTO knowledge_document_revisions
                             (id, document_id, source_ref, source_digest,
-                             parsed_blocks, page_count, state,
-                             needs_chunk_clone, created_at)
+                             parsed_blocks, page_count, state, created_at)
                         VALUES (:revision, :doc, '', :digest,
-                                '[]'::jsonb, 1, 'indexed', false, :now);
+                                '[]'::jsonb, 1, 'indexed', :now);
                         INSERT INTO knowledge_base_version_documents
                             (version_id, knowledge_base_id, document_id,
                              document_revision_id, ordinal, state)
@@ -435,9 +419,7 @@ async def test_filtered_hnsw_iterative_scan_recall_and_explain_gate(
                         "version": version_id,
                         "content": f"rank {rank}",
                         "ordinal": rank,
-                        "embedding": _vector(
-                            (rank + distance_offset) * 0.001
-                        ),
+                        "embedding": _vector((rank + distance_offset) * 0.001),
                     }
                     for rank in range(120)
                 ]
@@ -459,12 +441,6 @@ async def test_filtered_hnsw_iterative_scan_recall_and_explain_gate(
 
         async with sessions() as session:
             await configure_session_authorization(session, system)
-            statement_builder = getattr(
-                knowledge_repository_module,
-                "build_versioned_vector_search_statement",
-                None,
-            )
-            assert callable(statement_builder)
             params = {
                 "kb_id": kb,
                 "version_id": version,
@@ -477,7 +453,7 @@ async def test_filtered_hnsw_iterative_scan_recall_and_explain_gate(
             exact_ids = list(
                 (
                     await session.execute(
-                        statement_builder(),
+                        build_versioned_vector_search_statement(),
                         params,
                     )
                 ).scalars()
@@ -500,15 +476,11 @@ async def test_filtered_hnsw_iterative_scan_recall_and_explain_gate(
                 pytest.fail(str(exc))
             ann_latency = time.perf_counter() - ann_started
             ann_ids = [row.chunk.id for row in ann_rows]
-            active = (
-                await session.execute(
-                    text("SHOW hnsw.iterative_scan")
-                )
-            ).scalar_one()
+            active = (await session.execute(text("SHOW hnsw.iterative_scan"))).scalar_one()
             assert active == "strict_order"
             plan = (
                 await session.execute(
-                    statement_builder(explain=True),
+                    build_versioned_vector_search_statement(explain=True),
                     params,
                 )
             ).scalar_one()
@@ -519,27 +491,20 @@ async def test_filtered_hnsw_iterative_scan_recall_and_explain_gate(
                 f"ann={ann_latency:.6f}s exact={exact_latency:.6f}s"
             )
             assert recall >= 0.95
-            assert "ix_kb_chunks_embedding" in plan_text
+            assert "ix_kb_chunks_embedding" in plan_text, plan_text
             assert kb in plan_text
             assert "version_id" in plan_text
             assert "knowledge_base_versions" in plan_text
             assert "knowledge_base_version_documents" in plan_text
             assert "knowledge_document_revisions" in plan_text
-            assert set(ann_ids).issubset(
-                {
-                    f"task6-ann-0-{rank}-{suffix}"
-                    for rank in range(120)
-                }
-            )
+            assert set(ann_ids).issubset({f"task6-ann-0-{rank}-{suffix}" for rank in range(120)})
             assert ann_latency <= exact_latency * 20 + 1.0
             assert "recall@10" in capsys.readouterr().out
     finally:
         async with sessions() as session:
             await configure_session_authorization(session, system)
-            await session.execute(
-                delete(KnowledgeBaseModel).where(
-                    KnowledgeBaseModel.id.in_((kb, foreign_kb))
-                )
-            )
+            repository = DBKnowledgeBaseRepository(session)
+            await repository.delete_kb(kb)
+            await repository.delete_kb(foreign_kb)
             await session.commit()
         await engine.dispose()

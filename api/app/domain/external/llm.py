@@ -1,35 +1,32 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Protocol, List, Dict, Any, AsyncGenerator, TYPE_CHECKING, Union
+from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from app.domain.models.llm_model import ModelCapabilities
+    from app.domain.models.inference import InferenceCapabilities
 
 
 class LLM(Protocol):
     """用于Agent应用与LLM进行交互的接口协议"""
 
     async def invoke(
-            self,
-            messages: List[Dict[str, Any]],
-            tools: List[Dict[str, Any]] = None,
-            response_format: Dict[str, Any] = None,
-            tool_choice: Union[str, Dict[str, Any], None] = None,
-            response_schema: Dict[str, Any] = None,
-            retry_budget: Any = None,
-    ) -> Dict[str, Any]:
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """传递消息列表、工具列表、响应格式、工具选择策略调用LLM接口"""
         ...
 
     async def stream_invoke(
-            self,
-            messages: List[Dict[str, Any]],
-            tools: List[Dict[str, Any]] = None,
-            response_format: Dict[str, Any] = None,
-            tool_choice: Union[str, Dict[str, Any], None] = None,
-            response_schema: Dict[str, Any] = None,
-            retry_budget: Any = None,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """流式调用 LLM，yield delta 字典: content/reasoning_content/tool_calls/index."""
         ...
 
@@ -49,11 +46,6 @@ class LLM(Protocol):
         ...
 
     @property
-    def supports_multimodal(self) -> bool:
-        """只读属性，模型是否支持多模态（图片）理解"""
-        ...
-
-    @property
-    def capabilities(self) -> "ModelCapabilities":
+    def capabilities(self) -> "InferenceCapabilities":
         """只读属性，模型能力描述"""
         ...

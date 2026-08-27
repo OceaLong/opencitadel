@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Transactional immutable resource bindings for session turns."""
+
 from collections.abc import Callable
 
 from app.domain.errors import (
@@ -9,13 +8,13 @@ from app.domain.errors import (
     ForbiddenError,
     NotFoundError,
 )
-from app.domain.models.resource_governance import (
-    BuildState,
+from app.domain.models.knowledge_version import KnowledgeVersionState
+from app.domain.models.resource_bindings import (
+    PublicationState,
     PublishedResourceVersion,
     ResourceKind,
     SessionResourceBinding,
 )
-from app.domain.models.knowledge_version import KnowledgeVersionState
 from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.resource_version_provider import (
@@ -69,7 +68,7 @@ class ResourceBindingService:
             )
             if session is None:
                 raise NotFoundError("session not found in owner scope")
-            current = await uow.resource_governance.get_current_binding(
+            current = await uow.resource_bindings.get_current_binding(
                 session_id,
                 kind,
                 for_update=True,
@@ -77,17 +76,11 @@ class ResourceBindingService:
             if current is not None:
                 if current.resource_id != resource_id:
                     raise ConflictError(
-                        "session resource kind is already bound to another "
-                        "resource"
+                        "session resource kind is already bound to another resource"
                     )
-                if (
-                    requested_version_id is None
-                    or current.version_id == resolved.version_id
-                ):
+                if requested_version_id is None or current.version_id == resolved.version_id:
                     return current
-                raise ConflictError(
-                    "initial binding is already pinned to another version"
-                )
+                raise ConflictError("initial binding is already pinned to another version")
 
             binding = SessionResourceBinding(
                 session_id=session_id,
@@ -101,7 +94,9 @@ class ResourceBindingService:
                 resolved=resolved,
                 scope=scope,
             )
-            return await uow.resource_governance.add_binding(binding)
+            created = await uow.resource_bindings.add_binding(binding)
+            await uow.commit()
+            return created
 
     async def bind_initial_resolved(
         self,
@@ -121,8 +116,10 @@ class ResourceBindingService:
             resource_id=resolved.resource_id,
             requested_version_id=resolved.version_id,
         )
-        current = await uow.resource_governance.get_current_binding(
-            session_id, resolved.resource_kind, for_update=True,
+        current = await uow.resource_bindings.get_current_binding(
+            session_id,
+            resolved.resource_kind,
+            for_update=True,
         )
         if current is not None:
             raise ConflictError("session resource kind is already bound")
@@ -131,13 +128,15 @@ class ResourceBindingService:
             resolved=resolved,
             scope=scope,
         )
-        return await uow.resource_governance.add_binding(SessionResourceBinding(
-            session_id=session_id,
-            resource_kind=resolved.resource_kind,
-            resource_id=resolved.resource_id,
-            version_id=resolved.version_id,
-            bound_by=actor_id,
-        ))
+        return await uow.resource_bindings.add_binding(
+            SessionResourceBinding(
+                session_id=session_id,
+                resource_kind=resolved.resource_kind,
+                resource_id=resolved.resource_id,
+                version_id=resolved.version_id,
+                bound_by=actor_id,
+            )
+        )
 
     async def current(
         self,
@@ -153,7 +152,7 @@ class ResourceBindingService:
             )
             if session is None:
                 raise NotFoundError("session not found in owner scope")
-            binding = await uow.resource_governance.get_current_binding(
+            binding = await uow.resource_bindings.get_current_binding(
                 session_id,
                 kind,
             )
@@ -167,9 +166,7 @@ class ResourceBindingService:
         resource_kind: ResourceKind,
         scope: OwnerScope,
     ) -> str:
-        return (
-            await self.current(session_id, resource_kind, scope)
-        ).version_id
+        return (await self.current(session_id, resource_kind, scope)).version_id
 
     async def current_bindings(
         self,
@@ -180,17 +177,22 @@ class ResourceBindingService:
             session = await uow.session.get_metadata(session_id, scope=scope)
             if session is None:
                 raise NotFoundError("session not found in owner scope")
-            return await uow.resource_governance.list_current_bindings(session_id)
+            return await uow.resource_bindings.list_current_bindings(session_id)
 
     async def available_versions(
-        self, session_id: str, resource_kind: ResourceKind, scope: OwnerScope,
+        self,
+        session_id: str,
+        resource_kind: ResourceKind,
+        scope: OwnerScope,
     ) -> list[PublishedResourceVersion]:
         binding = await self.current(session_id, resource_kind, scope)
         provider = self._provider_for(resource_kind)
         versions = await provider.list_published_versions(binding.resource_id, scope)
         for version in versions:
             self._validate_provider_result(
-                version, kind=resource_kind, resource_id=binding.resource_id,
+                version,
+                kind=resource_kind,
+                resource_id=binding.resource_id,
                 requested_version_id=None,
             )
         return versions
@@ -209,7 +211,7 @@ class ResourceBindingService:
             )
             if session is None:
                 raise NotFoundError("session not found in owner scope")
-            return await uow.resource_governance.list_bindings(
+            return await uow.resource_bindings.list_bindings(
                 session_id,
                 kind,
             )
@@ -238,7 +240,7 @@ class ResourceBindingService:
             )
             if session is None:
                 raise NotFoundError("session not found in owner scope")
-            current = await uow.resource_governance.get_current_binding(
+            current = await uow.resource_bindings.get_current_binding(
                 session_id,
                 kind,
                 for_update=True,
@@ -273,12 +275,12 @@ class ResourceBindingService:
                 supersedes_binding_id=current.id,
                 bound_by=actor_id,
             )
-            return (
-                await uow.resource_governance.replace_current_binding(
-                    current,
-                    replacement,
-                )
+            replacement = await uow.resource_bindings.replace_current_binding(
+                current,
+                replacement,
             )
+            await uow.commit()
+            return replacement
 
     @staticmethod
     async def _lock_final_knowledge_version_reference(
@@ -314,9 +316,7 @@ class ResourceBindingService:
                 KnowledgeVersionState.DEGRADED,
             }
         ):
-            raise ConflictError(
-                "knowledge-base version is no longer bindable"
-            )
+            raise ConflictError("knowledge-base version is no longer bindable")
 
     async def _assert_owned_session(
         self,
@@ -351,23 +351,13 @@ class ResourceBindingService:
         requested_version_id: str | None,
     ) -> None:
         if resolved.resource_kind != kind:
-            raise BadRequestError(
-                "resource version provider returned a kind mismatch"
-            )
+            raise BadRequestError("resource version provider returned a kind mismatch")
         if resolved.resource_id != resource_id:
-            raise BadRequestError(
-                "resource version provider returned a foreign resource"
-            )
-        if (
-            requested_version_id is not None
-            and resolved.version_id != requested_version_id
-        ):
-            raise BadRequestError(
-                "resource version provider returned a foreign version"
-            )
-        if (
-            not resolved.published
-            or resolved.state
-            not in {BuildState.SUCCEEDED, BuildState.DEGRADED}
-        ):
+            raise BadRequestError("resource version provider returned a foreign resource")
+        if requested_version_id is not None and resolved.version_id != requested_version_id:
+            raise BadRequestError("resource version provider returned a foreign version")
+        if not resolved.published or resolved.state not in {
+            PublicationState.READY,
+            PublicationState.DEGRADED,
+        }:
             raise BadRequestError("resource version is not published")

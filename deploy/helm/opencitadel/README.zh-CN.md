@@ -2,224 +2,122 @@
 
 # OpenCitadel Helm Chart
 
-Kubernetes 部署 OpenCitadel 的 Helm Chart，支持 API 与 Agent Worker 独立扩缩容。
+本 Chart 部署全新的 OpenCitadel 运行时：API、统一执行内核、UI、沙箱接入、
+PostgreSQL/Redis 选项，以及可选的 Ops Collector/Actuator。
 
-## 前置要求
+## 前置条件
 
 - Kubernetes 1.24+
 - Helm 3.x
-- 已构建并推送 `opencitadel-api` 与 `opencitadel-worker` 镜像（`api/Dockerfile` 多阶段 target）
-- 集群内可访问 PostgreSQL（pgvector）、Redis
+- `opencitadel-api`、`opencitadel-execution-kernel`、`opencitadel-ui`、
+  `opencitadel-sandbox` 镜像
+- 带 pgvector 的全新 PostgreSQL 数据库和 Redis
+
+Chart 可为自包含安装创建 PostgreSQL、Redis 与 MinIO；生产环境建议使用托管服务。
 
 ## 安装
 
-```bash
-helm upgrade --install opencitadel ./deploy/helm/opencitadel \
-  --namespace opencitadel --create-namespace \
-  --values production-values.yaml \
-  --set image.api.repository=your-registry/opencitadel-api \
-  --set image.worker.repository=your-registry/opencitadel-worker
-```
-
-完整镜像构建/推送步骤与生产环境 `--set` 参数（七个镜像，含可选 Ops Collector、Ops Actuator、ingress、sandbox
-driver）：见[部署指南](../../../docs/operations/deployment.zh-CN.md)的
-Kubernetes / Helm 部署一节。
-
-### local 模式（集群内 MinIO）
+先创建受保护的 Values 文件，配置互不相同的密钥与镜像地址，然后执行：
 
 ```bash
-helm upgrade --install opencitadel ./deploy/helm/opencitadel \
+helm lint deploy/helm/opencitadel
+helm upgrade --install opencitadel deploy/helm/opencitadel \
   --namespace opencitadel --create-namespace \
-  --set minio.enabled=true \
-  --set env.STORAGE_PROVIDER=minio \
-  --set secrets.minioAccessKey=minioadmin \
-  --set secrets.minioSecretKey=minioadmin
+  --values values.production.yaml \
+  --set image.api.repository=REGISTRY/opencitadel-api \
+  --set image.executionKernel.repository=REGISTRY/opencitadel-execution-kernel \
+  --set image.ui.repository=REGISTRY/opencitadel-ui \
+  --set image.sandbox.repository=REGISTRY/opencitadel-sandbox
 ```
 
-`minio.enabled=true` 时 Chart 自动部署 MinIO StatefulSet 并将 `MINIO_ENDPOINT` 指向集群内 Service。
+只有确定使用集群内对象存储时，才设置 `minio.enabled=true` 与
+`env.STORAGE_PROVIDER=minio`。
+
+## 运行拓扑
+
+| Workload | 职责 | PostgreSQL 角色 |
+| --- | --- | --- |
+| API | HTTP、认证、准入、公开 SSE | `postgresql.user` |
+| Migration init | 唯一绿地 Alembic Revision 与首次配置 Seed | `postgresql.migrationUser` |
+| 执行内核 | Command、决策、Activity、Timer、Outbox、投影、Scheduler | `executionKernel.databaseUser` |
+| UI | Next.js 应用 | 无 |
+
+每个迁移调用都在 Schema Upgrade 与首次 Seed 的完整区间持有同一个 PostgreSQL
+Advisory Lock，因此多个 API initContainer 会自动串行。API 与执行内核凭证不能迁移
+Schema；内核只有 Append、Claim 与 Projection 所需的运行权限。
 
 ## 主要 Values
 
 | 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `replicaCount.api` | 2 | API 副本数 |
-| `replicaCount.worker` | 2 | Worker 副本数 |
-| `autoscaling.api.enabled` | true | API HPA |
-| `autoscaling.worker.enabled` | true | Worker HPA |
-| `migrate.enabled` | true | API initContainer 执行迁移 |
-| `postgresql.adminUser` | postgres | 仅用于初始化的 PostgreSQL 管理角色 |
-| `postgresql.user` | opencitadel_app | 受 RLS 约束的非超级用户应用/迁移角色 |
-| `minio.enabled` | false | 集群内 MinIO（local 模式设为 true） |
-| `minio.storage` | 20Gi | MinIO PVC 大小 |
-| `opsCollector.enabled` | false | 部署可选的固定只读 Patrol Collector |
-| `opsCollector.image.*` | 见 values.yaml | Collector Repository、Tag 与 Pull Policy |
-| `opsCollector.allowedNamespaces` / `allowedWorkloads` | 受限默认值 | Kubernetes Scope 白名单 |
-| `opsCollector.registered*` | `{}` | 注册的 Prometheus/HTTP/TLS/备份/依赖目标 |
-| `opsActuator.enabled` | false | 部署可选的写范围 Patrol Actuator（Ops Patrol Remediation） |
-| `opsActuator.image.*` | 见 values.yaml | Actuator Repository、Tag 与 Pull Policy |
-| `opsActuator.targetRef` | `opencitadel-local` | 发起修复的 Pack 匹配的稳定身份标识 |
-| `opsActuator.allowedNamespaces` | `[opencitadel]` | 门控每次写调用的非空 Namespace 白名单 |
-| `opsActuator.allowedWorkloads` | `{}` | Namespace → Workload id → `{kind, min_replicas, max_replicas}`；未列入的 Workload 不能被定位 |
-| `opsActuator.serviceAccount.create` / `.name` | `true` / `""` | 专用 Patch-only ServiceAccount；`create=false` 时使用预先创建的账户 |
-| `opsActuator.resources` | 见 values.yaml | CPU/内存 requests 与 limits |
-| `worker.metricsPort` | 9108 | Worker Prometheus 指标端口（仅集群内可达，无鉴权） |
-| `env.STORAGE_PROVIDER` | cos | 对象存储后端：`cos` 或 `minio` |
-| `env` | 见 values.yaml | 非敏感环境变量（DB/Redis 主机、日志级别等） |
-| `secrets` | 见 values.yaml | 敏感配置，渲染为 Secret 并通过 `envFrom` 注入 |
-| `appConfig` | 见 values.yaml | 应用行为配置，渲染为 ConfigMap 并挂载为 `/app/config.yaml` |
+| --- | --- | --- |
+| `replicaCount.api` | `2` | API 副本数 |
+| `executionKernel.replicas` | `2` | 执行内核副本数 |
+| `executionKernel.databaseUser` | `opencitadel_execution_kernel_runtime` | 专用内核角色 |
+| `executionKernel.metricsPort` | `9108` | 集群内 Prometheus 端口 |
+| `shutdown.timeoutSeconds` | `30` | 应用任务有界排空时间 |
+| `shutdown.terminationGracePeriodSeconds` | `45` | Pod 宽限期，必须大于排空时间 |
+| `autoscaling.api.enabled` | `true` | API HPA |
+| `autoscaling.executionKernel.enabled` | `true` | 执行内核 HPA |
+| `postgresql.enabled` | `true` | Chart 托管的全新 PostgreSQL |
+| `redis.enabled` | `true` | Chart 托管 Redis |
+| `minio.enabled` | `false` | 可选的 Chart 托管 MinIO |
+| `networkPolicy.enabled` | `true` | Workload 网络隔离 |
+| `opsCollector.enabled` | `false` | 固定只读 Patrol Collector |
+| `opsActuator.enabled` | `false` | 白名单写入 Patrol Actuator |
+| `migrate.enabled` | `true` | 运行串行化的 Migration initContainer |
 
-> **注意**：生产部署前请通过 `--set` 或独立 values 文件覆盖全部敏感项：
-> `secrets.apiKeySecret`、`secrets.auditSigningKey`、`secrets.jwtSecret`、`secrets.sessionSecret`、
-> `secrets.bootstrapAdminPassword`、`secrets.postgresAdminPassword`、`secrets.postgresPassword`
-> 与 `secrets.redisPassword`。两个 PostgreSQL 密码必须不同。
-> 将 `env.FRONTEND_BASE_URL`、`env.OAUTH_REDIRECT_BASE` 与 `env.COOKIE_SECURE=true` 设置为与 Ingress 域名一致。
-> Helm 部署默认 `env.USE_DB_APP_CONFIG="true"`。确认 `env.POSTGRES_HOST`、`env.REDIS_HOST` 指向集群内实际服务。
-> 若生产应用数据库角色是超级用户或具有 `BYPASSRLS`，应用会拒绝启动。
+`values.schema.json` 会验证执行内核契约并拒绝已淘汰的部署键。
 
-## 生产安全要求
+## 必填密钥
 
+必须覆盖所有占位值，尤其以下值必须互不相同：
+
+- `secrets.postgresAdminPassword`
+- `secrets.postgresMigrationPassword`
+- `secrets.postgresPassword`
+- `secrets.executionKernelPostgresPassword`
+- `secrets.redisPassword`
 - `secrets.apiKeySecret`、`secrets.auditSigningKey`、`secrets.jwtSecret`、
-  `secrets.sessionSecret`、`secrets.bootstrapAdminPassword`、
-  `secrets.postgresAdminPassword`、`secrets.postgresPassword`、
-  `secrets.redisPassword` 的长度与互异性要求见[部署指南 — local
-  模式](../../../docs/operations/deployment.zh-CN.md#local-模式配置)（该规则对
-  cloud 与 local 两套 `.env` 模板均适用）；轮换时同步设置 key id 与
-  previous-key JSON Map。
-- API、Worker、迁移 initContainer 都使用 `postgresql.user`，这是受
-  RLS 约束的非超级用户。生产启动会拒绝 `rolsuper=true` 或
-  `rolbypassrls=true`。
-- 保持 `networkPolicy.enabled=true`。它只允许 API/Worker 访问沙箱，
-  沙箱出站仅放行 DNS 与公网地址段，阻断私网、Link-local、Metadata 与
-  保留地址。
-- 设置 `env.COOKIE_SECURE=true`、公网 HTTPS 前端/OAuth URL，并按同一指南
-  设置 `env.TRUSTED_PROXY_CIDRS` / `env.OUTBOUND_ALLOWED_PORTS` /
-  `env.OUTBOUND_PRIVATE_HOST_ALLOWLIST`。
-- `production-values.yaml` 应存放在批准的加密 Secret 机制中，不得提交。
+  `secrets.sessionSecret`
+- `secrets.bootstrapAdminPassword`
 
-## 已有 Chart 托管 PostgreSQL PVC
+使用批准的 Secret Manager，不要提交生产 Values 文件。PostgreSQL 管理员凭证仅用于
+Bootstrap，不会注入 API 或执行内核容器。
 
-`/docker-entrypoint-initdb.d` 只在全新数据目录执行。已有 PVC 切换到应用
-角色前，进入维护窗口并在仓库根目录执行：
+## 安全要求
 
-```bash
-NS=opencitadel
-RELEASE=opencitadel
-CHART=./deploy/helm/opencitadel
-VALUES=production-values.yaml
-APP_USER=opencitadel_app
-PG_POD="$(kubectl -n "$NS" get pod \
-  -l app.kubernetes.io/component=postgres \
-  -o jsonpath='{.items[0].metadata.name}')"
+- 保持 `networkPolicy.enabled=true`，沙箱 Ingress 只允许 API/执行内核。
+- Collector 保持只读；Actuator 独立部署并使用明确白名单。
+- 配置公网 HTTPS 前端/OAuth URL 与 `env.COOKIE_SECURE=true`。
+- 精确设置可信 Proxy CIDR、出站端口与私网主机白名单。
+- 任何运行时数据库角色都不得拥有 `SUPERUSER` 或 `BYPASSRLS`。
+- 只部署到全新数据库；本 Chart 不包含旧 Catalog 转换路径。
 
-# 1. 停止写入并备份当前数据库。
-kubectl -n "$NS" scale deployment \
-  "${RELEASE}-api" "${RELEASE}-worker" --replicas=0
-kubectl -n "$NS" exec "$PG_POD" -- sh -ceu \
-  'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
-  > "${RELEASE}-before-app-role-$(date +%Y%m%d%H%M%S).sql"
+Chart 托管 PostgreSQL 只在全新数据库初始化时运行 `files/postgres/init-app-role.sh`，
+在 Alembic 之前创建互相独立的 Migration、API 与 Kernel 角色。外部全新数据库必须先
+配置等价角色，并执行以下查询验证：
 
-# 2. 应用新 Secret 与脚本 ConfigMap，但不启动迁移。
-helm template "$RELEASE" "$CHART" \
-  --namespace "$NS" --values "$VALUES" \
-  --show-only templates/secret.yaml \
-  --show-only templates/configmap-postgres-init.yaml \
-  | kubectl -n "$NS" apply -f -
-
-# 3. 复制仓库内的原始脚本，不要粘贴修改版。
-kubectl -n "$NS" cp \
-  deploy/helm/opencitadel/files/postgres/init-app-role.sh \
-  "$PG_POD:/tmp/init-app-role.sh"
-APP_PASSWORD="$(kubectl -n "$NS" get secret "${RELEASE}-secret" \
-  -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 --decode)"
-kubectl -n "$NS" exec "$PG_POD" -- chmod 0500 /tmp/init-app-role.sh
-
-# 4. 创建/收敛不可绕过 RLS 的应用角色，并转移关系对象所有权。
-kubectl -n "$NS" exec "$PG_POD" -- env \
-  OPENCITADEL_APP_USER="$APP_USER" \
-  OPENCITADEL_APP_PASSWORD="$APP_PASSWORD" \
-  /tmp/init-app-role.sh
-
-# 5. rolsuper、rolbypassrls 必须为 false，wrong_owner 必须为 0。
-kubectl -n "$NS" exec -i "$PG_POD" -- env \
-  OPENCITADEL_APP_USER="$APP_USER" sh -ceu '
-    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-      -v app_user="$OPENCITADEL_APP_USER"
-  ' <<'SQL'
+```sql
 SELECT rolname, rolsuper, rolbypassrls
 FROM pg_roles
-WHERE rolname = :'app_user';
-SELECT count(*) AS wrong_owner
-FROM pg_class c
-JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = 'public'
-  AND c.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
-  AND pg_get_userbyid(c.relowner) <> :'app_user';
-SQL
-unset APP_PASSWORD
-
-# 6. 角色/所有权校验通过后再升级。
-helm upgrade "$RELEASE" "$CHART" \
-  --namespace "$NS" --values "$VALUES"
+WHERE rolname IN ('opencitadel_app', 'opencitadel_execution_kernel_runtime');
 ```
 
-该流程仅适用于 Chart 托管 StatefulSet。外部 PostgreSQL 应通过 Provider
-批准的管理通道执行
-`deploy/helm/opencitadel/files/postgres/init-app-role.sh`，再允许 Helm
-启动 migration initContainer。
-
-## 生产验证
+## 扩缩容与验证
 
 ```bash
-# NetworkPolicy 必须可渲染且已存在。
-helm template opencitadel ./deploy/helm/opencitadel \
-  --namespace opencitadel --values production-values.yaml \
-  --show-only templates/networkpolicy-sandbox.yaml
-kubectl -n opencitadel get networkpolicy opencitadel-sandbox
-
-# 迁移必须先完成，API/Worker 随后可用。
 kubectl -n opencitadel rollout status deployment/opencitadel-api
-kubectl -n opencitadel rollout status deployment/opencitadel-worker
-kubectl -n opencitadel exec deployment/opencitadel-api -- \
-  curl --fail http://127.0.0.1:8000/api/status
+kubectl -n opencitadel rollout status deployment/opencitadel-execution-kernel
+kubectl -n opencitadel scale deployment/opencitadel-execution-kernel --replicas=4
+
+helm template opencitadel deploy/helm/opencitadel \
+  --namespace opencitadel --values values.production.yaml >/dev/null
+kubectl -n opencitadel get networkpolicy
 ```
 
-每次数据库角色变更后重复 `rolsuper`、`rolbypassrls`、`wrong_owner`
-查询。加密/审计 Key 轮换与链校验见[生产部署
-指南](../../../docs/operations/deployment.zh-CN.md#凭证加密与审计签名-key-轮换)。
+Release Tag 发布
+`ghcr.io/ocealong/opencitadel-{api,execution-kernel,migrate,ui,sandbox,ops-collector,ops-actuator}`。
 
-## Release 镜像
-
-打 tag（`v*`）后，[`.github/workflows/release.yml`](../../../.github/workflows/release.yml) 会发布多架构镜像到 `ghcr.io/ocealong/opencitadel-{api,worker,migrate,ui,sandbox,ops-collector,ops-actuator}`。通过 `image.*`、`opsCollector.image.*` 与 `opsActuator.image.*` 引用 Release 构建。
-
-## 架构
-
-- **API Deployment**：无状态 FastAPI，SSE 连接层
-- **Worker Deployment**：消费 Redis dispatch 队列，执行 Agent
-- **migrate initContainer**：`python -m app.migrate`，与 docker-compose `opencitadel-migrate` 等价
-
-## 扩缩容
-
-```bash
-# 手动调整 Worker 副本（处理 Agent 负载）
-kubectl scale deployment opencitadel-worker --replicas=4 -n opencitadel
-
-# 或启用 HPA（values.yaml 中 autoscaling.worker.enabled=true）
-```
-
-## 架构演进
-
-单机 Compose 稳定后，按阶段拆分计算与沙箱执行面，详见 [架构演进指南](../../../docs/architecture/architecture-evolution.zh-CN.md)。
-
-推荐演进顺序：
-
-1. PostgreSQL / Redis 外置（释放主节点内存）
-2. 本 Chart 部署 API + Worker（HPA 按队列深度或 CPU 扩缩）
-3. `sandbox.address` 指向远程沙箱集群（Worker 不再挂载 docker.sock）
-
-## 相关文档
-
-- 根目录 [README.md](../../../README.zh-CN.md) — 架构与配置说明
-- [生产部署指南](../../../docs/operations/deployment.zh-CN.md) — 生产部署指南
-- [Ops Patrol 运维](../../../docs/operations/ops-patrol.zh-CN.md) — Collector Values、Policy、验证与恢复
-- [架构演进指南](../../../docs/architecture/architecture-evolution.zh-CN.md) — 扩容与沙箱外置
-- [api/README.zh-CN.md](../../../api/README.zh-CN.md) — API / Worker 本地开发
+参见[部署指南](../../../docs/operations/deployment.zh-CN.md)、
+[执行内核架构](../../../docs/architecture/execution-kernel.zh-CN.md)和
+[Ops Patrol 运维](../../../docs/operations/ops-patrol.zh-CN.md)。

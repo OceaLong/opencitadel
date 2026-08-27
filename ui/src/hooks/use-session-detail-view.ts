@@ -6,25 +6,23 @@ import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import type { ChatInputRef } from "@/components/session/chat-input";
-import { getToolKind } from "@/components/tool-use/utils";
 
 import { useIncrementalTimeline } from "@/hooks/use-incremental-timeline";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { useSessionDetail } from "@/hooks/use-session-detail";
+import { artifactsApi } from "@/lib/api/artifacts";
 import { sessionApi } from "@/lib/api/session";
 import type {
   ApprovalEventData,
   ArtifactEventSummary,
-  ClarifyAnswer,
   FileInfo,
-  SessionCheckpoint,
   SessionMode,
   Skill,
   SSEEventData,
   ToolEvent,
 } from "@/lib/api/types";
 import type { AttachmentFile, TimelineItem } from "@/lib/session-events";
-import { getLatestPlanFromEvents, getTaskObservationSummary } from "@/lib/session-events";
+import { getTaskObservationSummary } from "@/lib/session-events";
 
 import type { Locale } from "@/i18n/routing";
 
@@ -39,38 +37,11 @@ export type UseSessionDetailViewOptions = {
 function findLatestTool(timeline: TimelineItem[]): ToolEvent | null {
   for (let i = timeline.length - 1; i >= 0; i--) {
     const item = timeline[i];
-    if (item.kind === "tool" && getToolKind(item.data) !== "message") {
+    if (item.kind === "tool") {
       return item.data;
-    }
-    if (item.kind === "step" && item.tools.length > 0) {
-      for (let j = item.tools.length - 1; j >= 0; j--) {
-        if (getToolKind(item.tools[j]) !== "message") {
-          return item.tools[j];
-        }
-      }
     }
   }
   return null;
-}
-
-function getSessionArtifactsFromEvents(events: SSEEventData[]): ArtifactEventSummary[] {
-  const map = new Map<string, ArtifactEventSummary>();
-  for (const ev of events) {
-    if (ev.type !== "artifact") continue;
-    const data = ev.data;
-    const existing = map.get(data.artifact_id);
-    if (!existing || data.version >= existing.version) {
-      map.set(data.artifact_id, {
-        artifact_id: data.artifact_id,
-        kind: data.kind,
-        title: data.title,
-        status: data.status,
-        storage_ref: data.storage_ref,
-        version: data.version,
-      });
-    }
-  }
-  return Array.from(map.values());
 }
 
 function getLatestApprovalFromEvents(
@@ -80,7 +51,7 @@ function getLatestApprovalFromEvents(
   if (!waiting) return null;
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const ev = events[i];
-    if (ev.type === "approval") return ev.data;
+    if (ev.type === "approval" && ev.data.options.length > 0) return ev.data;
   }
   return null;
 }
@@ -97,13 +68,11 @@ export function useSessionDetailView({
   const t = useTranslations("sessionDetail");
   const tAuth = useTranslations("auth");
   const { requireAuth } = useRequireAuth();
-  const [includeDebug, setIncludeDebug] = useState(false);
   const detail = useSessionDetail(sessionId, hasInitialMessage);
   const {
     session,
     files,
     events,
-    checkpoints,
     loading,
     loadingEarlier,
     hasEarlierHistory,
@@ -116,39 +85,31 @@ export function useSessionDetailView({
     streaming,
     streamStatus,
     streamError,
-    enableDebugStream,
-    refetchEventsWithDebug,
   } = detail;
 
   const [activeSkill, setActiveSkill] = useState<Skill | null>(null);
   const [fileListOpen, setFileListOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<AttachmentFile | null>(null);
   const [previewTool, setPreviewTool] = useState<ToolEvent | null>(null);
-  const [artifactsPreviewDismissed, setArtifactsPreviewDismissed] = useState(false);
+  const [sessionArtifacts, setSessionArtifacts] = useState<ArtifactEventSummary[]>([]);
+  const [dismissedArtifactsKey, setDismissedArtifactsKey] = useState<string | null>(null);
   const [vncOpen, setVncOpen] = useState(false);
-  const [restoringCheckpoint, setRestoringCheckpoint] = useState(false);
-  const [checkpointDialogOpen, setCheckpointDialogOpen] = useState(false);
-  const [pendingCheckpoint, setPendingCheckpoint] = useState<SessionCheckpoint | null>(null);
   const initialMessageSentRef = useRef(false);
   const chatInputRef = useRef<ChatInputRef>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevToolCountRef = useRef(0);
 
-  const configEditable = session?.status === "pending" || session?.status === "completed" || session?.status === "failed";
+  const configEditable =
+    session?.status === "pending" ||
+    session?.status === "completed" ||
+    session?.status === "failed";
   const timeline = useIncrementalTimeline(events, locale);
-  const checkpointByAnchor = useMemo(() => {
-    const map = new Map<string, SessionCheckpoint>();
-    for (const checkpoint of checkpoints) {
-      map.set(checkpoint.anchor_event_id, checkpoint);
-    }
-    return map;
-  }, [checkpoints]);
-  const planSteps = useMemo(() => getLatestPlanFromEvents(events), [events]);
-  const sessionArtifacts = useMemo(() => getSessionArtifactsFromEvents(events), [events]);
   const sessionArtifactsKey = useMemo(
     () => sessionArtifacts.map((item) => `${item.artifact_id}:${item.version}`).join("|"),
     [sessionArtifacts],
   );
+  const artifactsPreviewDismissed =
+    sessionArtifactsKey !== "" && dismissedArtifactsKey === sessionArtifactsKey;
   const latestApproval = useMemo(
     () => getLatestApprovalFromEvents(events, session?.status === "waiting"),
     [events, session?.status],
@@ -163,8 +124,29 @@ export function useSessionDetailView({
     (sessionArtifacts.length > 0 && !artifactsPreviewDismissed);
 
   useEffect(() => {
-    setArtifactsPreviewDismissed(false);
-  }, [sessionArtifactsKey]);
+    let cancelled = false;
+    void artifactsApi
+      .listBySession(sessionId)
+      .then(({ artifacts }) => {
+        if (cancelled) return;
+        setSessionArtifacts(
+          artifacts.map((artifact) => ({
+            artifact_id: artifact.id,
+            kind: artifact.kind,
+            title: artifact.title,
+            status: artifact.status,
+            storage_ref: artifact.storage_ref,
+            version: artifact.version_refs.length,
+          })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setSessionArtifacts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, events.length, session?.status]);
 
   const resolvedPreviewTool = useMemo(() => {
     if (!previewTool) return null;
@@ -176,11 +158,6 @@ export function useSessionDetailView({
       if (item.kind === "tool" && (item.data as { tool_call_id?: string }).tool_call_id === id) {
         return item.data;
       }
-      if (item.kind === "step") {
-        for (const tool of item.tools) {
-          if ((tool as { tool_call_id?: string }).tool_call_id === id) return tool;
-        }
-      }
     }
     return previewTool;
   }, [previewTool, timeline]);
@@ -191,7 +168,6 @@ export function useSessionDetailView({
     const latestTool = findLatestTool(timeline);
     const toolCount = timeline.reduce((count, item) => {
       if (item.kind === "tool") return count + 1;
-      if (item.kind === "step") return count + item.tools.length;
       return count;
     }, 0);
 
@@ -230,6 +206,7 @@ export function useSessionDetailView({
     sendMessage,
     sessionId,
     router,
+    t,
   ]);
 
   const sessionModelId = session?.model_id || undefined;
@@ -252,34 +229,32 @@ export function useSessionDetailView({
         throw e;
       }
     },
-    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth, t, tAuth],
+    [
+      sendMessage,
+      sessionModelId,
+      sessionSkillId,
+      sessionThinkingEnabled,
+      mode,
+      requireAuth,
+      t,
+      tAuth,
+    ],
   );
 
-  const handleClarifyAnswer = useCallback(
-    async (answer: string, clarifyAnswers?: ClarifyAnswer[]) => {
-      if (!requireAuth(tAuth("loginToSendMessage"))) return;
-      await sendMessage(answer, [], {
-        model_id: sessionModelId,
-        skill_id: sessionSkillId,
-        thinking_enabled: sessionThinkingEnabled,
-        clarify_answers: clarifyAnswers,
-        mode,
-      });
-    },
-    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth, t, tAuth],
-  );
-
-  const handleGateSend = useCallback(
+  const handleApprovalSend = useCallback(
     async (message: string) => {
       if (!requireAuth(tAuth("loginToSendMessage"))) return;
-      await sendMessage(message, [], {
-        model_id: sessionModelId,
-        skill_id: sessionSkillId,
-        thinking_enabled: sessionThinkingEnabled,
-        mode,
-      });
+      if (!latestApproval) throw new Error("Approval is no longer pending");
+      const rejected = message.startsWith("reject") || message === "skip";
+      const feedback =
+        rejected && message.includes(":") ? message.slice(message.indexOf(":") + 1).trim() : "";
+      await sessionApi.decideApproval(
+        latestApproval.approval_id,
+        rejected ? "rejected" : "approved",
+        feedback,
+      );
     },
-    [sendMessage, sessionModelId, sessionSkillId, sessionThinkingEnabled, mode, requireAuth, t, tAuth],
+    [latestApproval, requireAuth, tAuth],
   );
 
   const handleThinkingChange = useCallback(
@@ -315,8 +290,6 @@ export function useSessionDetailView({
   }, []);
 
   const handleToolClick = useCallback((tool: ToolEvent) => {
-    const kind = getToolKind(tool);
-    if (kind === "message") return;
     setPreviewTool(tool);
     setPreviewFile(null);
   }, []);
@@ -324,8 +297,8 @@ export function useSessionDetailView({
   const handleClosePreview = useCallback(() => {
     setPreviewFile(null);
     setPreviewTool(null);
-    setArtifactsPreviewDismissed(true);
-  }, []);
+    setDismissedArtifactsKey(sessionArtifactsKey);
+  }, [sessionArtifactsKey]);
 
   const handleJumpToLatest = useCallback(() => {
     const latest = findLatestTool(timeline);
@@ -369,46 +342,6 @@ export function useSessionDetailView({
     }
   }, [session, sessionId, refresh, t]);
 
-  const handleDebugOpen = useCallback(() => {
-    setIncludeDebug(true);
-    enableDebugStream();
-    void refetchEventsWithDebug();
-  }, [enableDebugStream, refetchEventsWithDebug]);
-
-  const handleRestoreCheckpoint = useCallback((checkpoint: SessionCheckpoint) => {
-    if (!session) return;
-    setPendingCheckpoint(checkpoint);
-    setCheckpointDialogOpen(true);
-  }, [session]);
-
-  const confirmRestoreCheckpoint = useCallback(async () => {
-    if (!session || !pendingCheckpoint) return;
-    setRestoringCheckpoint(true);
-    try {
-      if (session.status === "running") {
-        await sessionApi.stopSession(sessionId);
-      }
-      await sessionApi.restoreCheckpoint(sessionId, pendingCheckpoint.id);
-      toast.success(t("checkpointRestored"));
-      setCheckpointDialogOpen(false);
-      setPendingCheckpoint(null);
-      await refresh();
-      await refreshFiles();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("restoreFailed"));
-    } finally {
-      setRestoringCheckpoint(false);
-    }
-  }, [session, pendingCheckpoint, sessionId, refresh, refreshFiles, t]);
-
-  const resolveCheckpoint = useCallback(
-    (anchorEventId?: string) => {
-      if (!anchorEventId) return undefined;
-      return checkpointByAnchor.get(anchorEventId);
-    },
-    [checkpointByAnchor],
-  );
-
   return {
     session,
     files,
@@ -427,7 +360,6 @@ export function useSessionDetailView({
     setActiveSkill,
     configEditable,
     timeline,
-    planSteps,
     sessionArtifacts,
     latestApproval,
     observationSummary,
@@ -440,8 +372,7 @@ export function useSessionDetailView({
     chatInputRef,
     scrollContainerRef,
     handleSend,
-    handleGateSend,
-    handleClarifyAnswer,
+    handleApprovalSend,
     handleThinkingChange,
     handleModelChange,
     handleSkillChange,
@@ -453,14 +384,5 @@ export function useSessionDetailView({
     handleOpenVNC,
     handleCloseVNC,
     handleStop,
-    includeDebug,
-    handleDebugOpen,
-    resolveCheckpoint,
-    handleRestoreCheckpoint,
-    restoringCheckpoint,
-    checkpointDialogOpen,
-    setCheckpointDialogOpen,
-    pendingCheckpoint,
-    confirmRestoreCheckpoint,
   };
 }

@@ -1,7 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import (
     DateTime,
@@ -52,7 +50,13 @@ class CodebaseVersionORM(Base):
             name="fk_codebase_versions_parent_owner",
         ),
         Index("ix_codebase_versions_codebase_state", "codebase_id", "state"),
-        Index("ix_codebase_versions_build", "build_id"),
+        Index("uq_codebase_versions_build", "build_id", unique=True),
+        Index(
+            "uq_codebase_versions_building_candidate",
+            "codebase_id",
+            unique=True,
+            postgresql_where=text("state = 'building'"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
@@ -61,22 +65,23 @@ class CodebaseVersionORM(Base):
         ForeignKey("codebases.id", ondelete="CASCADE"),
         nullable=False,
     )
-    parent_version_id: Mapped[Optional[str]] = mapped_column(
-        String(255), nullable=True
-    )
-    build_id: Mapped[Optional[str]] = mapped_column(
+    parent_version_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    build_id: Mapped[str] = mapped_column(
         String(255),
-        ForeignKey("resource_builds.id", ondelete="SET NULL"),
-        nullable=True,
+        nullable=False,
+        server_default=text("gen_random_uuid()::text"),
+    )
+    request_key: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        server_default=text("md5(gen_random_uuid()::text) || md5(gen_random_uuid()::text)"),
     )
     state: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
         server_default=text("'building'"),
     )
-    source_snapshot_key: Mapped[Optional[str]] = mapped_column(
-        Text, nullable=True
-    )
+    source_snapshot_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_revision: Mapped[str] = mapped_column(
         Text,
         nullable=False,
@@ -101,9 +106,7 @@ class CodebaseVersionORM(Base):
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP"),
     )
-    published_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def to_domain(self) -> CodebaseVersion:
         return CodebaseVersion(
@@ -111,6 +114,7 @@ class CodebaseVersionORM(Base):
             codebase_id=self.codebase_id,
             parent_version_id=self.parent_version_id,
             build_id=self.build_id,
+            request_key=self.request_key,
             state=CodebaseVersionState(self.state),
             source_snapshot_key=self.source_snapshot_key,
             source_revision=self.source_revision or "",
@@ -129,6 +133,7 @@ class CodebaseVersionORM(Base):
             codebase_id=version.codebase_id,
             parent_version_id=version.parent_version_id,
             build_id=version.build_id,
+            request_key=version.request_key,
             state=version.state.value,
             source_snapshot_key=version.source_snapshot_key,
             source_revision=version.source_revision,

@@ -1,9 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Auditor RBAC: require_non_auditor blocks write operations."""
-import pytest
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from app.domain.errors import ForbiddenError
 from app.domain.models.scope import Principal
@@ -21,12 +21,14 @@ def _make_auditor_principal() -> Principal:
 
 @pytest.mark.asyncio
 async def test_require_non_auditor_rejects_auditor():
-    with patch(
-        "app.interfaces.auth_dependencies.get_current_principal",
-        new=AsyncMock(return_value=_make_auditor_principal()),
+    with (
+        patch(
+            "app.interfaces.auth_dependencies.get_current_principal",
+            new=AsyncMock(return_value=_make_auditor_principal()),
+        ),
+        pytest.raises(ForbiddenError),
     ):
-        with pytest.raises(ForbiddenError):
-            await require_non_auditor()
+        await require_non_auditor()
 
 
 @pytest.mark.asyncio
@@ -64,7 +66,7 @@ async def test_authenticated_router_allows_auditor_read_request():
 
 
 @pytest.mark.asyncio
-async def test_service_api_key_cannot_bypass_auditor_read_only_role(monkeypatch):
+async def test_service_api_key_cannot_bypass_auditor_read_only_role():
     class _Repository:
         async def get_by_hash(self, _key_hash):
             return SimpleNamespace(owner_user_id="auditor-1")
@@ -88,10 +90,14 @@ async def test_service_api_key_cannot_bypass_auditor_read_only_role(monkeypatch)
         async def __aexit__(self, *_args):
             return False
 
-    monkeypatch.setattr(
-        "app.interfaces.auth_dependencies.get_uow",
-        lambda: _Uow(),
-    )
+    class _Hasher:
+        def hash(self, plaintext: str) -> str:
+            assert plaintext == "sk-existing-auditor-key"
+            return "stored-hash"
 
     with pytest.raises(ForbiddenError):
-        await require_service_api_key(x_api_key="sk-existing-auditor-key")
+        await require_service_api_key(
+            x_api_key="sk-existing-auditor-key",
+            hasher=_Hasher(),
+            uow_factory=_Uow,
+        )

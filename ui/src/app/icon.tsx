@@ -8,22 +8,20 @@ const CITADEL_PATH =
 
 export default function Icon() {
   return new ImageResponse(
-    (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "transparent",
-        }}
-      >
-        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-          <path d={CITADEL_PATH} fill="#1e293b" fillRule="evenodd" />
-        </svg>
-      </div>
-    ),
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "transparent",
+      }}
+    >
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+        <path d={CITADEL_PATH} fill="#1e293b" fillRule="evenodd" />
+      </svg>
+    </div>,
     { ...size },
   );
 }

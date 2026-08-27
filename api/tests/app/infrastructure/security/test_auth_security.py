@@ -1,13 +1,13 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-import pytest
-import jwt
-from datetime import datetime
+from datetime import UTC, datetime
 
-from app.domain.errors import UnauthorizedError
+import jwt
+import pytest
+
 from app.application.services.auth_service import AuthService
+from app.domain.errors import UnauthorizedError
 from app.domain.models.refresh_token import RefreshToken
 from app.domain.models.user import User, UserStatus
+from app.infrastructure.adapters.security_ports import JwtTokenCodecAdapter
 from app.infrastructure.security.jwt_service import JwtService
 from app.infrastructure.security.password_hasher import PasswordHasher
 from app.infrastructure.security.service_api_key import ServiceApiKeyHasher
@@ -35,7 +35,11 @@ def test_password_hasher_verifies_existing_argon2id_hash():
 
 
 def test_jwt_service_issues_typed_tokens_with_version():
-    service = JwtService(secret="test-secret", access_ttl_seconds=60, refresh_ttl_seconds=120)
+    service = JwtService(
+        secret="test-jwt-secret-at-least-32-characters",
+        access_ttl_seconds=60,
+        refresh_ttl_seconds=120,
+    )
 
     access = service.issue_access_token(user_id="u1", role="admin", token_version=3)
     refresh = service.issue_refresh_token(user_id="u1", token_version=3)
@@ -96,24 +100,35 @@ class _FakeUow:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
+    async def commit(self) -> None:
+        return None
+
 
 @pytest.mark.asyncio
 async def test_auth_service_refresh_consumes_token_once():
-    jwt_service = JwtService(secret="test-secret", access_ttl_seconds=60, refresh_ttl_seconds=120)
+    jwt_service = JwtService(
+        secret="test-jwt-secret-at-least-32-characters",
+        access_ttl_seconds=60,
+        refresh_ttl_seconds=120,
+    )
     user = User(id="user-1", email="u@example.com", username="u", status=UserStatus.ACTIVE)
-    refresh_token = jwt_service.issue_refresh_token(user_id=user.id, token_version=user.token_version)
-    claims = jwt.decode(refresh_token, jwt_service.secret, algorithms=["HS256"], options={"verify_signature": False})
+    refresh_token = jwt_service.issue_refresh_token(
+        user_id=user.id, token_version=user.token_version
+    )
+    claims = jwt.decode(
+        refresh_token, jwt_service.secret, algorithms=["HS256"], options={"verify_signature": False}
+    )
     stored = RefreshToken(
         user_id=user.id,
         token_hash=jwt_service.hash_token(refresh_token),
-        expires_at=datetime.fromtimestamp(claims["exp"]),
+        expires_at=datetime.fromtimestamp(claims["exp"], UTC),
     )
     refresh_repo = _FakeRefreshRepo(stored)
     user_repo = _FakeUserRepo(user)
     service = AuthService(
         uow_factory=lambda: _FakeUow(refresh_repo, user_repo),
         password_hasher=PasswordHasher(),
-        jwt_service=jwt_service,
+        token_codec=JwtTokenCodecAdapter(jwt_service),
     )
 
     refreshed_user, tokens = await service.refresh(refresh_token)

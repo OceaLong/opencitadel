@@ -13,6 +13,7 @@ argument (PatrolRemediationService.execute() always passes the persisted
 PatrolRemediation.idempotency_key, never an LLM- or batch-executor-derived
 value).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,27 +22,28 @@ from typing import Any
 
 from app.domain.external.connection_pool import MCPConnectionPoolPort
 from app.domain.models.integration_server import MCPServerRecord
-from app.domain.utils.integration_config_builder import mcp_records_to_config
-
+from app.domain.runtime_policy import ActivityExecutionPolicy
+from app.domain.utils.integration_runtime_builder import mcp_records_to_runtime
 
 # The bounded write-action surface registered by ops-actuator/server.py.
 # get_capabilities is intentionally excluded here (see get_capabilities()).
 ACTUATOR_ACTION_TOOLS = frozenset({"restart_workload", "scale_workload", "rollback_workload"})
-
-# Well-known MCPServerRecord.name an administrator must register the
-# deployed ops-actuator MCP endpoint under. There is exactly one Actuator
-# per platform deployment (unlike the Collector, which is registered
-# per-Pack), so PatrolRemediationService resolves it by this fixed name via
-# uow.mcp_server.get_by_name(...) rather than through a Pack-owned id.
-ACTUATOR_MCP_SERVER_NAME = "ops-actuator"
 
 
 class MCPActuatorClient:
     def __init__(self, connection_pool: MCPConnectionPoolPort) -> None:
         self._connection_pool = connection_pool
 
-    async def _connect(self, server: MCPServerRecord):
-        manager = await self._connection_pool.acquire(mcp_records_to_config([server]))
+    async def _connect(
+        self,
+        server: MCPServerRecord,
+        *,
+        policy: ActivityExecutionPolicy,
+    ):
+        manager = await self._connection_pool.acquire(
+            mcp_records_to_runtime([server]),
+            policy=policy,
+        )
         if manager.connection_errors:
             raise ConnectionError(f"Actuator connection failed: {manager.connection_errors}")
         advertised = manager.tools.get(server.name, [])
@@ -62,22 +64,43 @@ class MCPActuatorClient:
         if isinstance(raw, dict):
             return raw
         if not isinstance(raw, str):
-            raise ValueError("Actuator returned a non-JSON response")
+            raise TypeError("Actuator returned a non-JSON response")
         decoded = json.loads(raw)
         if not isinstance(decoded, dict):
-            raise ValueError("Actuator returned a non-object response")
+            raise TypeError("Actuator returned a non-object response")
         return decoded
 
-    async def _invoke(self, manager, names: dict[str, str], tool: str, arguments: dict[str, Any], timeout: int) -> dict[str, Any]:
+    async def _invoke(
+        self,
+        manager,
+        names: dict[str, str],
+        tool: str,
+        arguments: dict[str, Any],
+        timeout_seconds: int,
+    ) -> dict[str, Any]:
         canonical = names.get(tool)
         if canonical is None:
             raise ValueError(f"Actuator does not advertise {tool}")
-        result = await asyncio.wait_for(manager.invoke(canonical, arguments), timeout=timeout)
+        result = await asyncio.wait_for(
+            manager.invoke(canonical, arguments), timeout=timeout_seconds
+        )
         return self._decode(result)
 
-    async def get_capabilities(self, server: MCPServerRecord, *, timeout: int = 15) -> dict[str, Any]:
-        manager, names = await self._connect(server)
-        return await self._invoke(manager, names, "get_capabilities", {}, timeout=timeout)
+    async def get_capabilities(
+        self,
+        server: MCPServerRecord,
+        *,
+        policy: ActivityExecutionPolicy,
+        timeout_seconds: int = 15,
+    ) -> dict[str, Any]:
+        manager, names = await self._connect(server, policy=policy)
+        return await self._invoke(
+            manager,
+            names,
+            "get_capabilities",
+            {},
+            timeout_seconds=timeout_seconds,
+        )
 
     async def execute_action(
         self,
@@ -85,7 +108,8 @@ class MCPActuatorClient:
         tool: str,
         arguments: dict[str, Any],
         *,
-        timeout: int = 30,
+        policy: ActivityExecutionPolicy,
+        timeout_seconds: int = 30,
     ) -> dict[str, Any]:
         """Invoke one of the three registered write actions exactly once.
 
@@ -96,5 +120,11 @@ class MCPActuatorClient:
         """
         if tool not in ACTUATOR_ACTION_TOOLS:
             raise ValueError(f"unsupported actuator action {tool!r}")
-        manager, names = await self._connect(server)
-        return await self._invoke(manager, names, tool, arguments, timeout=timeout)
+        manager, names = await self._connect(server, policy=policy)
+        return await self._invoke(
+            manager,
+            names,
+            tool,
+            arguments,
+            timeout_seconds=timeout_seconds,
+        )

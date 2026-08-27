@@ -1,10 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
 import os.path
 import uuid
-from datetime import datetime
-from typing import BinaryIO, Callable, Tuple
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import BinaryIO
 
 from starlette.concurrency import run_in_threadpool
 
@@ -20,10 +19,10 @@ class MinioFileStorage(FileStorage):
     """基于 MinIO 的文件存储实现。"""
 
     def __init__(
-            self,
-            bucket: str,
-            minio: Minio,
-            uow_factory: Callable[[], IUnitOfWork],
+        self,
+        bucket: str,
+        minio: Minio,
+        uow_factory: Callable[[], IUnitOfWork],
     ) -> None:
         self.bucket = bucket
         self.minio = minio
@@ -36,7 +35,7 @@ class MinioFileStorage(FileStorage):
             if not file_extension:
                 file_extension = ""
 
-            date_path = datetime.now().strftime("%Y/%m/%d")
+            date_path = datetime.now(UTC).strftime("%Y/%m/%d")
             object_key = f"{date_path}/{file_id}{file_extension}"
 
             length = payload.size if payload.size is not None else -1
@@ -64,13 +63,14 @@ class MinioFileStorage(FileStorage):
             )
             async with self._uow_factory() as uow:
                 await uow.file.save(file)
+                await uow.commit()
 
             return file
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.error("上传文件[%s]失败: %s", payload.filename, exc)
             raise
 
-    async def download_file(self, file_id: str) -> Tuple[BinaryIO, File]:
+    async def download_file(self, file_id: str) -> tuple[BinaryIO, File]:
         try:
             async with self._uow_factory() as uow:
                 file = await uow.file.get_by_id(file_id)
@@ -83,6 +83,17 @@ class MinioFileStorage(FileStorage):
                 file.key,
             )
             return response, file
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.error("下载文件[%s]失败: %s", file_id, exc)
             raise
+
+    async def presigned_get_url(
+        self,
+        key: str,
+        *,
+        expires_seconds: int,
+    ) -> str | None:
+        return await self.minio.presigned_get_url(
+            key,
+            expires_seconds=expires_seconds,
+        )

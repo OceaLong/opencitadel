@@ -2,7 +2,7 @@ import { cookies, headers } from "next/headers";
 import { getRequestConfig } from "next-intl/server";
 
 import { detectLocaleFromLanguageTag } from "./detect-locale";
-import { type Locale,LOCALE_COOKIE_NAME, routing } from "./routing";
+import { type Locale, LOCALE_COOKIE_NAME, routing } from "./routing";
 
 export default getRequestConfig(async () => {
   const store = await cookies();

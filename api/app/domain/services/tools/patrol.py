@@ -1,13 +1,20 @@
 """Internal idempotent tool used only by Patrol sessions."""
+
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from app.domain.models.patrol import PatrolObservationSubmission
-from app.domain.models.tool_policy import ApprovalMode, ToolCapability, ToolEffect, ToolExecutionPolicy, ToolIdempotency
+from app.domain.models.tool_policy import (
+    ApprovalMode,
+    ToolCapability,
+    ToolEffect,
+    ToolExecutionPolicy,
+    ToolIdempotency,
+)
 from app.domain.models.tool_result import ToolResult
 from app.domain.services.tools.base import BaseTool, tool
-
 
 FinalizePatrolFn = Callable[..., Awaitable[dict[str, Any]]]
 PATROL_SUBMIT_POLICY = ToolExecutionPolicy(
@@ -54,6 +61,6 @@ class PatrolTool(BaseTool):
                 collector_capability_hash=collector_capability_hash,
                 submissions=[PatrolObservationSubmission.model_validate(item) for item in results],
             )
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             return ToolResult(success=False, message=str(exc))
         return ToolResult(success=True, data=data, message="Patrol results finalized")

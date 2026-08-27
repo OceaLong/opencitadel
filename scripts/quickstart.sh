@@ -32,7 +32,7 @@ require_cmd() {
 
 wait_for_container_health() {
   local container="$1"
-  for i in $(seq 1 60); do
+  for _ in $(seq 1 60); do
     local status
     status="$(docker inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null || echo "unknown")"
     [[ "$status" == "healthy" ]] && return 0
@@ -95,10 +95,11 @@ if [[ ! -f .env ]]; then
   fi
 
   warn "Edit .env and set BOOTSTRAP_ADMIN_PASSWORD before continuing."
-  warn "After first login, add your LLM API key in Settings → Models."
+  warn "After first login, configure an endpoint, model, and chat binding in Settings → Inference."
   warn "Quickstart defaults: COMPOSE_PROFILES=local + STORAGE_PROVIDER=minio (see .env for cloud COS)."
   if [[ "$DEMO_MODE" -eq 1 ]]; then
-    warn "To auto-register a demo LLM instead, set DEMO_LLM_BASE_URL/API_KEY/MODEL in .env now —"
+    warn "To auto-register demo inference, set DEMO_INFERENCE_BASE_URL, DEMO_INFERENCE_CREDENTIAL,"
+    warn "DEMO_INFERENCE_MODEL, and DEMO_INFERENCE_PROVIDER in .env now —"
     warn "this pause is the only time before containers start (compose reads .env at startup)."
   fi
   if [[ -n "${QUICKSTART_NONINTERACTIVE:-}" ]] || [[ ! -t 0 ]]; then
@@ -191,7 +192,7 @@ info "Building and starting OpenCitadel (this may take several minutes on first 
 "${COMPOSE_CMD[@]}" up -d --build
 
 info "Waiting for API health ..."
-for i in $(seq 1 60); do
+for _ in $(seq 1 60); do
   if curl -sf "http://localhost:${NGINX_PORT:-8088}/api/status" >/dev/null 2>&1; then
     break
   fi
@@ -232,15 +233,15 @@ if [[ "$DEMO_MODE" -eq 1 ]]; then
   echo "See the 'python -m app.seed_demo' output above for the full walkthrough, including"
   echo "why the demo Finding comes from the demo-console-health check specifically."
 else
-  echo "  1. Log in and open Settings → Models"
-  echo "  2. Add an OpenAI / Anthropic / compatible API key"
+  echo "  1. Log in and open Settings → Inference"
+  echo "  2. Add an endpoint and model, then bind the chat purpose"
   echo "  3. Start a new Agent session from the home page"
 fi
 echo ""
 echo "For cloud object storage instead of bundled MinIO:"
 echo "  Set COMPOSE_PROFILES= (empty) and STORAGE_PROVIDER=cos + COS_* in .env, then re-run"
 echo ""
-echo "For fully offline LLM (Ollama on host):"
-echo "  Keep COMPOSE_PROFILES=local STORAGE_PROVIDER=minio; install Ollama and add endpoint in Settings"
+echo "For fully offline inference (Ollama on host):"
+echo "  Keep COMPOSE_PROFILES=local STORAGE_PROVIDER=minio; install Ollama and configure Settings → Inference"
 echo ""
-info "Logs: ${COMPOSE_CMD[*]} logs -f opencitadel-api opencitadel-worker"
+info "Logs: ${COMPOSE_CMD[*]} logs -f opencitadel-api opencitadel-execution-kernel"

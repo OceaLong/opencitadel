@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from types import SimpleNamespace
 
 import pytest
@@ -9,10 +7,10 @@ from app.domain.models.knowledge_base import (
     KnowledgeChunk,
 )
 from app.domain.models.scope import OwnerScope
-from app.infrastructure.repositories import (
-    db_knowledge_base_repository as knowledge_repository_module,
-)
 from app.infrastructure.repositories.db_knowledge_base_repository import DBKnowledgeBaseRepository
+from app.infrastructure.repositories.kb._shared import (
+    build_versioned_vector_search_statement,
+)
 
 
 class _RecordingSession:
@@ -60,18 +58,28 @@ async def test_save_chunks_batches_by_500_and_embedding_presence():
 
     # 1200 条带向量 -> 3 批；700 条无向量 -> 2 批
     assert len(session.calls) == 5
-    embed_calls = [c for c in session.calls if "::vector" in c[0]]
-    plain_calls = [c for c in session.calls if "::vector" not in c[0]]
+    embed_calls = [c for c in session.calls if "CAST(:embedding AS vector)" in c[0]]
+    plain_calls = [c for c in session.calls if "CAST(:embedding AS vector)" not in c[0]]
     assert [len(params) for _, params in embed_calls] == [500, 500, 200]
     assert [len(params) for _, params in plain_calls] == [500, 200]
     # executemany 参数为字典列表，且键完整
     first_params = embed_calls[0][1]
     assert isinstance(first_params, list)
     assert set(first_params[0].keys()) == {
-            "id", "kb_id", "doc_id", "parent_id", "level", "content",
-            "version_id", "segmented_content", "content_tsv", "page_no",
-            "heading_path", "ordinal", "embedding",
-        }
+        "id",
+        "kb_id",
+        "doc_id",
+        "parent_id",
+        "level",
+        "content",
+        "version_id",
+        "segmented_content",
+        "content_tsv",
+        "page_no",
+        "heading_path",
+        "ordinal",
+        "embedding",
+    }
 
 
 @pytest.mark.anyio
@@ -83,20 +91,52 @@ async def test_save_chunks_empty_is_noop():
 
 
 @pytest.mark.anyio
-async def test_delete_kb_removes_restricted_revision_chain_first():
+async def test_delete_kb_removes_index_and_restricted_revision_chain_first():
     session = _RecordingSession()
     repo = DBKnowledgeBaseRepository(db_session=session)
 
     await repo.delete_kb("kb1")
 
     statements = [sql for sql, _params in session.calls]
-    assert len(statements) == 3
-    assert "DELETE FROM knowledge_base_version_documents" in statements[0]
-    assert "knowledge_base_version_documents.knowledge_base_id" in statements[0]
-    assert "DELETE FROM knowledge_document_revisions" in statements[1]
-    assert "SELECT knowledge_documents.id" in statements[1]
-    assert "knowledge_documents.kb_id" in statements[1]
-    assert "DELETE FROM knowledge_bases" in statements[2]
+    assert len(statements) == 7
+    assert "DELETE FROM knowledge_relations" in statements[0]
+    assert "DELETE FROM knowledge_entity_refs" in statements[1]
+    assert "DELETE FROM knowledge_entities" in statements[2]
+    assert "DELETE FROM knowledge_chunks" in statements[3]
+    assert "DELETE FROM knowledge_base_version_documents" in statements[4]
+    assert "knowledge_base_version_documents.knowledge_base_id" in statements[4]
+    assert "DELETE FROM knowledge_document_revisions" in statements[5]
+    assert "SELECT knowledge_documents.id" in statements[5]
+    assert "knowledge_documents.kb_id" in statements[5]
+    assert "DELETE FROM knowledge_bases" in statements[6]
+
+
+@pytest.mark.anyio
+async def test_delete_document_removes_index_manifest_and_revision_chain_first():
+    session = _RecordingSession(
+        results=[
+            _FakeResult(),
+            _FakeResult(scalars_all=[]),
+            _FakeResult(),
+            _FakeResult(),
+            _FakeResult(),
+            _FakeResult(),
+            _FakeResult(),
+        ]
+    )
+    repo = DBKnowledgeBaseRepository(db_session=session)
+
+    await repo.delete_document("d1")
+
+    statements = [sql for sql, _params in session.calls]
+    assert len(statements) == 7
+    assert "DELETE FROM knowledge_relations" in statements[0]
+    assert "SELECT DISTINCT knowledge_entity_refs.entity_id" in statements[1]
+    assert "DELETE FROM knowledge_entity_refs" in statements[2]
+    assert "DELETE FROM knowledge_chunks" in statements[3]
+    assert "DELETE FROM knowledge_base_version_documents" in statements[4]
+    assert "DELETE FROM knowledge_document_revisions" in statements[5]
+    assert "DELETE FROM knowledge_documents" in statements[6]
 
 
 @pytest.mark.anyio
@@ -150,9 +190,7 @@ async def test_get_kb_for_update_uses_owner_scoped_row_lock():
         owner_user_id="user1",
     )
     record = SimpleNamespace(to_domain=lambda: expected)
-    session = _RecordingSession(
-        results=[_FakeResult(scalar_one=record)]
-    )
+    session = _RecordingSession(results=[_FakeResult(scalar_one=record)])
     repo = DBKnowledgeBaseRepository(db_session=session)
 
     result = await repo.get_kb_for_update(
@@ -165,16 +203,17 @@ async def test_get_kb_for_update_uses_owner_scoped_row_lock():
     assert "FOR UPDATE" in sql
     assert "owner_user_id" in sql
 
+
 @pytest.mark.anyio
 async def test_purge_documents_deletes_zero_ref_entities_from_candidates_only():
     # execute 依次: 删关系 -> 查候选 entity_id -> 删引用 -> 删归零实体 -> 删 chunks
     session = _RecordingSession(
         results=[
-            _FakeResult(),                                 # delete relations
-            _FakeResult(scalars_all=["e1", "e2"]),         # select candidate entity ids
-            _FakeResult(),                                 # delete refs
-            _FakeResult(),                                 # delete zero-ref entities
-            _FakeResult(),                                 # delete chunks
+            _FakeResult(),  # delete relations
+            _FakeResult(scalars_all=["e1", "e2"]),  # select candidate entity ids
+            _FakeResult(),  # delete refs
+            _FakeResult(),  # delete zero-ref entities
+            _FakeResult(),  # delete chunks
         ]
     )
     repo = DBKnowledgeBaseRepository(db_session=session)
@@ -193,10 +232,10 @@ async def test_purge_documents_deletes_zero_ref_entities_from_candidates_only():
 async def test_purge_documents_without_candidates_skips_entity_delete():
     session = _RecordingSession(
         results=[
-            _FakeResult(),                       # delete relations
-            _FakeResult(scalars_all=[]),         # no candidates
-            _FakeResult(),                       # delete refs
-            _FakeResult(),                       # delete chunks
+            _FakeResult(),  # delete relations
+            _FakeResult(scalars_all=[]),  # no candidates
+            _FakeResult(),  # delete refs
+            _FakeResult(),  # delete chunks
         ]
     )
     repo = DBKnowledgeBaseRepository(db_session=session)
@@ -230,9 +269,7 @@ async def test_versioned_bm25_sql_closes_version_manifest_and_revision():
     session = _RecordingSession(results=[_FakeResult(rows=[])])
     repo = DBKnowledgeBaseRepository(db_session=session)
 
-    assert await repo.bm25_search_chunks_for_version(
-        "kb1", "kbv1", "release", limit=7
-    ) == []
+    assert await repo.bm25_search_chunks_for_version("kb1", "kbv1", "release", limit=7) == []
 
     sql, params = session.calls[0]
     assert "c.version_id = :version_id" in sql
@@ -263,50 +300,38 @@ async def test_versioned_vector_sql_rejects_empty_or_malformed_embedding(
     repo = DBKnowledgeBaseRepository(db_session=session)
 
     with pytest.raises(ValueError, match="embedding"):
-        await repo.vector_search_chunks_for_version(
-            "kb1", "kbv1", embedding, limit=7
-        )
+        await repo.vector_search_chunks_for_version("kb1", "kbv1", embedding, limit=7)
 
     assert session.calls == []
 
 
 @pytest.mark.anyio
 async def test_versioned_vector_sql_enables_iterative_scan_before_query():
-    session = _RecordingSession(
-        results=[_FakeResult(), _FakeResult(rows=[])]
-    )
+    session = _RecordingSession(results=[_FakeResult(), _FakeResult(rows=[])])
     repo = DBKnowledgeBaseRepository(db_session=session)
 
-    assert await repo.vector_search_chunks_for_version(
-        "kb1",
-        "kbv1",
-        [0.0] * 1536,
-        limit=10,
-    ) == []
-
-    assert session.calls[0][0].strip() == (
-        "SET LOCAL hnsw.iterative_scan = 'strict_order'"
+    assert (
+        await repo.vector_search_chunks_for_version(
+            "kb1",
+            "kbv1",
+            [0.0] * 1536,
+            limit=10,
+        )
+        == []
     )
+
+    assert session.calls[0][0].strip() == ("SET LOCAL hnsw.iterative_scan = 'strict_order'")
     query_sql, query_params = session.calls[1]
     assert "c.version_id = :version_id" in query_sql
-    assert "ORDER BY c.embedding <=> :query::vector" in query_sql
+    assert "ORDER BY c.embedding <=> CAST(:query AS vector)" in query_sql
     assert query_params["version_id"] == "kbv1"
 
 
 def test_versioned_vector_sql_and_explain_share_production_statement():
-    builder = getattr(
-        knowledge_repository_module,
-        "build_versioned_vector_search_statement",
-        None,
-    )
-    assert callable(builder)
-
-    production = str(builder())
-    explained = str(builder(explain=True))
+    production = str(build_versioned_vector_search_statement())
+    explained = str(build_versioned_vector_search_statement(explain=True))
     assert production in explained
-    assert explained.lstrip().startswith(
-        "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)"
-    )
+    assert explained.lstrip().startswith("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)")
     for predicate in (
         "c.kb_id = :kb_id",
         "c.version_id = :version_id",

@@ -1,27 +1,19 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import select, delete, update, func
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import TypeAdapter
 
 from app.domain.models.codebase import SessionMode
-from app.domain.models.event import BaseEvent, Event, SessionStatusEvent
-from app.domain.models.event_upgrader import upgrade_event_payload
 from app.domain.models.file import File
-from app.domain.models.memory import Memory
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.session import Session, SessionStatus
-from app.domain.external.session_list_notifier import NoopSessionListNotifier, SessionListNotifierPort
 from app.domain.repositories.session_repository import SessionRepository
-from app.infrastructure.models import (
-    SessionAgentMemoryModel,
-    SessionEventModel,
+from app.infrastructure.models.session import SessionModel
+from app.infrastructure.models.session_file_attachment import (
     SessionFileAttachmentModel,
-    SessionModel,
+)
+from app.infrastructure.models.session_resource_binding import (
     SessionResourceBindingORM,
 )
 
@@ -29,34 +21,33 @@ from app.infrastructure.models import (
 class DBSessionRepository(SessionRepository):
     """基于Postgres数据库的会话仓库"""
 
-    def __init__(
-            self,
-            db_session: AsyncSession,
-            session_list_notifier: Optional[SessionListNotifierPort] = None,
-    ) -> None:
+    def __init__(self, db_session: AsyncSession) -> None:
         """构造函数，完成数据仓库的初始化"""
         self.db_session = db_session
-        self._session_list_notifier = session_list_notifier or NoopSessionListNotifier()
 
-    def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
+    def _apply_scope(self, stmt, scope: OwnerScope | None):
         if scope is None:
             return stmt
         if scope.type == OwnerScopeType.TEAM:
             return stmt.where(SessionModel.team_id == scope.team_id)
-        return stmt.where(SessionModel.owner_user_id == scope.user_id, SessionModel.team_id.is_(None))
+        return stmt.where(
+            SessionModel.owner_user_id == scope.user_id, SessionModel.team_id.is_(None)
+        )
 
     async def count_created_between(
-            self,
-            start_at: Optional[datetime] = None,
-            end_at: Optional[datetime] = None,
+        self,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
     ) -> int:
         """Count *Agent-mode* sessions created within the window. Ask-mode
         (quick Q&A, no planning/tool-gating) sessions are excluded because
         this method backs compliance's ``agent_session_count`` -- it must
-        answer "were there Agent sessions whose governance gates could have
+        answer "were there Agent sessions whose formal approvals could have
         fired", not "was the product used at all"."""
-        stmt = select(func.count()).select_from(SessionModel).where(
-            SessionModel.mode == SessionMode.AGENT.value
+        stmt = (
+            select(func.count())
+            .select_from(SessionModel)
+            .where(SessionModel.mode == SessionMode.AGENT.value)
         )
         if start_at:
             stmt = stmt.where(SessionModel.created_at >= start_at)
@@ -65,18 +56,7 @@ class DBSessionRepository(SessionRepository):
         result = await self.db_session.execute(stmt)
         return int(result.scalar_one() or 0)
 
-    async def _load_memories(self, session_id: str) -> Dict[str, Memory]:
-        stmt = select(SessionAgentMemoryModel).where(
-            SessionAgentMemoryModel.session_id == session_id,
-        )
-        result = await self.db_session.execute(stmt)
-        records = result.scalars().all()
-        return {
-            record.agent_name: Memory(**(record.memory_data or {"messages": []}))
-            for record in records
-        }
-
-    async def _load_files(self, session_id: str) -> List[File]:
+    async def _load_files(self, session_id: str) -> list[File]:
         stmt = (
             select(SessionFileAttachmentModel)
             .where(SessionFileAttachmentModel.session_id == session_id)
@@ -99,28 +79,21 @@ class DBSessionRepository(SessionRepository):
 
     async def _session_from_record(self, record: SessionModel) -> Session:
         session = record.to_domain()
-        session.memories = await self._load_memories(record.id)
         session.files = await self._load_files(record.id)
-        session.resource_bindings = await self._load_resource_bindings(
-            record.id
-        )
+        session.resource_bindings = await self._load_resource_bindings(record.id)
         return session
 
     async def _load_resource_bindings(
         self,
         session_id: str,
     ):
-        return (
-            await self._load_resource_bindings_for_sessions([session_id])
-        ).get(session_id, [])
+        return (await self._load_resource_bindings_for_sessions([session_id])).get(session_id, [])
 
     async def _load_resource_bindings_for_sessions(
         self,
-        session_ids: List[str],
-    ) -> Dict[str, list]:
-        bindings_by_session = {
-            session_id: [] for session_id in session_ids
-        }
+        session_ids: list[str],
+    ) -> dict[str, list]:
+        bindings_by_session = {session_id: [] for session_id in session_ids}
         if not session_ids:
             return bindings_by_session
         result = await self.db_session.execute(
@@ -135,31 +108,10 @@ class DBSessionRepository(SessionRepository):
             )
         )
         for record in result.scalars().all():
-            bindings_by_session[record.session_id].append(
-                record.to_domain().to_projection()
-            )
+            bindings_by_session[record.session_id].append(record.to_domain().to_projection())
         return bindings_by_session
 
-    async def _persist_memories(self, session_id: str, memories: Dict[str, Memory]) -> None:
-        if not memories:
-            return
-        for agent_name, memory in memories.items():
-            memory_data = memory.model_dump(mode="json")
-            stmt = (
-                pg_insert(SessionAgentMemoryModel)
-                .values(
-                    session_id=session_id,
-                    agent_name=agent_name,
-                    memory_data=memory_data,
-                )
-                .on_conflict_do_update(
-                    index_elements=["session_id", "agent_name"],
-                    set_={"memory_data": memory_data},
-                )
-            )
-            await self.db_session.execute(stmt)
-
-    async def _persist_files(self, session_id: str, files: List[File]) -> None:
+    async def _persist_files(self, session_id: str, files: list[File]) -> None:
         if not files:
             return
         for file in files:
@@ -200,18 +152,23 @@ class DBSessionRepository(SessionRepository):
         if not record:
             record = SessionModel.from_domain(session)
             self.db_session.add(record)
-            await self._persist_memories(session.id, session.memories)
             await self._persist_files(session.id, session.files)
             await self.db_session.flush()
             return
 
-        # 3.会话存在则仅更新元数据（memories/files 由 save_memory/add_file 等专用路径维护）
+        # 3.会话存在则仅更新元数据（files 由 add_file 专用路径维护）
         record.update_from_domain(session)
 
-    async def get_all(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[Session]:
+    async def get_all(
+        self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
+    ) -> list[Session]:
         """获取所有会话列表（列表视图不加载 memories/files，避免 N+1）"""
         stmt = self._apply_scope(select(SessionModel), scope)
-        stmt = stmt.order_by(SessionModel.latest_message_at.desc().nullslast()).offset(max(offset, 0)).limit(max(1, min(limit, 500)))
+        stmt = (
+            stmt.order_by(SessionModel.latest_message_at.desc().nullslast())
+            .offset(max(offset, 0))
+            .limit(max(1, min(limit, 500)))
+        )
         result = await self.db_session.execute(stmt)
         records = result.scalars().all()
         bindings = await self._load_resource_bindings_for_sessions(
@@ -226,55 +183,28 @@ class DBSessionRepository(SessionRepository):
         result = await self.db_session.execute(select(func.count()).select_from(SessionModel))
         return int(result.scalar_one() or 0)
 
-    async def list_recoverable_running(
-            self,
-            limit: int = 100,
-            updated_before: Optional[datetime] = None,
-    ) -> List[Session]:
-        stmt = (
-            select(SessionModel)
-            .where(
-                SessionModel.status == SessionStatus.RUNNING.value,
-                SessionModel.task_id.is_not(None),
-                SessionModel.pending_phase.is_(None),
-            )
-            .order_by(SessionModel.updated_at.asc())
-            .limit(max(1, min(limit, 500)))
-        )
-        if updated_before is not None:
-            stmt = stmt.where(SessionModel.updated_at < updated_before)
-        result = await self.db_session.execute(stmt)
-        records = result.scalars().all()
-        bindings = await self._load_resource_bindings_for_sessions(
-            [record.id for record in records]
-        )
-        sessions = [record.to_domain() for record in records]
-        for session in sessions:
-            session.resource_bindings = bindings[session.id]
-        return sessions
-
     async def exists(self, session_id: str) -> bool:
         stmt = select(SessionModel.id).where(SessionModel.id == session_id).limit(1)
         result = await self.db_session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
-    async def get_metadata(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[Session]:
+    async def get_metadata(
+        self, session_id: str, scope: OwnerScope | None = None
+    ) -> Session | None:
         stmt = self._apply_scope(select(SessionModel).where(SessionModel.id == session_id), scope)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         if record is None:
             return None
         session = record.to_domain()
-        session.resource_bindings = await self._load_resource_bindings(
-            session.id
-        )
+        session.resource_bindings = await self._load_resource_bindings(session.id)
         return session
 
     async def lock_by_id(
         self,
         session_id: str,
-        scope: Optional[OwnerScope] = None,
-    ) -> Optional[Session]:
+        scope: OwnerScope | None = None,
+    ) -> Session | None:
         stmt = self._apply_scope(
             select(SessionModel).where(SessionModel.id == session_id),
             scope,
@@ -284,17 +214,17 @@ class DBSessionRepository(SessionRepository):
         if record is None:
             return None
         session = record.to_domain()
-        session.resource_bindings = await self._load_resource_bindings(
-            session.id
-        )
+        session.resource_bindings = await self._load_resource_bindings(session.id)
         return session
 
-    async def get_files(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[List[File]]:
+    async def get_files(
+        self, session_id: str, scope: OwnerScope | None = None
+    ) -> list[File] | None:
         if await self.get_metadata(session_id, scope=scope) is None:
             return None
         return await self._load_files(session_id)
 
-    async def get_by_id(self, session_id: str, scope: Optional[OwnerScope] = None) -> Optional[Session]:
+    async def get_by_id(self, session_id: str, scope: OwnerScope | None = None) -> Session | None:
         """根据id查询会话"""
         stmt = self._apply_scope(select(SessionModel).where(SessionModel.id == session_id), scope)
         result = await self.db_session.execute(stmt)
@@ -314,18 +244,16 @@ class DBSessionRepository(SessionRepository):
     async def update_title(self, session_id: str, title: str) -> None:
         """更新会话标题"""
         # 1.构建更新语句并执行
-        stmt = (
-            update(SessionModel)
-            .where(SessionModel.id == session_id)
-            .values(title=title)
-        )
+        stmt = update(SessionModel).where(SessionModel.id == session_id).values(title=title)
         result = await self.db_session.execute(stmt)
 
         # 2.检查是否更新成功
         if result.rowcount == 0:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
 
-    async def update_latest_message(self, session_id: str, message: str, timestamp: datetime) -> None:
+    async def update_latest_message(
+        self, session_id: str, message: str, timestamp: datetime
+    ) -> None:
         """更新会话最新消息"""
         # 1.构建更新语句并执行
         stmt = (
@@ -341,212 +269,6 @@ class DBSessionRepository(SessionRepository):
         # 2.检查是否更新成功
         if result.rowcount == 0:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
-
-        await self._session_list_notifier.notify_sessions_changed()
-
-    async def add_event(
-            self,
-            session_id: str,
-            event: BaseEvent,
-            event_data: Optional[Dict[str, Any]] = None,
-            seq: Optional[int] = None,
-    ) -> int:
-        """往会话中新增事件，返回全局 seq（与 SSE/分页游标一致）"""
-        exists_stmt = select(SessionModel.id).where(SessionModel.id == session_id)
-        exists = await self.db_session.scalar(exists_stmt)
-        if exists is None:
-            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
-
-        payload = dict(event_data or event.model_dump(mode="json"))
-        if seq is None:
-            from app.infrastructure.external.event_seq_allocator import allocate_event_seq
-            seq = await allocate_event_seq()
-        payload["id"] = str(seq)
-        event.id = str(seq)
-        record = SessionEventModel(
-            seq=seq,
-            session_id=session_id,
-            stream_id=payload.get("id"),
-            type=payload.get("type", event.type),
-            payload=payload,
-            created_at=event.created_at,
-        )
-        self.db_session.add(record)
-        await self.db_session.flush()
-        assigned_seq = int(record.seq)
-        event.id = str(assigned_seq)
-        return assigned_seq
-
-    async def add_events(self, session_id: str, events: List[BaseEvent]) -> None:
-        """批量新增事件"""
-        if not events:
-            return
-        payloads = [(event, event.model_dump(mode="json")) for event in events]
-        await self.add_event_payloads(session_id, payloads)
-
-    async def add_event_payloads(
-            self,
-            session_id: str,
-            payloads: List[Tuple[BaseEvent, Dict[str, Any]]],
-    ) -> None:
-        """批量新增已序列化事件"""
-        if not payloads:
-            return
-        exists_stmt = select(SessionModel.id).where(SessionModel.id == session_id)
-        exists = await self.db_session.scalar(exists_stmt)
-        if exists is None:
-            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
-
-        records = []
-        for event, event_data in payloads:
-            seq_value: Optional[int] = None
-            event_id = event_data.get("id")
-            if event_id is not None:
-                try:
-                    seq_value = int(str(event_id))
-                except (TypeError, ValueError):
-                    seq_value = None
-            if seq_value is None:
-                from app.infrastructure.external.event_seq_allocator import allocate_event_seq
-                seq_value = await allocate_event_seq()
-            event_data["id"] = str(seq_value)
-            event.id = str(seq_value)
-            records.append(
-                SessionEventModel(
-                    seq=seq_value,
-                    session_id=session_id,
-                    stream_id=str(seq_value),
-                    type=event_data.get("type", event.type),
-                    payload=event_data,
-                    created_at=event.created_at,
-                ),
-            )
-        self.db_session.add_all(records)
-        await self.db_session.flush()
-
-    async def claim_session_status_event(
-            self,
-            session_id: str,
-            event: SessionStatusEvent,
-            event_data: Dict[str, Any],
-    ) -> bool:
-        """Claim and persist a status under a row lock.
-
-        The session transition, epoch terminal latch, and append-only event
-        record are committed by the surrounding UoW as one transaction.
-        """
-        if not event.run_epoch_id:
-            raise ValueError("Session status event requires run_epoch_id")
-        seq_value = int(str(event_data["id"]))
-        session = await self.db_session.scalar(
-            select(SessionModel)
-            .where(SessionModel.id == session_id)
-            .with_for_update()
-        )
-        if session is None:
-            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
-
-        terminal_statuses = {"waiting", "completed", "cancelled", "failed"}
-        if event.status == "running":
-            if session.current_run_epoch_id == event.run_epoch_id:
-                return False
-            if (
-                session.current_run_epoch_seq is not None
-                and seq_value <= session.current_run_epoch_seq
-            ):
-                return False
-            session.current_run_epoch_id = event.run_epoch_id
-            session.current_run_epoch_seq = seq_value
-            session.current_run_terminal_status = None
-        elif event.status in terminal_statuses:
-            if (
-                session.current_run_epoch_id != event.run_epoch_id
-                or session.current_run_terminal_status is not None
-            ):
-                return False
-            session.current_run_terminal_status = event.status
-        else:
-            return False
-
-        payload = dict(event_data)
-        payload["id"] = str(seq_value)
-        event.id = str(seq_value)
-        session.status = event.status
-        self.db_session.add(
-            SessionEventModel(
-                seq=seq_value,
-                session_id=session_id,
-                stream_id=str(seq_value),
-                type=event.type,
-                payload=payload,
-                created_at=event.created_at,
-            )
-        )
-        await self.db_session.flush()
-        return True
-
-    async def list_events(
-            self,
-            session_id: str,
-            after: Optional[int] = None,
-            before: Optional[int] = None,
-            limit: int = 100,
-            latest: bool = False,
-    ) -> List[Tuple[int, BaseEvent]]:
-        """按游标分页获取会话事件（支持正向 after、反向 before、或最近 latest）"""
-        adapter = TypeAdapter(Event)
-
-        if latest:
-            stmt = (
-                select(SessionEventModel)
-                .where(SessionEventModel.session_id == session_id)
-                .order_by(SessionEventModel.seq.desc())
-                .limit(limit)
-            )
-            result = await self.db_session.execute(stmt)
-            records = list(reversed(result.scalars().all()))
-        elif before is not None:
-            stmt = (
-                select(SessionEventModel)
-                .where(
-                    SessionEventModel.session_id == session_id,
-                    SessionEventModel.seq < before,
-                )
-                .order_by(SessionEventModel.seq.desc())
-                .limit(limit)
-            )
-            result = await self.db_session.execute(stmt)
-            records = list(reversed(result.scalars().all()))
-        else:
-            stmt = (
-                select(SessionEventModel)
-                .where(SessionEventModel.session_id == session_id)
-                .order_by(SessionEventModel.seq.asc())
-                .limit(limit)
-            )
-            if after is not None:
-                stmt = stmt.where(SessionEventModel.seq > after)
-            result = await self.db_session.execute(stmt)
-            records = result.scalars().all()
-
-        events: List[Tuple[int, BaseEvent]] = []
-        for record in records:
-            event = adapter.validate_python(upgrade_event_payload(record.payload))
-            event.id = str(record.seq)
-            events.append((record.seq, event))
-        return events
-
-    async def has_events_before(self, session_id: str, seq: int) -> bool:
-        stmt = (
-            select(SessionEventModel.seq)
-            .where(
-                SessionEventModel.session_id == session_id,
-                SessionEventModel.seq < seq,
-            )
-            .limit(1)
-        )
-        result = await self.db_session.execute(stmt)
-        return result.scalar_one_or_none() is not None
 
     async def add_file(self, session_id: str, file: File) -> None:
         """往会话中新增文件"""
@@ -595,7 +317,7 @@ class DBSessionRepository(SessionRepository):
         )
         await self.db_session.execute(stmt)
 
-    async def get_file_by_path(self, session_id: str, filepath: str) -> Optional[File]:
+    async def get_file_by_path(self, session_id: str, filepath: str) -> File | None:
         """根据文件路径获取文件信息"""
         stmt = (
             select(SessionFileAttachmentModel)
@@ -618,15 +340,14 @@ class DBSessionRepository(SessionRepository):
         )
 
     async def update_session_config(
-            self,
-            session_id: str,
-            model_id: Optional[str] = None,
-            skill_id: Optional[str] = None,
-            thinking_enabled: Optional[bool] = None,
-            gate_profile: Optional[str] = None,
-            operator_domains: Optional[list] = None,
-            clear_model: bool = False,
-            clear_skill: bool = False,
+        self,
+        session_id: str,
+        model_id: str | None = None,
+        skill_id: str | None = None,
+        thinking_enabled: bool | None = None,
+        operator_domains: list | None = None,
+        clear_model: bool = False,
+        clear_skill: bool = False,
     ) -> None:
         values = {}
         if clear_model:
@@ -639,8 +360,6 @@ class DBSessionRepository(SessionRepository):
             values["skill_id"] = skill_id
         if thinking_enabled is not None:
             values["thinking_enabled"] = thinking_enabled
-        if gate_profile is not None:
-            values["gate_profile"] = gate_profile
         if operator_domains is not None:
             values["operator_domains"] = operator_domains
         if not values:
@@ -653,47 +372,12 @@ class DBSessionRepository(SessionRepository):
     async def update_status(self, session_id: str, status: SessionStatus) -> None:
         """更新会话状态"""
         # 1.构建更新语句并执行
-        stmt = (
-            update(SessionModel)
-            .where(SessionModel.id == session_id)
-            .values(status=status.value)
-        )
+        stmt = update(SessionModel).where(SessionModel.id == session_id).values(status=status.value)
         result = await self.db_session.execute(stmt)
 
         # 2.检查是否更新成功
         if result.rowcount == 0:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
-
-    async def set_pending_phase(self, session_id: str, phase: Optional[str]) -> None:
-        """更新会话等待恢复的内部阶段"""
-        stmt = (
-            update(SessionModel)
-            .where(SessionModel.id == session_id)
-            .values(pending_phase=phase)
-        )
-        result = await self.db_session.execute(stmt)
-        if result.rowcount == 0:
-            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
-
-    async def set_pending_metadata(self, session_id: str, metadata: Optional[Dict[str, Any]]) -> None:
-        """更新会话门控状态元数据"""
-        stmt = (
-            update(SessionModel)
-            .where(SessionModel.id == session_id)
-            .values(pending_metadata=metadata)
-        )
-        result = await self.db_session.execute(stmt)
-        if result.rowcount == 0:
-            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
-
-    async def get_pending_metadata(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """读取会话门控状态元数据"""
-        stmt = select(SessionModel.pending_metadata).where(SessionModel.id == session_id)
-        result = await self.db_session.execute(stmt)
-        row = result.scalar_one_or_none()
-        if row is None:
-            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
-        return row
 
     async def update_unread_message_count(self, session_id: str, count: int) -> None:
         """更新会话的未读消息数"""
@@ -734,8 +418,7 @@ class DBSessionRepository(SessionRepository):
             .values(
                 # 2.核心逻辑：GREATEST((当前值-1), 0)避免出现负数
                 unread_message_count=func.greatest(
-                    func.coalesce(SessionModel.unread_message_count, 0) - 1,
-                    0
+                    func.coalesce(SessionModel.unread_message_count, 0) - 1, 0
                 )
             )
         )
@@ -744,130 +427,3 @@ class DBSessionRepository(SessionRepository):
         # 3.检查是否更新成功
         if result.rowcount == 0:
             raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
-
-    async def save_memory(self, session_id: str, agent_name: str, memory: Memory) -> None:
-        """存储或者更新会话中的记忆(按 agent_name 单行 upsert)"""
-        exists_stmt = select(SessionModel.id).where(SessionModel.id == session_id)
-        exists_result = await self.db_session.execute(exists_stmt)
-        if exists_result.scalar_one_or_none() is None:
-            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
-
-        memory_data = memory.model_dump(mode="json")
-        stmt = (
-            pg_insert(SessionAgentMemoryModel)
-            .values(
-                session_id=session_id,
-                agent_name=agent_name,
-                memory_data=memory_data,
-            )
-            .on_conflict_do_update(
-                index_elements=["session_id", "agent_name"],
-                set_={"memory_data": memory_data},
-            )
-        )
-        await self.db_session.execute(stmt)
-
-    async def get_memory(self, session_id: str, agent_name: str) -> Memory:
-        """获取指定会话的agent记忆信息"""
-        stmt = (
-            select(SessionAgentMemoryModel.memory_data)
-            .where(SessionAgentMemoryModel.session_id == session_id)
-            .where(SessionAgentMemoryModel.agent_name == agent_name)
-        )
-        result = await self.db_session.execute(stmt)
-        memory_data = result.scalar_one_or_none()
-        if memory_data:
-            return Memory(**memory_data)
-        return Memory(messages=[])
-
-    async def get_max_event_seq(self, session_id: str) -> Optional[int]:
-        stmt = (
-            select(func.max(SessionEventModel.seq))
-            .where(SessionEventModel.session_id == session_id)
-        )
-        result = await self.db_session.execute(stmt)
-        return result.scalar_one_or_none()
-
-    async def get_event_seq_by_stream_id(self, session_id: str, stream_id: str) -> Optional[int]:
-        stmt = (
-            select(SessionEventModel.seq)
-            .where(SessionEventModel.session_id == session_id)
-            .where(SessionEventModel.stream_id == stream_id)
-            .order_by(SessionEventModel.seq.asc())
-            .limit(1)
-        )
-        result = await self.db_session.execute(stmt)
-        return result.scalar_one_or_none()
-
-    async def delete_events_from_seq(
-            self,
-            session_id: str,
-            from_seq: int,
-            inclusive: bool = True,
-    ) -> int:
-        condition = (
-            SessionEventModel.seq >= from_seq
-            if inclusive
-            else SessionEventModel.seq > from_seq
-        )
-        stmt = (
-            delete(SessionEventModel)
-            .where(SessionEventModel.session_id == session_id)
-            .where(condition)
-        )
-        result = await self.db_session.execute(stmt)
-        return result.rowcount or 0
-
-    async def restore_session_snapshot(
-            self,
-            session_id: str,
-            memories: Dict[str, Any],
-            files: List[Dict[str, Any]],
-            status: str,
-            pending_phase: Optional[str],
-    ) -> None:
-        stmt = (
-            update(SessionModel)
-            .where(SessionModel.id == session_id)
-            .values(
-                status=status,
-                pending_phase=pending_phase,
-            )
-        )
-        result = await self.db_session.execute(stmt)
-        if result.rowcount == 0:
-            raise ValueError(f"会话[{session_id}]不存在，请核实后重试")
-
-        await self.db_session.execute(
-            delete(SessionAgentMemoryModel).where(
-                SessionAgentMemoryModel.session_id == session_id,
-            ),
-        )
-        await self.db_session.execute(
-            delete(SessionFileAttachmentModel).where(
-                SessionFileAttachmentModel.session_id == session_id,
-            ),
-        )
-
-        for agent_name, memory_data in (memories or {}).items():
-            await self.db_session.execute(
-                pg_insert(SessionAgentMemoryModel).values(
-                    session_id=session_id,
-                    agent_name=agent_name,
-                    memory_data=memory_data,
-                ),
-            )
-
-        for file_data in files or []:
-            await self.db_session.execute(
-                pg_insert(SessionFileAttachmentModel).values(
-                    session_id=session_id,
-                    file_id=file_data.get("id") or file_data.get("file_id"),
-                    filename=file_data.get("filename", ""),
-                    filepath=file_data.get("filepath", ""),
-                    key=file_data.get("key", ""),
-                    extension=file_data.get("extension", ""),
-                    mime_type=file_data.get("mime_type", ""),
-                    size=int(file_data.get("size") or 0),
-                ),
-            )

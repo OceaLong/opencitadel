@@ -35,22 +35,21 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [Governance plane](architecture/governance-plane.md) | Effect contracts, capability narrowing, batch approval, terminal latch, evidence |
 | [Ops Patrol](architecture/ops-patrol.md) | Pack/Run lifecycle, Collector trust boundary, evidence, tenant isolation |
 | [Technical decisions](architecture/technical-decisions.md) | Technology choices and alternatives |
-| [LLM endpoints & models](architecture/llm-endpoints-and-models.md) | Endpoint/model split, encryption, UI flow |
-| [Frontend UI](architecture/frontend-ui.md) | Next.js shell, SSE projection, HITL components |
-| [Task recovery](architecture/task-recovery.md) | Recoverable retry, checkpoint restore, DLQ |
+| [Inference control plane](architecture/inference-control-plane.md) | Endpoint/model/binding ownership, capabilities, encryption, UI flow |
+| [Frontend UI](architecture/frontend-ui.md) | Next.js shell, public SSE projection, approval surfaces |
+| [Execution kernel](architecture/execution-kernel.md) | Commands, Event Store, Activities, recovery, projections, SSE, and privilege boundaries |
+| [Execution kernel cutover evidence](architecture/execution-kernel-cutover-evidence.md) | Greenfield schema boundary and reproducible acceptance results |
 | [Security model](architecture/security-model.md) | Trust boundaries, sandbox isolation, auth |
-| [Events](architecture/events.md) | Domain events, SSE contract, persistence, replay |
-| [Checkpoints & HITL](architecture/checkpoints-and-hitl.md) | Gate contracts, rollback, Web Operator, browser profile snapshots |
-| [Web Operator](architecture/web-operator.md) | Gate profiles, audit contract, OpsConsole demo |
+| [Web Operator](architecture/web-operator.md) | Exact-host boundary, per-invocation approval, evidence |
 | [Teams & workspaces](architecture/teams-and-workspaces.md) | Team roles, `X-Workspace-Id`, invitations |
 | [Admin, auditor & compliance](architecture/admin-auditor-compliance.md) | Platform admin, evidence chain, compliance reports |
 | [A2A & service API keys](architecture/integrations-a2a-service-keys.md) | Inbound/outbound A2A, `X-Api-Key` |
 | [Skills](architecture/skills.md) | Skill templates, runtime overrides, MCP/A2A filtering |
 | [Artifacts & sharing](architecture/artifacts-sharing.md) | Session artifacts, public share links |
 | [Automation & scheduler](architecture/automation-scheduler.md) | Cron/webhook jobs, leader election, notifications |
-| [Config source governance](architecture/config-source-governance.md) | AppConfig, config.yaml, env var boundaries |
+| [Config source governance](architecture/config-source-governance.md) | Deployment Settings, Runtime Policy, Integration boundaries |
+| [Runtime Policy control plane](architecture/runtime-policy-control-plane.md) | Immutable revisions, atomic head, CAS, fail-closed consumers |
 | [Model resilience](architecture/model-resilience.md) | Circuit breaking, fallback, SLO runbooks |
-| [Contract compatibility](architecture/contract-compatibility.md) | API/SSE compatibility window |
 | [Codebase reindex](architecture/codebase-reindex.md) | Vector degradation and recovery |
 | [Knowledge base ingestion](architecture/knowledge-base-ingestion.md) | Parse, OCR, GraphRAG, ingest failures |
 | [Architecture evolution](architecture/architecture-evolution.md) | Compose → K8s / external sandbox |
@@ -78,17 +77,10 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [SECURITY.md](../.github/SECURITY.md) | Vulnerability reporting |
 | [CODE_OF_CONDUCT.md](../.github/CODE_OF_CONDUCT.md) | Community standards |
 
-### Audits (historical)
-
-| Document | Scope |
-|----------|-------|
-| [2026-07-28 governance audit](superpowers/audits/2026-07-28-agent-kb-codebase-governance-audit.md) | Superseded audit snapshot (zh-only, see status banner) |
-| [2026-08-04 governance P0 re-verification](superpowers/audits/2026-08-04-governance-p0-reverification.md) | Re-verification of the 2026-07-28 audit's P0 findings (zh-only) |
-
 ## Maintenance rules
 
 - **One topic, one authoritative doc** — avoid duplicating policy across README and topic docs.
-- **Config source of truth** — `.env.example` for env vars; `api/config.yaml` for behavior config.
+- **Config source of truth** — `.env.example` for deployment inputs; PostgreSQL Runtime Policy revisions for live behavior.
 - **Bilingual pairs** — update both language files when changing a topic.
 - **Link convention** — English docs link to `*.md`; Chinese docs link to `*.zh-CN.md`.
 - **Index sync** — when adding a tutorial or architecture doc, update this index, the root [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) doc map, and add top-of-file language switch links in both language files.

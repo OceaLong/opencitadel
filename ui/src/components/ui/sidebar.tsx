@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { PanelLeftIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -152,6 +153,7 @@ function Sidebar({
   collapsible?: "offcanvas" | "icon" | "none";
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+  const t = useTranslations("common");
 
   if (collapsible === "none") {
     return (
@@ -184,8 +186,8 @@ function Sidebar({
           side={side}
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>Sidebar</SheetTitle>
-            <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+            <SheetTitle>{t("sidebar")}</SheetTitle>
+            <SheetDescription>{t("mobileSidebarDescription")}</SheetDescription>
           </SheetHeader>
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
@@ -243,6 +245,7 @@ function Sidebar({
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
   const { toggleSidebar } = useSidebar();
+  const t = useTranslations("common");
 
   return (
     <Button
@@ -258,7 +261,7 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       {...props}
     >
       <PanelLeftIcon />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">{t("toggleSidebar")}</span>
     </Button>
   );
 }

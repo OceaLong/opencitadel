@@ -3,7 +3,6 @@
 type SkillAgentParams = {
   max_iterations?: number;
   max_retries?: number;
-  max_search_results?: number;
   temperature_override?: number;
 };
 
@@ -23,7 +22,6 @@ export type Skill = {
   examples: string[];
   is_builtin: boolean;
   enabled: boolean;
-  auto_recommend?: boolean;
   visibility?: "global" | "private";
   owner_user_id?: string | null;
   team_id?: string | null;
@@ -56,5 +54,4 @@ export type CreateSkillParams = {
   agent_params?: SkillAgentParams;
   examples?: string[];
   enabled?: boolean;
-  auto_recommend?: boolean;
 };

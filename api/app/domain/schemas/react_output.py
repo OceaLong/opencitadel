@@ -1,8 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Strict Pydantic schemas for ReAct structured outputs."""
+
 import json
-from typing import Any, List
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -20,7 +19,7 @@ def _coerce_result_to_str(value: Any) -> str:
 class ReactStepSchema(BaseModel):
     success: bool
     result: str = ""
-    attachments: List[str] = Field(default_factory=list)
+    attachments: list[str] = Field(default_factory=list)
 
     model_config = {"extra": "ignore"}
 
@@ -32,6 +31,6 @@ class ReactStepSchema(BaseModel):
 
 class ReactSummarySchema(BaseModel):
     message: str
-    attachments: List[str] = Field(default_factory=list)
+    attachments: list[str] = Field(default_factory=list)
 
     model_config = {"extra": "ignore"}

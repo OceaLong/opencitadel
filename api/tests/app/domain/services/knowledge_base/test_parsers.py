@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import pytest
 
 from app.domain.services.knowledge_base.parsers import validate_pdf_integrity

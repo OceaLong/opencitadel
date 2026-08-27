@@ -1,20 +1,18 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""Opt-in PostgreSQL proof for binding lock and partial-unique semantics."""
+"""Canonical PostgreSQL proof for binding lock and partial-unique semantics."""
+
 import asyncio
-import os
 import uuid
 
 import pytest
 from sqlalchemy import delete, insert
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.application.services.resource_binding_service import (
     ResourceBindingService,
 )
 from app.domain.models.authorization import AuthorizationContext
-from app.domain.models.resource_governance import (
-    BuildState,
+from app.domain.models.resource_bindings import (
+    PublicationState,
     PublishedResourceVersion,
     ResourceKind,
 )
@@ -23,21 +21,18 @@ from app.domain.services.resource_version_provider import (
     ResourceVersionProviderRegistry,
 )
 from app.infrastructure.models.session import SessionModel
-from app.infrastructure.repositories.db_resource_governance_repository import (
-    DBResourceGovernanceRepository,
-)
+from app.infrastructure.models.user import UserORM
 from app.infrastructure.repositories.db_session_repository import (
     DBSessionRepository,
+)
+from app.infrastructure.repositories.db_session_resource_binding_repository import (
+    DBSessionResourceBindingRepository,
 )
 from app.infrastructure.security.db_authorization import (
     configure_session_authorization,
 )
-from core.config import get_settings
-
-
-RUN_POSTGRES_INTEGRATION = (
-    os.getenv("OPENCITADEL_RUN_POSTGRES_INTEGRATION") == "1"
-)
+from core.config import load_deployment_settings
+from tests.app.execution_test_support import authenticated_session_factory
 
 
 class _Provider:
@@ -57,7 +52,7 @@ class _Provider:
             resource_kind=self.kind,
             resource_id=resource_id,
             version_id=requested_version_id or self.version_id,
-            state=BuildState.SUCCEEDED,
+            state=PublicationState.READY,
             published=True,
         )
 
@@ -65,6 +60,7 @@ class _Provider:
 class _BindingUow:
     def __init__(self, session_factory) -> None:
         self._session_factory = session_factory
+        self._committed = False
 
     async def __aenter__(self):
         self.db_session = self._session_factory()
@@ -73,34 +69,37 @@ class _BindingUow:
             AuthorizationContext.system("resource-binding-postgres-test"),
         )
         self.session = DBSessionRepository(self.db_session)
-        self.resource_governance = DBResourceGovernanceRepository(
-            self.db_session
-        )
+        self.resource_bindings = DBSessionResourceBindingRepository(self.db_session)
         return self
+
+    async def commit(self) -> None:
+        await self.db_session.commit()
+        self._committed = True
+
+    async def rollback(self) -> None:
+        await self.db_session.rollback()
 
     async def __aexit__(self, exc_type, _exc, _tb):
         try:
-            if exc_type is None:
-                await self.db_session.commit()
-            else:
-                await self.db_session.rollback()
+            if not self._committed:
+                await self.rollback()
         finally:
             await self.db_session.close()
         return False
 
 
-@pytest.mark.skipif(
-    not RUN_POSTGRES_INTEGRATION,
-    reason="set OPENCITADEL_RUN_POSTGRES_INTEGRATION=1 for PostgreSQL proof",
-)
 @pytest.mark.asyncio
-async def test_postgres_initial_and_same_target_upgrade_races_keep_one_current(
-    _db_schema,
-):
-    engine = create_async_engine(get_settings().sqlalchemy_database_uri)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+@pytest.mark.usefixtures("postgres_integration")
+async def test_postgres_initial_and_same_target_upgrade_races_keep_one_current():
+    settings = load_deployment_settings()
+    engine = create_async_engine(settings.sqlalchemy_database_uri)
+    session_factory = authenticated_session_factory(
+        engine,
+        signing_secret=settings.session_secret,
+    )
+    user_id = f"binding-user-{uuid.uuid4()}"
     session_id = f"binding-session-{uuid.uuid4()}"
-    scope = OwnerScope.personal("u1")
+    scope = OwnerScope.personal(user_id)
     provider = _Provider()
     service = ResourceBindingService(
         uow_factory=lambda: _BindingUow(session_factory),
@@ -110,14 +109,19 @@ async def test_postgres_initial_and_same_target_upgrade_races_keep_one_current(
         async with session_factory() as setup:
             await configure_session_authorization(
                 setup,
-                AuthorizationContext.system(
-                    "resource-binding-postgres-setup"
-                ),
+                AuthorizationContext.system("resource-binding-postgres-setup"),
+            )
+            await setup.execute(
+                insert(UserORM).values(
+                    id=user_id,
+                    email=f"{user_id}@test.local",
+                    username=user_id,
+                )
             )
             await setup.execute(
                 insert(SessionModel).values(
                     id=session_id,
-                    owner_user_id="u1",
+                    owner_user_id=user_id,
                     status="pending",
                 )
             )
@@ -145,14 +149,14 @@ async def test_postgres_initial_and_same_target_upgrade_races_keep_one_current(
                 session_id,
                 ResourceKind.CODEBASE,
                 "cbv2",
-                actor_id="u1",
+                actor_id=user_id,
                 scope=scope,
             ),
             service.upgrade(
                 session_id,
                 ResourceKind.CODEBASE,
                 "cbv2",
-                actor_id="u1",
+                actor_id=user_id,
                 scope=scope,
             ),
         )
@@ -170,12 +174,9 @@ async def test_postgres_initial_and_same_target_upgrade_races_keep_one_current(
         async with session_factory() as cleanup:
             await configure_session_authorization(
                 cleanup,
-                AuthorizationContext.system(
-                    "resource-binding-postgres-cleanup"
-                ),
+                AuthorizationContext.system("resource-binding-postgres-cleanup"),
             )
-            await cleanup.execute(
-                delete(SessionModel).where(SessionModel.id == session_id)
-            )
+            await cleanup.execute(delete(SessionModel).where(SessionModel.id == session_id))
+            await cleanup.execute(delete(UserORM).where(UserORM.id == user_id))
             await cleanup.commit()
         await engine.dispose()

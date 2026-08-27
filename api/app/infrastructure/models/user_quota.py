@@ -1,25 +1,29 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.models.user_quota import UserQuota
+
 from .base import Base
 
 
 class UserQuotaORM(Base):
     __tablename__ = "user_quotas"
 
-    user_id: Mapped[str] = mapped_column(String(255), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    monthly_token_limit: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    daily_session_limit: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    max_concurrent_tasks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    max_storage_bytes: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)"))
+    user_id: Mapped[str] = mapped_column(
+        String(255), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    monthly_token_limit: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    daily_session_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_concurrent_tasks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_storage_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+    )
 
     @classmethod
     def from_domain(cls, quota: UserQuota) -> "UserQuotaORM":

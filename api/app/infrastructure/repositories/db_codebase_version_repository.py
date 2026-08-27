@@ -1,8 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """SQLAlchemy repository for immutable codebase analysis versions."""
-from datetime import datetime, timezone
-from typing import Optional
+
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +10,7 @@ from app.domain.models.codebase_version import (
     CodebaseVersion,
     CodebaseVersionState,
 )
-from app.domain.models.resource_governance import BuildState, ResourceKind
+from app.domain.models.resource_bindings import ResourceKind
 from app.domain.repositories.codebase_version_repository import (
     CodebaseVersionGCResult,
     CodebaseVersionRepository,
@@ -26,21 +24,8 @@ from app.infrastructure.models.codebase import (
     CodebaseSymbolModel,
 )
 from app.infrastructure.models.codebase_version import CodebaseVersionORM
-from app.infrastructure.models.resource_governance import (
-    ResourceBuildEventORM,
-    ResourceBuildORM,
-)
 from app.infrastructure.repositories.version_gc_base import (
     VersionGarbageCollector,
-)
-
-
-_ACTIVE_BUILD_STATES = (BuildState.QUEUED.value, BuildState.RUNNING.value)
-_TERMINAL_BUILD_STATES = (
-    BuildState.SUCCEEDED.value,
-    BuildState.DEGRADED.value,
-    BuildState.FAILED.value,
-    BuildState.CANCELLED.value,
 )
 
 
@@ -71,10 +56,6 @@ class DBCodebaseVersionRepository(
     def _resource_kind(self) -> str:
         return ResourceKind.CODEBASE.value
 
-    @property
-    def _active_build_states(self):
-        return _ACTIVE_BUILD_STATES
-
     def _empty_totals(self) -> dict:
         return {
             "deleted_files": 0,
@@ -83,8 +64,6 @@ class DBCodebaseVersionRepository(
             "deleted_chunks": 0,
             "deleted_artifacts": 0,
             "reclaimed_logical_bytes": 0,
-            "deleted_builds": 0,
-            "deleted_build_events": 0,
             "retained_shared_snapshots": 0,
         }
 
@@ -104,12 +83,10 @@ class DBCodebaseVersionRepository(
             deleted_versions=len(collected),
             protected_active_versions=protected["active"],
             protected_bound_versions=protected["bound"],
-            protected_active_build_versions=protected["active_build"],
+            protected_building_versions=protected["building"],
             protected_age_versions=protected["age"],
             protected_retention_versions=protected["retention"],
-            snapshot_keys_to_delete=tuple(
-                dict.fromkeys(extras["snapshot_keys_to_delete"])
-            ),
+            snapshot_keys_to_delete=tuple(dict.fromkeys(extras["snapshot_keys_to_delete"])),
             **totals,
         )
 
@@ -131,8 +108,7 @@ class DBCodebaseVersionRepository(
         )
         chunk_rows = chunk_result.all()
         reclaimed_logical_bytes = sum(
-            len((row.content or "").encode("utf-8"))
-            for row in chunk_rows
+            len((row.content or "").encode("utf-8")) for row in chunk_rows
         )
 
         deleted_edges = await self._delete_returning_count(
@@ -176,29 +152,6 @@ class DBCodebaseVersionRepository(
             .returning(CodebaseFileModel.id)
         )
 
-        build_result = await self.db_session.execute(
-            select(ResourceBuildORM.id).where(
-                ResourceBuildORM.resource_kind == ResourceKind.CODEBASE.value,
-                ResourceBuildORM.resource_id == codebase_id,
-                ResourceBuildORM.version_id == version_id,
-                ResourceBuildORM.state.in_(_TERMINAL_BUILD_STATES),
-            )
-        )
-        build_ids = tuple(build_result.scalars().all())
-        deleted_build_events = 0
-        deleted_builds = 0
-        if build_ids:
-            deleted_build_events = await self._delete_returning_count(
-                delete(ResourceBuildEventORM)
-                .where(ResourceBuildEventORM.build_id.in_(build_ids))
-                .returning(ResourceBuildEventORM.id)
-            )
-            deleted_builds = await self._delete_returning_count(
-                delete(ResourceBuildORM)
-                .where(ResourceBuildORM.id.in_(build_ids))
-                .returning(ResourceBuildORM.id)
-            )
-
         retained_shared_snapshots = 0
         snapshot_keys_to_delete: list[str] = []
         if snapshot_key:
@@ -240,8 +193,6 @@ class DBCodebaseVersionRepository(
             "deleted_chunks": deleted_chunks,
             "deleted_artifacts": deleted_artifacts,
             "reclaimed_logical_bytes": reclaimed_logical_bytes,
-            "deleted_builds": deleted_builds,
-            "deleted_build_events": deleted_build_events,
             "retained_shared_snapshots": retained_shared_snapshots,
             "snapshot_keys_to_delete": snapshot_keys_to_delete,
         }
@@ -250,6 +201,10 @@ class DBCodebaseVersionRepository(
         self,
         version: CodebaseVersion,
     ) -> CodebaseVersion:
+        if version.state is not CodebaseVersionState.BUILDING:
+            raise ValueError("candidate must start in building state")
+        if not version.build_id.strip():
+            raise ValueError("candidate requires an execution build id")
         record = CodebaseVersionORM.from_domain(version)
         self.db_session.add(record)
         await self.db_session.flush()
@@ -259,12 +214,35 @@ class DBCodebaseVersionRepository(
         self,
         version_id: str,
         *,
-        codebase_id: Optional[str] = None,
-    ) -> Optional[CodebaseVersion]:
+        codebase_id: str | None = None,
+    ) -> CodebaseVersion | None:
         stmt = select(CodebaseVersionORM).where(CodebaseVersionORM.id == version_id)
         if codebase_id is not None:
             stmt = stmt.where(CodebaseVersionORM.codebase_id == codebase_id)
         result = await self.db_session.execute(stmt)
+        record = result.scalar_one_or_none()
+        return record.to_domain() if record is not None else None
+
+    async def get_build_candidate(
+        self,
+        build_id: str,
+    ) -> CodebaseVersion | None:
+        result = await self.db_session.execute(
+            select(CodebaseVersionORM).where(CodebaseVersionORM.build_id == build_id)
+        )
+        record = result.scalar_one_or_none()
+        return record.to_domain() if record is not None else None
+
+    async def get_active_candidate(
+        self,
+        codebase_id: str,
+    ) -> CodebaseVersion | None:
+        result = await self.db_session.execute(
+            select(CodebaseVersionORM).where(
+                CodebaseVersionORM.codebase_id == codebase_id,
+                CodebaseVersionORM.state == CodebaseVersionState.BUILDING.value,
+            )
+        )
         record = result.scalar_one_or_none()
         return record.to_domain() if record is not None else None
 
@@ -273,11 +251,9 @@ class DBCodebaseVersionRepository(
         codebase_id: str,
         *,
         limit: int = 500,
-        before: Optional[tuple[datetime, str]] = None,
+        before: tuple[datetime, str] | None = None,
     ) -> list[CodebaseVersion]:
-        stmt = select(CodebaseVersionORM).where(
-            CodebaseVersionORM.codebase_id == codebase_id
-        )
+        stmt = select(CodebaseVersionORM).where(CodebaseVersionORM.codebase_id == codebase_id)
         if before is not None:
             before_created_at, before_id = before
             stmt = stmt.where(
@@ -298,7 +274,7 @@ class DBCodebaseVersionRepository(
         self,
         version_id: str,
         *,
-        expected_active_version_id: Optional[str],
+        expected_active_version_id: str | None,
         state: CodebaseVersionState,
         capabilities: dict[str, bool],
         degraded_reasons: list[str],
@@ -307,53 +283,35 @@ class DBCodebaseVersionRepository(
         try:
             state = CodebaseVersionState(state)
         except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "published codebase candidate must be ready or degraded"
-            ) from exc
+            raise ValueError("published codebase candidate must be ready or degraded") from exc
         if state not in {
             CodebaseVersionState.READY,
             CodebaseVersionState.DEGRADED,
         }:
-            raise ValueError(
-                "published codebase candidate must be ready or degraded"
-            )
+            raise ValueError("published codebase candidate must be ready or degraded")
         if state is CodebaseVersionState.READY and degraded_reasons:
-            raise ValueError(
-                "ready codebase candidate cannot have degradation reasons"
-            )
-        if (
-            state is CodebaseVersionState.DEGRADED
-            and (
-                not degraded_reasons
-                or any(
-                    not isinstance(reason, str) or not reason.strip()
-                    for reason in degraded_reasons
-                )
-            )
+            raise ValueError("ready codebase candidate cannot have degradation reasons")
+        if state is CodebaseVersionState.DEGRADED and (
+            not degraded_reasons
+            or any(not isinstance(reason, str) or not reason.strip() for reason in degraded_reasons)
         ):
-            raise ValueError(
-                "degraded codebase candidate requires a stable reason"
-            )
+            raise ValueError("degraded codebase candidate requires a stable reason")
 
         result = await self.db_session.execute(
-            select(CodebaseVersionORM)
-            .where(CodebaseVersionORM.id == version_id)
-            .with_for_update()
+            select(CodebaseVersionORM).where(CodebaseVersionORM.id == version_id).with_for_update()
         )
         version = result.scalar_one_or_none()
         if version is None:
             return False
         cb_result = await self.db_session.execute(
-            select(CodebaseModel)
-            .where(CodebaseModel.id == version.codebase_id)
-            .with_for_update()
+            select(CodebaseModel).where(CodebaseModel.id == version.codebase_id).with_for_update()
         )
         codebase = cb_result.scalar_one_or_none()
         if codebase is None:
             return False
         if codebase.active_version_id != expected_active_version_id:
             return False
-        published_at = datetime.now(timezone.utc)
+        published_at = datetime.now(UTC)
         version.state = state.value
         version.capabilities = dict(capabilities)
         version.degraded_reasons = list(degraded_reasons)
@@ -362,7 +320,7 @@ class DBCodebaseVersionRepository(
         codebase.active_version_id = version.id
         codebase.status = CodebaseStatus.READY.value
         codebase.vector_degraded = state is CodebaseVersionState.DEGRADED
-        codebase.updated_at = published_at.replace(tzinfo=None)
+        codebase.updated_at = published_at
         await self.db_session.flush()
         return True
 
@@ -375,9 +333,7 @@ class DBCodebaseVersionRepository(
         source_digest: str,
     ) -> CodebaseVersion:
         result = await self.db_session.execute(
-            select(CodebaseVersionORM)
-            .where(CodebaseVersionORM.id == version_id)
-            .with_for_update()
+            select(CodebaseVersionORM).where(CodebaseVersionORM.id == version_id).with_for_update()
         )
         record = result.scalar_one_or_none()
         if record is None:
@@ -395,9 +351,7 @@ class DBCodebaseVersionRepository(
         error: str,
     ) -> CodebaseVersion:
         result = await self.db_session.execute(
-            select(CodebaseVersionORM)
-            .where(CodebaseVersionORM.id == version_id)
-            .with_for_update()
+            select(CodebaseVersionORM).where(CodebaseVersionORM.id == version_id).with_for_update()
         )
         record = result.scalar_one_or_none()
         if record is None:

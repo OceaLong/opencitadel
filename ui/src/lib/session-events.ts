@@ -1,56 +1,29 @@
-/**
- * 将 SSE 事件列表转换为时间线展示项与计划步骤
- * 与 chat 流式 / 任务详情接口的响应格式一致
- *
- * 后端事件格式为 { event: "message"|"title"|..., data: {...} }，
- * 前端统一使用 { type, data }，需先归一化。
- */
+/** Public Run events reduced to the user-facing conversation timeline. */
 
-import { modelErrorMessage } from "@/lib/api/llm-status";
-import type {
-  ChatMessage,
-  ClarifyQuestion,
-  PlanEvent,
-  PlanStep,
-  SessionFile,
-  SSEEventData,
-  StepEvent,
-  SubAgentEvent,
-  ToolEvent,
-} from "@/lib/api/types";
+import { modelErrorMessage } from "@/lib/api/inference-errors";
+import type { ChatMessage, SessionFile, SSEEventData, ToolEvent } from "@/lib/api/types";
 
 import type { Locale } from "@/i18n/routing";
 import { translate } from "@/i18n/translate";
 
-import { getEventVisibility, looksLikePlannerJson, TRANSIENT_EVENT_TYPES } from "./session-events/debug";
-import { getToolTimeLabel, markLatestClarifyAnswered, stableId, toMillis } from "./session-events/format";
+import { getToolTimeLabel, stableId, toMillis } from "./session-events/format";
 
-export * from "./session-events/debug";
 export * from "./session-events/format";
 export * from "./session-events/normalize";
 
-/** 时间线单项：用于渲染对话区的一条记录 */
 export type TimelineItem =
   | { kind: "user"; id: string; data: ChatMessage; anchorEventId?: string }
   | { kind: "attachments"; id: string; role: "user" | "assistant"; files: AttachmentFile[] }
   | { kind: "assistant"; id: string; data: ChatMessage }
-  | {
-      kind: "clarify";
-      id: string;
-      title?: string | null;
-      questions: ClarifyQuestion[];
-      interactive: boolean;
-    }
   | { kind: "tool"; id: string; data: ToolEvent; timeLabel?: string }
-  | { kind: "step"; id: string; data: StepEvent; tools: ToolEvent[]; anchorEventId?: string }
   | {
-      kind: "subagent";
+      kind: "error";
       id: string;
-      data: SubAgentEvent;
-      anchorEventId?: string;
-    }
-  | { kind: "wait"; id: string; message: string; timestamp?: number }
-  | { kind: "error"; id: string; error: string; timestamp?: number; contextLabel?: string; repeatCount?: number };
+      error: string;
+      timestamp?: number;
+      repeatCount?: number;
+      incidentId?: string | null;
+    };
 
 export type TaskObservationSummary = {
   startedAt?: number;
@@ -58,11 +31,8 @@ export type TaskObservationSummary = {
   durationMs?: number;
   toolCount: number;
   errorCount: number;
-  waitCount: number;
-  debugCount: number;
 };
 
-/** 附件展示用（文件名、类型、大小等） */
 export type AttachmentFile = {
   id: string;
   filename: string;
@@ -71,407 +41,131 @@ export type AttachmentFile = {
   sizeLabel?: string;
 };
 
-/** 从 SessionFile 转为 AttachmentFile */
-export function sessionFileToAttachment(f: SessionFile): AttachmentFile {
+export function sessionFileToAttachment(file: SessionFile): AttachmentFile {
   return {
-    id: f.id,
-    filename: f.filename,
-    extension: f.extension,
-    size: f.size,
+    id: file.id,
+    filename: file.filename,
+    extension: file.extension,
+    size: file.size,
   };
 }
 
-/** 从 ChatMessage.attachments 项转为 AttachmentFile（无 size 时用 0） */
-function chatAttachmentToDisplay(a: {
+function chatAttachmentToDisplay(attachment: {
   file_id?: string;
   id?: string;
   filename: string;
   size?: number;
-  [key: string]: unknown;
 }): AttachmentFile {
-  const ext = (a.filename || "").split(".").pop() || "";
   return {
-    id: a.file_id || a.id || "",
-    filename: a.filename || "",
-    extension: ext,
-    size: typeof a.size === "number" ? a.size : 0,
+    id: attachment.file_id || attachment.id || "",
+    filename: attachment.filename,
+    extension: attachment.filename.split(".").pop() || "",
+    size: attachment.size ?? 0,
   };
 }
 
-/**
- * 将 SSE 事件列表归并为时间线展示项（顺序与设计一致）
- */
 export function eventsToTimeline(events: SSEEventData[], locale?: Locale): TimelineItem[] {
-  const list: TimelineItem[] = [];
-  let lastStepId: string | null = null;
+  const timeline: TimelineItem[] = [];
+  const toolIndexes = new Map<string, number>();
   let messageIndex = 0;
   let toolIndex = 0;
-  let stepIndex = 0;
   let errorIndex = 0;
-  let clarifyIndex = 0;
-  let lastContextLabel: string | undefined;
-  const streamMessages = new Map<string, { listIndex: number; content: string }>();
 
-  for (const ev of events) {
-    const visibility = getEventVisibility(ev);
-    if (visibility === "internal" || visibility === "debug") {
-      if (ev.type !== "debug_item" && ev.type !== "message_delta") {
-        continue;
+  for (const event of events) {
+    if (event.type === "message") {
+      const message = event.data;
+      if (message.role !== "user" && message.role !== "assistant") continue;
+      const anchorEventId = message.event_id;
+      if (message.role === "user") {
+        timeline.push({
+          kind: "user",
+          id: stableId("user", messageIndex++, anchorEventId || String(timeline.length)),
+          data: message,
+          anchorEventId,
+        });
+      } else {
+        timeline.push({
+          kind: "assistant",
+          id: stableId("assistant", messageIndex++, anchorEventId || String(timeline.length)),
+          data: message,
+        });
       }
+      if (message.attachments?.length) {
+        timeline.push({
+          kind: "attachments",
+          id: stableId("attachments", messageIndex, message.role),
+          role: message.role,
+          files: message.attachments.map(chatAttachmentToDisplay),
+        });
+      }
+      continue;
     }
 
-    switch (ev.type) {
-      case "message_delta": {
-        const deltaData = ev.data as {
-          stream_id?: string;
-          delta?: string;
-          role?: string;
-          event_id?: string;
-          resource_bindings?: ChatMessage["resource_bindings"];
+    if (event.type === "tool") {
+      const callId = event.data.tool_call_id;
+      const existingIndex = callId ? toolIndexes.get(callId) : undefined;
+      if (existingIndex !== undefined) {
+        timeline[existingIndex] = {
+          kind: "tool",
+          id: timeline[existingIndex].id,
+          data: event.data,
+          timeLabel: getToolTimeLabel(event.data, locale),
         };
-        if (deltaData.role && deltaData.role !== "assistant") break;
-        const streamId = deltaData.stream_id || deltaData.event_id;
-        if (!streamId || !deltaData.delta) break;
-        const existing = streamMessages.get(streamId);
-        if (existing) {
-          existing.content += deltaData.delta;
-          const item = list[existing.listIndex];
-          if (item?.kind === "assistant") {
-            list[existing.listIndex] = {
-              ...item,
-              data: { ...item.data, message: existing.content, stream_id: streamId, resource_bindings: deltaData.resource_bindings ?? item.data.resource_bindings },
-            };
-          }
-        } else {
-          const listIndex = list.length;
-          streamMessages.set(streamId, { listIndex, content: deltaData.delta });
-          list.push({
-            kind: "assistant",
-            id: stableId("assistant-stream", messageIndex++, streamId),
-            data: { role: "assistant", message: deltaData.delta, stream_id: streamId, resource_bindings: deltaData.resource_bindings },
-          });
-        }
-        break;
-      }
-      case "reasoning_delta":
-      case "tool_args_delta":
-        break;
-      case "assistant_notice": {
-        const notice = ev.data as {
-          message?: string;
-          i18n_key?: string | null;
-          i18n_params?: Record<string, string> | null;
-        };
-        let displayMessage = notice.message ?? "";
-        if (notice.i18n_key) {
-          const translated = translate(notice.i18n_key, notice.i18n_params ?? undefined, locale);
-          if (translated !== notice.i18n_key) {
-            displayMessage = translated;
-          }
-        }
-        if (!displayMessage) break;
-        list.push({
-          kind: "assistant",
-          id: stableId("assistant", messageIndex++, String(list.length)),
-          data: { role: "assistant", message: displayMessage },
+      } else {
+        const index = timeline.length;
+        timeline.push({
+          kind: "tool",
+          id: stableId("tool", toolIndex++, callId || event.data.name),
+          data: event.data,
+          timeLabel: getToolTimeLabel(event.data, locale),
         });
-        break;
+        if (callId) toolIndexes.set(callId, index);
       }
-      case "debug_item":
-        break;
-      case "session_status": {
-        const status = (ev.data as { status?: string }).status;
-        if (status === "cancelled") {
-          list.push({
-            kind: "assistant",
-            id: stableId("system", messageIndex++, `cancelled-${list.length}`),
-            data: {
-              role: "assistant",
-              message: translate("sessionDetail.taskCancelledNotice", undefined, locale),
-            },
-          });
-        } else if (status === "failed") {
-          list.push({
-            kind: "assistant",
-            id: stableId("system", messageIndex++, `failed-${list.length}`),
-            data: {
-              role: "assistant",
-              message: translate("sessionDetail.taskFailedNotice", undefined, locale),
-            },
-          });
-        }
-        break;
-      }
-      case "clarify": {
-        const data = ev.data as {
-          title?: string | null;
-          questions?: ClarifyQuestion[];
-          event_id?: string;
+      continue;
+    }
+
+    if (event.type === "session_status" && event.data.status === "cancelled") {
+      timeline.push({
+        kind: "assistant",
+        id: stableId("system", messageIndex++, event.data.event_id || "cancelled"),
+        data: {
+          ...event.data,
+          role: "assistant",
+          message: translate("sessionDetail.taskCancelledNotice", undefined, locale),
+        },
+      });
+      continue;
+    }
+
+    if (event.type === "error") {
+      const error =
+        modelErrorMessage(event.data.code, locale) ??
+        translate("errors.appError", undefined, locale);
+      const previous = timeline[timeline.length - 1];
+      if (
+        previous?.kind === "error" &&
+        previous.error === error &&
+        (previous.incidentId ?? null) === (event.data.incident_id ?? null)
+      ) {
+        timeline[timeline.length - 1] = {
+          ...previous,
+          repeatCount: (previous.repeatCount ?? 1) + 1,
+          timestamp: toMillis(event.data.created_at) ?? previous.timestamp,
         };
-        for (let i = list.length - 1; i >= 0; i--) {
-          const item = list[i];
-          if (item.kind === "clarify" && item.interactive) {
-            list[i] = { ...item, interactive: false };
-            break;
-          }
-        }
-        list.push({
-          kind: "clarify",
-          id: stableId("clarify", clarifyIndex++, data.event_id || String(list.length)),
-          title: data.title,
-          questions: Array.isArray(data.questions) ? data.questions : [],
-          interactive: true,
+      } else {
+        timeline.push({
+          kind: "error",
+          id: stableId("error", errorIndex++, event.data.event_id || String(timeline.length)),
+          error,
+          timestamp: toMillis(event.data.created_at),
+          repeatCount: 1,
+          incidentId: event.data.incident_id,
         });
-        break;
       }
-      case "message": {
-        const msg = ev.data as ChatMessage;
-        if (msg.role === "user") {
-          markLatestClarifyAnswered(list);
-          lastStepId = null;
-          const anchorEventId = (msg as { event_id?: string }).event_id;
-          list.push({
-            kind: "user",
-            id: stableId("user", messageIndex++, String(list.length)),
-            data: msg,
-            anchorEventId,
-          });
-          if (msg.attachments && msg.attachments.length > 0) {
-            list.push({
-              kind: "attachments",
-              id: stableId("att", messageIndex, "user"),
-              role: "user",
-              files: msg.attachments.map(chatAttachmentToDisplay),
-            });
-          }
-        } else if (msg.role === "assistant") {
-          if (msg.message && looksLikePlannerJson(msg.message)) {
-            break;
-          }
-          const streamId = (msg as { stream_id?: string }).stream_id;
-          if (streamId && streamMessages.has(streamId)) {
-            const existing = streamMessages.get(streamId)!;
-            existing.content = msg.message || existing.content;
-            const item = list[existing.listIndex];
-            if (item?.kind === "assistant") {
-              list[existing.listIndex] = {
-                ...item,
-                data: msg,
-              };
-            }
-            break;
-          }
-          list.push({
-            kind: "assistant",
-            id: stableId("assistant", messageIndex++, String(list.length)),
-            data: msg,
-          });
-          if (msg.attachments && msg.attachments.length > 0) {
-            list.push({
-              kind: "attachments",
-              id: stableId("att", messageIndex, "assistant"),
-              role: "assistant",
-              files: msg.attachments.map(chatAttachmentToDisplay),
-            });
-          }
-        }
-        break;
-      }
-      case "step": {
-        const step = ev.data as StepEvent;
-        const stepAnchorEventId = (step as { event_id?: string }).event_id;
-        lastContextLabel = translate("common.contextStep", { description: step.description }, locale);
-
-        // 判断是更新现有 step 还是创建新 step
-        // 关键：只有当 lastStepId === step.id 时才是同一个 step 的状态更新
-        if (lastStepId !== null && lastStepId === step.id) {
-          // 这是同一个 step 的状态更新（running -> completed）
-          // 从后往前查找，确保找到最新的（最后一个）匹配的 step
-          let existingIdx = -1;
-          for (let i = list.length - 1; i >= 0; i--) {
-            const item = list[i];
-            if (item.kind === "step" && item.data.id === step.id) {
-              existingIdx = i;
-              break;
-            }
-          }
-
-          if (existingIdx >= 0) {
-            const existing = list[existingIdx];
-            if (existing.kind === "step") {
-              list[existingIdx] = {
-                kind: "step",
-                id: existing.id,
-                data: step,
-                tools: existing.tools,
-                anchorEventId: existing.anchorEventId ?? stepAnchorEventId,
-              };
-            }
-          }
-        } else {
-          // 新的 step (第一次出现或新对话轮次的 step)
-          list.push({
-            kind: "step",
-            id: stableId("step", stepIndex++, step.id + "_" + String(list.length)),
-            data: step,
-            tools: [],
-            anchorEventId: stepAnchorEventId,
-          });
-        }
-
-        // 更新 lastStepId 跟踪
-        // 只要 step 不是 completed/failed 状态，就保持跟踪
-        if (step.status === "completed" || step.status === "failed") {
-          lastStepId = null;
-        } else {
-          // running, pending 等其他状态都设置 lastStepId
-          lastStepId = step.id;
-        }
-
-        break;
-      }
-      case "subagent": {
-        const sub = ev.data as SubAgentEvent;
-        const anchor = (sub as { event_id?: string }).event_id;
-        const existingIdx = list.findIndex(
-          (item) => item.kind === "subagent" && item.data.subagent_id === sub.subagent_id,
-        );
-        if (existingIdx >= 0) {
-          const existing = list[existingIdx];
-          if (existing.kind === "subagent") {
-            list[existingIdx] = {
-              kind: "subagent",
-              id: existing.id,
-              data: sub,
-              anchorEventId: existing.anchorEventId ?? anchor,
-            };
-          }
-        } else {
-          list.push({
-            kind: "subagent",
-            id: stableId("subagent", stepIndex++, sub.subagent_id),
-            data: sub,
-            anchorEventId: anchor,
-          });
-        }
-        lastContextLabel = translate("common.contextSubtask", { goal: sub.goal }, locale);
-        break;
-      }
-      case "tool": {
-        const tool = ev.data as ToolEvent;
-        const toolCallId = (tool as { tool_call_id?: string }).tool_call_id;
-        lastContextLabel = translate(
-          "common.contextTool",
-          { name: tool.name || tool.function || "" },
-          locale,
-        );
-
-        if (lastStepId !== null) {
-          // 工具属于当前 step，添加到 step 的 tools 中
-          // 重要：从后往前查找，确保找到最新的（最后一个）匹配的 step
-          let stepIdx = -1;
-          for (let i = list.length - 1; i >= 0; i--) {
-            const item = list[i];
-            if (item.kind === "step" && item.data.id === lastStepId) {
-              stepIdx = i;
-              break;
-            }
-          }
-
-          if (stepIdx >= 0) {
-            const step = list[stepIdx];
-            if (step.kind === "step") {
-              if (toolCallId != null) {
-                // 检查是否已存在相同 tool_call_id 的工具（更新场景）
-                const existingToolIdx = step.tools.findIndex(
-                  (t) => (t as { tool_call_id?: string }).tool_call_id === toolCallId,
-                );
-                if (existingToolIdx >= 0) {
-                  // 更新现有工具
-                  const newTools = [...step.tools];
-                  newTools[existingToolIdx] = tool;
-                  list[stepIdx] = { ...step, tools: newTools };
-                  break;
-                }
-              }
-              // 添加新工具
-              list[stepIdx] = { ...step, tools: [...step.tools, tool] };
-            }
-          }
-        } else {
-          // 工具不属于任何 step，作为独立工具添加
-          if (toolCallId != null) {
-            const last = list[list.length - 1];
-            if (
-              last?.kind === "tool" &&
-              (last.data as { tool_call_id?: string }).tool_call_id === toolCallId
-            ) {
-              // 更新最后一个独立工具
-              list[list.length - 1] = { ...last, data: tool };
-              break;
-            }
-          }
-          // 添加新的独立工具
-          list.push({
-            kind: "tool",
-            id: stableId("tool", toolIndex++, (tool.name || "") + (tool.function || "")),
-            data: tool,
-            timeLabel: getToolTimeLabel(tool, locale),
-          });
-        }
-        break;
-      }
-      case "title":
-      case "plan":
-      case "done":
-        break;
-      case "wait": {
-        const data = ev.data as { message?: string; reason?: string; prompt?: string; created_at?: number };
-        list.push({
-          kind: "wait",
-          id: stableId("wait", errorIndex++, String(list.length)),
-          message: data.message || data.prompt || data.reason || translate("sessionDetail.waitForInput", undefined, locale),
-          timestamp: data.created_at,
-        });
-        break;
-      }
-      case "error": {
-        // 处理错误事件
-        const errorData = ev.data as {
-          error?: string;
-          code?: string | null;
-          created_at?: number;
-          event_id?: string;
-          [key: string]: unknown;
-        };
-        const displayError = modelErrorMessage(errorData.code, locale) ?? errorData.error;
-        if (displayError) {
-          const last = list[list.length - 1];
-          if (last?.kind === "error" && last.error === displayError) {
-            list[list.length - 1] = {
-              ...last,
-              repeatCount: (last.repeatCount ?? 1) + 1,
-              timestamp: errorData.created_at ?? last.timestamp,
-            };
-          } else {
-            list.push({
-              kind: "error",
-              id: stableId("error", errorIndex++, String(list.length)),
-              error: displayError,
-              timestamp: errorData.created_at,
-              contextLabel: lastContextLabel,
-              repeatCount: 1,
-            });
-          }
-        }
-        break;
-      }
-      default:
-        break;
     }
   }
 
-  return list;
+  return timeline;
 }
 
 export function getTaskObservationSummary(
@@ -482,200 +176,37 @@ export function getTaskObservationSummary(
   let endedAt: number | undefined;
   let toolCount = 0;
   let errorCount = 0;
-  let waitCount = 0;
-  let debugCount = 0;
   const seenTools = new Set<string>();
 
-  for (const ev of events) {
-    const createdAt = toMillis((ev.data as { created_at?: number | string }).created_at);
+  for (const event of events) {
+    const createdAt = toMillis(event.data.created_at);
     if (createdAt !== undefined) {
       startedAt = startedAt === undefined ? createdAt : Math.min(startedAt, createdAt);
       endedAt = endedAt === undefined ? createdAt : Math.max(endedAt, createdAt);
     }
-    if (ev.type === "tool") {
-      const tool = ev.data as ToolEvent;
-      const id = tool.tool_call_id || `${tool.name}:${tool.function}:${toolCount}`;
-      if (!seenTools.has(id)) {
-        seenTools.add(id);
+    if (event.type === "tool") {
+      const key =
+        event.data.tool_call_id || event.data.event_id || `${event.data.name}:${toolCount}`;
+      if (!seenTools.has(key)) {
+        seenTools.add(key);
         toolCount += 1;
       }
-      if (tool.error) errorCount += 1;
-    } else if (ev.type === "error") {
+      if (event.data.error) errorCount += 1;
+    } else if (event.type === "error") {
       errorCount += 1;
-    } else if (ev.type === "wait") {
-      waitCount += 1;
-    } else if (ev.type === "debug_item" || ev.type === "reasoning_delta" || ev.type === "tool_args_delta") {
-      debugCount += 1;
     }
   }
 
   const durationEnd =
-    sessionStatus === "running" && startedAt !== undefined ? Date.now() : endedAt ?? startedAt;
-  const durationMs =
-    startedAt !== undefined && durationEnd !== undefined ? Math.max(0, durationEnd - startedAt) : undefined;
-
-  return { startedAt, endedAt, durationMs, toolCount, errorCount, waitCount, debugCount };
-}
-
-/**
- * 流式 delta 事件增量 patch，避免每 token 全量 eventsToTimeline。
- * 返回 null 表示需全量重建。
- */
-export function patchTimelineForDeltaEvent(
-  timeline: TimelineItem[],
-  ev: SSEEventData,
-): TimelineItem[] | null {
-  if (!TRANSIENT_EVENT_TYPES.has(ev.type)) {
-    return null;
-  }
-
-  if (ev.type === "message_delta") {
-    const deltaData = ev.data as {
-      stream_id?: string;
-      delta?: string;
-      role?: string;
-      event_id?: string;
-    };
-    if (deltaData.role && deltaData.role !== "assistant") return timeline;
-    const streamId = deltaData.stream_id || deltaData.event_id;
-    if (!streamId || !deltaData.delta) return timeline;
-
-    for (let i = timeline.length - 1; i >= 0; i--) {
-      const item = timeline[i];
-      if (item.kind !== "assistant") continue;
-      const itemStreamId = (item.data as { stream_id?: string }).stream_id;
-      if (itemStreamId !== streamId) continue;
-      const next = [...timeline];
-      const currentMessage = (item.data as ChatMessage).message ?? "";
-      next[i] = {
-        ...item,
-        data: {
-          ...item.data,
-          message: `${currentMessage}${deltaData.delta}`,
-          stream_id: streamId,
-        },
-      };
-      return next;
-    }
-
-    return [
-      ...timeline,
-      {
-        kind: "assistant" as const,
-        id: `assistant-stream-${streamId}`,
-        data: { role: "assistant" as const, message: deltaData.delta, stream_id: streamId },
-      },
-    ];
-  }
-
-  if (ev.type === "reasoning_delta") {
-    const deltaData = ev.data as { stream_id?: string; delta?: string; event_id?: string };
-    const streamId = deltaData.stream_id || deltaData.event_id;
-    if (!streamId || !deltaData.delta) return timeline;
-
-    for (let i = timeline.length - 1; i >= 0; i--) {
-      const item = timeline[i];
-      if (item.kind !== "assistant") continue;
-      const itemStreamId = (item.data as { stream_id?: string }).stream_id;
-      if (itemStreamId !== streamId) continue;
-      const next = [...timeline];
-      const currentReasoning = (item.data as { reasoning?: string }).reasoning ?? "";
-      next[i] = {
-        ...item,
-        data: {
-          ...item.data,
-          reasoning: `${currentReasoning}${deltaData.delta}`,
-          stream_id: streamId,
-        },
-      };
-      return next;
-    }
-    return timeline;
-  }
-
-  if (ev.type === "tool_args_delta") {
-    const deltaData = ev.data as {
-      tool_call_id?: string;
-      delta?: string;
-      tool_name?: string;
-    };
-    const toolCallId = deltaData.tool_call_id;
-    if (!toolCallId || !deltaData.delta) return timeline;
-
-    for (let i = timeline.length - 1; i >= 0; i--) {
-      const item = timeline[i];
-      if (item.kind === "tool") {
-        const id = (item.data as { tool_call_id?: string }).tool_call_id;
-        if (id !== toolCallId) continue;
-        const next = [...timeline];
-        const currentArgs = (item.data as { function_args?: string }).function_args ?? "";
-        next[i] = {
-          ...item,
-          data: {
-            ...item.data,
-            function_args: `${currentArgs}${deltaData.delta}`,
-          },
-        };
-        return next;
-      }
-      if (item.kind === "step") {
-        for (let j = item.tools.length - 1; j >= 0; j--) {
-          const tool = item.tools[j];
-          if ((tool as { tool_call_id?: string }).tool_call_id !== toolCallId) continue;
-          const next = [...timeline];
-          const stepItem = { ...next[i], tools: [...item.tools] };
-          const currentArgs = (tool as { function_args?: string }).function_args ?? "";
-          stepItem.tools[j] = {
-            ...tool,
-            function_args: `${currentArgs}${deltaData.delta}`,
-          };
-          next[i] = stepItem;
-          return next;
-        }
-      }
-    }
-    return timeline;
-  }
-
-  return timeline;
-}
-
-/**
- * 从事件列表中取最新的 plan 步骤（用于底部任务进度面板）
- * 先取最近一次 plan 快照，再合并其后 step 事件的实时状态。
- */
-export function getLatestPlanFromEvents(events: SSEEventData[]): PlanStep[] {
-  let planIndex = -1;
-  let steps: PlanStep[] = [];
-  for (let i = events.length - 1; i >= 0; i--) {
-    const ev = events[i];
-    if (ev.type === "plan") {
-      const plan = ev.data as PlanEvent;
-      if (plan.steps && Array.isArray(plan.steps)) {
-        steps = plan.steps.map((step) => ({ ...step }));
-      }
-      planIndex = i;
-      break;
-    }
-  }
-  if (planIndex < 0 || steps.length === 0) {
-    return steps;
-  }
-
-  const stepById = new Map(steps.map((step) => [step.id, step]));
-  for (let i = planIndex + 1; i < events.length; i++) {
-    const ev = events[i];
-    if (ev.type !== "step") continue;
-    const stepData = ev.data as StepEvent;
-    if (!stepData.id) continue;
-    const existing = stepById.get(stepData.id);
-    if (!existing) continue;
-    existing.status = stepData.status;
-    if (stepData.description) existing.description = stepData.description;
-    if (stepData.started_at !== undefined) existing.started_at = stepData.started_at;
-    if (stepData.ended_at !== undefined) existing.ended_at = stepData.ended_at;
-    if (stepData.duration_ms !== undefined) existing.duration_ms = stepData.duration_ms;
-    if (stepData.error !== undefined) existing.error = stepData.error;
-  }
-  return steps;
+    sessionStatus === "running" && startedAt !== undefined ? Date.now() : (endedAt ?? startedAt);
+  return {
+    startedAt,
+    endedAt,
+    durationMs:
+      startedAt !== undefined && durationEnd !== undefined
+        ? Math.max(0, durationEnd - startedAt)
+        : undefined,
+    toolCount,
+    errorCount,
+  };
 }

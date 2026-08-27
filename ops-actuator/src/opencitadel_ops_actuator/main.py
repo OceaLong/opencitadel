@@ -2,6 +2,7 @@
 
 Mirrors ops-collector/src/opencitadel_ops_collector/main.py.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,7 +22,9 @@ def main() -> None:
     settings = ActuatorSettings()
     transport = args.transport or settings.transport
     if transport == "stdio" and not settings.allow_stdio:
-        raise SystemExit("stdio transport is disabled; set OPS_ACTUATOR_ALLOW_STDIO=true for development")
+        raise SystemExit(
+            "stdio transport is disabled; set OPS_ACTUATOR_ALLOW_STDIO=true for development"
+        )
     create_server(settings).run(transport=transport)
 
 

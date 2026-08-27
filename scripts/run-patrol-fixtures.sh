@@ -79,7 +79,7 @@ deploy_ops_actuator() {
   # reaches the actuator via `kubectl port-forward`, which tunnels through
   # the kubelet directly into the pod's network namespace rather than the
   # CNI's pod-to-pod path that NetworkPolicy governs, so the actuator's
-  # production-shaped ingress policy (api/worker pods only) stays intact.
+  # production-shaped ingress policy (API/execution-kernel pods only) stays intact.
 }
 
 if [[ "$run_remediation_fixture" == true ]]; then

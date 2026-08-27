@@ -3,8 +3,7 @@
 [English](codebase-reindex.md)
 
 本文是 Codebase 模块的权威参考：安全源码获取、不可变分析版本、
-Ask/Agent 绑定、混合检索、有证据的分析产物、重建恢复、兼容路由与
-保留策略。
+Ask/Agent 绑定、混合检索、有证据的分析产物、持久恢复与保留策略。
 
 ## 能力面
 
@@ -12,7 +11,7 @@ Ask/Agent 绑定、混合检索、有证据的分析产物、重建恢复、兼�
 |------|------------|------|
 | 列表 / 创建 | `/codebase`、`POST /api/codebases` | ZIP、文件集或 HTTPS Git 导入，进入任务前完成源码校验 |
 | 版本历史 | `GET /api/codebases/{id}/versions` | 返回 active version 与 candidate build 状态 |
-| 构建 | `POST /api/codebases/{id}/builds` | 幂等创建或返回一个 queued/running candidate |
+| 构建 | `POST /api/codebases/{id}/builds` | 幂等创建一个候选并接入其源 Run |
 | 重试 / 取消 | `POST /api/codebases/{id}/builds/{build_id}/retry`、`/cancel` | 只允许同代码库 build/version 闭包 |
 | 版本源码 | `POST /api/codebases/{id}/versions/{version_id}/source` | 读取该已发布版本的不可变 snapshot |
 | 版本产物 | `GET /api/codebases/{id}/versions/{version_id}/artifacts` | 返回该版本有证据支撑的产物 |
@@ -23,13 +22,13 @@ Ask 与 Agent 会话创建时都会携带明确的 `codebase_version_id`。已�
 
 ## 源码获取与不可变快照
 
-每次导入或重建都会创建一个 candidate `codebase_version` 和一个共享的
-`resource_build`。
+每次导入或重建都创建一个带 `build_id`、`request_key` 的 candidate
+`codebase_version`，并原子接入一个 `codebase_ingest` Run。
 
 ```mermaid
 flowchart TD
   Request["创建/重建请求"] --> Validate["校验源码参数"]
-  Validate --> Candidate["创建 candidate version + ResourceBuild"]
+  Validate --> Candidate["创建 candidate version + 源 Run"]
   Candidate --> Materialize["物化到干净临时工作区"]
   Materialize --> Snapshot["创建内容寻址源码快照"]
   Snapshot --> Analyze["分析文件、符号、边、chunk"]
@@ -56,12 +55,11 @@ flowchart TD
 
 ## 构建状态与发布语义
 
-一个代码库最多存在一个 queued/running build。重复重建请求返回现有
-candidate，不会再次派发 worker 任务。
+一个代码库最多存在一个 `building` candidate。源 Run 是生命周期和进度唯一权威，使用 `new`、`queued`、`running`、`waiting`、`completed`、`failed`、`cancelled`。重复请求通过命令与 request-key 幂等返回同一 candidate/Run。
 
 发布是短事务 compare-and-swap：
 
-1. 校验 candidate 属于该代码库及其 build；
+1. 校验 candidate 属于该代码库及其源 Run identity；
 2. 校验 candidate parent 仍等于当前 active version；
 3. 校验必需事实存在：非空源码集、源码 snapshot、源码 digest、lexical
    索引和引用闭包；
@@ -124,9 +122,7 @@ reason，而不是渲染泛化模板图。
 
 ## 恢复
 
-Worker reconciliation 可以把 stale candidate/build 标记失败，但除非
-candidate 通过发布 CAS，否则不得改变 active version。retry 会基于当前
-active version 创建新的 candidate。
+执行内核从 PostgreSQL 回收命令和过期 Activity claim。它可以把未发布候选标记失败，但除非 candidate 通过发布 CAS，否则不得改变 active version。retry 基于当前 active version 创建新的 candidate 和 Run。
 
 ## 保留与 GC
 
@@ -136,14 +132,10 @@ Codebase version GC 默认关闭，由以下配置限流：
 - `codebase.version_retention_min_days`
 - `codebase.version_gc_batch_size`
 
-GC 保护 active versions、历史 session bindings、queued/running build
-versions、年龄窗口和保留窗口。它在事务内删除 version-scoped files、symbols、
-edges、chunks、artifacts、terminal build events/builds 和 version rows。
-源码 snapshot object 只有在没有其他版本引用该 key 后才会删除。
+GC 保护 active versions、历史 session bindings、所有 `building` candidates、年龄窗口和保留窗口。它在事务内删除 version-scoped files、symbols、edges、chunks、artifacts 和 version rows。源码 snapshot object 只有在没有其他版本引用该 key 后才会删除。Run 事件遵循执行事件保留策略，不属于产品 GC 数据。
 
 ## 相关文档
 
 - [安全模型](security-model.zh-CN.md)
 - [知识库摄取](knowledge-base-ingestion.zh-CN.md)
-- [事件](events.zh-CN.md)
-- [契约兼容](contract-compatibility.zh-CN.md)
+- [执行内核](execution-kernel.zh-CN.md)

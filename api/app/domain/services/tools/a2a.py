@@ -1,282 +1,48 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+"""Domain A2A tool pack backed by an injected connection-pool port."""
+
+from __future__ import annotations
+
 import logging
-import uuid
-import asyncio
-import json
-from contextlib import AsyncExitStack
-from typing import Optional, Dict, Any
+from typing import Any
 
-import httpx
-
-from app.domain.errors import ServerRequestsError
-from app.domain.external.connection_pool import A2AConnectionPoolPort
-from app.domain.models.app_config import A2AConfig
-from app.domain.models.tool_result import ToolResult
+from app.domain.external.connection_pool import (
+    A2AClientPort,
+    A2AConnectionPoolPort,
+)
+from app.domain.models.integration_runtime import A2ARuntime
 from app.domain.models.tool_policy import (
     CONSERVATIVE_TOOL_POLICY,
     ToolDescriptor,
     ToolExecutionPolicy,
 )
-from app.domain.utils.app_config_filter import filter_enabled_a2a_config
-from app.domain.utils.outbound_url import resolve_outbound_url
-from app.infrastructure.security.outbound_http import (
-    create_ssrf_safe_async_client,
-)
-from .base import BaseTool, tool
+from app.domain.models.tool_result import ToolResult
+from app.domain.runtime_policy import ActivityExecutionPolicy
+from app.domain.services.tools.base import BaseTool, tool
+from app.domain.utils.integration_filter import filter_enabled_a2a_runtime
 
 logger = logging.getLogger(__name__)
 
-_MAX_AGENT_CARD_BYTES = 1024 * 1024
-_MAX_A2A_RESPONSE_BYTES = 5 * 1024 * 1024
-
-"""
-A2A客户端管理器的开发思路:
-1.在Agent执行过程中, 有可能需要多次调用Remote-Agent，
-  但是a2a中的agent-card.json请求是网络io, 相对耗时，
-  所以需要缓存agent-card的相关信息, 只有在初始化A2A客户端的时候才初始化一次,
-  更新a2a服务器的时候更新, 清除a2a客户端管理器时删除;
-2.在前端UI交互中, 无论A2A服务器是否启动, 都会展示Card信息,
-  但是呢, 在执行/规划Agent中, 我们只传递启用的A2A服务, 所以A2A客户端管理器必须动态接受配置;
-3.一个A2A客户端会同时管理多个Agent, 但是不同的A2A服务有可能他们的name是一样的，
-  需要考虑传递给Agent信息时的唯一性, 会配置多一个唯一的id;
-4.由于使用httpx客户端, 这个客户端需要创建上下文/释放资源, 所以可以使用AsyncExitStack来管理
-  异步上下文, 避免大量使用with..as的嵌套组合;
-5.A2AClientManager的初始化非常耗时, 一次请求中只初始化一次;
-6.A2A配置是写在config.yaml中的并直接暴露给开发者, 有可能开发者会手动修改config.yaml
-  所以在使用的时候, 最多需要做多一次校验;
-7.A2A客户端管理器只实现两个方法, 一个是get_remote_agent_cards、call_remote_agent;
-8.A2A客户端管理器停止时必须清除对应资源, 涵盖了缓存, 异步上下文管理器避免资源泄露;
-"""
-
-
-class A2AClientManager:
-    """A2A客户端管理器"""
-
-    def __init__(self, a2a_config: Optional[A2AConfig] = None) -> None:
-        """构造函数，完成A2A客户端的初始化"""
-        self._a2a_config = a2a_config  # 配置
-        self._exit_stack: AsyncExitStack = AsyncExitStack()  # 上下文管理器
-        self._httpx_client: Optional[httpx.AsyncClient] = None  # httpx客户端
-        self._agent_cards: Dict[str, Any] = {}  # agent卡片
-        self._initialized: bool = False  # 是否初始化
-
-    @property
-    def agent_cards(self) -> Dict[str, Any]:
-        """只读属性，返回agent卡片信息"""
-        return self._agent_cards
-
-    async def initialize(self) -> None:
-        """异步初始化函数，用于初始化所有已配置的a2a服务"""
-        # 1.检测是否已经初始化
-        if self._initialized:
-            return
-
-        try:
-            # 3.初始化httpx客户端
-            self._httpx_client = await self._exit_stack.enter_async_context(
-                create_ssrf_safe_async_client(
-                    timeout=httpx.Timeout(60.0, connect=10.0),
-                    follow_redirects=False,
-                ),
-            )
-
-            # 4.记录日志并连接所有配置的a2a服务获取卡片信息
-            logger.info(f"加载{len(self._a2a_config.a2a_servers)}个A2A服务")
-            await self._get_a2a_agent_cards()
-            self._initialized = True
-            logger.info(f"A2A客户端加载成功")
-        except Exception as e:
-            logger.error(f"A2A客户端管理器加载失败")
-            raise ServerRequestsError(f"A2A客户端管理器加载失败")
-
-    async def _get_a2a_agent_cards(self) -> None:
-        """根据配置连接所有已启用的 a2a 服务器获取 AgentCard 信息"""
-        enabled_servers = [
-            server_config
-            for server_config in self._a2a_config.a2a_servers
-            if server_config.enabled
-        ]
-        await asyncio.gather(*[
-            self._load_a2a_agent_card(server_config)
-            for server_config in enabled_servers
-        ])
-
-    async def _load_a2a_agent_card(self, a2a_server_config) -> None:
-        try:
-            base_url = resolve_outbound_url(
-                a2a_server_config.base_url,
-            ).url.rstrip("/")
-            # 2.调用httpx客户端发起请求
-            agent_card_response = await self._httpx_client.get(
-                f"{base_url}/.well-known/agent-card.json"
-            )
-            agent_card_response.raise_for_status()
-            self._ensure_response_size(
-                agent_card_response,
-                _MAX_AGENT_CARD_BYTES,
-            )
-            agent_card = agent_card_response.json()
-            if agent_card.get("url"):
-                resolve_outbound_url(str(agent_card["url"]))
-
-            # 3.存储到agent_cards
-            agent_card["enabled"] = a2a_server_config.enabled
-            self._agent_cards[a2a_server_config.id] = agent_card
-        except Exception as e:
-            logger.warning(f"加载A2A服务[{a2a_server_config.id}]失败: {str(e)}")
-            return
-
-    async def invoke(self, agent_id: str, query: str) -> ToolResult:
-        """根据传递的智能体id+query调用Remote-Agent"""
-        if agent_id not in self._agent_cards:
-            return ToolResult(success=False, message="该远程Agent不存在")
-
-        agent_card = self._agent_cards.get(agent_id, {})
-        if not agent_card.get("enabled", True):
-            return ToolResult(success=False, message="该远程Agent已禁用")
-        url = agent_card.get("url", "")
-
-        # 3.判断端点是否存在
-        if url == "":
-            return ToolResult(success=False, message="该远程Agent调用端点不存在")
-        try:
-            url = resolve_outbound_url(str(url)).url
-        except ValueError as exc:
-            return ToolResult(
-                success=False,
-                message=f"远程Agent端点未通过出站安全策略: {exc}",
-            )
-
-        payload = self._build_message_payload(query)
-        try:
-            # 4.根据 AgentCard 能力选择流式或非流式调用
-            if agent_card.get("capabilities", {}).get("streaming", False):
-                result = await self._invoke_stream(url, payload)
-            else:
-                result = await self._invoke_send(url, payload)
-            text = self._extract_text(result)
-            return ToolResult(
-                success=True,
-                message="调用远程Agent成功",
-                data={"text": text, "raw": result} if text else result,
-            )
-        except Exception as e:
-            logger.error(f"调用远程Agent[{agent_id}:{url}]出错: {str(e)}")
-            return ToolResult(
-                success=False,
-                message=f"调用远程Agent[{agent_id}:{url}]出错: {str(e)}"
-            )
-
-    @staticmethod
-    def _build_message_payload(query: str) -> Dict[str, Any]:
-        return {
-            "id": str(uuid.uuid4()),
-            "jsonrpc": "2.0",
-            "method": "message/send",
-            "params": {
-                "message": {
-                    "messageId": str(uuid.uuid4()),
-                    "role": "user",
-                    "parts": [
-                        {"kind": "text", "text": query},
-                    ],
-                },
-            },
-        }
-
-    async def _invoke_send(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        agent_response = await self._httpx_client.post(url, json=payload)
-        agent_response.raise_for_status()
-        self._ensure_response_size(agent_response, _MAX_A2A_RESPONSE_BYTES)
-        return agent_response.json()
-
-    async def _invoke_stream(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        stream_payload = {**payload, "method": "message/stream"}
-        events = []
-        total_bytes = 0
-        async with self._httpx_client.stream("POST", url, json=stream_payload) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                total_bytes += len(line.encode("utf-8"))
-                if total_bytes > _MAX_A2A_RESPONSE_BYTES:
-                    raise ValueError("A2A 流式响应超过允许大小")
-                if not line:
-                    continue
-                if line.startswith("data:"):
-                    line = line[5:].strip()
-                if not line or line == "[DONE]":
-                    continue
-                try:
-                    events.append(json.loads(line))
-                except Exception:
-                    events.append({"text": line})
-        return {"events": events}
-
-    @staticmethod
-    def _ensure_response_size(response: httpx.Response, limit: int) -> None:
-        declared = response.headers.get("content-length")
-        if declared:
-            try:
-                if int(declared) > limit:
-                    raise ValueError("A2A 响应超过允许大小")
-            except ValueError as exc:
-                if "超过允许大小" in str(exc):
-                    raise
-        if len(response.content) > limit:
-            raise ValueError("A2A 响应超过允许大小")
-
-    @classmethod
-    def _extract_text(cls, payload: Any) -> str:
-        texts = []
-
-        def visit(value: Any) -> None:
-            if isinstance(value, dict):
-                if isinstance(value.get("text"), str):
-                    texts.append(value["text"])
-                for key in ("result", "message", "artifact", "parts", "events"):
-                    if key in value:
-                        visit(value[key])
-            elif isinstance(value, list):
-                for item in value:
-                    visit(item)
-
-        visit(payload)
-        return "\n".join(text for text in texts if text).strip()
-
-    async def cleanup(self) -> None:
-        """当退出A2A客户端管理器时，清除对应资源"""
-        try:
-            await self._exit_stack.aclose()
-            self._agent_cards.clear()
-            self._initialized = False
-            logger.info(f"清除A2A客户端管理器成功")
-        except Exception as e:
-            logger.error(f"清理A2A客户端管理器失败: {str(e)}")
-
 
 class A2ATool(BaseTool):
-    """A2A工具包，根据传递的完成A2A工具包的初始化"""
+    """Expose configured A2A agents without owning transport details."""
+
     name: str = "a2a"
 
     def __init__(self, connection_pool: A2AConnectionPoolPort) -> None:
-        """构造函数，完成工具包初始化"""
         super().__init__()
         self._connection_pool = connection_pool
-        self._initialized: bool = False
-        self.manager: Optional[A2AClientManager] = None
-        self._uses_pool: bool = False
-        self._tool_policies: Dict[str, ToolExecutionPolicy] = {}
+        self._initialized = False
+        self.manager: A2AClientPort | None = None
+        self._uses_pool = False
+        self._tool_policies: dict[str, ToolExecutionPolicy] = {}
 
     @staticmethod
     def _aggregate_policy(
-            servers,
-            function_name: str,
+        servers: list[Any],
+        function_name: str,
     ) -> ToolExecutionPolicy:
         configured = [
-            server.tool_policies.get(function_name)
-            for server in servers
-            if server.enabled
+            server.tool_policies.get(function_name) for server in servers if server.enabled
         ]
         if not configured or any(policy is None for policy in configured):
             return CONSERVATIVE_TOOL_POLICY
@@ -285,20 +51,24 @@ class A2ATool(BaseTool):
             return CONSERVATIVE_TOOL_POLICY
         return first
 
-    async def initialize(self, a2a_config: Optional[A2AConfig] = None) -> None:
-        """初始化A2A工具包（软失败，不向外抛异常）"""
+    async def initialize(
+        self,
+        runtime: A2ARuntime | None = None,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> None:
         if self._initialized:
             return
-        filtered = filter_enabled_a2a_config(a2a_config) if a2a_config else A2AConfig()
+        filtered = filter_enabled_a2a_runtime(runtime) if runtime else A2ARuntime()
         self._tool_policies = {
-            name: self._aggregate_policy(filtered.a2a_servers, name)
+            name: self._aggregate_policy(filtered.servers, name)
             for name in ("get_remote_agent_cards", "call_remote_agent")
         }
         self._tools_cache = None
         try:
-            self.manager = await self._connection_pool.acquire(filtered)
+            self.manager = await self._connection_pool.acquire(filtered, policy=policy)
             self._uses_pool = True
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("A2A 工具包初始化失败: %s", exc)
             self.manager = None
             self._uses_pool = False
@@ -316,24 +86,18 @@ class A2ATool(BaseTool):
 
     @tool(
         name="get_remote_agent_cards",
-        description="获取可远程调用的Agent卡片信息, 包含Agent id、名称、描述、技能、请求端点等。",
+        description=("获取可远程调用的Agent卡片信息, 包含Agent id、名称、描述、技能、请求端点等。"),
         parameters={},
-        required=[]
+        required=[],
     )
     async def get_remote_agent_cards(self) -> ToolResult:
-        """获取远程Agent卡片信息列表"""
         if not self.manager:
             return ToolResult(success=False, message="A2A工具未初始化")
-        agent_cards = []
-        for card_id, agent_card in self.manager.agent_cards.items():
-            if not agent_card.get("enabled", True):
-                continue
-            agent_cards.append({
-                "id": card_id,
-                **agent_card,
-            })
-
-        # 2.组装ToolResult响应
+        agent_cards = [
+            {"id": card_id, **agent_card}
+            for card_id, agent_card in self.manager.agent_cards.items()
+            if agent_card.get("enabled", True)
+        ]
         return ToolResult(
             success=True,
             message="获取Agent卡片信息列表成功",
@@ -342,11 +106,13 @@ class A2ATool(BaseTool):
 
     @tool(
         name="call_remote_agent",
-        description="根据传递的id+query(分配给远程Agent完成的任务query)调用远程Agent完成对应需求",
+        description=("根据传递的id+query(分配给远程Agent完成的任务query)调用远程Agent完成对应需求"),
         parameters={
             "id": {
                 "type": "string",
-                "description": "需要调用远程agent的id, 格式参考get_remote_agent_cards()返回的数据结构",
+                "description": (
+                    "需要调用远程agent的id, 格式参考get_remote_agent_cards()返回的数据结构"
+                ),
             },
             "query": {
                 "type": "string",
@@ -356,23 +122,18 @@ class A2ATool(BaseTool):
         required=["id", "query"],
     )
     async def call_remote_agent(self, id: str, query: str) -> ToolResult:
-        """调用远程Agent并完成对应需求"""
         if not self.manager:
             return ToolResult(success=False, message="A2A工具未初始化")
         return await self.manager.invoke(agent_id=id, query=query)
 
     async def cleanup(self) -> None:
-        """清除A2A工具资源（连接池模式下仅重置本地状态）"""
-        if self._uses_pool:
-            self.manager = None
-            self._initialized = False
-            self._uses_pool = False
-            self._tool_policies = {}
-            self._tools_cache = None
-            return
-        if self.manager:
+        if not self._uses_pool and self.manager is not None:
             await self.manager.cleanup()
         self.manager = None
         self._initialized = False
+        self._uses_pool = False
         self._tool_policies = {}
         self._tools_cache = None
+
+
+__all__ = ["A2ATool"]

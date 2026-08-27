@@ -21,10 +21,7 @@ const WEEKDAY_KEYS = [
 /**
  * 将日期字符串格式化为相对日期标签
  */
-export function formatRelativeDate(
-  dateStr: string | null | undefined,
-  locale: Locale,
-): string {
+export function formatRelativeDate(dateStr: string | null | undefined, locale: Locale): string {
   if (!dateStr) return translate("common.dates.today", undefined, locale);
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return translate("common.dates.today", undefined, locale);

@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import List
-
 from pydantic import BaseModel, Field
 
 
@@ -19,4 +15,4 @@ class ConsoleRecordResult(BaseModel):
 class ShellReadResult(BaseModel):
     session_id: str
     output: str
-    console_records: List[ConsoleRecordResult] = Field(default_factory=list)
+    console_records: list[ConsoleRecordResult] = Field(default_factory=list)

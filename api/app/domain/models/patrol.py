@@ -1,17 +1,17 @@
 """Domain contracts for deterministic, read-only Ops Patrol runs."""
+
 from __future__ import annotations
 
 import hashlib
 import json
 import re
 import uuid
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 
 # Pydantic's recursive JSON alias can exceed schema recursion limits when reused
 # throughout nested Pack models. JSON-serializability is enforced at API/storage
@@ -48,10 +48,10 @@ _CHECK_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
-class PatrolPackStatus(str, Enum):
+class PatrolPackStatus(StrEnum):
     DRAFT = "draft"
     VALIDATING = "validating"
     ACTIVE = "active"
@@ -59,7 +59,7 @@ class PatrolPackStatus(str, Enum):
     INVALID = "invalid"
 
 
-class PatrolRunStatus(str, Enum):
+class PatrolRunStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -68,7 +68,7 @@ class PatrolRunStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class PatrolCheckStatus(str, Enum):
+class PatrolCheckStatus(StrEnum):
     PASS = "pass"
     WARN = "warn"
     FAIL = "fail"
@@ -76,27 +76,27 @@ class PatrolCheckStatus(str, Enum):
     SKIPPED = "skipped"
 
 
-class PatrolFindingStatus(str, Enum):
+class PatrolFindingStatus(StrEnum):
     OPEN = "open"
     ACKNOWLEDGED = "acknowledged"
     RESOLVED = "resolved"
     FALSE_POSITIVE = "false_positive"
 
 
-class PatrolFindingSeverity(str, Enum):
+class PatrolFindingSeverity(StrEnum):
     INFO = "info"
     WARNING = "warning"
     CRITICAL = "critical"
 
 
-class PatrolTriggerType(str, Enum):
+class PatrolTriggerType(StrEnum):
     MANUAL = "manual"
     SCHEDULE = "schedule"
     REPLAY = "replay"
     REMEDIATION = "remediation"  # Auto-triggered recheck run after a remediation executes.
 
 
-class PatrolProbeStatus(str, Enum):
+class PatrolProbeStatus(StrEnum):
     OK = "ok"
     ERROR = "error"
     UNAVAILABLE = "unavailable"
@@ -188,7 +188,7 @@ class PatrolAssertion(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def validate_operator_value(self) -> "PatrolAssertion":
+    def validate_operator_value(self) -> PatrolAssertion:
         if self.op == "regex":
             if not isinstance(self.value, str):
                 raise ValueError("regex requires a string value")
@@ -228,7 +228,7 @@ class PatrolCheck(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def validate_assertions(self) -> "PatrolCheck":
+    def validate_assertions(self) -> PatrolCheck:
         ids = [item.id for item in self.assertions]
         if len(ids) != len(set(ids)):
             raise ValueError("assertion ids must be unique per check")
@@ -254,7 +254,7 @@ class PatrolPackConfig(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def validate_checks(self) -> "PatrolPackConfig":
+    def validate_checks(self) -> PatrolPackConfig:
         ids = [check.id for check in self.checks]
         if len(ids) != len(set(ids)):
             raise ValueError("check ids must be unique")
@@ -344,7 +344,6 @@ class PatrolPack(BaseModel):
     version: int = Field(default=1, ge=1)
     config: PatrolPackConfig
     mcp_server_id: str
-    skill_id: str
     scheduled_job_id: str | None = None
     last_validated_at: datetime | None = None
     last_validated_version: int | None = None
@@ -358,6 +357,7 @@ class PatrolRun(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     pack_id: str
     session_id: str | None = None
+    execution_run_id: uuid.UUID
     pack_version: int = Field(ge=1)
     pack_snapshot: dict[str, Any]
     trigger_type: PatrolTriggerType
@@ -415,8 +415,11 @@ class PatrolFinding(BaseModel):
     decision_reason: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
-    def require_false_positive_reason(self) -> "PatrolFinding":
-        if self.status == PatrolFindingStatus.FALSE_POSITIVE and not (self.decision_reason or "").strip():
+    def require_false_positive_reason(self) -> PatrolFinding:
+        if (
+            self.status == PatrolFindingStatus.FALSE_POSITIVE
+            and not (self.decision_reason or "").strip()
+        ):
             raise ValueError("false-positive decisions require a reason")
         return self
 
@@ -426,13 +429,13 @@ def patrol_fingerprint(*parts: str) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-class PatrolRemediationAction(str, Enum):
+class PatrolRemediationAction(StrEnum):
     RESTART_WORKLOAD = "restart_workload"
     SCALE_WORKLOAD = "scale_workload"
     ROLLBACK_WORKLOAD = "rollback_workload"
 
 
-class PatrolRemediationStatus(str, Enum):
+class PatrolRemediationStatus(StrEnum):
     PROPOSED = "proposed"  # 提案已建，修复会话未批
     EXECUTING = "executing"  # 审批通过，执行中
     EXECUTED = "executed"  # actuator 已应用，待复检
@@ -491,7 +494,13 @@ def patrol_remediation_params_hash(
     params: dict[str, JsonValue],
 ) -> str:
     canonical = json.dumps(
-        {"action": action, "namespace": namespace, "workload": workload, "kind": kind, "params": params},
+        {
+            "action": action,
+            "namespace": namespace,
+            "workload": workload,
+            "kind": kind,
+            "params": params,
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

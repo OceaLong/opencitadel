@@ -108,15 +108,8 @@ export type PatrolFinding = {
   decided_by?: string | null;
   decided_at?: string | null;
   decision_reason?: string | null;
-  /**
-   * Which remediation actions this Finding's originating Check's probe tool
-   * supports, computed server-side (see
-   * app/interfaces/endpoints/patrol_routes.py::_finding_allowed_actions).
-   * Optional for backward compatibility with cached/stale responses that
-   * predate this field -- `RemediationDialog` falls back to a local mirror
-   * of the same rule when it's absent.
-   */
-  allowed_actions?: PatrolRemediationAction[];
+  /** Server-authoritative remediation actions for this finding. */
+  allowed_actions: PatrolRemediationAction[];
 };
 
 export type PatrolRunDetail = PatrolRun & {

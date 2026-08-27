@@ -1,11 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
-from functools import lru_cache
 
 from redis.asyncio import Redis
 
-from core.config import get_settings, Settings
+from core.config import DeploymentSettings
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +10,10 @@ logger = logging.getLogger(__name__)
 class RedisClient:
     """Redis客户端，用于完成redis缓存连接&使用"""
 
-    def __init__(self):
+    def __init__(self, settings: DeploymentSettings) -> None:
         """构造函数，完成redis客户端的创建"""
         self._client: Redis | None = None
-        self._settings: Settings = get_settings()
+        self._settings = settings
 
     async def init(self) -> None:
         """完成redis客户端的初始化"""
@@ -38,8 +35,8 @@ class RedisClient:
             # 3.测试连接redis缓存
             await self._client.ping()
             logger.info("Redis客户端初始化成功")
-        except Exception as e:
-            logger.error(f"初始化Redis客户端失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("初始化Redis客户端失败: %s", e)
             raise
 
     async def shutdown(self) -> None:
@@ -50,18 +47,9 @@ class RedisClient:
             self._client = None
             logger.info("Redis客户端成功关闭")
 
-        # 2.清除缓存
-        get_redis.cache_clear()
-
     @property
     def client(self) -> Redis:
         """只读属性，返回redis客户端"""
         if self._client is None:
             raise RuntimeError("Redis客户端未初始化，获取客户端失败")
         return self._client
-
-
-@lru_cache()
-def get_redis() -> RedisClient:
-    """获取redis实例"""
-    return RedisClient()

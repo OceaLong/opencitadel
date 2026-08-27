@@ -1,12 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import pytest
 
 from app.domain.errors import ServerRequestsError
-from app.application.services.memory_extractor_service import (
-    EXTRACT_PROMPT,
-    _extract_llm_text_content,
-)
 from app.domain.models.error_codes import MODEL_QUOTA_EXCEEDED
 from app.domain.utils.llm_retry import (
     classify_llm_error_code,
@@ -19,7 +13,7 @@ from app.infrastructure.external.llm.openai_llm import _format_llm_error
 QUOTA_ERROR_SAMPLE = (
     "Error code: 403 - {'error': {'message': 'The free quota has been exhausted. "
     "To continue accessing the model on a paid basis, please complete your payment "
-    "information (or disable the \"use free tier only\" mode in the management console "
+    'information (or disable the "use free tier only" mode in the management console '
     "if already completed)', 'type': 'insufficient_quota', 'code': 'insufficient_quota'}}"
 )
 
@@ -27,13 +21,6 @@ QUOTA_ERROR_SAMPLE = (
 def test_server_requests_error_str():
     err = ServerRequestsError("调用LLM失败: test")
     assert str(err) == "调用LLM失败: test"
-
-
-def test_extract_prompt_format_no_key_error():
-    rendered = EXTRACT_PROMPT.format(events_summary="user: hello")
-    assert '{"title"' in rendered or '{{"title"' not in rendered
-    assert "hello" in rendered
-    assert "{events_summary}" not in rendered
 
 
 def test_format_llm_error_unsupported_model():
@@ -95,21 +82,6 @@ def test_is_quota_exhausted_error_detects_cause_chain():
     wrapped = ServerRequestsError("调用LLM失败: 模型 qwen-plus API 配额已耗尽")
     wrapped.__cause__ = original
     assert is_quota_exhausted_error(wrapped) is True
-
-
-def test_extract_llm_text_content_prefers_content():
-    assert _extract_llm_text_content({"content": "[]", "reasoning_content": "x"}) == "[]"
-
-
-def test_extract_llm_text_content_falls_back_to_reasoning():
-    assert _extract_llm_text_content({
-        "content": "",
-        "reasoning_content": '[{"title":"a","content":"b","tags":[]}]',
-    }) == '[{"title":"a","content":"b","tags":[]}]'
-
-
-def test_extract_llm_text_content_empty_defaults_to_array():
-    assert _extract_llm_text_content({}) == "[]"
 
 
 @pytest.mark.parametrize(

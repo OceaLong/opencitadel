@@ -83,11 +83,11 @@ function ShareArtifactContent() {
               <iframe
                 title={t("artifactTitle")}
                 srcDoc={content}
-                className="bg-background h-[calc(100vh-120px)] w-full rounded-xl border shadow-panel"
+                className="bg-background shadow-panel h-[calc(100vh-120px)] w-full rounded-xl border"
                 sandbox="allow-scripts"
               />
             ) : (
-              <div className="bg-card border-border/70 rounded-xl border p-6 shadow-panel">
+              <div className="bg-card border-border/70 shadow-panel rounded-xl border p-6">
                 <MarkdownContent content={content} />
               </div>
             )}

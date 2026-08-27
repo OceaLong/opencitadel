@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import AsyncMock
 
 import pytest
@@ -7,18 +8,30 @@ import pytest
 from app.application.patrol_templates import load_patrol_template
 from app.application.services.patrol_collector_validator import MCPPatrolCollectorValidator
 from app.domain.models.integration_server import MCPServerRecord
+from app.domain.runtime_policy import ActivityExecutionPolicy
 
 
 class Manager:
-    connection_errors = {}
+    connection_errors: ClassVar[dict] = {}
 
     def __init__(self):
-        names = ["get_capabilities", "k8s_workload_summary", "k8s_recent_events", "prom_query", "certificate_status", "backup_status", "dependency_status", "http_probe"]
+        names = [
+            "get_capabilities",
+            "k8s_workload_summary",
+            "k8s_recent_events",
+            "prom_query",
+            "certificate_status",
+            "backup_status",
+            "dependency_status",
+            "http_probe",
+        ]
         self.tools = {"collector": [SimpleNamespace(name=name) for name in names]}
         self.calls = []
 
     async def get_all_tools(self):
-        return [{"function": {"name": f"mcp_collector_{item.name}"}} for item in self.tools["collector"]]
+        return [
+            {"function": {"name": f"mcp_collector_{item.name}"}} for item in self.tools["collector"]
+        ]
 
     async def invoke(self, name, arguments):
         self.calls.append((name, arguments))
@@ -37,10 +50,13 @@ async def test_live_validator_calls_only_manifest_tools_with_pack_arguments():
     server = MCPServerRecord(id="server-1", name="collector", url="https://collector.example/mcp")
     config = load_patrol_template("kubernetes-baseline-v1")
 
-    capabilities = await validator.get_capabilities(server)
-    dry_run = await validator.dry_run(server, config)
+    policy = ActivityExecutionPolicy()
+    capabilities = await validator.get_capabilities(server, policy=policy)
+    dry_run = await validator.dry_run(server, config, policy=policy)
 
     assert "get_capabilities" in capabilities["enabled_tools"]
     assert dry_run["ok"] is True
     assert len(dry_run["probes"]) == 9
-    assert not any({"url", "promql", "command", "script"} & set(arguments) for _, arguments in manager.calls)
+    assert not any(
+        {"url", "promql", "command", "script"} & set(arguments) for _, arguments in manager.calls
+    )

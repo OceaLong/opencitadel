@@ -1,18 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-const ACTIVE_BUILD_STATES = new Set(["queued", "running"]);
+const ACTIVE_BUILD_STATUSES = new Set(["new", "queued", "running", "waiting"]);
 const DEFAULT_POLL_MS = 5000;
-
-type TFunction = ReturnType<typeof useTranslations>;
 
 /** Minimal shape a resource build must have for shared polling/action logic. */
 export type VersionBuildLike = {
   id: string;
-  state: string;
+  status: string;
   can_retry: boolean;
   can_cancel: boolean;
 };
@@ -58,7 +55,8 @@ export type UseVersionBuildPollingOptions<TVersionsData> = {
   controlledHistory?: TVersionsData | null;
   onBuildChanged?: () => void;
   pollMs?: number;
-  t: TFunction;
+  capabilityAvailableLabel: string;
+  capabilityUnavailableLabel: string;
   loadErrorMessage: string;
   actionErrorMessage: string;
 };
@@ -79,7 +77,8 @@ export function useVersionBuildPolling<
   controlledHistory,
   onBuildChanged,
   pollMs = DEFAULT_POLL_MS,
-  t,
+  capabilityAvailableLabel,
+  capabilityUnavailableLabel,
   loadErrorMessage,
   actionErrorMessage,
 }: UseVersionBuildPollingOptions<TVersionsData>) {
@@ -114,7 +113,7 @@ export function useVersionBuildPolling<
 
   const activeBuild = history?.active_build;
   useEffect(() => {
-    if (!activeBuild || !ACTIVE_BUILD_STATES.has(activeBuild.state)) return;
+    if (!activeBuild || !ACTIVE_BUILD_STATUSES.has(activeBuild.status)) return;
     const timer = window.setInterval(() => {
       if (controlledHistory === undefined) {
         void load(true);
@@ -133,7 +132,7 @@ export function useVersionBuildPolling<
   const capabilities = viewed
     ? Object.entries(viewed.capabilities).map(
         ([name, enabled]) =>
-          `${name}: ${enabled ? t("capabilityAvailable") : t("capabilityUnavailable")}`,
+          `${name}: ${enabled ? capabilityAvailableLabel : capabilityUnavailableLabel}`,
       )
     : [];
   const actionableBuild =

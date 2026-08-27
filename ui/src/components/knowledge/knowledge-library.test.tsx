@@ -9,7 +9,6 @@ import { renderComponent } from "@/test-utils/render";
 const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   createBuild: vi.fn(),
-  legacyReindex: vi.fn(),
   listKnowledgeBases: vi.fn(),
   listVersions: vi.fn(),
   push: vi.fn(),
@@ -37,7 +36,6 @@ vi.mock("@/lib/api/knowledge", () => ({
     listDocuments: vi.fn(),
     delete: vi.fn(),
     deleteDocument: vi.fn(),
-    reindex: mocks.legacyReindex,
   },
 }));
 vi.mock("@/lib/api/session", () => ({ sessionApi: { createSession: mocks.createSession } }));
@@ -110,7 +108,6 @@ describe("knowledge task starts", () => {
   afterEach(() => {
     mocks.createSession.mockReset();
     mocks.createBuild.mockReset();
-    mocks.legacyReindex.mockReset();
     mocks.listKnowledgeBases.mockReset();
     mocks.listVersions.mockReset();
     mocks.push.mockReset();
@@ -127,7 +124,6 @@ describe("knowledge task starts", () => {
           doc_count: 2,
           ready_doc_count: 1,
           active_version_id: "version-published",
-          ingest_task_id: "candidate-build",
         },
       ],
     });
@@ -200,18 +196,16 @@ describe("knowledge task starts", () => {
       ...idleHistory,
       active_build: {
         id: "build-1",
+        run_id: "run-build-1",
         knowledge_base_id: "kb-1",
         version_id: "version-candidate",
-        parent_version_id: "version-published",
-        command_key: "command",
-        state: "running",
+        status: "running",
         phase: "chunk",
-        progress: 0.5,
-        capabilities: [],
-        degraded_reasons: [],
-        metrics: {},
-        last_event_seq: 1,
+        progress: 50,
         created_at: "2026-07-30T00:00:00Z",
+        updated_at: "2026-07-30T00:00:30Z",
+        terminal_at: null,
+        failure_code: null,
         can_retry: false,
         can_cancel: true,
       },
@@ -234,7 +228,6 @@ describe("knowledge task starts", () => {
     });
 
     expect(mocks.createBuild).toHaveBeenCalledWith("kb-1");
-    expect(mocks.legacyReindex).not.toHaveBeenCalled();
     expect(findButton(container, "View build").disabled).toBe(true);
     await unmount();
   });

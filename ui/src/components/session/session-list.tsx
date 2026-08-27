@@ -108,7 +108,7 @@ export function SessionList() {
             type="button"
             size="sm"
             variant={filter === option ? "secondary" : "ghost"}
-            className={cn("h-6 px-2 text-2xs", filter === option && "font-medium")}
+            className={cn("text-2xs h-6 px-2", filter === option && "font-medium")}
             onClick={() => setFilter(option)}
           >
             {t(`filter.${option}`)}
@@ -117,7 +117,10 @@ export function SessionList() {
       </div>
 
       {filteredSessions.length === 0 ? (
-        <EmptyState title={sessions.length === 0 ? t("empty") : t("filterEmpty")} className="py-8" />
+        <EmptyState
+          title={sessions.length === 0 ? t("empty") : t("filterEmpty")}
+          className="py-8"
+        />
       ) : (
         <ItemGroup className="gap-1">
           {filteredSessions.map((session) => (

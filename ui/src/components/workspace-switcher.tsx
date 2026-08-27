@@ -11,40 +11,34 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 import { type Team, teamApi } from "@/lib/api/team";
-import { ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
+import { useClientDataScope } from "@/providers/client-data-provider";
 
 export function WorkspaceSwitcher({ trigger }: { trigger?: ReactNode }) {
   const { user } = useAuth();
+  const { scope, setWorkspaceId } = useClientDataScope();
   const t = useTranslations("workspace");
   const [teams, setTeams] = useState<Team[]>([]);
-  const [active, setActive] = useState("");
+  const active = scope?.workspaceId ?? "";
 
   useEffect(() => {
-    if (!user) return;
-    const stored = window.localStorage.getItem(ACTIVE_WORKSPACE_KEY) ?? "";
+    if (!user || !scope) return;
     void teamApi
       .list()
       .then((data) => {
         const teamIds = new Set(data.teams.map((team) => team.id));
-        const nextActive = stored && teamIds.has(stored) ? stored : "";
-        if (nextActive !== stored) {
-          window.localStorage.setItem(ACTIVE_WORKSPACE_KEY, "");
+        if (active && !teamIds.has(active)) {
+          setWorkspaceId("");
         }
-        setActive(nextActive);
         setTeams(data.teams);
       })
       .catch(() => {
         setTeams([]);
-        setActive("");
       });
-  }, [user]);
+  }, [active, scope, setWorkspaceId, user]);
 
-  const activeTeam = useMemo(
-    () => teams.find((team) => team.id === active),
-    [active, teams],
-  );
+  const activeTeam = useMemo(() => teams.find((team) => team.id === active), [active, teams]);
   const displayLabel = activeTeam?.name ?? t("personal");
   const TriggerIcon = activeTeam ? Users : User;
 
@@ -53,8 +47,7 @@ export function WorkspaceSwitcher({ trigger }: { trigger?: ReactNode }) {
   }
 
   function change(value: string) {
-    setActive(value);
-    window.localStorage.setItem(ACTIVE_WORKSPACE_KEY, value);
+    setWorkspaceId(value);
     window.location.reload();
   }
 
@@ -69,11 +62,13 @@ export function WorkspaceSwitcher({ trigger }: { trigger?: ReactNode }) {
         {trigger ?? (
           <button
             type="button"
-            className="mb-3 flex w-full items-center gap-2.5 rounded-xl bg-muted/50 px-2.5 py-2 transition-colors hover:bg-muted/80"
+            className="bg-muted/50 hover:bg-muted/80 mb-3 flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 transition-colors"
             aria-label={t("label")}
           >
-            <TriggerIcon className="size-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">{displayLabel}</span>
+            <TriggerIcon className="text-muted-foreground size-4 shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-left text-sm font-medium">
+              {displayLabel}
+            </span>
             <ChevronDown className="size-4 shrink-0 opacity-60" />
           </button>
         )}
@@ -92,7 +87,7 @@ export function WorkspaceSwitcher({ trigger }: { trigger?: ReactNode }) {
               )}
               onClick={() => change(option.id)}
             >
-              <OptionIcon className="size-4 shrink-0 text-muted-foreground" />
+              <OptionIcon className="text-muted-foreground size-4 shrink-0" />
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{option.label}</span>
               {isSelected ? <Check className="text-primary size-4 shrink-0" /> : null}
             </button>

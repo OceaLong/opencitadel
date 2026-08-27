@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Generate cached Mermaid/Markdown artifacts from static analysis facts.
 
 Artifacts in this module are intentionally conservative: diagram-like views are
@@ -7,12 +5,13 @@ emitted only when static analysis produced explicit evidence for the underlying
 facts.  This avoids presenting generic templates or ordered function lists as if
 they were discovered architecture or runtime flow.
 """
+
 import hashlib
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from app.domain.external.llm import LLM
 from app.domain.models.codebase import (
@@ -28,30 +27,30 @@ from app.domain.models.codebase import (
 
 @dataclass(frozen=True)
 class ArtifactGenerationResult:
-    artifacts: List[CodebaseArtifact] = field(default_factory=list)
-    unsupported_views: Dict[ArtifactKind, str] = field(default_factory=dict)
+    artifacts: list[CodebaseArtifact] = field(default_factory=list)
+    unsupported_views: dict[ArtifactKind, str] = field(default_factory=dict)
 
 
 class ArtifactGenerator:
-    def __init__(self, llm: Optional[LLM] = None) -> None:
+    def __init__(self, llm: LLM | None = None) -> None:
         self._llm = llm
 
     def generate_all(
-            self,
-            codebase_id: str,
-            name: str = "代码库",
-            files: Optional[List[CodebaseFile]] = None,
-            symbols: Optional[List[CodebaseSymbol]] = None,
-            edges: Optional[List[CodebaseEdge]] = None,
-            language_stats: Optional[Dict[str, int]] = None,
+        self,
+        codebase_id: str,
+        name: str = "代码库",
+        files: list[CodebaseFile] | None = None,
+        symbols: list[CodebaseSymbol] | None = None,
+        edges: list[CodebaseEdge] | None = None,
+        language_stats: dict[str, int] | None = None,
     ) -> ArtifactGenerationResult:
         files = files or []
         symbols = symbols or []
         edges = edges or []
         language_stats = language_stats or {}
 
-        artifacts: List[CodebaseArtifact] = []
-        unsupported_views: Dict[ArtifactKind, str] = {
+        artifacts: list[CodebaseArtifact] = []
+        unsupported_views: dict[ArtifactKind, str] = {
             ArtifactKind.ARCHITECTURE: "insufficient_evidence",
             ArtifactKind.DATA_FLOW: "unsupported",
             ArtifactKind.CALL_CHAIN: "insufficient_evidence",
@@ -87,11 +86,11 @@ class ArtifactGenerator:
         )
 
     def generate_all_from_analysis(
-            self,
-            analysis: object,
-            *,
-            codebase_id: Optional[str] = None,
-            name: str = "代码库",
+        self,
+        analysis: object,
+        *,
+        codebase_id: str | None = None,
+        name: str = "代码库",
     ) -> ArtifactGenerationResult:
         files = list(getattr(analysis, "files", []) or [])
         symbols = list(getattr(analysis, "symbols", []) or [])
@@ -122,10 +121,10 @@ class ArtifactGenerator:
         return result
 
     def generate_call_chain(
-            self,
-            analysis: object,
-            *,
-            codebase_id: Optional[str] = None,
+        self,
+        analysis: object,
+        *,
+        codebase_id: str | None = None,
     ) -> CodebaseArtifact:
         files = list(getattr(analysis, "files", []) or [])
         symbols = list(getattr(analysis, "symbols", []) or [])
@@ -144,23 +143,19 @@ class ArtifactGenerator:
         return artifact
 
     def _overview(
-            self,
-            codebase_id: str,
-            name: str,
-            files: List[CodebaseFile],
-            symbols: List[CodebaseSymbol],
-            language_stats: Dict[str, int],
+        self,
+        codebase_id: str,
+        name: str,
+        files: list[CodebaseFile],
+        symbols: list[CodebaseSymbol],
+        language_stats: dict[str, int],
     ) -> CodebaseArtifact:
         files_by_id = {file.id: file for file in files}
         lang_lines = ", ".join(
-            f"{k}: {v}"
-            for k, v in sorted(language_stats.items(), key=lambda x: -x[1])
+            f"{k}: {v}" for k, v in sorted(language_stats.items(), key=lambda x: -x[1])
         )
         top_symbols = sorted(symbols, key=lambda s: s.name)[:30]
-        sym_lines = "\n".join(
-            f"- `{s.name}` ({s.kind.value})"
-            for s in top_symbols
-        )
+        sym_lines = "\n".join(f"- `{s.name}` ({s.kind.value})" for s in top_symbols)
         content = (
             f"# {name} 代码库概览\n\n"
             f"- 文件数: {len(files)}\n"
@@ -176,20 +171,14 @@ class ArtifactGenerator:
             title="项目概览",
             content=content,
             meta={
-                "files": [
-                    self._file_ref(file)
-                    for file in files
-                ],
-                "symbols": [
-                    self._symbol_ref(symbol, files_by_id)
-                    for symbol in symbols
-                ],
+                "files": [self._file_ref(file) for file in files],
+                "symbols": [self._symbol_ref(symbol, files_by_id) for symbol in symbols],
             },
-            created_at=datetime.now(),
+            created_at=datetime.now(UTC),
         )
 
-    def _module_dir(self, codebase_id: str, files: List[CodebaseFile]) -> CodebaseArtifact:
-        dirs: Dict[str, List[str]] = {}
+    def _module_dir(self, codebase_id: str, files: list[CodebaseFile]) -> CodebaseArtifact:
+        dirs: dict[str, list[str]] = {}
         for f in files:
             parts = f.path.split("/")
             if len(parts) > 1:
@@ -212,33 +201,30 @@ class ArtifactGenerator:
             content=content,
             meta={
                 "dirs": {k: len(v) for k, v in dirs.items()},
-                "paths": [
-                    self._file_ref(file)
-                    for file in files
-                ],
+                "paths": [self._file_ref(file) for file in files],
             },
-            created_at=datetime.now(),
+            created_at=datetime.now(UTC),
         )
 
     def _architecture(
-            self,
-            codebase_id: str,
-            files: List[CodebaseFile],
-            symbols: List[CodebaseSymbol],
-            edges: List[CodebaseEdge],
-    ) -> Optional[CodebaseArtifact]:
+        self,
+        codebase_id: str,
+        files: list[CodebaseFile],
+        symbols: list[CodebaseSymbol],
+        edges: list[CodebaseEdge],
+    ) -> CodebaseArtifact | None:
         symbols_by_id = {symbol.id: symbol for symbol in symbols}
         files_by_id = {file.id: file for file in files}
         evidence_edges = [
-            edge for edge in edges
-            if self._edge_kind_value(edge.kind) in {"import", "dependency"}
-            and edge.evidence
+            edge
+            for edge in edges
+            if self._edge_kind_value(edge.kind) in {"import", "dependency"} and edge.evidence
         ]
         if not evidence_edges:
             return None
 
-        module_nodes: Dict[str, str] = {}
-        meta_edges: List[Dict[str, Any]] = []
+        module_nodes: dict[str, str] = {}
+        meta_edges: list[dict[str, Any]] = []
         lines = ["graph TB"]
         seen_edges: set[tuple[str, str]] = set()
         for edge in evidence_edges[:120]:
@@ -251,11 +237,7 @@ class ArtifactGenerator:
             src_module = self._module_name(src_file.path)
 
             dst_module = ""
-            dst_symbol = (
-                symbols_by_id.get(edge.dst_symbol_id)
-                if edge.dst_symbol_id
-                else None
-            )
+            dst_symbol = symbols_by_id.get(edge.dst_symbol_id) if edge.dst_symbol_id else None
             if dst_symbol is not None:
                 dst_file = files_by_id.get(dst_symbol.file_id)
                 if dst_file is not None:
@@ -304,20 +286,21 @@ class ArtifactGenerator:
                 ],
                 "edges": meta_edges,
             },
-            created_at=datetime.now(),
+            created_at=datetime.now(UTC),
         )
 
     def _call_chain(
-            self,
-            codebase_id: str,
-            files: List[CodebaseFile],
-            symbols: List[CodebaseSymbol],
-            edges: List[CodebaseEdge],
-    ) -> Optional[CodebaseArtifact]:
+        self,
+        codebase_id: str,
+        files: list[CodebaseFile],
+        symbols: list[CodebaseSymbol],
+        edges: list[CodebaseEdge],
+    ) -> CodebaseArtifact | None:
         sym_by_id = {s.id: s for s in symbols}
         file_by_id = {f.id: f for f in files}
         evidence_edges = [
-            edge for edge in edges
+            edge
+            for edge in edges
             if self._edge_kind_value(edge.kind) == EdgeKind.CALL.value
             and edge.evidence
             and edge.src_symbol_id in sym_by_id
@@ -328,7 +311,7 @@ class ArtifactGenerator:
         lines = ["graph LR"]
         seen_nodes: set[str] = set()
         seen_edges: set[str] = set()
-        meta_edges: List[Dict[str, Any]] = []
+        meta_edges: list[dict[str, Any]] = []
         for edge in evidence_edges[:80]:
             src = sym_by_id.get(edge.src_symbol_id)
             if not src:
@@ -348,28 +331,22 @@ class ArtifactGenerator:
                     if edge_key not in seen_edges:
                         lines.append(f"    {src_node} --> {dst_node}")
                         seen_edges.add(edge_key)
-                        meta_edges.append(
-                            self._edge_ref(edge, sym_by_id, file_by_id)
-                        )
+                        meta_edges.append(self._edge_ref(edge, sym_by_id, file_by_id))
             else:
                 callee_node = self._callee_node_id(edge.callee_name)
                 if callee_node not in seen_nodes:
-                    lines.append(
-                        f'    {callee_node}["{self._escape_label(edge.callee_name)}"]'
-                    )
+                    lines.append(f'    {callee_node}["{self._escape_label(edge.callee_name)}"]')
                     seen_nodes.add(callee_node)
                 edge_key = f"{src_node}->{callee_node}"
                 if edge_key not in seen_edges:
                     lines.append(f"    {src_node} --> {callee_node}")
                     seen_edges.add(edge_key)
-                    meta_edges.append(
-                        self._edge_ref(edge, sym_by_id, file_by_id)
-                    )
+                    meta_edges.append(self._edge_ref(edge, sym_by_id, file_by_id))
 
         if not meta_edges:
             return None
-        node_locations: List[Dict[str, object]] = []
-        node_refs: List[Dict[str, object]] = []
+        node_locations: list[dict[str, object]] = []
+        node_refs: list[dict[str, object]] = []
         seen_symbol_ids: set[str] = set()
         for edge in evidence_edges[:40]:
             for sym_id in (edge.src_symbol_id, edge.dst_symbol_id):
@@ -405,14 +382,14 @@ class ArtifactGenerator:
                 "nodes": node_refs,
                 "edges": meta_edges,
             },
-            created_at=datetime.now(),
+            created_at=datetime.now(UTC),
         )
 
     @staticmethod
     def _infer_codebase_id(
-            files: List[CodebaseFile],
-            symbols: List[CodebaseSymbol],
-            edges: List[CodebaseEdge],
+        files: list[CodebaseFile],
+        symbols: list[CodebaseSymbol],
+        edges: list[CodebaseEdge],
     ) -> str:
         for item in [*files, *symbols, *edges]:
             codebase_id = getattr(item, "codebase_id", "")
@@ -422,9 +399,9 @@ class ArtifactGenerator:
 
     @staticmethod
     def _infer_version_id(
-            files: List[CodebaseFile],
-            symbols: List[CodebaseSymbol],
-            edges: List[CodebaseEdge],
+        files: list[CodebaseFile],
+        symbols: list[CodebaseSymbol],
+        edges: list[CodebaseEdge],
     ) -> str:
         for item in [*files, *symbols, *edges]:
             version_id = getattr(item, "version_id", "")
@@ -441,7 +418,7 @@ class ArtifactGenerator:
         return getattr(kind, "value", str(kind))
 
     @staticmethod
-    def _file_ref(file: CodebaseFile) -> Dict[str, Any]:
+    def _file_ref(file: CodebaseFile) -> dict[str, Any]:
         return {
             "file_id": file.id,
             "version_id": file.version_id,
@@ -452,10 +429,10 @@ class ArtifactGenerator:
         }
 
     def _symbol_ref(
-            self,
-            symbol: CodebaseSymbol,
-            files_by_id: Dict[str, CodebaseFile],
-    ) -> Dict[str, Any]:
+        self,
+        symbol: CodebaseSymbol,
+        files_by_id: dict[str, CodebaseFile],
+    ) -> dict[str, Any]:
         file = files_by_id.get(symbol.file_id)
         return {
             "symbol": symbol.name,
@@ -472,26 +449,19 @@ class ArtifactGenerator:
         }
 
     def _edge_ref(
-            self,
-            edge: CodebaseEdge,
-            symbols_by_id: Dict[str, CodebaseSymbol],
-            files_by_id: Dict[str, CodebaseFile],
-            *,
-            src_module: str = "",
-            dst_module: str = "",
-    ) -> Dict[str, Any]:
+        self,
+        edge: CodebaseEdge,
+        symbols_by_id: dict[str, CodebaseSymbol],
+        files_by_id: dict[str, CodebaseFile],
+        *,
+        src_module: str = "",
+        dst_module: str = "",
+    ) -> dict[str, Any]:
         src_symbol = symbols_by_id.get(edge.src_symbol_id)
-        dst_symbol = (
-            symbols_by_id.get(edge.dst_symbol_id)
-            if edge.dst_symbol_id
-            else None
-        )
+        dst_symbol = symbols_by_id.get(edge.dst_symbol_id) if edge.dst_symbol_id else None
         src_file = files_by_id.get(src_symbol.file_id) if src_symbol else None
         dst_file = files_by_id.get(dst_symbol.file_id) if dst_symbol else None
-        evidence_refs = [
-            evidence.model_dump(mode="json")
-            for evidence in edge.evidence
-        ]
+        evidence_refs = [evidence.model_dump(mode="json") for evidence in edge.evidence]
         return {
             "edge_id": edge.id,
             "kind": self._edge_kind_value(edge.kind),
@@ -511,9 +481,9 @@ class ArtifactGenerator:
 
     @staticmethod
     def _edge_symbol_ref(
-            symbol: Optional[CodebaseSymbol],
-            file: Optional[CodebaseFile],
-    ) -> Optional[Dict[str, Any]]:
+        symbol: CodebaseSymbol | None,
+        file: CodebaseFile | None,
+    ) -> dict[str, Any] | None:
         if symbol is None:
             return None
         return {
@@ -537,9 +507,9 @@ class ArtifactGenerator:
         return "(root)"
 
     def _module_node_id(
-            self,
-            module: str,
-            module_nodes: Dict[str, str],
+        self,
+        module: str,
+        module_nodes: dict[str, str],
     ) -> str:
         node_id = module_nodes.get(module)
         if node_id:

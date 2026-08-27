@@ -1,17 +1,18 @@
 """Stable Collector request/response contracts."""
+
 from __future__ import annotations
 
 import hashlib
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
-from enum import Enum
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
-class CollectorErrorCode(str, Enum):
+class CollectorErrorCode(StrEnum):
     AUTH_FAILED = "AUTH_FAILED"
     TARGET_NOT_FOUND = "TARGET_NOT_FOUND"
     NAMESPACE_DENIED = "NAMESPACE_DENIED"
@@ -27,8 +28,14 @@ class CollectorErrorCode(str, Enum):
 
 class EvidenceItem(BaseModel):
     type: Literal[
-        "summary", "resource_refs", "raw_probe_response", "log_excerpt",
-        "metric_sample", "tls_chain", "backup_metadata", "collector_result"
+        "summary",
+        "resource_refs",
+        "raw_probe_response",
+        "log_excerpt",
+        "metric_sample",
+        "tls_chain",
+        "backup_metadata",
+        "collector_result",
     ]
     ref: str
     sha256: str
@@ -40,7 +47,7 @@ class CollectorEnvelope(BaseModel):
     schema_version: Literal[1] = 1
     request_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     target_ref: str
-    collected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    collected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     duration_ms: int = Field(ge=0)
     status: Literal["ok", "error", "unavailable", "denied"]
     data: dict[str, Any] = Field(default_factory=dict)
@@ -90,10 +97,12 @@ class RegisteredDependencyRequest(BaseModel):
 
 
 def evidence_for(target_ref: str, data: dict[str, Any], types: list[str]) -> list[EvidenceItem]:
-    canonical = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    canonical = json.dumps(
+        data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    ).encode("utf-8")
     digest = hashlib.sha256(canonical).hexdigest()
     evidence_id = str(uuid.uuid4())
-    expires = datetime.now(timezone.utc) + timedelta(days=7)
+    expires = datetime.now(UTC) + timedelta(days=7)
     return [
         EvidenceItem(
             type=item,  # type: ignore[arg-type]

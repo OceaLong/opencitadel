@@ -1,13 +1,13 @@
+from contextlib import contextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
-from prometheus_client import REGISTRY
 
-from app.domain.errors import BadRequestError, ConflictError, NotFoundError
 from app.application.patrol_templates import load_patrol_template
 from app.application.services.patrol_remediation_service import PatrolRemediationService
-from app.domain.models.app_config import AppConfig
+from app.domain.errors import BadRequestError, ConflictError, NotFoundError
 from app.domain.models.patrol import (
     PatrolCheckResult,
     PatrolCheckStatus,
@@ -23,6 +23,17 @@ from app.domain.models.patrol import (
     patrol_remediation_params_hash,
 )
 from app.domain.models.scope import OwnerScope
+from app.domain.runtime_policy import (
+    ActivityExecutionPolicy,
+    OperationsPolicy,
+    PatrolOperationsPolicy,
+    PatrolRemediationMode,
+)
+from tests.app.application_test_support import (
+    NoopGovernanceMetrics,
+    RecordingGovernanceMetrics,
+)
+from tests.runtime_policy_support import MutablePolicyReader
 
 
 class Repo:
@@ -32,33 +43,50 @@ class Repo:
     def __init__(self):
         config = load_patrol_template("kubernetes-baseline-v1")
         self.pack = PatrolPack(
-            owner_user_id="user-1", name="Daily", slug="daily", status=PatrolPackStatus.ACTIVE,
-            config=config, mcp_server_id="server-1", skill_id="skill-1",
+            owner_user_id="user-1",
+            name="Daily",
+            slug="daily",
+            status=PatrolPackStatus.ACTIVE,
+            config=config,
+            mcp_server_id="server-1",
         )
         self.run = PatrolRun(
-            pack_id=self.pack.id, pack_version=1,
+            pack_id=self.pack.id,
+            pack_version=1,
             pack_snapshot={"config": config.model_dump(mode="json")},
-            trigger_type=PatrolTriggerType.MANUAL, idempotency_key="key-1",
+            trigger_type=PatrolTriggerType.MANUAL,
+            idempotency_key="key-1",
+            execution_run_id=uuid4(),
         )
         self.k8s_check_result = PatrolCheckResult(
-            run_id=self.run.id, check_id="k8s-workload-availability",
-            status=PatrolCheckStatus.FAIL, severity=PatrolFindingSeverity.CRITICAL,
+            run_id=self.run.id,
+            check_id="k8s-workload-availability",
+            status=PatrolCheckStatus.FAIL,
+            severity=PatrolFindingSeverity.CRITICAL,
             fingerprint="f" * 64,
         )
         self.http_check_result = PatrolCheckResult(
-            run_id=self.run.id, check_id="endpoint-health",
-            status=PatrolCheckStatus.FAIL, severity=PatrolFindingSeverity.CRITICAL,
+            run_id=self.run.id,
+            check_id="endpoint-health",
+            status=PatrolCheckStatus.FAIL,
+            severity=PatrolFindingSeverity.CRITICAL,
             fingerprint="g" * 64,
         )
         self.k8s_finding = PatrolFinding(
-            run_id=self.run.id, check_result_id=self.k8s_check_result.id,
-            fingerprint=self.k8s_check_result.fingerprint, severity=PatrolFindingSeverity.CRITICAL,
-            title="k8s workload unavailable", summary="unavailable replicas",
+            run_id=self.run.id,
+            check_result_id=self.k8s_check_result.id,
+            fingerprint=self.k8s_check_result.fingerprint,
+            severity=PatrolFindingSeverity.CRITICAL,
+            title="k8s workload unavailable",
+            summary="unavailable replicas",
         )
         self.http_finding = PatrolFinding(
-            run_id=self.run.id, check_result_id=self.http_check_result.id,
-            fingerprint=self.http_check_result.fingerprint, severity=PatrolFindingSeverity.CRITICAL,
-            title="endpoint unhealthy", summary="http probe failing",
+            run_id=self.run.id,
+            check_result_id=self.http_check_result.id,
+            fingerprint=self.http_check_result.fingerprint,
+            severity=PatrolFindingSeverity.CRITICAL,
+            title="endpoint unhealthy",
+            summary="http probe failing",
         )
         self.remediations: dict[str, object] = {}
 
@@ -82,9 +110,15 @@ class Repo:
     async def get_active_remediation_for_finding(self, finding_id):
         return next(
             (
-                item for item in self.remediations.values()
+                item
+                for item in self.remediations.values()
                 if item.finding_id == finding_id
-                and item.status not in {PatrolRemediationStatus.VERIFIED, PatrolRemediationStatus.FAILED, PatrolRemediationStatus.CANCELLED}
+                and item.status
+                not in {
+                    PatrolRemediationStatus.VERIFIED,
+                    PatrolRemediationStatus.FAILED,
+                    PatrolRemediationStatus.CANCELLED,
+                }
             ),
             None,
         )
@@ -105,110 +139,151 @@ class Repo:
         return [item for item in self.remediations.values() if item.run_id == run_id]
 
     async def get_remediation_by_session_id(self, session_id):
-        return next((item for item in self.remediations.values() if item.session_id == session_id), None)
-
-
-class SkillRepo:
-    """Fake app.domain.repositories.skill_repository.SkillRepository, mirroring
-    the lookup PatrolPackService.create_pack does for "ops-patrol"."""
-
-    def __init__(self, registered: bool = True):
-        self._skill = (
-            SimpleNamespace(id="skill-remediation-1", slug="ops-patrol-remediation")
-            if registered
-            else None
+        return next(
+            (item for item in self.remediations.values() if item.session_id == session_id),
+            None,
         )
-
-    async def get_by_slug(self, slug):
-        if slug == "ops-patrol-remediation":
-            return self._skill
-        return None
 
 
 class Uow:
-    def __init__(self, repo, *, remediation_skill_registered: bool = True):
+    def __init__(self, repo):
         self.patrol = repo
+        self.execution_commands = object()
         self.session = SimpleNamespace(save=AsyncMock(), update_status=AsyncMock())
-        self.skill = SkillRepo(registered=remediation_skill_registered)
 
     async def __aenter__(self):
         return self
+
+    async def commit(self):
+        return None
 
     async def __aexit__(self, *args):
         return None
 
 
-def feature_config(enabled: bool = True) -> AppConfig:
-    cfg = AppConfig()
-    cfg.feature_flags.enable_ops_patrol_remediation = enabled
-    return cfg
+_POLICY_READER = MutablePolicyReader(
+    operations=OperationsPolicy(
+        patrol=PatrolOperationsPolicy(remediation=PatrolRemediationMode.ENABLED)
+    )
+)
 
 
-def _patched(enabled: bool = True):
-    return patch(
-        "app.application.services.patrol_remediation_service.get_runtime_config",
-        return_value=feature_config(enabled),
+@contextmanager
+def _patched(
+    enabled: bool = True,
+    *,
+    mode: PatrolRemediationMode | None = None,
+):
+    previous = _POLICY_READER.operations.revision.policy
+    _POLICY_READER.set_operations(
+        OperationsPolicy(
+            patrol=PatrolOperationsPolicy(
+                remediation=mode
+                or (PatrolRemediationMode.ENABLED if enabled else PatrolRemediationMode.DISABLED),
+            )
+        )
+    )
+    try:
+        yield
+    finally:
+        _POLICY_READER.set_operations(previous)
+
+
+def make_service(
+    uow: Uow,
+    *,
+    actuator=None,
+    patrol_runs=None,
+    admission=None,
+    governance_metrics=None,
+) -> PatrolRemediationService:
+    return PatrolRemediationService(
+        lambda: uow,
+        actuator_client=actuator or SimpleNamespace(),
+        patrol_run_service=patrol_runs
+        or SimpleNamespace(
+            trigger_pack=AsyncMock(return_value=SimpleNamespace(id="default-recheck-run"))
+        ),
+        run_admission_service=admission or SimpleNamespace(admit=AsyncMock(return_value=uuid4())),
+        policy_reader=_POLICY_READER,
+        governance_metrics=governance_metrics or NoopGovernanceMetrics(),
     )
 
 
 @pytest.mark.asyncio
 async def test_propose_creates_remediation_with_hash_and_session():
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
     with _patched():
         remediation = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
         )
 
     assert remediation.status == PatrolRemediationStatus.PROPOSED
     assert remediation.session_id
     assert remediation.idempotency_key == f"rem:{remediation.id}"
     assert remediation.target_namespace == "opencitadel"
-    expected_hash = patrol_remediation_params_hash("restart_workload", "opencitadel", "", "Deployment", {})
+    expected_hash = patrol_remediation_params_hash(
+        "restart_workload", "opencitadel", "", "Deployment", {}
+    )
     assert remediation.params_hash == expected_hash
     assert repo.remediations[remediation.id].id == remediation.id
 
 
 @pytest.mark.asyncio
-async def test_propose_resolves_real_skill_id_for_session_when_registered():
-    """sessions.skill_id is a real FK (infrastructure/models/session.py) — the
-    session created by propose() must carry the actual Skill row's id, not a
-    bare slug literal, mirroring how PatrolPackService.create_pack resolves
-    "ops-patrol" via uow.skill.get_by_slug()."""
+async def test_propose_creates_deterministic_session_without_llm_skill():
     repo = Repo()
-    uow = Uow(repo, remediation_skill_registered=True)
-    service = PatrolRemediationService(lambda: uow)
+    uow = Uow(repo)
+    service = make_service(uow)
     scope = OwnerScope.personal("user-1")
 
     with _patched():
         remediation = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
         )
 
     uow.session.save.assert_awaited_once()
     saved_session = uow.session.save.call_args.args[0]
     assert saved_session.id == remediation.session_id
-    assert saved_session.skill_id == "skill-remediation-1"
+    assert saved_session.skill_id is None
 
 
 @pytest.mark.asyncio
-async def test_propose_rejects_when_remediation_skill_not_registered_with_no_partial_writes():
+async def test_dispatched_remediation_uses_session_source_and_patrol_run_parent():
     repo = Repo()
-    uow = Uow(repo, remediation_skill_registered=False)
-    service = PatrolRemediationService(lambda: uow)
+    repo.run.execution_run_id = uuid4()
+    uow = Uow(repo)
+    uow.execution_commands = object()
+    admission = SimpleNamespace(admit=AsyncMock(return_value=uuid4()))
+    service = make_service(uow, admission=admission)
     scope = OwnerScope.personal("user-1")
 
     with _patched():
-        with pytest.raises(BadRequestError):
-            await service.propose(
-                repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
-            )
+        remediation = await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
+        )
 
-    # No remediation row and no session must be written when the skill is missing.
-    assert repo.remediations == {}
-    uow.session.save.assert_not_awaited()
+    admission.admit.assert_awaited_once()
+    request = admission.admit.call_args.kwargs
+    assert request["source_entity_type"] == "session"
+    assert request["source_entity_id"] == remediation.session_id
+    assert request["parent_run_id"] == repo.run.execution_run_id
+    assert request["correlation_id"] == repo.run.execution_run_id
+    assert request["command_sink"] is uow.execution_commands
 
 
 @pytest.mark.asyncio
@@ -217,92 +292,140 @@ async def test_propose_workload_override_replaces_empty_probe_default():
     'workload' key, so target_workload defaults to "". The optional request
     override lets the caller supply it explicitly."""
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
     with _patched():
         remediation = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1",
-            workload="deployment/api", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
+            workload="deployment/api",
         )
 
     assert remediation.target_workload == "deployment/api"
-    expected_hash = patrol_remediation_params_hash("restart_workload", "opencitadel", "deployment/api", "Deployment", {})
+    expected_hash = patrol_remediation_params_hash(
+        "restart_workload", "opencitadel", "deployment/api", "Deployment", {}
+    )
     assert remediation.params_hash == expected_hash
 
 
 @pytest.mark.asyncio
 async def test_propose_rejects_blank_workload_override():
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
-    with _patched():
-        with pytest.raises(BadRequestError):
-            await service.propose(
-                repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1",
-                workload="   ", dispatch=False,
-            )
+    with _patched(), pytest.raises(BadRequestError):
+        await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
+            workload="   ",
+        )
 
 
 @pytest.mark.asyncio
 async def test_propose_rejects_action_not_in_catalog():
     """http_probe 类 check 的 finding 提 restart → BadRequest."""
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
-    with _patched():
-        with pytest.raises(BadRequestError):
-            await service.propose(
-                repo.http_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
-            )
+    with _patched(), pytest.raises(BadRequestError):
+        await service.propose(
+            repo.http_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
+        )
 
 
 @pytest.mark.asyncio
 async def test_propose_rejects_when_flag_disabled():
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
-    with _patched(enabled=False):
-        with pytest.raises(BadRequestError):
-            await service.propose(
-                repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
-            )
+    with _patched(enabled=False), pytest.raises(BadRequestError):
+        await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_propose_only_policy_allows_proposal_without_execution_enablement():
+    repo = Repo()
+    service = make_service(Uow(repo))
+
+    with _patched(mode=PatrolRemediationMode.PROPOSE_ONLY):
+        remediation = await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            OwnerScope.personal("user-1"),
+            "user-1",
+        )
+
+    assert remediation.status is PatrolRemediationStatus.PROPOSED
 
 
 @pytest.mark.asyncio
 async def test_propose_scale_params_validated():
     """scale 缺 replicas / replicas 非正整数 → BadRequest."""
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
     with _patched():
         with pytest.raises(BadRequestError):
             await service.propose(
-                repo.k8s_finding.id, PatrolRemediationAction.SCALE_WORKLOAD, {}, scope, "user-1", dispatch=False,
+                repo.k8s_finding.id,
+                PatrolRemediationAction.SCALE_WORKLOAD,
+                {},
+                scope,
+                "user-1",
             )
         with pytest.raises(BadRequestError):
             await service.propose(
-                repo.k8s_finding.id, PatrolRemediationAction.SCALE_WORKLOAD, {"replicas": 0}, scope, "user-1", dispatch=False,
+                repo.k8s_finding.id,
+                PatrolRemediationAction.SCALE_WORKLOAD,
+                {"replicas": 0},
+                scope,
+                "user-1",
             )
         with pytest.raises(BadRequestError):
             await service.propose(
-                repo.k8s_finding.id, PatrolRemediationAction.SCALE_WORKLOAD, {"replicas": "3"}, scope, "user-1", dispatch=False,
+                repo.k8s_finding.id,
+                PatrolRemediationAction.SCALE_WORKLOAD,
+                {"replicas": "3"},
+                scope,
+                "user-1",
             )
 
 
 @pytest.mark.asyncio
 async def test_propose_scale_with_positive_replicas_succeeds():
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
     with _patched():
         remediation = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.SCALE_WORKLOAD, {"replicas": 3}, scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.SCALE_WORKLOAD,
+            {"replicas": 3},
+            scope,
+            "user-1",
         )
     assert remediation.params == {"replicas": 3}
 
@@ -310,29 +433,40 @@ async def test_propose_scale_with_positive_replicas_succeeds():
 @pytest.mark.asyncio
 async def test_propose_rejects_unknown_params_for_action():
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
-    with _patched():
-        with pytest.raises(BadRequestError):
-            await service.propose(
-                repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {"unexpected": 1}, scope, "user-1", dispatch=False,
-            )
+    with _patched(), pytest.raises(BadRequestError):
+        await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {"unexpected": 1},
+            scope,
+            "user-1",
+        )
 
 
 @pytest.mark.asyncio
 async def test_propose_rejects_second_active_remediation_for_same_finding():
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
     with _patched():
         await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
         )
         with pytest.raises(ConflictError):
             await service.propose(
-                repo.k8s_finding.id, PatrolRemediationAction.SCALE_WORKLOAD, {"replicas": 2}, scope, "user-1", dispatch=False,
+                repo.k8s_finding.id,
+                PatrolRemediationAction.SCALE_WORKLOAD,
+                {"replicas": 2},
+                scope,
+                "user-1",
             )
 
 
@@ -340,14 +474,17 @@ async def test_propose_rejects_second_active_remediation_for_same_finding():
 async def test_propose_rejects_non_actionable_finding_status():
     repo = Repo()
     repo.k8s_finding.status = PatrolFindingStatus.RESOLVED
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
-    with _patched():
-        with pytest.raises(ConflictError):
-            await service.propose(
-                repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
-            )
+    with _patched(), pytest.raises(ConflictError):
+        await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
+        )
 
 
 @pytest.mark.asyncio
@@ -360,14 +497,17 @@ async def test_propose_rejects_revision_param_for_rollback_workload():
     actually honor, fabricating approval semantics. It must be rejected the
     same as any other unknown param, not silently accepted and discarded."""
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
-    with _patched():
-        with pytest.raises(BadRequestError):
-            await service.propose(
-                repo.k8s_finding.id, PatrolRemediationAction.ROLLBACK_WORKLOAD, {"revision": 3}, scope, "user-1", dispatch=False,
-            )
+    with _patched(), pytest.raises(BadRequestError):
+        await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.ROLLBACK_WORKLOAD,
+            {"revision": 3},
+            scope,
+            "user-1",
+        )
 
 
 @pytest.mark.asyncio
@@ -377,27 +517,38 @@ async def test_propose_rollback_workload_impact_summary_does_not_imply_a_chosen_
     accepted, the summary must describe only what the Actuator actually
     does: roll back to the previous revision."""
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
     with _patched():
         remediation = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.ROLLBACK_WORKLOAD, {}, scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.ROLLBACK_WORKLOAD,
+            {},
+            scope,
+            "user-1",
         )
 
     assert remediation.params == {}
-    assert remediation.impact_summary == "Roll Deployment/<unresolved> in opencitadel back to the previous revision."
+    assert (
+        remediation.impact_summary
+        == "Roll Deployment/<unresolved> in opencitadel back to the previous revision."
+    )
 
 
 @pytest.mark.asyncio
 async def test_cross_tenant_get_returns_not_found():
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     owner_scope = OwnerScope.personal("user-1")
 
     with _patched():
         remediation = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, owner_scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            owner_scope,
+            "user-1",
         )
 
     attacker_scope = OwnerScope.personal("user-2")
@@ -406,11 +557,170 @@ async def test_cross_tenant_get_returns_not_found():
 
     # And a cross-tenant propose against someone else's Finding must be
     # indistinguishable from a missing Finding.
+    with _patched(), pytest.raises(NotFoundError):
+        await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            attacker_scope,
+            "user-2",
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_resumes_an_interrupted_idempotent_actuator_call():
+    """Losing the worker after PROPOSED -> EXECUTING must be recoverable.
+
+    The persisted remediation idempotency key, rather than the Activity lease,
+    is the external write identity. Re-delivery therefore resumes the same
+    Actuator operation and records its durable outcome.
+    """
+    repo = Repo()
+    uow = Uow(repo)
+    uow.mcp_server = SimpleNamespace(
+        get_by_name=AsyncMock(return_value=SimpleNamespace(enabled=True))
+    )
+    actuator = SimpleNamespace(
+        get_capabilities=AsyncMock(return_value={"overall_capability_hash": "capability-v1"}),
+        execute_action=AsyncMock(
+            return_value={
+                "action_outcome": "succeeded",
+                "before": {"replicas": 1},
+                "after": {"replicas": 2},
+            }
+        ),
+    )
+    service = make_service(uow, actuator=actuator)
+    scope = OwnerScope.personal("user-1")
     with _patched():
-        with pytest.raises(NotFoundError):
-            await service.propose(
-                repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, attacker_scope, "user-2", dispatch=False,
+        remediation = await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.SCALE_WORKLOAD,
+            {"replicas": 2},
+            scope,
+            "user-1",
+            workload="deployment/api",
+        )
+    remediation.actuator_capability_hash = "capability-v1"
+    remediation.status = PatrolRemediationStatus.EXECUTING
+    await repo.save_remediation(remediation)
+
+    with _patched():
+        result = await service.execute(
+            remediation.id,
+            remediation.session_id,
+            "activity-delivery-id",
+            scope,
+            policy=ActivityExecutionPolicy(),
+        )
+
+    assert result["status"] == PatrolRemediationStatus.EXECUTED.value
+    actuator.execute_action.assert_awaited_once()
+    assert actuator.execute_action.await_args.args[2]["idempotency_key"] == (
+        remediation.idempotency_key
+    )
+    persisted = repo.remediations[remediation.id]
+    assert persisted.status == PatrolRemediationStatus.EXECUTED
+    assert persisted.before_observation == {"replicas": 1}
+    assert persisted.after_observation == {"replicas": 2}
+
+
+@pytest.mark.asyncio
+async def test_policy_tightening_after_capability_check_denies_actuator_call():
+    repo = Repo()
+    uow = Uow(repo)
+    uow.mcp_server = SimpleNamespace(
+        get_by_name=AsyncMock(return_value=SimpleNamespace(enabled=True))
+    )
+
+    async def tighten_policy(*_args, **_kwargs):
+        _POLICY_READER.set_operations(
+            OperationsPolicy(
+                patrol=PatrolOperationsPolicy(remediation=PatrolRemediationMode.DISABLED)
             )
+        )
+        return {"overall_capability_hash": "capability-v1"}
+
+    actuator = SimpleNamespace(
+        get_capabilities=AsyncMock(side_effect=tighten_policy),
+        execute_action=AsyncMock(),
+    )
+    service = make_service(uow, actuator=actuator)
+    scope = OwnerScope.personal("user-1")
+    with _patched():
+        remediation = await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
+            workload="deployment/api",
+        )
+        remediation.actuator_capability_hash = "capability-v1"
+        remediation.status = PatrolRemediationStatus.EXECUTING
+        await repo.save_remediation(remediation)
+
+        with pytest.raises(BadRequestError) as denied:
+            await service.execute(
+                remediation.id,
+                remediation.session_id,
+                "activity-delivery-id",
+                scope,
+                policy=ActivityExecutionPolicy(),
+            )
+
+    assert denied.value.error_key == "apiErrors.patrolRemediation.executionDisabled"
+    actuator.execute_action.assert_not_awaited()
+    persisted = repo.remediations[remediation.id]
+    assert persisted.status is PatrolRemediationStatus.FAILED
+    assert persisted.error_code == "POLICY_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_execute_recovery_skips_completed_actuator_call_and_resumes_recheck():
+    """A crash after persisting EXECUTED must not repeat the external write."""
+    repo = Repo()
+    uow = Uow(repo)
+    actuator = SimpleNamespace(
+        get_capabilities=AsyncMock(),
+        execute_action=AsyncMock(),
+    )
+    recheck = SimpleNamespace(id="recheck-run-1")
+    patrol_runs = SimpleNamespace(trigger_pack=AsyncMock(return_value=recheck))
+    service = make_service(
+        uow,
+        actuator=actuator,
+        patrol_runs=patrol_runs,
+    )
+    scope = OwnerScope.personal("user-1")
+    with _patched():
+        remediation = await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
+            workload="deployment/api",
+        )
+    remediation.status = PatrolRemediationStatus.EXECUTED
+    remediation.before_observation = {"generation": 1}
+    remediation.after_observation = {"generation": 2}
+    await repo.save_remediation(remediation)
+
+    with _patched():
+        result = await service.execute(
+            remediation.id,
+            remediation.session_id,
+            "redelivered-activity",
+            scope,
+            policy=ActivityExecutionPolicy(),
+        )
+
+    actuator.get_capabilities.assert_not_awaited()
+    actuator.execute_action.assert_not_awaited()
+    patrol_runs.trigger_pack.assert_awaited_once()
+    assert repo.remediations[remediation.id].recheck_run_id == recheck.id
+    assert result["status"] == PatrolRemediationStatus.EXECUTED.value
 
 
 @pytest.mark.asyncio
@@ -420,12 +730,16 @@ async def test_cancel_if_pending_cancels_proposed_and_frees_finding_for_repropos
     the tool was ever called -> PROPOSED moves to CANCELLED, freeing the
     Finding for a new proposal."""
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
     with _patched():
         remediation = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
         )
 
     await service.cancel_if_pending(remediation.session_id)
@@ -435,7 +749,11 @@ async def test_cancel_if_pending_cancels_proposed_and_frees_finding_for_repropos
 
     with _patched():
         reproposed = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
         )
     assert reproposed.id != remediation.id
     assert reproposed.status == PatrolRemediationStatus.PROPOSED
@@ -454,14 +772,20 @@ async def test_cancel_if_pending_fails_executing_session_and_frees_finding_for_r
     (and the DB partial unique index agrees — see the alembic revision that
     creates patrol_remediations)."""
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
     with _patched():
         remediation = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
         )
-    stuck = repo.remediations[remediation.id].model_copy(update={"status": PatrolRemediationStatus.EXECUTING})
+    stuck = repo.remediations[remediation.id].model_copy(
+        update={"status": PatrolRemediationStatus.EXECUTING}
+    )
     repo.remediations[remediation.id] = stuck
 
     await service.cancel_if_pending(remediation.session_id)
@@ -472,7 +796,11 @@ async def test_cancel_if_pending_fails_executing_session_and_frees_finding_for_r
 
     with _patched():
         reproposed = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.SCALE_WORKLOAD, {"replicas": 2}, scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.SCALE_WORKLOAD,
+            {"replicas": 2},
+            scope,
+            "user-1",
         )
     assert reproposed.id != remediation.id
     assert reproposed.status == PatrolRemediationStatus.PROPOSED
@@ -485,12 +813,16 @@ async def test_cancel_if_pending_is_noop_for_already_terminal_remediation():
     a best-effort cleanup for sessions that ended *without* the service
     itself already having decided a terminal outcome."""
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    service = make_service(Uow(repo))
     scope = OwnerScope.personal("user-1")
 
     with _patched():
         remediation = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
         )
     done = repo.remediations[remediation.id].model_copy(
         update={"status": PatrolRemediationStatus.VERIFIED, "error_code": None}
@@ -503,49 +835,42 @@ async def test_cancel_if_pending_is_noop_for_already_terminal_remediation():
     assert repo.remediations[remediation.id].error_code is None
 
 
-def _counter_value(name: str, labels: dict) -> float:
-    return REGISTRY.get_sample_value(name, labels) or 0.0
-
-
 @pytest.mark.asyncio
 async def test_propose_records_proposed_remediation_transition():
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    metrics = RecordingGovernanceMetrics()
+    service = make_service(Uow(repo), governance_metrics=metrics)
     scope = OwnerScope.personal("user-1")
-    before = _counter_value(
-        "governance_remediation_transitions_total", {"to_status": "proposed"}
-    )
 
     with _patched():
         remediation = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
         )
 
-    after = _counter_value(
-        "governance_remediation_transitions_total", {"to_status": "proposed"}
-    )
     assert remediation.status == PatrolRemediationStatus.PROPOSED
-    assert after - before == 1.0
+    assert metrics.remediation_transitions.count("proposed") == 1
 
 
 @pytest.mark.asyncio
 async def test_cancel_if_pending_records_cancelled_remediation_transition():
     repo = Repo()
-    service = PatrolRemediationService(lambda: Uow(repo))
+    metrics = RecordingGovernanceMetrics()
+    service = make_service(Uow(repo), governance_metrics=metrics)
     scope = OwnerScope.personal("user-1")
 
     with _patched():
         remediation = await service.propose(
-            repo.k8s_finding.id, PatrolRemediationAction.RESTART_WORKLOAD, {}, scope, "user-1", dispatch=False,
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
         )
-    before = _counter_value(
-        "governance_remediation_transitions_total", {"to_status": "cancelled"}
-    )
-
     await service.cancel_if_pending(remediation.session_id)
 
-    after = _counter_value(
-        "governance_remediation_transitions_total", {"to_status": "cancelled"}
-    )
     assert repo.remediations[remediation.id].status == PatrolRemediationStatus.CANCELLED
-    assert after - before == 1.0
+    assert metrics.remediation_transitions.count("cancelled") == 1

@@ -2,9 +2,14 @@
 actuator's 4-tool write surface (get_capabilities + 3 registered write
 actions) and its non-read-only annotations.
 """
+
 import asyncio
 
-from opencitadel_ops_actuator.capabilities import TOOL_INPUT_MODELS, canonical_hash, capability_manifest
+from opencitadel_ops_actuator.capabilities import (
+    TOOL_INPUT_MODELS,
+    canonical_hash,
+    capability_manifest,
+)
 from opencitadel_ops_actuator.server import create_server
 
 

@@ -27,8 +27,7 @@ vi.mock("next-intl", () =>
     approvalOutcomesDesc: "desc",
     outcomeApproved: "Approved",
     outcomeRejected: "Rejected",
-    outcomeExpired: "Expired",
-    outcomeConsumed: "Consumed",
+    outcomeCancelled: "Cancelled",
     timeRange7d: "7d",
     timeRange30d: "30d",
     timeRange90d: "90d",
@@ -42,7 +41,9 @@ vi.mock("@/components/admin/governance-overview-charts", () => ({
   InterceptionsChart: ({ data }: { data: unknown[] }) => (
     <div data-testid="interceptions-chart">{data.length}</div>
   ),
-  PatrolTrendChart: ({ data }: { data: unknown[] }) => <div data-testid="patrol-chart">{data.length}</div>,
+  PatrolTrendChart: ({ data }: { data: unknown[] }) => (
+    <div data-testid="patrol-chart">{data.length}</div>
+  ),
   RemediationStatusChart: ({ remediation }: { remediation: { success_rate: number | null } }) => (
     <div data-testid="remediation-chart">{String(remediation.success_rate)}</div>
   ),
@@ -54,11 +55,11 @@ const SAMPLE_OVERVIEW = {
   approvals: {
     pending_count: 3,
     avg_decision_seconds: 45.2,
-    outcomes: { approved: 5, rejected: 2, expired: 1, consumed: 4 },
+    outcomes: { approved: 5, rejected: 2, cancelled: 1 },
   },
   interceptions: [
-    { date: "2026-08-01", approval_decisions: 2, denials: 1 },
-    { date: "2026-08-02", approval_decisions: 1, denials: 0 },
+    { date: "2026-08-01", approval_requests: 2, activity_failures: 1 },
+    { date: "2026-08-02", approval_requests: 1, activity_failures: 0 },
   ],
   patrol: [{ date: "2026-08-01", runs: 2, findings: 1 }],
   remediation: {
@@ -106,7 +107,11 @@ describe("AdminGovernancePage", () => {
   it("renders honest empty state when there is no approval decision data yet", async () => {
     mocks.getGovernanceOverview.mockResolvedValue({
       ...SAMPLE_OVERVIEW,
-      approvals: { pending_count: 0, avg_decision_seconds: null, outcomes: { approved: 0, rejected: 0, expired: 0, consumed: 0 } },
+      approvals: {
+        pending_count: 0,
+        avg_decision_seconds: null,
+        outcomes: { approved: 0, rejected: 0, cancelled: 0 },
+      },
     });
     const { container, unmount } = await renderPage();
 

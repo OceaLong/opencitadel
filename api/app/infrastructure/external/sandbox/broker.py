@@ -1,83 +1,74 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Narrow authenticated Docker lifecycle broker for ephemeral sandboxes."""
+
 from __future__ import annotations
 
 import hmac
-import os
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 import docker
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel
 
-from app.infrastructure.external.runtime_settings import SandboxRuntimeSettings
 from app.infrastructure.external.sandbox.sandbox_container_policy import (
+    CreateSandboxRequest,
     build_docker_sandbox_config,
 )
+from app.infrastructure.external.sandbox.settings import SandboxDeployment
+from core.config import DeploymentSettings, load_deployment_settings
 
-app = FastAPI(
-    title="OpenCitadel Sandbox Broker",
-    docs_url=None,
-    redoc_url=None,
-    openapi_url=None,
-)
+DockerClientFactory = Callable[[], Any]
 
 
-def _required_env(name: str) -> str:
-    value = (os.environ.get(name) or "").strip()
-    if not value:
-        raise RuntimeError(f"{name} must be configured")
-    return value
+@dataclass(frozen=True)
+class BrokerRuntime:
+    token: str
+    deployment: SandboxDeployment
+    docker_factory: DockerClientFactory
 
 
-def _broker_token() -> str:
-    token = _required_env("SANDBOX_BROKER_TOKEN")
+def _deployment(settings: DeploymentSettings) -> SandboxDeployment:
+    deployment = SandboxDeployment.from_settings(settings)
+    if not deployment.image:
+        raise RuntimeError("SANDBOX_IMAGE must be configured")
+    if not deployment.name_prefix:
+        raise RuntimeError("SANDBOX_NAME_PREFIX must be configured")
+    return deployment
+
+
+def build_broker_runtime(
+    settings: DeploymentSettings,
+    *,
+    docker_factory: DockerClientFactory = docker.from_env,
+) -> BrokerRuntime:
+    token = settings.sandbox_broker_token.strip()
     if len(token) < 32:
         raise RuntimeError("SANDBOX_BROKER_TOKEN must contain at least 32 characters")
-    return token
+    return BrokerRuntime(
+        token=token,
+        deployment=_deployment(settings),
+        docker_factory=docker_factory,
+    )
 
 
-def _name_prefix() -> str:
-    return (os.environ.get("SANDBOX_NAME_PREFIX") or "opencitadel-sandbox").strip()
-
-
-def _validate_name(name: str) -> str:
-    prefix = re.escape(_name_prefix())
+def _validate_name(name: str, runtime: BrokerRuntime) -> str:
+    prefix = re.escape(runtime.deployment.name_prefix or "")
     if not re.fullmatch(rf"{prefix}-[a-f0-9]{{8}}", name):
         raise HTTPException(status_code=400, detail="invalid sandbox id")
     return name
 
 
-async def _authorize(authorization: str = Header(default="")) -> None:
-    expected = f"Bearer {_broker_token()}"
+async def _authorize(authorization: str, runtime: BrokerRuntime) -> None:
+    expected = f"Bearer {runtime.token}"
     if not hmac.compare_digest(authorization, expected):
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
-def _runtime_settings() -> SandboxRuntimeSettings:
-    return SandboxRuntimeSettings(
-        driver="docker",
-        image=_required_env("SANDBOX_IMAGE"),
-        name_prefix=_name_prefix(),
-        ttl_minutes=int(os.environ.get("SANDBOX_TTL_MINUTES") or "20"),
-        network=(os.environ.get("SANDBOX_NETWORK") or "").strip() or None,
-        chrome_args=(os.environ.get("SANDBOX_CHROME_ARGS") or "").strip(),
-        https_proxy=(os.environ.get("SANDBOX_HTTPS_PROXY") or "").strip() or None,
-        http_proxy=(os.environ.get("SANDBOX_HTTP_PROXY") or "").strip() or None,
-        no_proxy=(os.environ.get("SANDBOX_NO_PROXY") or "").strip() or None,
-        memory_limit=(os.environ.get("SANDBOX_MEMORY_LIMIT") or "1g").strip(),
-        cpu_limit=float(os.environ.get("SANDBOX_CPU_LIMIT") or "2"),
-        pids_limit=int(os.environ.get("SANDBOX_PIDS_LIMIT") or "512"),
-        pool_enabled=False,
-        pool_size=0,
-    )
-
-
-def _container_payload(container) -> dict:
+def _container_payload(container, deployment: SandboxDeployment) -> dict:
     container.reload()
     networks = (container.attrs.get("NetworkSettings") or {}).get("Networks") or {}
-    preferred_network = _runtime_settings().network
+    preferred_network = deployment.network
     endpoint = networks.get(preferred_network) if preferred_network else None
     if endpoint is None and networks:
         endpoint = next(iter(networks.values()))
@@ -91,39 +82,29 @@ def _container_payload(container) -> dict:
 
 def _require_managed_sandbox(container):
     container.reload()
-    labels = ((container.attrs.get("Config") or {}).get("Labels") or {})
+    labels = (container.attrs.get("Config") or {}).get("Labels") or {}
     if labels.get("opencitadel.io/sandbox") != "true":
-        # Do not reveal or operate on a same-prefix container outside the
-        # broker's explicit ownership boundary.
         raise HTTPException(status_code=404, detail="sandbox not found")
     return container
 
 
-class CreateSandboxRequest(BaseModel):
-    id: str
-
-
-@app.get("/healthz")
-async def healthz() -> dict:
-    return {"ok": True}
-
-
-@app.get("/v1/sandboxes", dependencies=[Depends(_authorize)])
-async def list_sandboxes() -> dict:
-    containers = docker.from_env().containers.list(
+async def list_sandboxes(runtime: BrokerRuntime) -> dict:
+    containers = runtime.docker_factory().containers.list(
         all=True,
         filters={
             "label": "opencitadel.io/sandbox=true",
-            "name": f"{_name_prefix()}-",
+            "name": f"{runtime.deployment.name_prefix}-",
         },
     )
-    return {"sandboxes": [_container_payload(item) for item in containers]}
+    return {"sandboxes": [_container_payload(item, runtime.deployment) for item in containers]}
 
 
-@app.post("/v1/sandboxes", dependencies=[Depends(_authorize)])
-async def create_sandbox(body: CreateSandboxRequest) -> dict:
-    sandbox_id = _validate_name(body.id)
-    client = docker.from_env()
+async def create_sandbox(
+    body: CreateSandboxRequest,
+    runtime: BrokerRuntime,
+) -> dict:
+    sandbox_id = _validate_name(body.id, runtime)
+    client = runtime.docker_factory()
     try:
         existing = client.containers.get(sandbox_id)
     except docker.errors.NotFound:
@@ -131,31 +112,34 @@ async def create_sandbox(body: CreateSandboxRequest) -> dict:
     if existing is not None:
         raise HTTPException(status_code=409, detail="sandbox already exists")
     container = client.containers.run(
-        **build_docker_sandbox_config(_runtime_settings(), sandbox_id)
+        **build_docker_sandbox_config(
+            runtime.deployment,
+            body.policy,
+            sandbox_id,
+            operations_revision_id=body.operations_revision_id,
+        )
     )
-    payload = _container_payload(container)
+    payload = _container_payload(container, runtime.deployment)
     if not payload["ip"]:
         container.remove(force=True)
         raise HTTPException(status_code=503, detail="sandbox has no network address")
     return payload
 
 
-@app.get("/v1/sandboxes/{sandbox_id}", dependencies=[Depends(_authorize)])
-async def get_sandbox(sandbox_id: str) -> dict:
-    _validate_name(sandbox_id)
+async def get_sandbox(sandbox_id: str, runtime: BrokerRuntime) -> dict:
+    _validate_name(sandbox_id, runtime)
     try:
-        container = docker.from_env().containers.get(sandbox_id)
+        container = runtime.docker_factory().containers.get(sandbox_id)
     except docker.errors.NotFound as exc:
         raise HTTPException(status_code=404, detail="sandbox not found") from exc
     _require_managed_sandbox(container)
-    return _container_payload(container)
+    return _container_payload(container, runtime.deployment)
 
 
-@app.delete("/v1/sandboxes/{sandbox_id}", dependencies=[Depends(_authorize)])
-async def delete_sandbox(sandbox_id: str) -> dict:
-    _validate_name(sandbox_id)
+async def delete_sandbox(sandbox_id: str, runtime: BrokerRuntime) -> dict:
+    _validate_name(sandbox_id, runtime)
     try:
-        container = docker.from_env().containers.get(sandbox_id)
+        container = runtime.docker_factory().containers.get(sandbox_id)
     except docker.errors.NotFound:
         return {"deleted": False}
     _require_managed_sandbox(container)
@@ -163,13 +147,76 @@ async def delete_sandbox(sandbox_id: str) -> dict:
     return {"deleted": True}
 
 
+def create_broker_app(
+    settings: DeploymentSettings | None = None,
+    *,
+    docker_factory: DockerClientFactory = docker.from_env,
+) -> FastAPI:
+    """Create one broker app with immutable validated process configuration."""
+
+    runtime = build_broker_runtime(
+        settings or load_deployment_settings(),
+        docker_factory=docker_factory,
+    )
+    application = FastAPI(
+        title="OpenCitadel Sandbox Broker",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
+    application.state.runtime = runtime
+
+    async def authorize(authorization: str = Header(default="")) -> None:
+        await _authorize(authorization, runtime)
+
+    @application.get("/healthz")
+    async def healthz() -> dict:
+        return {"ok": True}
+
+    @application.get("/v1/sandboxes", dependencies=[Depends(authorize)])
+    async def list_route() -> dict:
+        return await list_sandboxes(runtime)
+
+    @application.post("/v1/sandboxes", dependencies=[Depends(authorize)])
+    async def create_route(body: CreateSandboxRequest) -> dict:
+        return await create_sandbox(body, runtime)
+
+    @application.get(
+        "/v1/sandboxes/{sandbox_id}",
+        dependencies=[Depends(authorize)],
+    )
+    async def get_route(sandbox_id: str) -> dict:
+        return await get_sandbox(sandbox_id, runtime)
+
+    @application.delete(
+        "/v1/sandboxes/{sandbox_id}",
+        dependencies=[Depends(authorize)],
+    )
+    async def delete_route(sandbox_id: str) -> dict:
+        return await delete_sandbox(sandbox_id, runtime)
+
+    return application
+
+
 def main() -> None:
     import uvicorn
 
-    _broker_token()
-    _runtime_settings()
+    settings = load_deployment_settings()
+    app = create_broker_app(settings)
     uvicorn.run(app, host="0.0.0.0", port=8090, access_log=False)
 
 
 if __name__ == "__main__":
     main()
+
+
+__all__ = [
+    "BrokerRuntime",
+    "build_broker_runtime",
+    "create_broker_app",
+    "create_sandbox",
+    "delete_sandbox",
+    "get_sandbox",
+    "list_sandboxes",
+    "main",
+]

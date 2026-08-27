@@ -1,4 +1,5 @@
 """HTTP contracts for owner-scoped Ops Patrol resources."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -8,13 +9,19 @@ from pydantic import BaseModel, Field
 
 from app.domain.models.patrol import (
     PatrolCheckResult,
+    PatrolCheckStatus,
     PatrolFinding,
+    PatrolFindingSeverity,
     PatrolFindingStatus,
     PatrolPack,
     PatrolPackConfig,
+    PatrolPackStatus,
     PatrolRemediation,
     PatrolRemediationAction,
+    PatrolRemediationStatus,
     PatrolRun,
+    PatrolRunStatus,
+    PatrolTriggerType,
 )
 from app.domain.utils.schedule_utils import compute_next_run
 
@@ -43,11 +50,10 @@ class PatrolPackResponse(BaseModel):
     team_id: str | None
     name: str
     slug: str
-    status: str
+    status: PatrolPackStatus
     version: int
     config: PatrolPackConfig
     mcp_server_id: str
-    skill_id: str
     scheduled_job_id: str | None
     last_validated_at: datetime | None
     last_validated_version: int | None
@@ -57,7 +63,7 @@ class PatrolPackResponse(BaseModel):
     next_run_at: datetime | None = None
 
     @classmethod
-    def from_domain(cls, pack: PatrolPack) -> "PatrolPackResponse":
+    def from_domain(cls, pack: PatrolPack) -> PatrolPackResponse:
         payload = pack.model_dump(mode="json")
         if pack.status.value == "active" and pack.config.schedule.enabled:
             payload["next_run_at"] = compute_next_run(
@@ -79,8 +85,8 @@ class PatrolRunResponse(BaseModel):
     pack_id: str
     pack_version: int
     session_id: str | None
-    status: str
-    trigger_type: str
+    status: PatrolRunStatus
+    trigger_type: PatrolTriggerType
     started_at: datetime | None
     finished_at: datetime | None
     first_reviewed_at: datetime | None
@@ -92,7 +98,7 @@ class PatrolRunResponse(BaseModel):
     created_at: datetime
 
     @classmethod
-    def from_domain(cls, run: PatrolRun) -> "PatrolRunResponse":
+    def from_domain(cls, run: PatrolRun) -> PatrolRunResponse:
         return cls(
             id=run.id,
             pack_id=run.pack_id,
@@ -132,8 +138,8 @@ class PatrolCheckResultResponse(BaseModel):
     id: str
     run_id: str
     check_id: str
-    status: str
-    severity: str
+    status: PatrolCheckStatus
+    severity: PatrolFindingSeverity
     observed: dict[str, Any]
     assertion_results: list[dict[str, Any]]
     evidence_refs: list[dict[str, Any]]
@@ -145,7 +151,7 @@ class PatrolCheckResultResponse(BaseModel):
     finished_at: datetime
 
     @classmethod
-    def from_domain(cls, result: PatrolCheckResult) -> "PatrolCheckResultResponse":
+    def from_domain(cls, result: PatrolCheckResult) -> PatrolCheckResultResponse:
         return cls.model_validate(result.model_dump(mode="json"))
 
 
@@ -154,8 +160,8 @@ class PatrolFindingResponse(BaseModel):
     run_id: str
     check_result_id: str
     fingerprint: str
-    severity: str
-    status: str
+    severity: PatrolFindingSeverity
+    status: PatrolFindingStatus
     title: str
     summary: str
     first_seen_at: datetime
@@ -169,14 +175,17 @@ class PatrolFindingResponse(BaseModel):
     # is patrol_remediation_service._allowed_actions_for_probe_tool — see
     # app/interfaces/endpoints/patrol_routes.py::_finding_allowed_actions for
     # the assembly point). Lets the UI stop mirroring that rule client-side.
-    allowed_actions: list[str] = Field(default_factory=list)
+    allowed_actions: list[PatrolRemediationAction]
 
     @classmethod
     def from_domain(
-        cls, finding: PatrolFinding, allowed_actions: list[str] | None = None
-    ) -> "PatrolFindingResponse":
+        cls,
+        finding: PatrolFinding,
+        *,
+        allowed_actions: list[PatrolRemediationAction | str],
+    ) -> PatrolFindingResponse:
         payload = finding.model_dump(mode="json")
-        payload["allowed_actions"] = list(allowed_actions) if allowed_actions else []
+        payload["allowed_actions"] = list(allowed_actions)
         return cls.model_validate(payload)
 
 
@@ -194,9 +203,7 @@ class PatrolRunListResponse(BaseModel):
 class ProposePatrolRemediationRequest(BaseModel):
     action: PatrolRemediationAction
     params: dict[str, Any] = Field(default_factory=dict)
-    # Optional override for the target workload name. The Check's probe.args
-    # rarely carries a "workload" key today (see Task 2 report §8.1), so the
-    # caller can supply it explicitly; must be a non-blank string when given.
+    # Optional explicit target when the probe does not identify a workload.
     workload: str | None = Field(default=None, min_length=1, max_length=255)
 
 
@@ -208,7 +215,7 @@ class PatrolRemediationResponse(BaseModel):
     check_result_id: str
     fingerprint: str
     session_id: str | None
-    action: str
+    action: PatrolRemediationAction
     target_namespace: str
     target_workload: str
     target_kind: str
@@ -218,7 +225,7 @@ class PatrolRemediationResponse(BaseModel):
     rollback_hint: str
     idempotency_key: str
     actuator_capability_hash: str | None
-    status: str
+    status: PatrolRemediationStatus
     before_observation: dict[str, Any] | None
     after_observation: dict[str, Any] | None
     recheck_run_id: str | None
@@ -229,7 +236,7 @@ class PatrolRemediationResponse(BaseModel):
     updated_at: datetime
 
     @classmethod
-    def from_domain(cls, remediation: PatrolRemediation) -> "PatrolRemediationResponse":
+    def from_domain(cls, remediation: PatrolRemediation) -> PatrolRemediationResponse:
         return cls.model_validate(remediation.model_dump(mode="json"))
 
 

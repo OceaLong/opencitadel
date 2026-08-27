@@ -1,17 +1,16 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+from app.domain.runtime_policy import CodebaseAnalysisPolicy
 from app.domain.services.codebase.static_analyzer import StaticAnalyzer
 
 
 def test_analyze_python_symbols_and_calls():
-    content = '''
+    content = """
 def foo():
     bar()
 
 def bar():
     return 1
-'''
-    analyzer = StaticAnalyzer()
+"""
+    analyzer = StaticAnalyzer(policy=CodebaseAnalysisPolicy())
     result = analyzer.analyze_tree("cb-1", "/tmp", [("main.py", content)])
     assert len(result.files) == 1
     names = {s.name for s in result.symbols}

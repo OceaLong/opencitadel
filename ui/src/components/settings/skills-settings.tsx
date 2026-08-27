@@ -28,22 +28,15 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
-import { configApi } from "@/lib/api/config";
-import { modelsApi } from "@/lib/api/models";
+import { type A2AServer, integrationsApi, type MCPServer } from "@/lib/api";
+import { inferenceApi, type InferenceModel } from "@/lib/api/inference";
 import { skillsApi } from "@/lib/api/skills";
-import type {
-  CreateSkillParams,
-  ListA2AServerItem,
-  ListMCPServerItem,
-  LLMModel,
-  Skill,
-} from "@/lib/api/types";
+import type { CreateSkillParams, Skill } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 const defaultAgentParams = {
   max_iterations: undefined as number | undefined,
   max_retries: undefined as number | undefined,
-  max_search_results: undefined as number | undefined,
   temperature_override: undefined as number | undefined,
 };
 
@@ -58,7 +51,6 @@ const emptyForm: CreateSkillParams = {
   agent_params: { ...defaultAgentParams },
   examples: [],
   enabled: true,
-  auto_recommend: true,
 };
 
 type Props = {
@@ -87,7 +79,7 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
   const t = useTranslations("settingsSkills");
   const tCommon = useTranslations("common");
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [models, setModels] = useState<LLMModel[]>([]);
+  const [models, setModels] = useState<InferenceModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Skill | null>(null);
@@ -96,8 +88,8 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
   const [examplesText, setExamplesText] = useState("");
   const [allowMcpTools, setAllowMcpTools] = useState(false);
   const [allowA2aTools, setAllowA2aTools] = useState(false);
-  const [mcpServers, setMcpServers] = useState<ListMCPServerItem[]>([]);
-  const [a2aServers, setA2aServers] = useState<ListA2AServerItem[]>([]);
+  const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
+  const [a2aServers, setA2aServers] = useState<A2AServer[]>([]);
   const [selectedMcpRefs, setSelectedMcpRefs] = useState<string[]>([]);
   const [selectedA2aRefs, setSelectedA2aRefs] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -110,15 +102,18 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [skillsData, modelsData] = await Promise.all([skillsApi.list(), modelsApi.list()]);
+      const [skillsData, modelsData] = await Promise.all([
+        skillsApi.list(),
+        inferenceApi.listModels(),
+      ]);
       setSkills(skillsData.skills);
-      setModels(modelsData.models);
+      setModels((modelsData.items ?? []).filter((model) => model.kind === "chat"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tCommon("loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tCommon]);
 
   useEffect(() => {
     load();
@@ -127,11 +122,11 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
   const loadServerOptions = useCallback(async () => {
     try {
       const [mcpData, a2aData] = await Promise.all([
-        configApi.getMCPServers(),
-        configApi.getA2AServers(),
+        integrationsApi.listMCPServers(),
+        integrationsApi.listA2AServers(),
       ]);
-      setMcpServers(mcpData.mcp_servers);
-      setA2aServers(a2aData.a2a_servers);
+      setMcpServers(mcpData.items);
+      setA2aServers(a2aData.items);
     } catch {
       setMcpServers([]);
       setA2aServers([]);
@@ -172,12 +167,10 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
       agent_params: {
         max_iterations: s.agent_params?.max_iterations,
         max_retries: s.agent_params?.max_retries,
-        max_search_results: s.agent_params?.max_search_results,
         temperature_override: s.agent_params?.temperature_override,
       },
       examples: s.examples,
       enabled: s.enabled,
-      auto_recommend: s.auto_recommend ?? true,
     });
     resetToolGroupState(s.allowed_tools);
     setSelectedMcpRefs(s.mcp_server_refs ?? []);
@@ -187,9 +180,9 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
     setDialogOpen(true);
   };
 
-  const toggleMcpRef = (serverName: string) => {
+  const toggleMcpRef = (serverId: string) => {
     setSelectedMcpRefs((prev) =>
-      prev.includes(serverName) ? prev.filter((item) => item !== serverName) : [...prev, serverName],
+      prev.includes(serverId) ? prev.filter((item) => item !== serverId) : [...prev, serverId],
     );
   };
 
@@ -207,9 +200,6 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
     }
     if (p.max_retries != null && p.max_retries !== ("" as unknown as number)) {
       result.max_retries = Number(p.max_retries);
-    }
-    if (p.max_search_results != null && p.max_search_results !== ("" as unknown as number)) {
-      result.max_search_results = Number(p.max_search_results);
     }
     if (p.temperature_override != null && p.temperature_override !== ("" as unknown as number)) {
       result.temperature_override = Number(p.temperature_override);
@@ -310,7 +300,11 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
           <p className="text-muted-foreground mt-1 text-sm">{t("description")}</p>
         </div>
         <div className="flex gap-2">
-          <Button size={embedded ? "xs" : "default"} variant="outline" onClick={() => setImportOpen(true)}>
+          <Button
+            size={embedded ? "xs" : "default"}
+            variant="outline"
+            onClick={() => setImportOpen(true)}
+          >
             <Upload className="mr-1 size-4" />
             {t("importSkill")}
           </Button>
@@ -331,7 +325,7 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
             <Card
               key={s.id}
               className={cn(
-                "hover:border-border transition-all hover:shadow-card-hover",
+                "hover:border-border hover:shadow-card-hover transition-all",
                 !s.enabled && "opacity-60",
               )}
             >
@@ -348,12 +342,12 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
                   <div className="flex shrink-0 gap-1">
                     {canManageSkill(s, isAdmin, userId) ? (
                       <>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(s.id)}>
-                      <Trash2 className="text-destructive size-4" />
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => openEdit(s)}>
-                      {tCommon("edit")}
-                    </Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(s.id)}>
+                          <Trash2 className="text-destructive size-4" />
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => openEdit(s)}>
+                          {tCommon("edit")}
+                        </Button>
                       </>
                     ) : null}
                   </div>
@@ -361,14 +355,12 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
               </CardHeader>
             </Card>
           ))}
-          {skills.length === 0 && (
-            <EmptyState title={t("noSkills")} className="py-8" />
-          )}
+          {skills.length === 0 && <EmptyState title={t("noSkills")} className="py-8" />}
         </div>
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto shadow-panel">
+        <DialogContent className="shadow-panel max-h-[90vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? t("editSkill") : t("createSkill")}</DialogTitle>
           </DialogHeader>
@@ -417,6 +409,7 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
               <Input
                 value={toolsText}
                 onChange={(e) => setToolsText(e.target.value)}
+                translate="no"
                 placeholder="read_file, shell_execute, search_web, mcp_jina_*"
               />
               <p className="text-muted-foreground text-xs">{t("toolWhitelistHint")}</p>
@@ -439,13 +432,13 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
               <div className="flex flex-wrap gap-2">
                 {mcpServers.map((server) => (
                   <Button
-                    key={server.server_name}
+                    key={server.id}
                     type="button"
                     size="sm"
-                    variant={selectedMcpRefs.includes(server.server_name) ? "default" : "outline"}
-                    onClick={() => toggleMcpRef(server.server_name)}
+                    variant={selectedMcpRefs.includes(server.id) ? "default" : "outline"}
+                    onClick={() => toggleMcpRef(server.id)}
                   >
-                    {server.server_name}
+                    {server.name}
                   </Button>
                 ))}
                 {mcpServers.length === 0 && (
@@ -464,7 +457,7 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
                     variant={selectedA2aRefs.includes(server.id) ? "default" : "outline"}
                     onClick={() => toggleA2aRef(server.id)}
                   >
-                    {server.name || server.id}
+                    {server.base_url}
                   </Button>
                 ))}
                 {a2aServers.length === 0 && (
@@ -504,24 +497,6 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
                       agent_params: {
                         ...form.agent_params,
                         max_retries: e.target.value ? Number(e.target.value) : undefined,
-                      },
-                    })
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>{t("maxSearchResults")}</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  placeholder={t("leaveBlankDefault")}
-                  value={form.agent_params?.max_search_results ?? ""}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      agent_params: {
-                        ...form.agent_params,
-                        max_search_results: e.target.value ? Number(e.target.value) : undefined,
                       },
                     })
                   }
@@ -576,13 +551,6 @@ export function SkillsSettings({ embedded = false, isAdmin = false, userId }: Pr
                 value={examplesText}
                 onChange={(e) => setExamplesText(e.target.value)}
               />
-            </div>
-            <div className="border-border/70 bg-muted/20 flex items-center justify-between rounded-xl border p-3">
-              <Switch
-                checked={form.auto_recommend ?? true}
-                onCheckedChange={(v) => setForm({ ...form, auto_recommend: v })}
-              />
-              <Label>{t("autoRecommend")}</Label>
             </div>
             <div className="border-border/70 bg-muted/20 flex items-center justify-between rounded-xl border p-3">
               <Switch

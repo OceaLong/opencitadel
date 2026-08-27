@@ -1,14 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from dataclasses import dataclass, field
-from typing import Dict
 
 
 @dataclass
 class LLMMetricsSnapshot:
     multimodal_request_total: int = 0
     multimodal_fallback_total: int = 0
-    multimodal_fallback_by_reason: Dict[str, int] = field(default_factory=dict)
+    multimodal_fallback_by_reason: dict[str, int] = field(default_factory=dict)
     multimodal_image_bytes_total: int = 0
     multimodal_image_count: int = 0
 
@@ -39,7 +36,7 @@ def get_llm_metrics_snapshot() -> LLMMetricsSnapshot:
     return _metrics
 
 
-_resilience_counters: Dict[str, int] = {}
+_resilience_counters: dict[str, int] = {}
 
 
 def record_llm_resilience_event(event: str, model_id: str, provider: str) -> None:
@@ -47,5 +44,5 @@ def record_llm_resilience_event(event: str, model_id: str, provider: str) -> Non
     _resilience_counters[key] = _resilience_counters.get(key, 0) + 1
 
 
-def get_resilience_metrics_snapshot() -> Dict[str, int]:
+def get_resilience_metrics_snapshot() -> dict[str, int]:
     return dict(_resilience_counters)

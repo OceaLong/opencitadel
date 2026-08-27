@@ -1,7 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from datetime import datetime
-from typing import Optional
+from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +12,7 @@ class DBRefreshTokenRepository(RefreshTokenRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
-    async def get_by_hash(self, token_hash: str) -> Optional[RefreshToken]:
+    async def get_by_hash(self, token_hash: str) -> RefreshToken | None:
         result = await self.db_session.execute(
             select(RefreshTokenORM).where(RefreshTokenORM.token_hash == token_hash)
         )
@@ -33,17 +30,17 @@ class DBRefreshTokenRepository(RefreshTokenRepository):
         await self.db_session.execute(
             update(RefreshTokenORM)
             .where(RefreshTokenORM.token_hash == token_hash)
-            .values(revoked_at=datetime.now())
+            .values(revoked_at=datetime.now(UTC))
         )
 
-    async def consume_by_hash(self, token_hash: str) -> Optional[RefreshToken]:
+    async def consume_by_hash(self, token_hash: str) -> RefreshToken | None:
         result = await self.db_session.execute(
             update(RefreshTokenORM)
             .where(
                 RefreshTokenORM.token_hash == token_hash,
                 RefreshTokenORM.revoked_at.is_(None),
             )
-            .values(revoked_at=datetime.now())
+            .values(revoked_at=datetime.now(UTC))
             .returning(RefreshTokenORM)
         )
         record = result.scalar_one_or_none()
@@ -53,5 +50,5 @@ class DBRefreshTokenRepository(RefreshTokenRepository):
         await self.db_session.execute(
             update(RefreshTokenORM)
             .where(RefreshTokenORM.user_id == user_id, RefreshTokenORM.revoked_at.is_(None))
-            .values(revoked_at=datetime.now())
+            .values(revoked_at=datetime.now(UTC))
         )

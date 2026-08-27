@@ -1,141 +1,62 @@
-[English](admin-auditor-compliance.md) · [简体中文](admin-auditor-compliance.zh-CN.md)
+# Admin, Auditor, and Compliance
 
-# Admin, Auditor & Compliance
+[简体中文](admin-auditor-compliance.zh-CN.md)
 
-Platform administration, read-only auditor role, and compliance evidence workflows.
+Administration and audit are separate authorities. Administrators manage
+platform resources; auditors read governance and evidence but cannot mutate
+product or execution state.
 
-## Global roles
+## Read models
 
-| Role | `global_role` | Write access | Read access |
-|------|---------------|--------------|-------------|
-| Admin | `admin` | Full platform admin + user operations | All admin/audit/compliance routes |
-| User | `user` | Sessions, KB, codebases, teams (non-auditor guard) | Own and team-scoped resources |
-| Auditor | `auditor` | **None** — `require_non_auditor` blocks writes | Audit, usage, compliance, evidence |
+The compliance UI consumes formal, owner-scoped projections:
 
-Auditors can review governance data but cannot create sessions, upload files, or modify configurations.
+- session metadata and frozen Operator scope/domains;
+- Run family, state, creation, and terminal time;
+- approval request, decision, actor, subject, and feedback;
+- Activity type, state, attempt, and sanitized failure code;
+- execution-event and audit-chain verification status;
+- patrol findings and remediation outcomes.
 
-```mermaid
-flowchart TD
-  Login["Auditor login"] --> Admin["/admin/compliance"]
-  Admin --> Chain["Verify audit chain"]
-  Admin --> Evidence["Download evidence ZIP"]
-  Admin --> Profile["Open session governance profile"]
-  Admin --> Report["/admin/compliance/report"]
-  Report --> Export["Export JSON / MD / PDF"]
-  Chain --> Integrity["Platform-wide HMAC integrity"]
-  Evidence --> SessionPkg["Per-session tool invoke records"]
-  Evidence --> SignedPkg["Signed package: manifest.json + chain-signature.txt"]
-  Profile --> ProfileView["/admin/compliance/sessions/{sessionId}"]
-  ProfileView --> ProfileData["Approvals + gate hits + checkpoints + terminal state"]
-```
+These views do not reconstruct workflow state from UI events or audit text.
+Run, approval, and Activity rows come from the formal execution projections;
+the audit chain supplies independent action evidence.
 
-## Admin UI routes
+## Main endpoints
 
-| Route | Description |
-|-------|-------------|
-| `/admin` | Overview dashboard |
-| `/admin/users` | User list, quotas, role assignment |
-| `/admin/teams` | Team management |
-| `/admin/invitations` | Platform invitation tokens |
-| `/admin/audit` | Audit log viewer |
-| `/admin/compliance` | Evidence center, chain verification, compliance reports |
-| `/admin/compliance/sessions/[sessionId]` | Per-session governance profile: approvals, gate hits, denials, checkpoints, terminal state |
-| `/admin/compliance/report` | Full-page compliance report export (JSON / MD / PDF) |
-| `/admin/governance` | Platform-wide governance overview: approval outcomes, interceptions (approval decisions + policy denials) by day, Ops Patrol trend, remediation outcomes, audit chain status |
+- `GET /api/admin/governance/overview`: approval backlog/outcomes, daily
+  approval requests and Activity failures, patrol trend, remediation status,
+  audit-chain status.
+- `GET /api/admin/governance/sessions/{id}/profile`: one session's Run,
+  approval, Activity, and verified-chain timeline.
+- `GET /api/admin/evidence/sessions`: eligible sessions with event counts.
+- `GET /api/admin/evidence/sessions/{id}/package`: signed, redacted evidence
+  archive.
+- `GET /api/admin/audit/verify-chain`: platform or session chain verification.
+- `GET /api/admin/compliance/report`: aggregate compliance report.
 
-Usage charts and token statistics appear on the **`/admin` overview dashboard** (not a separate `/admin/usage` page). Backend usage APIs remain under `/api/admin/usage/*`.
+Cross-owner session access is resolved server-side under auditor authority;
+ordinary users cannot use these endpoints to enumerate foreign resources.
 
-Bootstrap admin is created from `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` on first migrate.
+## Evidence package
 
-## Compliance API
+The package is built deterministically without an LLM. It includes a manifest,
+governance profile in JSON/Markdown, audit material, artifact metadata/content
+when authorized, and a PDF summary when the renderer is available. Every
+free-text field receives key-based redaction and secret-pattern scrubbing.
+Manifest digests and an HMAC signature allow offline integrity checks.
 
-All routes require `require_auditor_or_admin` (prefix `/api/admin`):
+Missing optional PDF support does not change the source evidence; the package
+records the omission. Hash-chain or signature failure is surfaced as an error,
+not replaced with a best-effort success.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/admin/audit/verify-chain` | Verify global audit HMAC chain |
-| GET | `/api/admin/audit/verify-chain/sessions/{id}` | Verify session tool-invoke chain |
-| GET | `/api/admin/evidence/sessions` | List sessions with evidence packages |
-| GET | `/api/admin/evidence/sessions/{id}/package` | Download ZIP evidence package |
-| GET | `/api/admin/compliance/report` | Compliance report (`json` / `md` / `pdf`) |
-| GET | `/api/admin/governance/sessions/{id}/profile` | Per-session governance profile read-model (approvals, gate hits, denials, checkpoints, chain verification, terminal state) |
-| GET | `/api/admin/governance/overview?days=30` | Platform-wide governance overview read-model (approval batch outcomes, daily approval-decision/denial interceptions, Ops Patrol run/finding trend, remediation status distribution, audit chain status) — same `require_auditor_or_admin` guard, `days` ranges 1–365 |
+## UI
 
-Compliance mapping covers **等保2.0** and **ISO27001** control items. Web Operator sessions with `gate_profile` produce `agent_tool_invoke` rows with HMAC evidence chain fields.
+- `/admin/governance` shows platform trends.
+- `/admin/compliance` lists evidence sessions and exports.
+- `/admin/compliance/sessions/[sessionId]` renders the formal governance
+  profile.
+- `/admin/audit` provides audit search and chain verification.
 
-Each control resolves to one of five statuses: `pass` (evidence confirms the control), `gap` (evidence confirms the control is absent or misconfigured), `attention` (present but with a caveat — e.g. a capability exists but was never exercised in the reporting window), `not_verified` (the window contains no data to judge the control either way, e.g. no Agent sessions ran), or `na` (control not applicable to this deployment). The report summary carries a count per status; controls are judged by real evaluators reading the window's actual audit/config data, not by a static "all pass" default.
-
-## Evidence package contents
-
-Per-session ZIP from the Evidence center contains:
-
-- `audit.json`, `audit-report.md` — audit trail as structured JSON and rendered Markdown
-- `checkpoints.json` — session checkpoint index
-- `governance-profile.json`, `governance-profile.md` — the same governance profile served by the API above, redacted and rendered deterministically
-- `evidence-summary.pdf` when PDF rendering is available
-- `manifest.json` — per-file SHA-256 hashes plus the chain verification result
-- `chain-signature.txt` — `HMAC-SHA256(AUDIT_SIGNING_KEY, manifest.json bytes)`
-
-`screenshots/*.png` and `reconciliation/*.md`/`.html` are added when the session produced browser screenshots or artifacts.
-
-## Governance profile
-
-The governance profile is a read-only aggregation of data the governance execution chain already records — the audit hash chain, checkpoints, and session state — into one auditor-facing document. It adds no new tables and no new writes. Its seven top-level fields are `session`, `chain`, `approvals`, `gate_hits`, `checkpoints`, `terminal`, and `denials` — the last one projects every `agent_tool_denied` audit row (capability-policy rejections at the assembly/exposure/execution layer) for the session, each with `tool`, `layer`, `reason`, and `created_at`. The evidence ZIP's `governance-profile.md` renders this as a "策略拒绝" (Policy denials) table.
-
-```mermaid
-erDiagram
-  SESSION ||--o{ AUDIT_LOG : "chained tool-invoke + approval rows"
-  SESSION ||--o{ TOOL_APPROVAL_BATCH : "gated tool-call batches"
-  TOOL_APPROVAL_BATCH ||--o{ AUDIT_LOG : "approve / reject decisions"
-  SESSION ||--o| RUN_OUTCOME : "terminal status, once reached"
-  SESSION ||--|| GOVERNANCE_PROFILE : "aggregates"
-  GOVERNANCE_PROFILE ||--o{ EVIDENCE_PACKAGE : "exported as, on demand"
-
-  SESSION {
-    string id PK
-    string gate_profile
-    string operator_scope
-    string status
-  }
-  TOOL_APPROVAL_BATCH {
-    string id PK
-    string session_id FK
-    string status
-    datetime expires_at
-  }
-  AUDIT_LOG {
-    string id PK
-    string session_id FK
-    string action
-    int chain_seq
-    string prev_hash
-    string entry_hash
-  }
-  RUN_OUTCOME {
-    string status
-    string error_code
-  }
-  GOVERNANCE_PROFILE {
-    bool chain_verified
-    int checked_entries
-  }
-  EVIDENCE_PACKAGE {
-    string manifest_sha256
-    string pdf_status
-  }
-```
-
-## Typical auditor workflow
-
-1. Log in as auditor (admin assigns `global_role=auditor`)
-2. Open **Admin → Compliance** (`/admin/compliance`)
-3. Run **Verify audit chain** for platform-wide integrity
-4. Filter Web Operator sessions and download evidence ZIP
-5. Open a session's governance profile (`/admin/compliance/sessions/{sessionId}`) for its approval/gate/checkpoint detail
-6. Export compliance report (`framework=djbh2.0` or ISO) for audit period
-
-## Related documentation
-
-- [Web Operator architecture](web-operator.md) — gate profiles and evidence chain
-- [Refund reconciliation tutorial](../tutorials/05-refund-reconciliation-compliance.md)
-- [Security model](security-model.md) — RBAC details
+Auditor views hide all mutation controls. Admin mutation routes still require
+CSRF protection, explicit role checks, scope validation, and append-only audit
+recording.

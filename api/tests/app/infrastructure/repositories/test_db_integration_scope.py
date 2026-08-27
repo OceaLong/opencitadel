@@ -1,8 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import pytest
 
-from app.domain.errors import ServerRequestsError
 from app.domain.models.scope import OwnerScope
 from app.infrastructure.repositories.db_integration_server_repository import (
     DBA2AServerRepository,
@@ -65,7 +62,10 @@ async def test_a2a_apply_scope_none_filters_global_only():
 @pytest.mark.parametrize(
     ("repo_factory", "table_name"),
     [
-        (lambda captured: DBMCPServerRepository(_FakeSession(captured), _FakeCipher()), "mcp_servers"),
+        (
+            lambda captured: DBMCPServerRepository(_FakeSession(captured), _FakeCipher()),
+            "mcp_servers",
+        ),
         (lambda captured: DBA2AServerRepository(_FakeSession(captured)), "a2a_servers"),
     ],
 )
@@ -84,12 +84,3 @@ async def test_team_scope_filters_integration_servers_by_team_not_creator(
     assert f"{table_name}.owner_user_id" not in where_sql
     assert "team-1" in compiled.params.values()
     assert "member-2" not in compiled.params.values()
-
-
-@pytest.mark.asyncio
-async def test_list_revisions_rejects_unscoped_query():
-    from app.infrastructure.repositories.db_app_config_repository import DbAppConfigRepository
-
-    repo = DbAppConfigRepository()
-    with pytest.raises(ServerRequestsError):
-        await repo.list_revisions()

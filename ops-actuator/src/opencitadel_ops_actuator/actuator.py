@@ -9,10 +9,12 @@ upstream approval/remediation chain, not this service -- silently retrying
 a write (restart/scale/rollback) risks a double-apply that the caller did
 not approve.
 """
+
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from .config import ActuatorSettings
 from .contracts import ActuatorEnvelope, ActuatorErrorCode, evidence_for
@@ -20,7 +22,6 @@ from .k8s_writer import KubernetesWriter, NoRollbackRevision, WorkloadNotFound
 from .limits import bound
 from .redaction import redact
 from .security import TargetDenied, require_replicas_in_bounds, require_workload
-
 
 _DENIAL_CODES = {
     "NAMESPACE_DENIED": ActuatorErrorCode.NAMESPACE_DENIED,
@@ -36,7 +37,9 @@ class _ActionFailure(Exception):
 
 
 class Actuator:
-    def __init__(self, settings: ActuatorSettings, *, k8s_factory: Callable[[], Any] = KubernetesWriter) -> None:
+    def __init__(
+        self, settings: ActuatorSettings, *, k8s_factory: Callable[[], Any] = KubernetesWriter
+    ) -> None:
         self.settings = settings
         self._k8s_factory = k8s_factory
         self._semaphore = asyncio.Semaphore(settings.concurrency)
@@ -44,14 +47,20 @@ class Actuator:
     @staticmethod
     def _require_key(idempotency_key: str) -> None:
         if not idempotency_key or not idempotency_key.strip():
-            raise _ActionFailure(ActuatorErrorCode.IDEMPOTENCY_KEY_MISSING, "idempotency_key is required")
+            raise _ActionFailure(
+                ActuatorErrorCode.IDEMPOTENCY_KEY_MISSING, "idempotency_key is required"
+            )
 
-    def _bound_or_none(self, value: dict[str, Any] | None) -> tuple[dict[str, Any] | None, list[str]]:
+    def _bound_or_none(
+        self, value: dict[str, Any] | None
+    ) -> tuple[dict[str, Any] | None, list[str]]:
         if value is None:
             return None, []
         return bound(redact(value), self.settings)
 
-    async def _execute(self, action: str, operation: Callable[[], tuple[str, Any, Any]], data: dict[str, Any]) -> dict[str, Any]:
+    async def _execute(
+        self, action: str, operation: Callable[[], tuple[str, Any, Any]], data: dict[str, Any]
+    ) -> dict[str, Any]:
         safe_data = redact(data)
         try:
             async with self._semaphore:
@@ -70,7 +79,9 @@ class Actuator:
                 before=bounded_before,
                 after=bounded_after,
                 data=bounded_data,
-                evidence=evidence_for(self.settings.target_ref, bounded_data, ["summary", "before_after_snapshot"]),
+                evidence=evidence_for(
+                    self.settings.target_ref, bounded_data, ["summary", "before_after_snapshot"]
+                ),
                 warnings=warnings,
             )
         except TargetDenied as exc:
@@ -79,19 +90,27 @@ class Actuator:
         except _ActionFailure as exc:
             result = self._failed(action, safe_data, exc.code, str(exc))
         except NoRollbackRevision as exc:
-            result = self._failed(action, safe_data, ActuatorErrorCode.NO_ROLLBACK_REVISION, str(exc))
+            result = self._failed(
+                action, safe_data, ActuatorErrorCode.NO_ROLLBACK_REVISION, str(exc)
+            )
         except WorkloadNotFound as exc:
             result = self._failed(action, safe_data, ActuatorErrorCode.TARGET_NOT_FOUND, str(exc))
         except ValueError as exc:
-            code = ActuatorErrorCode.OUTPUT_TOO_LARGE if str(exc) == "OUTPUT_TOO_LARGE" else ActuatorErrorCode.INTERNAL
+            code = (
+                ActuatorErrorCode.OUTPUT_TOO_LARGE
+                if str(exc) == "OUTPUT_TOO_LARGE"
+                else ActuatorErrorCode.INTERNAL
+            )
             result = self._failed(action, safe_data, code, str(exc))
         except TimeoutError as exc:
             result = self._failed(action, safe_data, ActuatorErrorCode.TIMEOUT, str(exc))
-        except Exception as exc:  # noqa: BLE001 - fail-closed boundary, never retried
+        except (OSError, RuntimeError) as exc:
             result = self._failed(action, safe_data, ActuatorErrorCode.K8S_ERROR, redact(str(exc)))
         return result.model_dump(mode="json")
 
-    def _failed(self, action: str, data: dict[str, Any], code: ActuatorErrorCode, message: str) -> ActuatorEnvelope:
+    def _failed(
+        self, action: str, data: dict[str, Any], code: ActuatorErrorCode, message: str
+    ) -> ActuatorEnvelope:
         return ActuatorEnvelope(
             target_ref=self.settings.target_ref,
             action=action,
@@ -101,14 +120,19 @@ class Actuator:
             error_message=message[:2000],
         )
 
-    async def restart_workload(self, namespace: str, workload: str, kind: str, idempotency_key: str) -> dict[str, Any]:
+    async def restart_workload(
+        self, namespace: str, workload: str, kind: str, idempotency_key: str
+    ) -> dict[str, Any]:
         data = {"namespace": namespace, "workload": workload, "kind": kind}
 
         def call() -> tuple[str, Any, Any]:
             self._require_key(idempotency_key)
             target = require_workload(self.settings, namespace, workload)
             if target.kind != kind:
-                raise _ActionFailure(ActuatorErrorCode.KIND_MISMATCH, "requested kind does not match registered target")
+                raise _ActionFailure(
+                    ActuatorErrorCode.KIND_MISMATCH,
+                    "requested kind does not match registered target",
+                )
             writer = self._k8s_factory()
             marker = writer.read_marker(namespace, workload, kind)
             if marker == idempotency_key:
@@ -119,14 +143,19 @@ class Actuator:
 
         return await self._execute("restart_workload", call, data)
 
-    async def scale_workload(self, namespace: str, workload: str, kind: str, replicas: int, idempotency_key: str) -> dict[str, Any]:
+    async def scale_workload(
+        self, namespace: str, workload: str, kind: str, replicas: int, idempotency_key: str
+    ) -> dict[str, Any]:
         data = {"namespace": namespace, "workload": workload, "kind": kind, "replicas": replicas}
 
         def call() -> tuple[str, Any, Any]:
             self._require_key(idempotency_key)
             target = require_workload(self.settings, namespace, workload)
             if target.kind != kind:
-                raise _ActionFailure(ActuatorErrorCode.KIND_MISMATCH, "requested kind does not match registered target")
+                raise _ActionFailure(
+                    ActuatorErrorCode.KIND_MISMATCH,
+                    "requested kind does not match registered target",
+                )
             require_replicas_in_bounds(target, replicas)
             writer = self._k8s_factory()
             marker = writer.read_marker(namespace, workload, kind)
@@ -138,14 +167,18 @@ class Actuator:
 
         return await self._execute("scale_workload", call, data)
 
-    async def rollback_workload(self, namespace: str, workload: str, kind: str, idempotency_key: str) -> dict[str, Any]:
+    async def rollback_workload(
+        self, namespace: str, workload: str, kind: str, idempotency_key: str
+    ) -> dict[str, Any]:
         data = {"namespace": namespace, "workload": workload, "kind": kind}
 
         def call() -> tuple[str, Any, Any]:
             self._require_key(idempotency_key)
             target = require_workload(self.settings, namespace, workload)
             if target.kind != kind or kind != "deployment":
-                raise _ActionFailure(ActuatorErrorCode.KIND_MISMATCH, "rollback only supports deployment workloads")
+                raise _ActionFailure(
+                    ActuatorErrorCode.KIND_MISMATCH, "rollback only supports deployment workloads"
+                )
             writer = self._k8s_factory()
             marker = writer.read_marker(namespace, workload, kind)
             if marker == idempotency_key:

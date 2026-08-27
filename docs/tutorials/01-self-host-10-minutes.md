@@ -33,8 +33,8 @@ The script copies `.env.example` → `.env`, generates secrets, and prompts you 
 
 `make quickstart` runs:
 
-1. `docker compose build opencitadel-sandbox` — required for dynamic sandbox creation (the compose service is under the `fixed-sandbox` profile and is not started by default, but Worker-created sandboxes need this image)
-2. `docker compose up -d --build` — starts API, Worker, UI, Postgres, Redis, and (with quickstart defaults) MinIO
+1. `docker compose build opencitadel-sandbox` — required for dynamic sandbox creation (the compose service is under the `fixed-sandbox` profile and is not started by default, but kernel-created sandboxes need this image)
+2. `docker compose up -d --build` — starts API, execution kernel, UI, Postgres, Redis, and (with quickstart defaults) MinIO
 
 First build may take 5–10 minutes.
 
@@ -47,14 +47,16 @@ Open **http://localhost:8088** when health check passes.
 - Email: value of `BOOTSTRAP_ADMIN_EMAIL` (default `admin@example.com`)
 - Password: your `BOOTSTRAP_ADMIN_PASSWORD`
 
-### 4. Add an endpoint and model
+### 4. Configure inference
 
-LLM configuration is two-step: **endpoint** (provider + API key) then **model** (model name under that endpoint). Full details: [Production deployment — Models](../operations/deployment.md#models-skills-and-memory).
+Inference configuration is explicit: an **endpoint** owns provider and
+credential, a typed **model** belongs to it, and a **binding** selects the model
+for each purpose. Full details: [Inference control plane](../architecture/inference-control-plane.md).
 
-1. Open **Settings → Models**
+1. Open **Settings → Inference**
 2. Click **Add endpoint** — choose provider, base URL, paste API key
-3. Under that endpoint, click **Add model** — enter model name
-4. Set as default
+3. Under that endpoint, click **Add model** — enter model name and select `chat`
+4. Bind the `chat` purpose to that model
 
 ### 5. Run your first task
 
@@ -76,7 +78,10 @@ FRONTEND_BASE_URL=http://localhost:8088
 OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal
 ```
 
-Install [Ollama](https://ollama.com), pull a model, then add an **endpoint** (`http://host.docker.internal:11434/v1`) and a **model** under it in Settings. Keep the allowlist exact — no wildcard. Full local-mode reference: [deployment guide — local mode](../operations/deployment.md#local-mode).
+Install [Ollama](https://ollama.com), pull a model, then add an **endpoint**
+(`http://host.docker.internal:11434/v1`), a chat **model**, and a `chat`
+**binding** in Settings → Inference. Keep the allowlist exact—no wildcard.
+Full local-mode reference: [deployment guide — local mode](../operations/deployment.md#local-mode).
 
 **Note:** Smaller local models may struggle with multi-step Agent tasks. BYO cloud API keys give the best first-run experience.
 
@@ -85,7 +90,7 @@ Install [Ollama](https://ollama.com), pull a model, then add an **endpoint** (`h
 | Issue | Fix |
 |-------|-----|
 | 502 on login | Wait for `opencitadel-migrate` to finish; check `docker compose logs opencitadel-migrate` |
-| Agent does nothing | Confirm a default model is set and its endpoint has a valid API key |
+| Agent does nothing | Confirm the effective `chat` binding resolves to an accessible model and endpoint credential |
 | OOM / slow | See [deployment guide](../operations/deployment.md) memory tuning; enable swap on small VMs |
 
 ## Next

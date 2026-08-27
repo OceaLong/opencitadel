@@ -3,3 +3,4 @@ out
 build
 node_modules
 next-env.d.ts
+src/lib/api/generated/schema.d.ts

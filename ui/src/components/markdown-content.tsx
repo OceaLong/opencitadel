@@ -39,108 +39,108 @@ function buildComponents(
   onSourceClick?: (path: string, line?: number) => void,
 ): React.ComponentProps<typeof ReactMarkdown>["components"] {
   return {
-  h1: ({ className, ...props }) => <h1 className={cn(headingClasses.h1, className)} {...props} />,
-  h2: ({ className, ...props }) => <h2 className={cn(headingClasses.h2, className)} {...props} />,
-  h3: ({ className, ...props }) => <h3 className={cn(headingClasses.h3, className)} {...props} />,
-  h4: ({ className, ...props }) => <h4 className={cn(headingClasses.h4, className)} {...props} />,
-  h5: ({ className, ...props }) => <h5 className={cn(headingClasses.h5, className)} {...props} />,
-  h6: ({ className, ...props }) => <h6 className={cn(headingClasses.h6, className)} {...props} />,
-  p: ({ className, ...props }) => (
-    <p
-      className={cn("text-foreground mb-2 text-sm leading-relaxed last:mb-0", className)}
-      {...props}
-    />
-  ),
-  ul: ({ className, ...props }) => (
-    <ul
-      className={cn("text-foreground mb-2 list-disc space-y-0.5 pl-5 text-sm", className)}
-      {...props}
-    />
-  ),
-  ol: ({ className, ...props }) => (
-    <ol
-      className={cn("text-foreground mb-2 list-decimal space-y-0.5 pl-5 text-sm", className)}
-      {...props}
-    />
-  ),
-  li: ({ className, ...props }) => <li className={cn("leading-relaxed", className)} {...props} />,
-  strong: ({ className, ...props }) => (
-    <strong className={cn("text-foreground font-semibold", className)} {...props} />
-  ),
-  code: ({ className, children, ...props }) => {
-    const text = typeof children === "string" ? children : String(children ?? "");
-    const lang = className?.replace("language-", "") ?? "";
-    if (lang === "mermaid") {
-      return <MermaidDiagram chart={text.trim()} />;
-    }
-    const isBlock = text.includes("\n") || lang.length > 0;
-    return (
-      <code
+    h1: ({ className, ...props }) => <h1 className={cn(headingClasses.h1, className)} {...props} />,
+    h2: ({ className, ...props }) => <h2 className={cn(headingClasses.h2, className)} {...props} />,
+    h3: ({ className, ...props }) => <h3 className={cn(headingClasses.h3, className)} {...props} />,
+    h4: ({ className, ...props }) => <h4 className={cn(headingClasses.h4, className)} {...props} />,
+    h5: ({ className, ...props }) => <h5 className={cn(headingClasses.h5, className)} {...props} />,
+    h6: ({ className, ...props }) => <h6 className={cn(headingClasses.h6, className)} {...props} />,
+    p: ({ className, ...props }) => (
+      <p
+        className={cn("text-foreground mb-2 text-sm leading-relaxed last:mb-0", className)}
+        {...props}
+      />
+    ),
+    ul: ({ className, ...props }) => (
+      <ul
+        className={cn("text-foreground mb-2 list-disc space-y-0.5 pl-5 text-sm", className)}
+        {...props}
+      />
+    ),
+    ol: ({ className, ...props }) => (
+      <ol
+        className={cn("text-foreground mb-2 list-decimal space-y-0.5 pl-5 text-sm", className)}
+        {...props}
+      />
+    ),
+    li: ({ className, ...props }) => <li className={cn("leading-relaxed", className)} {...props} />,
+    strong: ({ className, ...props }) => (
+      <strong className={cn("text-foreground font-semibold", className)} {...props} />
+    ),
+    code: ({ className, children, ...props }) => {
+      const text = typeof children === "string" ? children : String(children ?? "");
+      const lang = className?.replace("language-", "") ?? "";
+      if (lang === "mermaid") {
+        return <MermaidDiagram chart={text.trim()} />;
+      }
+      const isBlock = text.includes("\n") || lang.length > 0;
+      return (
+        <code
+          className={cn(
+            isBlock
+              ? "bg-muted text-foreground my-2 block overflow-x-auto rounded-lg p-3 font-mono text-sm"
+              : "bg-muted text-foreground inline rounded-md px-1.5 py-0.5 font-mono text-[0.8125em]",
+            className,
+          )}
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    },
+    pre: ({ className, ...props }) => (
+      <pre className={cn("my-2 overflow-x-auto", className)} {...props} />
+    ),
+    blockquote: ({ className, ...props }) => (
+      <blockquote
         className={cn(
-          isBlock
-            ? "bg-muted text-foreground my-2 block overflow-x-auto rounded-lg p-3 font-mono text-sm"
-            : "bg-muted text-foreground inline rounded-md px-1.5 py-0.5 font-mono text-[0.8125em]",
+          "border-border text-muted-foreground my-2 border-l-4 py-0.5 pl-3 text-sm italic",
           className,
         )}
         {...props}
-      >
-        {children}
-      </code>
-    );
-  },
-  pre: ({ className, ...props }) => (
-    <pre className={cn("my-2 overflow-x-auto", className)} {...props} />
-  ),
-  blockquote: ({ className, ...props }) => (
-    <blockquote
-      className={cn(
-        "border-border text-muted-foreground my-2 border-l-4 py-0.5 pl-3 text-sm italic",
-        className,
-      )}
-      {...props}
-    />
-  ),
-  a: ({ className, href, children, ...props }) => {
-    const childText = String(children ?? "");
-    if (href?.startsWith("kbdoc://") && onSourceClick) {
+      />
+    ),
+    a: ({ className, href, children, ...props }) => {
+      const childText = String(children ?? "");
+      if (href?.startsWith("kbdoc://") && onSourceClick) {
+        return (
+          <button
+            type="button"
+            className="text-link text-sm hover:underline"
+            onClick={() => onSourceClick(href)}
+          >
+            {children}
+          </button>
+        );
+      }
+      const locMatch = childText.match(/^([^:]+):(\d+)$/);
+      if (locMatch && onSourceClick) {
+        return (
+          <button
+            type="button"
+            className="text-link text-sm hover:underline"
+            onClick={() => onSourceClick(locMatch[1], Number(locMatch[2]))}
+          >
+            {childText}
+          </button>
+        );
+      }
+      // 安全兜底：如果 href 包含 CJK 字符，说明 autolink 仍然误判，降级为纯文本
+      if (href && /[\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/.test(href)) {
+        return <span className="text-foreground text-sm">{children}</span>;
+      }
       return (
-        <button
-          type="button"
-          className="text-link text-sm hover:underline"
-          onClick={() => onSourceClick(href)}
+        <a
+          className={cn("text-link text-sm hover:underline", className)}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          {...props}
         >
           {children}
-        </button>
+        </a>
       );
-    }
-    const locMatch = childText.match(/^([^:]+):(\d+)$/);
-    if (locMatch && onSourceClick) {
-      return (
-        <button
-          type="button"
-          className="text-link text-sm hover:underline"
-          onClick={() => onSourceClick(locMatch[1], Number(locMatch[2]))}
-        >
-          {childText}
-        </button>
-      );
-    }
-    // 安全兜底：如果 href 包含 CJK 字符，说明 autolink 仍然误判，降级为纯文本
-    if (href && /[\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/.test(href)) {
-      return <span className="text-foreground text-sm">{children}</span>;
-    }
-    return (
-      <a
-        className={cn("text-link text-sm hover:underline", className)}
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        {...props}
-      >
-        {children}
-      </a>
-    );
-  },
+    },
   };
 }
 

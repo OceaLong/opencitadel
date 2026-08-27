@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import io
 import stat
 import zipfile
@@ -45,27 +43,21 @@ def _symlink_zip() -> bytes:
     ],
 )
 def test_unsafe_git_url_is_rejected(url):
-    validator = CodebaseSourceValidator(
-        resolver=lambda _host, _port: ["93.184.216.34"]
-    )
+    validator = CodebaseSourceValidator(resolver=lambda _host, _port: ["93.184.216.34"])
 
     with pytest.raises(BadRequestError):
         validator.validate_git_url(url)
 
 
 def test_git_url_rejects_private_resolved_addresses():
-    validator = CodebaseSourceValidator(
-        resolver=lambda _host, _port: ["93.184.216.34", "10.0.0.2"]
-    )
+    validator = CodebaseSourceValidator(resolver=lambda _host, _port: ["93.184.216.34", "10.0.0.2"])
 
     with pytest.raises(BadRequestError):
         validator.validate_git_url("https://example.com/repo.git")
 
 
 def test_safe_https_git_url_is_normalized():
-    validator = CodebaseSourceValidator(
-        resolver=lambda _host, _port: ["93.184.216.34"]
-    )
+    validator = CodebaseSourceValidator(resolver=lambda _host, _port: ["93.184.216.34"])
 
     assert (
         validator.validate_git_url("https://example.com/org/repo.git")
@@ -83,9 +75,10 @@ def test_source_path_cannot_escape_root(path):
 
 
 def test_source_path_normalizes_safe_relative_path():
-    assert str(
-        normalize_contained_path("/workspace/codebase", "src/main.py")
-    ) == "/workspace/codebase/src/main.py"
+    assert (
+        str(normalize_contained_path("/workspace/codebase", "src/main.py"))
+        == "/workspace/codebase/src/main.py"
+    )
 
 
 @pytest.mark.parametrize(

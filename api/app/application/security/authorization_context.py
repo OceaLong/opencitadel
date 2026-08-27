@@ -1,20 +1,17 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
-from typing import Iterator
 
 from app.domain.models.authorization import AuthorizationContext
 
-
-_current_authorization: ContextVar[AuthorizationContext] = ContextVar(
+_current_authorization: ContextVar[AuthorizationContext | None] = ContextVar(
     "current_authorization",
-    default=AuthorizationContext.anonymous(),
+    default=None,
 )
 
 
 def get_authorization_context() -> AuthorizationContext:
-    return _current_authorization.get()
+    return _current_authorization.get() or AuthorizationContext.anonymous()
 
 
 def set_authorization_context(context: AuthorizationContext) -> Token:

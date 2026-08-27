@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from argon2 import PasswordHasher as Argon2PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 

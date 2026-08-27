@@ -13,7 +13,6 @@ import { BrowserTool } from "./browser-tool";
 import { DefaultTool } from "./default-tool";
 import { FileTool } from "./file-tool";
 import { McpTool } from "./mcp-tool";
-import { MessageTool } from "./message-tool";
 import { SearchTool } from "./search-tool";
 import type { ToolKind } from "./utils";
 import { getFriendlyToolLabel, getToolKind } from "./utils";
@@ -24,7 +23,6 @@ export type ToolUseProps = {
 };
 
 const TOOL_COMPONENTS: Record<ToolKind, ComponentType<{ label: string; onClick?: () => void }>> = {
-  message: MessageTool,
   bash: BashTool,
   file: FileTool,
   search: SearchTool,
@@ -41,11 +39,11 @@ export function ToolUse({ data, onClick }: ToolUseProps) {
   const Component = TOOL_COMPONENTS[kind];
   const status = data?.status;
   const statusLabel =
-    status === "calling"
+    status === "started"
       ? t("statusRunning")
-      : status === "called"
+      : status === "completed"
         ? t("statusCalled")
-        : status === "error"
+        : status === "failed"
           ? t("statusError")
           : status;
   return (
@@ -53,8 +51,10 @@ export function ToolUse({ data, onClick }: ToolUseProps) {
       <Component label={label} onClick={onClick} />
       {status ? (
         <StatusBadge
-          variant={status === "error" ? "destructive" : status === "called" ? "success" : "info"}
-          className="uppercase tracking-wide"
+          variant={
+            status === "failed" ? "destructive" : status === "completed" ? "success" : "info"
+          }
+          className="tracking-wide uppercase"
         >
           {statusLabel}
         </StatusBadge>

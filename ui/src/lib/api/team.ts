@@ -1,7 +1,18 @@
 import { del, get, patch, post } from "./fetch";
 
-export type Team = { id: string; name: string; description: string; created_by?: string | null; created_at: string };
-export type TeamMember = { team_id: string; user_id: string; role: "owner" | "admin" | "member"; joined_at: string };
+export type Team = {
+  id: string;
+  name: string;
+  description: string;
+  created_by?: string | null;
+  created_at: string;
+};
+export type TeamMember = {
+  team_id: string;
+  user_id: string;
+  role: "owner" | "admin" | "member";
+  joined_at: string;
+};
 export type TeamInvitationPreview = {
   team_id: string;
   team_name: string;
@@ -20,7 +31,9 @@ export type TeamMemberDetail = {
   avatar_url: string;
 };
 
-export function memberDisplayName(member: Pick<TeamMemberDetail, "display_name" | "email" | "user_id">): string {
+export function memberDisplayName(
+  member: Pick<TeamMemberDetail, "display_name" | "email" | "user_id">,
+): string {
   return member.display_name || member.email || member.user_id;
 }
 

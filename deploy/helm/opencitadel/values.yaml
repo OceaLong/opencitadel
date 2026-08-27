@@ -1,6 +1,5 @@
 replicaCount:
   api: 2
-  worker: 2
   ui: 1
 
 image:
@@ -8,8 +7,8 @@ image:
     repository: opencitadel-api
     tag: latest
     pullPolicy: IfNotPresent
-  worker:
-    repository: opencitadel-worker
+  executionKernel:
+    repository: opencitadel-execution-kernel
     tag: latest
     pullPolicy: IfNotPresent
   ui:
@@ -23,11 +22,14 @@ image:
 ui:
   enabled: true
 
-worker:
-  # Port the worker's Prometheus metrics HTTP server binds to (in-cluster
-  # only; no token, gate scrape access via NetworkPolicy). Must match
-  # WORKER_METRICS_PORT / Settings.worker_metrics_port; 0 disables it.
+executionKernel:
+  replicas: 2
+  databaseUser: opencitadel_execution_kernel_runtime
   metricsPort: 9108
+
+shutdown:
+  timeoutSeconds: 30
+  terminationGracePeriodSeconds: 45
 
 opsCollector:
   enabled: false
@@ -81,6 +83,7 @@ postgresql:
   enabled: true
   image: pgvector/pgvector:pg16
   adminUser: postgres
+  migrationUser: opencitadel_migration_runtime
   user: opencitadel_app
   database: opencitadel
   storage: 20Gi
@@ -140,7 +143,7 @@ autoscaling:
     minReplicas: 2
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
-  worker:
+  executionKernel:
     enabled: true
     minReplicas: 2
     maxReplicas: 20
@@ -154,7 +157,7 @@ resources:
     limits:
       cpu: 2
       memory: 1Gi
-  worker:
+  executionKernel:
     requests:
       cpu: 500m
       memory: 512Mi
@@ -169,18 +172,32 @@ resources:
       cpu: 1
       memory: 384Mi
 
-# 非敏感环境变量（对应 api/core/config.py Settings）
+# 非敏感部署环境变量（对应 api/core/config.py DeploymentSettings）
 env:
   ENV: production
   LOG_LEVEL: INFO
-  APP_CONFIG_FILEPATH: config.yaml
+  CORS_ORIGINS: "*"
+  OTEL_ENABLED: "false"
+  OTEL_SERVICE_NAME: opencitadel-api
+  OTEL_EXPORTER_ENDPOINT: ""
+  POLICY_HEAD_REFRESH_INTERVAL_SECONDS: "5"
+  POLICY_MAX_STALENESS_SECONDS: "30"
+  SANDBOX_DRIVER: kubernetes
+  SANDBOX_IMAGE: opencitadel-sandbox
+  SANDBOX_NAME_PREFIX: opencitadel-sandbox
+  SANDBOX_NETWORK: ""
+  SANDBOX_CHROME_ARGS: ""
+  SANDBOX_HTTPS_PROXY: ""
+  SANDBOX_HTTP_PROXY: ""
+  SANDBOX_NO_PROXY: ""
+  SANDBOX_K8S_NAMESPACE: default
+  SANDBOX_K8S_POD_LABEL: app=opencitadel-sandbox
   POSTGRES_HOST: opencitadel-postgres
   POSTGRES_USER: opencitadel_app
   POSTGRES_DB: opencitadel
   REDIS_HOST: opencitadel-redis
   REDIS_PORT: "6379"
   REDIS_DB: "0"
-  USE_DB_APP_CONFIG: "true"
   COOKIE_SECURE: "true"
   OUTBOUND_ALLOWED_PORTS: "80,443,8080,8443,11434"
   OUTBOUND_PRIVATE_HOST_ALLOWLIST: ""
@@ -210,165 +227,17 @@ secrets:
   bootstrapAdminEmail: admin@example.com
   bootstrapAdminPassword: replace-with-strong-password
   postgresAdminPassword: replace-with-distinct-admin-password
+  postgresMigrationPassword: replace-with-distinct-migration-password
   postgresPassword: replace-with-strong-postgres-password
+  executionKernelPostgresPassword: replace-with-distinct-kernel-postgres-password
   redisPassword: replace-with-strong-redis-password
   cosSecretId: ""
   cosSecretKey: ""
   minioAccessKey: minioadmin
   minioSecretKey: minioadmin
-  embeddingApiKey: ""
-  langfusePublicKey: ""
-  langfuseSecretKey: ""
   # /api/metrics 的 Bearer token；留空表示该端点 fail-closed 关闭（404）。
   # 启用 Prometheus 抓取前需设置为强随机值。
   metricsToken: ""
-
-# 应用行为配置（渲染为 ConfigMap，挂载为 /app/config.yaml）
-appConfig:
-  server:
-    cors_origins: '*'
-    rate_limit_enabled: true
-    rate_limit_per_minute: 120
-    sessions_stream_interval_seconds: 15
-  agent_config:
-    max_iterations: 100
-    max_retries: 3
-    max_search_results: 10
-    tool_result_max_chars: 32000
-    subagent_max_iterations: 15
-    subagent_max_concurrency: 3
-  memory:
-    recall_limit: 20
-    auto_extract_enabled: true
-    vector_enabled: false
-    compact_strategy: hybrid
-    compact_token_threshold: 32000
-    compact_keep_recent: 12
-    compact_tool_content_max_chars: 8000
-    compact_always_on_step_boundary: true
-    compact_rule_trigger_threshold: 16000
-    tool_output_offload_enabled: false
-    tool_output_offload_threshold_chars: 4000
-    embedding:
-      provider: openai
-      model: text-embedding-3-small
-      base_url: https://api.openai.com/v1
-  sandbox:
-    driver: kubernetes
-    address: null
-    image: opencitadel-sandbox
-    name_prefix: opencitadel-sandbox
-    ttl_minutes: 20
-    network: null
-    chrome_args: ''
-    https_proxy: null
-    http_proxy: null
-    no_proxy: localhost,127.0.0.1
-    cleanup_interval_seconds: 60
-    memory_limit: 1g
-    cpu_limit: 2
-    pids_limit: 512
-    pool_enabled: false
-    pool_size: 0
-    idle_timeout_minutes: 10
-    warmup_retry_interval_seconds: 0.5
-    k8s_namespace: default
-    k8s_pod_label: app=opencitadel-sandbox
-  worker:
-    max_concurrent_tasks: 4
-    task_dispatch_max_retries: 3
-    tool_timeout_seconds: 120
-    max_sandboxes_per_node: 4
-    max_dynamic_sandboxes_global: 0
-    admission_min_host_available_mb: 3072
-    admission_reclaim_target_mb: 4096
-    admission_poll_interval_seconds: 2
-    admission_settle_seconds: 8
-    admission_reclaim_enabled: true
-    task_execution_lease_seconds: 60
-    reclaim_leader_lease_seconds: 15
-    memory_probe_source: auto
-  streams:
-    dispatch_maxlen: 10000
-    task_input_maxlen: 10000
-    task_output_maxlen: 50000
-    stream_maxlen: 10000
-  observability:
-    otel_enabled: false
-    otel_service_name: opencitadel-api
-    otel_exporter_endpoint: ''
-    langfuse_enabled: false
-  mcp_config:
-    # Seed template only (enabled: false). Do not put real secrets here in production; configure via UI/API.
-    mcpServers:
-      amap-maps-streamableHTTP:
-        transport: streamable_http
-        enabled: false
-        description: null
-        env: null
-        command: null
-        args: null
-        url: https://mcp.amap.com/mcp?key=YOUR_AMAP_KEY
-        headers: null
-      jina-mcp-server:
-        transport: streamable_http
-        enabled: false
-        description: null
-        env: null
-        command: null
-        args: null
-        url: https://mcp.jina.ai/v1
-        headers:
-          Authorization: Bearer YOUR_JINA_API_KEY
-  a2a_config:
-    a2a_servers: []
-  model_resilience:
-    enabled: true
-    fallback_enabled: false
-    allow_cross_provider_fallback: false
-    fallback_on_quota_exceeded: true
-    allow_cross_provider_fallback_on_quota: true
-    max_attempts_per_call: 3
-    max_call_budget_seconds: 120
-    breaker_window_seconds: 60
-    breaker_error_threshold: 5
-    breaker_open_ttl_seconds: 60
-    breaker_halfopen_probe_timeout_seconds: 10
-    fast_fail_on_open_circuit: true
-    dlq_replay_enabled: false
-    dlq_replay_batch_size: 4
-    dlq_replay_interval_seconds: 5
-  feature_flags:
-    enable_agent_features: true
-    enable_embeddings: true
-    enable_image_generation: true
-    enable_parallel_step_execution: false
-    enable_artifacts: true
-    enable_hitl_gates: true
-    enable_scheduled_jobs: true
-  hitl:
-    plan_gate_enabled: true
-    tool_gate_task_level_enabled: true
-    tool_gate_call_level_enabled: false
-    tool_gate_risk_list:
-      - write_file
-      - replace_in_file
-      - shell_execute
-      - mcp_*
-      - a2a
-      - browser_click
-      - browser_input
-      - browser_select_option
-      - browser_press_key
-      - browser_console_exec
-    takeover_timeout_minutes: 30
-  scheduler:
-    enabled: true
-    poll_interval_seconds: 10.0
-    max_concurrent_jobs: 5
-    max_concurrent_jobs_per_job: 1
-    leader_lease_seconds: 30
-    webhook_idempotency_ttl_seconds: 600
 
 migrate:
   enabled: true

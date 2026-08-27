@@ -1,9 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
 import urllib.parse
 
-from fastapi import APIRouter, UploadFile, File, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from starlette.responses import StreamingResponse
 
 from app.application.services.file_service import FileService
@@ -21,17 +19,18 @@ router = APIRouter(prefix="/files", tags=["文件模块"])
     path="",
     response_model=Response[FileInfo],
     summary="对话文件上传接口",
-    description="在对话接口中，将文件上传到对象存储和沙箱中"
+    description="在对话接口中，将文件上传到对象存储和沙箱中",
 )
 async def upload_file(
-        file: UploadFile = File(...),
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        _write_guard=Depends(require_non_auditor),
-        file_service: FileService = Depends(get_file_service),
+    file: UploadFile = File(...),
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    _write_guard=Depends(require_non_auditor),
+    file_service: FileService = Depends(get_file_service),
 ) -> Response[FileInfo]:
     """文件上传接口，传递文件返回文件的File信息"""
     fileinfo = await file_service.upload_file(upload_file=file, scope=ctx.scope)
-    return Response.success(data=fileinfo,
+    return Response.success(
+        data=fileinfo,
     )
 
 
@@ -42,13 +41,14 @@ async def upload_file(
     description="获取指定会话中对应文件的基础信息",
 )
 async def get_file_info(
-        file_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        file_service: FileService = Depends(get_file_service),
+    file_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    file_service: FileService = Depends(get_file_service),
 ) -> Response[FileInfo]:
     """获取指定会话中对应文件的基础信息"""
     fileinfo = await file_service.get_file_info(file_id, scope=ctx.scope)
-    return Response.success(data=fileinfo,
+    return Response.success(
+        data=fileinfo,
     )
 
 
@@ -58,9 +58,9 @@ async def get_file_info(
     description="从沙箱or对象存储中下载指定的文件到本地",
 )
 async def download_file(
-        file_id: str,
-        ctx: WorkspaceContext = Depends(get_workspace_context),
-        file_service: FileService = Depends(get_file_service),
+    file_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    file_service: FileService = Depends(get_file_service),
 ) -> StreamingResponse:
     """下载指定会话中的指定文件"""
     # 1.调用服务获取文件源数据

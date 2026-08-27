@@ -1,9 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import hashlib
 import secrets
 from dataclasses import dataclass
-
 
 SERVICE_KEY_PREFIX = "sk"
 

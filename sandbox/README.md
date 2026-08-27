@@ -79,7 +79,7 @@ Sandbox deploys via root `docker-compose.yml`. After `UV_INDEX_URL` is set, Dock
 docker compose build opencitadel-sandbox
 ```
 
-Default production path is dynamic sandboxes: when `sandbox.address: null` in `api/config.yaml`, Worker creates `opencitadel-sandbox-*` instances via Docker/Kubernetes driver. Fixed containers are for `docker compose --profile fixed-sandbox` or external sandbox clusters, connected via `sandbox.address`.
+The default production path uses dynamic sandboxes. Deployment Settings choose the Docker or Kubernetes driver, image, network, proxy, and namespace; the active Operations Policy supplies TTL and resource limits for each authenticated create request. Fixed containers are available only through `docker compose --profile fixed-sandbox` or an explicitly deployed external sandbox service.
 
 ### Timeout Configuration
 
@@ -89,7 +89,7 @@ Sandbox idle destroy timeout (minutes):
 SERVER_TIMEOUT_MINUTES=60   # Recommended (pydantic-settings standard)
 ```
 
-API/Worker inject `SERVER_TIMEOUT_MINUTES` via `SANDBOX_TTL_MINUTES` when creating dynamic sandboxes.
+The execution kernel injects `SERVER_TIMEOUT_MINUTES` via `SANDBOX_TTL_MINUTES` when creating dynamic sandboxes.
 
 ### Ports
 

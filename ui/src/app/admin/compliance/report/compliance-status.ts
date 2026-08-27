@@ -1,12 +1,7 @@
 import type { StatusBadgeVariant } from "@/components/status-badge";
 
-/** Five-state compliance evaluator vocabulary (Phase A Task 4, spec §A5). */
-export type ComplianceControlStatus =
-  | "pass"
-  | "gap"
-  | "attention"
-  | "not_verified"
-  | "na";
+/** Five-state compliance evaluator vocabulary. */
+export type ComplianceControlStatus = "pass" | "gap" | "attention" | "not_verified" | "na";
 
 /**
  * Maps a compliance control's status to a StatusBadge variant.

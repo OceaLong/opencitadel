@@ -1,203 +1,75 @@
-[English](README.md) · [简体中文](README.zh-CN.md)
-
 # OpenCitadel UI
 
-Next.js frontend for session management, AI chat, model/endpoint settings, Skill templates, long-term memory, HITL gates, and remote desktop (VNC).
+[简体中文](README.zh-CN.md)
 
-## Tech Stack
+Next.js 16 / React 19 frontend for event-sourced Agent sessions, immutable
+knowledge and codebase versions, automation, patrol, governance, and platform
+administration.
 
-- Next.js 16 (React 19, App Router)
-- TypeScript
-- Tailwind CSS 4
-- Radix UI + Lucide icons
-- next-intl 4.x (locales `en` / `zh`)
-- noVNC (remote desktop), Mermaid (diagrams), Recharts (admin charts)
+## Contract boundary
 
-## Project Structure
+The UI is a projection client. It submits API commands and renders formal
+Run, Activity, approval, resource-build, and public-event views. It never
+infers workflow completion from connection state or local timers.
 
-```
-ui/
-├── src/
-│   ├── app/               # App Router pages
-│   │   ├── page.tsx       # Home (new session)
-│   │   ├── sessions/      # Session detail
-│   │   ├── codebase/      # Code knowledge base
-│   │   ├── knowledge/     # Document knowledge base
-│   │   ├── automation/    # Scheduled jobs
-│   │   ├── patrols/       # Patrol list, create wizard, Pack detail
-│   │   ├── patrol-runs/   # Authoritative Run report and evidence
-│   │   ├── teams/         # Team workspaces
-│   │   ├── admin/         # Admin console
-│   │   ├── login/         # Login
-│   │   ├── register/      # Registration
-│   │   ├── invitations/   # Team invitation accept
-│   │   └── share/         # Public artifact share
-│   ├── components/        # UI components, grouped by domain
-│   │   ├── admin/         # Admin dashboard, governance profile view
-│   │   ├── codebase/      # Codebase library, import, evidence panel
-│   │   ├── knowledge/     # Knowledge base library, documents, graph
-│   │   ├── patrol/        # Pack wizard, Run detail, remediation dialog/status
-│   │   ├── resource/      # Codebase/KB build candidate + version status
-│   │   ├── session/       # Chat, HITL bars, VNC, checkpoints, operator scope
-│   │   ├── settings/      # Settings tabs (models, skills, memory...)
-│   │   ├── tool-use/      # Tool execution UI
-│   │   ├── ui/            # Base Radix UI primitives
-│   │   ├── workspace/     # Session context panels (codebase/knowledge)
-│   │   └── *.tsx          # Root-level shared: app-shell, left-panel, app-header,
-│   │                      # mobile-bottom-nav, context-selector, markdown-content,
-│   │                      # mermaid-diagram, status-badge, workspace-switcher...
-│   ├── lib/
-│   │   └── api/           # API client modules
-│   ├── hooks/             # Custom hooks
-│   ├── providers/         # React context providers
-│   └── i18n/              # next-intl routing and locale helpers
-├── scripts/               # i18n build/check scripts
-├── messages/              # Generated en.json / zh.json
-└── public/
+- Session live delivery and replay use the same public execution-event model.
+- Durable cursors are opaque to components.
+- Approval actions target persisted approval batches; chat text is not an
+  approval protocol.
+- Internal Activity payloads, provider secrets, and event hashes are not part
+  of the browser contract.
+- Resource sessions pin an immutable published version.
+
+## Source map
+
+```text
+src/
+├── app/                 App Router pages
+├── components/
+│   ├── session/         timeline, approvals, errors, VNC, artifacts
+│   ├── resource/        candidate build and version status
+│   ├── knowledge/       knowledge library and document reader
+│   ├── codebase/        codebase library
+│   ├── patrol/          patrol and remediation views
+│   ├── admin/           governance, usage, compliance
+│   ├── settings/        general, Agent, inference, Skills, memory, integrations, runtime
+│   └── ui/              shared Radix primitives
+├── hooks/               state and streaming orchestration
+├── lib/api/             typed HTTP/SSE clients
+├── lib/session-events.ts
+├── providers/
+└── i18n/
+messages/                authoritative English and Chinese catalogs
+scripts/                 strict i18n consistency checks
 ```
 
-## Routes
+Important routes include `/sessions/[id]`, `/knowledge`, `/codebase`,
+`/automation`, `/patrols`, `/patrol-runs/[id]`, `/teams`, and `/admin/*`.
+Settings contains General, Agent, Inference, Skills, Memory, Integrations, and an
+administrator-only Runtime section.
 
-| Route | Page | Shell |
-|-------|------|-------|
-| `/` | Home — create session, model/Skill pick | Sidebar + header |
-| `/sessions/[id]` | Streaming chat, HITL, VNC, artifacts | Sidebar + header |
-| `/codebase`, `/codebase/[id]` | Code import and Ask/Agent | Sidebar + header |
-| `/knowledge`, `/knowledge/[id]` | Document KB and RAG | Sidebar + header |
-| `/automation` | Cron/webhook jobs | Sidebar + header |
-| `/patrols`, `/patrols/new`, `/patrols/[id]` | Feature-flagged Patrol list, wizard, Pack lifecycle | Sidebar + header |
-| `/patrol-runs/[id]` | Check results, Findings, signed evidence download | Sidebar + header |
-| `/teams`, `/teams/[id]` | Team management | Sidebar + header |
-| `/login`, `/register` | Auth | No shell |
-| `/admin` | Overview dashboard (usage charts) | Admin layout |
-| `/admin/users` | User management | Admin layout |
-| `/admin/teams` | Team administration | Admin layout |
-| `/admin/invitations` | Platform invitations | Admin layout |
-| `/admin/audit` | Audit log viewer | Admin layout |
-| `/admin/compliance` | Evidence center | Admin layout |
-| `/admin/compliance/report` | Compliance report export | Admin layout |
-| `/admin/compliance/sessions/[sessionId]` | Session governance profile (`GovernanceProfileView`) | Admin layout |
-| `/admin/governance` | Platform-wide governance overview (approvals, interceptions, Ops Patrol trend, remediation outcomes) | Admin layout |
-| `/invitations/[token]` | Accept invitation | No shell |
-| `/share/artifact/[token]` | Public artifact view | No shell |
-
-**Navigation**:
-
-- **Desktop**: Left panel holds session list; Codebase, Knowledge, and Automation are in the **header workspace dropdown** (`app-header.tsx`).
-- **Mobile**: `MobileBottomNav` exposes chat, codebase, and knowledge; Patrol (when `opsPatrolEnabled`), Automation, Teams, Settings, and Admin are in the **More** sheet.
-- Ops Patrol navigation appears only when global `feature_flags.enable_ops_patrol` is enabled; auditors receive read-only views and no mutation controls.
-- `/codebase/[id]` and `/knowledge/[id]` redirect to a new Ask session — they are not standalone detail pages.
-
-## Features
-
-- **Session config**: choose model and Skill on home and session pages; update when session is idle.
-- **Streaming chat**: SSE with `message_delta` merge; history via `/sessions/{id}/events`.
-- **Endpoint & model management**: Settings → Models — group models by endpoint (provider, base URL, API key on endpoint).
-- **Skill templates**: Settings → Skills.
-- **Long-term memory**: Settings → Memory; compact/clear session memory on session page.
-- **Settings modal** (eight tabs): General (theme + language), Agent, Models, Skills, Memory, Integrations (MCP/A2A/Service Keys), HITL, Runtime (admin only).
-- **Theme and language**: Settings → General (`GeneralSettings`); locale in `NEXT_LOCALE` cookie (no URL prefix).
-- **HITL UI**: clarify questions, plan/tool approval bars, VNC takeover, checkpoint restore; global defaults in Settings → HITL.
-- **Web Operator**: `operator-scope-dialog.tsx` when Skill is `web-operator`.
-- **LLM status badge**: Header polls `/api/llm/status`.
-- **Notifications**: `NotificationInbox` in header (REST + SSE).
-- **Mobile session toolbar**: model/Skill/context options in `ChatOptionsSheet`.
-
-See [`../docs/architecture/frontend-ui.md`](../docs/architecture/frontend-ui.md).
-
-## Frontend development conventions
-
-Contributors should follow these conventions (also enforced in `ui/.cursor/rules.general.mdc` for Cursor IDE):
-
-- **TypeScript strict mode**; prefer `type` over `interface`; path alias `@/*` → `./src/*`
-- **App Router**: server components by default; add `"use client"` only when needed; pages in `src/app/**/page.tsx`
-- **Components**: base UI primitives in `@/components/ui/` (shadcn/Radix); business components grouped by domain under `@/components/{admin,codebase,knowledge,patrol,resource,session,settings,tool-use,workspace}/`; cross-domain shared components (layout shell, `context-selector.tsx`, `markdown-content.tsx`, `mermaid-diagram.tsx`, `status-badge.tsx`, etc.) stay at the `@/components/` root; use `cn()` and CVA for variants
-- **Hooks**: extract complex state/effects from large pages into `src/hooks/`
-- **Imports**: React/Next → third-party → `@/components` → `@/lib`/`@/hooks` → relative
-- **Formatting**: Prettier (100 cols, double quotes); run `npm run format:check` before PR
-- **API client**: use `src/lib/api/fetch.ts`; never hardcode routes outside `src/lib/api/`
-
-## API Client
-
-Base URL via `NEXT_PUBLIC_API_BASE_URL`:
-
-- **Development**: `http://localhost:8088/api`
-- **Production**: `/api` (Nginx reverse proxy)
-
-Core fetch layer: `src/lib/api/fetch.ts` — cookie auth, CSRF, `X-Workspace-Id`, 401 refresh, SSE helpers.
-
-| Module | Purpose |
-|--------|---------|
-| `session.ts` | Sessions, chat SSE, checkpoints |
-| `endpoints.ts` | `/llm-endpoints` CRUD |
-| `models.ts` | `/llm-models` CRUD |
-| `llm-status.ts` | `/llm/status` |
-| `config.ts` | AppConfig sections |
-| `skills.ts`, `memory.ts` | Skills and memory |
-| `admin.ts`, `team.ts` | Admin and teams |
-| `knowledge.ts`, `codebase.ts`, `file.ts` | Knowledge bases, codebases, files |
-| `service-keys.ts`, `notifications.ts`, `compliance.ts` | Service API keys, notifications, compliance + session governance profile |
-| `constants.ts` | Shared limits (`CODEBASE_ZIP_MAX_BYTES` = 200 MB, must match nginx) |
-| `artifacts.ts` | Artifacts and share |
-| `patrols.ts` | Pack/Run/Finding lifecycle, metrics, evidence download, remediation propose/list/get |
-| `types.ts` | Shared TypeScript types |
-
-## Local Development
-
-### Prerequisites
-
-- Node.js >= 22
-- npm >= 10
-
-### Install and Run
+## Development
 
 ```bash
 npm install
-npm run dev
-```
-
-Dev server: `http://localhost:3000`; API default: `http://localhost:8088/api`.
-
-### Code Quality
-
-```bash
-npm run lint
-npm run lint:fix
-npm run typecheck
-npm run format
-npm run format:check
 npm run i18n:check
-```
-
-### Build
-
-```bash
+npm run typecheck
+npm run lint
+npm run test
 npm run build
-npm run start
 ```
 
-## Docker Deployment
+`messages/en.json` and `messages/zh.json` are the only translation sources.
+Update both catalogs directly; `npm run i18n:check` rejects mismatched,
+missing, unused, unregistered dynamic, or hardcoded user-facing text.
 
-UI deploys via root `docker-compose.yml`. Multi-stage Dockerfile:
+Use `src/lib/api/fetch.ts` for API access, preserve strict TypeScript, keep
+domain components in their domain directory, and avoid hard-coded API routes
+outside `src/lib/api/`.
 
-1. **deps** — install npm dependencies
-2. **builder** — build Next.js (standalone)
-3. **runner** — minimal production image
+The development server runs on `http://localhost:3000`; the default API base
+is `http://localhost:8088/api`. Production uses `/api` through the reverse
+proxy.
 
-Build with `NEXT_PUBLIC_API_BASE_URL=/api` so Nginx proxies API requests.
-
-## Testing
-
-- **Unit tests** (Vitest): logic-layer tests under `ui/src/**/*.test.ts` — safe redirect, session events, LLM status, knowledge utils. No component-level UI regression suite.
-- **E2E** (Playwright): base smoke/OpsConsole tests plus an opt-in real-runtime Patrol flow requiring a tool-capable model and Collector. See [`../e2e/README.md`](../e2e/README.md).
-
-Do not assume `npm run test` covers full UI flows.
-
-## Internationalization (i18n)
-
-- Framework: `next-intl` with locales `en` and `zh` (default `en`)
-- **Source of truth**: `scripts/build-messages.mjs` (+ `i18n-supplement.mjs` for drift backfill) → `npm run i18n:build` → `messages/en.json` and `messages/zh.json`
-- **Do not hand-edit** `messages/*.json` without updating the build scripts and re-running `i18n:build`
-- Runtime locale code is `zh`; documentation filenames use `*.zh-CN.md` for Chinese — same language, different identifiers
-- URL has no locale prefix (`localePrefix: "never"`); locale persisted in `NEXT_LOCALE` cookie
-- Theme and language: **Settings → General** (`GeneralSettings`)
+See [frontend architecture](../docs/architecture/frontend-ui.md) and
+[execution kernel](../docs/architecture/execution-kernel.md).

@@ -1,11 +1,10 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """低层 vision 工具函数（content part 构建、MIME 判断、附件过滤）。"""
+
 import base64
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
-from app.domain.models.message import MediaAttachment, MediaAttachment
+from app.domain.models.message import MediaAttachment
 from app.domain.models.multimodal import CONTENT_TYPE_IMAGE_URL
 
 logger = logging.getLogger(__name__)
@@ -27,7 +26,7 @@ def is_video_mime(mime_type: str) -> bool:
     return bool(mime_type) and mime_type.lower().startswith("video/")
 
 
-def build_image_content_part(image_bytes: bytes, mime_type: str) -> Dict[str, Any]:
+def build_image_content_part(image_bytes: bytes, mime_type: str) -> dict[str, Any]:
     """将图片字节转为 OpenAI-compatible image_url content part。"""
     if not is_image_mime(mime_type):
         raise ValueError(f"不支持的图片 mime 类型: {mime_type}")
@@ -38,32 +37,34 @@ def build_image_content_part(image_bytes: bytes, mime_type: str) -> Dict[str, An
     }
 
 
-def build_image_content_part_from_base64(data_base64: str, mime_type: str) -> Dict[str, Any]:
+def build_image_content_part_from_base64(data_base64: str, mime_type: str) -> dict[str, Any]:
     """从 base64 字符串构建 image_url content part。"""
     return build_image_content_part(base64.b64decode(data_base64), mime_type)
 
 
-def vision_attachment_byte_size(attachment: Union[MediaAttachment, MediaAttachment]) -> int:
+def vision_attachment_byte_size(attachment: MediaAttachment) -> int:
     """估算 vision 附件解码后的原始字节大小。"""
     if not attachment.data_base64:
         return 0
     try:
         return len(base64.b64decode(attachment.data_base64, validate=False))
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         return len(attachment.data_base64)
 
 
 def filter_valid_vision_attachments(
-        vision_attachments: Optional[List[Union[MediaAttachment, MediaAttachment]]] = None,
-        *,
-        max_bytes: int = MAX_VISION_IMAGE_BYTES,
-) -> List[Union[MediaAttachment, MediaAttachment]]:
+    vision_attachments: list[MediaAttachment] | None = None,
+    *,
+    max_bytes: int = MAX_VISION_IMAGE_BYTES,
+) -> list[MediaAttachment]:
     """过滤无效或过大的图片附件，避免多模态请求长时间阻塞。"""
-    valid: List[Union[MediaAttachment, MediaAttachment]] = []
+    valid: list[MediaAttachment] = []
     for attachment in vision_attachments or []:
         media_type = getattr(attachment, "media_type", "image")
         if media_type != "image" and not is_image_mime(attachment.mime_type):
-            logger.debug("跳过非图片 vision 附件: mime=%s media_type=%s", attachment.mime_type, media_type)
+            logger.debug(
+                "跳过非图片 vision 附件: mime=%s media_type=%s", attachment.mime_type, media_type
+            )
             continue
         if not is_image_mime(attachment.mime_type) and media_type == "image":
             logger.debug("跳过非图片 vision 附件: mime=%s", attachment.mime_type)
@@ -85,27 +86,3 @@ def filter_valid_vision_attachments(
             len(valid),
         )
     return valid
-
-
-def build_user_message(
-        text: str,
-        vision_attachments: Optional[List[Union[MediaAttachment, MediaAttachment]]] = None,
-        *,
-        supports_multimodal: bool = False,
-        llm=None,
-) -> Dict[str, Any]:
-    """构建 user 消息（兼容旧 supports_multimodal 签名，委托 vision_service）。"""
-    from app.domain.services import vision_service
-
-    if llm is not None:
-        return vision_service.build_user_message(text, vision_attachments, llm=llm)
-    if supports_multimodal and vision_attachments:
-        from app.domain.models.llm_model import ModelCapabilities
-        from types import SimpleNamespace
-
-        fake_llm = SimpleNamespace(
-            capabilities=ModelCapabilities(vision=True),
-            supports_multimodal=True,
-        )
-        return vision_service.build_user_message(text, vision_attachments, llm=fake_llm)
-    return {"role": "user", "content": text}

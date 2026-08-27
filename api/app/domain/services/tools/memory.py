@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
 
 from app.domain.models.tool_result import ToolResult
 from app.domain.services.tools.base import BaseTool, tool
@@ -40,11 +38,11 @@ class MemoryTool(BaseTool):
         policy=EXTERNAL_WRITE,
     )
     async def memory_save(
-            self,
-            title: str,
-            content: str,
-            tags: Optional[list] = None,
-            scope: str = "global",
+        self,
+        title: str,
+        content: str,
+        tags: list | None = None,
+        scope: str = "global",
     ) -> ToolResult:
         result = await self._save_fn(title, content, tags or [], scope)
         return ToolResult(success=True, message=f"记忆已保存: {title}", data=result)

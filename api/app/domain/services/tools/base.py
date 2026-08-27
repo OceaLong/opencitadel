@@ -1,7 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import inspect
-from typing import Dict, Any, List, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from app.domain.models.tool_policy import (
     CONSERVATIVE_TOOL_POLICY,
@@ -24,11 +23,11 @@ OpenCitadel 工具设计思路:
 
 
 def tool(
-        name: str,
-        description: str,
-        parameters: Dict[str, Dict[str, Any]],
-        required: List[str],
-        policy: ToolExecutionPolicy = CONSERVATIVE_TOOL_POLICY,
+    name: str,
+    description: str,
+    parameters: dict[str, dict[str, Any]],
+    required: list[str],
+    policy: ToolExecutionPolicy = CONSERVATIVE_TOOL_POLICY,
 ) -> Callable:
     """定义OpenAI工具装饰器，用于将一个函数/方法添加上对应的工具声明"""
 
@@ -44,8 +43,8 @@ def tool(
                     "type": "object",
                     "properties": parameters,
                     "required": required,
-                }
-            }
+                },
+            },
         }
 
         # 2.将对应属性绑定到func上
@@ -61,50 +60,38 @@ def tool(
 
 class BaseTool:
     """基础工具类，用于定义一个工具类，管理统一的工具集"""
+
     name: str = ""  # 工具集的名字
 
     def __init__(self) -> None:
         """构造函数，完成缓存初始化"""
         self._tools_cache = None
         self._tool_methods_cache = None
-        self._capability_policy: Optional[CapabilityPolicy] = None
+        self._capability_policy: CapabilityPolicy | None = None
 
-    def _get_tool_methods(self) -> Dict[str, Callable]:
+    def _get_tool_methods(self) -> dict[str, Callable]:
         if self._tool_methods_cache is not None:
             return self._tool_methods_cache
         self._tool_methods_cache = {
-            getattr(method, "_tool_name"): method
+            method._tool_name: method
             for _, method in inspect.getmembers(self, inspect.ismethod)
             if hasattr(method, "_tool_name")
         }
         return self._tool_methods_cache
 
     @classmethod
-    def _filter_parameters(cls, method: Callable, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    def _filter_parameters(cls, method: Callable, kwargs: dict[str, Any]) -> dict[str, Any]:
         """传递method+kwargs并过滤参数，使其符合method参数的要求，因为LLM输出的内容有可能有幻觉"""
-        # 1.定义一个变量用于存储过滤后的字典信息
-        filtered_kwargs = {}
         sign = inspect.signature(method)
+        return {key: value for key, value in kwargs.items() if key in sign.parameters}
 
-        # 2.循环遍历kwargs的所有数据
-        for key, value in kwargs.items():
-            if key in sign.parameters:
-                filtered_kwargs[key] = value
-
-        return filtered_kwargs
-
-    def get_tools(self) -> List[Dict[str, Any]]:
+    def get_tools(self) -> list[dict[str, Any]]:
         """获取所有已注册的工具列表schema信息，用于LLM绑定工具"""
         # 1.判断缓存是否存在
         if self._tools_cache is not None:
             return self._tools_cache
 
-        # 2.定义工具列表用于存储对应的数据
-        tools = []
-
-        # 3.循环遍历类下的所有方法
-        for descriptor in self.get_tool_descriptors():
-            tools.append(descriptor.schema)
+        tools = [descriptor.schema for descriptor in self.get_tool_descriptors()]
 
         # 4.创建缓存后返回
         self._tools_cache = tools
@@ -121,18 +108,15 @@ class BaseTool:
             raise ValueError(f"工具[{name}]未找到")
         return ToolDescriptor(
             name=name,
-            schema=getattr(method, "_tool_schema"),
+            schema=method._tool_schema,
             method=method,
             tool_pack=self.name,
             policy=getattr(method, "_tool_policy", CONSERVATIVE_TOOL_POLICY),
         )
 
-    def get_tool_descriptors(self) -> List[ToolDescriptor]:
+    def get_tool_descriptors(self) -> list[ToolDescriptor]:
         """Return descriptors visible under the active session policy."""
-        descriptors = [
-            self.get_tool_descriptor(name)
-            for name in self._get_tool_methods()
-        ]
+        descriptors = [self.get_tool_descriptor(name) for name in self._get_tool_methods()]
         if self._capability_policy is None:
             return descriptors
         return [
@@ -147,12 +131,9 @@ class BaseTool:
     async def invoke(self, tool_name: str, **kwargs) -> ToolResult:
         """根据传递的工具名+kwargs调用指定工具并获取结果"""
         descriptor = self.get_tool_descriptor(tool_name)
-        if (
-            self._capability_policy is not None
-            and not self._capability_policy.allows(
-                descriptor.policy,
-                tool_name=descriptor.name,
-            )
+        if self._capability_policy is not None and not self._capability_policy.allows(
+            descriptor.policy,
+            tool_name=descriptor.name,
         ):
             raise CapabilityDeniedError(
                 f"当前会话策略禁止工具[{tool_name}]",
@@ -194,24 +175,18 @@ class PolicyBoundTool(BaseTool):
             tool_name=descriptor.name,
         )
 
-    def get_tool_descriptors(self) -> List[ToolDescriptor]:
+    def get_tool_descriptors(self) -> list[ToolDescriptor]:
         return [
             descriptor
             for descriptor in self._wrapped.get_tool_descriptors()
             if self._allows(descriptor)
         ]
 
-    def get_tools(self) -> List[Dict[str, Any]]:
-        return [
-            descriptor.schema
-            for descriptor in self.get_tool_descriptors()
-        ]
+    def get_tools(self) -> list[dict[str, Any]]:
+        return [descriptor.schema for descriptor in self.get_tool_descriptors()]
 
     def has_tool(self, tool_name: str) -> bool:
-        return any(
-            descriptor.name == tool_name
-            for descriptor in self.get_tool_descriptors()
-        )
+        return any(descriptor.name == tool_name for descriptor in self.get_tool_descriptors())
 
     async def invoke(self, tool_name: str, **kwargs) -> ToolResult:
         descriptor = self._wrapped.get_tool_descriptor(tool_name)

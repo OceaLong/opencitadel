@@ -1,10 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Parser adapter value objects."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from app.domain.models.codebase import EdgeKind, SymbolKind
 
@@ -24,7 +22,7 @@ class ParsedSymbol:
     range: SourceRange
     parser: str
     confidence: float
-    parent_qualified_name: Optional[str] = None
+    parent_qualified_name: str | None = None
 
 
 @dataclass(frozen=True)

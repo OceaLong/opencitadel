@@ -13,12 +13,13 @@ carry the idempotency annotation on a real cluster. Routing the fake through
 one shared method keeps it from masking that real-vs-fake divergence again:
 there is no separate "scale subresource" code path here to fake out.
 """
+
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import pytest
-
 from opencitadel_ops_actuator.config import ActuatorSettings, WorkloadTarget
 from opencitadel_ops_actuator.k8s_writer import NoRollbackRevision, WorkloadNotFound
 
@@ -36,7 +37,9 @@ class FakeKubernetesWriter:
         # exception instead of mutating state -- used to prove a transient
         # k8s failure is attempted exactly once and never retried.
         self.raise_on_mutation: Exception | None = None
-        self.revisions = list(revisions) if revisions is not None else ["template-v1", "template-v2"]
+        self.revisions = (
+            list(revisions) if revisions is not None else ["template-v1", "template-v2"]
+        )
         self.current_template = self.revisions[-1] if self.revisions else "template-v1"
 
     def _assert_present(self) -> None:
@@ -56,7 +59,9 @@ class FakeKubernetesWriter:
             "template": self.current_template,
         }
 
-    def _mutate_main_resource(self, namespace: str, name: str, kind: str, idempotency_key: str, apply: Callable[[], None]) -> tuple[dict[str, Any], dict[str, Any]]:
+    def _mutate_main_resource(
+        self, namespace: str, name: str, kind: str, idempotency_key: str, apply: Callable[[], None]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Single main-resource "patch": snapshot before, optionally raise
         (simulating a failed/never-retried k8s call), else apply the spec
         change and the idempotency marker atomically, snapshot after."""
@@ -79,7 +84,9 @@ class FakeKubernetesWriter:
         after["restarted_at"] = "2026-08-04T00:00:00+00:00"
         return {"before": before, "after": after}
 
-    def scale(self, namespace: str, name: str, kind: str, replicas: int, idempotency_key: str) -> dict[str, Any]:
+    def scale(
+        self, namespace: str, name: str, kind: str, replicas: int, idempotency_key: str
+    ) -> dict[str, Any]:
         self.scale_calls += 1
 
         def apply() -> None:
@@ -98,7 +105,9 @@ class FakeKubernetesWriter:
         def apply() -> None:
             self.current_template = target_template
 
-        before, after = self._mutate_main_resource(namespace, name, "deployment", idempotency_key, apply)
+        before, after = self._mutate_main_resource(
+            namespace, name, "deployment", idempotency_key, apply
+        )
         after["rolled_back_to_revision"] = None
         return {"before": before, "after": after}
 
@@ -106,15 +115,15 @@ class FakeKubernetesWriter:
 @pytest.fixture
 def actuator_settings():
     def _make(**overrides: Any) -> ActuatorSettings:
-        base: dict[str, Any] = dict(
-            allowed_namespaces=["demo"],
-            allowed_workloads={
+        base: dict[str, Any] = {
+            "allowed_namespaces": ["demo"],
+            "allowed_workloads": {
                 "demo": {
                     "api": WorkloadTarget(kind="deployment", min_replicas=1, max_replicas=10),
                     "cache": WorkloadTarget(kind="statefulset", min_replicas=1, max_replicas=5),
                 }
             },
-        )
+        }
         base.update(overrides)
         return ActuatorSettings(**base)
 

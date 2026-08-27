@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
 const TERMINAL_CODEBASE_STATUSES: CodebaseStatus[] = ["ready", "failed"];
-const ACTIVE_BUILD_STATES = new Set(["queued", "running"]);
+const ACTIVE_BUILD_STATUSES = new Set(["new", "queued", "running", "waiting"]);
 const INGEST_POLL_INTERVAL_MS = 3000;
 
 const CODEBASE_STATUS_LABEL_KEYS: Record<CodebaseStatus, `status.${CodebaseStatus}`> = {
@@ -55,8 +55,8 @@ function isIngestingStatus(status: CodebaseStatus): boolean {
 }
 
 function hasActiveBuild(history?: CodebaseVersionsData | null): boolean {
-  const state = history?.active_build?.state;
-  return Boolean(state && ACTIVE_BUILD_STATES.has(state));
+  const status = history?.active_build?.status;
+  return Boolean(status && ACTIVE_BUILD_STATUSES.has(status));
 }
 
 function truncateError(error: string, maxLength = 120): string {
@@ -79,10 +79,7 @@ function codebaseShouldPoll(
   cb: Codebase,
   { versionsById }: { versionsById: Record<string, CodebaseVersionsData | null> },
 ): boolean {
-  return (
-    hasActiveBuild(versionsById[cb.id]) ||
-    (isIngestingStatus(cb.status) && Boolean(cb.ingest_task_id))
-  );
+  return hasActiveBuild(versionsById[cb.id]) || isIngestingStatus(cb.status);
 }
 
 export function CodebaseLibrary() {
@@ -111,16 +108,16 @@ export function CodebaseLibrary() {
     pollMs: INGEST_POLL_INTERVAL_MS,
     formatIngestError: (ev) => {
       const message =
-        typeof ev.data?.error === "string" && ev.data.error.trim() ? ev.data.error : t("indexFailed");
+        typeof ev.data?.error === "string" && ev.data.error.trim()
+          ? ev.data.error
+          : t("indexFailed");
       return t("indexFailedDetail", { error: message });
     },
   });
 
   const startTask = async (codebase: Codebase, mode: SessionMode = "ask") => {
     const versionId =
-      versionHistories[codebase.id]?.active_version_id ??
-      codebase.active_version_id ??
-      undefined;
+      versionHistories[codebase.id]?.active_version_id ?? codebase.active_version_id ?? undefined;
     await runStartTask(
       codebase.id,
       async () => {
@@ -170,13 +167,9 @@ export function CodebaseLibrary() {
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
           {codebases.map((cb) => {
             const history = versionHistories[cb.id] ?? null;
-            const activeVersionId =
-              history?.active_version_id ?? cb.active_version_id;
+            const activeVersionId = history?.active_version_id ?? cb.active_version_id;
             const rebuilding = hasActiveBuild(history);
-            const ingesting =
-              rebuilding ||
-              ingestingIds.has(cb.id) ||
-              (isIngestingStatus(cb.status) && Boolean(cb.ingest_task_id));
+            const ingesting = rebuilding || ingestingIds.has(cb.id) || isIngestingStatus(cb.status);
             const canStart = Boolean(activeVersionId) && cb.status !== "failed";
             const statusLabel = t(CODEBASE_STATUS_LABEL_KEYS[cb.status]);
             return (
@@ -239,10 +232,7 @@ export function CodebaseLibrary() {
                       </span>
                     )}
                     {cb.status === "failed" && cb.error && (
-                      <span
-                        className="mt-1 block text-destructive"
-                        title={cb.error}
-                      >
+                      <span className="text-destructive mt-1 block" title={cb.error}>
                         {truncateError(cb.error)}
                       </span>
                     )}

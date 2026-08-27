@@ -1,20 +1,18 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
+import contextlib
 import io
 import logging
 import socket
-import threading
 import time
 import uuid
 from datetime import datetime
-from typing import Optional, Self, BinaryIO
+from typing import BinaryIO, Self
 from urllib.parse import quote
 
 import docker
 import httpx
 from async_lru import alru_cache
-from docker.errors import NotFound, APIError
+from docker.errors import APIError, NotFound
 from docker.models.resource import Model
 
 from app.domain.external.browser import Browser
@@ -22,34 +20,34 @@ from app.domain.external.llm import LLM
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
 from app.infrastructure.external.browser.playwright_browser import PlaywrightBrowser
-from app.infrastructure.external.runtime_settings import (
-    SandboxRuntimeSettings,
-    configure_sandbox_runtime as _configure_sandbox_runtime_settings,
-    get_sandbox_runtime_settings,
-)
+from app.infrastructure.external.sandbox.admission import SandboxQuota
 from app.infrastructure.external.sandbox.sandbox_container_policy import (
+    CreateSandboxRequest,
+    SandboxContainerPolicy,
     build_docker_sandbox_config,
 )
-from core.config import get_settings
+from app.infrastructure.external.sandbox.settings import (
+    SandboxEffectiveSettings,
+    SandboxHostAccess,
+)
 
 logger = logging.getLogger(__name__)
 
-_sync_redis_client = None
-_docker_client = None
-_docker_client_lock = threading.Lock()
+
+class DockerSandboxError(RuntimeError):
+    """Raised when a Docker-backed sandbox cannot be created or warmed."""
 
 
-def _broker_url() -> str:
-    return (get_settings().sandbox_broker_url or "").strip().rstrip("/")
+def _broker_url(host: SandboxHostAccess) -> str:
+    return (host.broker_url or "").rstrip("/")
 
 
-def _broker_call(method: str, path: str, **kwargs) -> dict:
-    settings = get_settings()
-    url = _broker_url()
+def _broker_call(host: SandboxHostAccess, method: str, path: str, **kwargs) -> dict:
+    url = _broker_url(host)
     if not url:
         raise RuntimeError("sandbox broker is not configured")
     with httpx.Client(
-        headers={"Authorization": f"Bearer {settings.sandbox_broker_token}"},
+        headers={"Authorization": f"Bearer {host.broker_token or ''}"},
         timeout=30,
         trust_env=False,
     ) as client:
@@ -58,15 +56,25 @@ def _broker_call(method: str, path: str, **kwargs) -> dict:
     return response.json()
 
 
-def _broker_list() -> list[dict]:
-    return list(_broker_call("GET", "/v1/sandboxes").get("sandboxes") or [])
+def _broker_list(host: SandboxHostAccess) -> list[dict]:
+    return list(_broker_call(host, "GET", "/v1/sandboxes").get("sandboxes") or [])
 
 
-def _broker_create(container_name: str) -> dict:
+def _broker_create(
+    host: SandboxHostAccess,
+    container_name: str,
+    settings: SandboxEffectiveSettings,
+) -> dict:
+    request = CreateSandboxRequest(
+        id=container_name,
+        operations_revision_id=settings.operations_revision_id,
+        policy=SandboxContainerPolicy.from_operations(settings.policy),
+    )
     return _broker_call(
+        host,
         "POST",
         "/v1/sandboxes",
-        json={"id": container_name},
+        json=request.model_dump(mode="json"),
     )
 
 
@@ -77,51 +85,46 @@ def _broker_sandbox_path(container_name: str) -> str:
     return f"/v1/sandboxes/{quote(container_name, safe='')}"
 
 
-def configure_sandbox_runtime(settings: SandboxRuntimeSettings) -> None:
-    _configure_sandbox_runtime_settings(settings)
-
-
-def _get_docker_client():
-    global _docker_client
-    if get_settings().env.lower() == "production":
+def _get_docker_client(host: SandboxHostAccess):
+    if host.environment == "production":
         raise RuntimeError(
             "direct Docker access is disabled in production; configure "
             "SANDBOX_BROKER_URL or use the Kubernetes sandbox driver"
         )
-    with _docker_client_lock:
-        if _docker_client is None:
-            _docker_client = docker.from_env()
-        return _docker_client
+    return docker.from_env()
 
 
-def _get_sync_redis_client():
-    global _sync_redis_client
-    if _sync_redis_client is None:
-        import redis as sync_redis
+def _get_sync_redis_client(host: SandboxHostAccess):
+    import redis as sync_redis
 
-        settings = get_settings()
-        _sync_redis_client = sync_redis.Redis(
-            host=settings.redis_host,
-            port=settings.redis_port,
-            db=settings.redis_db,
-            password=settings.redis_password,
-            decode_responses=True,
-        )
-    return _sync_redis_client
+    return sync_redis.Redis(
+        host=host.redis_host,
+        port=host.redis_port,
+        db=host.redis_db,
+        password=host.redis_password,
+        decode_responses=True,
+    )
 
 
 class DockerSandbox(Sandbox):
     """基于Docker的沙箱服务"""
 
     def __init__(
-            self,
-            ip: Optional[str] = None,
-            container_name: Optional[str] = None
+        self,
+        *,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+        quota: SandboxQuota,
+        ip: str | None = None,
+        container_name: str | None = None,
     ) -> None:
         """构造函数，完成Docker沙箱扩展创建"""
         self.client = httpx.AsyncClient(timeout=600)
         self._ip = ip
         self._container_name = container_name
+        self.settings = settings
+        self._host = host
+        self._quota = quota
         self._base_url = f"http://{ip}:8080"
         self._vnc_url = f"ws://{ip}:5901"
         self._cdp_url = f"http://{ip}:9222"
@@ -143,7 +146,7 @@ class DockerSandbox(Sandbox):
 
     @classmethod
     @alru_cache(maxsize=128, typed=True)
-    async def _resolve_hostname_to_ip(cls, hostname: str) -> Optional[str]:
+    async def _resolve_hostname_to_ip(cls, hostname: str) -> str | None:
         """将docker容器主机/地址转换成ipv4格式数据"""
         try:
             # 1.首先解析传递的hostname是不是ip
@@ -161,21 +164,21 @@ class DockerSandbox(Sandbox):
                 return addr_info[0][4][0]
 
             return None
-        except Exception as e:
-            logger.error(f"解析Docker容器主机地址{hostname}失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("解析Docker容器主机地址%s失败: %s", hostname, e)
             return None
 
     @staticmethod
-    def _ipv4_from_endpoint(endpoint: dict) -> Optional[str]:
+    def _ipv4_from_endpoint(endpoint: dict) -> str | None:
         ip = (endpoint.get("IPAddress") or "").strip()
         return ip or None
 
     @classmethod
     def _get_container_ip(
-            cls,
-            container: Model,
-            preferred_network: Optional[str] = None,
-    ) -> Optional[str]:
+        cls,
+        container: Model,
+        preferred_network: str | None = None,
+    ) -> str | None:
         """根据传递的容器获取 IPv4 地址（兼容自定义 bridge 网络）。"""
         network_settings = container.attrs.get("NetworkSettings") or {}
         networks = network_settings.get("Networks") or {}
@@ -200,171 +203,141 @@ class DockerSandbox(Sandbox):
 
     @classmethod
     def _require_container_ip(
-            cls,
-            container: Model,
-            container_name: str,
-            preferred_network: Optional[str] = None,
+        cls,
+        container: Model,
+        container_name: str,
+        preferred_network: str | None = None,
     ) -> str:
         ip = cls._get_container_ip(container, preferred_network=preferred_network)
         if ip:
             return ip
         network_label = preferred_network or "default"
-        raise RuntimeError(
-            f"沙箱[{container_name}]在网络[{network_label}]上未分配到 IPv4 地址"
-        )
+        raise RuntimeError(f"沙箱[{container_name}]在网络[{network_label}]上未分配到 IPv4 地址")
 
     @classmethod
-    def list_live_sandbox_ids_sync(cls) -> set[str]:
-        settings = get_sandbox_runtime_settings()
-        if settings.address or not settings.name_prefix:
+    def _list_live_sandbox_ids_sync(
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+    ) -> set[str]:
+        deployment = settings.deployment
+        if deployment.address or not deployment.name_prefix:
             return set()
-        if _broker_url():
-            return {
-                item["id"]
-                for item in _broker_list()
-                if item.get("status") == "running"
-            }
-        docker_client = _get_docker_client()
-        containers = docker_client.containers.list(
-            filters={"name": f"{settings.name_prefix}-", "status": "running"},
+        if _broker_url(host):
+            return {item["id"] for item in _broker_list(host) if item.get("status") == "running"}
+        containers = _get_docker_client(host).containers.list(
+            filters={
+                "name": f"{deployment.name_prefix}-",
+                "status": "running",
+            },
         )
-        return {c.name.lstrip("/") for c in containers}
+        return {container.name.lstrip("/") for container in containers}
 
     @classmethod
-    async def list_live_sandbox_ids(cls) -> set[str]:
-        return await asyncio.to_thread(cls.list_live_sandbox_ids_sync)
+    async def list_live_sandbox_ids(
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+    ) -> set[str]:
+        return await asyncio.to_thread(cls._list_live_sandbox_ids_sync, settings, host)
 
     @classmethod
-    def _create_task(cls) -> Self:
-        """创建沙箱容器的异步任务"""
-        # 1.构建容器的名字
-        settings = get_sandbox_runtime_settings()
-        image = settings.image
-        name_prefix = settings.name_prefix
-        container_name = f"{name_prefix}-{str(uuid.uuid4())[:8]}"
-
+    def _create_task_with_name(
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+        quota: SandboxQuota,
+        container_name: str,
+    ) -> Self:
+        deployment = settings.deployment
+        container: Model | None = None
         try:
-            if _broker_url():
-                payload = _broker_create(container_name)
-                return DockerSandbox(
+            if _broker_url(host):
+                payload = _broker_create(host, container_name, settings)
+                return cls(
+                    settings=settings,
+                    host=host,
+                    quota=quota,
                     ip=payload["ip"],
                     container_name=payload["id"],
                 )
-            docker_client = _get_docker_client()
-
-            # 4.预配置容器信息
-            container_config = build_docker_sandbox_config(
-                settings,
-                container_name,
+            container = _get_docker_client(host).containers.run(
+                **build_docker_sandbox_config(
+                    deployment,
+                    SandboxContainerPolicy.from_operations(settings.policy),
+                    container_name,
+                    operations_revision_id=settings.operations_revision_id,
+                )
             )
-
-            # 6.调用docker客户端容器运行参数创建沙箱
-            container = docker_client.containers.run(**container_config)
-
-            # 7.重载并刷新容器信息
             container.reload()
             ip = cls._require_container_ip(
                 container,
                 container_name,
-                preferred_network=settings.network,
+                preferred_network=deployment.network,
             )
-
-            return DockerSandbox(ip=ip, container_name=container_name)
-        except Exception as e:
-            logger.error(f"创建Docker沙箱容器失败: {str(e)}")
-            raise Exception(f"创建Docker沙箱容器失败: {str(e)}") from e
-
-    @classmethod
-    async def _create_and_warm(cls, max_retries: Optional[int] = None) -> Self:
-        """Create a sandbox container and wait until supervisor services are ready."""
-        settings = get_sandbox_runtime_settings()
-        if settings.address:
-            return await cls._create_fresh()
-
-        from app.infrastructure.external.sandbox.admission import get_sandbox_quota
-
-        quota = get_sandbox_quota()
-        pre_name = f"{settings.name_prefix}-{str(uuid.uuid4())[:8]}"
-        if not await quota.acquire(pre_name):
-            raise RuntimeError("沙箱准入未通过：节点配额或内存水位不足")
-        try:
-            sandbox = await cls._create_fresh_with_name(pre_name)
-            await sandbox.ensure_sandbox(max_retries=max_retries)
-        except Exception:
-            await quota.release(pre_name)
+            return cls(
+                settings=settings,
+                host=host,
+                quota=quota,
+                ip=ip,
+                container_name=container_name,
+            )
+        except BaseException as exc:
+            if container is not None:
+                with contextlib.suppress(Exception):
+                    container.remove(force=True)
+            if isinstance(exc, (OSError, RuntimeError, ValueError)):
+                logger.error("创建Docker沙箱容器失败: %s", exc)
+                raise DockerSandboxError(f"创建Docker沙箱容器失败: {exc!s}") from exc
             raise
-        from app.infrastructure.external.sandbox.sandbox_pool import SandboxPool
-
-        await SandboxPool.touch_activity(sandbox.id)
-        return sandbox
 
     @classmethod
-    async def _create_and_fast_warm(cls) -> Self:
-        settings = get_sandbox_runtime_settings()
-        return await cls._create_and_warm(max_retries=settings.fast_warmup_max_retries)
-
-    @classmethod
-    def _create_task_with_name(cls, container_name: str) -> Self:
-        settings = get_sandbox_runtime_settings()
-        image = settings.image
+    async def create_and_warm(
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+        quota: SandboxQuota,
+        *,
+        max_retries: int | None = None,
+    ) -> Self:
+        deployment = settings.deployment
+        if deployment.address:
+            ip = await cls._resolve_hostname_to_ip(deployment.address)
+            return cls(settings=settings, host=host, quota=quota, ip=ip)
+        if not deployment.name_prefix:
+            raise RuntimeError("sandbox name prefix is not configured")
+        container_name = f"{deployment.name_prefix}-{str(uuid.uuid4())[:8]}"
+        if not await quota.acquire(container_name, settings.policy):
+            raise RuntimeError("沙箱准入未通过：节点配额或内存水位不足")
+        sandbox: Self | None = None
         try:
-            if _broker_url():
-                payload = _broker_create(container_name)
-                return DockerSandbox(
-                    ip=payload["ip"],
-                    container_name=payload["id"],
-                )
-            docker_client = _get_docker_client()
-            container_config = build_docker_sandbox_config(
+            sandbox = await asyncio.to_thread(
+                cls._create_task_with_name,
                 settings,
+                host,
+                quota,
                 container_name,
             )
-            container = docker_client.containers.run(**container_config)
-            container.reload()
-            ip = cls._require_container_ip(
-                container,
-                container_name,
-                preferred_network=settings.network,
-            )
-            return DockerSandbox(ip=ip, container_name=container_name)
-        except Exception as e:
-            logger.error(f"创建Docker沙箱容器失败: {str(e)}")
-            raise Exception(f"创建Docker沙箱容器失败: {str(e)}") from e
-
-    @classmethod
-    async def _create_fresh_with_name(cls, container_name: str) -> Self:
-        settings = get_sandbox_runtime_settings()
-        if settings.address:
-            ip = await cls._resolve_hostname_to_ip(settings.address)
-            return DockerSandbox(ip=ip)
-        return await asyncio.to_thread(cls._create_task_with_name, container_name)
-
-    @classmethod
-    async def _create_fresh(cls) -> Self:
-        settings = get_sandbox_runtime_settings()
-        if settings.address:
-            ip = await cls._resolve_hostname_to_ip(settings.address)
-            return DockerSandbox(ip=ip)
-        return await asyncio.to_thread(cls._create_task)
-
-    @classmethod
-    async def create(cls) -> Self:
-        """类方法，创建沙箱容器（优先从预热池获取）"""
-        settings = get_sandbox_runtime_settings()
-        if settings.address:
-            ip = await cls._resolve_hostname_to_ip(settings.address)
-            return DockerSandbox(ip=ip)
-
-        from app.infrastructure.external.sandbox.sandbox_pool import get_sandbox_pool
-
-        pool = get_sandbox_pool()
-        if pool.enabled:
-            return await pool.acquire()
-        return await cls._create_and_warm()
+            await sandbox.ensure_sandbox(max_retries=max_retries)
+        except BaseException:
+            try:
+                if sandbox is None:
+                    await quota.release(container_name)
+                else:
+                    # Once creation succeeds, the instance owns both the
+                    # container and quota lease. Destroy it on every warmup
+                    # failure, including cancellation, so a failed prewarm
+                    # cannot leak a live but unusable sandbox.
+                    await asyncio.shield(sandbox.destroy())
+            except Exception:
+                logger.exception("Failed to compensate sandbox warmup failure: %s", container_name)
+            raise
+        return sandbox
 
     async def destroy(self) -> bool:
         """销毁当前的DockerSandbox实例"""
         holder_id = self._container_name
+        destroyed = True
         try:
             # 1.关闭httpx客户端
             if self.client:
@@ -372,29 +345,36 @@ class DockerSandbox(Sandbox):
 
             # 2.关闭并移除容器
             if self._container_name:
-                await asyncio.to_thread(self._remove_container, self._container_name)
+                await asyncio.to_thread(
+                    self._remove_container,
+                    self._host,
+                    self._container_name,
+                )
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("销毁当前Docker沙箱[%s]失败: %s", self._container_name, e)
+            destroyed = False
+        finally:
             if holder_id:
-                from app.infrastructure.external.sandbox.admission import get_sandbox_quota
-
-                await get_sandbox_quota().release(holder_id)
-            return True
-        except Exception as e:
-            logger.error(f"销毁当前Docker沙箱[{self._container_name}]失败: {str(e)}")
-            return False
+                await self._quota.release(holder_id)
+        return destroyed
 
     @classmethod
-    def _remove_container(cls, container_name: str) -> None:
-        if _broker_url():
-            _broker_call("DELETE", _broker_sandbox_path(container_name))
+    def _remove_container(cls, host: SandboxHostAccess, container_name: str) -> None:
+        if _broker_url(host):
+            _broker_call(host, "DELETE", _broker_sandbox_path(container_name))
             return
-        docker_client = _get_docker_client()
-        docker_client.containers.get(container_name).remove(force=True)
+        _get_docker_client(host).containers.get(container_name).remove(force=True)
 
     @classmethod
-    def _get_running_container_ip(cls, id: str) -> Optional[str]:
-        if _broker_url():
+    def _get_running_container_ip(
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+        sandbox_id: str,
+    ) -> str | None:
+        if _broker_url(host):
             try:
-                payload = _broker_call("GET", _broker_sandbox_path(id))
+                payload = _broker_call(host, "GET", _broker_sandbox_path(sandbox_id))
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code == 404:
                     return None
@@ -402,37 +382,42 @@ class DockerSandbox(Sandbox):
             if payload.get("status") != "running":
                 return None
             return payload.get("ip") or None
-        docker_client = _get_docker_client()
         try:
-            container = docker_client.containers.get(id)
+            container = _get_docker_client(host).containers.get(sandbox_id)
             container.reload()
             if container.status != "running":
-                logger.warning(f"容器存在但未运行, 容器名字: {id}")
+                logger.warning("容器存在但未运行, 容器名字: %s", sandbox_id)
                 return None
-            settings = get_sandbox_runtime_settings()
-            return cls._get_container_ip(container, preferred_network=settings.network)
+            return cls._get_container_ip(
+                container,
+                preferred_network=settings.deployment.network,
+            )
         except NotFound:
-            logger.warning(f"该容器找不到可能被销毁: {str(id)}")
+            logger.warning("该容器找不到可能被销毁: %s", sandbox_id)
             return None
         except APIError as e:
-            logger.error(f"Docker API出错: {str(e)}")
+            logger.error("Docker API出错: %s", e)
             return None
 
     @classmethod
-    def _cleanup_orphaned_containers_sync(cls) -> int:
-        settings = get_sandbox_runtime_settings()
-        if settings.address or not settings.name_prefix:
+    def _cleanup_orphaned_containers_sync(
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+    ) -> int:
+        deployment = settings.deployment
+        if deployment.address or not deployment.name_prefix:
             return 0
-        if _broker_url():
-            return cls._cleanup_broker_sandboxes_sync(settings)
-        docker_client = _get_docker_client()
+        if _broker_url(host):
+            return cls._cleanup_broker_sandboxes_sync(settings, host)
+        docker_client = _get_docker_client(host)
         removed = 0
-        idle_timeout_seconds = max(60, (settings.idle_timeout_minutes or 30) * 60)
+        idle_timeout_seconds = max(60, settings.policy.idle_timeout_minutes * 60)
         now = time.time()
         try:
             containers = docker_client.containers.list(
                 all=True,
-                filters={"name": f"{settings.name_prefix}-"},
+                filters={"name": f"{deployment.name_prefix}-"},
             )
             for container in containers:
                 container.reload()
@@ -447,35 +432,33 @@ class DockerSandbox(Sandbox):
                 idle_seconds = idle_timeout_seconds
                 if started_at:
                     try:
-                        started_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                        started_dt = datetime.fromisoformat(started_at)
                         idle_seconds = now - started_dt.timestamp()
                     except ValueError:
                         idle_seconds = 0
                 if idle_seconds < idle_timeout_seconds:
                     continue
                 try:
-                    redis_client = _get_sync_redis_client()
+                    redis_client = _get_sync_redis_client(host)
                     last_active_raw = redis_client.get(f"sandbox:last_active:{container_name}")
                     if last_active_raw:
                         last_active = int(last_active_raw)
                         if now - last_active < idle_timeout_seconds:
                             continue
-                except Exception as exc:
+                except (OSError, RuntimeError, ValueError) as exc:
                     logger.warning(
                         "Redis unavailable, skip idle cleanup for running sandbox %s: %s",
                         container_name,
                         exc,
                     )
                     continue
-                try:
+                with contextlib.suppress(Exception):
                     container.stop(timeout=10)
-                except Exception:
-                    pass
                 try:
                     container.remove(force=True)
                     removed += 1
                     logger.info("Removed idle sandbox container: %s", container_name)
-                except Exception as exc:
+                except (OSError, RuntimeError, ValueError) as exc:
                     logger.warning("Failed to remove idle sandbox %s: %s", container_name, exc)
             return removed
         finally:
@@ -483,96 +466,118 @@ class DockerSandbox(Sandbox):
 
     @classmethod
     def _cleanup_broker_sandboxes_sync(
-            cls,
-            settings: SandboxRuntimeSettings,
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
     ) -> int:
         removed = 0
-        idle_timeout_seconds = max(
-            60,
-            (settings.idle_timeout_minutes or 30) * 60,
-        )
+        idle_timeout_seconds = max(60, settings.policy.idle_timeout_minutes * 60)
         now = time.time()
-        for item in _broker_list():
+        for item in _broker_list(host):
             name = item.get("id") or ""
             status = item.get("status") or ""
             if status in {"exited", "dead", "created"}:
-                _broker_call("DELETE", _broker_sandbox_path(name))
+                _broker_call(host, "DELETE", _broker_sandbox_path(name))
                 removed += 1
                 continue
             if status != "running":
                 continue
             started_at = item.get("started_at") or ""
             try:
-                started = datetime.fromisoformat(
-                    started_at.replace("Z", "+00:00")
-                ).timestamp()
+                started = datetime.fromisoformat(started_at).timestamp()
             except ValueError:
                 continue
             if now - started < idle_timeout_seconds:
                 continue
             try:
-                last_active_raw = _get_sync_redis_client().get(
-                    f"sandbox:last_active:{name}"
-                )
-                if (
-                    last_active_raw
-                    and now - int(last_active_raw) < idle_timeout_seconds
-                ):
+                last_active_raw = _get_sync_redis_client(host).get(f"sandbox:last_active:{name}")
+                if last_active_raw and now - int(last_active_raw) < idle_timeout_seconds:
                     continue
-            except Exception:
+            except (OSError, RuntimeError, ValueError):
                 continue
-            _broker_call("DELETE", _broker_sandbox_path(name))
+            _broker_call(host, "DELETE", _broker_sandbox_path(name))
             removed += 1
         return removed
 
     @classmethod
-    async def cleanup_orphaned_containers(cls) -> int:
-        return await asyncio.to_thread(cls._cleanup_orphaned_containers_sync)
+    async def cleanup_orphaned_containers(
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+    ) -> int:
+        return await asyncio.to_thread(
+            cls._cleanup_orphaned_containers_sync,
+            settings,
+            host,
+        )
 
     @classmethod
-    async def get(cls, id: str) -> Optional[Self]:
+    async def get(
+        cls,
+        settings: SandboxEffectiveSettings,
+        host: SandboxHostAccess,
+        quota: SandboxQuota,
+        sandbox_id: str,
+    ) -> Self | None:
         """根据传递的id获取沙箱实例"""
-        # 1.判断是否直连沙箱
-        settings = get_sandbox_runtime_settings()
-        if settings.address:
+        deployment = settings.deployment
+        if deployment.address:
             try:
-                ip = await cls._resolve_hostname_to_ip(settings.address)
-                return DockerSandbox(ip=ip, container_name=id)
-            except Exception as e:
-                logger.error(f"解析沙箱地址失败: {str(e)}")
+                ip = await cls._resolve_hostname_to_ip(deployment.address)
+                return cls(
+                    settings=settings,
+                    host=host,
+                    quota=quota,
+                    ip=ip,
+                    container_name=sandbox_id,
+                )
+            except (OSError, RuntimeError, ValueError) as e:
+                logger.error("解析沙箱地址失败: %s", e)
                 return None
 
         try:
             # 2.创建docker客户端并根据容器名字获取容器（在线程中执行同步 Docker SDK）
-            ip = await asyncio.to_thread(cls._get_running_container_ip, id)
+            ip = await asyncio.to_thread(
+                cls._get_running_container_ip,
+                settings,
+                host,
+                sandbox_id,
+            )
             if not ip:
                 return None
-            return DockerSandbox(ip=ip, container_name=id)
-        except Exception as e:
+            return cls(
+                settings=settings,
+                host=host,
+                quota=quota,
+                ip=ip,
+                container_name=sandbox_id,
+            )
+        except (OSError, RuntimeError, ValueError) as e:
             # 8.其他错误统一捕获
-            logger.error(f"获取沙箱发生未知错误: {str(e)}")
+            logger.error("获取沙箱发生未知错误: %s", e)
             return None
 
     async def get_browser(
-            self,
-            supports_multimodal: bool = False,
-            llm: Optional[LLM] = None,
+        self,
+        llm: LLM | None = None,
+        allowed_domains: frozenset[str] | None = None,
     ) -> Browser:
         """获取沙箱中的浏览器实例"""
         return PlaywrightBrowser(
             self.cdp_url,
-            supports_multimodal=supports_multimodal,
+            vision_enabled=bool(llm and llm.capabilities.vision),
             vision_llm=llm,
+            allowed_domains=allowed_domains,
         )
 
-    async def ensure_sandbox(self, max_retries: Optional[int] = None) -> None:
+    async def ensure_sandbox(self, max_retries: int | None = None) -> None:
         """确保沙箱一定存在/服务全部都开启了才执行后续步骤"""
-        settings = get_sandbox_runtime_settings()
-        max_retries = max(1, max_retries or settings.warmup_max_retries)
-        retry_interval = max(0.5, settings.warmup_retry_interval_seconds)
+        policy = self.settings.policy
+        max_retries = max(1, max_retries or policy.warmup_max_retries)
+        retry_interval = max(0.5, policy.warmup_retry_interval_seconds)
 
         # 2.循环请求获取supervisor状态并判断服务是否正常
-        for attempt in range(max_retries):
+        for _attempt in range(max_retries):
             try:
                 # 3.调用client客户端向沙箱发起api请求获取状态
                 response = await self.client.get(f"{self._base_url}/api/supervisor/status")
@@ -583,14 +588,14 @@ class DockerSandbox(Sandbox):
 
                 # 5.判断是否执行成功
                 if not tool_result.success:
-                    logger.warning(f"Supervisor进程状态监测失败: {tool_result.message}")
+                    logger.warning("Supervisor进程状态监测失败: %s", tool_result.message)
                     await asyncio.sleep(retry_interval)
                     continue
 
                 # 6.读取services数据并判断
                 services = tool_result.data or []
                 if not services:
-                    logger.warning(f"Supervisor进程中未发现任何服务")
+                    logger.warning("Supervisor进程中未发现任何服务")
                     await asyncio.sleep(retry_interval)
                     continue
 
@@ -609,28 +614,27 @@ class DockerSandbox(Sandbox):
                 # 9.判断是否所有服务都启动
                 if all_running:
                     logger.info("Sandbox Supervisor所有进程服务运行正常")
-                    from app.infrastructure.external.sandbox.sandbox_pool import SandboxPool
-
-                    await SandboxPool.touch_activity(self.id)
                     return
-                else:
-                    logger.info(f"正在等待Sandbox Supervisor进程服务运行, 还未运行的服务列表: {non_running_services}")
-                    await asyncio.sleep(retry_interval)
-            except Exception as e:
-                logger.warning(f"无法确认Sandbox Supervisor进程状态: {str(e)}")
+                logger.info(
+                    "正在等待Sandbox Supervisor进程服务运行, 还未运行的服务列表: %s",
+                    non_running_services,
+                )
+                await asyncio.sleep(retry_interval)
+            except (httpx.HTTPError, OSError, RuntimeError, ValueError) as e:
+                logger.warning("无法确认Sandbox Supervisor进程状态: %s", e)
                 await asyncio.sleep(retry_interval)
 
         # 经过max_retries次监测后还无法确认则抛出异常
-        logger.error(f"在经过{max_retries}次尝试后仍无法确认Sandbox Supervisor状态信息")
-        raise Exception(f"在经过{max_retries}次尝试后仍无法确认Sandbox Supervisor状态信息")
+        logger.error("在经过%s次尝试后仍无法确认Sandbox Supervisor状态信息", max_retries)
+        raise DockerSandboxError(f"在经过{max_retries}次尝试后仍无法确认Sandbox Supervisor状态信息")
 
     async def read_file(
-            self,
-            filepath: str,
-            start_line: Optional[int] = None,
-            end_line: Optional[int] = None,
-            sudo: bool = False,
-            max_length: int = 10000
+        self,
+        filepath: str,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        sudo: bool = False,
+        max_length: int = 10000,
     ) -> ToolResult:
         """读取沙箱中指定路径的文件内容"""
         response = await self.client.post(
@@ -641,32 +645,29 @@ class DockerSandbox(Sandbox):
                 "end_line": end_line,
                 "sudo": sudo,
                 "max_length": max_length,
-            }
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
     async def read_files(
-            self,
-            filepaths: list[str],
-            *,
-            sudo: bool = False,
-            max_length: int = 10000,
+        self,
+        filepaths: list[str],
+        *,
+        sudo: bool = False,
+        max_length: int = 10000,
     ) -> list[ToolResult]:
         return await asyncio.gather(
-            *(
-                self.read_file(path, sudo=sudo, max_length=max_length)
-                for path in filepaths
-            )
+            *(self.read_file(path, sudo=sudo, max_length=max_length) for path in filepaths)
         )
 
     async def write_file(
-            self,
-            filepath: str,
-            content: str,
-            append: bool = False,
-            leading_newline: bool = False,
-            trailing_newline: bool = False,
-            sudo: bool = False,
+        self,
+        filepath: str,
+        content: str,
+        append: bool = False,
+        leading_newline: bool = False,
+        trailing_newline: bool = False,
+        sudo: bool = False,
     ) -> ToolResult:
         """向沙箱中指定文件写入内容"""
         response = await self.client.post(
@@ -678,16 +679,16 @@ class DockerSandbox(Sandbox):
                 "leading_newline": leading_newline,
                 "trailing_newline": trailing_newline,
                 "sudo": sudo,
-            }
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
     async def replace_in_file(
-            self,
-            filepath: str,
-            old_str: str,
-            new_str: str,
-            sudo: bool = False,
+        self,
+        filepath: str,
+        old_str: str,
+        new_str: str,
+        sudo: bool = False,
     ) -> ToolResult:
         """替换沙箱中文件的旧内容为指定内容"""
         response = await self.client.post(
@@ -697,7 +698,7 @@ class DockerSandbox(Sandbox):
                 "old_str": old_str,
                 "new_str": new_str,
                 "sudo": sudo,
-            }
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
@@ -709,7 +710,7 @@ class DockerSandbox(Sandbox):
                 "filepath": filepath,
                 "regex": regex,
                 "sudo": sudo,
-            }
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
@@ -720,7 +721,7 @@ class DockerSandbox(Sandbox):
             json={
                 "dir_path": dir_path,
                 "glob_pattern": glob_pattern,
-            }
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
@@ -734,7 +735,7 @@ class DockerSandbox(Sandbox):
             f"{self._base_url}/api/file/check-file-exists",
             json={
                 "filepath": filepath,
-            }
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
@@ -744,15 +745,15 @@ class DockerSandbox(Sandbox):
             f"{self._base_url}/api/file/delete-file",
             json={
                 "filepath": filepath,
-            }
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
     async def upload_file(
-            self,
-            file_data: BinaryIO,
-            filepath: str,
-            filename: str = None,
+        self,
+        file_data: BinaryIO,
+        filepath: str,
+        filename: str | None = None,
     ) -> ToolResult:
         """将文件源上传至沙箱指定位置"""
         # 1.预配置上传数据
@@ -770,8 +771,7 @@ class DockerSandbox(Sandbox):
     async def download_file(self, filepath: str) -> BinaryIO:
         """从沙箱中下载文件"""
         response = await self.client.get(
-            f"{self._base_url}/api/file/download-file",
-            params={"filepath": filepath}
+            f"{self._base_url}/api/file/download-file", params={"filepath": filepath}
         )
         response.raise_for_status()
 
@@ -785,7 +785,7 @@ class DockerSandbox(Sandbox):
                 "session_id": session_id,
                 "exec_dir": exec_dir,
                 "command": command,
-            }
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
@@ -796,15 +796,15 @@ class DockerSandbox(Sandbox):
             json={
                 "session_id": session_id,
                 "console": console,
-            }
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
     async def write_shell_input(
-            self,
-            session_id: str,
-            input_text: str,
-            press_enter: bool = True,
+        self,
+        session_id: str,
+        input_text: str,
+        press_enter: bool = True,
     ) -> ToolResult:
         """向沙箱的Shell进程写入数据"""
         response = await self.client.post(
@@ -813,18 +813,18 @@ class DockerSandbox(Sandbox):
                 "session_id": session_id,
                 "input_text": input_text,
                 "press_enter": press_enter,
-            }
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
-    async def wait_process(self, session_id: str, seconds: Optional[int] = None) -> ToolResult:
+    async def wait_process(self, session_id: str, seconds: int | None = None) -> ToolResult:
         """等待沙箱中进程的执行"""
         response = await self.client.post(
             f"{self._base_url}/api/shell/wait-process",
             json={
                 "session_id": session_id,
                 "seconds": seconds,
-            }
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
@@ -834,7 +834,7 @@ class DockerSandbox(Sandbox):
             f"{self._base_url}/api/shell/kill-process",
             json={
                 "session_id": session_id,
-            }
+            },
         )
         return ToolResult.from_sandbox(**response.json())
 
@@ -936,7 +936,9 @@ class DockerSandbox(Sandbox):
                 f"rm -f {archive_path}",
             )
 
-    async def restore_browser_profile_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
+    async def restore_browser_profile_snapshot(
+        self, snapshot_id: str, snapshot_data: BinaryIO
+    ) -> None:
         archive_path = f"/tmp/bp_restore_{snapshot_id}.tgz"
         await self.stop_chrome()
         upload_result = await self.upload_file(

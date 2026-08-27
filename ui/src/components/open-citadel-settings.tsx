@@ -2,25 +2,15 @@
 
 import { useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import {
-  Bot,
-  LayoutGrid,
-  LayoutList,
-  Loader2,
-  Pencil,
-  Settings,
-  Shield,
-} from "lucide-react";
+import { LayoutGrid, Loader2, Pencil, Settings } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
-import { AgentSettings } from "@/components/settings/agent-settings";
 import { GeneralSettings } from "@/components/settings/general-settings";
-import { HitlSettings } from "@/components/settings/hitl-settings";
+import { InferenceSettings } from "@/components/settings/inference-settings";
 import { McpServerForm, type McpServerFormHandle } from "@/components/settings/mcp-server-form";
 import { MemorySettings } from "@/components/settings/memory-settings";
-import { ModelsSettings } from "@/components/settings/models-settings";
-import { RuntimeSettings } from "@/components/settings/runtime-settings";
+import { RuntimePolicySettings } from "@/components/settings/runtime-policy-settings";
 import { ServiceKeysSettings } from "@/components/settings/service-keys-settings";
 import { SkillsSettings } from "@/components/settings/skills-settings";
 import { Badge } from "@/components/ui/badge";
@@ -35,13 +25,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLegend,
-  FieldSet,
-} from "@/components/ui/field";
+import { Field, FieldDescription, FieldGroup, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -51,22 +35,27 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 import { type SettingTab, useOpenCitadelSettings } from "@/hooks/use-open-citadel-settings";
-import type { ListA2AServerItem, ListMCPServerItem, MCPServerConfig } from "@/lib/api";
-import {
-  IconDelete,
-  IconIntegration,
-  IconMemory,
-  IconModel,
-  IconSkill,
-  IconTool,
-} from "@/lib/icons";
+import type { A2AServer, MCPServer, UpdateMCPServerRequest } from "@/lib/api";
+import { IconDelete, IconIntegration, IconMemory, IconModel, IconSkill } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
+
+function IntegrationStatusLabel({ status }: { status: MCPServer["connection_status"] }) {
+  const t = useTranslations("settings");
+  const labels: Record<MCPServer["connection_status"], string> = {
+    checking: t("integrationStatus.checking"),
+    connected: t("integrationStatus.connected"),
+    disabled: t("integrationStatus.disabled"),
+    error: t("integrationStatus.error"),
+    policy_unavailable: t("integrationStatus.policy_unavailable"),
+  };
+  return labels[status];
+}
 
 // ==================== A2A Agent 配置 ====================
 
 type A2ASettingProps = {
-  servers: ListA2AServerItem[];
+  servers: A2AServer[];
   loading: boolean;
   onToggleEnabled: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
@@ -112,54 +101,54 @@ export function A2ASetting({
           <FieldLegend className="text-foreground flex w-full items-center justify-between text-lg font-semibold">
             {t("a2a")}
             {!readOnly ? (
-            <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-              <DialogTrigger asChild>
-                <Button type="button" size="xs" className="cursor-pointer">
-                  {t("addRemoteAgent")}
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle className="text-foreground">{t("addRemoteAgent")}</DialogTitle>
-                  <DialogDescription className="text-muted-foreground">
-                    {t("a2aAddDescription")}
-                  </DialogDescription>
-                </DialogHeader>
-                <form
-                  className="w-full"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleAdd();
-                  }}
-                >
-                  <FieldGroup>
-                    <FieldSet>
-                      <Field>
-                        <Input
-                          id="a2a_base_url"
-                          type="url"
-                          placeholder={t("a2aUrlPlaceholder")}
-                          value={addUrl}
-                          onChange={(e) => setAddUrl(e.target.value)}
-                          disabled={adding}
-                        />
-                      </Field>
-                    </FieldSet>
-                  </FieldGroup>
-                </form>
-                <DialogFooter>
-                  <DialogClose asChild>
-                    <Button variant="outline" className="cursor-pointer" disabled={adding}>
-                      {tCommon("cancel")}
-                    </Button>
-                  </DialogClose>
-                  <Button className="cursor-pointer" onClick={handleAdd} disabled={adding}>
-                    {adding && <Loader2 className="animate-spin" />}
-                    {tCommon("add")}
+              <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button type="button" size="xs" className="cursor-pointer">
+                    {t("addRemoteAgent")}
                   </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle className="text-foreground">{t("addRemoteAgent")}</DialogTitle>
+                    <DialogDescription className="text-muted-foreground">
+                      {t("a2aAddDescription")}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form
+                    className="w-full"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleAdd();
+                    }}
+                  >
+                    <FieldGroup>
+                      <FieldSet>
+                        <Field>
+                          <Input
+                            id="a2a_base_url"
+                            type="url"
+                            placeholder={t("a2aUrlPlaceholder")}
+                            value={addUrl}
+                            onChange={(e) => setAddUrl(e.target.value)}
+                            disabled={adding}
+                          />
+                        </Field>
+                      </FieldSet>
+                    </FieldGroup>
+                  </form>
+                  <DialogFooter>
+                    <DialogClose asChild>
+                      <Button variant="outline" className="cursor-pointer" disabled={adding}>
+                        {tCommon("cancel")}
+                      </Button>
+                    </DialogClose>
+                    <Button className="cursor-pointer" onClick={handleAdd} disabled={adding}>
+                      {adding && <Loader2 className="animate-spin" />}
+                      {tCommon("add")}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             ) : null}
           </FieldLegend>
           <FieldDescription className="text-sm">{t("a2aDescription")}</FieldDescription>
@@ -184,68 +173,39 @@ export function A2ASetting({
                   <ItemContent>
                     <ItemTitle className="text-md text-foreground flex w-full items-center justify-between font-semibold">
                       <div className="flex items-center gap-2">
-                        {server.name}
-                        {!server.enabled && <Badge>{tCommon("disabled")}</Badge>}
+                        {typeof server.agent_card?.name === "string"
+                          ? server.agent_card.name
+                          : server.base_url}
+                        <Badge variant="secondary">
+                          <IntegrationStatusLabel status={server.connection_status} />
+                        </Badge>
                       </div>
                       <div className="flex items-center justify-center gap-2">
                         {!readOnly ? (
                           <>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          className="cursor-pointer"
-                          onClick={() => onDelete(server.id)}
-                        >
-                          <IconDelete />
-                        </Button>
-                        <Switch
-                          checked={server.enabled}
-                          onCheckedChange={(checked) => onToggleEnabled(server.id, checked)}
-                        />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              className="cursor-pointer"
+                              onClick={() => onDelete(server.id)}
+                            >
+                              <IconDelete />
+                            </Button>
+                            <Switch
+                              checked={server.enabled}
+                              onCheckedChange={(checked) => onToggleEnabled(server.id, checked)}
+                            />
                           </>
                         ) : null}
                       </div>
                     </ItemTitle>
-                    {server.description && <ItemDescription>{server.description}</ItemDescription>}
                     <ItemDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <LayoutList size={12} />
-                      {server.input_modes?.map((mode) => (
-                        <Badge
-                          key={`in-${mode}`}
-                          variant="secondary"
-                          className="text-muted-foreground"
-                        >
-                          {tCommon("input")}: {mode}
-                        </Badge>
-                      ))}
-                      {server.output_modes?.map((mode) => (
-                        <Badge
-                          key={`out-${mode}`}
-                          variant="secondary"
-                          className="text-muted-foreground"
-                        >
-                          {tCommon("output")}: {mode}
-                        </Badge>
-                      ))}
-                      <Badge
-                        variant={server.streaming ? "secondary" : "outline"}
-                        className={
-                          server.streaming ? "text-muted-foreground" : "text-muted-foreground/70"
-                        }
-                      >
-                        {tCommon("streaming")}: {server.streaming ? tCommon("on") : tCommon("off")}
-                      </Badge>
-                      <Badge
-                        variant={server.push_notifications ? "secondary" : "outline"}
-                        className={
-                          server.push_notifications
-                            ? "text-muted-foreground"
-                            : "text-muted-foreground/70"
-                        }
-                      >
-                        {tCommon("pushNotifications")}: {server.push_notifications ? tCommon("on") : tCommon("off")}
-                      </Badge>
+                      <Badge variant="secondary">{server.visibility}</Badge>
+                      {typeof server.agent_card?.description === "string"
+                        ? server.agent_card.description
+                        : server.base_url}
+                      {server.connection_error ?? null}
                     </ItemDescription>
                   </ItemContent>
                 </Item>
@@ -261,33 +221,15 @@ export function A2ASetting({
 // ==================== MCP 服务器 ====================
 
 type MCPSettingProps = {
-  servers: ListMCPServerItem[];
+  servers: MCPServer[];
   loading: boolean;
   onToggleEnabled: (serverName: string, enabled: boolean) => void;
   onDelete: (serverName: string) => void;
   onAdd: (config: string) => Promise<boolean>;
-  onEdit: (serverName: string, config: MCPServerConfig) => Promise<boolean>;
+  onEdit: (serverId: string, config: UpdateMCPServerRequest) => Promise<boolean>;
   readOnly?: boolean;
   isAdmin?: boolean;
 };
-
-function mcpConnectionStatusLabel(
-  server: ListMCPServerItem,
-  t: ReturnType<typeof useTranslations<"settings">>,
-  disabledLabel: string,
-): { label: string; variant: "default" | "secondary" | "destructive" | "outline" } {
-  const status = server.connection_status ?? (server.enabled ? "pending" : "disabled");
-  switch (status) {
-    case "connected":
-      return { label: t("mcpStatusConnected"), variant: "default" };
-    case "error":
-      return { label: t("mcpStatusError"), variant: "destructive" };
-    case "pending":
-      return { label: t("mcpStatusPending"), variant: "secondary" };
-    default:
-      return { label: disabledLabel, variant: "outline" };
-  }
-}
 
 export function MCPSetting({
   servers,
@@ -305,32 +247,25 @@ export function MCPSetting({
   const [addConfig, setAddConfig] = useState("");
   const [adding, setAdding] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [editServer, setEditServer] = useState<ListMCPServerItem | null>(null);
+  const [editServer, setEditServer] = useState<MCPServer | null>(null);
   const editFormRef = useRef<McpServerFormHandle>(null);
   const [editing, setEditing] = useState(false);
 
   const mcpConfigPlaceholder = isAdmin
     ? `{
-  "mcpServers": {
-    "qiniu": {
-      "command": "uvx",
-      "args": [
-        "qiniu-mcp-server"
-      ],
-      "env": {
-        "QINIU_ACCESS_KEY": "YOUR_ACCESS_KEY",
-        "QINIU_SECRET_KEY": "YOUR_SECRET_KEY"
-      }
-    }
-  }
+  "name": "local-tools",
+  "transport": "stdio",
+  "command": "uvx",
+  "args": ["example-mcp-server"],
+  "enabled": true,
+  "visibility": "global"
 }`
     : `{
-  "mcpServers": {
-    "remote-tools": {
-      "transport": "streamable_http",
-      "url": "https://example.com/mcp"
-    }
-  }
+  "name": "remote-tools",
+  "transport": "streamable_http",
+  "url": "https://example.com/mcp",
+  "enabled": true,
+  "visibility": "private"
 }`;
 
   const handleAdd = async () => {
@@ -350,7 +285,7 @@ export function MCPSetting({
     }
   };
 
-  const openEditDialog = (server: ListMCPServerItem) => {
+  const openEditDialog = (server: MCPServer) => {
     setEditServer(server);
     setEditDialogOpen(true);
   };
@@ -365,7 +300,7 @@ export function MCPSetting({
       if (errorKey) {
         toast.error(t(errorKey));
       } else {
-        const transport = editServer.config?.transport ?? editServer.transport;
+        const transport = editServer.transport;
         toast.error(t(transport === "stdio" ? "mcpCommandRequired" : "mcpUrlRequired"));
       }
       return;
@@ -376,7 +311,7 @@ export function MCPSetting({
     }
     setEditing(true);
     try {
-      const success = await onEdit(editServer.server_name, config);
+      const success = await onEdit(editServer.id, config);
       if (success) {
         setEditDialogOpen(false);
         setEditServer(null);
@@ -393,54 +328,54 @@ export function MCPSetting({
           <FieldLegend className="text-foreground flex w-full items-center justify-between text-lg font-semibold">
             {t("mcp")}
             {!readOnly ? (
-            <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-              <DialogTrigger asChild>
-                <Button type="button" size="xs" className="cursor-pointer">
-                  {t("addServer")}
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle className="text-foreground">{t("addMcpServer")}</DialogTitle>
-                  <DialogDescription className="text-muted-foreground">
-                    {isAdmin ? t("mcpAddDescription") : t("mcpAddDescriptionNonAdmin")}
-                  </DialogDescription>
-                </DialogHeader>
-                <form
-                  className="w-full"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleAdd();
-                  }}
-                >
-                  <FieldGroup>
-                    <FieldSet>
-                      <Field>
-                        <Textarea
-                          id="mcp_config"
-                          placeholder={mcpConfigPlaceholder}
-                          value={addConfig}
-                          onChange={(e) => setAddConfig(e.target.value)}
-                          className="min-h-[200px] font-mono text-xs"
-                          disabled={adding}
-                        />
-                      </Field>
-                    </FieldSet>
-                  </FieldGroup>
-                </form>
-                <DialogFooter>
-                  <DialogClose asChild>
-                    <Button variant="outline" className="cursor-pointer" disabled={adding}>
-                      {tCommon("cancel")}
-                    </Button>
-                  </DialogClose>
-                  <Button className="cursor-pointer" onClick={handleAdd} disabled={adding}>
-                    {adding && <Loader2 className="animate-spin" />}
-                    {tCommon("add")}
+              <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button type="button" size="xs" className="cursor-pointer">
+                    {t("addServer")}
                   </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle className="text-foreground">{t("addMcpServer")}</DialogTitle>
+                    <DialogDescription className="text-muted-foreground">
+                      {isAdmin ? t("mcpAddDescription") : t("mcpAddDescriptionNonAdmin")}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form
+                    className="w-full"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleAdd();
+                    }}
+                  >
+                    <FieldGroup>
+                      <FieldSet>
+                        <Field>
+                          <Textarea
+                            id="mcp_config"
+                            placeholder={mcpConfigPlaceholder}
+                            value={addConfig}
+                            onChange={(e) => setAddConfig(e.target.value)}
+                            className="min-h-[200px] font-mono text-xs"
+                            disabled={adding}
+                          />
+                        </Field>
+                      </FieldSet>
+                    </FieldGroup>
+                  </form>
+                  <DialogFooter>
+                    <DialogClose asChild>
+                      <Button variant="outline" className="cursor-pointer" disabled={adding}>
+                        {tCommon("cancel")}
+                      </Button>
+                    </DialogClose>
+                    <Button className="cursor-pointer" onClick={handleAdd} disabled={adding}>
+                      {adding && <Loader2 className="animate-spin" />}
+                      {tCommon("add")}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             ) : null}
             <Dialog
               open={editDialogOpen}
@@ -456,13 +391,13 @@ export function MCPSetting({
                   <DialogTitle className="text-foreground">{t("editMcpServer")}</DialogTitle>
                   <DialogDescription className="text-muted-foreground">
                     {editServer
-                      ? `${t("editMcpServerDesc")} (${editServer.server_name})`
+                      ? `${t("editMcpServerDesc")} (${editServer.name})`
                       : t("editMcpServerDesc")}
                   </DialogDescription>
                 </DialogHeader>
                 {editServer ? (
                   <McpServerForm
-                    key={editServer.server_id ?? editServer.server_name}
+                    key={editServer.id}
                     ref={editFormRef}
                     server={editServer}
                     isAdmin={isAdmin}
@@ -486,10 +421,6 @@ export function MCPSetting({
           <FieldDescription className="text-sm">
             {isAdmin ? t("mcpAddDescription") : t("mcpAddDescriptionNonAdmin")}
           </FieldDescription>
-          <FieldDescription className="text-muted-foreground text-xs">
-            {t("mcpStatusRefreshHint")}
-          </FieldDescription>
-
           {/* 加载态 */}
           {loading && (
             <div className="flex justify-center py-8">
@@ -506,65 +437,59 @@ export function MCPSetting({
           {!loading && servers.length > 0 && (
             <ItemGroup className="gap-3">
               {servers.map((server) => {
-                const statusBadge = mcpConnectionStatusLabel(server, t, tCommon("disabled"));
                 return (
-                <Item key={server.server_name} variant="outline">
-                  <ItemContent>
-                    <ItemTitle className="text-md text-foreground flex w-full items-center justify-between font-semibold">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {server.server_name}
-                        <Badge>{server.transport}</Badge>
-                        <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
-                      </div>
-                      <div className="flex items-center justify-center gap-2">
-                        {!readOnly ? (
-                          <>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          className="cursor-pointer"
-                          onClick={() => openEditDialog(server)}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          className="cursor-pointer"
-                          onClick={() => onDelete(server.server_name)}
-                        >
-                          <IconDelete />
-                        </Button>
-                        <Switch
-                          checked={server.enabled}
-                          onCheckedChange={(checked) =>
-                            onToggleEnabled(server.server_name, checked)
-                          }
-                        />
-                          </>
-                        ) : null}
-                      </div>
-                    </ItemTitle>
-                    {server.connection_error ? (
-                      <ItemDescription className="text-destructive text-xs">
-                        {server.connection_error}
-                      </ItemDescription>
-                    ) : null}
-                    {server.tools.length > 0 && (
-                      <ItemDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <IconTool size={12} />
-                        {server.tools.map((tool) => (
-                          <Badge key={tool} variant="secondary" className="text-muted-foreground">
-                            {tool}
+                  <Item key={server.id} variant="outline">
+                    <ItemContent>
+                      <ItemTitle className="text-md text-foreground flex w-full items-center justify-between font-semibold">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {server.name}
+                          <Badge>{server.transport}</Badge>
+                          <Badge variant="secondary">{server.visibility}</Badge>
+                          <Badge variant="secondary">
+                            <IntegrationStatusLabel status={server.connection_status} />
                           </Badge>
-                        ))}
-                      </ItemDescription>
-                    )}
-                  </ItemContent>
-                </Item>
-              );
+                          <Badge variant="outline">
+                            {t("mcpToolCount", { count: server.tools?.length ?? 0 })}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center justify-center gap-2">
+                          {!readOnly ? (
+                            <>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                className="cursor-pointer"
+                                onClick={() => openEditDialog(server)}
+                              >
+                                <Pencil className="size-3.5" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                className="cursor-pointer"
+                                onClick={() => onDelete(server.id)}
+                              >
+                                <IconDelete />
+                              </Button>
+                              <Switch
+                                checked={server.enabled}
+                                onCheckedChange={(checked) => onToggleEnabled(server.id, checked)}
+                              />
+                            </>
+                          ) : null}
+                        </div>
+                      </ItemTitle>
+                      {server.description ? (
+                        <ItemDescription>{server.description}</ItemDescription>
+                      ) : null}
+                      {server.connection_error ? (
+                        <ItemDescription>{server.connection_error}</ItemDescription>
+                      ) : null}
+                    </ItemContent>
+                  </Item>
+                );
               })}
             </ItemGroup>
           )}
@@ -579,16 +504,14 @@ export function MCPSetting({
 const SETTING_MENUS: Array<{
   key: SettingTab;
   icon: typeof Settings;
-  labelKey: "common" | "agent" | "models" | "skills" | "memory" | "integrations" | "hitl" | "runtime";
+  labelKey: "common" | "inference" | "skills" | "memory" | "integrations" | "runtime";
   adminOnly?: boolean;
 }> = [
   { key: "common-setting", icon: Settings, labelKey: "common" },
-  { key: "agent-setting", icon: Bot, labelKey: "agent" },
-  { key: "models-setting", icon: IconModel, labelKey: "models" },
+  { key: "inference-setting", icon: IconModel, labelKey: "inference" },
   { key: "skills-setting", icon: IconSkill, labelKey: "skills" },
   { key: "memory-setting", icon: IconMemory, labelKey: "memory" },
   { key: "integrations-setting", icon: IconIntegration, labelKey: "integrations" },
-  { key: "hitl-setting", icon: Shield, labelKey: "hitl" },
   { key: "runtime-setting", icon: LayoutGrid, labelKey: "runtime", adminOnly: true },
 ];
 
@@ -633,22 +556,15 @@ export function SettingsDialog({
   initialTab = "common-setting",
 }: SettingsDialogProps) {
   const t = useTranslations("settings");
-  const tCommon = useTranslations("common");
   const { user } = useAuth();
   const isAdmin = user?.global_role === "admin";
   const [activeSetting, setActiveSetting] = useState<SettingTab>(initialTab);
 
-  const showFooterSave = activeSetting === "agent-setting";
   const {
-    agentConfig,
-    setAgentConfig,
     mcpServers,
     a2aServers,
-    loadingConfig,
     loadingMCP,
     loadingA2A,
-    saving,
-    handleSave,
     handleMCPToggle,
     handleMCPDelete,
     handleMCPAdd,
@@ -656,31 +572,21 @@ export function SettingsDialog({
     handleA2AToggle,
     handleA2ADelete,
     handleA2AAdd,
-  } = useOpenCitadelSettings(open, activeSetting);
+  } = useOpenCitadelSettings(open);
   const { isMobile } = useIsMobile();
   const visibleMenus = SETTING_MENUS.filter((menu) => !menu.adminOnly || isAdmin);
 
   const settingsContent = (
     <>
-      {loadingConfig && activeSetting === "agent-setting" ? (
-        <div className="flex h-full items-center justify-center">
-          <Loader2 className="text-muted-foreground size-6 animate-spin" />
-        </div>
-      ) : (
-        <>
-          {activeSetting === "common-setting" && <GeneralSettings />}
-          {activeSetting === "agent-setting" && (
-            <AgentSettings config={agentConfig} onChange={setAgentConfig} readOnly={false} />
-          )}
-          {activeSetting === "runtime-setting" && isAdmin && (
-            <RuntimeSettings isAdmin={isAdmin} />
-          )}
-        </>
+      {activeSetting === "common-setting" && <GeneralSettings />}
+      {activeSetting === "runtime-setting" && isAdmin && <RuntimePolicySettings />}
+      {activeSetting === "inference-setting" && (
+        <InferenceSettings embedded isAdmin={isAdmin} userId={user?.id} />
       )}
-      {activeSetting === "models-setting" && <ModelsSettings embedded isAdmin={isAdmin} userId={user?.id} />}
-      {activeSetting === "skills-setting" && <SkillsSettings embedded isAdmin={isAdmin} userId={user?.id} />}
+      {activeSetting === "skills-setting" && (
+        <SkillsSettings embedded isAdmin={isAdmin} userId={user?.id} />
+      )}
       {activeSetting === "memory-setting" && <MemorySettings embedded />}
-      {activeSetting === "hitl-setting" && <HitlSettings isAdmin={isAdmin} />}
       {activeSetting === "integrations-setting" && (
         <div className="space-y-6 px-1">
           <MCPSetting
@@ -711,7 +617,7 @@ export function SettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          "flex flex-col overflow-hidden shadow-panel",
+          "shadow-panel flex flex-col overflow-hidden",
           "h-[100dvh] max-h-[100dvh] w-full max-w-full rounded-none",
           "md:h-[640px] md:max-h-[90vh] md:!max-w-[920px] md:rounded-lg",
         )}
@@ -752,32 +658,11 @@ export function SettingsDialog({
 
             <Separator orientation="vertical" />
 
-            <div className="scrollbar-hide h-full min-h-0 flex-1 overflow-y-auto">{settingsContent}</div>
+            <div className="scrollbar-hide h-full min-h-0 flex-1 overflow-y-auto">
+              {settingsContent}
+            </div>
           </div>
         )}
-
-        <DialogFooter
-          className={cn(
-            "h-[56px] shrink-0 items-center",
-            showFooterSave && "border-t pt-4",
-          )}
-        >
-          {showFooterSave && (
-            <>
-              <Button
-                variant="outline"
-                className="cursor-pointer"
-                onClick={() => onOpenChange(false)}
-              >
-                {tCommon("cancel")}
-              </Button>
-              <Button className="cursor-pointer" disabled={saving} onClick={handleSave}>
-                {saving && <Loader2 className="animate-spin" />}
-                {tCommon("save")}
-              </Button>
-            </>
-          )}
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

@@ -1,4 +1,5 @@
 """FastMCP registration for the nine fixed read-only operations."""
+
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
@@ -8,8 +9,9 @@ from .capabilities import capability_manifest
 from .collector import OpsCollector
 from .config import CollectorSettings
 
-
-READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+READ_ONLY = ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+)
 
 
 def create_server(settings: CollectorSettings | None = None) -> FastMCP:
@@ -31,17 +33,32 @@ def create_server(settings: CollectorSettings | None = None) -> FastMCP:
         return capability_manifest(cfg.target_ref)
 
     @server.tool(name="k8s_workload_summary", annotations=READ_ONLY)
-    async def k8s_workload_summary(namespace: str, workload_ids: list[str] | None = None, window_seconds: int = 3600, pvc_query_id: str | None = None) -> dict:
+    async def k8s_workload_summary(
+        namespace: str,
+        workload_ids: list[str] | None = None,
+        window_seconds: int = 3600,
+        pvc_query_id: str | None = None,
+    ) -> dict:
         """Read bounded workload, pod, job, node-pressure and restart summaries."""
-        return await collector.k8s_workload_summary(namespace, workload_ids or [], window_seconds, pvc_query_id)
+        return await collector.k8s_workload_summary(
+            namespace, workload_ids or [], window_seconds, pvc_query_id
+        )
 
     @server.tool(name="k8s_recent_events", annotations=READ_ONLY)
-    async def k8s_recent_events(namespace: str, since_seconds: int = 3600, limit: int = 100) -> dict:
+    async def k8s_recent_events(
+        namespace: str, since_seconds: int = 3600, limit: int = 100
+    ) -> dict:
         """Read warning events from one allowlisted namespace."""
         return await collector.k8s_recent_events(namespace, since_seconds, limit)
 
     @server.tool(name="k8s_pod_logs", annotations=READ_ONLY)
-    async def k8s_pod_logs(namespace: str, pod: str, container: str | None = None, tail_lines: int = 100, since_seconds: int = 600) -> dict:
+    async def k8s_pod_logs(
+        namespace: str,
+        pod: str,
+        container: str | None = None,
+        tail_lines: int = 100,
+        since_seconds: int = 600,
+    ) -> dict:
         """Read a redacted and capped tail from one pod in an allowlisted namespace."""
         return await collector.k8s_pod_logs(namespace, pod, container, tail_lines, since_seconds)
 

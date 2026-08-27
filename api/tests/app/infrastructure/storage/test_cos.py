@@ -1,10 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.infrastructure.storage.cos import Cos, _read_body_fully
+from core.config import DeploymentSettings
 
 
 class _ChunkedBody:
@@ -29,10 +28,8 @@ async def _immediate_sleep(_seconds: float) -> None:
 
 
 def _make_cos_with_client() -> Cos:
-    cos = Cos()
+    cos = Cos(DeploymentSettings(env="test", cos_bucket="test-bucket"))
     cos._client = MagicMock()
-    cos._settings = MagicMock()
-    cos._settings.cos_bucket = "test-bucket"
     return cos
 
 
@@ -44,10 +41,7 @@ async def test_get_bytes_recovers_after_truncated_reads():
 
     def get_object(**_kwargs):
         call_count["n"] += 1
-        if call_count["n"] < 3:
-            body = _ChunkedBody([truncated])
-        else:
-            body = _ChunkedBody([full_data])
+        body = _ChunkedBody([truncated]) if call_count["n"] < 3 else _ChunkedBody([full_data])
         return {"Body": body, "Content-Length": str(len(full_data))}
 
     cos = _make_cos_with_client()
@@ -56,12 +50,14 @@ async def test_get_bytes_recovers_after_truncated_reads():
     async def fake_run_in_threadpool(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    with patch("app.infrastructure.storage.cos.asyncio.sleep", new=_immediate_sleep):
-        with patch(
+    with (
+        patch("app.infrastructure.storage.cos.asyncio.sleep", new=_immediate_sleep),
+        patch(
             "app.infrastructure.storage.cos.run_in_threadpool",
             side_effect=fake_run_in_threadpool,
-        ):
-            result = await cos.get_bytes("artifacts/s1/a1/v1.md")
+        ),
+    ):
+        result = await cos.get_bytes("artifacts/s1/a1/v1.md")
 
     assert result == full_data
     assert call_count["n"] == 3
@@ -81,13 +77,15 @@ async def test_get_bytes_raises_when_truncation_persists():
     async def fake_run_in_threadpool(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    with patch("app.infrastructure.storage.cos.asyncio.sleep", new=_immediate_sleep):
-        with patch(
+    with (
+        patch("app.infrastructure.storage.cos.asyncio.sleep", new=_immediate_sleep),
+        patch(
             "app.infrastructure.storage.cos.run_in_threadpool",
             side_effect=fake_run_in_threadpool,
-        ):
-            with pytest.raises(RuntimeError, match="COS get_bytes 读取失败"):
-                await cos.get_bytes("artifacts/s1/a1/v1.md")
+        ),
+        pytest.raises(RuntimeError, match="COS get_bytes 读取失败"),
+    ):
+        await cos.get_bytes("artifacts/s1/a1/v1.md")
 
 
 @pytest.mark.asyncio

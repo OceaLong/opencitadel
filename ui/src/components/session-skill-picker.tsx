@@ -7,22 +7,9 @@ import { InlineOptionPicker } from "@/components/session/inline-option-picker";
 
 import { skillsApi } from "@/lib/api/skills";
 import type { Skill, SkillSummary } from "@/lib/api/types";
+import { clientDataScopeKey } from "@/lib/data/client-data-scope";
 import { useAuth } from "@/providers/auth-provider";
-
-let skillsCache: Skill[] | null = null;
-let skillsPromise: Promise<Skill[]> | null = null;
-
-function loadSkills(): Promise<Skill[]> {
-  if (skillsCache) return Promise.resolve(skillsCache);
-  if (!skillsPromise) {
-    skillsPromise = skillsApi.list(true).then((data) => {
-      skillsCache = data.skills;
-      skillsPromise = null;
-      return data.skills;
-    });
-  }
-  return skillsPromise;
-}
+import { useClientDataScope } from "@/providers/client-data-provider";
 
 type Props = {
   value?: string | null;
@@ -36,22 +23,33 @@ export function SessionSkillPicker({ value, onChange, disabled, onSkillLoaded, c
   const t = useTranslations("skillPicker");
   const tCommon = useTranslations("common");
   const { user } = useAuth();
-  const [skills, setSkills] = useState<Skill[]>([]);
+  const { scope, scopeRevision, loadResource, resourceRevision } = useClientDataScope();
+  const skillsRevision = resourceRevision("skills");
+  const scopeKey = scope ? clientDataScopeKey(scope) : null;
+  const [loaded, setLoaded] = useState<{ scopeKey: string; skills: Skill[] } | null>(null);
+  const skills = useMemo(
+    () => (loaded?.scopeKey === scopeKey ? loaded.skills : []),
+    [loaded, scopeKey],
+  );
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !scopeKey) return;
     let cancelled = false;
-    loadSkills()
+    const requestedScopeKey = scopeKey;
+    void loadResource("skills", async () => {
+      const data = await skillsApi.list(true);
+      return data.skills;
+    })
       .then((items) => {
-        if (!cancelled) setSkills(items);
+        if (!cancelled) setLoaded({ scopeKey: requestedScopeKey, skills: items });
       })
       .catch(() => {
-        if (!cancelled) setSkills([]);
+        if (!cancelled) setLoaded(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [loadResource, scopeKey, scopeRevision, skillsRevision, user]);
 
   useEffect(() => {
     if (!value) {

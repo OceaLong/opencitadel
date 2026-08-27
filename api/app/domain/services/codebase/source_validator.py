@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Codebase source acquisition and path safety validation."""
+
 from __future__ import annotations
 
 import ipaddress
@@ -8,16 +7,15 @@ import posixpath
 import socket
 import stat
 import zipfile
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePosixPath
-from typing import Callable, Iterable, Optional
 from urllib.parse import urlparse
 
 from app.domain.errors import BadRequestError
 from app.domain.models.codebase import CodebaseSourceType
 from app.domain.models.scope import OwnerScope
-
 
 Resolver = Callable[[str, int], Iterable[str]]
 
@@ -26,9 +24,9 @@ Resolver = Callable[[str, int], Iterable[str]]
 class ValidatedCodebaseSource:
     source_type: CodebaseSourceType
     source_ref: str
-    file_id: Optional[str] = None
+    file_id: str | None = None
     file_ids: tuple[str, ...] = ()
-    git_url: Optional[str] = None
+    git_url: str | None = None
 
 
 def normalize_contained_path(root: str, requested: str) -> PurePosixPath:
@@ -58,7 +56,7 @@ class CodebaseSourceValidator:
     def __init__(
         self,
         *,
-        resolver: Optional[Resolver] = None,
+        resolver: Resolver | None = None,
         allow_non_default_git_ports: bool = False,
         max_zip_entries: int = 10_000,
         max_zip_uncompressed_bytes: int = 256 * 1024 * 1024,
@@ -74,9 +72,9 @@ class CodebaseSourceValidator:
         self,
         source_type: CodebaseSourceType,
         *,
-        file_id: Optional[str] = None,
-        git_url: Optional[str] = None,
-        file_ids: Optional[list[str]] = None,
+        file_id: str | None = None,
+        git_url: str | None = None,
+        file_ids: list[str] | None = None,
     ) -> ValidatedCodebaseSource:
         source_type = CodebaseSourceType(source_type)
         if source_type is CodebaseSourceType.ZIP:
@@ -111,12 +109,12 @@ class CodebaseSourceValidator:
         self,
         source_type: CodebaseSourceType,
         *,
-        file_id: Optional[str] = None,
-        git_url: Optional[str] = None,
-        file_ids: Optional[list[str]] = None,
+        file_id: str | None = None,
+        git_url: str | None = None,
+        file_ids: list[str] | None = None,
         uow,
         file_storage,
-        scope: Optional[OwnerScope] = None,
+        scope: OwnerScope | None = None,
     ) -> ValidatedCodebaseSource:
         validated = self.validate_source_shape(
             source_type,
@@ -138,7 +136,7 @@ class CodebaseSourceValidator:
         try:
             stream, _storage_info = await file_storage.download_file(validated.file_id)
             payload = stream.read()
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             raise BadRequestError("zip 文件不可下载") from exc
         self.validate_zip_bytes(payload)
         return validated
@@ -154,11 +152,7 @@ class CodebaseSourceValidator:
         if parsed.username or parsed.password:
             raise BadRequestError("Git URL 不能包含凭据")
         port = parsed.port or 443
-        if (
-            not self._allow_non_default_git_ports
-            and parsed.port is not None
-            and parsed.port != 443
-        ):
+        if not self._allow_non_default_git_ports and parsed.port is not None and parsed.port != 443:
             raise BadRequestError("Git URL 不允许非默认端口")
         for address in self._addresses_for_host(parsed.hostname, port):
             self._reject_unsafe_address(address)

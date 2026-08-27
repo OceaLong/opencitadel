@@ -2,6 +2,7 @@
 
 Structure mirrors ops-collector/src/opencitadel_ops_collector/config.py.
 """
+
 from __future__ import annotations
 
 from typing import Literal

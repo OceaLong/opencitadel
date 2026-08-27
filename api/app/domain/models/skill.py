@@ -1,14 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
-from enum import Enum
-from typing import List, Literal, Optional
+from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.domain.utils.time_utils import utc_now
 
-class ResourceVisibility(str, Enum):
+
+class ResourceVisibility(StrEnum):
     GLOBAL = "global"
     PRIVATE = "private"
 
@@ -16,22 +16,21 @@ class ResourceVisibility(str, Enum):
 class SkillResource(BaseModel):
     name: str = ""
     kind: Literal["template", "script", "reference"] = "reference"
-    path: Optional[str] = None
-    content: Optional[str] = None
+    path: str | None = None
+    content: str | None = None
 
 
 class SkillAgentParams(BaseModel):
-    """Skill覆盖的Agent参数"""
-    max_iterations: Optional[int] = None
-    max_retries: Optional[int] = None
-    max_search_results: Optional[int] = None
-    temperature_override: Optional[float] = None
-    tool_gate_call_level_enabled: Optional[bool] = None
-    writing_style_override: Optional[Literal["prose", "adaptive"]] = None
+    """Execution settings applied when admitting an Agent Run."""
+
+    max_iterations: int | None = Field(default=None, ge=1, le=100)
+    max_retries: int | None = Field(default=None, ge=0, le=10)
+    temperature_override: float | None = Field(default=None, ge=0, le=2)
 
 
 class Skill(BaseModel):
     """Skill技能模板领域模型"""
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = ""
     slug: str = ""
@@ -40,34 +39,28 @@ class Skill(BaseModel):
     category: str = "general"
     system_prompt: str = ""
     body: str = ""
-    resources: List[SkillResource] = Field(default_factory=list)
-    allowed_tools: List[str] = Field(default_factory=list)
-    mcp_server_refs: List[str] = Field(default_factory=list)
-    a2a_server_refs: List[str] = Field(default_factory=list)
-    recommended_model_id: Optional[str] = None
+    resources: list[SkillResource] = Field(default_factory=list)
+    allowed_tools: list[str] = Field(default_factory=list)
+    mcp_server_refs: list[str] = Field(default_factory=list)
+    a2a_server_refs: list[str] = Field(default_factory=list)
+    recommended_model_id: str | None = None
     agent_params: SkillAgentParams = Field(default_factory=SkillAgentParams)
-    examples: List[str] = Field(default_factory=list)
+    examples: list[str] = Field(default_factory=list)
     override_base_rules: bool = False
-    auto_recommend: bool = True
     source_format: Literal["native", "claude_md"] = "native"
     is_builtin: bool = False
     enabled: bool = True
-    owner_user_id: Optional[str] = None
-    team_id: Optional[str] = None
+    owner_user_id: str | None = None
+    team_id: str | None = None
     visibility: str = ResourceVisibility.GLOBAL
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class SkillSummary(BaseModel):
     """Skill摘要，用于会话详情返回"""
+
     id: str
     name: str
     icon: str = "🤖"
-    examples: List[str] = Field(default_factory=list)
-
-
-class SkillRecommendResult(BaseModel):
-    skill_id: Optional[str] = None
-    confidence: float = 0.0
-    reason: str = ""
+    examples: list[str] = Field(default_factory=list)

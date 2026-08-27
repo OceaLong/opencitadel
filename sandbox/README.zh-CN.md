@@ -78,7 +78,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 docker compose build opencitadel-sandbox
 ```
 
-默认生产路径为动态沙箱：`api/config.yaml` 中 `sandbox.address: null` 时，Worker 通过 Docker/Kubernetes driver 按任务创建 `opencitadel-sandbox-*` 实例。固定容器仅用于 `docker compose --profile fixed-sandbox` 或外部沙箱集群，此时再通过 `sandbox.address` 连接。
+默认生产路径使用动态沙箱。Deployment Settings 选择 Docker/Kubernetes Driver、镜像、网络、代理与 Namespace；活动 Operations Policy 在每次认证创建请求中携带 TTL 与资源限制。固定容器仅用于 `docker compose --profile fixed-sandbox` 或显式部署的外部沙箱服务。
 
 ### 超时配置
 
@@ -88,7 +88,7 @@ docker compose build opencitadel-sandbox
 SERVER_TIMEOUT_MINUTES=60   # 推荐（pydantic-settings 标准名）
 ```
 
-API/Worker 侧通过 `SANDBOX_TTL_MINUTES` 创建动态沙箱时注入 `SERVER_TIMEOUT_MINUTES`。
+执行内核通过 `SANDBOX_TTL_MINUTES` 创建动态沙箱时注入 `SERVER_TIMEOUT_MINUTES`。
 
 ### 端口说明
 

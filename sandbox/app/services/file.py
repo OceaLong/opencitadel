@@ -1,29 +1,23 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
 import glob
 import logging
 import os.path
 import re
 import shlex
-from typing import Optional
 
+from anyio import Path as AsyncPath
 from fastapi import UploadFile
 
-from app.interfaces.errors.exceptions import (
-    NotFoundException,
-    BadRequestException,
-    AppException
-)
+from app.interfaces.errors.exceptions import AppException, BadRequestException, NotFoundException
 from app.models.file import (
+    FileCheckResult,
+    FileDeleteResult,
+    FileFindResult,
     FileReadResult,
-    FileWriteResult,
     FileReplaceResult,
     FileSearchResult,
-    FileFindResult,
     FileUploadResult,
-    FileCheckResult,
-    FileDeleteResult
+    FileWriteResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -102,20 +96,20 @@ class FileService:
 
     @classmethod
     async def read_file(
-            cls,
-            filepath: str,
-            start_line: Optional[int] = None,
-            end_line: Optional[int] = None,
-            sudo: bool = False,
-            max_length: Optional[int] = 10000,
+        cls,
+        filepath: str,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        sudo: bool = False,
+        max_length: int | None = 10000,
     ) -> FileReadResult:
         """根据传递的文件路径+起始行号+权限+最大长度读取文件内容"""
         try:
             filepath = cls._normalize_filepath(filepath)
 
             # 1.检测在当前权限下能否获取该文件
-            if not os.path.exists(filepath) and not sudo:
-                logger.error(f"要读取的文件不存在或无权限: {filepath}")
+            if not await AsyncPath(filepath).exists() and not sudo:
+                logger.error("要读取的文件不存在或无权限: %s", filepath)
                 raise NotFoundException(f"要读取的文件不存在或无权限: {filepath}")
 
             # 2.ubuntu系统下统一使用utf-8编码
@@ -144,10 +138,12 @@ class FileService:
                 # 8.创建一个内部读取函数
                 def async_read_file() -> str:
                     try:
-                        with open(filepath, "r", encoding=encoding) as f:
+                        with open(filepath, encoding=encoding) as f:
                             return f.read()
-                    except Exception as async_read_file_exception:
-                        raise AppException(msg=f"读取文件失败: {str(async_read_file_exception)}")
+                    except (OSError, RuntimeError, ValueError) as async_read_file_exception:
+                        raise AppException(
+                            msg=f"读取文件失败: {async_read_file_exception!s}"
+                        ) from async_read_file_exception
 
                 # 9.使用asyncio创建线程读取文件
                 content = await asyncio.to_thread(async_read_file)
@@ -165,21 +161,21 @@ class FileService:
                 content = content[:max_length] + "(truncated)"
 
             return FileReadResult(filepath=filepath, content=content)
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             # 13.判断异常类型执行不同操作
-            if isinstance(e, BadRequestException) or isinstance(e, AppException):
+            if isinstance(e, (BadRequestException, AppException)):
                 raise
-            raise AppException(f"文件读取失败: {str(e)}")
+            raise AppException(f"文件读取失败: {e!s}") from e
 
     @classmethod
     async def write_file(
-            cls,
-            filepath: str,
-            content: str,
-            append: bool = False,
-            leading_newline: bool = False,
-            trailing_newline: bool = False,
-            sudo: bool = False,
+        cls,
+        filepath: str,
+        content: str,
+        append: bool = False,
+        leading_newline: bool = False,
+        trailing_newline: bool = False,
+        sudo: bool = False,
     ) -> FileWriteResult:
         """根据传递的文件路径+内容向指定文件写入内容"""
         try:
@@ -221,18 +217,19 @@ class FileService:
                     )
 
                     # 8.等待子进程执行完毕
-                    stdout, stderr = await process.communicate()
+                    _stdout, stderr = await process.communicate()
 
                     # 9.检测子进程是否正常执行
                     if process.returncode != 0:
                         raise BadRequestException(f"文件内容写入失败: {stderr.decode()}")
                 finally:
                     # 10.清除下临时文件
-                    if os.path.exists(temp_file):
-                        os.unlink(temp_file)
+                    temp_path = AsyncPath(temp_file)
+                    if await temp_path.exists():
+                        await temp_path.unlink()
             else:
                 # 11.非sudo使用Python方式写入，先确保文件路径存在
-                os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                await AsyncPath(filepath).parent.mkdir(parents=True, exist_ok=True)
 
                 # 12.创建一个异步写入的函数
                 def async_write_file() -> int:
@@ -247,19 +244,19 @@ class FileService:
                 filepath=filepath,
                 bytes_written=bytes_written,
             )
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             # 14.根据不同的错误执行不同的操作
-            logger.error(f"文件内容写入失败: {str(e)}")
+            logger.error("文件内容写入失败: %s", e)
             if isinstance(e, BadRequestException):
                 raise
-            raise AppException(f"文件内容写入失败: {str(e)}")
+            raise AppException(f"文件内容写入失败: {e!s}") from e
 
     async def replace_in_file(
-            self,
-            filepath: str,
-            old_str: str,
-            new_str: str,
-            sudo: bool = False,
+        self,
+        filepath: str,
+        old_str: str,
+        new_str: str,
+        sudo: bool = False,
     ) -> FileReplaceResult:
         """根据传递的数据替换文件内指定的内容"""
         filepath = self._normalize_filepath(filepath)
@@ -285,10 +282,10 @@ class FileService:
         return FileReplaceResult(filepath=filepath, replaced_count=replaced_count)
 
     async def search_in_file(
-            self,
-            filepath: str,
-            regex: str,
-            sudo: bool = False,
+        self,
+        filepath: str,
+        regex: str,
+        sudo: bool = False,
     ) -> FileSearchResult:
         """根据传递的文件路径+匹配规则查询文件内符合的内容"""
         filepath = self._normalize_filepath(filepath)
@@ -305,8 +302,8 @@ class FileService:
         # 3.将外部传递的regex转换为正则
         try:
             pattern = re.compile(regex)
-        except Exception as e:
-            raise BadRequestException(f"传递正则表达式[{regex}]出错: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            raise BadRequestException(f"传递正则表达式[{regex}]出错: {e!s}") from e
 
         # 4.创建一个异步函数，使用子线程方式执行避免长时间io阻塞
         def async_matches():
@@ -332,7 +329,7 @@ class FileService:
         dir_path = cls._normalize_dirpath(dir_path)
 
         # 1.检测下传递进来的目录是否存在
-        if not os.path.exists(dir_path):
+        if not await AsyncPath(dir_path).exists():
             raise NotFoundException(f"当前文件夹不存在: {dir_path}")
 
         # 2.定义一个异步函数使用asyncio子线程运行避免IO阻塞
@@ -356,7 +353,7 @@ class FileService:
             file_size = 0
 
             # 2.确保上传文件所在的目录存在
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            await AsyncPath(filepath).parent.mkdir(parents=True, exist_ok=True)
 
             # 3.定义一个异步函数用于上传文件避免阻塞进程
             def async_write_file():
@@ -377,15 +374,15 @@ class FileService:
                 file_size=file_size,
                 success=True,
             )
-        except Exception as e:
-            logger.error(f"上传文件到沙箱出错: {str(e)}")
-            raise AppException(f"上传文件到沙箱出错: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("上传文件到沙箱出错: %s", e)
+            raise AppException(f"上传文件到沙箱出错: {e!s}") from e
 
     @classmethod
     async def ensure_file(cls, filepath: str) -> None:
         """传递filepath用于确保当前文件存在"""
         filepath = cls._normalize_filepath(filepath)
-        if not os.path.exists(filepath):
+        if not await AsyncPath(filepath).exists():
             raise NotFoundException(f"该文件不存在: {filepath}")
 
     @classmethod
@@ -394,7 +391,7 @@ class FileService:
         filepath = cls._normalize_filepath(filepath)
         return FileCheckResult(
             filepath=filepath,
-            exists=os.path.exists(filepath),
+            exists=await AsyncPath(filepath).exists(),
         )
 
     async def delete_file(self, filepath: str) -> FileDeleteResult:
@@ -409,6 +406,6 @@ class FileService:
             # 2.调用命令删除文件
             os.remove(filepath)
             return FileDeleteResult(filepath=filepath, deleted=True)
-        except Exception as e:
-            logger.error(f"删除文件{filepath}失败: {str(e)}")
-            raise AppException(f"删除文件{filepath}失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("删除文件%s失败: %s", filepath, e)
+            raise AppException(f"删除文件{filepath}失败: {e!s}") from e

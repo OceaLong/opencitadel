@@ -1,34 +1,23 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""Opt-in PostgreSQL proof for exact historical KB retrieval closure."""
+"""Canonical PostgreSQL proof for exact historical KB retrieval closure."""
+
 from __future__ import annotations
 
-import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import delete, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.domain.models.authorization import AuthorizationContext
-from app.infrastructure.models.knowledge_base import KnowledgeBaseModel
 from app.infrastructure.repositories.db_knowledge_base_repository import (
     DBKnowledgeBaseRepository,
 )
 from app.infrastructure.security.db_authorization import (
     configure_session_authorization,
 )
-from core.config import get_settings
-
-
-pytestmark = pytest.mark.skipif(
-    os.getenv("OPENCITADEL_RUN_POSTGRES_INTEGRATION") != "1",
-    reason=(
-        "set OPENCITADEL_RUN_POSTGRES_INTEGRATION=1 for exact "
-        "version-scoped retrieval SQL proof"
-    ),
-)
+from core.config import load_deployment_settings
+from tests.app.execution_test_support import authenticated_session_factory
 
 
 async def _execute_batch(session, sql: str, params: dict) -> None:
@@ -38,11 +27,14 @@ async def _execute_batch(session, sql: str, params: dict) -> None:
 
 
 @pytest.mark.asyncio
-async def test_historical_retrieval_never_reads_active_candidate_or_foreign_rows(
-    _db_schema,
-):
-    engine = create_async_engine(get_settings().sqlalchemy_database_uri)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
+@pytest.mark.usefixtures("postgres_integration")
+async def test_historical_retrieval_never_reads_active_candidate_or_foreign_rows():
+    settings = load_deployment_settings()
+    engine = create_async_engine(settings.sqlalchemy_database_uri)
+    sessions = authenticated_session_factory(
+        engine,
+        signing_secret=settings.session_secret,
+    )
     suffix = uuid.uuid4().hex
     ids = {
         key: f"task5-{key}-{suffix}"
@@ -67,7 +59,7 @@ async def test_historical_retrieval_never_reads_active_candidate_or_foreign_rows
             "foreign_child",
         )
     }
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     system = AuthorizationContext.system("task5-versioned-retrieval")
     try:
         async with sessions() as session:
@@ -77,29 +69,28 @@ async def test_historical_retrieval_never_reads_active_candidate_or_foreign_rows
                 """
                 INSERT INTO knowledge_bases
                     (id, name, status, doc_count, chunk_count,
-                     vector_degraded, legacy_v1_migrated, settings,
+                     vector_degraded, settings,
                      created_at, updated_at)
                 VALUES
-                    (:kb, 'kb', 'ready', 1, 2, false, true,
+                    (:kb, 'kb', 'ready', 1, 2, false,
                      '{}'::jsonb, :now, :now),
-                    (:foreign_kb, 'foreign', 'ready', 1, 1, false, true,
+                    (:foreign_kb, 'foreign', 'ready', 1, 1, false,
                      '{}'::jsonb, :now, :now);
                 INSERT INTO knowledge_base_versions
                     (id, knowledge_base_id, state, capabilities,
-                     degraded_reasons, metrics, legacy_snapshot,
-                     created_at, published_at)
+                     degraded_reasons, metrics, created_at, published_at)
                 VALUES
                     (:v1, :kb, 'ready',
-                     '{"keyword_search":true}'::jsonb,
-                     '[]'::jsonb, '{}'::jsonb, false, :now, :now),
+                     jsonb_build_object('keyword_search', true),
+                     '[]'::jsonb, '{}'::jsonb, :now, :now),
                     (:v2, :kb, 'ready',
-                     '{"keyword_search":true}'::jsonb,
-                     '[]'::jsonb, '{}'::jsonb, false, :now, :now),
+                     jsonb_build_object('keyword_search', true),
+                     '[]'::jsonb, '{}'::jsonb, :now, :now),
                     (:candidate, :kb, 'building', '{}'::jsonb,
-                     '[]'::jsonb, '{}'::jsonb, false, :now, NULL),
+                     '[]'::jsonb, '{}'::jsonb, :now, NULL),
                     (:foreign_v, :foreign_kb, 'ready',
-                     '{"keyword_search":true}'::jsonb,
-                     '[]'::jsonb, '{}'::jsonb, false, :now, :now);
+                     jsonb_build_object('keyword_search', true),
+                     '[]'::jsonb, '{}'::jsonb, :now, :now);
                 UPDATE knowledge_bases SET active_version_id = :v2
                 WHERE id = :kb;
                 UPDATE knowledge_bases SET active_version_id = :foreign_v
@@ -114,17 +105,16 @@ async def test_historical_retrieval_never_reads_active_candidate_or_foreign_rows
                      '', 1, 'ready', :now, :now);
                 INSERT INTO knowledge_document_revisions
                     (id, document_id, source_ref, source_digest,
-                     parsed_blocks, page_count, state,
-                     needs_chunk_clone, created_at)
+                     parsed_blocks, page_count, state, created_at)
                 VALUES
                     (:rev1, :doc, '', :digest1, '[]'::jsonb, 1,
-                     'indexed', false, :now),
+                     'indexed', :now),
                     (:rev2, :doc, '', :digest2, '[]'::jsonb, 1,
-                     'indexed', false, :now),
+                     'indexed', :now),
                     (:candidate_rev, :doc, '', :digest3, '[]'::jsonb, 1,
-                     'indexed', false, :now),
+                     'indexed', :now),
                     (:foreign_rev, :foreign_doc, '', :digest4,
-                     '[]'::jsonb, 1, 'indexed', false, :now);
+                     '[]'::jsonb, 1, 'indexed', :now);
                 INSERT INTO knowledge_base_version_documents
                     (version_id, knowledge_base_id, document_id,
                      document_revision_id, ordinal, state)
@@ -180,12 +170,18 @@ async def test_historical_retrieval_never_reads_active_candidate_or_foreign_rows
             assert [item.chunk.id for item in v1] == [ids["v1_child"]]
             assert [item.document_revision_id for item in v1] == [ids["rev1"]]
             assert [item.chunk.id for item in v2] == [ids["v2_child"]]
-            assert await repository.bm25_search_chunks_for_version(
-                ids["kb"], ids["candidate"], "release", limit=10
-            ) == []
-            assert await repository.bm25_search_chunks_for_version(
-                ids["kb"], ids["foreign_v"], "release", limit=10
-            ) == []
+            assert (
+                await repository.bm25_search_chunks_for_version(
+                    ids["kb"], ids["candidate"], "release", limit=10
+                )
+                == []
+            )
+            assert (
+                await repository.bm25_search_chunks_for_version(
+                    ids["kb"], ids["foreign_v"], "release", limit=10
+                )
+                == []
+            )
             exact = await repository.get_chunks_by_ids_for_version(
                 ids["kb"],
                 ids["v1"],
@@ -198,20 +194,14 @@ async def test_historical_retrieval_never_reads_active_candidate_or_foreign_rows
                 [ids["v1_parent"], ids["v2_parent"]],
             )
             assert [item.id for item in parents] == [ids["v1_parent"]]
-            document = await repository.get_document_for_version(
-                ids["kb"], ids["v1"], ids["doc"]
-            )
+            document = await repository.get_document_for_version(ids["kb"], ids["v1"], ids["doc"])
             assert document is not None
             assert document[1] == ids["rev1"]
     finally:
         async with sessions() as cleanup:
             await configure_session_authorization(cleanup, system)
-            await cleanup.execute(
-                delete(KnowledgeBaseModel).where(
-                    KnowledgeBaseModel.id.in_(
-                        [ids["kb"], ids["foreign_kb"]]
-                    )
-                )
-            )
+            repository = DBKnowledgeBaseRepository(cleanup)
+            await repository.delete_kb(ids["kb"])
+            await repository.delete_kb(ids["foreign_kb"])
             await cleanup.commit()
         await engine.dispose()

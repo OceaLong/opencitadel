@@ -1,16 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from authlib.integrations.starlette_client import OAuth
 
 
 class OAuthClients:
     def __init__(
-            self,
-            *,
-            google_client_id: str = "",
-            google_client_secret: str = "",
-            github_client_id: str = "",
-            github_client_secret: str = "",
+        self,
+        *,
+        google_client_id: str = "",
+        google_client_secret: str = "",
+        github_client_id: str = "",
+        github_client_secret: str = "",
     ) -> None:
         self.oauth = OAuth()
         if google_client_id and google_client_secret:

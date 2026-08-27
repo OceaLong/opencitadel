@@ -1,30 +1,28 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import os.path
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse
 
 from app.interfaces.schemas.base import Response
 from app.interfaces.schemas.file import (
+    FileCheckRequest,
+    FileDeleteRequest,
+    FileFindRequest,
     FileReadRequest,
-    FileWriteRequest,
     FileReplaceRequest,
     FileSearchRequest,
-    FileFindRequest,
-    FileCheckRequest,
-    FileDeleteRequest
+    FileWriteRequest,
 )
 from app.interfaces.service_dependencies import get_file_service
 from app.models.file import (
+    FileCheckResult,
+    FileDeleteResult,
+    FileFindResult,
     FileReadResult,
-    FileWriteResult,
     FileReplaceResult,
     FileSearchResult,
-    FileFindResult,
     FileUploadResult,
-    FileCheckResult,
-    FileDeleteResult
+    FileWriteResult,
 )
 from app.services.file import FileService
 
@@ -37,8 +35,8 @@ router = APIRouter(prefix="/file", tags=["文件模块"])
     response_model=Response[FileReadResult],
 )
 async def read_file(
-        request: FileReadRequest,
-        file_service: FileService = Depends(get_file_service),
+    request: FileReadRequest,
+    file_service: FileService = Depends(get_file_service),
 ) -> Response[FileReadResult]:
     """根据传递的数据读取沙箱中的文件内容"""
     result = await file_service.read_file(
@@ -60,8 +58,8 @@ async def read_file(
     response_model=Response[FileWriteResult],
 )
 async def write_file(
-        request: FileWriteRequest,
-        file_service: FileService = Depends(get_file_service),
+    request: FileWriteRequest,
+    file_service: FileService = Depends(get_file_service),
 ) -> Response[FileWriteResult]:
     """根据传递的数据向指定文件写入内容"""
     result = await file_service.write_file(
@@ -84,8 +82,8 @@ async def write_file(
     response_model=Response[FileReplaceResult],
 )
 async def replace_in_file(
-        request: FileReplaceRequest,
-        file_service: FileService = Depends(get_file_service),
+    request: FileReplaceRequest,
+    file_service: FileService = Depends(get_file_service),
 ) -> Response[FileReplaceResult]:
     """根据传递的数据替换文件内的部分内容"""
     result = await file_service.replace_in_file(
@@ -106,8 +104,8 @@ async def replace_in_file(
     response_model=Response[FileSearchResult],
 )
 async def search_in_file(
-        request: FileSearchRequest,
-        file_service: FileService = Depends(get_file_service),
+    request: FileSearchRequest,
+    file_service: FileService = Depends(get_file_service),
 ) -> Response[FileSearchResult]:
     """根据传递的数据检索指定文件的内容"""
     result = await file_service.search_in_file(
@@ -127,8 +125,8 @@ async def search_in_file(
     response_model=Response[FileFindResult],
 )
 async def find_files(
-        request: FileFindRequest,
-        file_service: FileService = Depends(get_file_service),
+    request: FileFindRequest,
+    file_service: FileService = Depends(get_file_service),
 ) -> Response[FileFindRequest]:
     """根据传递的文件夹+glob文件规则查找文件列表"""
     result = await file_service.find_files(
@@ -147,9 +145,9 @@ async def find_files(
     response_model=Response[FileUploadResult],
 )
 async def upload_file(
-        file: UploadFile = File(...),  # 上传的文件源
-        filepath: str = Form(None),  # 上传的文件路径
-        file_service: FileService = Depends(get_file_service),
+    file: UploadFile = File(...),  # 上传的文件源
+    filepath: str = Form(None),  # 上传的文件路径
+    file_service: FileService = Depends(get_file_service),
 ) -> Response[FileUploadResult]:
     """根据传递的文件源+路径上传文件到沙箱"""
     # 1.判断filepath是否传递，如果没有则使用临时路径
@@ -167,8 +165,8 @@ async def upload_file(
 
 @router.get(path="/download-file")
 async def download_file(
-        filepath: str,
-        file_service: FileService = Depends(get_file_service),
+    filepath: str,
+    file_service: FileService = Depends(get_file_service),
 ) -> FileResponse:
     """根据传递的filepath下载指定的文件"""
     # 0.归一化路径(containment校验)，后续统一使用归一化后的路径，
@@ -195,8 +193,8 @@ async def download_file(
     response_model=Response[FileCheckResult],
 )
 async def check_file_exists(
-        request: FileCheckRequest,
-        file_service: FileService = Depends(get_file_service),
+    request: FileCheckRequest,
+    file_service: FileService = Depends(get_file_service),
 ) -> Response[FileCheckResult]:
     """根据传递的路径判断文件是否存在"""
     result = await file_service.check_file_exists(filepath=request.filepath)
@@ -212,8 +210,8 @@ async def check_file_exists(
     response_model=Response[FileDeleteResult],
 )
 async def delete_file(
-        request: FileDeleteRequest,
-        file_service: FileService = Depends(get_file_service),
+    request: FileDeleteRequest,
+    file_service: FileService = Depends(get_file_service),
 ) -> Response[FileDeleteResult]:
     """根据传递的文件路径删除指定的文件"""
     result = await file_service.delete_file(

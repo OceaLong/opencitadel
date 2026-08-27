@@ -19,12 +19,10 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 export type OperatorScope = "owned" | "third_party_saas";
-export type GateProfile = "loose" | "standard" | "strict";
 
 export type OperatorSessionConfig = {
   scope: OperatorScope;
   operatorDomains: string[];
-  gateProfile: GateProfile;
 };
 
 type OperatorScopeDialogProps = {
@@ -35,12 +33,9 @@ type OperatorScopeDialogProps = {
   initialConfig?: Partial<OperatorSessionConfig>;
 };
 
-const GATE_PROFILES: GateProfile[] = ["loose", "standard", "strict"];
-
 const DEFAULT_CONFIG: OperatorSessionConfig = {
   scope: "owned",
   operatorDomains: ["ops-console", "localhost"],
-  gateProfile: "standard",
 };
 
 export function OperatorScopeDialog({
@@ -52,7 +47,6 @@ export function OperatorScopeDialog({
 }: OperatorScopeDialogProps) {
   const [scope, setScope] = useState<OperatorScope>(DEFAULT_CONFIG.scope);
   const [domainsText, setDomainsText] = useState(DEFAULT_CONFIG.operatorDomains.join(", "));
-  const [gateProfile, setGateProfile] = useState<GateProfile>(DEFAULT_CONFIG.gateProfile);
   const t = useTranslations("operatorScope");
   const tCommon = useTranslations("common");
   const isEdit = mode === "edit";
@@ -61,13 +55,11 @@ export function OperatorScopeDialog({
     if (!open) return;
     const nextScope = initialConfig?.scope ?? DEFAULT_CONFIG.scope;
     const nextDomains = initialConfig?.operatorDomains ?? DEFAULT_CONFIG.operatorDomains;
-    const nextProfile = initialConfig?.gateProfile ?? DEFAULT_CONFIG.gateProfile;
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
       setScope(nextScope);
       setDomainsText(nextDomains.join(", "));
-      setGateProfile(nextProfile);
     });
     return () => {
       cancelled = true;
@@ -79,6 +71,7 @@ export function OperatorScopeDialog({
       .split(/[\n,]+/)
       .map((item) => item.trim())
       .filter(Boolean);
+  const operatorDomains = parseDomains(domainsText);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -109,17 +102,17 @@ export function OperatorScopeDialog({
               <button
                 type="button"
                 className={cn(
-                  "hover:bg-muted/60 w-full rounded-lg border border-gate-subtle p-3 text-left transition-colors",
-                  scope === "third_party_saas" && "border-gate bg-gate-subtle",
+                  "hover:bg-muted/60 border-approval-subtle w-full rounded-lg border p-3 text-left transition-colors",
+                  scope === "third_party_saas" && "border-approval bg-approval-subtle",
                 )}
                 onClick={() => setScope("third_party_saas")}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium">{t("thirdPartyTitle")}</span>
-                  {scope === "third_party_saas" && <Check className="size-4 text-warning" />}
+                  {scope === "third_party_saas" && <Check className="text-warning size-4" />}
                 </div>
                 <p className="text-muted-foreground mt-1 flex items-start gap-1 text-xs">
-                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
+                  <AlertTriangle className="text-warning mt-0.5 size-3.5 shrink-0" />
                   {t("thirdPartyDescription")}
                 </p>
               </button>
@@ -136,31 +129,6 @@ export function OperatorScopeDialog({
             />
             <p className="text-muted-foreground text-xs">{t("domainsHint")}</p>
           </div>
-
-          <div className="space-y-2">
-            <Label>{t("gateProfileLabel")}</Label>
-            <div className="grid gap-2">
-              {GATE_PROFILES.map((profile) => (
-                <button
-                  key={profile}
-                  type="button"
-                  className={cn(
-                    "hover:bg-muted/60 rounded-lg border p-3 text-left transition-colors",
-                    gateProfile === profile && "border-primary bg-primary/5",
-                  )}
-                  onClick={() => setGateProfile(profile)}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium">{t(`gateProfile.${profile}.title`)}</span>
-                    {gateProfile === profile && <Check className="text-primary size-4" />}
-                  </div>
-                  <p className="text-muted-foreground mt-1 text-xs">
-                    {t(`gateProfile.${profile}.description`)}
-                  </p>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         <DialogFooter>
@@ -168,11 +136,11 @@ export function OperatorScopeDialog({
             {tCommon("cancel")}
           </Button>
           <Button
+            disabled={operatorDomains.length === 0}
             onClick={() => {
               onConfirm({
                 scope,
-                operatorDomains: parseDomains(domainsText),
-                gateProfile,
+                operatorDomains,
               });
               onOpenChange(false);
             }}

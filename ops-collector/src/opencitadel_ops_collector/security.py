@@ -1,4 +1,5 @@
 """Allowlist enforcement shared by every probe."""
+
 from __future__ import annotations
 
 import ipaddress

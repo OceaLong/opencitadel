@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""Real-SQL tests for the 4 repository aggregate methods Task 5 (admin
+"""Real-SQL tests for governance repository aggregate methods.
 governance dashboard) added to feed GovernanceOverviewService.build_overview.
 
 Mirrors the SQLite-backed fixture pattern in
@@ -10,8 +8,10 @@ lightweight) SQLite engine, on throwaway shadow tables with Postgres-only
 DDL (``CURRENT_TIMESTAMP(0)`` defaults, ``::jsonb`` casts, cross-table FKs)
 stripped -- the SELECT/GROUP BY/WHERE logic under test is untouched.
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from types import SimpleNamespace
+from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 from sqlalchemy import Column, MetaData, Table, create_engine
@@ -25,12 +25,12 @@ from app.infrastructure.models.patrol import (
     PatrolRemediationModel,
     PatrolRunModel,
 )
-from app.infrastructure.models.resource_governance import ToolApprovalBatchORM
 from app.infrastructure.repositories.db_audit_repository import DBAuditRepository
 from app.infrastructure.repositories.db_patrol_repository import DBPatrolRepository
-from app.infrastructure.repositories.db_resource_governance_repository import (
-    DBResourceGovernanceRepository,
-)
+
+
+def utc(*args: int) -> datetime:
+    return datetime(*args, tzinfo=UTC)
 
 
 @compiles(JSONB, "sqlite")
@@ -66,7 +66,12 @@ def _shadow_table(orm_cls, metadata: MetaData) -> Table:
 @pytest.fixture
 def db():
     metadata = MetaData()
-    for orm_cls in (AuditLogORM, ToolApprovalBatchORM, PatrolRunModel, PatrolFindingModel, PatrolRemediationModel):
+    for orm_cls in (
+        AuditLogORM,
+        PatrolRunModel,
+        PatrolFindingModel,
+        PatrolRemediationModel,
+    ):
         _shadow_table(orm_cls, metadata)
     engine = create_engine("sqlite:///:memory:")
     metadata.create_all(engine)
@@ -74,8 +79,11 @@ def db():
         adapter = _AsyncSessionAdapter(session)
         yield SimpleNamespace(
             session=session,
-            audit=DBAuditRepository(adapter),
-            resource_governance=DBResourceGovernanceRepository(adapter),
+            audit=DBAuditRepository(
+                adapter,
+                signing_key="governance-audit-signing-key",
+                signing_key_id="test",
+            ),
             patrol=DBPatrolRepository(adapter),
         )
         session.rollback()
@@ -84,6 +92,7 @@ def db():
 
 # --- fixture builders: every NOT NULL column set explicitly (shadow tables
 # have no server-side defaults). ---
+
 
 def _audit_log(*, id: str, action: str, created_at: datetime) -> AuditLogORM:
     return AuditLogORM(
@@ -104,28 +113,12 @@ def _audit_log(*, id: str, action: str, created_at: datetime) -> AuditLogORM:
     )
 
 
-def _approval_batch(
-    *,
-    id: str,
-    status: str,
-    created_at: datetime,
-    decided_at: datetime | None = None,
-) -> ToolApprovalBatchORM:
-    return ToolApprovalBatchORM(
-        id=id,
-        session_id="session-1",
-        status=status,
-        expires_at=created_at,
-        created_at=created_at,
-        decided_at=decided_at,
-    )
-
-
 def _patrol_run(*, id: str, created_at: datetime) -> PatrolRunModel:
     return PatrolRunModel(
         id=id,
         pack_id="pack-1",
         session_id=None,
+        execution_run_id=uuid5(NAMESPACE_URL, f"test:patrol-run:{id}"),
         pack_version=1,
         pack_snapshot={},
         trigger_type="manual",
@@ -202,15 +195,20 @@ def _patrol_remediation(*, id: str, status: str, created_at: datetime) -> Patrol
 
 # --- AuditRepository.daily_action_counts ---
 
+
 @pytest.mark.asyncio
 async def test_daily_action_counts_groups_by_date_and_action(db):
     db.session.add_all(
         [
-            _audit_log(id="a1", action="agent_tool_approve", created_at=datetime(2026, 8, 1, 9)),
-            _audit_log(id="a2", action="agent_tool_approve", created_at=datetime(2026, 8, 1, 10)),
-            _audit_log(id="a3", action="agent_tool_reject", created_at=datetime(2026, 8, 1, 11)),
-            _audit_log(id="a4", action="agent_tool_approve", created_at=datetime(2026, 8, 2, 9)),
-            _audit_log(id="a5", action="unrelated", created_at=datetime(2026, 8, 1, 12)),
+            _audit_log(id="a1", action="agent_tool_approve", created_at=utc(2026, 8, 1, 9)),
+            _audit_log(
+                id="a2",
+                action="agent_tool_approve",
+                created_at=utc(2026, 8, 1, 10),
+            ),
+            _audit_log(id="a3", action="agent_tool_reject", created_at=utc(2026, 8, 1, 11)),
+            _audit_log(id="a4", action="agent_tool_approve", created_at=utc(2026, 8, 2, 9)),
+            _audit_log(id="a5", action="unrelated", created_at=utc(2026, 8, 1, 12)),
         ]
     )
     db.session.flush()
@@ -228,116 +226,46 @@ async def test_daily_action_counts_groups_by_date_and_action(db):
 async def test_daily_action_counts_respects_since(db):
     db.session.add_all(
         [
-            _audit_log(id="a1", action="agent_tool_denied", created_at=datetime(2026, 1, 1)),
-            _audit_log(id="a2", action="agent_tool_denied", created_at=datetime(2026, 8, 1)),
+            _audit_log(id="a1", action="agent_tool_denied", created_at=utc(2026, 1, 1)),
+            _audit_log(id="a2", action="agent_tool_denied", created_at=utc(2026, 8, 1)),
         ]
     )
     db.session.flush()
 
-    rows = await db.audit.daily_action_counts(["agent_tool_denied"], since=datetime(2026, 6, 1))
+    rows = await db.audit.daily_action_counts(["agent_tool_denied"], since=utc(2026, 6, 1))
 
     assert rows == [{"date": "2026-08-01", "action": "agent_tool_denied", "count": 1}]
 
 
 @pytest.mark.asyncio
 async def test_daily_action_counts_empty_actions_returns_empty_without_querying(db):
-    db.session.add(_audit_log(id="a1", action="agent_tool_denied", created_at=datetime(2026, 1, 1)))
+    db.session.add(_audit_log(id="a1", action="agent_tool_denied", created_at=utc(2026, 1, 1)))
     db.session.flush()
 
     assert await db.audit.daily_action_counts([]) == []
 
 
-# --- ResourceGovernanceRepository.approval_batch_stats ---
-
-@pytest.mark.asyncio
-async def test_approval_batch_stats_counts_pending_and_outcomes(db):
-    since = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    db.session.add_all(
-        [
-            _approval_batch(id="b1", status="pending", created_at=datetime(2026, 8, 1, tzinfo=timezone.utc)),
-            _approval_batch(id="b2", status="approved", created_at=datetime(2026, 8, 1, tzinfo=timezone.utc)),
-            _approval_batch(id="b3", status="approved", created_at=datetime(2026, 8, 1, tzinfo=timezone.utc)),
-            _approval_batch(id="b4", status="rejected", created_at=datetime(2026, 8, 1, tzinfo=timezone.utc)),
-        ]
-    )
-    db.session.flush()
-
-    stats = await db.resource_governance.approval_batch_stats(since)
-
-    assert stats["pending_count"] == 1
-    assert stats["outcomes"] == {"approved": 2, "rejected": 1, "expired": 0, "consumed": 0}
-
-
-@pytest.mark.asyncio
-async def test_approval_batch_stats_excludes_batches_before_since(db):
-    db.session.add_all(
-        [
-            _approval_batch(id="b1", status="pending", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc)),
-            _approval_batch(id="b2", status="pending", created_at=datetime(2026, 8, 1, tzinfo=timezone.utc)),
-        ]
-    )
-    db.session.flush()
-
-    stats = await db.resource_governance.approval_batch_stats(datetime(2026, 6, 1, tzinfo=timezone.utc))
-
-    assert stats["pending_count"] == 1
-
-
-@pytest.mark.asyncio
-async def test_approval_batch_stats_computes_average_decision_seconds(db):
-    since = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    db.session.add_all(
-        [
-            _approval_batch(
-                id="b1", status="approved",
-                created_at=datetime(2026, 8, 1, 0, 0, 0, tzinfo=timezone.utc),
-                decided_at=datetime(2026, 8, 1, 0, 0, 10, tzinfo=timezone.utc),
-            ),
-            _approval_batch(
-                id="b2", status="approved",
-                created_at=datetime(2026, 8, 1, 0, 0, 0, tzinfo=timezone.utc),
-                decided_at=datetime(2026, 8, 1, 0, 0, 30, tzinfo=timezone.utc),
-            ),
-            _approval_batch(id="b3", status="pending", created_at=datetime(2026, 8, 1, tzinfo=timezone.utc)),
-        ]
-    )
-    db.session.flush()
-
-    stats = await db.resource_governance.approval_batch_stats(since)
-
-    assert stats["avg_decision_seconds"] == pytest.approx(20.0)
-
-
-@pytest.mark.asyncio
-async def test_approval_batch_stats_average_is_none_without_decided_batches(db):
-    db.session.add(_approval_batch(id="b1", status="pending", created_at=datetime(2026, 8, 1, tzinfo=timezone.utc)))
-    db.session.flush()
-
-    stats = await db.resource_governance.approval_batch_stats(datetime(2026, 1, 1, tzinfo=timezone.utc))
-
-    assert stats["avg_decision_seconds"] is None
-
-
 # --- PatrolRepository.daily_run_finding_counts ---
+
 
 @pytest.mark.asyncio
 async def test_daily_run_finding_counts_merges_runs_and_findings_by_date(db):
     db.session.add_all(
         [
-            _patrol_run(id="r1", created_at=datetime(2026, 8, 1, 9)),
-            _patrol_run(id="r2", created_at=datetime(2026, 8, 1, 10)),
-            _patrol_run(id="r3", created_at=datetime(2026, 8, 2, 9)),
+            _patrol_run(id="r1", created_at=utc(2026, 8, 1, 9)),
+            _patrol_run(id="r2", created_at=utc(2026, 8, 1, 10)),
+            _patrol_run(id="r3", created_at=utc(2026, 8, 2, 9)),
         ]
     )
     db.session.add_all(
         [
-            _patrol_finding(id="f1", run_id="r1", first_seen_at=datetime(2026, 8, 1, 9, 5)),
-            _patrol_finding(id="f2", run_id="r3", first_seen_at=datetime(2026, 8, 3, 0)),
+            _patrol_finding(id="f1", run_id="r1", first_seen_at=utc(2026, 8, 1, 9, 5)),
+            _patrol_finding(id="f2", run_id="r3", first_seen_at=utc(2026, 8, 3, 0)),
         ]
     )
     db.session.flush()
 
-    rows = await db.patrol.daily_run_finding_counts(datetime(2026, 1, 1))
+    rows = await db.patrol.daily_run_finding_counts(utc(2026, 1, 1))
 
     assert rows == [
         {"date": "2026-08-01", "runs": 2, "findings": 1},
@@ -348,29 +276,30 @@ async def test_daily_run_finding_counts_merges_runs_and_findings_by_date(db):
 
 @pytest.mark.asyncio
 async def test_daily_run_finding_counts_respects_since_independently_per_series(db):
-    db.session.add(_patrol_run(id="r1", created_at=datetime(2026, 1, 1)))
-    db.session.add(_patrol_finding(id="f1", run_id="r1", first_seen_at=datetime(2026, 8, 1)))
+    db.session.add(_patrol_run(id="r1", created_at=utc(2026, 1, 1)))
+    db.session.add(_patrol_finding(id="f1", run_id="r1", first_seen_at=utc(2026, 8, 1)))
     db.session.flush()
 
-    rows = await db.patrol.daily_run_finding_counts(datetime(2026, 6, 1))
+    rows = await db.patrol.daily_run_finding_counts(utc(2026, 6, 1))
 
     assert rows == [{"date": "2026-08-01", "runs": 0, "findings": 1}]
 
 
 # --- PatrolRepository.remediation_status_counts ---
 
+
 @pytest.mark.asyncio
 async def test_remediation_status_counts_groups_by_status(db):
     db.session.add_all(
         [
-            _patrol_remediation(id="m1", status="verified", created_at=datetime(2026, 8, 1)),
-            _patrol_remediation(id="m2", status="verified", created_at=datetime(2026, 8, 2)),
-            _patrol_remediation(id="m3", status="failed", created_at=datetime(2026, 8, 1)),
+            _patrol_remediation(id="m1", status="verified", created_at=utc(2026, 8, 1)),
+            _patrol_remediation(id="m2", status="verified", created_at=utc(2026, 8, 2)),
+            _patrol_remediation(id="m3", status="failed", created_at=utc(2026, 8, 1)),
         ]
     )
     db.session.flush()
 
-    counts = await db.patrol.remediation_status_counts(datetime(2026, 1, 1))
+    counts = await db.patrol.remediation_status_counts(utc(2026, 1, 1))
 
     assert counts == {"verified": 2, "failed": 1}
 
@@ -379,12 +308,12 @@ async def test_remediation_status_counts_groups_by_status(db):
 async def test_remediation_status_counts_respects_since(db):
     db.session.add_all(
         [
-            _patrol_remediation(id="m1", status="verified", created_at=datetime(2026, 1, 1)),
-            _patrol_remediation(id="m2", status="verified", created_at=datetime(2026, 8, 1)),
+            _patrol_remediation(id="m1", status="verified", created_at=utc(2026, 1, 1)),
+            _patrol_remediation(id="m2", status="verified", created_at=utc(2026, 8, 1)),
         ]
     )
     db.session.flush()
 
-    counts = await db.patrol.remediation_status_counts(datetime(2026, 6, 1))
+    counts = await db.patrol.remediation_status_counts(utc(2026, 6, 1))
 
     assert counts == {"verified": 1}

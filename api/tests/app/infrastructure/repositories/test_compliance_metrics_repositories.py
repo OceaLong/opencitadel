@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Real-SQL tests for the 7 repository methods Task 4 (合规评估器真化) added
 to feed ComplianceService._collect_metrics. Mirrors the SQLite-backed
 fixture pattern in test_db_tool_approval_repository.py (create_engine +
@@ -16,8 +14,10 @@ test is completely untouched -- it still runs through the real
 ``app.infrastructure.repositories.db_*_repository`` classes against
 whatever table happens to be bound to that name on the connected engine.
 """
-from datetime import datetime, timedelta
+
+from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import Column, MetaData, Table, create_engine
@@ -27,15 +27,16 @@ from sqlalchemy.orm import Session
 
 from app.domain.models.codebase import SessionMode
 from app.infrastructure.models.audit_log import AuditLogORM
-from app.infrastructure.models.llm_endpoint import LLMEndpointORM
+from app.infrastructure.models.inference_endpoint import InferenceEndpointORM
 from app.infrastructure.models.session import SessionModel
-from app.infrastructure.models.session_checkpoint import SessionCheckpointModel
 from app.infrastructure.models.user import UserORM
 from app.infrastructure.repositories.db_audit_repository import DBAuditRepository
-from app.infrastructure.repositories.db_checkpoint_repository import DBCheckpointRepository
-from app.infrastructure.repositories.db_llm_endpoint_repository import DBLLMEndpointRepository
+from app.infrastructure.repositories.db_inference_endpoint_repository import (
+    DBInferenceEndpointRepository,
+)
 from app.infrastructure.repositories.db_session_repository import DBSessionRepository
 from app.infrastructure.repositories.db_user_repository import DBUserRepository
+from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 
 
 @compiles(JSONB, "sqlite")
@@ -67,7 +68,7 @@ def _shadow_table(orm_cls, metadata: MetaData) -> Table:
     Why: the real tables use Postgres-only server_default SQL
     (``CURRENT_TIMESTAMP(0)``, ``'...'::character varying``) that SQLite's
     DDL parser rejects outright, and FKs that reference tables (teams,
-    llm_models, ...) out of scope for these single-repository tests. None
+    inference_models, ...) out of scope for these single-repository tests. None
     of that affects the SELECT/GROUP BY/ORDER BY/LIKE queries under test --
     this file supplies every column explicitly on insert instead of relying
     on DB-side defaults.
@@ -82,7 +83,7 @@ def _shadow_table(orm_cls, metadata: MetaData) -> Table:
 @pytest.fixture
 def db():
     metadata = MetaData()
-    for orm_cls in (AuditLogORM, UserORM, SessionModel, SessionCheckpointModel, LLMEndpointORM):
+    for orm_cls in (AuditLogORM, UserORM, SessionModel, InferenceEndpointORM):
         _shadow_table(orm_cls, metadata)
     engine = create_engine("sqlite:///:memory:")
     metadata.create_all(engine)
@@ -90,10 +91,16 @@ def db():
         adapter = _AsyncSessionAdapter(session)
         yield SimpleNamespace(
             session=session,
-            audit=DBAuditRepository(adapter),
+            audit=DBAuditRepository(
+                adapter,
+                signing_key="compliance-audit-signing-key",
+                signing_key_id="test",
+            ),
             user=DBUserRepository(adapter),
-            checkpoint=DBCheckpointRepository(adapter),
-            llm_endpoint=DBLLMEndpointRepository(adapter, cipher=None),
+            inference_endpoint=DBInferenceEndpointRepository(
+                adapter,
+                cipher=ApiKeyCipher("c" * 32),
+            ),
             session_repo=DBSessionRepository(adapter),
         )
         session.rollback()
@@ -102,6 +109,7 @@ def db():
 
 # --- fixture builders: every NOT NULL column is set explicitly since the
 # shadow tables have no server-side defaults. ---
+
 
 def _audit_log(
     *,
@@ -129,7 +137,14 @@ def _audit_log(
     )
 
 
-def _user(*, id: str, email: str, username: str, global_role: str) -> UserORM:
+def _user(
+    *,
+    id: str,
+    email: str,
+    username: str,
+    global_role: str,
+    status: str = "active",
+) -> UserORM:
     return UserORM(
         id=id,
         email=email,
@@ -138,10 +153,10 @@ def _user(*, id: str, email: str, username: str, global_role: str) -> UserORM:
         display_name="",
         avatar_url="",
         global_role=global_role,
-        status="active",
+        status=status,
         token_version=0,
-        created_at=datetime(2026, 1, 1),
-        updated_at=datetime(2026, 1, 1),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
         last_login_at=None,
     )
 
@@ -150,7 +165,6 @@ def _session_row(*, id: str, mode: str, created_at: datetime) -> SessionModel:
     return SessionModel(
         id=id,
         sandbox_id=None,
-        task_id=None,
         title="",
         unread_message_count=0,
         latest_message="",
@@ -161,62 +175,42 @@ def _session_row(*, id: str, mode: str, created_at: datetime) -> SessionModel:
         owner_user_id=None,
         team_id=None,
         mode=mode,
-        pending_phase=None,
-        pending_metadata=None,
         operator_scope=None,
         operator_domains=[],
-        gate_profile=None,
         status="running",
-        current_run_epoch_id=None,
-        current_run_epoch_seq=None,
-        current_run_terminal_status=None,
         updated_at=created_at,
         created_at=created_at,
     )
 
 
-def _checkpoint(*, id: str, session_id: str, created_at: datetime) -> SessionCheckpointModel:
-    return SessionCheckpointModel(
-        id=id,
-        session_id=session_id,
-        anchor_type="step",
-        anchor_event_id="ev-1",
-        label="",
-        seq_before=None,
-        memories_snapshot={},
-        files_snapshot=[],
-        session_state={},
-        sandbox_snapshot_key=None,
-        browser_snapshot_key=None,
-        created_at=created_at,
-    )
-
-
-def _llm_endpoint(*, id: str, base_url: str) -> LLMEndpointORM:
-    return LLMEndpointORM(
+def _inference_endpoint(*, id: str, base_url: str) -> InferenceEndpointORM:
+    return InferenceEndpointORM(
         id=id,
         display_name="",
         provider="openai",
         base_url=base_url,
-        api_key="",
-        api_key_encryption="legacy_plaintext",
+        credential="",
+        credential_encryption="fernet_v2",
         owner_user_id=None,
         team_id=None,
         visibility="global",
-        created_at=datetime(2026, 1, 1),
-        updated_at=datetime(2026, 1, 1),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
 
 # --- AuditRepository.count_by_actions ---
 
+
 @pytest.mark.asyncio
 async def test_count_by_actions_matches_only_listed_actions(db):
     db.session.add_all(
         [
-            _audit_log(id="a1", action="login", created_at=datetime(2026, 1, 5)),
-            _audit_log(id="a2", action="logout", created_at=datetime(2026, 1, 5)),
-            _audit_log(id="a3", action="agent_tool_invoke", created_at=datetime(2026, 1, 5)),
+            _audit_log(id="a1", action="login", created_at=datetime(2026, 1, 5, tzinfo=UTC)),
+            _audit_log(id="a2", action="logout", created_at=datetime(2026, 1, 5, tzinfo=UTC)),
+            _audit_log(
+                id="a3", action="resource_updated", created_at=datetime(2026, 1, 5, tzinfo=UTC)
+            ),
         ]
     )
     db.session.flush()
@@ -230,14 +224,16 @@ async def test_count_by_actions_matches_only_listed_actions(db):
 async def test_count_by_actions_respects_time_window(db):
     db.session.add_all(
         [
-            _audit_log(id="a1", action="login", created_at=datetime(2026, 1, 1)),
-            _audit_log(id="a2", action="login", created_at=datetime(2026, 6, 1)),
+            _audit_log(id="a1", action="login", created_at=datetime(2026, 1, 1, tzinfo=UTC)),
+            _audit_log(id="a2", action="login", created_at=datetime(2026, 6, 1, tzinfo=UTC)),
         ]
     )
     db.session.flush()
 
     count = await db.audit.count_by_actions(
-        ["login"], start_at=datetime(2026, 3, 1), end_at=datetime(2026, 12, 1)
+        ["login"],
+        start_at=datetime(2026, 3, 1, tzinfo=UTC),
+        end_at=datetime(2026, 12, 1, tzinfo=UTC),
     )
 
     assert count == 1
@@ -245,7 +241,7 @@ async def test_count_by_actions_respects_time_window(db):
 
 @pytest.mark.asyncio
 async def test_count_by_actions_empty_list_is_zero_without_querying(db):
-    db.session.add(_audit_log(id="a1", action="login", created_at=datetime(2026, 1, 1)))
+    db.session.add(_audit_log(id="a1", action="login", created_at=datetime(2026, 1, 1, tzinfo=UTC)))
     db.session.flush()
 
     assert await db.audit.count_by_actions([]) == 0
@@ -253,13 +249,22 @@ async def test_count_by_actions_empty_list_is_zero_without_querying(db):
 
 # --- AuditRepository.count_by_action_prefix ---
 
+
 @pytest.mark.asyncio
 async def test_count_by_action_prefix_matches_prefix_only(db):
     db.session.add_all(
         [
-            _audit_log(id="a1", action="admin.user.patch", created_at=datetime(2026, 1, 5)),
-            _audit_log(id="a2", action="admin.team.delete", created_at=datetime(2026, 1, 5)),
-            _audit_log(id="a3", action="llm_endpoint_create", created_at=datetime(2026, 1, 5)),
+            _audit_log(
+                id="a1", action="admin.user.patch", created_at=datetime(2026, 1, 5, tzinfo=UTC)
+            ),
+            _audit_log(
+                id="a2", action="admin.team.delete", created_at=datetime(2026, 1, 5, tzinfo=UTC)
+            ),
+            _audit_log(
+                id="a3",
+                action="inference_endpoint_create",
+                created_at=datetime(2026, 1, 5, tzinfo=UTC),
+            ),
         ]
     )
     db.session.flush()
@@ -273,13 +278,16 @@ async def test_count_by_action_prefix_matches_prefix_only(db):
 async def test_count_by_action_prefix_does_not_match_substring_mid_string(db):
     # "team.admin.demote" contains "admin." but does not *start* with it --
     # must not be counted (proves LIKE 'prefix%' not '%prefix%').
-    db.session.add(_audit_log(id="a1", action="team.admin.demote", created_at=datetime(2026, 1, 5)))
+    db.session.add(
+        _audit_log(id="a1", action="team.admin.demote", created_at=datetime(2026, 1, 5, tzinfo=UTC))
+    )
     db.session.flush()
 
     assert await db.audit.count_by_action_prefix("admin.") == 0
 
 
 # --- AuditRepository.list_recent_chained ---
+
 
 @pytest.mark.asyncio
 async def test_list_recent_chained_orders_by_chain_seq_not_created_at(db):
@@ -289,16 +297,22 @@ async def test_list_recent_chained_orders_by_chain_seq_not_created_at(db):
     db.session.add_all(
         [
             _audit_log(
-                id="a1", action="x", chain_seq=1,
-                created_at=datetime(2026, 1, 10),
+                id="a1",
+                action="x",
+                chain_seq=1,
+                created_at=datetime(2026, 1, 10, tzinfo=UTC),
             ),
             _audit_log(
-                id="a2", action="x", chain_seq=2,
-                created_at=datetime(2026, 1, 1),
+                id="a2",
+                action="x",
+                chain_seq=2,
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
             ),
             _audit_log(
-                id="a3", action="x", chain_seq=3,
-                created_at=datetime(2026, 1, 20),
+                id="a3",
+                action="x",
+                chain_seq=3,
+                created_at=datetime(2026, 1, 20, tzinfo=UTC),
             ),
         ]
     )
@@ -309,10 +323,12 @@ async def test_list_recent_chained_orders_by_chain_seq_not_created_at(db):
     assert [log.chain_seq for log in sample] == [1, 2, 3]
     # created_at is carried through unsorted -- the anomaly is preserved for
     # the caller (ComplianceService) to detect, not hidden by this method.
-    assert [log.created_at for log in sample] == [
-        datetime(2026, 1, 10),
-        datetime(2026, 1, 1),
-        datetime(2026, 1, 20),
+    # SQLite's DBAPI returns naive values even when SQLAlchemy declares
+    # DateTime(timezone=True); reattach UTC only at this test-adapter boundary.
+    assert [log.created_at.replace(tzinfo=UTC) for log in sample] == [
+        datetime(2026, 1, 10, tzinfo=UTC),
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 1, 20, tzinfo=UTC),
     ]
 
 
@@ -321,8 +337,10 @@ async def test_list_recent_chained_respects_limit_and_takes_the_newest(db):
     for seq in range(1, 6):
         db.session.add(
             _audit_log(
-                id=f"a{seq}", action="x", chain_seq=seq,
-                created_at=datetime(2026, 1, seq),
+                id=f"a{seq}",
+                action="x",
+                chain_seq=seq,
+                created_at=datetime(2026, 1, seq, tzinfo=UTC),
             )
         )
     db.session.flush()
@@ -337,8 +355,12 @@ async def test_list_recent_chained_respects_limit_and_takes_the_newest(db):
 async def test_list_recent_chained_excludes_unchained_entries(db):
     db.session.add_all(
         [
-            _audit_log(id="a1", action="x", chain_seq=None, created_at=datetime(2026, 1, 1)),
-            _audit_log(id="a2", action="x", chain_seq=1, created_at=datetime(2026, 1, 2)),
+            _audit_log(
+                id="a1", action="x", chain_seq=None, created_at=datetime(2026, 1, 1, tzinfo=UTC)
+            ),
+            _audit_log(
+                id="a2", action="x", chain_seq=1, created_at=datetime(2026, 1, 2, tzinfo=UTC)
+            ),
         ]
     )
     db.session.flush()
@@ -349,6 +371,7 @@ async def test_list_recent_chained_excludes_unchained_entries(db):
 
 
 # --- UserRepository.count_by_role ---
+
 
 @pytest.mark.asyncio
 async def test_count_by_role_groups_correctly(db):
@@ -372,14 +395,56 @@ async def test_count_by_role_empty_table_returns_empty_dict(db):
     assert await db.user.count_by_role() == {}
 
 
+@pytest.mark.asyncio
+async def test_count_by_status_groups_active_and_disabled_users(db):
+    db.session.add_all(
+        [
+            _user(id="u1", email="a@x.com", username="a", global_role="admin"),
+            _user(
+                id="u2",
+                email="b@x.com",
+                username="b",
+                global_role="user",
+                status="disabled",
+            ),
+        ]
+    )
+    db.session.flush()
+
+    assert await db.user.count_by_status() == {"active": 1, "disabled": 1}
+
+
+@pytest.mark.asyncio
+async def test_user_lifecycle_cleanup_emits_complete_transactional_commands() -> None:
+    session = SimpleNamespace(execute=AsyncMock())
+    repository = DBUserRepository(session)
+
+    await repository.delete_owned_resources("user-1")
+    await repository.revoke_security_material("user-1")
+
+    statements = [str(call.args[0]) for call in session.execute.await_args_list]
+    parameters = [call.args[1] for call in session.execute.await_args_list]
+    assert any("DELETE FROM sessions" in statement for statement in statements)
+    assert any("DELETE FROM files" in statement for statement in statements)
+    assert any("UPDATE service_api_keys" in statement for statement in statements)
+    assert any("DELETE FROM oauth_identities" in statement for statement in statements)
+    assert any("DELETE FROM team_members" in statement for statement in statements)
+    assert all(value == {"user_id": "user-1"} for value in parameters)
+
+
 # --- SessionRepository.count_created_between (fix 2: agent-mode only) ---
+
 
 @pytest.mark.asyncio
 async def test_count_created_between_excludes_ask_mode_sessions(db):
     db.session.add_all(
         [
-            _session_row(id="s1", mode=SessionMode.AGENT.value, created_at=datetime(2026, 1, 5)),
-            _session_row(id="s2", mode=SessionMode.ASK.value, created_at=datetime(2026, 1, 5)),
+            _session_row(
+                id="s1", mode=SessionMode.AGENT.value, created_at=datetime(2026, 1, 5, tzinfo=UTC)
+            ),
+            _session_row(
+                id="s2", mode=SessionMode.ASK.value, created_at=datetime(2026, 1, 5, tzinfo=UTC)
+            ),
         ]
     )
     db.session.flush()
@@ -393,65 +458,55 @@ async def test_count_created_between_excludes_ask_mode_sessions(db):
 async def test_count_created_between_respects_window(db):
     db.session.add_all(
         [
-            _session_row(id="s1", mode=SessionMode.AGENT.value, created_at=datetime(2026, 1, 1)),
-            _session_row(id="s2", mode=SessionMode.AGENT.value, created_at=datetime(2026, 6, 1)),
+            _session_row(
+                id="s1", mode=SessionMode.AGENT.value, created_at=datetime(2026, 1, 1, tzinfo=UTC)
+            ),
+            _session_row(
+                id="s2", mode=SessionMode.AGENT.value, created_at=datetime(2026, 6, 1, tzinfo=UTC)
+            ),
         ]
     )
     db.session.flush()
 
     count = await db.session_repo.count_created_between(
-        start_at=datetime(2026, 3, 1), end_at=datetime(2026, 12, 1)
+        start_at=datetime(2026, 3, 1, tzinfo=UTC), end_at=datetime(2026, 12, 1, tzinfo=UTC)
     )
 
     assert count == 1
 
 
-# --- CheckpointRepository.count_created_between ---
+# --- InferenceEndpointRepository.list_hosts ---
 
-@pytest.mark.asyncio
-async def test_checkpoint_count_created_between_respects_window(db):
-    db.session.add_all(
-        [
-            _checkpoint(id="c1", session_id="s1", created_at=datetime(2026, 1, 1)),
-            _checkpoint(id="c2", session_id="s1", created_at=datetime(2026, 6, 1)),
-        ]
-    )
-    db.session.flush()
-
-    total = await db.checkpoint.count_created_between()
-    windowed = await db.checkpoint.count_created_between(
-        start_at=datetime(2026, 3, 1), end_at=datetime(2026, 12, 1)
-    )
-
-    assert total == 2
-    assert windowed == 1
-
-
-# --- LLMEndpointRepository.list_hosts ---
 
 @pytest.mark.asyncio
 async def test_list_hosts_extracts_hostname_without_scheme_or_path(db):
     db.session.add_all(
         [
-            _llm_endpoint(id="e1", base_url="https://api.openai.com/v1"),
-            _llm_endpoint(id="e2", base_url="http://llm.internal.corp:8080/v1"),
-            _llm_endpoint(id="e3", base_url="llm.no-scheme.example.com/v1"),
+            _inference_endpoint(id="e1", base_url="https://api.openai.com/v1"),
+            _inference_endpoint(
+                id="e2",
+                base_url="http://inference.internal.corp:8080/v1",
+            ),
+            _inference_endpoint(
+                id="e3",
+                base_url="inference.no-scheme.example.com/v1",
+            ),
         ]
     )
     db.session.flush()
 
-    hosts = await db.llm_endpoint.list_hosts()
+    hosts = await db.inference_endpoint.list_hosts()
 
     assert sorted(hosts) == [
         "api.openai.com",
-        "llm.internal.corp",
-        "llm.no-scheme.example.com",
+        "inference.internal.corp",
+        "inference.no-scheme.example.com",
     ]
 
 
 @pytest.mark.asyncio
 async def test_list_hosts_skips_empty_base_url(db):
-    db.session.add(_llm_endpoint(id="e1", base_url=""))
+    db.session.add(_inference_endpoint(id="e1", base_url=""))
     db.session.flush()
 
-    assert await db.llm_endpoint.list_hosts() == []
+    assert await db.inference_endpoint.list_hosts() == []

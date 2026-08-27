@@ -1,9 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Protocol, Optional, BinaryIO, Self
+from typing import BinaryIO, Protocol
 
 from app.domain.external.browser import Browser
 from app.domain.external.llm import LLM
+from app.domain.models.scope import OwnerScope
 from app.domain.models.tool_result import ToolResult
 
 
@@ -18,15 +17,15 @@ class Sandbox(Protocol):
         """根据传递的会话id+是否返回控制台记录获取shell结果"""
         ...
 
-    async def wait_process(self, session_id: str, seconds: Optional[int] = None) -> ToolResult:
+    async def wait_process(self, session_id: str, seconds: int | None = None) -> ToolResult:
         """根据传递的会话id+秒数等待程序执行"""
         ...
 
     async def write_shell_input(
-            self,
-            session_id: str,
-            input_text: str,
-            press_enter: bool = True,
+        self,
+        session_id: str,
+        input_text: str,
+        press_enter: bool = True,
     ) -> ToolResult:
         """根据传递会话id+文本内容+是否回车键写入内容到进程中"""
         ...
@@ -36,34 +35,34 @@ class Sandbox(Protocol):
         ...
 
     async def write_file(
-            self,
-            filepath: str,
-            content: str,
-            append: bool = False,
-            leading_newline: bool = False,
-            trailing_newline: bool = False,
-            sudo: bool = False,
+        self,
+        filepath: str,
+        content: str,
+        append: bool = False,
+        leading_newline: bool = False,
+        trailing_newline: bool = False,
+        sudo: bool = False,
     ) -> ToolResult:
         """根据传递的文件路径+写入内容+追加模式+前后内容新行+超级权限写入对应的文件"""
         ...
 
     async def read_file(
-            self,
-            filepath: str,
-            start_line: Optional[int] = None,
-            end_line: Optional[int] = None,
-            sudo: bool = False,
-            max_length: int = 10000
+        self,
+        filepath: str,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        sudo: bool = False,
+        max_length: int = 10000,
     ) -> ToolResult:
         """根据传递的文件路径+起点终点行数+超级权限读取对应的文件内容"""
         ...
 
     async def read_files(
-            self,
-            filepaths: list[str],
-            *,
-            sudo: bool = False,
-            max_length: int = 10000,
+        self,
+        filepaths: list[str],
+        *,
+        sudo: bool = False,
+        max_length: int = 10000,
     ) -> list[ToolResult]:
         """Batch-read sandbox files with one per-file byte cap."""
         ...
@@ -81,11 +80,11 @@ class Sandbox(Protocol):
         ...
 
     async def replace_in_file(
-            self,
-            filepath: str,
-            old_str: str,
-            new_str: str,
-            sudo: bool = False,
+        self,
+        filepath: str,
+        old_str: str,
+        new_str: str,
+        sudo: bool = False,
     ) -> ToolResult:
         """根据传递文件路径+新旧内容+超级权限完成文件内容替换"""
         ...
@@ -99,10 +98,10 @@ class Sandbox(Protocol):
         ...
 
     async def upload_file(
-            self,
-            file_data: BinaryIO,
-            filepath: str,
-            filename: str = None,
+        self,
+        file_data: BinaryIO,
+        filepath: str,
+        filename: str | None = None,
     ) -> ToolResult:
         """根据文件源数据+路径+文件名将文件上传到沙箱中"""
         ...
@@ -128,9 +127,9 @@ class Sandbox(Protocol):
         ...
 
     async def get_browser(
-            self,
-            supports_multimodal: bool = False,
-            llm: Optional[LLM] = None,
+        self,
+        llm: LLM | None = None,
+        allowed_domains: frozenset[str] | None = None,
     ) -> Browser:
         """获取沙箱中的浏览器实例"""
         ...
@@ -150,16 +149,13 @@ class Sandbox(Protocol):
         """只读属性，获取沙箱的vnc链接(远程桌面链接)"""
         ...
 
-    @classmethod
-    async def create(cls) -> Self:
-        """类方法，用于快速创建一个沙箱"""
-        ...
-
     async def create_browser_profile_snapshot(self, snapshot_id: str) -> bytes:
         """Create a tar.gz snapshot of the browser profile directory."""
         ...
 
-    async def restore_browser_profile_snapshot(self, snapshot_id: str, snapshot_data: BinaryIO) -> None:
+    async def restore_browser_profile_snapshot(
+        self, snapshot_id: str, snapshot_data: BinaryIO
+    ) -> None:
         """Restore the browser profile directory from a tar.gz snapshot."""
         ...
 
@@ -167,7 +163,10 @@ class Sandbox(Protocol):
         """Restart the sandbox Chrome process after profile restore."""
         ...
 
-    @classmethod
-    async def get(cls, id: str) -> Optional[Self]:
-        """类方法，根据传递的id获取沙箱实例"""
-        ...
+
+class SandboxFactoryPort(Protocol):
+    """Owner-aware lifecycle boundary used by application/domain services."""
+
+    async def create(self, *, owner_scope: OwnerScope) -> Sandbox: ...
+
+    async def get(self, sandbox_id: str) -> Sandbox | None: ...

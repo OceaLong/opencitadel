@@ -1,8 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, text, PrimaryKeyConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, PrimaryKeyConstraint, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -29,7 +27,7 @@ class SessionFileAttachmentModel(Base):
     mime_type: Mapped[str] = mapped_column(String(128), nullable=False, server_default=text("''"))
     size: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP(0)"),
     )

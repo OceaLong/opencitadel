@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { renderComponent } from "@/test-utils/render";
+
 import { Alert, AlertDescription, AlertTitle } from "./alert";
 
 describe("Alert", () => {
@@ -12,14 +13,14 @@ describe("Alert", () => {
 
   it("renders role=alert with title and description", async () => {
     const { container, unmount } = await renderComponent(
-      <Alert variant="gate">
+      <Alert variant="approval">
         <AlertTitle>Approval needed</AlertTitle>
         <AlertDescription>Tool call awaits your decision.</AlertDescription>
       </Alert>,
     );
     const el = container.querySelector('[role="alert"]');
-    expect(el?.className).toContain("border-l-accent-gate");
-    expect(el?.className).toContain("bg-gate-subtle");
+    expect(el?.className).toContain("border-l-accent-approval");
+    expect(el?.className).toContain("bg-approval-subtle");
     expect(container.textContent).toContain("Approval needed");
     await unmount();
   });

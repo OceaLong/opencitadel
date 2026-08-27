@@ -1,15 +1,13 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Optional
-
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.tool_result import ToolResult
+
 from .base import BaseTool, tool
 from .capability_policy import CODE_READ, WORKSPACE_WRITE
 
 
 class FileTool(BaseTool):
     """文件工具箱"""
+
     name: str = "file"
 
     def __init__(self, sandbox: Sandbox) -> None:
@@ -21,10 +19,7 @@ class FileTool(BaseTool):
         name="read_file",
         description="读取文件内容。用于检查文件内容、分析日志或读取配置文件。长文档可用 start_line/end_line 分页，或增大 max_length。",
         parameters={
-            "filepath": {
-                "type": "string",
-                "description": "要读取文件的绝对路径"
-            },
+            "filepath": {"type": "string", "description": "要读取文件的绝对路径"},
             "start_line": {
                 "type": "integer",
                 "description": "(可选)读取的起始行, 索引从 0 开始",
@@ -39,19 +34,19 @@ class FileTool(BaseTool):
             },
             "max_length": {
                 "type": "integer",
-                "description": "(可选)读取文件内容的最大长度, 默认为50000"
-            }
+                "description": "(可选)读取文件内容的最大长度, 默认为50000",
+            },
         },
         required=["filepath"],
         policy=CODE_READ,
     )
     async def read_file(
-            self,
-            filepath: str,
-            start_line: Optional[int] = None,
-            end_line: Optional[int] = None,
-            sudo: Optional[bool] = False,
-            max_length: int = 50000,
+        self,
+        filepath: str,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        sudo: bool | None = False,
+        max_length: int = 50000,
     ) -> ToolResult:
         """传递文件路径读取沙箱中的文件内容"""
         return await self.sandbox.read_file(
@@ -66,42 +61,30 @@ class FileTool(BaseTool):
         name="write_file",
         description="对文件进行覆盖或追加写入。用于创建新文件、追加内容或修改现有文件。",
         parameters={
-            "filepath": {
-                "type": "string",
-                "description": "要写入文件的绝对路径"
-            },
-            "content": {
-                "type": "string",
-                "description": "要写入的文本内容"
-            },
-            "append": {
-                "type": "boolean",
-                "description": "(可选)是否使用追加模式"
-            },
+            "filepath": {"type": "string", "description": "要写入文件的绝对路径"},
+            "content": {"type": "string", "description": "要写入的文本内容"},
+            "append": {"type": "boolean", "description": "(可选)是否使用追加模式"},
             "leading_newline": {
                 "type": "boolean",
-                "description": "(可选)是否添加前置换行符, 在内容开头"
+                "description": "(可选)是否添加前置换行符, 在内容开头",
             },
             "trailing_newline": {
                 "type": "boolean",
-                "description": "(可选)是否添加后置换行符, 在内容结尾"
+                "description": "(可选)是否添加后置换行符, 在内容结尾",
             },
-            "sudo": {
-                "type": "boolean",
-                "description": "(可选)是否使用 sudo 权限"
-            }
+            "sudo": {"type": "boolean", "description": "(可选)是否使用 sudo 权限"},
         },
         required=["filepath", "content"],
         policy=WORKSPACE_WRITE,
     )
     async def write_file(
-            self,
-            filepath: str,
-            content: str,
-            append: Optional[bool] = False,
-            leading_newline: Optional[bool] = False,
-            trailing_newline: Optional[bool] = False,
-            sudo: Optional[bool] = False
+        self,
+        filepath: str,
+        content: str,
+        append: bool | None = False,
+        leading_newline: bool | None = False,
+        trailing_newline: bool | None = False,
+        sudo: bool | None = False,
     ) -> ToolResult:
         return await self.sandbox.write_file(
             filepath=filepath,
@@ -116,32 +99,16 @@ class FileTool(BaseTool):
         name="replace_in_file",
         description="在文件中替换指定的字符串。用于更新文件中的特定内容或修复代码中的错误。",
         parameters={
-            "filepath": {
-                "type": "string",
-                "description": "要执行替换操作的文件的绝对路径"
-            },
-            "old_str": {
-                "type": "string",
-                "description": "要被替换的原始字符串"
-            },
-            "new_str": {
-                "type": "string",
-                "description": "用于替换的新字符串"
-            },
-            "sudo": {
-                "type": "boolean",
-                "description": "(可选)是否使用 sudo 权限"
-            }
+            "filepath": {"type": "string", "description": "要执行替换操作的文件的绝对路径"},
+            "old_str": {"type": "string", "description": "要被替换的原始字符串"},
+            "new_str": {"type": "string", "description": "用于替换的新字符串"},
+            "sudo": {"type": "boolean", "description": "(可选)是否使用 sudo 权限"},
         },
         required=["filepath", "old_str", "new_str"],
         policy=WORKSPACE_WRITE,
     )
     async def replace_in_file(
-            self,
-            filepath: str,
-            old_str: str,
-            new_str: str,
-            sudo: Optional[bool] = False
+        self, filepath: str, old_str: str, new_str: str, sudo: bool | None = False
     ) -> ToolResult:
         return await self.sandbox.replace_in_file(
             filepath=filepath,
@@ -154,27 +121,15 @@ class FileTool(BaseTool):
         name="search_in_file",
         description="在文件内容中搜索匹配的文本。用于查找文件中的特定内容或模式。",
         parameters={
-            "filepath": {
-                "type": "string",
-                "description": "要进行搜索的文件的绝对路径"
-            },
-            "regex": {
-                "type": "string",
-                "description": "用于匹配的正则表达式模式"
-            },
-            "sudo": {
-                "type": "boolean",
-                "description": "(可选)是否使用 sudo 权限"
-            }
+            "filepath": {"type": "string", "description": "要进行搜索的文件的绝对路径"},
+            "regex": {"type": "string", "description": "用于匹配的正则表达式模式"},
+            "sudo": {"type": "boolean", "description": "(可选)是否使用 sudo 权限"},
         },
         required=["filepath", "regex"],
         policy=CODE_READ,
     )
     async def search_in_file(
-            self,
-            filepath: str,
-            regex: str,
-            sudo: Optional[bool] = False
+        self, filepath: str, regex: str, sudo: bool | None = False
     ) -> ToolResult:
         return await self.sandbox.search_in_file(
             filepath=filepath,
@@ -186,23 +141,13 @@ class FileTool(BaseTool):
         name="find_files",
         description="在指定目录中根据名称模式查找文件。用于定位具有特定命名模式的文件。",
         parameters={
-            "dir_path": {
-                "type": "string",
-                "description": "要搜索的目录的绝对路径"
-            },
-            "glob_pattern": {
-                "type": "string",
-                "description": "使用 glob 语法通配符的文件名模式"
-            }
+            "dir_path": {"type": "string", "description": "要搜索的目录的绝对路径"},
+            "glob_pattern": {"type": "string", "description": "使用 glob 语法通配符的文件名模式"},
         },
         required=["dir_path", "glob_pattern"],
         policy=CODE_READ,
     )
-    async def find_files(
-            self,
-            dir_path: str,
-            glob_pattern: str
-    ) -> ToolResult:
+    async def find_files(self, dir_path: str, glob_pattern: str) -> ToolResult:
         return await self.sandbox.find_files(
             dir_path=dir_path,
             glob_pattern=glob_pattern,

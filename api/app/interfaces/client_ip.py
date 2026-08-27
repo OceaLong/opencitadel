@@ -1,14 +1,13 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Derive client IP only across explicitly trusted reverse-proxy hops."""
+
 from __future__ import annotations
 
 import ipaddress
-from typing import Iterable
+from collections.abc import Iterable
 
 from starlette.requests import Request
 
-from core.config import get_settings
+from app.composition.types import ApiRuntime
 
 _MAX_FORWARDED_HEADER_BYTES = 1024
 _MAX_PROXY_HOPS = 16
@@ -16,17 +15,17 @@ _MAX_PROXY_HOPS = 16
 
 def _networks(values: Iterable[str]) -> tuple[ipaddress._BaseNetwork, ...]:
     return tuple(
-        ipaddress.ip_network(value.strip(), strict=False)
-        for value in values
-        if value.strip()
+        ipaddress.ip_network(value.strip(), strict=False) for value in values if value.strip()
     )
 
 
-def configured_trusted_proxy_cidrs() -> tuple[str, ...]:
+def configured_trusted_proxy_cidrs(request: Request) -> tuple[str, ...]:
+    application = request.scope.get("app")
+    runtime = getattr(getattr(application, "state", None), "runtime", None)
+    if not isinstance(runtime, ApiRuntime):
+        return ()
     return tuple(
-        value.strip()
-        for value in get_settings().trusted_proxy_cidrs.split(",")
-        if value.strip()
+        value.strip() for value in runtime.settings.trusted_proxy_cidrs.split(",") if value.strip()
     )
 
 
@@ -45,7 +44,7 @@ def get_client_ip(
     networks = _networks(
         trusted_proxy_cidrs
         if trusted_proxy_cidrs is not None
-        else configured_trusted_proxy_cidrs()
+        else configured_trusted_proxy_cidrs(request)
     )
     if not any(peer in network for network in networks):
         return str(peer)

@@ -1,42 +1,70 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from abc import ABC, abstractmethod
-from typing import TypeVar
+from enum import StrEnum
+from typing import Protocol, TypeVar
 
-from .checkpoint_repository import CheckpointRepository
+from app.domain.execution.commands import CommandEnvelope
+from app.domain.models.authorization import AuthorizationContext
+
+from .artifact_repository import ArtifactRepository
+from .audit_repository import AuditRepository
 from .codebase_repository import CodebaseRepository
 from .codebase_version_repository import CodebaseVersionRepository
 from .file_repository import FileRepository
+from .inference_binding_repository import InferenceBindingRepository
+from .inference_endpoint_repository import InferenceEndpointRepository
+from .inference_model_repository import InferenceModelRepository
+from .integration_server_repository import A2AServerRepository, MCPServerRepository
+from .invitation_repository import InvitationRepository
 from .knowledge_base_repository import KnowledgeBaseRepository
 from .knowledge_version_repository import KnowledgeVersionRepository
-from .llm_endpoint_repository import LLMEndpointRepository
-from .llm_model_repository import LLMModelRepository
-from .llm_model_preference_repository import LLMModelPreferenceRepository
 from .llm_token_usage_repository import LLMTokenUsageRepository
 from .memory_entry_repository import MemoryEntryRepository
-from .audit_repository import AuditRepository
-from .invitation_repository import InvitationRepository
+from .notification_repository import NotificationRepository
 from .oauth_identity_repository import OAuthIdentityRepository
+from .patrol_repository import PatrolRepository
 from .quota_repository import QuotaRepository
 from .refresh_token_repository import RefreshTokenRepository
-from .artifact_repository import ArtifactRepository
-from .integration_server_repository import A2AServerRepository, MCPServerRepository
 from .scheduled_job_repository import ScheduledJobRepository
-from .notification_repository import NotificationRepository
-from .session_repository import SessionRepository
 from .service_api_key_repository import ServiceApiKeyRepository
+from .session_repository import SessionRepository
+from .session_resource_binding_repository import SessionResourceBindingRepository
 from .skill_repository import SkillRepository
 from .team_repository import TeamRepository
 from .user_repository import UserRepository
-from .resource_governance_repository import ResourceGovernanceRepository
-from .patrol_repository import PatrolRepository
 
 T = TypeVar("T", bound="IUnitOfWork")
 
 
+class UnitOfWorkState(StrEnum):
+    NEW = "new"
+    ACTIVE = "active"
+    COMMITTED = "committed"
+    ROLLED_BACK = "rolled_back"
+    CLOSED = "closed"
+
+
+class UnitOfWorkStateError(RuntimeError):
+    """Raised when an operation violates the UoW transaction lifecycle."""
+
+
+class UnitOfWorkCleanupTimeout(RuntimeError):
+    """Raised when rollback or close cannot finish inside the cleanup bound."""
+
+
+class ExecutionCommandSink(Protocol):
+    async def receive(self, command: CommandEnvelope) -> bool: ...
+
+
+class UnitOfWorkFactory(Protocol):
+    def __call__(
+        self,
+        authorization_context: AuthorizationContext | None = None,
+    ) -> "IUnitOfWork": ...
+
+
 class IUnitOfWork(ABC):
     """Uow模式协议接口"""
-    checkpoint: CheckpointRepository
+
     audit: AuditRepository
     codebase: CodebaseRepository
     codebase_version: CodebaseVersionRepository
@@ -44,9 +72,9 @@ class IUnitOfWork(ABC):
     knowledge_version: KnowledgeVersionRepository
     file: FileRepository
     session: SessionRepository
-    llm_endpoint: LLMEndpointRepository
-    llm_model: LLMModelRepository
-    llm_model_preference: LLMModelPreferenceRepository
+    inference_endpoint: InferenceEndpointRepository
+    inference_model: InferenceModelRepository
+    inference_binding: InferenceBindingRepository
     skill: SkillRepository
     memory_entry: MemoryEntryRepository
     llm_token_usage: LLMTokenUsageRepository
@@ -62,16 +90,18 @@ class IUnitOfWork(ABC):
     a2a_server: A2AServerRepository
     scheduled_job: ScheduledJobRepository
     notification: NotificationRepository
-    resource_governance: ResourceGovernanceRepository
+    resource_bindings: SessionResourceBindingRepository
     patrol: PatrolRepository
+    execution_commands: ExecutionCommandSink
+    state: UnitOfWorkState
 
     @abstractmethod
-    async def commit(self):
+    async def commit(self) -> None:
         """提交数据库数据持久化"""
         ...
 
     @abstractmethod
-    async def rollback(self):
+    async def rollback(self) -> None:
         """数据库回退"""
         ...
 
@@ -81,6 +111,6 @@ class IUnitOfWork(ABC):
         ...
 
     @abstractmethod
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """退出上下文管理器"""
         ...

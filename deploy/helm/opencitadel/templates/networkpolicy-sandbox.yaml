@@ -16,7 +16,7 @@ spec:
             matchExpressions:
               - key: app.kubernetes.io/component
                 operator: In
-                values: ["api", "worker"]
+                values: ["api", "execution-kernel"]
       ports:
         - protocol: TCP
           port: 8080

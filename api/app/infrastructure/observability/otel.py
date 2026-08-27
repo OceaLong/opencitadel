@@ -1,21 +1,23 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """OpenTelemetry and Prometheus observability setup."""
+
 import logging
 
-from app.application.services.config_provider import get_runtime_config
+from core.config import DeploymentSettings
 
 logger = logging.getLogger(__name__)
 _initialized = False
 
 
-def setup_observability(app=None) -> None:
+def setup_observability(
+    app=None,
+    *,
+    settings: DeploymentSettings,
+) -> None:
     global _initialized
     if _initialized:
         return
-    observability = get_runtime_config().observability
-    if not observability.otel_enabled:
-        logger.info("OpenTelemetry disabled (otel_enabled=false in config.yaml)")
+    if not settings.otel_enabled:
+        logger.info("OpenTelemetry disabled")
         _initialized = True
         return
 
@@ -33,37 +35,42 @@ def setup_observability(app=None) -> None:
         _initialized = True
         return
 
-    resource = Resource.create({
-        "service.name": observability.otel_service_name,
-        "service.version": "1.0.0",
-    })
+    resource = Resource.create(
+        {
+            "service.name": settings.otel_service_name,
+            "service.version": "1.0.0",
+        }
+    )
     tracer_provider = TracerProvider(resource=resource)
-    if observability.otel_exporter_endpoint:
+    if settings.otel_exporter_endpoint:
         tracer_provider.add_span_processor(
-            BatchSpanProcessor(OTLPSpanExporter(endpoint=observability.otel_exporter_endpoint))
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=settings.otel_exporter_endpoint))
         )
     trace.set_tracer_provider(tracer_provider)
 
     reader = PeriodicExportingMetricReader(
-        OTLPMetricExporter(endpoint=observability.otel_exporter_endpoint)
-        if observability.otel_exporter_endpoint else OTLPMetricExporter()
+        OTLPMetricExporter(endpoint=settings.otel_exporter_endpoint)
+        if settings.otel_exporter_endpoint
+        else OTLPMetricExporter()
     )
     metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[reader]))
 
     if app is not None:
         try:
             from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
             FastAPIInstrumentor.instrument_app(app)
         except ImportError:
             pass
 
     _initialized = True
-    logger.info("OpenTelemetry initialized: service=%s", observability.otel_service_name)
+    logger.info("OpenTelemetry initialized: service=%s", settings.otel_service_name)
 
 
 def get_tracer(name: str = "opencitadel"):
     try:
         from opentelemetry import trace
+
         return trace.get_tracer(name)
     except ImportError:
         return _NoOpTracer()
@@ -72,6 +79,7 @@ def get_tracer(name: str = "opencitadel"):
 class _NoOpTracer:
     def start_as_current_span(self, name: str, **kwargs):
         from contextlib import nullcontext
+
         return nullcontext()
 
 
@@ -84,23 +92,25 @@ def record_agent_step(agent_name: str, step: str) -> None:
     global _agent_step_counter
     try:
         from opentelemetry import metrics
+
         if _agent_step_counter is None:
             meter = metrics.get_meter("opencitadel.agent")
             _agent_step_counter = meter.create_counter("agent_steps_total")
         _agent_step_counter.add(1, {"agent": agent_name, "step": step})
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         pass
 
 
 def record_llm_tokens(
-        model: str,
-        prompt_tokens: int = 0,
-        completion_tokens: int = 0,
-        cached_tokens: int = 0,
+    model: str,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    cached_tokens: int = 0,
 ) -> None:
     global _llm_token_counter, _llm_cached_token_counter
     try:
         from opentelemetry import metrics
+
         if _llm_token_counter is None:
             meter = metrics.get_meter("opencitadel.llm")
             _llm_token_counter = meter.create_counter("llm_tokens_total")
@@ -113,7 +123,7 @@ def record_llm_tokens(
             _llm_token_counter.add(completion_tokens, {"model": model, "type": "completion"})
         if cached_tokens:
             _llm_cached_token_counter.add(cached_tokens, {"model": model})
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         pass
 
 
@@ -124,9 +134,10 @@ def record_agent_cancel(session_id: str = "") -> None:
     global _agent_cancel_counter
     try:
         from opentelemetry import metrics
+
         if _agent_cancel_counter is None:
             meter = metrics.get_meter("opencitadel.agent")
             _agent_cancel_counter = meter.create_counter("agent_cancellations_total")
         _agent_cancel_counter.add(1, {"session_id": session_id or "unknown"})
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         pass

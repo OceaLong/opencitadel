@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
 
 from sqlalchemy import text
@@ -22,8 +20,8 @@ class PostgresHealthChecker(HealthChecker):
         try:
             await self._db_session.execute(text("SELECT 1"))
             return HealthStatus(service="postgres", status="ok")
-        except Exception as e:
-            logger.error(f"Postgres健康检查失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("Postgres健康检查失败: %s", e)
             return HealthStatus(
                 service="postgres",
                 status="error",

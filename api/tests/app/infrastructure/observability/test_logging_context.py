@@ -1,10 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
 
+from app.application.request_context import bind_context
 from app.infrastructure.observability.logging_context import (
     CorrelationContextFilter,
-    bind_context,
     configure_structured_logging,
     request_id_var,
     session_id_var,
@@ -27,11 +25,11 @@ def test_configure_structured_logging_replaces_filter():
     root.handlers.clear()
     root.addHandler(handler)
 
-    configure_structured_logging()
+    configure_structured_logging(log_format="text")
     first_filters = [f for f in handler.filters if isinstance(f, CorrelationContextFilter)]
     assert len(first_filters) == 1
 
-    configure_structured_logging()
+    configure_structured_logging(log_format="text")
     second_filters = [f for f in handler.filters if isinstance(f, CorrelationContextFilter)]
     assert len(second_filters) == 1
     assert second_filters[0] is not first_filters[0]

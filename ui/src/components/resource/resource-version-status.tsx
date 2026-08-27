@@ -2,8 +2,14 @@
 
 import { useTranslations } from "next-intl";
 
-import { BuildCandidatePanel } from "@/components/resource/build-candidate-panel";
-import { HistoricalVersions } from "@/components/resource/historical-versions";
+import {
+  type BuildCandidateMessages,
+  BuildCandidatePanel,
+} from "@/components/resource/build-candidate-panel";
+import {
+  type HistoricalVersionMessages,
+  HistoricalVersions,
+} from "@/components/resource/historical-versions";
 import { Button } from "@/components/ui/button";
 
 import {
@@ -36,9 +42,7 @@ type VersionWithDegradationInfo<TBuild> = VersionRecordLike<TBuild> & {
 type BuildWithProgressInfo = VersionBuildLike & {
   phase?: string | null;
   progress: number;
-  degraded_reasons: unknown[];
-  error_message?: string | null;
-  heartbeat_at?: string | null;
+  failure_code?: string | null;
 };
 
 export type ResourceVersionStatusProps<TVersionsData> = {
@@ -60,28 +64,102 @@ export type ResourceVersionStatusProps<TVersionsData> = {
   onBuildChanged?: () => void;
 };
 
+type SharedVersionMessages = BuildCandidateMessages &
+  HistoricalVersionMessages & {
+    versionStatusLoadError: string;
+    versionActionError: string;
+    versionStatusLoading: string;
+    capabilityAvailable: string;
+    capabilityUnavailable: string;
+  };
+
+type CodebaseVersionMessages = SharedVersionMessages & {
+  kind: "codebase";
+  versionDegraded: (reasons: string) => string;
+  unsupportedViews: (views: string) => string;
+};
+
+type KnowledgeVersionMessages = SharedVersionMessages & {
+  kind: "knowledge";
+  viewBuild: string;
+  reindex: string;
+};
+
+type ResourceVersionMessages = CodebaseVersionMessages | KnowledgeVersionMessages;
+
+function codebaseVersionMessages(
+  t: ReturnType<typeof useTranslations<"codebase">>,
+): CodebaseVersionMessages {
+  return {
+    kind: "codebase",
+    activeVersion: (version) => t("activeVersion", { version }),
+    noActiveVersion: t("noActiveVersion"),
+    versionCapabilities: (capabilities) => t("versionCapabilities", { capabilities }),
+    noCapabilities: t("noCapabilities"),
+    candidateBuild: (values) => t("candidateBuild", values),
+    candidatePhasePending: t("candidatePhasePending"),
+    retryBuild: t("retryBuild"),
+    cancelBuild: t("cancelBuild"),
+    previousVersions: t("previousVersions"),
+    viewHistoricalVersion: (version) => t("viewHistoricalVersion", { version }),
+    viewingHistoricalVersion: (version) => t("viewingHistoricalVersion", { version }),
+    versionStatusLoadError: t("versionStatusLoadError"),
+    versionActionError: t("versionActionError"),
+    versionStatusLoading: t("versionStatusLoading"),
+    capabilityAvailable: t("capabilityAvailable"),
+    capabilityUnavailable: t("capabilityUnavailable"),
+    versionDegraded: (reasons) => t("versionDegraded", { reasons }),
+    unsupportedViews: (views) => t("unsupportedViews", { views }),
+  };
+}
+
+function knowledgeVersionMessages(
+  t: ReturnType<typeof useTranslations<"knowledge">>,
+): KnowledgeVersionMessages {
+  return {
+    kind: "knowledge",
+    activeVersion: (version) => t("activeVersion", { version }),
+    noActiveVersion: t("noActiveVersion"),
+    versionCapabilities: (capabilities) => t("versionCapabilities", { capabilities }),
+    noCapabilities: t("noCapabilities"),
+    candidateBuild: (values) => t("candidateBuild", values),
+    candidatePhasePending: t("candidatePhasePending"),
+    retryBuild: t("retryBuild"),
+    cancelBuild: t("cancelBuild"),
+    previousVersions: t("previousVersions"),
+    viewHistoricalVersion: (version) => t("viewHistoricalVersion", { version }),
+    viewingHistoricalVersion: (version) => t("viewingHistoricalVersion", { version }),
+    versionStatusLoadError: t("versionStatusLoadError"),
+    versionActionError: t("versionActionError"),
+    versionStatusLoading: t("versionStatusLoading"),
+    capabilityAvailable: t("capabilityAvailable"),
+    capabilityUnavailable: t("capabilityUnavailable"),
+    viewBuild: t("viewBuild"),
+    reindex: t("reindex"),
+  };
+}
+
 function unsupportedViews(version: { metrics?: unknown } | null): string[] {
-  const raw = (version as { metrics?: Record<string, unknown> } | null)?.metrics
-    ?.unsupported_views;
+  const raw = (version as { metrics?: Record<string, unknown> } | null)?.metrics?.unsupported_views;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
   return Object.entries(raw as Record<string, unknown>).map(
     ([name, reason]) => `${name}: ${String(reason)}`,
   );
 }
 
-export function ResourceVersionStatus<
+function ResourceVersionStatusCore<
   TVersionsData extends VersionsDataLike<TVersion, TBuild>,
   TVersion extends VersionWithDegradationInfo<TBuild>,
   TBuild extends BuildWithProgressInfo,
 >({
   api,
   resourceId,
-  ns,
   controlledHistory,
   onBuildChanged,
-}: ResourceVersionStatusProps<TVersionsData>) {
-  const t = useTranslations(ns);
-
+  messages,
+}: Omit<ResourceVersionStatusProps<TVersionsData>, "ns"> & {
+  messages: ResourceVersionMessages;
+}) {
   const {
     loading,
     acting,
@@ -99,14 +177,15 @@ export function ResourceVersionStatus<
     resourceId,
     controlledHistory,
     onBuildChanged,
-    t,
-    loadErrorMessage: t("versionStatusLoadError"),
-    actionErrorMessage: t("versionActionError"),
+    capabilityAvailableLabel: messages.capabilityAvailable,
+    capabilityUnavailableLabel: messages.capabilityUnavailable,
+    loadErrorMessage: messages.versionStatusLoadError,
+    actionErrorMessage: messages.versionActionError,
   });
 
   if (loading && !history) {
     return (
-      <span role="status" aria-label={t("versionStatusLoading")}>
+      <span role="status" aria-label={messages.versionStatusLoading}>
         <IconLoading className="size-3 animate-spin" />
       </span>
     );
@@ -127,20 +206,18 @@ export function ResourceVersionStatus<
         acting={acting}
         onRetry={() => void runAction("retry")}
         onCancel={() => void runAction("cancel")}
-        t={t}
+        messages={messages}
         extraInfo={
-          ns === "codebase" ? (
+          messages.kind === "codebase" ? (
             <>
               {!!viewed?.degraded_reasons.length && (
                 <p className="text-warning">
-                  {t("versionDegraded", {
-                    reasons: viewed.degraded_reasons.join(", "),
-                  })}
+                  {messages.versionDegraded(viewed.degraded_reasons.join(", "))}
                 </p>
               )}
               {!!unsupportedViews(viewed).length && (
                 <p className="text-muted-foreground">
-                  {t("unsupportedViews", { views: unsupportedViews(viewed).join(", ") })}
+                  {messages.unsupportedViews(unsupportedViews(viewed).join(", "))}
                 </p>
               )}
             </>
@@ -151,9 +228,9 @@ export function ResourceVersionStatus<
         historical={historical}
         viewingVersionId={viewingVersionId}
         onView={setViewingVersionId}
-        t={t}
+        messages={messages}
         extraActions={
-          ns === "knowledge" ? (
+          messages.kind === "knowledge" ? (
             <Button
               type="button"
               size="sm"
@@ -161,11 +238,41 @@ export function ResourceVersionStatus<
               disabled={acting || Boolean(history?.active_build)}
               onClick={createBuild}
             >
-              {history?.active_build ? t("viewBuild") : t("reindex")}
+              {history?.active_build ? messages.viewBuild : messages.reindex}
             </Button>
           ) : undefined
         }
       />
     </div>
+  );
+}
+
+function CodebaseResourceVersionStatus<
+  TVersionsData extends VersionsDataLike<TVersion, TBuild>,
+  TVersion extends VersionWithDegradationInfo<TBuild>,
+  TBuild extends BuildWithProgressInfo,
+>(props: Omit<ResourceVersionStatusProps<TVersionsData>, "ns">) {
+  const t = useTranslations("codebase");
+  return <ResourceVersionStatusCore {...props} messages={codebaseVersionMessages(t)} />;
+}
+
+function KnowledgeResourceVersionStatus<
+  TVersionsData extends VersionsDataLike<TVersion, TBuild>,
+  TVersion extends VersionWithDegradationInfo<TBuild>,
+  TBuild extends BuildWithProgressInfo,
+>(props: Omit<ResourceVersionStatusProps<TVersionsData>, "ns">) {
+  const t = useTranslations("knowledge");
+  return <ResourceVersionStatusCore {...props} messages={knowledgeVersionMessages(t)} />;
+}
+
+export function ResourceVersionStatus<
+  TVersionsData extends VersionsDataLike<TVersion, TBuild>,
+  TVersion extends VersionWithDegradationInfo<TBuild>,
+  TBuild extends BuildWithProgressInfo,
+>({ ns, ...props }: ResourceVersionStatusProps<TVersionsData>) {
+  return ns === "codebase" ? (
+    <CodebaseResourceVersionStatus {...props} />
+  ) : (
+    <KnowledgeResourceVersionStatus {...props} />
   );
 }

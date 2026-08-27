@@ -2,10 +2,7 @@
 
 import { memo, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import {
-  AlertCircle,
-  MoreHorizontal,
-} from "lucide-react";
+import { AlertCircle, MoreHorizontal } from "lucide-react";
 
 import { Avatar, AvatarGroupCount } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -111,7 +108,7 @@ export const SessionItem = memo(function SessionItem({
         <div className="flex items-center gap-1.5">
           <p className="truncate text-sm font-medium">{session.title || tCommon("newTask")}</p>
           {contextLabel && (
-            <Badge variant="secondary" className="h-4 shrink-0 px-1 text-2xs">
+            <Badge variant="secondary" className="text-2xs h-4 shrink-0 px-1">
               {contextLabel}
             </Badge>
           )}
@@ -120,7 +117,7 @@ export const SessionItem = memo(function SessionItem({
       </ItemContent>
       <ItemActions className="flex flex-col gap-0 self-start pt-0.5">
         {session.unread_message_count > 0 && (
-          <span className="bg-primary text-primary-foreground mb-0.5 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-2xs font-medium">
+          <span className="bg-primary text-primary-foreground text-2xs mb-0.5 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 font-medium">
             {session.unread_message_count > 99 ? "99+" : session.unread_message_count}
           </span>
         )}

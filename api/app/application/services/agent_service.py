@@ -1,457 +1,390 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+"""Session-facing admission/query facade for the universal execution Run."""
+
+from __future__ import annotations
+
 import asyncio
-import logging
-import json
-import time
-from datetime import datetime
-from typing import AsyncGenerator, Optional, List, Type, Callable
+import re
+from collections.abc import AsyncGenerator, Callable
+from datetime import UTC, datetime
+from uuid import NAMESPACE_URL, UUID, uuid5
 
-from pydantic import TypeAdapter
-
-from app.domain.external.event_sequence import EventSequencePort
-from app.domain.external.task import Task
-from app.domain.external.task_state_port import TaskStatePort
-from app.domain.models.checkpoint import Checkpoint
-from app.domain.models.codebase import SessionMode
-from app.domain.models.event import (
-    BaseEvent,
-    AssistantNoticeEvent,
-    ClarifyAnswer,
-    ErrorEvent,
-    MessageEvent,
-    Event,
-    DoneEvent,
-    SessionStatusEvent,
+from app.application.execution.admission import RunAdmissionService
+from app.application.execution.command_ingress import CommandIngress
+from app.application.execution.public_projection import (
+    PublicEventPage,
+    PublicExecutionEvent,
 )
-from app.domain.models.event_policy import TRANSIENT_EVENT_TYPES
-from app.domain.models.event_upgrader import upgrade_event_payload
-from app.domain.models.session import Session, SessionStatus
+from app.application.ports.queries import PublicProjectionPort, RunProjectionPort
+from app.domain.execution.commands import CommandContext, RegisteredCommand
+from app.domain.execution.run import RunFamily
+from app.domain.models.codebase import SessionMode
+from app.domain.models.file import File
+from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
-from app.domain.services.checkpoint_service import CheckpointService
-from app.infrastructure.external.task.task_state import TaskStatus
-from app.infrastructure.observability.logging_context import bind_context, get_request_id
 
-logger = logging.getLogger(__name__)
-
-_SESSION_NOT_FOUND_MSG = "任务会话不存在, 请核实后重试"
-_TERMINAL_SESSION_STATUSES = {"waiting", "completed", "cancelled", "failed"}
-_STREAM_STALE_IDLE_SECONDS = 120.0
+_TERMINAL_EVENTS = frozenset({"done", "error"})
 
 
 class AgentService:
-    """OpenCitadel 智能体服务"""
+    """Admit session Runs and expose only their sanitized event projection."""
 
     def __init__(
-            self,
-            uow_factory: Callable[[], IUnitOfWork],
-            task_cls: Type[Task],
-            checkpoint_service: CheckpointService,
-            task_state_port: TaskStatePort,
-            event_sequence_port: EventSequencePort,
+        self,
+        *,
+        uow_factory: Callable[[], IUnitOfWork],
+        admission_service: RunAdmissionService,
+        command_ingress: CommandIngress,
+        public_projection: PublicProjectionPort,
+        run_projection: RunProjectionPort,
+        poll_interval_seconds: float = 0.2,
+        idle_timeout_seconds: float = 120.0,
     ) -> None:
+        if poll_interval_seconds <= 0 or idle_timeout_seconds <= 0:
+            raise ValueError("poll and idle timeouts must be positive")
         self._uow_factory = uow_factory
-        self._task_cls = task_cls
-        self._task_state = task_state_port
-        self._event_sequence = event_sequence_port
-        self._checkpoint_service = checkpoint_service
-        logger.info("AgentService初始化成功")
-
-    async def _get_task(self, session: Session) -> Optional[Task]:
-        task_id = session.task_id
-        if not task_id:
-            return None
-        return await self._task_cls.get(task_id)
-
-    async def _task_is_terminal(self, task: Task) -> bool:
-        snapshot = await self._task_state.get_runtime_snapshot(task.id)
-        return bool(snapshot.get("cancelled") or snapshot.get("is_done"))
-
-    async def _cleanup_task_resources(self, task_id: Optional[str]) -> None:
-        if not task_id:
-            return
-        cleanup = getattr(self._task_cls, "destroy_task_resources", None)
-        if cleanup is None:
-            return
-        try:
-            await cleanup(task_id)
-        except Exception as exc:
-            logger.warning("清理旧任务 Redis 资源失败 task_id=%s: %s", task_id, exc)
-
-    async def _create_task(self, session: Session) -> Task:
-        previous_task_id = session.task_id
-        task = await self._task_cls.create_for_session(
-            session.id,
-            request_id=get_request_id(),
-        )
-        session.task_id = task.id
-        async with self._uow_factory() as uow:
-            await uow.session.save(session)
-            await uow.session.update_status(session.id, SessionStatus.RUNNING)
-        await self._cleanup_task_resources(previous_task_id)
-        return task
-
-    async def _safe_update_unread_count(self, session_id: str) -> None:
-        try:
-            uow = self._uow_factory()
-            async with uow:
-                await uow.session.update_unread_message_count(session_id, 0)
-        except Exception as e:
-            logger.warning(f"会话[{session_id}]后台更新未读消息计数失败: {e}")
-
-    async def _resolve_last_event_seq(
-            self,
-            session_id: str,
-            latest_event_id: Optional[str],
-    ) -> int:
-        if not latest_event_id:
-            return 0
-        try:
-            return int(latest_event_id)
-        except (TypeError, ValueError):
-            pass
-        try:
-            async with self._uow_factory() as uow:
-                resolved = await uow.session.get_event_seq_by_stream_id(
-                    session_id,
-                    latest_event_id,
-                )
-            return int(resolved or 0)
-        except Exception:
-            return 0
-
-    async def _resolve_redis_cursor(self, task_id: str, last_seq: int) -> str:
-        if last_seq <= 0:
-            return "0"
-        cursor = await self._task_state.get_output_seq_cursor(task_id, last_seq)
-        return cursor or "0"
-
-    async def _consume_output_stream(
-            self,
-            task: Task,
-            session_id: str,
-            latest_event_id: Optional[str],
-    ) -> AsyncGenerator[BaseEvent, None]:
-        output_stream = task.output_stream
-        task_id = task.id
-        last_seq = await self._resolve_last_event_seq(session_id, latest_event_id)
-        redis_cursor = await self._resolve_redis_cursor(task_id, last_seq)
-        await self._safe_update_unread_count(session_id)
-
-        terminal_statuses = {
-            TaskStatus.DONE,
-            TaskStatus.CANCELLED,
-            TaskStatus.FAILED,
-        }
-        idle_started_at = time.monotonic()
-
-        def is_terminal_status_event(event: BaseEvent) -> bool:
-            return (
-                isinstance(event, SessionStatusEvent)
-                and event.status in _TERMINAL_SESSION_STATUSES
-            )
-
-        async def replay_persisted_events():
-            nonlocal last_seq
-            async with self._uow_factory() as uow:
-                records = await uow.session.list_events(session_id, after=last_seq, limit=500)
-            for seq, event in records:
-                if seq <= last_seq:
-                    continue
-                last_seq = seq
-                event.id = str(seq)
-                yield event
-
-        async def current_terminal_status_event() -> Optional[SessionStatusEvent]:
-            async with self._uow_factory() as uow:
-                current_session = await uow.session.get_metadata(session_id)
-            if current_session and current_session.status.value in _TERMINAL_SESSION_STATUSES:
-                return SessionStatusEvent(status=current_session.status.value)
-            return None
-
-        def heartbeat_is_stale(snapshot: dict) -> bool:
-            meta = snapshot.get("meta") or {}
-            heartbeat = snapshot.get("last_heartbeat_at") or meta.get("updated_at")
-            if heartbeat is None:
-                return True
-            try:
-                return time.time() - float(heartbeat) >= _STREAM_STALE_IDLE_SECONDS
-            except (TypeError, ValueError):
-                return True
-
-        if last_seq > 0 and redis_cursor == "0":
-            async for persisted_event in replay_persisted_events():
-                yield persisted_event
-                if is_terminal_status_event(persisted_event):
-                    return
-
-        while True:
-            stream_message_id, event_str = await output_stream.get(
-                start_id=redis_cursor,
-                block_ms=500,
-            )
-            if event_str is not None:
-                idle_started_at = time.monotonic()
-                redis_cursor = stream_message_id
-                event_payload = json.loads(event_str)
-                event = TypeAdapter(Event).validate_python(upgrade_event_payload(event_payload))
-                if event.type in TRANSIENT_EVENT_TYPES:
-                    yield event
-                    continue
-                try:
-                    event_seq = int(event.id)
-                except (TypeError, ValueError):
-                    continue
-                if event_seq <= last_seq:
-                    continue
-                last_seq = event_seq
-                event.id = str(event_seq)
-                yield event
-                if is_terminal_status_event(event):
-                    return
-                continue
-
-            snapshot = await self._task_state.get_runtime_snapshot(task_id)
-            if snapshot.get("cancelled"):
-                yield SessionStatusEvent(status="cancelled")
-                return
-            status = snapshot.get("status")
-            if snapshot.get("is_done") and status in terminal_statuses:
-                async for persisted_event in replay_persisted_events():
-                    yield persisted_event
-                    if is_terminal_status_event(persisted_event):
-                        return
-                terminal_event = await current_terminal_status_event()
-                if terminal_event:
-                    yield terminal_event
-                return
-            if (
-                status in {TaskStatus.PENDING, TaskStatus.RUNNING}
-                and time.monotonic() - idle_started_at >= _STREAM_STALE_IDLE_SECONDS
-                and heartbeat_is_stale(snapshot)
-            ):
-                async for persisted_event in replay_persisted_events():
-                    yield persisted_event
-                    if is_terminal_status_event(persisted_event):
-                        return
-                yield AssistantNoticeEvent(
-                    message="",
-                    i18n_key="sessionDetail.streamStale",
-                )
-                return
+        self._admission = admission_service
+        self._commands = command_ingress
+        self._public = public_projection
+        self._run_projection = run_projection
+        self._poll_interval = poll_interval_seconds
+        self._idle_timeout = idle_timeout_seconds
 
     async def chat(
-            self,
-            session_id: str,
-            message: Optional[str] = None,
-            attachments: Optional[List[str]] = None,
-            clarify_answers: Optional[List[ClarifyAnswer]] = None,
-            latest_event_id: Optional[str] = None,
-            timestamp: Optional[datetime] = None,
-            model_id: Optional[str] = None,
-            skill_id: Optional[str] = None,
-            thinking_enabled: Optional[bool] = None,
-            mode: Optional[SessionMode] = None,
-    ) -> AsyncGenerator[BaseEvent, None]:
-        request_id = get_request_id()
-        event_stream = self._chat_events(
-            session_id=session_id,
-            message=message,
-            attachments=attachments,
-            clarify_answers=clarify_answers,
-            latest_event_id=latest_event_id,
-            timestamp=timestamp,
-            model_id=model_id,
-            skill_id=skill_id,
-            thinking_enabled=thinking_enabled,
-            mode=mode,
-        )
-        try:
-            while True:
-                try:
-                    with bind_context(session_id=session_id, request_id=request_id):
-                        event = await anext(event_stream)
-                except StopAsyncIteration:
-                    return
-                yield event
-        finally:
-            with bind_context(session_id=session_id, request_id=request_id):
-                await event_stream.aclose()
-
-    async def _consume_task_output_stream(
-            self,
-            task: Task,
-            session_id: str,
-            latest_event_id: Optional[str],
-    ) -> AsyncGenerator[BaseEvent, None]:
-        event_stream = self._consume_output_stream(task, session_id, latest_event_id)
-        try:
-            while True:
-                try:
-                    with bind_context(task_id=task.id):
-                        event = await anext(event_stream)
-                except StopAsyncIteration:
-                    return
-                yield event
-        finally:
-            with bind_context(task_id=task.id):
-                await event_stream.aclose()
-
-    async def _chat_events(
-            self,
-            session_id: str,
-            message: Optional[str] = None,
-            attachments: Optional[List[str]] = None,
-            clarify_answers: Optional[List[ClarifyAnswer]] = None,
-            latest_event_id: Optional[str] = None,
-            timestamp: Optional[datetime] = None,
-            model_id: Optional[str] = None,
-            skill_id: Optional[str] = None,
-            thinking_enabled: Optional[bool] = None,
-            mode: Optional[SessionMode] = None,
-    ) -> AsyncGenerator[BaseEvent, None]:
-        session_missing = False
-        try:
-            async with self._uow_factory() as uow:
-                session = await uow.session.get_by_id(session_id)
-            if not session:
-                logger.error("尝试与不存在的任务会话[%s]对话", session_id)
-                session_missing = True
-                yield ErrorEvent(error=_SESSION_NOT_FOUND_MSG)
-                return
-
-            if (
-                model_id is not None
-                or skill_id is not None
-                or thinking_enabled is not None
-                or mode is not None
-            ):
-                async with self._uow_factory() as uow:
-                    await uow.session.update_session_config(
-                        session_id,
-                        model_id=model_id,
-                        skill_id=skill_id,
-                        thinking_enabled=thinking_enabled,
-                        clear_model=model_id == "",
-                        clear_skill=skill_id == "",
-                    )
-                    if mode is not None:
-                        session = await uow.session.get_by_id(session_id)
-                        if session:
-                            session.mode = mode
-                            await uow.session.save(session)
-                    session = await uow.session.get_by_id(session_id)
-
-            task = await self._get_task(session)
-
-            if message:
-                if (
-                    session.status != SessionStatus.RUNNING
-                    or task is None
-                    or await self._task_is_terminal(task)
-                ):
-                    task = await self._create_task(session)
-                    if not task:
-                        logger.error("会话[%s]创建任务失败", session_id)
-                        raise RuntimeError(f"会话[{session_id}]创建任务失败")
-
-                message_event = MessageEvent(
-                    role="user",
-                    message=message,
-                    clarify_answers=[
-                        ClarifyAnswer.model_validate(answer.model_dump())
-                        for answer in (clarify_answers or [])
-                    ],
-                )
-                seq = await self._event_sequence.allocate()
-                message_event.id = str(seq)
-                async with self._uow_factory() as uow:
-                    await uow.session.update_latest_message(
-                        session_id=session_id,
-                        message=message,
-                        timestamp=timestamp or datetime.now(),
-                    )
-                    db_attachments = await uow.file.list_by_ids(attachments or [])
-                    message_event.attachments = db_attachments
-                    current_bindings = (
-                        await uow.resource_governance.list_current_bindings(
-                            session_id
-                        )
-                    )
-                    message_event.resource_bindings = [
-                        binding.to_projection()
-                        for binding in current_bindings
-                    ]
-                    await uow.session.add_event(session_id, message_event, seq=seq)
-                await task.input_stream.put(message_event.model_dump_json())
-                yield message_event
-                await task.invoke()
-                with bind_context(task_id=task.id):
-                    logger.info(
-                        "往会话[%s]输入消息队列写入消息 task_id=%s: %s...",
-                        session_id,
-                        task.id,
-                        message[:50],
-                    )
-
-            if not task:
-                task = await self._get_task(session)
-            if not task:
-                return
-
-            with bind_context(task_id=task.id):
-                logger.info("会话[%s]已启动, task_id=%s", session_id, task.id)
-
-            task_event_stream = self._consume_task_output_stream(
-                task,
-                session_id,
-                latest_event_id,
+        self,
+        session_id: str,
+        *,
+        owner_scope: OwnerScope,
+        message: str | None = None,
+        request_id: UUID | None = None,
+        attachments: list[str] | None = None,
+        latest_event_id: str | None = None,
+        timestamp: datetime | None = None,
+        model_id: str | None = None,
+        skill_id: str | None = None,
+        thinking_enabled: bool | None = None,
+        mode: SessionMode | None = None,
+        **_: object,
+    ) -> AsyncGenerator[PublicExecutionEvent, None]:
+        if message is not None:
+            message = message.strip()
+            if not message:
+                raise ValueError("message must not be blank")
+        elif request_id is not None:
+            raise ValueError("request_id is only valid when message is present")
+        if message is not None and request_id is None:
+            raise ValueError("message admission requires request_id")
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(session_id, scope=owner_scope)
+            effective_skill_id = _effective_id(skill_id, session.skill_id) if session else None
+            skill = (
+                await uow.skill.get_by_id(effective_skill_id, scope=owner_scope)
+                if effective_skill_id
+                else None
             )
-            try:
-                async for event in task_event_stream:
+            attachment_files = []
+            for file_id in _attachment_ids(attachments):
+                file = await uow.file.get_by_id(file_id, scope=owner_scope)
+                if file is None:
+                    raise ValueError(f"attachment does not exist or is not accessible: {file_id}")
+                attachment_files.append(file)
+        if session is None:
+            raise ValueError("session does not exist")
+        if effective_skill_id and (skill is None or not skill.enabled):
+            raise ValueError("skill does not exist or is disabled")
+        if attachment_files and not message:
+            raise ValueError("attachments require a message")
+        effective_model_id = _effective_id(model_id, session.model_id)
+        if effective_model_id is None and skill is not None:
+            effective_model_id = skill.recommended_model_id
+        resolved_mode = mode or session.mode
+        if attachment_files and resolved_mode == SessionMode.ASK:
+            raise ValueError("temporary attachments require agent mode")
+        private_attachments = [_private_attachment(file) for file in attachment_files]
+        public_attachments = [_public_attachment(file) for file in attachment_files]
+        resource_bindings = [
+            {**binding.model_dump(mode="json"), "is_current": True}
+            for binding in session.resource_bindings
+        ]
+
+        cursor = latest_event_id
+        conversation: list[dict[str, str]] = []
+        if cursor is None and message is not None:
+            current = await self.list_events(
+                session_id,
+                owner_scope=owner_scope,
+                latest=True,
+                limit=1,
+            )
+            cursor = current.events[-1].cursor if current.events else None
+        if message is not None:
+            history = await self.list_events(
+                session_id,
+                owner_scope=owner_scope,
+                latest=True,
+                limit=100,
+            )
+            conversation = [
+                {
+                    "role": str(event.payload["role"]),
+                    "content": str(event.payload["message"]),
+                }
+                for event in history.events
+                if event.event_type == "message"
+                and event.payload.get("role") in {"user", "assistant"}
+                and isinstance(event.payload.get("message"), str)
+            ]
+
+        admitted_run_id: UUID | None = session.active_execution_run_id
+        if message is not None:
+            async with self._uow_factory() as uow:
+                locked_session = await uow.session.lock_by_id(
+                    session_id,
+                    scope=owner_scope,
+                )
+                if locked_session is None:
+                    raise ValueError("session does not exist")
+                if locked_session.active_execution_run_id is not None:
+                    if locked_session.active_execution_request_id != request_id:
+                        raise ValueError("session already has an active Run")
+                    admitted_run_id = locked_session.active_execution_run_id
+                else:
+                    if model_id is not None:
+                        locked_session.model_id = model_id or None
+                    if skill_id is not None:
+                        locked_session.skill_id = skill_id or None
+                    if thinking_enabled is not None:
+                        locked_session.thinking_enabled = thinking_enabled
+                    if mode is not None:
+                        locked_session.mode = mode
+                    locked_session.latest_message = message
+                    locked_session.latest_message_at = timestamp or datetime.now(UTC)
+                    for file in attachment_files:
+                        await uow.session.add_file(session_id, file)
+                    idempotency_key = f"session:{session_id}:request:{request_id}"
+                    admitted_run_id = await self._admission.admit(
+                        family=(
+                            RunFamily.ASK if resolved_mode == SessionMode.ASK else RunFamily.AGENT
+                        ),
+                        source_entity_type="session",
+                        source_entity_id=session_id,
+                        owner_scope=owner_scope,
+                        private_input={
+                            "message": message,
+                            "attachments": private_attachments,
+                            "model_id": effective_model_id,
+                            "skill_id": effective_skill_id,
+                            "temperature_override": (
+                                skill.agent_params.temperature_override
+                                if skill is not None
+                                else None
+                            ),
+                            "thinking_enabled": (
+                                thinking_enabled
+                                if thinking_enabled is not None
+                                else session.thinking_enabled
+                            ),
+                            "session_id": session_id,
+                            "mode": resolved_mode.value,
+                            "operator_scope": session.operator_scope,
+                            "operator_domains": list(session.operator_domains),
+                            "conversation": conversation,
+                            "resource_bindings": resource_bindings,
+                        },
+                        public_input={
+                            "role": "user",
+                            "message": message,
+                            "attachments": public_attachments,
+                            "resource_bindings": resource_bindings,
+                        },
+                        idempotency_key=idempotency_key,
+                        command_sink=uow.execution_commands,
+                    )
+                    locked_session.active_execution_run_id = admitted_run_id
+                    locked_session.active_execution_request_id = request_id
+                    await uow.session.save(locked_session)
+                await uow.commit()
+
+        idle = 0.0
+        while True:
+            page = await self.list_events(
+                session_id,
+                owner_scope=owner_scope,
+                run_id=admitted_run_id,
+                after=cursor,
+                limit=100,
+            )
+            if page.events:
+                idle = 0.0
+                for event in page.events:
+                    cursor = event.cursor
                     yield event
-            finally:
-                await task_event_stream.aclose()
+                    if (
+                        event.event_type in _TERMINAL_EVENTS
+                        or (event.event_type == "approval" and bool(event.payload.get("options")))
+                        or (
+                            event.event_type == "session_status"
+                            and event.payload.get("status") in {"waiting", "cancelled", "failed"}
+                        )
+                    ):
+                        return
+                continue
+            await asyncio.sleep(self._poll_interval)
+            idle += self._poll_interval
+            if idle >= self._idle_timeout:
+                return
 
-            with bind_context(task_id=task.id):
-                logger.info("会话[%s]本轮运行结束 task_id=%s", session_id, task.id)
-        except Exception as e:
-            logger.exception("任务会话[%s]对话出错: %s", session_id, e)
-            code = getattr(e, "error_code", None)
-            if not code:
-                from app.domain.utils.llm_retry import classify_llm_error_code
-                code = classify_llm_error_code(e)
-            event = ErrorEvent(error=str(e), code=code)
-            try:
-                seq = await self._event_sequence.allocate()
-                event.id = str(seq)
-                async with self._uow_factory() as uow:
-                    await uow.session.add_event(session_id, event, seq=seq)
-            except (asyncio.CancelledError, Exception) as add_err:
-                logger.warning("会话[%s]添加错误事件失败: %s", session_id, add_err)
-            yield event
-        finally:
-            if not session_missing:
-                try:
-                    asyncio.create_task(self._safe_update_unread_count(session_id))
-                except RuntimeError:
-                    logger.warning("会话[%s]无法创建后台任务更新未读消息计数", session_id)
+    async def list_events(
+        self,
+        session_id: str,
+        *,
+        owner_scope: OwnerScope,
+        run_id: UUID | None = None,
+        after: str | None = None,
+        before: str | None = None,
+        latest: bool = False,
+        limit: int = 100,
+    ) -> PublicEventPage:
+        return await self._public.list_events(
+            source_entity_type="session",
+            source_entity_id=session_id,
+            owner_scope=owner_scope,
+            run_id=run_id,
+            after=after,
+            before=before,
+            latest=latest,
+            limit=limit,
+        )
 
-    async def list_checkpoints(self, session_id: str) -> List[Checkpoint]:
-        return await self._checkpoint_service.list_checkpoints(session_id)
+    async def stop_session(
+        self,
+        session_id: str,
+        *,
+        owner_scope: OwnerScope,
+    ) -> None:
+        run_id = await self._run_projection.latest_active_run_id(
+            source_entity_type="session",
+            source_entity_id=session_id,
+            owner_scope=owner_scope,
+        )
+        if run_id is None:
+            async with self._uow_factory() as uow:
+                session = await uow.session.get_by_id(
+                    session_id,
+                    scope=owner_scope,
+                )
+            run_id = session.active_execution_run_id if session else None
+        if run_id is None:
+            return
+        owner_user_id, team_id = self._scope_parts(owner_scope)
+        await self._commands.submit(
+            RegisteredCommand(
+                command_id=uuid5(
+                    NAMESPACE_URL,
+                    f"opencitadel:session-cancel:{run_id}",
+                ),
+                command_type="CancelRun",
+                run_id=run_id,
+                expected_stream_version=None,
+                payload={"reason": "requested_by_user"},
+            ),
+            CommandContext(
+                owner_user_id=owner_user_id,
+                team_id=team_id,
+                correlation_id=UUID(str(run_id)),
+                causation_id=None,
+                issued_at=datetime.now(UTC),
+            ),
+        )
 
-    async def restore_checkpoint(self, session_id: str, checkpoint_id: str) -> None:
-        await self._checkpoint_service.restore(session_id, checkpoint_id)
-
-    async def stop_session(self, session_id: str) -> None:
-        async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(session_id)
-        if not session:
-            raise RuntimeError("任务会话不存在, 请核实后重试")
-        if session.task_id:
-            await self._task_state.request_cancel(session.task_id)
-        async with self._uow_factory() as uow:
-            await uow.session.update_status(session_id, SessionStatus.CANCELLED)
+    async def decide_approval(
+        self,
+        *,
+        approval_id: UUID,
+        owner_scope: OwnerScope,
+        decision: str,
+        actor_user_id: str,
+        feedback: str = "",
+    ) -> UUID:
+        if decision not in {"approved", "rejected"}:
+            raise ValueError("approval decision must be approved or rejected")
+        run_id = await self._run_projection.run_id_for_pending_approval(
+            approval_id=approval_id,
+            owner_scope=owner_scope,
+        )
+        if run_id is None:
+            raise ValueError("pending approval does not exist")
+        owner_user_id, team_id = self._scope_parts(owner_scope)
+        await self._commands.submit(
+            RegisteredCommand(
+                command_id=uuid5(
+                    NAMESPACE_URL,
+                    f"opencitadel:approval:{approval_id}:{decision}",
+                ),
+                command_type="DecideApproval",
+                run_id=run_id,
+                expected_stream_version=None,
+                payload={
+                    "approval_id": str(approval_id),
+                    "decision": decision,
+                    "actor_user_id": actor_user_id,
+                    "feedback": feedback,
+                },
+            ),
+            CommandContext(
+                owner_user_id=owner_user_id,
+                team_id=team_id,
+                correlation_id=run_id,
+                causation_id=None,
+                issued_at=datetime.now(UTC),
+            ),
+        )
+        return run_id
 
     async def shutdown(self) -> None:
-        logger.info("AgentService 关闭（任务由独立 worker 执行，无需清理本地 registry）")
+        """The API facade owns no background tasks or Redis resources."""
+
+    @staticmethod
+    def _scope_parts(owner_scope: OwnerScope) -> tuple[str | None, str | None]:
+        if owner_scope.team_id is not None:
+            return None, owner_scope.team_id
+        return owner_scope.user_id, None
+
+
+def _effective_id(requested: str | None, persisted: str | None) -> str | None:
+    if requested == "":
+        return None
+    return requested if requested is not None else persisted
+
+
+def _attachment_ids(attachments: list[str] | None) -> tuple[str, ...]:
+    raw = attachments or []
+    if len(raw) > 10:
+        raise ValueError("at most 10 attachments are allowed")
+    if any(not isinstance(file_id, str) or not file_id.strip() for file_id in raw):
+        raise ValueError("attachment IDs must be non-empty strings")
+    return tuple(dict.fromkeys(file_id.strip() for file_id in raw))
+
+
+def _attachment_filename(file: File) -> str:
+    basename = file.filename.replace("\\", "/").rsplit("/", 1)[-1]
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", basename).strip("._")
+    return f"{file.id}-{safe or 'attachment'}"
+
+
+def _public_attachment(file: File) -> dict[str, object]:
+    return {
+        "file_id": file.id,
+        "filename": file.filename,
+        "mime_type": file.mime_type,
+        "size": file.size,
+    }
+
+
+def _private_attachment(file: File) -> dict[str, object]:
+    return {
+        **_public_attachment(file),
+        "sandbox_path": f"/home/ubuntu/uploads/{_attachment_filename(file)}",
+    }
+
+
+__all__ = ["AgentService"]

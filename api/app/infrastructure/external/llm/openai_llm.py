@@ -1,58 +1,83 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
-from typing import List, Dict, Any, AsyncGenerator, Union
+from collections.abc import AsyncGenerator
+from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 
+from app.application.ports.crypto import OutboundNetworkPolicy
 from app.domain.errors import ServerRequestsError
 from app.domain.external.llm import LLM
+from app.domain.models.inference import (
+    InferenceCapabilities,
+    InferenceProvider,
+    ResolvedInferenceModel,
+)
 from app.domain.utils.llm_retry import is_quota_exhausted_error
-from app.domain.models.llm_model import LLMModel, ModelCapabilities, LLMProvider
 from app.infrastructure.external.llm.base_llm import (
     MultimodalFallbackMixin,
     _has_multimodal_image_content,
-    _strip_multimodal_to_text,
     is_retriable_multimodal_error,
+    normalize_usage,
 )
-from app.infrastructure.external.llm.base_llm import normalize_usage
-from app.infrastructure.observability.llm_metrics import record_multimodal_request
 from app.infrastructure.external.llm.structured_output import to_openai_strict
-from app.infrastructure.security.outbound_http import create_ssrf_safe_async_client
+from app.infrastructure.observability.llm_metrics import record_multimodal_request
+from app.infrastructure.security.outbound_http import (
+    DEFAULT_OUTBOUND_NETWORK_POLICY,
+    create_ssrf_safe_async_client,
+)
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TOOL_MODEL = "deepseek-chat"
 _DEFAULT_REQUEST_TIMEOUT = 300
-_CLIENT_EXTRA_KEYS = frozenset({
-    "base_url",
-    "api_key",
-    "tool_model_name",
-    "omit_parallel_tool_calls",
-    "thinking_request_params",
-    "thinking_extra_body",
-    "thinking_model_name",
-    "request_timeout",
-})
-_THINKING_CONFIG_KEYS = frozenset({
-    "thinking_request_params",
-    "thinking_extra_body",
-    "thinking_model_name",
-})
+_CLIENT_EXTRA_KEYS = frozenset(
+    {
+        "base_url",
+        "api_key",
+        "tool_model_name",
+        "omit_parallel_tool_calls",
+        "thinking_request_params",
+        "thinking_extra_body",
+        "thinking_model_name",
+        "request_timeout",
+    }
+)
+_THINKING_CONFIG_KEYS = frozenset(
+    {
+        "thinking_request_params",
+        "thinking_extra_body",
+        "thinking_model_name",
+    }
+)
 
 
-def _sanitize_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _sanitize_messages_for_api(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Last-mile guard: OpenAI-compatible APIs reject assistant messages with null content."""
-    from app.domain.services.agents.base import BaseAgent
-
-    return [BaseAgent._normalize_message_for_llm(dict(msg)) for msg in messages]
+    sanitized: list[dict[str, Any]] = []
+    for message in messages:
+        normalized = dict(message)
+        role = normalized.get("role")
+        content = normalized.get("content")
+        reasoning = normalized.get("reasoning_content")
+        tool_calls = normalized.get("tool_calls")
+        if role == "assistant":
+            if not content and reasoning and not tool_calls:
+                normalized["content"] = str(reasoning)
+            elif content is None:
+                normalized["content"] = ""
+        elif role in {"user", "system"} and content is None:
+            normalized["content"] = ""
+        if role != "assistant":
+            normalized.pop("reasoning_content", None)
+        sanitized.append(normalized)
+    return sanitized
 
 
 def _resolve_request_model(
-        model_name: str,
-        tools: List[Dict[str, Any]] | None,
-        extra: Dict[str, Any],
-        thinking_enabled: bool = False,
+    model_name: str,
+    tools: list[dict[str, Any]] | None,
+    extra: dict[str, Any],
+    thinking_enabled: bool = False,
 ) -> str:
     if tools:
         if model_name == "deepseek-reasoner" or model_name.endswith("-reasoner"):
@@ -66,9 +91,9 @@ def _resolve_request_model(
 
 
 def _merge_thinking_request_kwargs(
-        request_kwargs: Dict[str, Any],
-        extra: Dict[str, Any],
-        thinking_enabled: bool,
+    request_kwargs: dict[str, Any],
+    extra: dict[str, Any],
+    thinking_enabled: bool,
 ) -> None:
     if not thinking_enabled:
         return
@@ -100,11 +125,14 @@ def _log_response_summary(response: Any, request_model: str) -> None:
     usage_text = usage.model_dump() if usage is not None and hasattr(usage, "model_dump") else None
     finish_reason = response.choices[0].finish_reason if response.choices else None
     logger.info(
-        f"OpenAI客户端返回摘要: model={request_model} finish_reason={finish_reason} usage={usage_text}"
+        "OpenAI客户端返回摘要: model=%s finish_reason=%s usage=%s",
+        request_model,
+        finish_reason,
+        usage_text,
     )
 
 
-def _resolve_request_timeout(extra: Dict[str, Any]) -> float:
+def _resolve_request_timeout(extra: dict[str, Any]) -> float:
     configured = extra.get("request_timeout")
     if configured is None:
         return float(_DEFAULT_REQUEST_TIMEOUT)
@@ -112,11 +140,13 @@ def _resolve_request_timeout(extra: Dict[str, Any]) -> float:
         timeout = float(configured)
         return timeout if timeout > 0 else float(_DEFAULT_REQUEST_TIMEOUT)
     except (TypeError, ValueError):
-        logger.warning("无效的 request_timeout=%s，回退默认值 %s", configured, _DEFAULT_REQUEST_TIMEOUT)
+        logger.warning(
+            "无效的 request_timeout=%s，回退默认值 %s", configured, _DEFAULT_REQUEST_TIMEOUT
+        )
         return float(_DEFAULT_REQUEST_TIMEOUT)
 
 
-def _log_multimodal_request_summary(messages: List[Dict[str, Any]]) -> None:
+def _log_multimodal_request_summary(messages: list[dict[str, Any]]) -> None:
     from app.domain.utils.vision_tokens import count_message_image_stats
 
     image_count, image_bytes, _ = count_message_image_stats(messages)
@@ -134,19 +164,19 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
     """基于OpenAI SDK/兼容OpenAI格式的LLM调用类（支持OpenAI/Ollama/Azure）"""
 
     def __init__(
-            self,
-            config: LLMModel,
-            thinking_enabled: bool = False,
-            **kwargs,
+        self,
+        config: ResolvedInferenceModel,
+        thinking_enabled: bool = False,
+        outbound_policy: OutboundNetworkPolicy = DEFAULT_OUTBOUND_NETWORK_POLICY,
+        **kwargs,
     ) -> None:
         base_url = config.base_url
-        api_key = config.api_key
+        credential = config.credential
         model_name = config.model_name
         temperature = config.temperature
-        max_tokens = config.max_tokens
+        max_tokens = config.max_output_tokens
         extra = config.extra_params or {}
         self._capabilities = config.capabilities
-        self._supports_multimodal = config.supports_multimodal
         self._provider = config.provider
         self._base_url = base_url
 
@@ -154,21 +184,21 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         self._thinking_enabled = thinking_enabled
         if thinking_enabled and not any(key in extra for key in _THINKING_CONFIG_KEYS):
             logger.warning(
-                f"会话已开启思考模式，但模型[{model_name}]未配置 thinking 参数模板，将按普通模式请求"
+                "会话已开启思考模式，但模型[%s]未配置 thinking 参数模板，将按普通模式请求",
+                model_name,
             )
-        client_kwargs = {
-            k: v
-            for k, v in extra.items()
-            if k not in _CLIENT_EXTRA_KEYS
-        }
+        client_kwargs = {k: v for k, v in extra.items() if k not in _CLIENT_EXTRA_KEYS}
         client_kwargs.update(kwargs)
         client_kwargs.setdefault(
             "http_client",
-            create_ssrf_safe_async_client(timeout=300),
+            create_ssrf_safe_async_client(
+                timeout=300,
+                outbound_policy=outbound_policy,
+            ),
         )
         self._client = AsyncOpenAI(
             base_url=base_url,
-            api_key=api_key or "sk-placeholder",
+            api_key=credential,
             max_retries=0,
             **client_kwargs,
         )
@@ -190,42 +220,40 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         return self._max_tokens
 
     @property
-    def supports_multimodal(self) -> bool:
-        return self._supports_multimodal
-
-    @property
-    def capabilities(self) -> ModelCapabilities:
+    def capabilities(self) -> InferenceCapabilities:
         return self._capabilities
 
     async def _create_chat_completion(
-            self,
-            request_kwargs: Dict[str, Any],
-            tools: List[Dict[str, Any]] | None,
-            tool_choice: Union[str, Dict[str, Any], None],
-            request_model: str,
+        self,
+        request_kwargs: dict[str, Any],
+        tools: list[dict[str, Any]] | None,
+        tool_choice: str | dict[str, Any] | None,
+        request_model: str,
     ) -> Any:
         if tools:
             logger.info(
-                f"调用OpenAI客户端向LLM发起请求并携带工具信息: {request_model}"
-                + (f" (配置模型: {self._model_name})" if request_model != self._model_name else "")
-                + (f" thinking={self._thinking_enabled}" if self._thinking_enabled else "")
-                + f" timeout={self._timeout}s"
+                "调用OpenAI客户端向LLM发起请求并携带工具信息: %s%s%s timeout=%ss",
+                request_model,
+                f" (配置模型: {self._model_name})" if request_model != self._model_name else "",
+                f" thinking={self._thinking_enabled}" if self._thinking_enabled else "",
+                self._timeout,
             )
-            tool_kwargs: Dict[str, Any] = {
+            tool_kwargs: dict[str, Any] = {
                 "tools": tools,
                 "tool_choice": tool_choice,
             }
             if not self._extra_params.get("omit_parallel_tool_calls"):
                 tool_kwargs["parallel_tool_calls"] = True
             return await self._client.chat.completions.create(
-                    **request_kwargs,
-                    **tool_kwargs,
-                )
+                **request_kwargs,
+                **tool_kwargs,
+            )
 
         logger.info(
-            f"调用OpenAI客户端向LLM发起请求未携带工具: {request_model}"
-            + (f" thinking={self._thinking_enabled}" if self._thinking_enabled else "")
-            + f" timeout={self._timeout}s"
+            "调用OpenAI客户端向LLM发起请求未携带工具: %s%s timeout=%ss",
+            request_model,
+            f" thinking={self._thinking_enabled}" if self._thinking_enabled else "",
+            self._timeout,
         )
         return await self._client.chat.completions.create(**request_kwargs)
 
@@ -241,25 +269,24 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             raise ServerRequestsError(
                 f"调用LLM超时(>{self._timeout}s): 请检查模型服务或减小多模态图片体积"
             ) from error
-        logger.error(f"调用OpenAI客户端发生错误: {str(error)}", exc_info=True)
+        logger.error("调用OpenAI客户端发生错误: %s", error)
         raise ServerRequestsError(_format_llm_error(error, request_model)) from error
 
     async def invoke(
-            self,
-            messages: List[Dict[str, Any]],
-            tools: List[Dict[str, Any]] = None,
-            response_format: Dict[str, Any] = None,
-            tool_choice: Union[str, Dict[str, Any], None] = None,
-            response_schema: Dict[str, Any] = None,
-            retry_budget: Any = None,
-    ) -> Dict[str, Any]:
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         request_model = _resolve_request_model(
             self._model_name,
             tools,
             self._extra_params,
             thinking_enabled=self._thinking_enabled,
         )
-        request_kwargs: Dict[str, Any] = {
+        request_kwargs: dict[str, Any] = {
             "model": request_model,
             "messages": _sanitize_messages_for_api(messages),
             "timeout": self._timeout,
@@ -281,7 +308,7 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         )
         _log_multimodal_request_summary(messages)
 
-        async def _create_with_kwargs(kwargs: Dict[str, Any]):
+        async def _create_with_kwargs(kwargs: dict[str, Any]):
             return await self._create_chat_completion(
                 kwargs,
                 tools,
@@ -293,7 +320,7 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             response = await _create_with_kwargs(request_kwargs)
         except ServerRequestsError:
             raise
-        except Exception as error:
+        except (OpenAIError, OSError, RuntimeError, ValueError) as error:
             if _has_multimodal_image_content(messages) and is_retriable_multimodal_error(error):
                 try:
                     response = await self._apply_multimodal_fallback(
@@ -301,7 +328,7 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
                         request_kwargs,
                         _create_with_kwargs,
                     )
-                except Exception as retry_error:
+                except (OpenAIError, OSError, RuntimeError, ValueError) as retry_error:
                     if retry_error is error:
                         self._raise_llm_error(error, request_model)
                     self._raise_llm_error(retry_error, request_model)
@@ -322,21 +349,20 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         return result
 
     async def stream_invoke(
-            self,
-            messages: List[Dict[str, Any]],
-            tools: List[Dict[str, Any]] = None,
-            response_format: Dict[str, Any] = None,
-            tool_choice: Union[str, Dict[str, Any], None] = None,
-            response_schema: Dict[str, Any] = None,
-            retry_budget: Any = None,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+        response_schema: dict[str, Any] | None = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
         request_model = _resolve_request_model(
             self._model_name,
             tools,
             self._extra_params,
             thinking_enabled=self._thinking_enabled,
         )
-        request_kwargs: Dict[str, Any] = {
+        request_kwargs: dict[str, Any] = {
             "model": request_model,
             "messages": _sanitize_messages_for_api(messages),
             "timeout": self._timeout,
@@ -360,7 +386,7 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
         )
         _log_multimodal_request_summary(messages)
 
-        tool_kwargs: Dict[str, Any] = {}
+        tool_kwargs: dict[str, Any] = {}
         if tools:
             tool_kwargs = {
                 "tools": tools,
@@ -376,9 +402,10 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             )
         except ServerRequestsError:
             raise
-        except Exception as error:
+        except (OpenAIError, OSError, RuntimeError, ValueError) as error:
             if _has_multimodal_image_content(messages) and is_retriable_multimodal_error(error):
-                async def _create_stream_with_kwargs(kwargs: Dict[str, Any]):
+
+                async def _create_stream_with_kwargs(kwargs: dict[str, Any]):
                     return await self._client.chat.completions.create(
                         **kwargs,
                         **tool_kwargs,
@@ -390,15 +417,15 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
                         request_kwargs,
                         _create_stream_with_kwargs,
                     )
-                except Exception as retry_error:
+                except (OpenAIError, OSError, RuntimeError, ValueError) as retry_error:
                     if retry_error is error:
                         self._raise_llm_error(error, request_model)
                     self._raise_llm_error(retry_error, request_model)
             else:
                 self._raise_llm_error(error, request_model)
 
-        stream_usage: Dict[str, int] = {}
-        finish_reason: Optional[str] = None
+        stream_usage: dict[str, int] = {}
+        finish_reason: str | None = None
         async for chunk in stream:
             usage = getattr(chunk, "usage", None)
             if usage is not None:
@@ -412,7 +439,7 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             delta = choice.delta
             if delta is None:
                 continue
-            payload: Dict[str, Any] = {}
+            payload: dict[str, Any] = {}
             if delta.content:
                 payload["content"] = delta.content
             reasoning = getattr(delta, "reasoning_content", None)
@@ -421,14 +448,18 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             if delta.tool_calls:
                 payload["tool_calls"] = []
                 for tool_call in delta.tool_calls:
-                    payload["tool_calls"].append({
-                        "index": tool_call.index,
-                        "id": tool_call.id,
-                        "function": {
-                            "name": tool_call.function.name if tool_call.function else None,
-                            "arguments": tool_call.function.arguments if tool_call.function else "",
-                        },
-                    })
+                    payload["tool_calls"].append(
+                        {
+                            "index": tool_call.index,
+                            "id": tool_call.id,
+                            "function": {
+                                "name": tool_call.function.name if tool_call.function else None,
+                                "arguments": tool_call.function.arguments
+                                if tool_call.function
+                                else "",
+                            },
+                        }
+                    )
             if payload:
                 yield payload
         if finish_reason:
@@ -437,11 +468,15 @@ class OpenAILLM(MultimodalFallbackMixin, LLM):
             yield {"usage": stream_usage}
 
     def _structured_output_mode(self) -> str:
-        configured = (self._extra_params.get("structured_output") or self._capabilities.structured_output or "auto")
+        configured = (
+            self._extra_params.get("structured_output")
+            or self._capabilities.structured_output
+            or "auto"
+        )
         if configured != "auto":
             return str(configured)
-        if self._provider == LLMProvider.AZURE:
+        if self._provider == InferenceProvider.AZURE:
             return "json_schema"
-        if self._provider == LLMProvider.OPENAI and "openai.com" in (self._base_url or ""):
+        if self._provider == InferenceProvider.OPENAI and "openai.com" in (self._base_url or ""):
             return "json_schema"
         return "json_object"

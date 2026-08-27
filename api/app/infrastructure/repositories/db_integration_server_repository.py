@@ -1,14 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from datetime import datetime
-from typing import List, Optional
+from datetime import UTC, datetime
 
-from sqlalchemy import or_, select, delete
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.integration_server import A2AServerRecord, MCPServerRecord
 from app.domain.models.scope import OwnerScope, OwnerScopeType
-from app.domain.repositories.integration_server_repository import A2AServerRepository, MCPServerRepository
+from app.domain.repositories.integration_server_repository import (
+    A2AServerRepository,
+    MCPServerRepository,
+)
 from app.infrastructure.models.integration_server import A2AServerORM, MCPServerORM
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.security.secret_dict_cipher import decrypt_secret_dict, decrypt_url
@@ -19,16 +19,15 @@ class DBMCPServerRepository(MCPServerRepository):
         self.db_session = db_session
         self.cipher = cipher
 
-    def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
-        """scope=None means global-only (unlike llm_model repo where None means no filter)."""
+    def _apply_scope(self, stmt, scope: OwnerScope | None):
+        """scope=None means global-only, unlike inference resource repositories."""
         if scope is None:
             return stmt.where(MCPServerORM.visibility == "global")
         if scope.type == OwnerScopeType.TEAM:
             owner_filter = MCPServerORM.team_id == scope.team_id
         else:
-            owner_filter = (
-                (MCPServerORM.owner_user_id == scope.user_id)
-                & MCPServerORM.team_id.is_(None)
+            owner_filter = (MCPServerORM.owner_user_id == scope.user_id) & MCPServerORM.team_id.is_(
+                None
             )
         return stmt.where(or_(MCPServerORM.visibility == "global", owner_filter))
 
@@ -38,18 +37,22 @@ class DBMCPServerRepository(MCPServerRepository):
         env = decrypt_secret_dict(record.env, record.env_encryption, self.cipher)
         return record.to_domain(url, headers, env)
 
-    async def list_all(self, scope: Optional[OwnerScope] = None) -> List[MCPServerRecord]:
+    async def list_all(self, scope: OwnerScope | None = None) -> list[MCPServerRecord]:
         stmt = self._apply_scope(select(MCPServerORM), scope).order_by(MCPServerORM.created_at)
         result = await self.db_session.execute(stmt)
         return [self._to_domain(r) for r in result.scalars().all()]
 
-    async def get_by_id(self, server_id: str, scope: Optional[OwnerScope] = None) -> Optional[MCPServerRecord]:
+    async def get_by_id(
+        self, server_id: str, scope: OwnerScope | None = None
+    ) -> MCPServerRecord | None:
         stmt = self._apply_scope(select(MCPServerORM).where(MCPServerORM.id == server_id), scope)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         return self._to_domain(record) if record else None
 
-    async def get_by_name(self, name: str, scope: Optional[OwnerScope] = None) -> Optional[MCPServerRecord]:
+    async def get_by_name(
+        self, name: str, scope: OwnerScope | None = None
+    ) -> MCPServerRecord | None:
         stmt = self._apply_scope(select(MCPServerORM).where(MCPServerORM.name == name), scope)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
@@ -66,16 +69,18 @@ class DBMCPServerRepository(MCPServerRepository):
     async def save(
         self,
         record: MCPServerRecord,
-        encrypted_url: Optional[str],
+        encrypted_url: str | None,
         url_encryption: str,
-        encrypted_headers: Optional[dict],
+        encrypted_headers: dict | None,
         headers_encryption: str,
-        encrypted_env: Optional[dict],
+        encrypted_env: dict | None,
         env_encryption: str,
     ) -> None:
-        result = await self.db_session.execute(select(MCPServerORM).where(MCPServerORM.id == record.id))
+        result = await self.db_session.execute(
+            select(MCPServerORM).where(MCPServerORM.id == record.id)
+        )
         existing = result.scalar_one_or_none()
-        record.updated_at = datetime.now()
+        record.updated_at = datetime.now(UTC)
         if existing:
             existing.name = record.name
             existing.transport = record.transport.value
@@ -85,20 +90,22 @@ class DBMCPServerRepository(MCPServerRepository):
             existing.args = record.args
             existing.url = encrypted_url if encrypted_url is not None else record.url
             existing.url_encryption = url_encryption
-            if encrypted_headers is not None:
-                existing.headers = encrypted_headers
-                existing.headers_encryption = headers_encryption
-            if encrypted_env is not None:
-                existing.env = encrypted_env
-                existing.env_encryption = env_encryption
-            existing.extra = record.extra
+            existing.headers = encrypted_headers
+            existing.headers_encryption = headers_encryption
+            existing.env = encrypted_env
+            existing.env_encryption = env_encryption
+            existing.extra = record.transport_options
             existing.tool_policies = {
                 name: policy.model_dump(mode="json")
                 for name, policy in record.tool_policies.items()
             }
             existing.owner_user_id = record.owner_user_id
             existing.team_id = record.team_id
-            existing.visibility = record.visibility.value if hasattr(record.visibility, "value") else record.visibility
+            existing.visibility = (
+                record.visibility.value
+                if hasattr(record.visibility, "value")
+                else record.visibility
+            )
             existing.updated_at = record.updated_at
         else:
             self.db_session.add(
@@ -116,14 +123,16 @@ class DBMCPServerRepository(MCPServerRepository):
                     headers_encryption=headers_encryption,
                     env=encrypted_env,
                     env_encryption=env_encryption,
-                    extra=record.extra,
+                    extra=record.transport_options,
                     tool_policies={
                         name: policy.model_dump(mode="json")
                         for name, policy in record.tool_policies.items()
                     },
                     owner_user_id=record.owner_user_id,
                     team_id=record.team_id,
-                    visibility=record.visibility.value if hasattr(record.visibility, "value") else record.visibility,
+                    visibility=record.visibility.value
+                    if hasattr(record.visibility, "value")
+                    else record.visibility,
                 )
             )
 
@@ -135,34 +144,37 @@ class DBA2AServerRepository(A2AServerRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
-    def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
-        """scope=None means global-only (unlike llm_model repo where None means no filter)."""
+    def _apply_scope(self, stmt, scope: OwnerScope | None):
+        """scope=None means global-only, unlike inference resource repositories."""
         if scope is None:
             return stmt.where(A2AServerORM.visibility == "global")
         if scope.type == OwnerScopeType.TEAM:
             owner_filter = A2AServerORM.team_id == scope.team_id
         else:
-            owner_filter = (
-                (A2AServerORM.owner_user_id == scope.user_id)
-                & A2AServerORM.team_id.is_(None)
+            owner_filter = (A2AServerORM.owner_user_id == scope.user_id) & A2AServerORM.team_id.is_(
+                None
             )
         return stmt.where(or_(A2AServerORM.visibility == "global", owner_filter))
 
-    async def list_all(self, scope: Optional[OwnerScope] = None) -> List[A2AServerRecord]:
+    async def list_all(self, scope: OwnerScope | None = None) -> list[A2AServerRecord]:
         stmt = self._apply_scope(select(A2AServerORM), scope).order_by(A2AServerORM.created_at)
         result = await self.db_session.execute(stmt)
         return [r.to_domain() for r in result.scalars().all()]
 
-    async def get_by_id(self, server_id: str, scope: Optional[OwnerScope] = None) -> Optional[A2AServerRecord]:
+    async def get_by_id(
+        self, server_id: str, scope: OwnerScope | None = None
+    ) -> A2AServerRecord | None:
         stmt = self._apply_scope(select(A2AServerORM).where(A2AServerORM.id == server_id), scope)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         return record.to_domain() if record else None
 
     async def save(self, record: A2AServerRecord) -> None:
-        result = await self.db_session.execute(select(A2AServerORM).where(A2AServerORM.id == record.id))
+        result = await self.db_session.execute(
+            select(A2AServerORM).where(A2AServerORM.id == record.id)
+        )
         existing = result.scalar_one_or_none()
-        record.updated_at = datetime.now()
+        record.updated_at = datetime.now(UTC)
         if existing:
             existing.base_url = record.base_url
             existing.enabled = record.enabled
@@ -172,7 +184,11 @@ class DBA2AServerRepository(A2AServerRepository):
             }
             existing.owner_user_id = record.owner_user_id
             existing.team_id = record.team_id
-            existing.visibility = record.visibility.value if hasattr(record.visibility, "value") else record.visibility
+            existing.visibility = (
+                record.visibility.value
+                if hasattr(record.visibility, "value")
+                else record.visibility
+            )
             existing.updated_at = record.updated_at
         else:
             self.db_session.add(
@@ -186,7 +202,9 @@ class DBA2AServerRepository(A2AServerRepository):
                     },
                     owner_user_id=record.owner_user_id,
                     team_id=record.team_id,
-                    visibility=record.visibility.value if hasattr(record.visibility, "value") else record.visibility,
+                    visibility=record.visibility.value
+                    if hasattr(record.visibility, "value")
+                    else record.visibility,
                 )
             )
 

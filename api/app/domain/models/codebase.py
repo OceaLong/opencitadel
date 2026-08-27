@@ -1,22 +1,21 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional
+from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from app.domain.models.codebase_version import CodeEvidenceRef
+from app.domain.utils.time_utils import utc_now
 
 
-class CodebaseSourceType(str, Enum):
+class CodebaseSourceType(StrEnum):
     ZIP = "zip"
     GIT = "git"
     FILES = "files"
 
 
-class CodebaseStatus(str, Enum):
+class CodebaseStatus(StrEnum):
     PENDING = "pending"
     MATERIALIZING = "materializing"
     ANALYZING = "analyzing"
@@ -26,7 +25,7 @@ class CodebaseStatus(str, Enum):
     FAILED = "failed"
 
 
-class SymbolKind(str, Enum):
+class SymbolKind(StrEnum):
     FUNCTION = "function"
     CLASS = "class"
     METHOD = "method"
@@ -35,13 +34,13 @@ class SymbolKind(str, Enum):
     VARIABLE = "variable"
 
 
-class EdgeKind(str, Enum):
+class EdgeKind(StrEnum):
     CALL = "call"
     IMPORT = "import"
     INHERIT = "inherit"
 
 
-class ArtifactKind(str, Enum):
+class ArtifactKind(StrEnum):
     ARCHITECTURE = "architecture"
     DATA_FLOW = "data_flow"
     MODULE_DIR = "module_dir"
@@ -50,12 +49,12 @@ class ArtifactKind(str, Enum):
     OVERVIEW = "overview"
 
 
-class ArtifactFormat(str, Enum):
+class ArtifactFormat(StrEnum):
     MERMAID = "mermaid"
     MARKDOWN = "markdown"
 
 
-class SessionMode(str, Enum):
+class SessionMode(StrEnum):
     ASK = "ask"
     AGENT = "agent"
 
@@ -66,25 +65,24 @@ class Codebase(BaseModel):
     source_type: CodebaseSourceType = CodebaseSourceType.FILES
     source_ref: str = ""
     status: CodebaseStatus = CodebaseStatus.PENDING
-    language_stats: Dict[str, int] = Field(default_factory=dict)
+    language_stats: dict[str, int] = Field(default_factory=dict)
     file_count: int = 0
-    sandbox_id: Optional[str] = None
+    sandbox_id: str | None = None
     workspace_path: str = "/home/ubuntu/codebase"
-    snapshot_key: Optional[str] = None
-    ingest_task_id: Optional[str] = None
-    error: Optional[str] = None
+    snapshot_key: str | None = None
+    error: str | None = None
     vector_degraded: bool = False
-    active_version_id: Optional[str] = None
-    owner_user_id: Optional[str] = None
-    team_id: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    active_version_id: str | None = None
+    owner_user_id: str | None = None
+    team_id: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class CodebaseFile(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     codebase_id: str
-    version_id: Optional[str] = None
+    version_id: str | None = None
     path: str
     language: str = ""
     size: int = 0
@@ -94,7 +92,7 @@ class CodebaseFile(BaseModel):
 class CodebaseSymbol(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     codebase_id: str
-    version_id: Optional[str] = None
+    version_id: str | None = None
     file_id: str
     name: str
     qualified_name: str = ""
@@ -102,7 +100,7 @@ class CodebaseSymbol(BaseModel):
     signature: str = ""
     start_line: int = 0
     end_line: int = 0
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     parser: str = "regex"
     confidence: float = 0.0
 
@@ -110,37 +108,37 @@ class CodebaseSymbol(BaseModel):
 class CodebaseEdge(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     codebase_id: str
-    version_id: Optional[str] = None
+    version_id: str | None = None
     src_symbol_id: str
-    dst_symbol_id: Optional[str] = None
+    dst_symbol_id: str | None = None
     callee_name: str = ""
     kind: EdgeKind = EdgeKind.CALL
     resolution: str = "unresolved"
     confidence: float = 0.0
-    evidence: List[CodeEvidenceRef] = Field(default_factory=list)
+    evidence: list[CodeEvidenceRef] = Field(default_factory=list)
 
 
 class CodebaseChunk(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     codebase_id: str
-    version_id: Optional[str] = None
-    file_id: Optional[str] = None
-    symbol_id: Optional[str] = None
+    version_id: str | None = None
+    file_id: str | None = None
+    symbol_id: str | None = None
     content: str = ""
     search_text: str = ""
-    embedding: List[float] = Field(default_factory=list)
+    embedding: list[float] = Field(default_factory=list)
 
 
 class CodebaseArtifact(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     codebase_id: str
-    version_id: Optional[str] = None
+    version_id: str | None = None
     kind: ArtifactKind
     format: ArtifactFormat = ArtifactFormat.MERMAID
     title: str = ""
     content: str = ""
-    meta: Dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.now)
+    meta: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class FileTreeNode(BaseModel):
@@ -148,7 +146,7 @@ class FileTreeNode(BaseModel):
     path: str = ""
     is_dir: bool = False
     language: str = ""
-    children: List["FileTreeNode"] = Field(default_factory=list)
+    children: list["FileTreeNode"] = Field(default_factory=list)
 
 
 FileTreeNode.model_rebuild()

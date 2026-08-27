@@ -2,8 +2,8 @@
 dedup. A repeated call with the same idempotency_key must be answered from
 the current observed state without a second mutating k8s call.
 """
-import pytest
 
+import pytest
 from opencitadel_ops_actuator.actuator import Actuator
 
 

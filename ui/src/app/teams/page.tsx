@@ -25,11 +25,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/admin-utils";
 import { type Team, teamApi } from "@/lib/api/team";
 import { IconAdd, IconLoading, IconUsers } from "@/lib/icons";
-import { ACTIVE_WORKSPACE_KEY } from "@/lib/storage-keys";
+import { useClientDataScope } from "@/providers/client-data-provider";
 
 export default function TeamsPage() {
   const t = useTranslations("teams");
   const tCommon = useTranslations("common");
+  const { setWorkspaceId } = useClientDataScope();
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -65,7 +66,7 @@ export default function TeamsPage() {
         action: {
           label: t("switchToTeam"),
           onClick: () => {
-            window.localStorage.setItem(ACTIVE_WORKSPACE_KEY, team.id);
+            setWorkspaceId(team.id);
             window.location.reload();
           },
         },
@@ -117,7 +118,7 @@ export default function TeamsPage() {
           {teams.map((team) => (
             <Card
               key={team.id}
-              className="transition-colors hover:border-border hover:shadow-card-hover"
+              className="hover:border-border hover:shadow-card-hover transition-colors"
             >
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-3">

@@ -29,10 +29,7 @@ export function OpenCitadelIcon({ variant = "full", className }: OpenCitadelIcon
   if (variant === "icon") {
     return (
       <span
-        className={cn(
-          "text-foreground inline-flex size-7 items-center justify-center",
-          className,
-        )}
+        className={cn("text-foreground inline-flex size-7 items-center justify-center", className)}
         aria-hidden
       >
         <CitadelMark className="size-7" />
@@ -43,7 +40,9 @@ export function OpenCitadelIcon({ variant = "full", className }: OpenCitadelIcon
   return (
     <span className={cn("text-foreground inline-flex items-center gap-1.5", className)}>
       <CitadelMark className="size-5" />
-      <span className="text-sm font-semibold tracking-tight">OpenCitadel</span>
+      <span className="text-sm font-semibold tracking-tight" translate="no">
+        OpenCitadel
+      </span>
     </span>
   );
 }

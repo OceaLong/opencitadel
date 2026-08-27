@@ -1,7 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Immutable provenance for knowledge-base retrieval results."""
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -14,7 +11,7 @@ class KnowledgeCitation(BaseModel):
     version_id: str
     document_revision_id: str
     doc_id: str
-    page_no: Optional[int] = None
+    page_no: int | None = None
     chunk_id: str
 
     @field_validator(
@@ -36,7 +33,7 @@ def deduplicate_citations(
 ) -> list[KnowledgeCitation]:
     """Return stable first-seen citation order with exact identity deduping."""
     out: list[KnowledgeCitation] = []
-    seen: set[tuple[str, str, str, Optional[int], str]] = set()
+    seen: set[tuple[str, str, str, int | None, str]] = set()
     for citation in citations:
         key = (
             citation.version_id,

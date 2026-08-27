@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Graded error codes for model / tool / infra failure domains."""
+
 # Chat LLM domain
 MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
 MODEL_RATE_LIMITED = "MODEL_RATE_LIMITED"
@@ -17,5 +16,5 @@ DOCUMENT_PARSE_FAILED = "DOCUMENT_PARSE_FAILED"
 TOOL_FAILED = "TOOL_FAILED"
 SANDBOX_UNAVAILABLE = "SANDBOX_UNAVAILABLE"
 
-# Platform infra
-TASK_INFRA_FAILED = "TASK_INFRA_FAILED"
+# Platform infrastructure
+INFRASTRUCTURE_FAILED = "INFRASTRUCTURE_FAILED"

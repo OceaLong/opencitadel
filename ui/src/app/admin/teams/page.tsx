@@ -29,13 +29,14 @@ import {
 import { formatDateTime } from "@/lib/admin-utils";
 import { adminApi, type AdminTeam } from "@/lib/api/admin";
 import { memberDisplayName, type TeamMember, type TeamMemberDetail } from "@/lib/api/team";
-import { resetWorkspaceIfMatches } from "@/lib/workspace-utils";
+import { useClientDataScope } from "@/providers/client-data-provider";
 
 const PAGE_SIZE = 20;
 
 export default function AdminTeamsPage() {
   const t = useTranslations("adminTeams");
   const tCommon = useTranslations("common");
+  const { resetWorkspaceIfMatches } = useClientDataScope();
   const [teams, setTeams] = useState<AdminTeam[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -45,32 +46,38 @@ export default function AdminTeamsPage() {
   const [membersLoading, setMembersLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AdminTeam | null>(null);
 
-  const loadTeams = useCallback(async (nextOffset: number) => {
-    setLoading(true);
-    try {
-      const data = await adminApi.teams({ limit: PAGE_SIZE, offset: nextOffset });
-      setTeams(data.teams);
-      setTotal(data.total);
-      setOffset(nextOffset);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : tCommon("loadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [tCommon]);
+  const loadTeams = useCallback(
+    async (nextOffset: number) => {
+      setLoading(true);
+      try {
+        const data = await adminApi.teams({ limit: PAGE_SIZE, offset: nextOffset });
+        setTeams(data.teams);
+        setTotal(data.total);
+        setOffset(nextOffset);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : tCommon("loadFailed"));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [tCommon],
+  );
 
-  const loadMembers = useCallback(async (teamId: string) => {
-    setMembersLoading(true);
-    try {
-      const data = await adminApi.teamMembers(teamId);
-      setMembers(data.members);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : tCommon("loadFailed"));
-      setMembers([]);
-    } finally {
-      setMembersLoading(false);
-    }
-  }, [tCommon]);
+  const loadMembers = useCallback(
+    async (teamId: string) => {
+      setMembersLoading(true);
+      try {
+        const data = await adminApi.teamMembers(teamId);
+        setMembers(data.members);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : tCommon("loadFailed"));
+        setMembers([]);
+      } finally {
+        setMembersLoading(false);
+      }
+    },
+    [tCommon],
+  );
 
   useEffect(() => {
     void loadTeams(0);
@@ -154,7 +161,10 @@ export default function AdminTeamsPage() {
                 </TableHeader>
                 <TableBody>
                   {teams.map((team) => (
-                    <TableRow key={team.id} data-state={selectedTeamId === team.id ? "selected" : undefined}>
+                    <TableRow
+                      key={team.id}
+                      data-state={selectedTeamId === team.id ? "selected" : undefined}
+                    >
                       <TableCell className="max-w-xs min-w-48 whitespace-normal">
                         <button
                           type="button"
@@ -163,12 +173,17 @@ export default function AdminTeamsPage() {
                         >
                           <div className="font-medium">{team.name}</div>
                           <div className="text-muted-foreground mt-1 text-xs">
-                            {t("memberCount", { count: team.member_count })} · {formatDateTime(team.created_at)}
+                            {t("memberCount", { count: team.member_count })} ·{" "}
+                            {formatDateTime(team.created_at)}
                           </div>
                         </button>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="icon-sm" onClick={() => setDeleteTarget(team)}>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => setDeleteTarget(team)}
+                        >
                           <Trash2 className="text-destructive size-4" />
                         </Button>
                       </TableCell>
@@ -182,10 +197,20 @@ export default function AdminTeamsPage() {
                 {tCommon("pageOf", { current: currentPage, total: totalPages })}
               </span>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => void loadTeams(Math.max(0, offset - PAGE_SIZE))}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={offset === 0}
+                  onClick={() => void loadTeams(Math.max(0, offset - PAGE_SIZE))}
+                >
                   {tCommon("previousPage")}
                 </Button>
-                <Button variant="outline" size="sm" disabled={offset + PAGE_SIZE >= total} onClick={() => void loadTeams(offset + PAGE_SIZE)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={offset + PAGE_SIZE >= total}
+                  onClick={() => void loadTeams(offset + PAGE_SIZE)}
+                >
                   {tCommon("nextPage")}
                 </Button>
               </div>
@@ -227,14 +252,20 @@ export default function AdminTeamsPage() {
                       <TableCell className="max-w-56 min-w-40 whitespace-normal">
                         <div className="truncate font-medium">{memberDisplayName(member)}</div>
                         {member.email && member.display_name ? (
-                          <div className="text-muted-foreground truncate text-xs">{member.email}</div>
+                          <div className="text-muted-foreground truncate text-xs">
+                            {member.email}
+                          </div>
                         ) : null}
-                        <div className="text-muted-foreground text-xs">{formatDateTime(member.joined_at)}</div>
+                        <div className="text-muted-foreground text-xs">
+                          {formatDateTime(member.joined_at)}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Select
                           value={member.role}
-                          onValueChange={(value) => void handleRoleChange(member.user_id, value as TeamMember["role"])}
+                          onValueChange={(value) =>
+                            void handleRoleChange(member.user_id, value as TeamMember["role"])
+                          }
                         >
                           <SelectTrigger className="w-32">
                             <SelectValue />
@@ -247,7 +278,11 @@ export default function AdminTeamsPage() {
                         </Select>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="icon-sm" onClick={() => void handleRemoveMember(member.user_id)}>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => void handleRemoveMember(member.user_id)}
+                        >
                           <Trash2 className="text-destructive size-4" />
                         </Button>
                       </TableCell>

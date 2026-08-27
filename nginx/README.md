@@ -40,9 +40,9 @@ This is the **gateway ceiling** for all POST bodies. Per-feature limits may be l
 | Feature | Effective limit | Enforced by |
 |---------|-----------------|-------------|
 | Codebase ZIP | 200 MB | UI `CODEBASE_ZIP_MAX_BYTES` + nginx |
-| Knowledge base document | 50 MB default | AppConfig `knowledge_base.document.max_bytes` |
+| Knowledge base document | 50 MB default | Execution Policy `knowledge_base.document.max_bytes` |
 
-Keep UI constants, nginx, and AppConfig aligned when changing codebase upload limits.
+Keep UI constants, nginx, and the typed Execution Policy aligned when changing upload limits.
 
 ## SSE and WebSocket
 

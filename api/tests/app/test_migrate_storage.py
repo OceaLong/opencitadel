@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import asyncio
@@ -63,7 +61,7 @@ def test_migrate_objects_prefix_filter():
     source = FakeBackend({"logs/a.txt": b"1", "other/b.txt": b"2"})
     target = FakeBackend()
 
-    copied, skipped, failed = asyncio.run(migrate_objects(source, target, prefix="logs/"))
+    copied, _skipped, failed = asyncio.run(migrate_objects(source, target, prefix="logs/"))
 
     assert copied == 1
     assert failed == []

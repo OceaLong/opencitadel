@@ -1,4 +1,5 @@
 """Task 7 RED tests for explicit knowledge-document patch semantics."""
+
 from __future__ import annotations
 
 import importlib
@@ -78,9 +79,7 @@ async def test_logical_document_concrete_diagnostic_replaces_value(field):
 
 
 def test_repository_protocols_share_one_importable_typed_unset():
-    patch_module = importlib.import_module(
-        "app.domain.repositories.patch"
-    )
+    patch_module = importlib.import_module("app.domain.repositories.patch")
     unset = patch_module.UNSET
     assert type(unset) is patch_module.UnsetType
 
@@ -91,12 +90,8 @@ def test_repository_protocols_share_one_importable_typed_unset():
         KnowledgeVersionRepository,
     )
 
-    logical = inspect.signature(
-        KnowledgeBaseRepository.update_document_status
-    )
-    versioned = inspect.signature(
-        KnowledgeVersionRepository.transition_document
-    )
+    logical = inspect.signature(KnowledgeBaseRepository.update_document_status)
+    versioned = inspect.signature(KnowledgeVersionRepository.transition_document)
     for name in ("error", "warning"):
         assert logical.parameters[name].default is unset
         assert versioned.parameters[name].default is unset
@@ -156,9 +151,7 @@ def _transition_fixture():
 @pytest.mark.anyio
 async def test_version_transition_omitted_diagnostics_preserve_manifest_and_revision():
     version, manifest, revision = _transition_fixture()
-    repo = DBKnowledgeVersionRepository(
-        _TransitionSession(version, manifest, revision)
-    )
+    repo = DBKnowledgeVersionRepository(_TransitionSession(version, manifest, revision))
 
     await repo.transition_document(
         "kbv1",
@@ -182,13 +175,9 @@ async def test_version_transition_omitted_diagnostics_preserve_manifest_and_revi
 async def test_version_transition_explicit_none_clears_only_requested_field(
     field,
 ):
-    patch_module = importlib.import_module(
-        "app.domain.repositories.patch"
-    )
+    patch_module = importlib.import_module("app.domain.repositories.patch")
     version, manifest, revision = _transition_fixture()
-    repo = DBKnowledgeVersionRepository(
-        _TransitionSession(version, manifest, revision)
-    )
+    repo = DBKnowledgeVersionRepository(_TransitionSession(version, manifest, revision))
     kwargs = {"error": patch_module.UNSET, "warning": patch_module.UNSET}
     kwargs[field] = None
 
@@ -210,13 +199,9 @@ async def test_version_transition_explicit_none_clears_only_requested_field(
 @pytest.mark.anyio
 @pytest.mark.parametrize("field", ["error", "warning"])
 async def test_version_transition_replaces_only_requested_field(field):
-    patch_module = importlib.import_module(
-        "app.domain.repositories.patch"
-    )
+    patch_module = importlib.import_module("app.domain.repositories.patch")
     version, manifest, revision = _transition_fixture()
-    repo = DBKnowledgeVersionRepository(
-        _TransitionSession(version, manifest, revision)
-    )
+    repo = DBKnowledgeVersionRepository(_TransitionSession(version, manifest, revision))
     kwargs = {"error": patch_module.UNSET, "warning": patch_module.UNSET}
     kwargs[field] = "replacement"
 
@@ -238,9 +223,7 @@ async def test_version_transition_replaces_only_requested_field(field):
 @pytest.mark.anyio
 async def test_failed_retry_clears_stale_diagnostics_through_indexed_success():
     version, manifest, revision = _transition_fixture()
-    repo = DBKnowledgeVersionRepository(
-        _TransitionSession(version, manifest, revision)
-    )
+    repo = DBKnowledgeVersionRepository(_TransitionSession(version, manifest, revision))
 
     await repo.transition_document(
         "kbv1",
@@ -278,9 +261,7 @@ async def test_failed_retry_clears_stale_diagnostics_through_indexed_success():
 
 
 def test_ingestion_transition_wrapper_preserves_omitted_patch_fields():
-    patch_module = importlib.import_module(
-        "app.domain.repositories.patch"
-    )
+    patch_module = importlib.import_module("app.domain.repositories.patch")
     from app.domain.services.knowledge_base.ingestion_runner import (
         KBIngestionRunner,
     )

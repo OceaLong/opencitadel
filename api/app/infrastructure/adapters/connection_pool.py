@@ -1,23 +1,77 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from app.domain.external.connection_pool import A2AConnectionPoolPort, MCPConnectionPoolPort
-from app.domain.models.app_config import A2AConfig, MCPConfig
-from app.domain.services.tools.a2a import A2AClientManager
-from app.domain.services.tools.mcp import MCPClientManager
-from app.infrastructure.external.tools.connection_pool import A2AConnectionPool, MCPConnectionPool
+from app.application.ports.crypto import OutboundNetworkPolicy
+from app.domain.external.connection_pool import (
+    A2AConnectionPoolPort,
+    MCPConnectionPoolPort,
+)
+from app.domain.models.integration_runtime import A2ARuntime, MCPRuntime
+from app.domain.runtime_policy import ActivityExecutionPolicy
+from app.infrastructure.external.tools.a2a_client import A2AClientManager
+from app.infrastructure.external.tools.connection_pool import (
+    A2AConnectionPool,
+    MCPConnectionPool,
+)
+from app.infrastructure.external.tools.mcp_client import MCPClientManager
 
 
 class InfrastructureMCPConnectionPoolAdapter(MCPConnectionPoolPort):
-    async def acquire(self, mcp_config: MCPConfig) -> MCPClientManager:
-        return await MCPConnectionPool.acquire(mcp_config)
+    def __init__(self, *, outbound_policy: OutboundNetworkPolicy) -> None:
+        self._pool = MCPConnectionPool(outbound_policy=outbound_policy)
+
+    def try_get_cached(
+        self,
+        runtime: MCPRuntime,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> MCPClientManager | None:
+        return self._pool.try_get_cached(runtime, policy=policy)
+
+    async def refresh_in_background(
+        self,
+        runtime: MCPRuntime,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> None:
+        await self._pool.refresh_in_background(runtime, policy=policy)
+
+    async def acquire(
+        self,
+        runtime: MCPRuntime,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> MCPClientManager:
+        return await self._pool.acquire(runtime, policy=policy)
 
     async def release_stale(self) -> None:
-        await MCPConnectionPool.release_stale()
+        await self._pool.release_stale()
 
 
 class InfrastructureA2AConnectionPoolAdapter(A2AConnectionPoolPort):
-    async def acquire(self, a2a_config: A2AConfig) -> A2AClientManager:
-        return await A2AConnectionPool.acquire(a2a_config)
+    def __init__(self, *, outbound_policy: OutboundNetworkPolicy) -> None:
+        self._pool = A2AConnectionPool(outbound_policy=outbound_policy)
+
+    def try_get_cached(
+        self,
+        runtime: A2ARuntime,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> A2AClientManager | None:
+        return self._pool.try_get_cached(runtime, policy=policy)
+
+    async def refresh_in_background(
+        self,
+        runtime: A2ARuntime,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> None:
+        await self._pool.refresh_in_background(runtime, policy=policy)
+
+    async def acquire(
+        self,
+        runtime: A2ARuntime,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> A2AClientManager:
+        return await self._pool.acquire(runtime, policy=policy)
 
     async def release_stale(self) -> None:
-        await A2AConnectionPool.release_stale()
+        await self._pool.release_stale()

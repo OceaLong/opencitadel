@@ -1,22 +1,22 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
+
+from app.domain.utils.time_utils import utc_now
 
 
 class LLMTokenUsage(BaseModel):
     """单次 LLM 调用的 token 使用记录。"""
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     session_id: str = ""
     agent: str = ""
     step: str = ""
-    model_id: Optional[str] = None
+    model_id: str | None = None
     model_name: str = ""
-    owner_user_id: Optional[str] = None
-    team_id: Optional[str] = None
+    owner_user_id: str | None = None
+    team_id: str | None = None
     call_type: str = "stream"
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -24,11 +24,12 @@ class LLMTokenUsage(BaseModel):
     cached_tokens: int = 0
     cache_write_tokens: int = 0
     cache_metric_source: str = ""
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class SessionTokenUsageSummary(BaseModel):
     """会话级 token 汇总。"""
+
     session_id: str = ""
     prompt_tokens: int = 0
     completion_tokens: int = 0

@@ -41,7 +41,7 @@ export default function RegisterPage() {
 
   return (
     <main className="bg-background flex min-h-screen items-center justify-center p-6">
-      <Card className="w-full max-w-[360px] shadow-card">
+      <Card className="shadow-card w-full max-w-[360px]">
         <CardHeader className="items-center text-center">
           <OpenCitadelIcon variant="icon" className="mb-2 size-10" />
           <CardTitle className="text-xl">{t("registerTitle")}</CardTitle>
@@ -52,7 +52,11 @@ export default function RegisterPage() {
             {!inviteToken ? (
               <p className="text-destructive text-sm">{t("missingInviteToken")}</p>
             ) : null}
-            <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("emailPlaceholder")} />
+            <Input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder={t("emailPlaceholder")}
+            />
             <Input
               value={username}
               onChange={(e) => setUsername(e.target.value)}

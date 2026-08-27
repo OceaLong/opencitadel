@@ -1,13 +1,10 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import List, Optional
 
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.scheduled_job import ScheduledJob
+from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.scheduled_job_repository import ScheduledJobRepository
 from app.infrastructure.models.scheduled_job import ScheduledJobModel
 
@@ -16,7 +13,7 @@ class DBScheduledJobRepository(ScheduledJobRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
-    def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
+    def _apply_scope(self, stmt, scope: OwnerScope | None):
         if scope is None:
             return stmt
         if scope.type == OwnerScopeType.TEAM:
@@ -51,23 +48,27 @@ class DBScheduledJobRepository(ScheduledJobRepository):
     async def get_by_id(
         self,
         job_id: str,
-        scope: Optional[OwnerScope] = None,
-    ) -> Optional[ScheduledJob]:
+        scope: OwnerScope | None = None,
+        *,
+        for_update: bool = False,
+    ) -> ScheduledJob | None:
         stmt = self._apply_scope(
             select(ScheduledJobModel).where(ScheduledJobModel.id == job_id),
             scope,
         )
+        if for_update:
+            stmt = stmt.with_for_update()
         result = await self.db_session.execute(stmt)
         row = result.scalar_one_or_none()
         return row.to_domain() if row else None
 
-    async def get_by_webhook_token(self, token: str) -> Optional[ScheduledJob]:
+    async def get_by_webhook_token(self, token: str) -> ScheduledJob | None:
         stmt = select(ScheduledJobModel).where(ScheduledJobModel.webhook_token == token)
         result = await self.db_session.execute(stmt)
         row = result.scalar_one_or_none()
         return row.to_domain() if row else None
 
-    async def list_by_owner(self, owner_user_id: str) -> List[ScheduledJob]:
+    async def list_by_owner(self, owner_user_id: str) -> list[ScheduledJob]:
         stmt = (
             select(ScheduledJobModel)
             .where(ScheduledJobModel.owner_user_id == owner_user_id)
@@ -76,15 +77,14 @@ class DBScheduledJobRepository(ScheduledJobRepository):
         result = await self.db_session.execute(stmt)
         return [row.to_domain() for row in result.scalars().all()]
 
-    async def list_for_scope(self, scope: OwnerScope) -> List[ScheduledJob]:
-        stmt = (
-            self._apply_scope(select(ScheduledJobModel), scope)
-            .order_by(ScheduledJobModel.updated_at.desc())
+    async def list_for_scope(self, scope: OwnerScope) -> list[ScheduledJob]:
+        stmt = self._apply_scope(select(ScheduledJobModel), scope).order_by(
+            ScheduledJobModel.updated_at.desc()
         )
         result = await self.db_session.execute(stmt)
         return [row.to_domain() for row in result.scalars().all()]
 
-    async def list_due(self, now: datetime, limit: int = 20) -> List[ScheduledJob]:
+    async def list_due(self, now: datetime, limit: int = 20) -> list[ScheduledJob]:
         stmt = (
             select(ScheduledJobModel)
             .where(
@@ -99,11 +99,26 @@ class DBScheduledJobRepository(ScheduledJobRepository):
         result = await self.db_session.execute(stmt)
         return [row.to_domain() for row in result.scalars().all()]
 
-    async def get_by_last_run_session_id(self, session_id: str) -> Optional[ScheduledJob]:
+    async def list_running(self, limit: int = 100) -> list[ScheduledJob]:
+        stmt = (
+            select(ScheduledJobModel)
+            .where(
+                ScheduledJobModel.last_run_status == "running",
+                ScheduledJobModel.last_execution_run_id.is_not(None),
+            )
+            .order_by(ScheduledJobModel.last_run_at.asc())
+            .limit(limit)
+        )
+        result = await self.db_session.execute(stmt)
+        return [row.to_domain() for row in result.scalars().all()]
+
+    async def get_by_last_run_session_id(self, session_id: str) -> ScheduledJob | None:
         stmt = select(ScheduledJobModel).where(ScheduledJobModel.last_run_session_id == session_id)
         result = await self.db_session.execute(stmt)
         row = result.scalar_one_or_none()
         return row.to_domain() if row else None
 
     async def delete_by_id(self, job_id: str) -> None:
-        await self.db_session.execute(delete(ScheduledJobModel).where(ScheduledJobModel.id == job_id))
+        await self.db_session.execute(
+            delete(ScheduledJobModel).where(ScheduledJobModel.id == job_id)
+        )

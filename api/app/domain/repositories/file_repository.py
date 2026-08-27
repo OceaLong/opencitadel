@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Protocol, Optional, List
+from typing import Protocol
 
 from app.domain.models.file import File
 from app.domain.models.scope import OwnerScope
@@ -13,10 +11,10 @@ class FileRepository(Protocol):
         """新增或更新文件信息"""
         ...
 
-    async def get_by_id(self, file_id: str, scope: Optional[OwnerScope] = None) -> Optional[File]:
+    async def get_by_id(self, file_id: str, scope: OwnerScope | None = None) -> File | None:
         """根据传递的文件id获取文件信息"""
         ...
 
-    async def list_by_ids(self, file_ids: List[str], scope: Optional[OwnerScope] = None) -> List[File]:
+    async def list_by_ids(self, file_ids: list[str], scope: OwnerScope | None = None) -> list[File]:
         """根据传递的文件id列表批量获取文件信息"""
         ...

@@ -1,58 +1,56 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
+
+from app.domain.models.session import SessionStatus
+
 
 class ChainVerifyResponse(BaseModel):
     ok: bool
     total: int
-    first_broken_seq: Optional[int] = None
+    first_broken_seq: int | None = None
     checked_at: str
-    session_id: Optional[str] = None
-    session_entries: Optional[int] = None
-    session_ok: Optional[bool] = None
-    session_first_broken_seq: Optional[int] = None
+    session_id: str | None = None
+    session_entries: int | None = None
+    session_ok: bool | None = None
+    session_first_broken_seq: int | None = None
 
 
 class EvidenceSessionItem(BaseModel):
     session_id: str
     title: str
-    operator_scope: Optional[str] = None
-    gate_profile: Optional[str] = None
-    status: str
-    updated_at: Optional[str] = None
+    operator_scope: str | None = None
+    status: SessionStatus
+    updated_at: str | None = None
     chain_ok: bool = False
     tool_invocation_count: int = 0
     governance_action_count: int = 0
 
 
 class EvidenceSessionListResponse(BaseModel):
-    sessions: List[EvidenceSessionItem] = Field(default_factory=list)
+    sessions: list[EvidenceSessionItem] = Field(default_factory=list)
 
 
 class ComplianceReportResponse(BaseModel):
-    report: Dict[str, Any]
+    report: dict[str, Any]
 
 
 class ApprovalOutcomes(BaseModel):
     approved: int = 0
     rejected: int = 0
-    expired: int = 0
-    consumed: int = 0
+    cancelled: int = 0
 
 
 class ApprovalStats(BaseModel):
     pending_count: int = 0
-    avg_decision_seconds: Optional[float] = None
+    avg_decision_seconds: float | None = None
     outcomes: ApprovalOutcomes
 
 
 class DailyCount(BaseModel):
     date: str
-    approval_decisions: int = 0
-    denials: int = 0
+    approval_requests: int = 0
+    activity_failures: int = 0
 
 
 class DailyPatrolStat(BaseModel):
@@ -72,19 +70,19 @@ class RemediationStatusCounts(BaseModel):
 
 class RemediationStats(BaseModel):
     by_status: RemediationStatusCounts
-    success_rate: Optional[float] = None
+    success_rate: float | None = None
 
 
 class ChainStatus(BaseModel):
     ok: bool
     total: int
-    first_broken_seq: Optional[int] = None
+    first_broken_seq: int | None = None
     checked_at: str
 
 
 class GovernanceOverviewResponse(BaseModel):
     approvals: ApprovalStats
-    interceptions: List[DailyCount] = Field(default_factory=list)
-    patrol: List[DailyPatrolStat] = Field(default_factory=list)
+    interceptions: list[DailyCount] = Field(default_factory=list)
+    patrol: list[DailyPatrolStat] = Field(default_factory=list)
     remediation: RemediationStats
     chain: ChainStatus

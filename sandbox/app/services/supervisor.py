@@ -1,16 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
 import http.client
 import logging
 import socket
 import threading
 import xmlrpc.client
-from datetime import datetime, timedelta
-from typing import List, Any, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from app.core.config import get_settings
-from app.interfaces.errors.exceptions import BadRequestException, AppException
+from app.interfaces.errors.exceptions import AppException, BadRequestException
 from app.models.supervisor import ProcessInfo, SupervisorActionResult, SupervisorTimeout
 
 """
@@ -70,7 +68,9 @@ class SupervisorService:
         # 3.检测是否配置了自动销毁
         if settings.server_timeout_minutes is not None:
             # 4.设置销毁时间+定时器
-            self.shutdown_time = datetime.now() + timedelta(minutes=settings.server_timeout_minutes)
+            self.shutdown_time = datetime.now(UTC) + timedelta(
+                minutes=settings.server_timeout_minutes
+            )
             self._setup_timer(settings.server_timeout_minutes)
 
     @property
@@ -88,8 +88,8 @@ class SupervisorService:
         if self.shutdown_task:
             try:
                 self.shutdown_task.cancel()
-            except Exception as e:
-                logger.warning(f"取消shutdown任务失败: {str(e)}")
+            except (OSError, RuntimeError, ValueError) as e:
+                logger.warning("取消shutdown任务失败: %s", e)
 
         # 2.创建一个异步定时器任务函数
         async def shutdown_after_timeout():
@@ -100,15 +100,14 @@ class SupervisorService:
             # 3.获取事件循环并添加任务
             loop = asyncio.get_event_loop()
             self.shutdown_task = loop.create_task(shutdown_after_timeout())
-        except Exception as _:
+        except (OSError, RuntimeError, ValueError) as _:
             # 4.如果事件循环失败则创建一个新的线程来执行定时器
             if hasattr(self, "shutdown_timer") and self.shutdown_timer:
                 self.shutdown_timer.cancel()
 
             # 5.使用线程创建关闭定时器并设置在后台运行
             self.shutdown_timer = threading.Timer(
-                minutes * 60,
-                lambda: asyncio.run(self.shutdown())
+                minutes * 60, lambda: asyncio.run(self.shutdown())
             )
             self.shutdown_timer.daemon = True
             self.shutdown_timer.start()
@@ -120,9 +119,9 @@ class SupervisorService:
                 "http://localhost",
                 transport=UnixStreamTransport(self.rpc_url),
             )
-        except Exception as e:
-            logger.error(f"连接Supervisor服务失败: {str(e)}")
-            raise BadRequestException(f"连接Supervisor服务失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("连接Supervisor服务失败: %s", e)
+            raise BadRequestException(f"连接Supervisor服务失败: {e!s}") from e
 
     async def _call_rpc(self, method_name: str, *args) -> Any:
         """根据传递的方法名(如'supervisor.getAllProcessInfo')+参数调用rpc方法。
@@ -143,36 +142,36 @@ class SupervisorService:
             return await asyncio.to_thread(method, *args)
         except BadRequestException:
             raise
-        except Exception as e:
-            logger.error(f"RPC方法调用失败: {str(e)}")
-            raise BadRequestException(f"RPC方法调用失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("RPC方法调用失败: %s", e)
+            raise BadRequestException(f"RPC方法调用失败: {e!s}") from e
 
-    async def get_all_processes(self) -> List[ProcessInfo]:
+    async def get_all_processes(self) -> list[ProcessInfo]:
         """获取当前supervisor管理的所有进程信息"""
         try:
             processes = await self._call_rpc("supervisor.getAllProcessInfo")
             return [ProcessInfo(**process) for process in processes]
-        except Exception as e:
-            logger.error(f"获取进程信息失败: {str(e)}")
-            raise AppException(f"获取进程信息失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("获取进程信息失败: %s", e)
+            raise AppException(f"获取进程信息失败: {e!s}") from e
 
     async def stop_all_processes(self) -> SupervisorActionResult:
         """停止supervisor管理的所有进程"""
         try:
             result = await self._call_rpc("supervisor.stopAllProcesses")
             return SupervisorActionResult(status="stopped", result=result)
-        except Exception as e:
-            logger.error(f"停止supervisor所有进程服务失败: {str(e)}")
-            raise AppException(f"停止supervisor所有进程服务失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("停止supervisor所有进程服务失败: %s", e)
+            raise AppException(f"停止supervisor所有进程服务失败: {e!s}") from e
 
     async def shutdown(self) -> SupervisorActionResult:
         """关闭supervisord服务"""
         try:
             shutdown_result = await self._call_rpc("supervisor.shutdown")
             return SupervisorActionResult(status="shutdown", shutdown_result=shutdown_result)
-        except Exception as e:
-            logger.error(f"关闭supervisord服务失败: {str(e)}")
-            raise AppException(f"关闭supervisord服务失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("关闭supervisord服务失败: %s", e)
+            raise AppException(f"关闭supervisord服务失败: {e!s}") from e
 
     async def restart(self) -> SupervisorActionResult:
         """重启Supervisor管理的进程"""
@@ -184,11 +183,11 @@ class SupervisorService:
                 stop_result=stop_result,
                 start_result=start_result,
             )
-        except Exception as _:
-            logger.error(f"重启Supervisor进程服务失败")
-            raise AppException(f"重启Supervisor进程服务失败")
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.error("重启Supervisor进程服务失败")
+            raise AppException("重启Supervisor进程服务失败") from exc
 
-    async def activate_timeout(self, minutes: Optional[int] = None) -> SupervisorTimeout:
+    async def activate_timeout(self, minutes: int | None = None) -> SupervisorTimeout:
         """传递指定分钟，并激活定时销毁任务同时关闭自动保活"""
         # 1.获取超时分钟数
         setting = get_settings()
@@ -198,7 +197,7 @@ class SupervisorService:
 
         # 2.更新超时配置
         self.timeout_active = True
-        self.shutdown_time = datetime.now() + timedelta(minutes=timeout_minutes)
+        self.shutdown_time = datetime.now(UTC) + timedelta(minutes=timeout_minutes)
 
         # 3.创建一个新的定时器
         self._setup_timer(timeout_minutes)
@@ -208,20 +207,20 @@ class SupervisorService:
             active=True,
             shutdown_time=self.shutdown_time.isoformat(),
             timeout_minutes=timeout_minutes,
-            remaining_seconds=(self.shutdown_time - datetime.now()).total_seconds(),
+            remaining_seconds=(self.shutdown_time - datetime.now(UTC)).total_seconds(),
         )
 
-    async def extend_timeout(self, minutes: Optional[int] = 3) -> SupervisorTimeout:
+    async def extend_timeout(self, minutes: int | None = 3) -> SupervisorTimeout:
         """传递指定的时长，延长超时销毁的时间，单默认延长3分钟"""
         # 1.获取超时分钟数
         if minutes is None:
             raise BadRequestException("超时时间未配置, 请核实后重试")
-        remaining = self.shutdown_time - datetime.now()
+        remaining = self.shutdown_time - datetime.now(UTC)
         timeout_minutes = round(max(0, remaining.total_seconds()) / 60) + minutes
 
         # 2.更新超时配置
         self.timeout_active = True
-        self.shutdown_time = datetime.now() + timedelta(minutes=timeout_minutes)
+        self.shutdown_time = datetime.now(UTC) + timedelta(minutes=timeout_minutes)
 
         # 3.创建一个新的定时器
         self._setup_timer(timeout_minutes)
@@ -231,7 +230,7 @@ class SupervisorService:
             active=True,
             shutdown_time=self.shutdown_time.isoformat(),
             timeout_minutes=timeout_minutes,
-            remaining_seconds=(self.shutdown_time - datetime.now()).total_seconds(),
+            remaining_seconds=(self.shutdown_time - datetime.now(UTC)).total_seconds(),
         )
 
     async def cancel_timeout(self) -> SupervisorTimeout:
@@ -245,11 +244,11 @@ class SupervisorService:
             try:
                 self.shutdown_task.cancel()
                 self.shutdown_task = None
-            except Exception as e:
-                logger.warning(f"取消shutdown任务失败: {str(e)}")
+            except (OSError, RuntimeError, ValueError) as e:
+                logger.warning("取消shutdown任务失败: %s", e)
 
         # 3.同步检查是否存在定时器
-        if hasattr(self, 'shutdown_timer') and self.shutdown_timer:
+        if hasattr(self, "shutdown_timer") and self.shutdown_timer:
             self.shutdown_timer.cancel()
             self.shutdown_timer = None
 
@@ -269,13 +268,13 @@ class SupervisorService:
         # 2.统计剩余秒数
         remaining_seconds = 0
         if self.shutdown_time:
-            remaining = self.shutdown_time - datetime.now()
+            remaining = self.shutdown_time - datetime.now(UTC)
             remaining_seconds = max(0, remaining.total_seconds())
 
         return SupervisorTimeout(
             active=self.timeout_active,
             shutdown_time=self.shutdown_time.isoformat() if self.shutdown_time else None,
-            remaining_seconds=remaining_seconds
+            remaining_seconds=remaining_seconds,
         )
 
     async def stop_process(self, name: str) -> SupervisorActionResult:
@@ -283,18 +282,18 @@ class SupervisorService:
         try:
             result = await self._call_rpc("supervisor.stopProcess", name)
             return SupervisorActionResult(status="stopped", result=result, process=name)
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             logger.error("停止进程[%s]失败: %s", name, e)
-            raise AppException(f"停止进程[{name}]失败: {str(e)}")
+            raise AppException(f"停止进程[{name}]失败: {e!s}") from e
 
     async def start_process(self, name: str) -> SupervisorActionResult:
         """Start a single supervisor-managed process."""
         try:
             result = await self._call_rpc("supervisor.startProcess", name)
             return SupervisorActionResult(status="started", result=result, process=name)
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             logger.error("启动进程[%s]失败: %s", name, e)
-            raise AppException(f"启动进程[{name}]失败: {str(e)}")
+            raise AppException(f"启动进程[{name}]失败: {e!s}") from e
 
     async def restart_chrome(self) -> SupervisorActionResult:
         """Restart only the Chrome browser process."""

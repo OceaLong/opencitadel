@@ -53,7 +53,7 @@ opsCollector:
   targetRef: production-cluster-a
   allowedNamespaces: [opencitadel]
   allowedWorkloads:
-    opencitadel: [opencitadel-api, opencitadel-worker]
+    opencitadel: [opencitadel-api, opencitadel-execution-kernel]
   registeredPrometheusQueries:
     app-5xx-ratio:
       base_url: http://prometheus.monitoring.svc:9090
@@ -98,7 +98,7 @@ OPS_COLLECTOR_ALLOW_STDIO=true uv run opencitadel-ops-collector --transport stdi
 
 - Helm：设置 `opsCollector.enabled=true`，并在 `deploy/helm/opencitadel/values.yaml` 配置注册表。
 - Kustomize：以 `deploy/kustomize/ops-collector` 为 Base，Patch 镜像、Target Ref、白名单和注册目标环境变量。
-- Service 保持 `ClusterIP`，仅允许 API/Worker 访问 8090。
+- Service 保持 `ClusterIP`，仅允许 API/执行内核访问 8090。
 - 保持只读 ServiceAccount；其权限排除 Secret、exec、attach、impersonation 以及全部变更动词。
 - 根据 Kubernetes API 和注册目标的准确位置复核 NetworkPolicy Egress。注册表是应用层 SSRF 权威边界，NetworkPolicy 作为纵深防御。
 

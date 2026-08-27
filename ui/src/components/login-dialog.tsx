@@ -54,9 +54,7 @@ export function LoginDialog({ open, reason, onOpenChange, onSuccess }: LoginDial
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>{t("loginTitle")}</DialogTitle>
-          <DialogDescription>
-            {reason ?? t("loginDescription")}
-          </DialogDescription>
+          <DialogDescription>{reason ?? t("loginDescription")}</DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
           <Input
@@ -82,14 +80,14 @@ export function LoginDialog({ open, reason, onOpenChange, onSuccess }: LoginDial
               variant="outline"
               onClick={() => (window.location.href = "/api/auth/oauth/google/login")}
             >
-              Google
+              <span translate="no">Google</span>
             </Button>
             <Button
               type="button"
               variant="outline"
               onClick={() => (window.location.href = "/api/auth/oauth/github/login")}
             >
-              GitHub
+              <span translate="no">GitHub</span>
             </Button>
           </div>
           <p className="text-muted-foreground text-center text-xs">

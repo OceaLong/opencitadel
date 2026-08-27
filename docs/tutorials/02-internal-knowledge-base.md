@@ -150,10 +150,10 @@ For an active queued/running build, choose **Cancel** or call:
 POST /knowledge-bases/{kb_id}/builds/{build_id}/cancel
 ```
 
-The request asks the worker to stop at a safe boundary. Continue watching build
-status until it becomes terminal. If dispatch or a worker lease is interrupted,
-reconciliation recovers the durable build or marks it failed without changing
-the active version.
+The request records cancellation in the Run and stops at an Activity boundary.
+Continue watching build status until it becomes terminal. If an Activity claim
+expires, the execution kernel safely resumes the durable build or marks it
+failed without changing the active version.
 
 ## 10. Upgrade a session deliberately
 

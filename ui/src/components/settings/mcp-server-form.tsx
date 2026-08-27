@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
-import type { ListMCPServerItem, MCPServerConfig, MCPTransport } from "@/lib/api/types";
+import type { MCPServer, MCPTransport, UpdateMCPServerRequest } from "@/lib/api";
 
 type KeyValueRow = { id: string; key: string; value: string };
 
@@ -33,7 +33,7 @@ export type McpServerFormState = {
 };
 
 export type McpServerFormHandle = {
-  getConfig: () => MCPServerConfig | null;
+  getConfig: () => UpdateMCPServerRequest | null;
   validate: () => boolean;
   getValidationError: () => string | null;
 };
@@ -41,7 +41,7 @@ export type McpServerFormHandle = {
 const HTTP_URL_SCHEME = /^https?:\/\//i;
 
 type McpServerFormProps = {
-  server: ListMCPServerItem;
+  server: MCPServer;
   isAdmin?: boolean;
   disabled?: boolean;
 };
@@ -83,20 +83,18 @@ function parseUrlToForm(url: string | null | undefined): {
   }
 }
 
-function mcpConfigToForm(server: ListMCPServerItem): McpServerFormState {
-  const config = server.config ?? {};
-  const transport = (config.transport ?? server.transport ?? "streamable_http") as MCPTransport;
-  const { serviceUrl, urlParams, urlUndecryptable } = parseUrlToForm(config.url ?? null);
+function mcpConfigToForm(server: MCPServer): McpServerFormState {
+  const { serviceUrl, urlParams, urlUndecryptable } = parseUrlToForm(server.url);
 
   return {
-    transport,
-    description: config.description ?? "",
+    transport: server.transport,
+    description: server.description ?? "",
     serviceUrl,
     urlParams,
-    headerRows: dictToRows(config.headers as Record<string, unknown> | null | undefined),
-    command: config.command ?? "",
-    argsText: (config.args ?? []).join("\n"),
-    envRows: dictToRows(config.env as Record<string, unknown> | null | undefined),
+    headerRows: dictToRows(server.headers),
+    command: server.command ?? "",
+    argsText: (server.args ?? []).join("\n"),
+    envRows: dictToRows(server.env),
     urlUndecryptable,
   };
 }
@@ -124,7 +122,7 @@ function buildUrl(serviceUrl: string, urlParams: KeyValueRow[]): string {
   return `${base}?${pairs.join("&")}`;
 }
 
-function formToMcpConfig(form: McpServerFormState, enabled: boolean): MCPServerConfig {
+function formToMcpConfig(form: McpServerFormState, server: MCPServer): UpdateMCPServerRequest {
   const isHttp = HTTP_TRANSPORTS.includes(form.transport);
   const args = form.argsText
     .split("\n")
@@ -133,8 +131,11 @@ function formToMcpConfig(form: McpServerFormState, enabled: boolean): MCPServerC
 
   if (isHttp) {
     return {
+      name: server.name,
       transport: form.transport,
-      enabled,
+      enabled: server.enabled,
+      visibility: server.visibility,
+      transport_options: server.transport_options,
       description: form.description.trim() || null,
       url: buildUrl(form.serviceUrl, form.urlParams),
       headers: Object.keys(rowsToRecord(form.headerRows)).length
@@ -147,8 +148,11 @@ function formToMcpConfig(form: McpServerFormState, enabled: boolean): MCPServerC
   }
 
   return {
+    name: server.name,
     transport: form.transport,
-    enabled,
+    enabled: server.enabled,
+    visibility: server.visibility,
+    transport_options: server.transport_options,
     description: form.description.trim() || null,
     command: form.command.trim() || null,
     args: args.length ? args : null,
@@ -158,247 +162,250 @@ function formToMcpConfig(form: McpServerFormState, enabled: boolean): MCPServerC
   };
 }
 
-export const McpServerForm = forwardRef<McpServerFormHandle, McpServerFormProps>(function McpServerForm(
-  { server, isAdmin = false, disabled = false },
-  ref,
-) {
-  const t = useTranslations("settings");
-  const [form, setForm] = useState<McpServerFormState>(() => mcpConfigToForm(server));
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const validationErrorRef = useRef<string | null>(null);
+export const McpServerForm = forwardRef<McpServerFormHandle, McpServerFormProps>(
+  function McpServerForm({ server, isAdmin = false, disabled = false }, ref) {
+    const t = useTranslations("settings");
+    const [form, setForm] = useState<McpServerFormState>(() => mcpConfigToForm(server));
+    const [validationError, setValidationError] = useState<string | null>(null);
+    const validationErrorRef = useRef<string | null>(null);
 
-  const runValidation = (): boolean => {
-    if (HTTP_TRANSPORTS.includes(form.transport)) {
-      const serviceUrl = form.serviceUrl.trim();
-      if (!serviceUrl) {
-        validationErrorRef.current = "mcpUrlRequired";
-        setValidationError("mcpUrlRequired");
-        return false;
-      }
-      if (!HTTP_URL_SCHEME.test(serviceUrl)) {
-        validationErrorRef.current = "mcpUrlInvalidScheme";
-        setValidationError("mcpUrlInvalidScheme");
-        return false;
-      }
-      if (form.urlUndecryptable) {
-        const missingKeyValue = form.urlParams.some(
-          (row) => row.key.trim() && !row.value.trim(),
-        );
-        if (missingKeyValue) {
-          validationErrorRef.current = "mcpParamValueRequiredWhenUndecryptable";
-          setValidationError("mcpParamValueRequiredWhenUndecryptable");
+    const runValidation = (): boolean => {
+      if (HTTP_TRANSPORTS.includes(form.transport)) {
+        const serviceUrl = form.serviceUrl.trim();
+        if (!serviceUrl) {
+          validationErrorRef.current = "mcpUrlRequired";
+          setValidationError("mcpUrlRequired");
+          return false;
+        }
+        if (!HTTP_URL_SCHEME.test(serviceUrl)) {
+          validationErrorRef.current = "mcpUrlInvalidScheme";
+          setValidationError("mcpUrlInvalidScheme");
+          return false;
+        }
+        if (form.urlUndecryptable) {
+          const missingKeyValue = form.urlParams.some((row) => row.key.trim() && !row.value.trim());
+          if (missingKeyValue) {
+            validationErrorRef.current = "mcpParamValueRequiredWhenUndecryptable";
+            setValidationError("mcpParamValueRequiredWhenUndecryptable");
+            return false;
+          }
+        }
+      } else if (form.transport === "stdio") {
+        if (!form.command.trim()) {
+          validationErrorRef.current = "mcpCommandRequired";
+          setValidationError("mcpCommandRequired");
           return false;
         }
       }
-    } else if (form.transport === "stdio") {
-      if (!form.command.trim()) {
-        validationErrorRef.current = "mcpCommandRequired";
-        setValidationError("mcpCommandRequired");
-        return false;
-      }
-    }
-    validationErrorRef.current = null;
-    setValidationError(null);
-    return true;
-  };
+      validationErrorRef.current = null;
+      setValidationError(null);
+      return true;
+    };
 
-  useImperativeHandle(ref, () => ({
-    validate: () => runValidation(),
-    getValidationError: () => validationErrorRef.current,
-    getConfig: () => formToMcpConfig(form, server.enabled),
-  }));
-
-  const isHttp = HTTP_TRANSPORTS.includes(form.transport);
-
-  const updateRow = (
-    field: "urlParams" | "headerRows" | "envRows",
-    id: string,
-    patch: Partial<KeyValueRow>,
-  ) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: prev[field].map((row) => (row.id === id ? { ...row, ...patch } : row)),
+    useImperativeHandle(ref, () => ({
+      validate: () => runValidation(),
+      getValidationError: () => validationErrorRef.current,
+      getConfig: () => formToMcpConfig(form, server),
     }));
-  };
 
-  const addRow = (field: "urlParams" | "headerRows" | "envRows") => {
-    setForm((prev) => ({ ...prev, [field]: [...prev[field], newRow()] }));
-  };
+    const isHttp = HTTP_TRANSPORTS.includes(form.transport);
 
-  const removeRow = (field: "urlParams" | "headerRows" | "envRows", id: string) => {
-    setForm((prev) => ({ ...prev, [field]: prev[field].filter((row) => row.id !== id) }));
-  };
+    const updateRow = (
+      field: "urlParams" | "headerRows" | "envRows",
+      id: string,
+      patch: Partial<KeyValueRow>,
+    ) => {
+      setForm((prev) => ({
+        ...prev,
+        [field]: prev[field].map((row) => (row.id === id ? { ...row, ...patch } : row)),
+      }));
+    };
 
-  const renderKeyValueRows = (
-    field: "urlParams" | "headerRows" | "envRows",
-    keyLabel: string,
-    valueLabel: string,
-    addLabel: string,
-    valuePlaceholder?: string,
-  ) => (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <Label>{field === "urlParams" ? t("mcpUrlParams") : keyLabel}</Label>
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          disabled={disabled}
-          onClick={() => addRow(field)}
-        >
-          <Plus className="size-3.5" />
-          {addLabel}
-        </Button>
+    const addRow = (field: "urlParams" | "headerRows" | "envRows") => {
+      setForm((prev) => ({ ...prev, [field]: [...prev[field], newRow()] }));
+    };
+
+    const removeRow = (field: "urlParams" | "headerRows" | "envRows", id: string) => {
+      setForm((prev) => ({ ...prev, [field]: prev[field].filter((row) => row.id !== id) }));
+    };
+
+    const renderKeyValueRows = (
+      field: "urlParams" | "headerRows" | "envRows",
+      keyLabel: string,
+      valueLabel: string,
+      addLabel: string,
+      valuePlaceholder?: string,
+    ) => (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <Label>{field === "urlParams" ? t("mcpUrlParams") : keyLabel}</Label>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            disabled={disabled}
+            onClick={() => addRow(field)}
+          >
+            <Plus className="size-3.5" />
+            {addLabel}
+          </Button>
+        </div>
+        {form[field].length === 0 ? (
+          <p className="text-muted-foreground text-xs">{t("mcpNoParams")}</p>
+        ) : (
+          <div className="space-y-2">
+            {form[field].map((row) => (
+              <div key={row.id} className="flex items-end gap-2">
+                <div className="grid flex-1 gap-1">
+                  <Label className="text-xs">{keyLabel}</Label>
+                  <Input
+                    value={row.key}
+                    disabled={disabled}
+                    onChange={(e) => updateRow(field, row.id, { key: e.target.value })}
+                    placeholder={t("mcpParamKey")}
+                  />
+                </div>
+                <div className="grid flex-1 gap-1">
+                  <Label className="text-xs">{valueLabel}</Label>
+                  <Input
+                    type="password"
+                    value={row.value}
+                    disabled={disabled}
+                    onChange={(e) => updateRow(field, row.id, { value: e.target.value })}
+                    placeholder={
+                      valuePlaceholder ??
+                      (field === "urlParams"
+                        ? t("mcpParamValueLeaveBlank")
+                        : field === "headerRows"
+                          ? t("mcpHeaderValueLeaveBlank")
+                          : t("mcpEnvValueLeaveBlank"))
+                    }
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  disabled={disabled}
+                  onClick={() => removeRow(field, row.id)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-      {form[field].length === 0 ? (
-        <p className="text-muted-foreground text-xs">{t("mcpNoParams")}</p>
-      ) : (
+    );
+
+    return (
+      <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+        {form.urlUndecryptable && isHttp ? (
+          <div className="border-warning-subtle bg-warning-subtle text-warning flex items-start gap-2 rounded-lg border p-3 text-sm">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <span>{t("mcpUrlUndecryptable")}</span>
+          </div>
+        ) : null}
+
         <div className="space-y-2">
-          {form[field].map((row) => (
-            <div key={row.id} className="flex items-end gap-2">
-              <div className="grid flex-1 gap-1">
-                <Label className="text-xs">{keyLabel}</Label>
-                <Input
-                  value={row.key}
-                  disabled={disabled}
-                  onChange={(e) => updateRow(field, row.id, { key: e.target.value })}
-                  placeholder={t("mcpParamKey")}
-                />
-              </div>
-              <div className="grid flex-1 gap-1">
-                <Label className="text-xs">{valueLabel}</Label>
-                <Input
-                  type="password"
-                  value={row.value}
-                  disabled={disabled}
-                  onChange={(e) => updateRow(field, row.id, { value: e.target.value })}
-                  placeholder={
-                    valuePlaceholder ??
-                    (field === "urlParams"
-                      ? t("mcpParamValueLeaveBlank")
-                      : field === "headerRows"
-                        ? t("mcpHeaderValueLeaveBlank")
-                        : t("mcpEnvValueLeaveBlank"))
-                  }
-                />
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
+          <Label>{t("mcpTransport")}</Label>
+          <Select
+            value={form.transport}
+            disabled={disabled}
+            onValueChange={(value) =>
+              setForm((prev) => ({ ...prev, transport: value as MCPTransport }))
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="streamable_http" translate="no">
+                streamable_http
+              </SelectItem>
+              <SelectItem value="sse" translate="no">
+                sse
+              </SelectItem>
+              {isAdmin ? (
+                <SelectItem value="stdio" translate="no">
+                  stdio
+                </SelectItem>
+              ) : null}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label>{t("mcpDescription")}</Label>
+          <Input
+            value={form.description}
+            disabled={disabled}
+            onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+            placeholder={t("mcpDescriptionPlaceholder")}
+          />
+        </div>
+
+        {isHttp ? (
+          <>
+            <div className="space-y-2">
+              <Label>{t("mcpServiceUrl")}</Label>
+              <Input
+                value={form.serviceUrl}
                 disabled={disabled}
-                onClick={() => removeRow(field, row.id)}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
+                onChange={(e) => {
+                  validationErrorRef.current = null;
+                  setValidationError(null);
+                  setForm((prev) => ({ ...prev, serviceUrl: e.target.value }));
+                }}
+                placeholder="https://mcp.example.com/mcp"
+                aria-invalid={
+                  validationError === "mcpUrlRequired" || validationError === "mcpUrlInvalidScheme"
+                }
+              />
+              {validationError === "mcpUrlRequired" || validationError === "mcpUrlInvalidScheme" ? (
+                <p className="text-destructive text-xs">{t(validationError)}</p>
+              ) : null}
             </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
-  return (
-    <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
-      {form.urlUndecryptable && isHttp ? (
-        <div className="border-warning-subtle bg-warning-subtle text-warning flex items-start gap-2 rounded-lg border p-3 text-sm">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>{t("mcpUrlUndecryptable")}</span>
-        </div>
-      ) : null}
-
-      <div className="space-y-2">
-        <Label>{t("mcpTransport")}</Label>
-        <Select
-          value={form.transport}
-          disabled={disabled}
-          onValueChange={(value) =>
-            setForm((prev) => ({ ...prev, transport: value as MCPTransport }))
-          }
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="streamable_http">streamable_http</SelectItem>
-            <SelectItem value="sse">sse</SelectItem>
-            {isAdmin ? <SelectItem value="stdio">stdio</SelectItem> : null}
-          </SelectContent>
-        </Select>
+            {renderKeyValueRows(
+              "urlParams",
+              t("mcpParamKey"),
+              t("mcpParamValueLeaveBlank"),
+              t("addParam"),
+              form.urlUndecryptable ? t("mcpParamValueRequiredWhenUndecryptable") : undefined,
+            )}
+            {renderKeyValueRows(
+              "headerRows",
+              t("mcpHeaderKey"),
+              t("mcpHeaderValueLeaveBlank"),
+              t("addHeader"),
+            )}
+          </>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <Label>{t("mcpCommand")}</Label>
+              <Input
+                value={form.command}
+                disabled={disabled}
+                onChange={(e) => setForm((prev) => ({ ...prev, command: e.target.value }))}
+                translate="no"
+                placeholder="uvx"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>{t("mcpArgs")}</Label>
+              <Textarea
+                value={form.argsText}
+                disabled={disabled}
+                onChange={(e) => setForm((prev) => ({ ...prev, argsText: e.target.value }))}
+                placeholder={t("mcpArgsPlaceholder")}
+                className="min-h-[80px] font-mono text-xs"
+              />
+            </div>
+            {renderKeyValueRows("envRows", t("mcpEnvKey"), t("mcpEnvValueLeaveBlank"), t("addEnv"))}
+          </>
+        )}
       </div>
-
-      <div className="space-y-2">
-        <Label>{t("mcpDescription")}</Label>
-        <Input
-          value={form.description}
-          disabled={disabled}
-          onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-          placeholder={t("mcpDescriptionPlaceholder")}
-        />
-      </div>
-
-      {isHttp ? (
-        <>
-          <div className="space-y-2">
-            <Label>{t("mcpServiceUrl")}</Label>
-            <Input
-              value={form.serviceUrl}
-              disabled={disabled}
-              onChange={(e) => {
-                validationErrorRef.current = null;
-                setValidationError(null);
-                setForm((prev) => ({ ...prev, serviceUrl: e.target.value }));
-              }}
-              placeholder="https://mcp.example.com/mcp"
-              aria-invalid={validationError === "mcpUrlRequired" || validationError === "mcpUrlInvalidScheme"}
-            />
-            {validationError === "mcpUrlRequired" || validationError === "mcpUrlInvalidScheme" ? (
-              <p className="text-destructive text-xs">{t(validationError)}</p>
-            ) : null}
-          </div>
-          {renderKeyValueRows(
-            "urlParams",
-            t("mcpParamKey"),
-            t("mcpParamValueLeaveBlank"),
-            t("addParam"),
-            form.urlUndecryptable ? t("mcpParamValueRequiredWhenUndecryptable") : undefined,
-          )}
-          {renderKeyValueRows(
-            "headerRows",
-            t("mcpHeaderKey"),
-            t("mcpHeaderValueLeaveBlank"),
-            t("addHeader"),
-          )}
-        </>
-      ) : (
-        <>
-          <div className="space-y-2">
-            <Label>{t("mcpCommand")}</Label>
-            <Input
-              value={form.command}
-              disabled={disabled}
-              onChange={(e) => setForm((prev) => ({ ...prev, command: e.target.value }))}
-              placeholder="uvx"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>{t("mcpArgs")}</Label>
-            <Textarea
-              value={form.argsText}
-              disabled={disabled}
-              onChange={(e) => setForm((prev) => ({ ...prev, argsText: e.target.value }))}
-              placeholder={t("mcpArgsPlaceholder")}
-              className="min-h-[80px] font-mono text-xs"
-            />
-          </div>
-          {renderKeyValueRows(
-            "envRows",
-            t("mcpEnvKey"),
-            t("mcpEnvValueLeaveBlank"),
-            t("addEnv"),
-          )}
-        </>
-      )}
-    </div>
-  );
-});
+    );
+  },
+);

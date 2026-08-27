@@ -1,78 +1,48 @@
-[English](skills.md) · [简体中文](skills.zh-CN.md)
-
 # Skills
 
-Skill templates shape Agent behavior: system prompt, allowed tools, MCP/A2A scope, temperature overrides, and HITL defaults. Skills are first-class resources bound to sessions at creation time.
+[简体中文](skills.zh-CN.md)
 
-## Data model
+A Skill is an explicitly selected, owner-scoped Agent execution profile. It is
+not an autonomous router and is never chosen by hidden recommendation logic.
 
-| Field | Purpose |
-|-------|---------|
-| `name`, `slug`, `description`, `icon`, `category` | UI display and discovery |
-| `system_prompt` | Injected into Agent runtime prompt (`skill_loader.render_active`) |
-| `allowed_tools` | Tool whitelist (fnmatch patterns, e.g. `browser_*`) |
-| `agent_params` | Overrides: `max_iterations`, `max_retries`, `temperature_override`, `tool_gate_call_level_enabled`, `writing_style_override` |
-| `mcp_server_refs` | Restrict MCP servers available to this Skill |
-| `a2a_server_refs` | Restrict outbound A2A servers |
-| `recommended_model_id` | Default model when session has no explicit model |
-| `override_base_rules` | Replace base safety rules instead of appending |
-| `is_builtin` | Seeded built-in Skill; cannot be deleted |
-| `enabled` | Disabled Skills are skipped at runtime |
+## Contract
 
-Built-in Skills include `ops-patrol`, `ops-patrol-remediation`, `coding`, `research`, `data-analysis`, `writing`, `web-operator`, and `refund-reconciliation` — see `api/app/application/services/skill_service.py`.
+| Field | Meaning |
+| --- | --- |
+| `system_prompt`, `body` | Instructions rendered into model context |
+| `resources` | Inline templates, scripts, and references mounted for the Run |
+| `allowed_tools` | Exact tool-name allowlist; an empty list exposes no Skill-scoped tools |
+| `mcp_server_refs` | MCP servers that may contribute allowed tools |
+| `a2a_server_refs` | A2A servers that may contribute allowed tools |
+| `recommended_model_id` | Model selected only when the caller/session did not select one |
+| `agent_params` | `max_iterations`, `max_retries`, `temperature_override` frozen at admission |
+| `override_base_rules` | Explicit permission to replace, rather than append to, base instructions |
+| `visibility`, owner/team | Resource authorization boundary |
 
-## API
+The UI or API supplies `skill_id`. Admission resolves the Skill in the current
+OwnerScope, verifies that it is enabled, validates its recommended model and
+integration references, then freezes effective settings into the Run input.
+There is no endpoint or feature flag for automatic Skill recommendation.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/skills` | List Skills (owner scope via `X-Workspace-Id`) |
-| POST | `/api/skills` | Create custom Skill |
-| GET/PUT/DELETE | `/api/skills/{id}` | CRUD |
-| POST | `/api/skills/recommend` | Recommend Skill from user message |
-| POST | `/api/skills/import` | Import Skill from external format |
+## Tool narrowing
 
-## Runtime pipeline
+Tool availability is the intersection of platform registration, Run mode,
+Operator scope, Skill allowlist, integration refs, and execution policy. A
+Skill can narrow capability but cannot grant a tool that the caller or platform
+does not already authorize.
 
-```mermaid
-flowchart LR
-  Session["Session.skill_id"] --> Factory["TaskRunnerFactory"]
-  Factory --> Load["SkillService.get_skill"]
-  Load --> Render["skill_loader.render_active"]
-  Render --> Prompt["skill_prompt injected"]
-  Load --> Params["agent_params override"]
-  Load --> Tools["allowed_tools whitelist"]
-  Load --> MCP["mcp_server_refs filter"]
-  Load --> A2A["a2a_server_refs filter"]
-  Factory --> Runner["AgentTaskRunner"]
-```
+MCP/A2A tool names require matching server refs. Global Skills may reference
+only global integrations. Duplicate, missing, foreign, or disabled references
+are rejected. Tools without an explicit policy default to the most
+conservative effect/idempotency/approval classification.
 
-1. **Session bind**: home page or API sets `skill_id` on session create.
-2. **Auto-recommend** (optional): when `feature_flags.enable_skill_auto_recommend=true` and session has no Skill, `SkillRecommenderService` picks one from enabled Skills in the current owner scope.
-3. **TaskRunnerFactory** loads Skill, renders active prompt, applies `agent_params`, filters MCP/A2A connections, and passes `skill_prompt` to `AgentTaskRunner`.
-4. **ToolRegistry** respects `allowed_tools`; Ask flows use a read-only subset regardless of Skill.
-5. **Web Operator**: Skill `web-operator` triggers `operator-scope-dialog.tsx` on session create and enables stricter HITL defaults.
+## Execution
 
-### Governed single-tool sessions
+The model-call Activity loads the admitted Skill, renders active instructions,
+and applies the frozen temperature setting. The Agent tool catalog mounts
+Skill resources and exposes only admitted tools. External calls still use the
+normal durable Activity and approval protocol; Skill text cannot bypass it.
 
-`ops-patrol` and `ops-patrol-remediation` sessions are **governed single-tool sessions**: `TaskRunnerFactory` derives `is_governed_single_tool_session = is_patrol or is_remediation` (`task_runner_factory.py:363`) and uses that single flag to suppress every generic capability the same way for both — MCP (`MCPConfig()`), A2A (`A2AConfig()`), the memory tool, the subagent tool, artifact delivery, and image generation are all disabled regardless of `mcp_server_refs`/`a2a_server_refs` on the Skill. Remediation sessions additionally force an empty MCP config even though the Actuator MCP server exists, because `PatrolRemediationService.execute()` calls the Actuator server-side — the LLM never sees an MCP tool for it. The model is left with exactly the Skill's `allowed_tools` (`patrol_submit_results` / `patrol_execute_remediation` + `message_notify_user`).
-
-## UI
-
-| Surface | Component | Path |
-|---------|-----------|------|
-| Settings → Skills | `SkillsSettings` | `ui/src/components/settings/skills-settings.tsx` |
-| Home / session picker | model + Skill selectors | `ui/src/app/page.tsx`, `ui/src/components/session/session-detail-view.tsx` |
-| Web Operator scope | `OperatorScopeDialog` | `ui/src/components/session/operator-scope-dialog.tsx` |
-
-## Configuration
-
-- **Global defaults**: `api/config.yaml` → `agent_config`, HITL gates in AppConfig
-- **Per-Skill overrides**: `agent_params` on Skill entity
-- **Integration filtering**: `mcp_server_refs` / `a2a_server_refs` on Skill; empty = all enabled servers
-
-## Related documentation
-
-- [Frontend UI](frontend-ui.md) — Settings tabs and session flows
-- [A2A & Service API Keys](integrations-a2a-service-keys.md) — outbound A2A filtering
-- [Checkpoints & HITL](checkpoints-and-hitl.md) — gate profiles and Web Operator
-- [Tutorial 4: Governed Web Operator](../tutorials/04-governed-web-operator.md)
+Built-in Skills are seeded as product templates. User and team Skills are CRUD
+resources with the same validation. Markdown import converts one document to a
+native Skill before validation; runtime execution uses one native model only.

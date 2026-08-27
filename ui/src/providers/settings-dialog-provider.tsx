@@ -6,8 +6,7 @@ import dynamic from "next/dynamic";
 import type { SettingTab } from "@/hooks/use-open-citadel-settings";
 
 const SettingsDialog = dynamic(
-  () =>
-    import("@/components/open-citadel-settings").then((mod) => mod.SettingsDialog),
+  () => import("@/components/open-citadel-settings").then((mod) => mod.SettingsDialog),
   { ssr: false },
 );
 
@@ -40,9 +39,7 @@ export function SettingsDialogProvider({ children }: { children: React.ReactNode
   return (
     <SettingsDialogContext.Provider value={value}>
       {children}
-      {open ? (
-        <SettingsDialog open={open} onOpenChange={setOpen} initialTab={initialTab} />
-      ) : null}
+      {open ? <SettingsDialog open={open} onOpenChange={setOpen} initialTab={initialTab} /> : null}
     </SettingsDialogContext.Provider>
   );
 }

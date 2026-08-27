@@ -1,221 +1,50 @@
+# 模型韧性
+
 [English](model-resilience.md)
 
-# 模型韧性设计
+模型调用包含两个职责不同的可靠性层。
 
-本文档是 OpenCitadel 模型隔离、熔断、fallback、SLO 与运行治理的权威说明。
+## Provider Call 层
 
-## 目标与范围
+`ResilientLLMClient` 负责一次 Activity 执行内部的有界尝试。它使用
+`model_resilience.max_attempts_per_call` 与 `max_call_budget_seconds`，分类临时传输/
+Provider 错误、记录熔断状态，并可选择符合条件的已配置备用模型。Quota 失败可直接切换到
+下一个 Candidate；除非显式开启，否则不允许跨 Provider Fallback。
 
-模型全部不可用时，平台仍需满足：
+流式调用只允许在第一个输出 Chunk 之前重试或换 Provider。一旦开始输出，再次请求可能制造
+可见重复，因此当前调用直接失败，由 Activity 协议处理。
 
-- 配置可改：模型 probe 与配置保存解耦。
-- 健康可见：`/api/status` 表示平台域健康，`/api/llm/status` 表示模型域健康。
-- 非模型功能可用：文件操作与不依赖 chat LLM 的目录类接口。
-- 模型入口快速失败：Agent、A2A 以明确错误码终止，不堆积 Worker、沙箱或 Redis 资源。
+熔断器只是运行保护，不是工作流状态。Circuit 打开会阻止 Provider 调用，但不会完成或取消 Run。
 
-### P0 范围
+## Activity 层
 
-| 能力 | 说明 |
-|------|------|
-| DB 配置冷启动种子 | `AppConfig` 为空时由 `config.yaml` / Helm `appConfig` 初始化 |
-| `ModelResilienceConfig` | 模型韧性行为配置的唯一来源 |
-| `feature_flags` | 控制 Agent / A2A 等模型依赖入口 |
-| probe 解耦 | 用户主动探测使用原始 LLM，不经 chat 熔断域 |
-| 健康面拆分 | `/api/status` 与 `/api/llm/status` 分离 |
-| 分级错误码 | `ErrorEvent.code` 携带 `MODEL_*` 等可机器识别原因 |
-| 熔断与快速失败 | Redis 熔断状态驱动 Worker、reconcile、A2A 快速失败 |
-| Embedding 降级 | Codebase ingest 可在向量不可用时降级完成 |
+执行内核持久化模型调用的输入 Reference、Invocation 身份、Claim Generation、Timeout、
+call-start、Heartbeat 与 Result。Activity Retry 是工作流决策，必须出现在事件流中，不依赖进程
+本地计数。过期 Worker 无法为旧 Claim Generation 提交完成。
 
-### 非 P0 增强
+两个层不能共享可变重试计数：Provider 尝试限定在一个 Invocation 内；Activity Retry 创建或
+推进持久执行状态。
 
-| 能力 | 当前定位 |
-|------|----------|
-| 跨 Provider fallback | 默认关闭，需单独灰度 |
-| DLQ 自动重放 | 默认关闭，当前按运行手册手动控制 |
-| 完整容器拆分 | 长期结构隔离方向 |
-| UI Badge 全量覆盖 | 已部分落地，后续完善 |
+## 失败码
 
-## 架构设计
+公开模型失败使用稳定码：`MODEL_NOT_CONFIGURED`、`MODEL_RATE_LIMITED`、`MODEL_TIMEOUT`、
+`MODEL_QUOTA_EXCEEDED`、`MODEL_INVALID_REQUEST`、`MODEL_UNAVAILABLE` 与
+`INFRASTRUCTURE_FAILED`。Provider 原始错误体不进入公开事件。运维日志和指标保留诊断类别与模型 ID，
+但不记录凭据。
 
-```mermaid
-flowchart LR
-  TaskRunnerFactory["TaskRunnerFactory"] -->|"resolve LLM"| ResilientLLMClient["ResilientLLMClient"]
-  KBIngestJob["AgentWorker._execute_kb_ingest_job"] -->|"resolve text or vision LLM"| ResilientLLMClient
-  AgentRunner["AgentTaskRunner"] --> MemoryExtractorService["MemoryExtractorService"]
-  AgentRunner --> VisionGroundingTool["VisionGroundingTool"]
-  MemoryExtractorService --> ResilientLLMClient
-  VisionGroundingTool --> ResilientLLMClient
-  ResilientLLMClient --> CircuitBreaker["Redis CircuitBreaker"]
-  ResilientLLMClient --> RawLLM["Provider LLM Client"]
-  LLMStatus["/api/llm/status"] --> CircuitBreaker
-  LLMProbe["LLMModelService probe"] --> RawProbe["Raw LLMFactory Client"]
-```
+## 配置
 
-### 调用点边界
+活动 Execution Policy 的 `model_resilience` Section 控制：
 
-| 调用点 | 路径 | 失败域 |
-|--------|------|--------|
-| Agent 主链路 | `TaskRunnerFactory._resolve_llm_and_config` -> `create_resilient_llm` | chat LLM |
-| MemoryExtractorService | 继承 runner 注入的 `llm` | chat LLM |
-| VisionGroundingTool | 继承 Agent 注入的 `llm` | chat LLM |
-| KB 摄取 LLM | `LLMModelService.resolve_model` / `resolve_vision_model` | chat LLM |
-| ImageGenerationTool / `generate_image()` | 图片生成 | 独立工具域，不经 chat LLM fallback |
-| `LLMModelService._run_vision_probe` | 用户主动探测 | 原始 `LLMFactory.create`，不经韧性层 |
+- 有界尝试次数与墙钟预算；
+- 熔断 Window、Threshold、Open TTL、Half-Open Probe Timeout；
+- Fallback、Quota 行为与跨 Provider 权限；
+- Circuit 打开时是否快速失败。
 
-## 熔断器状态机
+Fallback Candidate 仍必须通过 OwnerScope、启用状态、能力和 Provider Policy 检查。视觉请求不能
+静默切换到不具备相应能力的模型。
 
-```mermaid
-stateDiagram-v2
-  [*] --> Closed
-  Closed --> Open: failure_window_exceeds_threshold
-  Closed --> Closed: success_or_non_retryable_error
-  Open --> HalfOpen: open_ttl_expired
-  Open --> Open: fast_fail
-  HalfOpen --> Closed: probe_success
-  HalfOpen --> Open: probe_failure
-  Closed --> [*]
-```
+## 验证
 
-| 状态 | 行为 |
-|------|------|
-| `closed` | 正常调用 Provider，失败计入窗口 |
-| `open` | 不调用 Provider，直接返回模型不可用错误 |
-| `half_open` | 放行少量探测请求，成功关闭，失败重新打开 |
-
-熔断状态保存在 Redis `cb:open_until:*`、`cb:errors:*`、`cb:probe:*`，窗口阈值来自 `AppConfig.model_resilience`。熔断错误分类只统计 429、5xx、timeout 等可恢复故障；认证、配置缺失等不可恢复错误应快速暴露，不参与 fallback。
-
-## Fallback 与重试边界
-
-| 阶段 | 行为 |
-|------|------|
-| 首 token / 首 delta 发出前 | 可走 `ResilientLLMClient` 瞬态重试与同 Provider 能力匹配 fallback |
-| 已 emit 任意 delta 之后 | 禁止 mid-stream 换模型；以 `ErrorEvent.code=MODEL_*` 终止 |
-| 非流式 `invoke` | 不受 mid-stream 限制，可重试或 fallback |
-
-实现约束：
-
-- `ResilientLLMClient.streaming_started` 在首个 chunk yield 后置位。
-- `stream_invoke` 在 `streaming_started=true` 后遇错直接抛 `ModelUnavailableError`，不切换候选模型。
-- OpenAI 路径不再保留独立重试 helper，chat LLM 重试权威集中在 `ResilientLLMClient`。
-- `allow_cross_provider_fallback=false` 为默认值；跨 Provider fallback 不是 P0 能力。
-
-### 配额耗尽专用 Fallback
-
-与 429/5xx 瞬态重试不同，`insufficient_quota`（`MODEL_QUOTA_EXCEEDED`）**不会在同一个模型上重试**，但可在配置开启时自动切换至 DB 中其他已配置模型：
-
-| 配置项 | 默认 | 说明 |
-|--------|------|------|
-| `fallback_on_quota_exceeded` | `true` | 配额耗尽时遍历备用模型 |
-| `allow_cross_provider_fallback_on_quota` | `true` | quota 场景允许跨 Provider（如阿里云 → Ollama） |
-
-行为要点：
-
-- **独立于** `fallback_enabled`：无需开启通用 transient fallback 即可启用 quota fallback。
-- 候选来自 `llm_models` 行（同 `endpoint_id` 兄弟模型优先，同 Provider，再跨 Provider）；不做实时 probe，直接调用，失败继续下一个。见 [LLM 端点与模型](llm-endpoints-and-models.zh-CN.md)。
-- 同一端点 / API Key 下不同 `model_name` 可拥有**独立配额**；quota fallback 会依次尝试所有已配置模型（含同端点 sibling），**不会在同一个模型上重试**。
-- 已确认 quota 耗尽的模型会在同一任务后续 LLM 调用中跳过，直接尝试其余候选。
-- Quota 驱动的模型切换**不消耗** Agent retry budget；全部候选均 quota 失败时才抛出 `MODEL_QUOTA_EXCEEDED`。
-- 切换成功后 Agent 发出 `assistant_notice`（`sessionDetail.modelFallbackNotice`），任务继续；全部失败则仍为 `MODEL_QUOTA_EXCEEDED` + session failed。
-- 同一任务内，每个 fallback **目标模型**最多提示一次（按 `ResilientLLMClient` 会话级去重）；若后续再次切换到不同备用模型，会再提示一次新目标。
-- 会话开启 Thinking 时，同 Provider 备用模型优先选用已配置 `thinking_request_params` / `thinking_extra_body` 的条目；未配置的备用模型以普通模式调用，避免重复告警。
-- 运行前提：至少配置 2 个有效模型（含 API Key）。
-
-## 健康、SLO 与告警
-
-### 平台域 L0
-
-| 指标 | 目标 |
-|------|------|
-| `/api/status` 可用性 | >= 99.9% |
-| P95 延迟 | < 500ms |
-
-### 模型域 L2 / L3
-
-| 指标 | 说明 |
-|------|------|
-| 按 provider / model_id 成功率 | 来自 resilience_events |
-| 429 / 5xx / timeout 比例 | 计入熔断窗口 |
-| 熔断开路时长 | Redis `cb:open_until:*` TTL |
-| fallback 命中率 | `fallback_success` 事件 |
-
-### Embedding 域
-
-| 指标 | 说明 |
-|------|------|
-| 索引任务成功率 | codebase ingest |
-| 降级触发率 | `vector_degraded=true` |
-
-### `/api/llm/status`
-
-| 指标 | 目标 |
-|------|------|
-| 可用性 | > 99.5% |
-| P95 | < 200ms，纯读聚合 |
-
-阈值初值见 `AppConfig.model_resilience`，建议每周回顾调优。
-
-## 运行手册
-
-### 灰度顺序
-
-1. 只观测：部署 `/api/llm/status` 与 resilience 指标，不开启 fallback。
-2. 分级错误码：前后端识别 `ErrorEvent.code`。
-3. 熔断：`model_resilience.enabled=true`，`fallback_enabled=false`。
-4. Fallback：可选开启 `fallback_enabled=true`，仍保持 `allow_cross_provider_fallback=false`。
-
-### Kill-switch
-
-| 开关 | 效果 |
-|------|------|
-| `model_resilience.enabled=false` | 关闭熔断与 `ResilientLLMClient` 快速失败 |
-| `model_resilience.fallback_enabled=false` | 关闭同 Provider fallback |
-| `model_resilience.fallback_on_quota_exceeded=false` | 关闭配额耗尽自动切换备用模型 |
-| `feature_flags.enable_agent_features=false` | 关闭 Agent / A2A 入口 |
-
-### DLQ 重放
-
-`dlq_replay_enabled=false` 是当前默认配置。需要手动重放时遵循：
-
-1. 仅重放 `error_code` 以 `MODEL_` 开头的条目。
-2. 确认对应 `model_id` 熔断状态为 `closed`。
-3. 批次不超过 `dlq_replay_batch_size`，间隔不低于 `dlq_replay_interval_seconds`。
-4. 模型再次进入 `open` 时暂停重放。
-
-### A2A 固定错误
-
-模型不可用时，A2A JSON-RPC 返回：
-
-| 字段 | 值 |
-|------|----|
-| `code` | `-32001` |
-| `message` | `模型服务暂不可用（熔断开路），请稍后重试` |
-
-## 落地顺序
-
-| 阶段 | 内容 |
-|------|------|
-| 短期，已落地 / 低风险 | DB 配置迁移、`AppConfig` schema、probe 解耦、健康拆分、`/api/llm/status`、`ErrorEvent.code` |
-| 中期，核心韧性 | Redis 熔断 + half_open Lua、`ResilientLLMClient`、DLQ `error_code`、Worker 快速失败、reconcile 熔断联动、Embedding ingest 降级、A2A 入口治理 |
-| 长期，结构隔离 | `feature_flags` 路由分组、Worker runner registry、UI 全量可视化、Codebase reindex UI |
-
-## 回归重点
-
-| 测试 | 覆盖 |
-|------|------|
-| `test_model_error_fixes.py` | 模型错误分类与前后端兼容 |
-| `test_llm_endpoint_service.py` | LLM 端点 CRUD 与加密 |
-| `test_recoverable_retry.py` | 基础设施失败检查点恢复与重排队 |
-| `test_resilient_llm.py` | 回退与熔断集成 |
-| `test_reconcile.py` | 孤儿任务 reconcile |
-| `test_reconcile_circuit.py` | reconcile 与熔断联动 |
-| `test_status_routes.py` | `/api/status` |
-| `api/tests/app/infrastructure/external/llm/test_circuit_breaker.py` | Redis 熔断状态转换 |
-| `api/tests/app/domain/models/test_event_upgrader.py` | 旧事件 `ErrorEvent.code` 兼容 |
-
-## 相关文档
-
-- [系统架构](overview.zh-CN.md)
-- [事件系统](events.zh-CN.md)
-- [配置来源治理](config-source-governance.zh-CN.md)
-- [API/SSE 协议兼容策略](contract-compatibility.zh-CN.md)
-- [Codebase 向量降级与重新索引](codebase-reindex.zh-CN.md)
+测试覆盖尝试边界、墙钟耗尽、熔断 Open/Half-Open、Quota Fallback、能力过滤、首 Chunk 后失败、
+多模态文本降级，以及 Activity 重复/过期完成 Fencing。

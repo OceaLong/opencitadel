@@ -1,21 +1,24 @@
 "use client";
 
-import type { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 
-type TFunction = ReturnType<typeof useTranslations>;
-
 type VersionShape = {
   id: string;
+};
+
+export type HistoricalVersionMessages = {
+  previousVersions: string;
+  viewHistoricalVersion: (version: string) => string;
+  viewingHistoricalVersion: (version: string) => string;
 };
 
 export type HistoricalVersionsProps<TVersion extends VersionShape> = {
   historical: TVersion[];
   viewingVersionId: string | null;
   onView: (versionId: string) => void;
-  t: TFunction;
+  messages: HistoricalVersionMessages;
   /**
    * Resource-specific actions rendered after the historical version list
    * (shown regardless of whether there is any history). Knowledge bases use
@@ -33,14 +36,14 @@ export function HistoricalVersions<TVersion extends VersionShape>({
   historical,
   viewingVersionId,
   onView,
-  t,
+  messages,
   extraActions,
 }: HistoricalVersionsProps<TVersion>) {
   return (
     <>
       {!!historical.length && (
         <div className="space-y-1">
-          <p className="text-muted-foreground">{t("previousVersions")}</p>
+          <p className="text-muted-foreground">{messages.previousVersions}</p>
           <div className="flex flex-wrap gap-1">
             {historical.map((version) => (
               <Button
@@ -50,13 +53,11 @@ export function HistoricalVersions<TVersion extends VersionShape>({
                 variant="ghost"
                 onClick={() => onView(version.id)}
               >
-                {t("viewHistoricalVersion", { version: version.id })}
+                {messages.viewHistoricalVersion(version.id)}
               </Button>
             ))}
           </div>
-          {viewingVersionId && (
-            <p>{t("viewingHistoricalVersion", { version: viewingVersionId })}</p>
-          )}
+          {viewingVersionId && <p>{messages.viewingHistoricalVersion(viewingVersionId)}</p>}
         </div>
       )}
       {extraActions}

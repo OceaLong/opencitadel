@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Shared tar exclude patterns for sandbox workspace snapshots."""
 
 WORKSPACE_SNAPSHOT_EXCLUDE_DIRS = (
@@ -20,16 +18,11 @@ WORKSPACE_SNAPSHOT_EXCLUDE_DIRS = (
     ".browser-profile",
 )
 
-WORKSPACE_SNAPSHOT_EXCLUDE_GLOBS = (
-    "*.tgz",
-)
+WORKSPACE_SNAPSHOT_EXCLUDE_GLOBS = ("*.tgz",)
 
 
 def build_tar_exclude_args() -> str:
     """Build tar --exclude arguments for workspace snapshots."""
-    parts: list[str] = []
-    for directory in WORKSPACE_SNAPSHOT_EXCLUDE_DIRS:
-        parts.append(f"--exclude='{directory}'")
-    for pattern in WORKSPACE_SNAPSHOT_EXCLUDE_GLOBS:
-        parts.append(f"--exclude='{pattern}'")
+    parts = [f"--exclude='{directory}'" for directory in WORKSPACE_SNAPSHOT_EXCLUDE_DIRS]
+    parts.extend(f"--exclude='{pattern}'" for pattern in WORKSPACE_SNAPSHOT_EXCLUDE_GLOBS)
     return " ".join(parts)

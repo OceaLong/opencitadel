@@ -1,37 +1,25 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """HTTP transport that validates DNS and connects to the validated IP address."""
+
 from __future__ import annotations
 
 import ssl
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 import httpcore
 import httpx
 from httpcore._backends.auto import AutoBackend
 
+from app.application.ports.crypto import OutboundNetworkPolicy
 from app.domain.utils.outbound_url import (
     DEFAULT_OUTBOUND_PORTS,
+    OutboundURLRejected,
     resolve_outbound_url,
 )
-from core.config import get_settings
 
-
-def _configured_private_hosts() -> tuple[str, ...]:
-    return tuple(
-        item.strip()
-        for item in get_settings().outbound_private_host_allowlist.split(",")
-        if item.strip()
-    )
-
-
-def _configured_ports() -> frozenset[int]:
-    values = {
-        int(item.strip())
-        for item in get_settings().outbound_allowed_ports.split(",")
-        if item.strip()
-    }
-    return frozenset(values or DEFAULT_OUTBOUND_PORTS)
+DEFAULT_OUTBOUND_NETWORK_POLICY = OutboundNetworkPolicy(
+    allowed_ports=DEFAULT_OUTBOUND_PORTS,
+)
 
 
 class SSRFProtectedAsyncNetworkBackend(httpcore.AsyncNetworkBackend):
@@ -46,15 +34,13 @@ class SSRFProtectedAsyncNetworkBackend(httpcore.AsyncNetworkBackend):
     ) -> None:
         self._inner = inner or AutoBackend()
         self._allowed_ports = frozenset(
-            allowed_ports if allowed_ports is not None else _configured_ports()
+            allowed_ports if allowed_ports is not None else DEFAULT_OUTBOUND_PORTS
         )
         self._allow_private_hosts = tuple(
-            allow_private_hosts
-            if allow_private_hosts is not None
-            else _configured_private_hosts()
+            allow_private_hosts if allow_private_hosts is not None else ()
         )
 
-    async def connect_tcp(
+    def connect_tcp(
         self,
         host: str,
         port: int,
@@ -68,7 +54,7 @@ class SSRFProtectedAsyncNetworkBackend(httpcore.AsyncNetworkBackend):
             allowed_ports=self._allowed_ports,
             allow_private_hosts=self._allow_private_hosts,
         )
-        return await self._inner.connect_tcp(
+        return self._inner.connect_tcp(
             target.addresses[0],
             port,
             timeout=timeout,
@@ -154,17 +140,19 @@ def create_ssrf_safe_async_client(
     follow_redirects: bool = False,
     allowed_ports: Iterable[int] | None = None,
     allow_private_hosts: Iterable[str] | None = None,
+    outbound_policy: OutboundNetworkPolicy | None = None,
     **kwargs: Any,
 ) -> httpx.AsyncClient:
     """Create an HTTP client whose sockets can only reach validated targets."""
+    policy = outbound_policy or DEFAULT_OUTBOUND_NETWORK_POLICY
     return httpx.AsyncClient(
         headers=headers,
         timeout=timeout or httpx.Timeout(30.0),
         auth=auth,
         follow_redirects=follow_redirects,
         transport=SSRFProtectedAsyncHTTPTransport(
-            allowed_ports=allowed_ports,
-            allow_private_hosts=allow_private_hosts,
+            allowed_ports=allowed_ports or policy.allowed_ports,
+            allow_private_hosts=allow_private_hosts or policy.allow_private_hosts,
         ),
         trust_env=False,
         **kwargs,
@@ -175,15 +163,13 @@ def create_ssrf_safe_mcp_client(
     headers: dict[str, str] | None = None,
     timeout: httpx.Timeout | None = None,
     auth: httpx.Auth | None = None,
+    *,
+    outbound_policy: OutboundNetworkPolicy | None = None,
 ) -> httpx.AsyncClient:
     return create_ssrf_safe_async_client(
         headers=headers,
         timeout=timeout,
         auth=auth,
         follow_redirects=True,
+        outbound_policy=outbound_policy,
     )
-
-
-# Local import alias kept at module end so tests and callers receive the same
-# domain exception without introducing an infrastructure-specific error type.
-from app.domain.utils.outbound_url import OutboundURLRejected  # noqa: E402

@@ -6,20 +6,10 @@ import { useTranslations } from "next-intl";
 import { LogIn, LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 import { useNavModules } from "@/hooks/use-nav-modules";
-import {
-  IconAdmin,
-  IconMore,
-  IconSettings,
-  IconUsers,
-} from "@/lib/icons";
+import { IconAdmin, IconMore, IconSettings, IconUsers } from "@/lib/icons";
 import { splitMobileNav } from "@/lib/nav-modules";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
@@ -54,9 +44,7 @@ export function MobileBottomNav() {
                 href={module.href}
                 className={cn(
                   "flex min-h-11 flex-col items-center justify-center gap-0.5 px-1 text-[10px] transition-colors",
-                  active
-                    ? "text-primary"
-                    : "text-muted-foreground hover:text-foreground",
+                  active ? "text-primary" : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 <Icon className="size-5 shrink-0" />
@@ -84,12 +72,7 @@ export function MobileBottomNav() {
             {overflow.map((module) => {
               const Icon = module.icon;
               return (
-                <Button
-                  key={module.key}
-                  variant="outline"
-                  className="h-11 justify-start"
-                  asChild
-                >
+                <Button key={module.key} variant="outline" className="h-11 justify-start" asChild>
                   <Link href={module.href} onClick={() => setMoreOpen(false)}>
                     <Icon className="size-4" />
                     {tNav(module.key)}
@@ -108,7 +91,7 @@ export function MobileBottomNav() {
               className="h-11 justify-start"
               onClick={() => {
                 setMoreOpen(false);
-                openSettings("models-setting");
+                openSettings("inference-setting");
               }}
             >
               <IconSettings className="size-4" />

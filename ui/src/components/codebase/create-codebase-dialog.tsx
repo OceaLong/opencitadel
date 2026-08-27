@@ -29,11 +29,7 @@ type CreateCodebaseDialogProps = {
   onCreated: (codebase: Codebase) => void;
 };
 
-export function CreateCodebaseDialog({
-  open,
-  onOpenChange,
-  onCreated,
-}: CreateCodebaseDialogProps) {
+export function CreateCodebaseDialog({ open, onOpenChange, onCreated }: CreateCodebaseDialogProps) {
   const t = useTranslations("codebase.createDialog");
   const tCommon = useTranslations("common");
   const tChatInput = useTranslations("chatInput");

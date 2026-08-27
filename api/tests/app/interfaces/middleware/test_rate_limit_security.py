@@ -1,13 +1,16 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import pytest
 from starlette.applications import Starlette
 from starlette.requests import Request
+from starlette.responses import Response
 
+from app.application.ports.coordination import RateLimitDecision, RedisConnectivity
+from app.composition.types import ApiRuntime
+from app.domain.runtime_policy import OperationsPolicy, TrafficPolicy
 from app.interfaces.middleware.rate_limit import (
     RateLimitBackendUnavailable,
     RateLimitMiddleware,
 )
+from tests.runtime_policy_support import MutablePolicyReader
 
 
 def _request(
@@ -16,16 +19,16 @@ def _request(
     cookie: str = "",
     path: str = "/api/auth/login",
     api_key: str = "",
+    runtime: ApiRuntime | None = None,
 ) -> Request:
-    headers = (
-        [(b"x-forwarded-for", forwarded_for.encode("ascii"))]
-        if forwarded_for
-        else []
-    )
+    headers = [(b"x-forwarded-for", forwarded_for.encode("ascii"))] if forwarded_for else []
     if cookie:
         headers.append((b"cookie", cookie.encode("ascii")))
     if api_key:
         headers.append((b"x-api-key", api_key.encode("ascii")))
+    application = Starlette()
+    if runtime is not None:
+        application.state.runtime = runtime
     return Request(
         {
             "type": "http",
@@ -36,8 +39,23 @@ def _request(
             "server": ("api", 8000),
             "scheme": "http",
             "query_string": b"",
+            "app": application,
         }
     )
+
+
+def _runtime(*, reader, store) -> ApiRuntime:
+    runtime = object.__new__(ApiRuntime)
+    object.__setattr__(runtime, "runtime_policy_reader", reader)
+    object.__setattr__(runtime, "rate_limit_store", store)
+    return runtime
+
+
+class _UnavailableStore:
+    async def check_and_record(self, _key: str, *, limit: int, window_seconds: int):
+        assert limit > 0
+        assert window_seconds == 60
+        return RateLimitDecision(False, RedisConnectivity(False, "redis_unavailable"))
 
 
 def test_rate_limit_key_ignores_spoofed_header_from_untrusted_peer():
@@ -46,10 +64,7 @@ def test_rate_limit_key_ignores_spoofed_header_from_untrusted_peer():
         trusted_proxy_cidrs=("10.0.0.0/8",),
     )
 
-    assert (
-        middleware._client_key(_request("203.0.113.10", "1.2.3.4"))
-        == "203.0.113.10"
-    )
+    assert middleware._client_key(_request("203.0.113.10", "1.2.3.4")) == "203.0.113.10"
 
 
 def test_authenticated_requests_are_limited_by_ip_and_opaque_credential():
@@ -66,16 +81,13 @@ def test_authenticated_requests_are_limited_by_ip_and_opaque_credential():
     assert keys[1].startswith("credential:")
     assert "highly-sensitive-jwt" not in keys[1]
 
-@pytest.mark.asyncio
-async def test_production_rate_limit_fails_closed_when_redis_is_unavailable(
-    monkeypatch,
-):
-    def unavailable():
-        raise ConnectionError("redis unavailable")
 
-    monkeypatch.setattr(
-        "app.infrastructure.storage.redis.get_redis",
-        unavailable,
+@pytest.mark.asyncio
+async def test_production_rate_limit_fails_closed_when_redis_is_unavailable():
+    reader = MutablePolicyReader()
+    request = _request(
+        "203.0.113.10",
+        runtime=_runtime(reader=reader, store=_UnavailableStore()),
     )
     middleware = RateLimitMiddleware(
         Starlette(),
@@ -83,7 +95,7 @@ async def test_production_rate_limit_fails_closed_when_redis_is_unavailable(
     )
 
     with pytest.raises(RateLimitBackendUnavailable):
-        await middleware._is_rate_limited_redis("203.0.113.10")
+        await middleware._is_rate_limited(request, "203.0.113.10", limit=120)
 
 
 def test_all_business_api_paths_and_service_credentials_are_limited():
@@ -105,6 +117,9 @@ def test_all_business_api_paths_and_service_credentials_are_limited():
 def test_health_path_does_not_consume_business_rate_limit():
     middleware = RateLimitMiddleware(Starlette())
 
+    assert middleware._is_limited_path("/api/health/live") is False
+    assert middleware._is_limited_path("/api/health/ready") is False
+    assert middleware._is_limited_path("/api/health/private") is True
     assert middleware._is_limited_path("/api/status") is False
     assert middleware._is_limited_path("/api/status/private") is True
 
@@ -130,50 +145,66 @@ def test_each_present_credential_gets_its_own_rate_limit_bucket():
 
     assert len(keys) == 4
     assert len(set(keys)) == 4
-    assert all(secret not in "\n".join(keys) for secret in (
-        "random-access",
-        "stable-refresh",
-        "stable-service-key",
-    ))
-
-
-class _FakeServerCfg:
-    def __init__(self, per_minute: int, enabled: bool = True):
-        self.rate_limit_per_minute = per_minute
-        self.rate_limit_enabled = enabled
-
-
-class _FakeRuntimeCfg:
-    def __init__(self, per_minute: int, enabled: bool = True):
-        self.server = _FakeServerCfg(per_minute, enabled)
-
-
-def test_effective_limit_follows_runtime_config(monkeypatch):
-    """限流值必须每请求动态读运行时配置，而非安装时冻结（冷缓存 bug 回归测试）。"""
-    middleware = RateLimitMiddleware(Starlette(), requests_per_minute=120)
-    monkeypatch.setattr(
-        "app.interfaces.middleware.rate_limit.get_runtime_config",
-        lambda: _FakeRuntimeCfg(per_minute=999),
+    assert all(
+        secret not in "\n".join(keys)
+        for secret in (
+            "random-access",
+            "stable-refresh",
+            "stable-service-key",
+        )
     )
-    assert middleware._effective_limit() == 999
 
 
-def test_effective_limit_falls_back_to_install_value_on_error(monkeypatch):
-    middleware = RateLimitMiddleware(Starlette(), requests_per_minute=77)
-
-    def _boom():
-        raise RuntimeError("cold")
-
-    monkeypatch.setattr(
-        "app.interfaces.middleware.rate_limit.get_runtime_config", _boom
+@pytest.mark.asyncio
+async def test_one_request_reads_one_current_traffic_policy() -> None:
+    reader = MutablePolicyReader(
+        operations=OperationsPolicy(
+            traffic=TrafficPolicy(requests_per_minute=1),
+        )
     )
-    assert middleware._effective_limit() == 77
+    runtime = _runtime(reader=reader, store=_UnavailableStore())
+    middleware = RateLimitMiddleware(Starlette())
 
-
-def test_rate_limit_disabled_at_runtime_skips_limiting(monkeypatch):
-    middleware = RateLimitMiddleware(Starlette(), requests_per_minute=120)
-    monkeypatch.setattr(
-        "app.interfaces.middleware.rate_limit.get_runtime_config",
-        lambda: _FakeRuntimeCfg(per_minute=120, enabled=False),
+    first = await middleware._traffic_policy(_request("203.0.113.10", runtime=runtime))
+    reader.set_operations(
+        OperationsPolicy(
+            traffic=TrafficPolicy(requests_per_minute=9),
+        )
     )
-    assert middleware._runtime_enabled() is False
+    second = await middleware._traffic_policy(_request("203.0.113.10", runtime=runtime))
+
+    assert first.requests_per_minute == 1
+    assert second.requests_per_minute == 9
+    assert [require_fresh for require_fresh, _now in reader.operations_calls] == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_live_limit_tightening_applies_to_the_next_request() -> None:
+    reader = MutablePolicyReader(
+        operations=OperationsPolicy(
+            traffic=TrafficPolicy(requests_per_minute=2),
+        )
+    )
+    runtime = _runtime(reader=reader, store=_UnavailableStore())
+    middleware = RateLimitMiddleware(Starlette())
+
+    async def accepted(_request):
+        return Response(status_code=204)
+
+    first = await middleware.dispatch(
+        _request("203.0.113.10", runtime=runtime),
+        accepted,
+    )
+    reader.set_operations(
+        OperationsPolicy(
+            traffic=TrafficPolicy(requests_per_minute=1),
+        )
+    )
+    denied = await middleware.dispatch(
+        _request("203.0.113.10", runtime=runtime),
+        accepted,
+    )
+
+    assert first.status_code == 204
+    assert denied.status_code == 429
+    assert len(reader.operations_calls) == 2

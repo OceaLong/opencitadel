@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Route-level RBAC coverage for the auditor governance profile API.
 
 App-building pattern mirrors
@@ -7,6 +5,7 @@ tests/app/interfaces/endpoints/test_resource_build_routes.py: a bare
 FastAPI app with the real router mounted and only the auth/service
 dependencies overridden, exercised through TestClient.
 """
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -59,9 +58,7 @@ def _app(service, *, role: GlobalRole, allow: bool) -> FastAPI:
         return Principal(user_id="caller-1", global_role=role)
 
     app.dependency_overrides[get_workspace_context] = ctx
-    app.dependency_overrides[require_auditor_or_admin] = (
-        allow_gate if allow else _deny_auditor_gate
-    )
+    app.dependency_overrides[require_auditor_or_admin] = allow_gate if allow else _deny_auditor_gate
     app.dependency_overrides[get_governance_profile_service] = lambda: service
     return app
 

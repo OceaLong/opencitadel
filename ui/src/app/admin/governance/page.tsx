@@ -61,7 +61,10 @@ export default function AdminGovernancePage() {
   }
 
   const totalInterceptions =
-    overview?.interceptions.reduce((sum, day) => sum + day.approval_decisions + day.denials, 0) ?? 0;
+    overview?.interceptions.reduce(
+      (sum, day) => sum + day.approval_requests + day.activity_failures,
+      0,
+    ) ?? 0;
   const avgDecisionSeconds = overview?.approvals.avg_decision_seconds;
   const chainOk = overview?.chain.ok ?? null;
 
@@ -97,7 +100,9 @@ export default function AdminGovernancePage() {
         />
         <Card className="gap-0 py-4">
           <CardHeader className="flex flex-row items-start justify-between pb-2">
-            <CardTitle className="text-muted-foreground text-sm font-medium">{t("statChainStatus")}</CardTitle>
+            <CardTitle className="text-muted-foreground text-sm font-medium">
+              {t("statChainStatus")}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {chainOk == null ? (
@@ -144,10 +149,18 @@ export default function AdminGovernancePage() {
             <CardDescription>{t("approvalOutcomesDesc")}</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2">
-            <MetricRow label={t("outcomeApproved")} value={overview?.approvals.outcomes.approved ?? 0} />
-            <MetricRow label={t("outcomeRejected")} value={overview?.approvals.outcomes.rejected ?? 0} />
-            <MetricRow label={t("outcomeExpired")} value={overview?.approvals.outcomes.expired ?? 0} />
-            <MetricRow label={t("outcomeConsumed")} value={overview?.approvals.outcomes.consumed ?? 0} />
+            <MetricRow
+              label={t("outcomeApproved")}
+              value={overview?.approvals.outcomes.approved ?? 0}
+            />
+            <MetricRow
+              label={t("outcomeRejected")}
+              value={overview?.approvals.outcomes.rejected ?? 0}
+            />
+            <MetricRow
+              label={t("outcomeCancelled")}
+              value={overview?.approvals.outcomes.cancelled ?? 0}
+            />
           </CardContent>
         </Card>
       </div>

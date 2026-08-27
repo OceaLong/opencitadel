@@ -1,10 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from app.domain.models.codebase import (
-    CodeEvidenceRef,
     CodebaseEdge,
     CodebaseFile,
     CodebaseSymbol,
+    CodeEvidenceRef,
     EdgeKind,
     SymbolKind,
 )

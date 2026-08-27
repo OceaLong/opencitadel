@@ -1,15 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Declarative execution metadata for agent tools."""
+
+from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Callable, Dict
+from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel
 
 
-class ToolCapability(str, Enum):
-    MESSAGE = "message"
+class ToolCapability(StrEnum):
     KNOWLEDGE_READ = "knowledge_read"
     CODE_READ = "code_read"
     INTEGRATION_READ = "integration_read"
@@ -19,21 +18,21 @@ class ToolCapability(str, Enum):
     UNKNOWN = "unknown"
 
 
-class ToolEffect(str, Enum):
+class ToolEffect(StrEnum):
     READ_ONLY = "read_only"
     WORKSPACE_WRITE = "workspace_write"
     EXTERNAL_WRITE = "external_write"
     INTERACTIVE = "interactive"
 
 
-class ToolIdempotency(str, Enum):
+class ToolIdempotency(StrEnum):
     SAFE = "safe"
     IDEMPOTENT_WITH_KEY = "idempotent_with_key"
     NON_IDEMPOTENT = "non_idempotent"
     UNKNOWN = "unknown"
 
 
-class ApprovalMode(str, Enum):
+class ApprovalMode(StrEnum):
     NEVER = "never"
     POLICY = "policy"
     ALWAYS = "always"
@@ -61,7 +60,7 @@ class ToolDescriptor:
     """The callable and metadata needed to govern a registered tool."""
 
     name: str
-    schema: Dict[str, Any]
+    schema: dict[str, Any]
     method: Callable[..., Any]
     tool_pack: str
     policy: ToolExecutionPolicy

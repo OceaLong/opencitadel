@@ -124,14 +124,24 @@ export function AddDocumentDialog({ kbId, open, onOpenChange, onAdded }: AddDocu
             <TabsTrigger value="web">{t("tabWeb")}</TabsTrigger>
           </TabsList>
           <TabsContent value="files" className="space-y-3 pt-3">
-            <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFiles} />
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={handleFiles}
+            />
             <Button
               variant="outline"
               className="w-full"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
             >
-              {uploading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <FileUp className="mr-2 size-4" />}
+              {uploading ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <FileUp className="mr-2 size-4" />
+              )}
               {t("selectFiles", { count: uploadedFiles.length })}
             </Button>
           </TabsContent>
@@ -140,7 +150,12 @@ export function AddDocumentDialog({ kbId, open, onOpenChange, onAdded }: AddDocu
               <Label htmlFor="kb-url">{t("webUrlLabel")}</Label>
               <div className="flex items-center gap-2">
                 <Globe className="text-muted-foreground size-4" />
-                <Input id="kb-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." />
+                <Input
+                  id="kb-url"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://..."
+                />
               </div>
             </div>
           </TabsContent>

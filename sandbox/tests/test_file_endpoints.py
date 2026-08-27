@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """download-file 端点的路径一致性测试。
 
 此前 `download_file` 端点在 `ensure_file(filepath)` 校验通过后，仍用调用方原始的
@@ -12,8 +10,8 @@
 1. 合法相对路径经端点能正确取到文件内容；
 2. 恶意逃逸路径仍被拒绝（BadRequestException）。
 """
-import pytest
 
+import pytest
 from app.interfaces.endpoints.file import download_file
 from app.interfaces.errors.exceptions import BadRequestException
 from app.services.file import FileService

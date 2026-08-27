@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { renderComponent } from "@/test-utils/render";
+
 import { StatusBadge, type StatusBadgeVariant } from "./status-badge";
 
 const ALL_VARIANTS: StatusBadgeVariant[] = [

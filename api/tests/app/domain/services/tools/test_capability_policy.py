@@ -3,10 +3,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.domain.models.codebase import SessionMode
-from app.domain.models.app_config import MCPServerConfig
+from app.domain.models.integration_runtime import MCPServerRuntime
 from app.domain.models.tool_policy import (
-    ApprovalMode,
     CONSERVATIVE_TOOL_POLICY,
+    ApprovalMode,
     ToolCapability,
     ToolEffect,
     ToolExecutionPolicy,
@@ -19,7 +19,6 @@ from app.domain.services.tools.capability_policy import (
 )
 from app.domain.services.tools.mcp import MCPTool
 from app.domain.services.tools.tool_registry import ToolRegistry
-
 
 READ_SAFE = ToolExecutionPolicy(
     capability=ToolCapability.KNOWLEDGE_READ,
@@ -35,9 +34,7 @@ WRITE = ToolExecutionPolicy(
     approval=ApprovalMode.POLICY,
     concurrency_group="filesystem",
 )
-INTEGRATION_READ = READ_SAFE.model_copy(
-    update={"capability": ToolCapability.INTEGRATION_READ}
-)
+INTEGRATION_READ = READ_SAFE.model_copy(update={"capability": ToolCapability.INTEGRATION_READ})
 
 
 class _MixedTool(BaseTool):
@@ -63,9 +60,7 @@ def test_ask_exposes_only_explicit_ask_safe_descriptors():
     )
 
     names = {
-        descriptor.name
-        for candidate in tools
-        for descriptor in candidate.get_tool_descriptors()
+        descriptor.name for candidate in tools for descriptor in candidate.get_tool_descriptors()
     }
 
     assert names == {"kb_search"}
@@ -127,13 +122,12 @@ def test_admin_classified_read_only_mcp_function_is_visible_in_ask():
 @pytest.mark.parametrize(
     "capability",
     [
-        ToolCapability.MESSAGE,
         ToolCapability.KNOWLEDGE_READ,
         ToolCapability.CODE_READ,
     ],
 )
 def test_integration_read_declaration_with_non_integration_capability_is_hidden_from_ask(
-        capability,
+    capability,
 ):
     mcp_tool = MCPTool(MagicMock())
     mcp_tool.register_schema(
@@ -150,8 +144,10 @@ def test_integration_read_declaration_with_non_integration_capability_is_hidden_
     assert ToolRegistry.collect_schemas(tools) == []
 
 
-def test_mcp_server_config_parses_typed_tool_policies():
-    config = MCPServerConfig(
+def test_mcp_server_runtime_parses_typed_tool_policies():
+    config = MCPServerRuntime(
+        id="server-1",
+        name="tickets",
         url="https://mcp.example.test",
         tool_policies={"lookup_ticket": INTEGRATION_READ.model_dump(mode="json")},
     )
@@ -159,8 +155,10 @@ def test_mcp_server_config_parses_typed_tool_policies():
     assert config.tool_policies["lookup_ticket"] == INTEGRATION_READ
 
 
-def test_mcp_server_config_normalizes_mislabeled_read_to_conservative():
-    config = MCPServerConfig(
+def test_mcp_server_runtime_normalizes_mislabeled_read_to_conservative():
+    config = MCPServerRuntime(
+        id="server-1",
+        name="tickets",
         url="https://mcp.example.test",
         tool_policies={"lookup_ticket": READ_SAFE.model_dump(mode="json")},
     )

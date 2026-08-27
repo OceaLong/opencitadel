@@ -1,14 +1,12 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """图像生成工具：调用 provider 图像生成 API。"""
+
 import logging
-from typing import Optional
 
 from app.domain.external.file_storage import FileStorage
-from app.domain.external.llm import LLM
-from app.domain.models.llm_model import LLMModel
+from app.domain.external.image_generation import ImageGenerator
+from app.domain.models.inference import ResolvedInferenceModel
 from app.domain.models.tool_result import ToolResult
-from app.domain.services import image_generation_service, vision_service
+
 from .base import BaseTool, tool
 from .capability_policy import GENERATION_WRITE
 
@@ -19,16 +17,16 @@ class ImageGenerationTool(BaseTool):
     name: str = "image_generation"
 
     def __init__(
-            self,
-            llm: LLM,
-            llm_model: LLMModel,
-            file_storage: FileStorage,
-            owner_user_id: Optional[str] = None,
-            team_id: Optional[str] = None,
+        self,
+        inference_model: ResolvedInferenceModel,
+        image_generator: ImageGenerator,
+        file_storage: FileStorage,
+        owner_user_id: str | None = None,
+        team_id: str | None = None,
     ) -> None:
         super().__init__()
-        self._llm = llm
-        self._llm_model = llm_model
+        self._inference_model = inference_model
+        self._image_generator = image_generator
         self._file_storage = file_storage
         self._owner_user_id = owner_user_id
         self._team_id = team_id
@@ -50,21 +48,21 @@ class ImageGenerationTool(BaseTool):
         policy=GENERATION_WRITE,
     )
     async def generate_image(
-            self,
-            prompt: str,
-            size: Optional[str] = None,
+        self,
+        prompt: str,
+        size: str | None = None,
     ) -> ToolResult:
-        caps = vision_service.resolve_capabilities(self._llm)
-        if not caps.image_generation:
+        if not self._inference_model.capabilities.image_generation:
             return ToolResult(
                 success=False,
                 message="当前模型未开启图像生成能力，请在模型设置中启用。",
             )
-        url = await image_generation_service.generate_image(
+        url = await self._image_generator.generate(
             prompt,
-            self._llm_model,
+            self._inference_model,
             self._file_storage,
             size=size or "1024x1024",
+            quality="standard",
             owner_user_id=self._owner_user_id,
             team_id=self._team_id,
         )

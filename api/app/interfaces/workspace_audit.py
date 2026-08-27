@@ -1,11 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from typing import Any
 
+from app.application.request_context import get_request_id
 from app.application.services.audit_service import AuditService
 from app.domain.models.audit_log import AuditLog
 from app.domain.models.scope import OwnerScopeType, WorkspaceContext
-from app.infrastructure.observability.logging_context import get_request_id
 
 
 async def record_workspace_audit(
@@ -28,11 +26,7 @@ async def record_workspace_audit(
             action=action,
             resource_type=resource_type,
             resource_id=resource_id,
-            team_id=(
-                ctx.scope.team_id
-                if ctx.scope.type == OwnerScopeType.TEAM
-                else None
-            ),
+            team_id=(ctx.scope.team_id if ctx.scope.type == OwnerScopeType.TEAM else None),
             request_id=get_request_id() or "",
             metadata=metadata or {},
         )

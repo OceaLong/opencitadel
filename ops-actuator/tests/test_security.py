@@ -2,12 +2,17 @@
 adapted for the actuator's write-target allowlist (namespace + registered
 workload + replica bounds) instead of the collector's probe registries.
 """
-import pytest
 
+import pytest
 from opencitadel_ops_actuator.actuator import Actuator
 from opencitadel_ops_actuator.config import ActuatorSettings
 from opencitadel_ops_actuator.main import build_parser
-from opencitadel_ops_actuator.security import TargetDenied, require_namespace, require_replicas_in_bounds, require_workload
+from opencitadel_ops_actuator.security import (
+    TargetDenied,
+    require_namespace,
+    require_replicas_in_bounds,
+    require_workload,
+)
 
 
 def test_default_transport_is_streamable_http():

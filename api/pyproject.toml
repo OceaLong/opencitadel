@@ -41,7 +41,6 @@ dependencies = [
     "pgvector>=0.3.6",
     "python-docx>=1.2.0",
     "weasyprint>=63.0",
-    "dependency-injector>=4.49.0",
     "psutil>=6.1.0",
 ]
 
@@ -53,11 +52,13 @@ k8s = [
 [dependency-groups]
 dev = [
     "httpx2>=2.12.0,<3",
+    "hypothesis>=6.165.10",
     "import-linter>=2.13",
     "pytest>=8.4.2",
     "pytest-asyncio>=0.25.0",
+    "ruff>=0.16.3",
 ]
-worker = [
+execution-kernel = [
     "tree-sitter-language-pack>=1.13.7",
     "playwright>=1.56.0",
     "jieba>=0.42.1",
@@ -75,56 +76,43 @@ name = "domain must not import application"
 type = "forbidden"
 source_modules = ["app.domain"]
 forbidden_modules = ["app.application"]
-ignore_imports = [
-    # 债务台账——每行一个已知违规，只减不增。
-    # 直接违规：domain 服务直接调用 application 层服务（3 处，Task 2/3 遗留）。
-    "app.domain.services.knowledge_base.ingestion_runner -> app.application.services.resource_build_service",
-    "app.domain.services.knowledge_base.ingestion_task_runner -> app.application.services.resource_build_service",
-    "app.domain.services.skills.skill_import -> app.application.services.skill_service",
-    # 间接违规：domain 经由已白名单的 domain->infrastructure 债务（resilient_llm）传递到 application，
-    # 根因已在下方 "domain must not import infrastructure" 契约中记账，这里只是打断传递链避免重复计数。
-    "app.domain.services.agent_task_runner -> app.infrastructure.external.llm.resilient_llm",
-    "app.domain.services.agents.base -> app.infrastructure.external.llm.resilient_llm",
-    "app.domain.services.flows.doc_qa_flow -> app.infrastructure.external.llm.resilient_llm",
-]
 
 [[tool.importlinter.contracts]]
 name = "domain must not import infrastructure"
 type = "forbidden"
 source_modules = ["app.domain"]
 forbidden_modules = ["app.infrastructure"]
-ignore_imports = [
-    # 债务台账——每行一个已知违规，只减不增。以 `uv run lint-imports` 实际输出为准录入。
-    # 延迟 import（函数体内）：ModelUnavailableError 相关。
-    "app.domain.services.agent_task_runner -> app.infrastructure.external.llm.resilient_llm",
-    "app.domain.services.agents.base -> app.infrastructure.external.llm.resilient_llm",
-    "app.domain.services.flows.doc_qa_flow -> app.infrastructure.external.llm.resilient_llm",
-    # 延迟 import（函数体内）：vision_service 取存储 client。
-    "app.domain.services.vision_service -> app.infrastructure.storage.factory",
-    # 顶层 import：structured_output schema 工具函数。
-    "app.domain.services.agents.base -> app.infrastructure.external.llm.structured_output",
-    # 顶层 import：Ops Patrol 治理指标（Phase A 新增）。
-    "app.domain.services.agents.tool_audit_recorder -> app.infrastructure.observability.governance_metrics",
-    "app.domain.services.agents.tool_batch_executor -> app.infrastructure.observability.governance_metrics",
-    # 顶层 import：LLM endpoint API key 加解密（app/infrastructure/security 此前缺 __init__.py 导致
-    # grimp 漏检，修复轮 1 补齐 __init__.py 后新检出）。
-    "app.domain.models.llm_endpoint -> app.infrastructure.security.api_key_cipher",
-    # 顶层 import：出站 HTTP SSRF 防护封装（同上，修复轮 1 新检出，共 3 处）。
-    "app.domain.services.image_generation_service -> app.infrastructure.security.outbound_http",
-    "app.domain.services.knowledge_base.web_connector -> app.infrastructure.security.outbound_http",
-    "app.domain.services.tools.a2a -> app.infrastructure.security.outbound_http",
-    # 顶层 import：MCP SSRF-safe client 工厂（同上，修复轮 1 新检出）。
-    "app.domain.services.tools.mcp -> app.infrastructure.security.outbound_http",
-]
 
 [[tool.importlinter.contracts]]
 name = "application must not import interfaces"
 type = "forbidden"
 source_modules = ["app.application"]
 forbidden_modules = ["app.interfaces"]
-ignore_imports = [
-    # 债务台账——每行一个已知违规，只减不增：application 服务直接引用 interfaces 层 schema。
-    "app.application.services.app_config_service -> app.interfaces.schemas.app_config",
-    "app.application.services.team_service -> app.interfaces.schemas.admin",
-    "app.application.services.team_service -> app.interfaces.schemas.team",
+
+[[tool.importlinter.contracts]]
+name = "application must not import infrastructure"
+type = "forbidden"
+source_modules = ["app.application"]
+forbidden_modules = ["app.infrastructure"]
+
+[[tool.importlinter.contracts]]
+name = "interfaces must not import infrastructure"
+type = "forbidden"
+source_modules = ["app.interfaces"]
+forbidden_modules = ["app.infrastructure"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "execution domain is isolated from upper layers"
+type = "forbidden"
+source_modules = ["app.domain.execution.**"]
+forbidden_modules = ["app.application", "app.infrastructure", "app.interfaces"]
+
+[[tool.importlinter.contracts]]
+name = "execution projectors cannot invoke activities"
+type = "forbidden"
+source_modules = ["app.application.execution.formal_projector"]
+forbidden_modules = [
+    "app.application.execution.activity_registry",
+    "app.application.execution.activities",
 ]

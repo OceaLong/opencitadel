@@ -1,22 +1,32 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import re
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Callable, List, Optional
+from datetime import UTC, datetime, timedelta
 
-from app.domain.errors import BadRequestError, ConflictError, ForbiddenError, NotFoundError
+from app.application.dto.team import (
+    InvitationStatus,
+    TeamInvitationPreview,
+    TeamMemberDetail,
+)
+from app.application.ports.crypto import ApplicationUrls, PasswordHashPort
+from app.domain.errors import (
+    BadRequestError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+)
 from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.team import Team, TeamMember, TeamRole
 from app.domain.models.user import User
 from app.domain.repositories.uow import IUnitOfWork
-from app.infrastructure.security.password_hasher import PasswordHasher
-from app.interfaces.schemas.admin import InvitationStatus
-from app.interfaces.schemas.team import TeamInvitationPreviewResponse, TeamMemberDetailResponse
-from core.config import get_settings
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _now() -> datetime:
+    """Return the current instant as an aware UTC datetime."""
+    return datetime.now(UTC)
 
 
 @dataclass(frozen=True)
@@ -27,12 +37,14 @@ class TeamInvitationRegisterResult:
 
 class TeamService:
     def __init__(
-            self,
-            uow_factory: Callable[[], IUnitOfWork],
-            password_hasher: Optional[PasswordHasher] = None,
+        self,
+        uow_factory: Callable[[], IUnitOfWork],
+        password_hasher: PasswordHashPort,
+        application_urls: ApplicationUrls,
     ) -> None:
         self._uow_factory = uow_factory
-        self._password_hasher = password_hasher or PasswordHasher()
+        self._password_hasher = password_hasher
+        self._application_urls = application_urls
 
     async def create_team(self, *, name: str, description: str, actor_user_id: str) -> Team:
         name = name.strip()
@@ -42,10 +54,13 @@ class TeamService:
         team = Team(name=name, description=description, created_by=actor_user_id)
         async with self._uow_factory() as uow:
             await uow.team.save(team)
-            await uow.team.add_member(TeamMember(team_id=team.id, user_id=actor_user_id, role=TeamRole.OWNER))
+            await uow.team.add_member(
+                TeamMember(team_id=team.id, user_id=actor_user_id, role=TeamRole.OWNER)
+            )
+            await uow.commit()
         return team
 
-    async def list_my_teams(self, user_id: str) -> List[Team]:
+    async def list_my_teams(self, user_id: str) -> list[Team]:
         async with self._uow_factory() as uow:
             return await uow.team.list_for_user(user_id)
 
@@ -57,24 +72,24 @@ class TeamService:
             await self._load_actor_member(uow, team_id, actor_user_id, allow_member=True)
             return team
 
-    async def list_members(self, team_id: str, actor_user_id: str) -> List[TeamMember]:
+    async def list_members(self, team_id: str, actor_user_id: str) -> list[TeamMember]:
         async with self._uow_factory() as uow:
             await self._load_actor_member(uow, team_id, actor_user_id, allow_member=True)
             return await uow.team.list_members(team_id)
 
-    async def list_member_details(self, team_id: str, actor_user_id: str) -> List[TeamMemberDetailResponse]:
+    async def list_member_details(self, team_id: str, actor_user_id: str) -> list[TeamMemberDetail]:
         async with self._uow_factory() as uow:
             await self._load_actor_member(uow, team_id, actor_user_id, allow_member=True)
             members = await uow.team.list_members(team_id)
             return await self._enrich_members(uow, members)
 
     async def create_team_invitation(
-            self,
-            *,
-            team_id: str,
-            actor_user_id: str,
-            role: TeamRole,
-            email: str | None = None,
+        self,
+        *,
+        team_id: str,
+        actor_user_id: str,
+        role: TeamRole,
+        email: str | None = None,
     ) -> str:
         await self._require_team_admin(team_id, actor_user_id)
         normalized_email = self._normalize_invite_email(email)
@@ -86,23 +101,26 @@ class TeamService:
             team_role=role,
             token=token,
             invited_by=actor_user_id,
-            expires_at=datetime.now() + timedelta(days=7),
+            expires_at=_now() + timedelta(days=7),
         )
         async with self._uow_factory() as uow:
             if normalized_email:
-                existing = await uow.invitation.get_pending_team_invitation(team_id, normalized_email)
+                existing = await uow.invitation.get_pending_team_invitation(
+                    team_id, normalized_email
+                )
                 if existing:
                     raise ConflictError("该邮箱已有待处理的团队邀请")
             await uow.invitation.save(invitation)
-        return f"{get_settings().frontend_base_url.rstrip('/')}/invitations/{token}"
+            await uow.commit()
+        return f"{self._application_urls.frontend_base_url.rstrip('/')}/invitations/{token}"
 
-    async def preview_invitation(self, *, token: str) -> TeamInvitationPreviewResponse:
+    async def preview_invitation(self, *, token: str) -> TeamInvitationPreview:
         async with self._uow_factory() as uow:
             invitation = await self._load_team_invitation(uow, token)
             team = await uow.team.get_by_id(invitation.team_id or "")
             if not team:
                 raise NotFoundError("团队不存在")
-            now = datetime.now()
+            now = _now()
             status = self._invitation_status(invitation, now=now)
             requires_registration = False
             email_hint = None
@@ -110,7 +128,7 @@ class TeamService:
                 email_hint = self._mask_email(invitation.email)
                 existing_user = await uow.user.get_by_email(invitation.email)
                 requires_registration = existing_user is None
-            return TeamInvitationPreviewResponse(
+            return TeamInvitationPreview(
                 team_id=team.id,
                 team_name=team.name,
                 role=invitation.team_role or TeamRole.MEMBER,
@@ -121,12 +139,12 @@ class TeamService:
             )
 
     async def register_and_accept_invitation(
-            self,
-            *,
-            token: str,
-            email: str,
-            username: str,
-            password: str,
+        self,
+        *,
+        token: str,
+        email: str,
+        username: str,
+        password: str,
     ) -> TeamInvitationRegisterResult:
         normalized_email = email.strip().lower()
         if not _EMAIL_RE.match(normalized_email):
@@ -154,9 +172,10 @@ class TeamService:
                 role=invitation.team_role or TeamRole.MEMBER,
             )
             await uow.team.add_member(member)
-            invitation.accepted_at = datetime.now()
+            invitation.accepted_at = _now()
             invitation.accepted_user_id = user.id
             await uow.invitation.save(invitation)
+            await uow.commit()
             return TeamInvitationRegisterResult(user=user, member=member)
 
     async def accept_invitation(self, *, token: str, user_id: str) -> TeamMember:
@@ -164,7 +183,7 @@ class TeamService:
             invitation = await self._load_team_invitation(uow, token)
             if invitation.accepted:
                 raise BadRequestError("邀请链接已被使用")
-            if invitation.expires_at < datetime.now():
+            if invitation.expires_at < _now():
                 raise BadRequestError("邀请链接已过期")
 
             user = await uow.user.get_by_id(user_id)
@@ -175,9 +194,10 @@ class TeamService:
 
             existing = await uow.team.get_member(invitation.team_id or "", user_id)
             if existing:
-                invitation.accepted_at = datetime.now()
+                invitation.accepted_at = _now()
                 invitation.accepted_user_id = user_id
                 await uow.invitation.save(invitation)
+                await uow.commit()
                 return existing
 
             member = TeamMember(
@@ -186,9 +206,10 @@ class TeamService:
                 role=invitation.team_role or TeamRole.MEMBER,
             )
             await uow.team.add_member(member)
-            invitation.accepted_at = datetime.now()
+            invitation.accepted_at = _now()
             invitation.accepted_user_id = user_id
             await uow.invitation.save(invitation)
+            await uow.commit()
             return member
 
     async def delete_team(self, *, team_id: str, actor_user_id: str) -> None:
@@ -197,6 +218,7 @@ class TeamService:
             if actor.role != TeamRole.OWNER:
                 raise ForbiddenError("只有团队所有者可解散团队", error_key="errors.teamOwnerOnly")
             await uow.team.delete_by_id(team_id)
+            await uow.commit()
 
     async def remove_member(self, *, team_id: str, actor_user_id: str, target_user_id: str) -> None:
         async with self._uow_factory() as uow:
@@ -206,19 +228,22 @@ class TeamService:
                 raise NotFoundError("成员不存在")
             await self._ensure_removable_owner(uow, team_id, target)
             await uow.team.remove_member(team_id, target_user_id)
+            await uow.commit()
 
     async def update_member_role(
-            self,
-            *,
-            team_id: str,
-            actor_user_id: str,
-            target_user_id: str,
-            role: TeamRole,
+        self,
+        *,
+        team_id: str,
+        actor_user_id: str,
+        target_user_id: str,
+        role: TeamRole,
     ) -> TeamMember:
         async with self._uow_factory() as uow:
             actor = await self._load_actor_member(uow, team_id, actor_user_id, allow_member=False)
             if actor.role != TeamRole.OWNER:
-                raise ForbiddenError("只有团队所有者可修改成员角色", error_key="errors.teamOwnerOnly")
+                raise ForbiddenError(
+                    "只有团队所有者可修改成员角色", error_key="errors.teamOwnerOnly"
+                )
             target = await uow.team.get_member(team_id, target_user_id)
             if not target:
                 raise NotFoundError("成员不存在")
@@ -228,6 +253,7 @@ class TeamService:
             updated = await uow.team.get_member(team_id, target_user_id)
             if not updated:
                 raise NotFoundError("成员不存在")
+            await uow.commit()
             return updated
 
     async def leave_team(self, *, team_id: str, user_id: str) -> None:
@@ -235,14 +261,13 @@ class TeamService:
             member = await self._load_actor_member(uow, team_id, user_id, allow_member=True)
             if member.role == TeamRole.OWNER:
                 members = await uow.team.list_members(team_id)
-                owner_count = sum(
-                    1 for item in members if item.role == TeamRole.OWNER
-                )
+                owner_count = sum(1 for item in members if item.role == TeamRole.OWNER)
                 if owner_count <= 1:
                     raise BadRequestError("请先转移所有权或解散团队")
             await uow.team.remove_member(team_id, user_id)
+            await uow.commit()
 
-    async def admin_list_all(self, *, limit: int, offset: int) -> tuple[List[Team], int]:
+    async def admin_list_all(self, *, limit: int, offset: int) -> tuple[list[Team], int]:
         async with self._uow_factory() as uow:
             teams = await uow.team.list_all(limit=limit, offset=offset)
             total = await uow.team.count()
@@ -254,8 +279,9 @@ class TeamService:
             if not team:
                 raise NotFoundError("团队不存在")
             await uow.team.delete_by_id(team_id)
+            await uow.commit()
 
-    async def admin_list_member_details(self, team_id: str) -> List[TeamMemberDetailResponse]:
+    async def admin_list_member_details(self, team_id: str) -> list[TeamMemberDetail]:
         async with self._uow_factory() as uow:
             team = await uow.team.get_by_id(team_id)
             if not team:
@@ -273,8 +299,11 @@ class TeamService:
                 raise NotFoundError("成员不存在")
             await self._ensure_removable_owner(uow, team_id, target)
             await uow.team.remove_member(team_id, target_user_id)
+            await uow.commit()
 
-    async def admin_update_member_role(self, team_id: str, target_user_id: str, role: TeamRole) -> TeamMember:
+    async def admin_update_member_role(
+        self, team_id: str, target_user_id: str, role: TeamRole
+    ) -> TeamMember:
         async with self._uow_factory() as uow:
             team = await uow.team.get_by_id(team_id)
             if not team:
@@ -288,22 +317,27 @@ class TeamService:
             updated = await uow.team.get_member(team_id, target_user_id)
             if not updated:
                 raise NotFoundError("成员不存在")
+            await uow.commit()
             return updated
 
-    async def _enrich_members(self, uow, members: List[TeamMember]) -> List[TeamMemberDetailResponse]:
+    async def _enrich_members(self, uow, members: list[TeamMember]) -> list[TeamMemberDetail]:
         if not members:
             return []
         user_ids = [member.user_id for member in members]
         users = await uow.user.list_by_ids(user_ids)
         user_map = {user.id: user for user in users}
         return [
-            TeamMemberDetailResponse(
+            TeamMemberDetail(
                 user_id=member.user_id,
                 role=member.role,
                 joined_at=member.joined_at,
-                display_name=user_map[member.user_id].display_name if member.user_id in user_map else "",
+                display_name=user_map[member.user_id].display_name
+                if member.user_id in user_map
+                else "",
                 email=user_map[member.user_id].email if member.user_id in user_map else "",
-                avatar_url=user_map[member.user_id].avatar_url if member.user_id in user_map else "",
+                avatar_url=user_map[member.user_id].avatar_url
+                if member.user_id in user_map
+                else "",
             )
             for member in members
         ]
@@ -317,12 +351,12 @@ class TeamService:
             raise BadRequestError("不能移除或降级唯一的所有者")
 
     async def _load_actor_member(
-            self,
-            uow,
-            team_id: str,
-            user_id: str,
-            *,
-            allow_member: bool = False,
+        self,
+        uow,
+        team_id: str,
+        user_id: str,
+        *,
+        allow_member: bool = False,
     ) -> TeamMember:
         team = await uow.team.get_by_id(team_id)
         if not team:
@@ -336,7 +370,9 @@ class TeamService:
             raise ForbiddenError("需要团队管理员权限")
         return member
 
-    async def _require_team_admin(self, team_id: str, user_id: str, *, allow_member: bool = False) -> TeamMember:
+    async def _require_team_admin(
+        self, team_id: str, user_id: str, *, allow_member: bool = False
+    ) -> TeamMember:
         async with self._uow_factory() as uow:
             return await self._load_actor_member(uow, team_id, user_id, allow_member=allow_member)
 

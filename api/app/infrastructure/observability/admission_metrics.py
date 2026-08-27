@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Prometheus metrics for sandbox admission and task leases."""
+
 from __future__ import annotations
 
 try:

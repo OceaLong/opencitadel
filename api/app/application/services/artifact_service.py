@@ -1,18 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
 import logging
 import os
 import re
 import secrets
 import uuid
-from datetime import datetime, timedelta
-from typing import Awaitable, Callable, List, Optional
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.object_storage import ObjectStoragePort
 from app.domain.models.artifact import Artifact, ArtifactKind, ArtifactStatus
-from app.domain.models.event import ArtifactEvent
 from app.domain.models.file import File
 from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
@@ -26,7 +23,7 @@ _VERIFY_UPLOAD_RETRY_DELAYS_SECONDS = (0.2, 0.5)
 _SCRIPT_TAG_RE = re.compile(r"<script\b[^>]*>.*?</script>", re.IGNORECASE | re.DOTALL)
 _EVENT_HANDLER_RE = re.compile(r"\s(on\w+)\s*=\s*(['\"]).*?\2", re.IGNORECASE | re.DOTALL)
 
-SandboxFileReader = Callable[[str, str], Awaitable[Optional[str]]]
+SandboxFileReader = Callable[[str, str], Awaitable[str | None]]
 
 
 def sanitize_html_for_preview(html: str) -> str:
@@ -65,7 +62,7 @@ def _artifact_not_found_message(artifact_id: str) -> str:
     )
 
 
-def _rank_session_files_for_artifact(artifact: Artifact, files: List[File]) -> List[File]:
+def _rank_session_files_for_artifact(artifact: Artifact, files: list[File]) -> list[File]:
     allowed_ext = _artifact_file_extensions(artifact.kind)
     title_token = _normalize_match_token(artifact.title)
     ranked: list[tuple[int, File]] = []
@@ -96,11 +93,11 @@ def _rank_session_files_for_artifact(artifact: Artifact, files: List[File]) -> L
 
 class ArtifactService:
     def __init__(
-            self,
-            uow_factory: Callable[[], IUnitOfWork],
-            object_storage: ObjectStoragePort,
-            file_storage: Optional[FileStorage] = None,
-            sandbox_file_reader: Optional[SandboxFileReader] = None,
+        self,
+        uow_factory: Callable[[], IUnitOfWork],
+        object_storage: ObjectStoragePort,
+        file_storage: FileStorage | None = None,
+        sandbox_file_reader: SandboxFileReader | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._object_storage = object_storage
@@ -112,15 +109,15 @@ class ArtifactService:
         return f"artifacts/{session_id}/{artifact_id}/v{version}.{ext}"
 
     async def write_content(
-            self,
-            session_id: str,
-            artifact_id: Optional[str],
-            kind: str,
-            title: str,
-            content: str,
-            *,
-            verify_upload: bool = True,
-    ) -> tuple[Artifact, ArtifactEvent]:
+        self,
+        session_id: str,
+        artifact_id: str | None,
+        kind: str,
+        title: str,
+        content: str,
+        *,
+        verify_upload: bool = True,
+    ) -> Artifact:
         data = _encode_utf8_content(content)
         async with self._uow_factory() as uow:
             if artifact_id:
@@ -174,41 +171,25 @@ class ArtifactService:
 
             artifact.title = title or artifact.title
             artifact.storage_ref = key
-            artifact.version_refs = list(artifact.version_refs) + [key]
+            artifact.version_refs = [*list(artifact.version_refs), key]
             artifact.status = status
-            artifact.updated_at = datetime.now()
+            artifact.updated_at = datetime.now(UTC)
             await uow.artifact.save(artifact)
             await uow.commit()
 
-        event = ArtifactEvent(
-            artifact_id=artifact.id,
-            kind=artifact.kind,
-            title=artifact.title,
-            status=status,
-            storage_ref=key,
-            version=version,
-        )
-        return artifact, event
+        return artifact
 
-    async def finalize(self, session_id: str, artifact_id: str) -> tuple[Artifact, ArtifactEvent]:
+    async def finalize(self, session_id: str, artifact_id: str) -> Artifact:
         async with self._uow_factory() as uow:
             artifact = await uow.artifact.get_by_id(artifact_id)
             if not artifact or artifact.session_id != session_id:
                 raise ValueError(_artifact_not_found_message(artifact_id))
             artifact.status = "final"
-            artifact.updated_at = datetime.now()
+            artifact.updated_at = datetime.now(UTC)
             await uow.artifact.save(artifact)
             await uow.commit()
 
-        event = ArtifactEvent(
-            artifact_id=artifact.id,
-            kind=artifact.kind,
-            title=artifact.title,
-            status="final",
-            storage_ref=artifact.storage_ref,
-            version=len(artifact.version_refs),
-        )
-        return artifact, event
+        return artifact
 
     async def _assert_session_scope(self, session_id: str, scope: OwnerScope) -> None:
         async with self._uow_factory() as uow:
@@ -216,7 +197,7 @@ class ArtifactService:
             if not session:
                 raise PermissionError(f"无权访问会话[{session_id}]")
 
-    async def _read_session_file_text(self, file: File) -> Optional[str]:
+    async def _read_session_file_text(self, file: File) -> str | None:
         if not self._file_storage:
             return None
         try:
@@ -226,16 +207,16 @@ class ArtifactService:
             if incomplete:
                 return None
             return text
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("读取会话附件失败 file_id=%s: %s", file.id, exc)
             return None
 
     async def _try_recover_content(
-            self,
-            artifact: Artifact,
-            *,
-            scope: Optional[OwnerScope] = None,
-    ) -> Optional[tuple[str, str]]:
+        self,
+        artifact: Artifact,
+        *,
+        scope: OwnerScope | None = None,
+    ) -> tuple[str, str] | None:
         async with self._uow_factory() as uow:
             files = await uow.session.get_files(artifact.session_id, scope=scope)
         if files:
@@ -250,7 +231,7 @@ class ArtifactService:
                     continue
                 try:
                     text = await self._sandbox_file_reader(artifact.session_id, file.filepath)
-                except Exception as exc:
+                except (OSError, RuntimeError, ValueError) as exc:
                     logger.warning(
                         "沙箱恢复交付物失败 session=%s path=%s: %s",
                         artifact.session_id,
@@ -264,12 +245,12 @@ class ArtifactService:
         return None
 
     async def get_content(
-            self,
-            artifact_id: str,
-            version_index: Optional[int] = None,
-            *,
-            scope: Optional[OwnerScope] = None,
-            sanitize_html: bool = True,
+        self,
+        artifact_id: str,
+        version_index: int | None = None,
+        *,
+        scope: OwnerScope | None = None,
+        sanitize_html: bool = True,
     ) -> bytes:
         async with self._uow_factory() as uow:
             artifact = await uow.artifact.get_by_id(artifact_id)
@@ -293,13 +274,13 @@ class ArtifactService:
         return data
 
     async def get_content_text(
-            self,
-            artifact_id: str,
-            version_index: Optional[int] = None,
-            *,
-            scope: Optional[OwnerScope] = None,
-            sanitize_html: bool = True,
-            auto_repair: bool = True,
+        self,
+        artifact_id: str,
+        version_index: int | None = None,
+        *,
+        scope: OwnerScope | None = None,
+        sanitize_html: bool = True,
+        auto_repair: bool = True,
     ) -> tuple[str, bool]:
         data = await self.get_content(
             artifact_id,
@@ -334,13 +315,15 @@ class ArtifactService:
                 text = sanitize_html_for_preview(text)
         return text, incomplete
 
-    async def list_by_session(self, session_id: str, scope: Optional[OwnerScope] = None) -> List[Artifact]:
+    async def list_by_session(
+        self, session_id: str, scope: OwnerScope | None = None
+    ) -> list[Artifact]:
         if scope is not None:
             await self._assert_session_scope(session_id, scope)
         async with self._uow_factory() as uow:
             return await uow.artifact.list_by_session(session_id)
 
-    async def get_by_id(self, artifact_id: str, scope: Optional[OwnerScope] = None) -> Optional[Artifact]:
+    async def get_by_id(self, artifact_id: str, scope: OwnerScope | None = None) -> Artifact | None:
         async with self._uow_factory() as uow:
             artifact = await uow.artifact.get_by_id(artifact_id)
             if not artifact:
@@ -352,14 +335,14 @@ class ArtifactService:
             return artifact
 
     async def create_share_link(
-            self,
-            artifact_id: str,
-            ttl_hours: int = 168,
-            *,
-            scope: Optional[OwnerScope] = None,
+        self,
+        artifact_id: str,
+        ttl_hours: int = 168,
+        *,
+        scope: OwnerScope | None = None,
     ) -> str:
         token = secrets.token_urlsafe(24)
-        expires = datetime.now() + timedelta(hours=ttl_hours)
+        expires = datetime.now(UTC) + timedelta(hours=ttl_hours)
         async with self._uow_factory() as uow:
             artifact = await uow.artifact.get_by_id(artifact_id)
             if not artifact:
@@ -374,11 +357,11 @@ class ArtifactService:
             await uow.commit()
         return token
 
-    async def get_by_share_token(self, token: str) -> Optional[Artifact]:
+    async def get_by_share_token(self, token: str) -> Artifact | None:
         async with self._uow_factory() as uow:
             artifact = await uow.artifact.get_by_share_token(token)
             if not artifact:
                 return None
-            if artifact.share_expires_at and artifact.share_expires_at < datetime.now():
+            if artifact.share_expires_at and artifact.share_expires_at < datetime.now(UTC):
                 return None
             return artifact

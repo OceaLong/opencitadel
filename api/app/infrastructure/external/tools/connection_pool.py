@@ -1,27 +1,33 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Shared MCP/A2A connection pools with health checks."""
+
 import asyncio
 import hashlib
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Dict, Optional
+from datetime import timedelta
 
-from app.domain.models.app_config import A2AConfig, MCPConfig
-from app.domain.utils.app_config_filter import filter_enabled_a2a_config, filter_enabled_mcp_config
-
-if TYPE_CHECKING:
-    from app.domain.services.tools.a2a import A2AClientManager
-    from app.domain.services.tools.mcp import MCPClientManager
+from app.application.ports.crypto import OutboundNetworkPolicy
+from app.domain.models.integration_runtime import A2ARuntime, MCPRuntime
+from app.domain.runtime_policy import ActivityExecutionPolicy
+from app.domain.utils.integration_filter import (
+    filter_enabled_a2a_runtime,
+    filter_enabled_mcp_runtime,
+)
+from app.infrastructure.external.tools.a2a_client import A2AClientManager
+from app.infrastructure.external.tools.mcp_client import MCPClientManager
+from app.infrastructure.security.outbound_http import DEFAULT_OUTBOUND_NETWORK_POLICY
 
 logger = logging.getLogger(__name__)
 
 _POOL_TTL_SECONDS = 300
 
 
-def _config_fingerprint(config) -> str:
-    payload = config.model_dump(mode="json")
+def _config_fingerprint(config, policy: ActivityExecutionPolicy) -> str:
+    payload = {
+        "config": config.model_dump(mode="json"),
+        "policy": policy.model_dump(mode="json"),
+    }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
@@ -34,121 +40,174 @@ class _PoolEntry:
 
 
 class MCPConnectionPool:
-    """Process-wide MCP manager pool keyed by enabled-server config hash."""
+    """Composition-owned MCP manager pool keyed by enabled-server config hash."""
 
-    _entries: Dict[str, _PoolEntry] = {}
-    _lock = asyncio.Lock()
+    def __init__(
+        self,
+        *,
+        outbound_policy: OutboundNetworkPolicy = DEFAULT_OUTBOUND_NETWORK_POLICY,
+    ) -> None:
+        self._outbound_policy = outbound_policy
+        self._entries: dict[str, _PoolEntry] = {}
+        self._lock = asyncio.Lock()
 
-    @classmethod
-    def try_get_cached(cls, mcp_config: MCPConfig) -> Optional["MCPClientManager"]:
+    def try_get_cached(
+        self,
+        runtime: MCPRuntime,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> MCPClientManager | None:
         """Return a warm pool manager without connecting."""
-        from app.domain.services.tools.mcp import MCPClientManager
-
-        filtered = filter_enabled_mcp_config(mcp_config)
-        fingerprint = _config_fingerprint(filtered)
-        entry = cls._entries.get(fingerprint)
+        filtered = filter_enabled_mcp_runtime(runtime)
+        fingerprint = _config_fingerprint(filtered, policy)
+        entry = self._entries.get(fingerprint)
         if entry and entry.fingerprint == fingerprint:
             entry.last_used = time.monotonic()
             return entry.manager
         return None
 
-    @classmethod
-    async def refresh_in_background(cls, mcp_config: MCPConfig) -> None:
+    async def refresh_in_background(
+        self,
+        runtime: MCPRuntime,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> None:
         """Connect to MCP servers in the background to warm the tool cache."""
         try:
-            await cls.acquire(mcp_config)
-        except Exception as exc:
+            await self.acquire(runtime, policy=policy)
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("Background MCP pool refresh failed: %s", exc)
 
-    @classmethod
-    async def acquire(cls, mcp_config: MCPConfig) -> "MCPClientManager":
-        from app.domain.services.tools.mcp import MCPClientManager
-
-        filtered = filter_enabled_mcp_config(mcp_config)
-        fingerprint = _config_fingerprint(filtered)
-        async with cls._lock:
-            entry = cls._entries.get(fingerprint)
+    async def acquire(
+        self,
+        runtime: MCPRuntime,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> "MCPClientManager":
+        filtered = filter_enabled_mcp_runtime(runtime)
+        fingerprint = _config_fingerprint(filtered, policy)
+        async with self._lock:
+            entry = self._entries.get(fingerprint)
             if entry and entry.fingerprint == fingerprint:
                 entry.last_used = time.monotonic()
                 return entry.manager
 
-            manager = MCPClientManager(mcp_config=filtered)
+            manager = MCPClientManager(
+                runtime=filtered,
+                connect_timeout=timedelta(seconds=policy.mcp_connect_timeout_seconds),
+                tool_timeout=timedelta(seconds=policy.tool_timeout_seconds),
+                outbound_policy=self._outbound_policy,
+            )
             await manager.initialize()
-            cls._entries[fingerprint] = _PoolEntry(manager, fingerprint)
+            self._entries[fingerprint] = _PoolEntry(manager, fingerprint)
             return manager
 
-    @classmethod
-    async def invalidate_all(cls) -> None:
-        async with cls._lock:
-            entries = list(cls._entries.values())
-            cls._entries.clear()
+    async def invalidate_all(self) -> None:
+        async with self._lock:
+            entries = list(self._entries.values())
+            self._entries.clear()
         for entry in entries:
             try:
                 await entry.manager.cleanup()
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.warning("MCP pool invalidation failed: %s", e)
 
-    @classmethod
-    async def release_stale(cls, max_idle_seconds: float = _POOL_TTL_SECONDS) -> None:
+    async def release_stale(self, max_idle_seconds: float = _POOL_TTL_SECONDS) -> None:
         now = time.monotonic()
         stale = [
-            fp for fp, entry in cls._entries.items()
-            if now - entry.last_used > max_idle_seconds
+            fp for fp, entry in self._entries.items() if now - entry.last_used > max_idle_seconds
         ]
         for fp in stale:
-            entry = cls._entries.pop(fp, None)
+            entry = self._entries.pop(fp, None)
             if entry:
                 try:
                     await entry.manager.cleanup()
-                except Exception as e:
+                except (OSError, RuntimeError, ValueError) as e:
                     logger.warning("MCP pool cleanup failed: %s", e)
 
 
 class A2AConnectionPool:
-    """Process-wide A2A manager pool keyed by enabled-server config hash."""
+    """Composition-owned A2A manager pool keyed by enabled-server config hash."""
 
-    _entries: Dict[str, _PoolEntry] = {}
-    _lock = asyncio.Lock()
+    def __init__(
+        self,
+        *,
+        outbound_policy: OutboundNetworkPolicy = DEFAULT_OUTBOUND_NETWORK_POLICY,
+    ) -> None:
+        self._outbound_policy = outbound_policy
+        self._entries: dict[str, _PoolEntry] = {}
+        self._lock = asyncio.Lock()
 
-    @classmethod
-    async def acquire(cls, a2a_config: A2AConfig) -> "A2AClientManager":
-        from app.domain.services.tools.a2a import A2AClientManager
+    def try_get_cached(
+        self,
+        runtime: A2ARuntime,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> A2AClientManager | None:
+        """Return a warm pool manager without fetching Agent Cards."""
+        filtered = filter_enabled_a2a_runtime(runtime)
+        fingerprint = _config_fingerprint(filtered, policy)
+        entry = self._entries.get(fingerprint)
+        if entry and entry.fingerprint == fingerprint:
+            entry.last_used = time.monotonic()
+            return entry.manager
+        return None
 
-        filtered = filter_enabled_a2a_config(a2a_config)
-        fingerprint = _config_fingerprint(filtered)
-        async with cls._lock:
-            entry = cls._entries.get(fingerprint)
+    async def refresh_in_background(
+        self,
+        runtime: A2ARuntime,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> None:
+        """Fetch Agent Cards in the background to warm the read projection."""
+        try:
+            await self.acquire(runtime, policy=policy)
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning("Background A2A pool refresh failed: %s", exc)
+
+    async def acquire(
+        self,
+        runtime: A2ARuntime,
+        *,
+        policy: ActivityExecutionPolicy,
+    ) -> "A2AClientManager":
+        filtered = filter_enabled_a2a_runtime(runtime)
+        fingerprint = _config_fingerprint(filtered, policy)
+        async with self._lock:
+            entry = self._entries.get(fingerprint)
             if entry and entry.fingerprint == fingerprint:
                 entry.last_used = time.monotonic()
                 return entry.manager
 
-            manager = A2AClientManager(a2a_config=filtered)
+            manager = A2AClientManager(
+                runtime=filtered,
+                connect_timeout=timedelta(seconds=policy.mcp_connect_timeout_seconds),
+                tool_timeout=timedelta(seconds=policy.tool_timeout_seconds),
+                outbound_policy=self._outbound_policy,
+            )
             await manager.initialize()
-            cls._entries[fingerprint] = _PoolEntry(manager, fingerprint)
+            self._entries[fingerprint] = _PoolEntry(manager, fingerprint)
             return manager
 
-    @classmethod
-    async def invalidate_all(cls) -> None:
-        async with cls._lock:
-            entries = list(cls._entries.values())
-            cls._entries.clear()
+    async def invalidate_all(self) -> None:
+        async with self._lock:
+            entries = list(self._entries.values())
+            self._entries.clear()
         for entry in entries:
             try:
                 await entry.manager.cleanup()
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 logger.warning("A2A pool invalidation failed: %s", e)
 
-    @classmethod
-    async def release_stale(cls, max_idle_seconds: float = _POOL_TTL_SECONDS) -> None:
+    async def release_stale(self, max_idle_seconds: float = _POOL_TTL_SECONDS) -> None:
         now = time.monotonic()
         stale = [
-            fp for fp, entry in cls._entries.items()
-            if now - entry.last_used > max_idle_seconds
+            fp for fp, entry in self._entries.items() if now - entry.last_used > max_idle_seconds
         ]
         for fp in stale:
-            entry = cls._entries.pop(fp, None)
+            entry = self._entries.pop(fp, None)
             if entry:
                 try:
                     await entry.manager.cleanup()
-                except Exception as e:
+                except (OSError, RuntimeError, ValueError) as e:
                     logger.warning("A2A pool cleanup failed: %s", e)

@@ -1,15 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""Pre-warmed sandbox container pool and activity tracking for idle cleanup."""
+"""Policy-reconciling pre-warmed Sandbox pool and activity tracking."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Protocol
 
-from app.infrastructure.external.sandbox.docker_sandbox import get_sandbox_runtime_settings
-from app.runtime_role import ProcessRole, get_role
+from app.application.ports.coordination import SandboxActivityStorePort
+from app.infrastructure.external.sandbox.settings import SandboxEffectiveSettings
 
 if TYPE_CHECKING:
     from app.domain.external.sandbox import Sandbox
@@ -20,74 +19,161 @@ _SANDBOX_ACTIVITY_PREFIX = "sandbox:last_active:"
 _SANDBOX_ACTIVITY_TTL_SECONDS = 86400
 
 
+class _PoolFactory(Protocol):
+    async def current_settings(
+        self,
+        *,
+        require_fresh: bool,
+    ) -> SandboxEffectiveSettings: ...
+
+    async def create_unpooled(
+        self,
+        settings: SandboxEffectiveSettings,
+        *,
+        max_retries: int | None = None,
+    ) -> Sandbox: ...
+
+
 class SandboxPool:
-    """Maintains a queue of warmed sandbox containers ready for assignment."""
+    """A per-composition-root pool reconciled against current policy."""
 
-    _instance: Optional["SandboxPool"] = None
-
-    def __init__(self) -> None:
-        sandbox = get_sandbox_runtime_settings()
-        self._enabled = bool(
-            not sandbox.address
-            and sandbox.pool_enabled
-            and sandbox.pool_size > 0
-        )
-        self._pool_size = max(0, sandbox.pool_size)
-        self._queue: asyncio.Queue[Sandbox] = asyncio.Queue(maxsize=self._pool_size)
-        self._warmup_task: Optional[asyncio.Task] = None
-        self._started = False
-
-    @classmethod
-    def get_instance(cls) -> "SandboxPool":
-        if cls._instance is None:
-            cls._instance = SandboxPool()
-        return cls._instance
-
-    @property
-    def enabled(self) -> bool:
-        return self._enabled
-
-    async def start(self) -> None:
-        if get_role() != ProcessRole.WORKER:
-            return
-        if not self._enabled or self._started:
-            return
-        self._started = True
-        self._warmup_task = asyncio.create_task(self._warmup_loop())
-        logger.info("Sandbox pool started (target_size=%s)", self._pool_size)
-
-    async def shutdown(self) -> None:
-        if self._warmup_task:
-            self._warmup_task.cancel()
-            try:
-                await self._warmup_task
-            except asyncio.CancelledError:
-                pass
-            self._warmup_task = None
-        while not self._queue.empty():
-            sandbox = self._queue.get_nowait()
-            await sandbox.destroy()
-        self._started = False
-
-    async def acquire(self) -> "Sandbox":
-        from app.infrastructure.external.sandbox.sandbox_driver import get_sandbox_class
-
-        sandbox_cls = get_sandbox_class()
-        if not self._enabled:
-            return await sandbox_cls._create_and_warm()
-
-        try:
-            sandbox = self._queue.get_nowait()
-            await self._wipe_browser_profile(sandbox)
-            await self.touch_activity(sandbox.id)
-            return sandbox
-        except asyncio.QueueEmpty:
-            self.refill_background()
-            return await sandbox_cls._create_and_fast_warm()
+    def __init__(
+        self,
+        *,
+        factory: _PoolFactory,
+        activity_store: SandboxActivityStorePort,
+    ) -> None:
+        self._factory = factory
+        self._activity_store = activity_store
+        self._queue: asyncio.Queue[Sandbox] = asyncio.Queue()
+        self._lock = asyncio.Lock()
 
     @staticmethod
-    async def _wipe_browser_profile(sandbox: "Sandbox") -> None:
-        """Clear browser login state when reassigning a warm pooled container."""
+    def enabled(settings: SandboxEffectiveSettings) -> bool:
+        return bool(
+            not settings.deployment.address
+            and settings.policy.pool_enabled
+            and settings.policy.pool_size > 0
+        )
+
+    async def run(self, stopping: asyncio.Event) -> None:
+        """Reconcile and warm the pool until the owning supervisor stops it."""
+
+        logger.info("Sandbox pool policy reconciler started")
+        try:
+            while not stopping.is_set():
+                wait_seconds = 1.0
+                try:
+                    settings = await self._factory.current_settings(require_fresh=True)
+                    await self.reconcile(settings)
+                    target = settings.policy.pool_size if self.enabled(settings) else 0
+                    async with self._lock:
+                        if self._queue.qsize() < target:
+                            sandbox = await self._factory.create_unpooled(settings)
+                            await self.touch_activity(sandbox.id)
+                            await self._queue.put(sandbox)
+                            logger.info(
+                                "Sandbox pool warmed container=%s policy_revision=%s size=%s/%s",
+                                sandbox.id,
+                                settings.operations_revision_id,
+                                self._queue.qsize(),
+                                target,
+                            )
+                            continue
+                    wait_seconds = min(
+                        5.0,
+                        float(settings.policy.cleanup_interval_seconds),
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except (OSError, RuntimeError, ValueError) as exc:
+                    logger.warning("Sandbox pool reconciliation failed: %s", exc)
+                await _wait_or_stop(stopping, wait_seconds)
+        finally:
+            drain_task = asyncio.create_task(
+                self._drain_owned(),
+                name="opencitadel:sandbox-pool-drain",
+            )
+            try:
+                await asyncio.shield(drain_task)
+            except asyncio.CancelledError:
+                # The supervisor may cancel the reconciler immediately after
+                # setting its cooperative stop event. Keep the owned cleanup
+                # attached and wait for it before propagating cancellation.
+                await drain_task
+                raise
+
+    async def acquire(self, settings: SandboxEffectiveSettings) -> Sandbox:
+        async with self._lock:
+            if not self.enabled(settings):
+                sandbox = await self._factory.create_unpooled(settings)
+                await self.touch_activity(sandbox.id)
+                return sandbox
+
+            while True:
+                try:
+                    sandbox = self._queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    sandbox = await self._factory.create_unpooled(
+                        settings,
+                        max_retries=settings.policy.fast_warmup_max_retries,
+                    )
+                    await self.touch_activity(sandbox.id)
+                    return sandbox
+                if getattr(sandbox, "settings", None) != settings:
+                    await sandbox.destroy()
+                    continue
+                await self._wipe_browser_profile(sandbox)
+                await self.touch_activity(sandbox.id)
+                return sandbox
+
+    async def reconcile(self, settings: SandboxEffectiveSettings) -> None:
+        """Drop stale/excess warm instances; the loop refills the new target."""
+        async with self._lock:
+            retained: list[Sandbox] = []
+            target = settings.policy.pool_size if self.enabled(settings) else 0
+            while not self._queue.empty():
+                sandbox = self._queue.get_nowait()
+                if getattr(sandbox, "settings", None) == settings and len(retained) < target:
+                    retained.append(sandbox)
+                else:
+                    await sandbox.destroy()
+            for sandbox in retained:
+                self._queue.put_nowait(sandbox)
+
+    async def _drain_owned(self) -> None:
+        async with self._lock:
+            await self._drain()
+
+    async def _drain(self) -> None:
+        sandboxes: list[Sandbox] = []
+        while not self._queue.empty():
+            sandboxes.append(self._queue.get_nowait())
+        logger.info(
+            "Sandbox pool draining count=%s containers=%s",
+            len(sandboxes),
+            [getattr(sandbox, "id", str(sandbox)) for sandbox in sandboxes],
+        )
+        results = await asyncio.gather(
+            *(sandbox.destroy() for sandbox in sandboxes),
+            return_exceptions=True,
+        )
+        for sandbox, result in zip(sandboxes, results, strict=True):
+            if isinstance(result, BaseException):
+                logger.error(
+                    "Sandbox pool failed to destroy %s during drain: %s",
+                    getattr(sandbox, "id", sandbox),
+                    result,
+                )
+            elif not result:
+                logger.error(
+                    "Sandbox pool could not destroy %s during drain",
+                    getattr(sandbox, "id", sandbox),
+                )
+        logger.info("Sandbox pool drain completed count=%s", len(sandboxes))
+
+    @staticmethod
+    async def _wipe_browser_profile(sandbox: Sandbox) -> None:
         exec_command = getattr(sandbox, "exec_command", None)
         if not callable(exec_command):
             return
@@ -104,47 +190,30 @@ class SandboxPool:
                     getattr(sandbox, "id", sandbox),
                     result.message or result.data,
                 )
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.warning(
                 "Sandbox pool browser profile wipe failed for %s: %s",
                 getattr(sandbox, "id", sandbox),
                 exc,
             )
 
-    def refill_background(self) -> None:
-        if self._started and (self._warmup_task is None or self._warmup_task.done()):
-            self._warmup_task = asyncio.create_task(self._warmup_loop())
-
-    async def _warmup_loop(self) -> None:
-        from app.infrastructure.external.sandbox.sandbox_driver import get_sandbox_class
-
-        sandbox_cls = get_sandbox_class()
-        while True:
-            try:
-                if self._queue.qsize() < self._pool_size:
-                    sandbox = await sandbox_cls._create_and_warm()
-                    await self._queue.put(sandbox)
-                    logger.debug("Sandbox pool warmed container: %s", sandbox.id)
-                else:
-                    await asyncio.sleep(5)
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.warning("Sandbox pool warmup failed: %s", exc)
-                await asyncio.sleep(10)
-
-    @staticmethod
-    async def touch_activity(container_name: str) -> None:
+    async def touch_activity(self, container_name: str) -> None:
         if not container_name or container_name == "opencitadel-sandbox":
             return
-        try:
-            from app.infrastructure.storage.redis import get_redis
+        recorded = await self._activity_store.touch(
+            container_name,
+            active_at_epoch=int(time.time()),
+            ttl_seconds=_SANDBOX_ACTIVITY_TTL_SECONDS,
+        )
+        if not recorded:
+            logger.debug("Failed to record sandbox activity for %s", container_name)
 
-            redis = get_redis().client
-            key = f"{_SANDBOX_ACTIVITY_PREFIX}{container_name}"
-            await redis.set(key, str(int(time.time())), ex=_SANDBOX_ACTIVITY_TTL_SECONDS)
-        except Exception as exc:
-            logger.debug("Failed to record sandbox activity for %s: %s", container_name, exc)
 
-def get_sandbox_pool() -> SandboxPool:
-    return SandboxPool.get_instance()
+async def _wait_or_stop(stopping: asyncio.Event, seconds: float) -> None:
+    try:
+        await asyncio.wait_for(stopping.wait(), timeout=max(0.0, seconds))
+    except TimeoutError:
+        return
+
+
+__all__ = ["SandboxPool"]

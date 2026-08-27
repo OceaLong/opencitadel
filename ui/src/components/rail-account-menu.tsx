@@ -43,8 +43,7 @@ export function RailAccountMenu() {
     );
   }
 
-  const displayName =
-    user.display_name || user.username || user.email || tCommon("user");
+  const displayName = user.display_name || user.username || user.email || tCommon("user");
 
   return (
     <DropdownMenu>
@@ -55,9 +54,7 @@ export function RailAccountMenu() {
           aria-label={displayName}
         >
           <Avatar className="size-8">
-            {user.avatar_url ? (
-              <AvatarImage src={user.avatar_url} alt={displayName} />
-            ) : null}
+            {user.avatar_url ? <AvatarImage src={user.avatar_url} alt={displayName} /> : null}
             <AvatarFallback>{initials(displayName)}</AvatarFallback>
           </Avatar>
         </button>

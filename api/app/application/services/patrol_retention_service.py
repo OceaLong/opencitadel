@@ -1,82 +1,44 @@
-"""Leased-scheduler-compatible Patrol retention cleanup; audit rows are untouched."""
+"""Policy-driven Patrol retention orchestration."""
+
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select, update
-
-from app.domain.repositories.uow import IUnitOfWork
-from app.infrastructure.models.patrol import (
-    PatrolCheckResultModel,
-    PatrolFindingModel,
-    PatrolRunModel,
-)
+from app.application.ports.queries import PatrolRetentionStorePort
+from app.application.services.runtime_policy_reader import OperationsPolicyReader
 
 
 class PatrolRetentionService:
-    def __init__(self, uow_factory: Callable[[], IUnitOfWork]) -> None:
-        self._uow_factory = uow_factory
-
-    async def cleanup(
+    def __init__(
         self,
+        store: PatrolRetentionStorePort,
         *,
-        run_days: int = 30,
-        finding_days: int = 30,
-        evidence_days: int = 7,
-        batch_size: int = 100,
-        now: datetime | None = None,
-    ) -> dict[str, int]:
-        run_days = min(max(run_days, 1), 90)
-        finding_days = min(max(finding_days, 1), 90)
-        evidence_days = min(max(evidence_days, 1), 90)
-        limit = min(max(batch_size, 1), 1000)
-        reference = now or datetime.now(timezone.utc)
-        run_cutoff = reference - timedelta(days=run_days)
-        finding_cutoff = reference - timedelta(days=finding_days)
-        evidence_cutoff = reference - timedelta(days=evidence_days)
-        async with self._uow_factory() as uow:
-            finding_ids = list((await uow.db_session.execute(
-                select(PatrolFindingModel.id)
-                .where(PatrolFindingModel.last_seen_at < finding_cutoff)
-                .order_by(PatrolFindingModel.last_seen_at.asc())
-                .limit(limit)
-            )).scalars())
-            if finding_ids:
-                await uow.db_session.execute(
-                    delete(PatrolFindingModel).where(PatrolFindingModel.id.in_(finding_ids))
-                )
+        policy_reader: OperationsPolicyReader,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._store = store
+        self._policy_reader = policy_reader
+        self._clock = clock or (lambda: datetime.now(UTC))
 
-            evidence_result_ids = list((await uow.db_session.execute(
-                select(PatrolCheckResultModel.id)
-                .join(PatrolRunModel, PatrolRunModel.id == PatrolCheckResultModel.run_id)
-                .where(
-                    PatrolRunModel.finished_at.is_not(None),
-                    PatrolRunModel.finished_at < evidence_cutoff,
-                    PatrolCheckResultModel.evidence_refs != [],
-                )
-                .order_by(PatrolRunModel.finished_at.asc())
-                .limit(limit)
-            )).scalars())
-            if evidence_result_ids:
-                await uow.db_session.execute(
-                    update(PatrolCheckResultModel)
-                    .where(PatrolCheckResultModel.id.in_(evidence_result_ids))
-                    .values(evidence_refs=[])
-                )
-
-            run_ids = list((await uow.db_session.execute(
-                select(PatrolRunModel.id)
-                .where(PatrolRunModel.finished_at.is_not(None), PatrolRunModel.finished_at < run_cutoff)
-                .order_by(PatrolRunModel.finished_at.asc())
-                .limit(limit)
-            )).scalars())
-            if run_ids:
-                await uow.db_session.execute(
-                    delete(PatrolRunModel).where(PatrolRunModel.id.in_(run_ids))
-                )
+    async def cleanup(self) -> dict[str, int]:
+        reference = self._clock()
+        if reference.tzinfo is None:
+            raise ValueError("Patrol retention clock must be timezone-aware")
+        reference = reference.astimezone(UTC)
+        active = await self._policy_reader.active_operations(
+            require_fresh=True,
+            now=reference,
+        )
+        policy = active.revision.policy.patrol_retention
+        result = await self._store.cleanup(
+            run_cutoff=reference - timedelta(days=policy.run_days),
+            finding_cutoff=reference - timedelta(days=policy.finding_days),
+            evidence_cutoff=reference - timedelta(days=policy.collector_evidence_days),
+            limit=policy.cleanup_batch_size,
+        )
         return {
-            "runs_deleted": len(run_ids),
-            "findings_deleted": len(finding_ids),
-            "evidence_refs_purged": len(evidence_result_ids),
+            "runs_deleted": result.runs_deleted,
+            "findings_deleted": result.findings_deleted,
+            "evidence_refs_purged": result.evidence_refs_purged,
         }

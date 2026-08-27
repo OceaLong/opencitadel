@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock
 
@@ -59,7 +57,9 @@ async def test_download_file_propagates_get_bytes_truncation_error():
 
     cos = MagicMock()
     cos.get_bytes = AsyncMock(
-        side_effect=RuntimeError("COS get_bytes 读取失败 key=2026/07/05/file-2.pdf expected=4096 got=1024")
+        side_effect=RuntimeError(
+            "COS get_bytes 读取失败 key=2026/07/05/file-2.pdf expected=4096 got=1024"
+        )
     )
 
     storage = CosFileStorage(bucket="test-bucket", cos=cos, uow_factory=lambda: uow_context)

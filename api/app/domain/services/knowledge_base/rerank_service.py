@@ -1,41 +1,31 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Optional reranking for KB retrieval candidates."""
+
 import asyncio
 import json
 import logging
 import time
-from dataclasses import dataclass
-from typing import List, Optional, TypeVar
+from typing import TypeVar
 
 from app.domain.external.llm import LLM
+from app.domain.runtime_policy import KnowledgeRerankPolicy
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-@dataclass
-class RerankSettings:
-    enabled: bool = True
-    provider: str = "llm"
-    timeout_seconds: float = 30.0
-
-
 class RerankService:
-    def __init__(self, llm: Optional[LLM], settings: Optional[RerankSettings] = None) -> None:
+    def __init__(self, llm: LLM | None, *, policy: KnowledgeRerankPolicy) -> None:
         self._llm = llm
-        self._settings = settings or RerankSettings()
+        self._policy = policy
 
-    async def rerank(self, query: str, candidates: List[T], top_n: int) -> List[T]:
-        if not self._settings.enabled or not self._llm or len(candidates) <= 1:
-            return candidates[:top_n]
-        if self._settings.provider != "llm":
+    async def rerank(self, query: str, candidates: list[T], top_n: int) -> list[T]:
+        if not self._policy.enabled or not self._llm or len(candidates) <= 1:
             return candidates[:top_n]
         started = time.perf_counter()
         try:
             result = await asyncio.wait_for(
                 self._rerank_with_llm(query, candidates, top_n),
-                timeout=self._settings.timeout_seconds,
+                timeout=self._policy.timeout_seconds,
             )
             logger.info(
                 "kb_rerank completed candidates=%s top_n=%s duration_ms=%.1f",
@@ -44,7 +34,7 @@ class RerankService:
                 (time.perf_counter() - started) * 1000,
             )
             return result
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.warning(
                 "kb_rerank fallback candidates=%s top_n=%s duration_ms=%.1f error=%s",
                 len(candidates),
@@ -54,7 +44,7 @@ class RerankService:
             )
             return candidates[:top_n]
 
-    async def _rerank_with_llm(self, query: str, candidates: List[T], top_n: int) -> List[T]:
+    async def _rerank_with_llm(self, query: str, candidates: list[T], top_n: int) -> list[T]:
         snippets = []
         for idx, candidate in enumerate(candidates):
             content = getattr(candidate, "content", "")

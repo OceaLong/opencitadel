@@ -1,56 +1,85 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""EvidenceService.build_session_evidence_package: signed ZIP evidence bundle.
-
-Fake-collaborator style mirrors tests/app/application/services/
-test_governance_profile_service.py (`gov_env`) and
-tests/app/application/services/test_patrol_evidence_service.py (SimpleNamespace
-+ AsyncMock for the audit/artifact collaborators) — no real DB.
-"""
-import hashlib
-import hmac
 import io
 import json
 import zipfile
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from datetime import UTC, datetime
 
 import pytest
 
-from app.application.services import evidence_service as evidence_service_module
-from app.application.services.evidence_service import EvidenceService
+from app.application.services.evidence_service import (
+    EvidenceService,
+    render_governance_profile_md,
+)
 from app.domain.models.scope import OwnerScope
 from app.domain.models.session import Session, SessionStatus
-from app.infrastructure.external.report.pdf_renderer import PdfUnavailableError
-from core.config import get_settings
+from tests.app.application_test_support import (
+    EmptyEvidenceSessionQuery,
+    FakeReportRenderer,
+    FixedEvidenceSigner,
+)
 
 
-class _FakeSessionRepo:
-    def __init__(self, session: Session):
-        self._session = session
+def _profile(*, feedback: str = "approved") -> dict:
+    return {
+        "session": {
+            "id": "session-1",
+            "title": "demo",
+            "status": "completed",
+            "operator_scope": "owned",
+            "operator_domains": ["ops-console"],
+            "created_at": "2026-08-24T00:00:00+00:00",
+            "updated_at": "2026-08-24T00:01:00+00:00",
+        },
+        "chain": {"verified": True, "checked_runs": 1, "checked_entries": 7},
+        "runs": [
+            {
+                "run_id": "run-1",
+                "family": "agent",
+                "status": "completed",
+                "created_at": "2026-08-24T00:00:00+00:00",
+                "terminal_at": "2026-08-24T00:01:00+00:00",
+            }
+        ],
+        "approvals": [
+            {
+                "approval_id": "approval-1",
+                "requested_at": "2026-08-24T00:00:10+00:00",
+                "decided_at": "2026-08-24T00:00:20+00:00",
+                "status": "approved",
+                "decided_by_user_id": "user-1",
+                "subject_label": "shell_execute",
+                "feedback": feedback,
+            }
+        ],
+        "activities": [
+            {
+                "activity_id": "activity-1",
+                "activity_type": "tool.call",
+                "status": "completed",
+                "attempt": 1,
+                "failure_code": None,
+                "created_at": "2026-08-24T00:00:30+00:00",
+            }
+        ],
+    }
 
-    async def get_by_id(self, session_id, scope=None):
-        return self._session if session_id == self._session.id else None
 
-    async def list_events(self, session_id, limit=5000):
+class _SessionRepo:
+    def __init__(self, session):
+        self.value = session
+
+    async def get_by_id(self, session_id, *, scope=None):
+        return self.value if session_id == self.value.id else None
+
+
+class _AuditRepo:
+    async def list_chained(self, *, resource_id):
         return []
 
 
-class _FakeCheckpointRepo:
-    async def list_by_session(self, session_id):
-        return []
-
-
-class _FakeAuditRepo:
-    async def list_chained(self, *, resource_id=None, limit=None):
-        return []
-
-
-class _FakeUow:
-    def __init__(self, session: Session):
-        self.session = _FakeSessionRepo(session)
-        self.checkpoint = _FakeCheckpointRepo()
-        self.audit = _FakeAuditRepo()
+class _Uow:
+    def __init__(self, session):
+        self.session = _SessionRepo(session)
+        self.audit = _AuditRepo()
 
     async def __aenter__(self):
         return self
@@ -59,233 +88,122 @@ class _FakeUow:
         return False
 
 
-class _FakeGovernanceProfileService:
-    """Records the (session_id, scope) it was called with."""
+class _AuditService:
+    async def verify_session_chain(self, session_id):
+        return {"ok": True, "total": 0}
 
-    def __init__(self, profile: dict):
-        self._profile = profile
-        self.calls: list[tuple[str, OwnerScope | None]] = []
+    async def build_session_audit_report_json(self, session_id):
+        return {"session_id": session_id, "entries": []}
 
-    async def build_profile(self, session_id, scope=None):
+    async def build_session_audit_report(self, session_id):
+        return f"# Audit {session_id}\n"
+
+
+class _Artifacts:
+    async def list_by_session(self, session_id, *, scope):
+        return []
+
+
+class _Governance:
+    def __init__(self, profile):
+        self.profile = profile
+        self.calls = []
+
+    async def build_profile(self, session_id, *, scope):
         self.calls.append((session_id, scope))
-        return self._profile
-
-
-def _governance_profile(session_id: str) -> dict:
-    return {
-        "session": {
-            "id": session_id,
-            "title": "demo session",
-            "status": "completed",
-            "gate_profile": "strict",
-            "operator_scope": "owned",
-            "created_at": "2026-08-01T00:00:00",
-            "updated_at": "2026-08-01T01:00:00",
-        },
-        "chain": {"verified": True, "checked_entries": 2},
-        "approvals": [
-            {
-                "action": "agent_tool_approve",
-                "decision": "approve",
-                "actor_user_id": "user-1",
-                "created_at": "2026-08-01T00:10:00",
-                "pending_phase": "TOOL_APPROVAL_PHASE",
-                "tool": "browser_click",
-                "approval_batch_id": "b1",
-                "feedback": None,
-            }
-        ],
-        "gate_hits": [
-            {
-                "tool": "shell_exec",
-                "gated": True,
-                "gate_profile": "strict",
-                "created_at": "2026-08-01T00:20:00",
-            }
-        ],
-        "checkpoints": [
-            {
-                "id": "cp-1",
-                "anchor_type": "step",
-                "label": "before-shell",
-                "created_at": "2026-08-01T00:15:00",
-            }
-        ],
-        "terminal": {"status": "completed", "reached_at": "2026-08-01T01:00:00"},
-        "denials": [
-            {
-                "tool": "write_file",
-                "layer": "execution",
-                "reason": "当前会话策略禁止工具[write_file]",
-                "created_at": "2026-08-01T00:12:00",
-            }
-        ],
-    }
-
-
-class _EvidenceEnv:
-    def __init__(self):
-        self.session = Session(
-            id="session-1",
-            title="demo session",
-            owner_user_id="user-1",
-            team_id=None,
-            operator_scope="owned",
-            gate_profile="strict",
-            status=SessionStatus.COMPLETED,
-        )
-        self.uow = _FakeUow(self.session)
-        self.audit_service = SimpleNamespace(
-            verify_session_chain=AsyncMock(
-                return_value={"ok": True, "session_ok": True, "total": 2, "session_entries": 2}
-            ),
-            build_session_audit_report_json=AsyncMock(
-                return_value={"tool_invocations": [], "governance_actions": []}
-            ),
-            build_session_audit_report=AsyncMock(return_value="# audit report\n"),
-        )
-        self.artifact_service = SimpleNamespace(
-            list_by_session=AsyncMock(return_value=[]),
-        )
-        self.governance_profile_service = _FakeGovernanceProfileService(
-            _governance_profile(self.session.id)
-        )
-        self.service = EvidenceService(
-            lambda: self.uow,
-            self.audit_service,
-            self.artifact_service,
-            self.governance_profile_service,
-        )
-        self.scope = OwnerScope.personal("user-1")
-
-    async def create_session_with_governance_data(self) -> str:
-        return self.session.id
-
-    @staticmethod
-    def zip_names(package: bytes) -> set[str]:
-        with zipfile.ZipFile(io.BytesIO(package)) as archive:
-            return set(archive.namelist())
-
-    @staticmethod
-    def read_manifest(package: bytes) -> dict:
-        with zipfile.ZipFile(io.BytesIO(package)) as archive:
-            return json.loads(archive.read("manifest.json"))
-
-    @staticmethod
-    def verify_signature(package: bytes) -> bool:
-        with zipfile.ZipFile(io.BytesIO(package)) as archive:
-            manifest_bytes = archive.read("manifest.json")
-            sig_text = archive.read("chain-signature.txt").decode("utf-8")
-            expected = hmac.new(
-                get_settings().audit_signing_key.encode(), manifest_bytes, hashlib.sha256
-            ).hexdigest()
-            if expected not in sig_text:
-                return False
-            manifest = json.loads(manifest_bytes)
-            for name, digest in manifest["file_hashes"].items():
-                if hashlib.sha256(archive.read(name)).hexdigest() != digest:
-                    return False
-            return True
+        return self.profile
 
 
 @pytest.fixture
-def evidence_env(monkeypatch):
-    # PDF rendering (weasyprint) needs native system libs (cairo/pango) that
-    # this sandbox doesn't have; build_session_evidence_package already
-    # degrades gracefully on PdfUnavailableError (pdf_skipped=True), so pin
-    # that branch instead of depending on the local machine's native libs —
-    # PDF rendering itself is outside this task's scope.
-    def _raise(_html: str) -> bytes:
-        raise PdfUnavailableError("weasyprint native libs unavailable in test env")
-
-    monkeypatch.setattr(evidence_service_module, "render_html_to_pdf", _raise)
-    return _EvidenceEnv()
-
-
-@pytest.mark.asyncio
-async def test_evidence_package_contains_signed_governance_profile(evidence_env):
-    sid = await evidence_env.create_session_with_governance_data()
-    package = await evidence_env.service.build_session_evidence_package(sid, scope=evidence_env.scope)
-    names = evidence_env.zip_names(package)
-    assert "governance-profile.json" in names
-    assert "governance-profile.md" in names
-    manifest = evidence_env.read_manifest(package)
-    assert "governance-profile.json" in manifest["file_hashes"]
-    assert "governance-profile.md" in manifest["file_hashes"]
-    # 签名对 manifest 整体成立，追加文件后验签仍通过
-    assert evidence_env.verify_signature(package)
-
-
-@pytest.mark.asyncio
-async def test_evidence_package_passes_scope_through_to_governance_profile(evidence_env):
-    sid = await evidence_env.create_session_with_governance_data()
-    await evidence_env.service.build_session_evidence_package(sid, scope=evidence_env.scope)
-    assert evidence_env.governance_profile_service.calls == [(sid, evidence_env.scope)]
-
-
-@pytest.mark.asyncio
-async def test_governance_profile_md_renders_deterministic_sections(evidence_env):
-    sid = await evidence_env.create_session_with_governance_data()
-    package = await evidence_env.service.build_session_evidence_package(sid, scope=evidence_env.scope)
-    with zipfile.ZipFile(io.BytesIO(package)) as archive:
-        md = archive.read("governance-profile.md").decode("utf-8")
-    assert "shell_exec" in md
-    assert "agent_tool_approve" in md
-    assert "before-shell" in md
-    assert "completed" in md
-
-
-@pytest.mark.asyncio
-async def test_governance_profile_md_renders_denials_section(evidence_env):
-    """Task 2 fix round 1 (#3): the Markdown export must carry a Denials
-    section (mirroring the Approvals/Gate 命中 table rendering) — the
-    `denials` key has been in the profile dict since Task 2's `denials`
-    section, but the .md renderer never surfaced it until now (the .json
-    export already did, since it just serializes the whole profile dict)."""
-    sid = await evidence_env.create_session_with_governance_data()
-    package = await evidence_env.service.build_session_evidence_package(sid, scope=evidence_env.scope)
-    with zipfile.ZipFile(io.BytesIO(package)) as archive:
-        md = archive.read("governance-profile.md").decode("utf-8")
-
-    assert "write_file" in md
-    assert "execution" in md
-    assert "当前会话策略禁止工具[write_file]" in md
-
-
-@pytest.mark.asyncio
-async def test_governance_profile_md_renders_denials_empty_state(evidence_env):
-    sid = await evidence_env.create_session_with_governance_data()
-    evidence_env.governance_profile_service._profile["denials"] = []
-
-    package = await evidence_env.service.build_session_evidence_package(sid, scope=evidence_env.scope)
-    with zipfile.ZipFile(io.BytesIO(package)) as archive:
-        md = archive.read("governance-profile.md").decode("utf-8")
-
-    assert "write_file" not in md
-
-
-@pytest.mark.asyncio
-async def test_governance_profile_export_scrubs_free_text_secrets(evidence_env):
-    """Key-based redaction (redact_value) only inspects the field *name*, so
-    a secret pasted into a freeform field like approval feedback sails
-    through untouched. Both the .md and the .json export must additionally
-    regex-scan free text (same defense used by PatrolReportService) so the
-    raw credential never lands in the signed evidence package."""
-    sid = await evidence_env.create_session_with_governance_data()
-    bearer_jwt = (
-        "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0."
-        "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+def service():
+    session = Session(
+        id="session-1",
+        title="demo",
+        owner_user_id="user-1",
+        operator_scope="owned",
+        operator_domains=["ops-console"],
+        status=SessionStatus.COMPLETED,
+        created_at=datetime(2026, 8, 24, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 24, 0, 1, tzinfo=UTC),
     )
-    secret_feedback = f"retry looks fine, reused {bearer_jwt} and password=hunter2"
-    evidence_env.governance_profile_service._profile["approvals"][0]["feedback"] = secret_feedback
+    governance = _Governance(_profile())
+    return (
+        EvidenceService(
+            lambda: _Uow(session),
+            _AuditService(),
+            _Artifacts(),
+            governance,
+            FakeReportRenderer(None),
+            FixedEvidenceSigner(),
+            EmptyEvidenceSessionQuery(),
+        ),
+        governance,
+    )
 
-    package = await evidence_env.service.build_session_evidence_package(sid, scope=evidence_env.scope)
+
+def test_governance_markdown_contains_only_formal_sections():
+    rendered = render_governance_profile_md(_profile()).decode()
+
+    assert "Run 时间线" in rendered
+    assert "审批时间线" in rendered
+    assert "Activity 时间线" in rendered
+    assert "shell_execute" in rendered
+    assert "checkpoint" not in rendered.lower()
+    assert "gate profile" not in rendered.lower()
+
+
+@pytest.mark.asyncio
+async def test_evidence_package_contains_signed_formal_governance(service):
+    evidence, governance = service
+    scope = OwnerScope.personal("user-1")
+
+    package = await evidence.build_session_evidence_package("session-1", scope)
+
     with zipfile.ZipFile(io.BytesIO(package)) as archive:
-        md = archive.read("governance-profile.md").decode("utf-8")
-        raw_json = archive.read("governance-profile.json").decode("utf-8")
+        names = set(archive.namelist())
+        assert {
+            "audit.json",
+            "audit-report.md",
+            "governance-profile.json",
+            "governance-profile.md",
+            "manifest.json",
+            "chain-signature.txt",
+        } <= names
+        manifest = json.loads(archive.read("manifest.json"))
+        profile = json.loads(archive.read("governance-profile.json"))
+        assert manifest["execution_chain_verification"]["verified"] is True
+        assert manifest["pdf"] == "skipped"
+        assert profile["runs"][0]["run_id"] == "run-1"
+        assert "HMAC-SHA256" in archive.read("chain-signature.txt").decode()
+    assert governance.calls == [("session-1", scope)]
 
-    for leaked in ("hunter2", "eyJhbGciOiJIUzI1NiJ9", "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"):
-        assert leaked not in md, f"{leaked!r} leaked into governance-profile.md"
-        assert leaked not in raw_json, f"{leaked!r} leaked into governance-profile.json"
-    assert "***REDACTED***" in md
-    assert "***REDACTED***" in raw_json
+
+@pytest.mark.asyncio
+async def test_profile_export_scrubs_secrets():
+    secret_profile = _profile(feedback="Authorization: Bearer super-secret-token")
+    governance = _Governance(secret_profile)
+    session = Session(
+        id="session-1",
+        title="demo",
+        owner_user_id="user-1",
+        status=SessionStatus.COMPLETED,
+    )
+    evidence = EvidenceService(
+        lambda: _Uow(session),
+        _AuditService(),
+        _Artifacts(),
+        governance,
+        FakeReportRenderer(None),
+        FixedEvidenceSigner(),
+        EmptyEvidenceSessionQuery(),
+    )
+
+    package = await evidence.build_session_evidence_package(
+        "session-1", OwnerScope.personal("user-1")
+    )
+
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        exported = archive.read("governance-profile.json").decode()
+        markdown = archive.read("governance-profile.md").decode()
+    assert "super-secret-token" not in exported
+    assert "super-secret-token" not in markdown

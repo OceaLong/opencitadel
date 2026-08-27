@@ -1,4 +1,5 @@
 """Deterministic output limits applied before serialization."""
+
 from __future__ import annotations
 
 import json
@@ -26,7 +27,9 @@ def bound(value: Any, settings: CollectorSettings) -> tuple[Any, list[str]]:
         return item
 
     bounded = visit(value)
-    encoded = json.dumps(bounded, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    encoded = json.dumps(
+        bounded, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    ).encode("utf-8")
     if len(encoded) > settings.max_output_bytes:
         raise ValueError("OUTPUT_TOO_LARGE")
     return bounded, sorted(set(warnings))

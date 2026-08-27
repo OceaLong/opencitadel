@@ -1,3 +1,4 @@
+import type { ExecutionRunStatus } from "./execution";
 import type { SessionMode } from "./session";
 
 // ==================== 文档知识库 ====================
@@ -22,7 +23,6 @@ export type KnowledgeBase = {
   chunk_count: number;
   ready_doc_count?: number;
   active_version_id?: string | null;
-  ingest_task_id?: string | null;
   error?: string | null;
   vector_degraded?: boolean;
   settings?: Record<string, unknown>;
@@ -80,44 +80,28 @@ export type KnowledgeSessionData = {
 
 export type ReadKnowledgeDocumentData = {
   document: KnowledgeDocument;
-  content: string;
-  version_id?: string | null;
-  document_revision_id?: string | null;
-  items?: KnowledgeDocumentContentItem[];
+  version_id: string;
+  document_revision_id: string;
+  items: KnowledgeDocumentContentItem[];
   next_cursor?: string | null;
-  total?: number;
-  truncated?: boolean;
+  total: number;
+  truncated: boolean;
 };
-
-type KnowledgeBuildState =
-  | "queued"
-  | "running"
-  | "succeeded"
-  | "degraded"
-  | "failed"
-  | "cancelled";
 
 type KnowledgeVersionState = "building" | "ready" | "degraded" | "failed";
 
 export type KnowledgeBuild = {
   id: string;
+  run_id?: string | null;
   knowledge_base_id: string;
   version_id: string;
-  parent_version_id?: string | null;
-  command_key: string;
-  state: KnowledgeBuildState;
+  status: ExecutionRunStatus;
   phase?: string | null;
   progress: number;
-  capabilities: unknown[];
-  degraded_reasons: unknown[];
-  metrics: Record<string, unknown>;
-  error_code?: string | null;
-  error_message?: string | null;
-  heartbeat_at?: string | null;
-  last_event_seq: number;
+  failure_code?: string | null;
   created_at: string;
-  started_at?: string | null;
-  finished_at?: string | null;
+  updated_at: string;
+  terminal_at?: string | null;
   can_retry: boolean;
   can_cancel: boolean;
 };
@@ -126,7 +110,7 @@ export type KnowledgeVersion = {
   id: string;
   knowledge_base_id: string;
   parent_version_id?: string | null;
-  build_id?: string | null;
+  build_id: string;
   state: KnowledgeVersionState;
   capabilities: Record<string, unknown>;
   degraded_reasons: string[];

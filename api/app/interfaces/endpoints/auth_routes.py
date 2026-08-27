@@ -1,36 +1,45 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from datetime import datetime
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Query, Request, Response as StarletteResponse
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi import Response as StarletteResponse
 from starlette.responses import RedirectResponse
 
-from app.domain.errors import BadRequestError, UnauthorizedError
+from app.application.ports.crypto import (
+    REFRESH_COOKIE,
+    ApplicationUrls,
+    CookieManagerPort,
+    OAuthRegistryPort,
+)
 from app.application.services.auth_service import AuthService
+from app.domain.errors import BadRequestError, UnauthorizedError
 from app.domain.models.invitation import InvitationType
 from app.domain.models.oauth_identity import OAuthIdentity
 from app.domain.models.team import TeamMember, TeamRole
 from app.domain.models.user import User
+from app.domain.repositories.uow import UnitOfWorkFactory
 from app.domain.utils.safe_redirect import resolve_safe_redirect_path
-from app.infrastructure.security.cookie import AuthCookieManager, REFRESH_COOKIE
 from app.interfaces.auth_dependencies import get_current_principal, verify_csrf
 from app.interfaces.client_ip import get_client_ip
 from app.interfaces.schemas import Response as ApiResponse
 from app.interfaces.schemas.auth import LoginRequest, RegisterRequest, UserResponse
-from app.interfaces.service_dependencies import get_auth_service, get_cookie_manager
-from app.infrastructure.storage.postgres import get_uow
-from core.config import get_settings
+from app.interfaces.service_dependencies import (
+    get_application_urls,
+    get_auth_service,
+    get_cookie_manager,
+    get_oauth_registry,
+    get_uow_factory,
+)
 
 router = APIRouter(prefix="/auth", tags=["认证模块"])
 
 
 @router.post("/register", response_model=ApiResponse[UserResponse])
 async def register(
-        response: StarletteResponse,
-        request: Request,
-        body: RegisterRequest,
-        auth_service: AuthService = Depends(get_auth_service),
-        cookie_manager: AuthCookieManager = Depends(get_cookie_manager),
+    response: StarletteResponse,
+    request: Request,
+    body: RegisterRequest,
+    auth_service: AuthService = Depends(get_auth_service),
+    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
 ) -> ApiResponse[UserResponse]:
     user = await auth_service.register_with_invitation(
         invite_token=body.invite_token,
@@ -44,17 +53,19 @@ async def register(
         user_agent=request.headers.get("user-agent", ""),
         ip_address=get_client_ip(request),
     )
-    cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
+    cookie_manager.set_auth_cookies(
+        response, access_token=tokens.access_token, refresh_token=tokens.refresh_token
+    )
     return ApiResponse.success(UserResponse.from_domain(user))
 
 
 @router.post("/login", response_model=ApiResponse[UserResponse])
 async def login(
-        response: StarletteResponse,
-        request: Request,
-        body: LoginRequest,
-        auth_service: AuthService = Depends(get_auth_service),
-        cookie_manager: AuthCookieManager = Depends(get_cookie_manager),
+    response: StarletteResponse,
+    request: Request,
+    body: LoginRequest,
+    auth_service: AuthService = Depends(get_auth_service),
+    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
 ) -> ApiResponse[UserResponse]:
     user, tokens = await auth_service.login(
         email_or_username=body.email_or_username,
@@ -62,16 +73,18 @@ async def login(
         user_agent=request.headers.get("user-agent", ""),
         ip_address=get_client_ip(request),
     )
-    cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
+    cookie_manager.set_auth_cookies(
+        response, access_token=tokens.access_token, refresh_token=tokens.refresh_token
+    )
     return ApiResponse.success(UserResponse.from_domain(user))
 
 
 @router.post("/refresh", response_model=ApiResponse[UserResponse])
 async def refresh(
-        response: StarletteResponse,
-        request: Request,
-        auth_service: AuthService = Depends(get_auth_service),
-        cookie_manager: AuthCookieManager = Depends(get_cookie_manager),
+    response: StarletteResponse,
+    request: Request,
+    auth_service: AuthService = Depends(get_auth_service),
+    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
 ) -> ApiResponse[UserResponse]:
     refresh_token = request.cookies.get(REFRESH_COOKIE)
     if not refresh_token:
@@ -81,16 +94,18 @@ async def refresh(
         user_agent=request.headers.get("user-agent", ""),
         ip_address=get_client_ip(request),
     )
-    cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
+    cookie_manager.set_auth_cookies(
+        response, access_token=tokens.access_token, refresh_token=tokens.refresh_token
+    )
     return ApiResponse.success(UserResponse.from_domain(user))
 
 
 @router.post("/logout", response_model=ApiResponse[dict], dependencies=[Depends(verify_csrf)])
 async def logout(
-        response: StarletteResponse,
-        request: Request,
-        auth_service: AuthService = Depends(get_auth_service),
-        cookie_manager: AuthCookieManager = Depends(get_cookie_manager),
+    response: StarletteResponse,
+    request: Request,
+    auth_service: AuthService = Depends(get_auth_service),
+    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
 ) -> ApiResponse[dict]:
     await auth_service.logout(request.cookies.get(REFRESH_COOKIE))
     cookie_manager.clear_auth_cookies(response)
@@ -98,8 +113,11 @@ async def logout(
 
 
 @router.get("/me", response_model=ApiResponse[UserResponse])
-async def me(principal=Depends(get_current_principal)) -> ApiResponse[UserResponse]:
-    async with get_uow() as uow:
+async def me(
+    principal=Depends(get_current_principal),
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
+) -> ApiResponse[UserResponse]:
+    async with uow_factory() as uow:
         user = await uow.user.get_by_id(principal.user_id)
     if not user:
         raise UnauthorizedError()
@@ -108,32 +126,33 @@ async def me(principal=Depends(get_current_principal)) -> ApiResponse[UserRespon
 
 @router.get("/oauth/{provider}/login")
 async def oauth_login(
-        provider: str,
-        request: Request,
-        redirect: str = Query(default=""),
-        team_invite_token: str = Query(default=""),
+    provider: str,
+    request: Request,
+    redirect: str = Query(default=""),
+    team_invite_token: str = Query(default=""),
+    oauth_registry: OAuthRegistryPort = Depends(get_oauth_registry),
+    application_urls: ApplicationUrls = Depends(get_application_urls),
 ):
-    from app.container import get_api_container
-
-    client = get_api_container().oauth_clients().get(provider)
+    client = oauth_registry.get(provider)
     if client is None:
         raise BadRequestError("OAuth 提供商未启用")
     request.session["oauth_redirect"] = resolve_safe_redirect_path(redirect)
     request.session["oauth_team_invite_token"] = (team_invite_token or "").strip()
-    redirect_uri = f"{get_settings().oauth_redirect_base}/{provider}/callback"
+    redirect_uri = f"{application_urls.oauth_redirect_base}/{provider}/callback"
     return await client.authorize_redirect(request, redirect_uri)
 
 
 @router.get("/oauth/{provider}/callback")
 async def oauth_callback(
-        provider: str,
-        request: Request,
-        auth_service: AuthService = Depends(get_auth_service),
-        cookie_manager: AuthCookieManager = Depends(get_cookie_manager),
+    provider: str,
+    request: Request,
+    auth_service: AuthService = Depends(get_auth_service),
+    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
+    oauth_registry: OAuthRegistryPort = Depends(get_oauth_registry),
+    application_urls: ApplicationUrls = Depends(get_application_urls),
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
 ):
-    from app.container import get_api_container
-
-    client = get_api_container().oauth_clients().get(provider)
+    client = oauth_registry.get(provider)
     if client is None:
         raise BadRequestError("OAuth 提供商未启用")
     token = await client.authorize_access_token(request)
@@ -145,9 +164,13 @@ async def oauth_callback(
     if not provider_user_id:
         raise BadRequestError("OAuth 用户标识缺失")
 
-    async with get_uow() as uow:
+    async with uow_factory() as uow:
         identity = await uow.oauth_identity.get_by_provider_identity(provider, provider_user_id)
-        user = await uow.user.get_by_id(identity.user_id) if identity else await uow.user.get_by_email(email)
+        user = (
+            await uow.user.get_by_id(identity.user_id)
+            if identity
+            else await uow.user.get_by_email(email)
+        )
         team_invite_token = (request.session.pop("oauth_team_invite_token", "") or "").strip()
         oauth_redirect = resolve_safe_redirect_path(request.session.pop("oauth_redirect", ""))
 
@@ -169,7 +192,7 @@ async def oauth_callback(
                 avatar_url=profile.get("picture") or profile.get("avatar_url") or "",
             )
             await uow.user.save(user)
-            invitation.accepted_at = datetime.now()
+            invitation.accepted_at = datetime.now(UTC)
             invitation.accepted_user_id = user.id
             await uow.invitation.save(invitation)
             if invitation.type == InvitationType.TEAM and invitation.team_id:
@@ -185,11 +208,11 @@ async def oauth_callback(
         elif team_invite_token:
             team_invitation = await uow.invitation.get_by_token(team_invite_token)
             if (
-                    team_invitation
-                    and team_invitation.type == InvitationType.TEAM
-                    and team_invitation.team_id
-                    and not team_invitation.accepted
-                    and team_invitation.expires_at >= datetime.now()
+                team_invitation
+                and team_invitation.type == InvitationType.TEAM
+                and team_invitation.team_id
+                and not team_invitation.accepted
+                and team_invitation.expires_at >= datetime.now(UTC)
             ):
                 if team_invitation.email and team_invitation.email.strip().lower() != email:
                     raise BadRequestError("邀请邮箱与 OAuth 账号不匹配")
@@ -202,7 +225,7 @@ async def oauth_callback(
                             role=team_invitation.team_role or TeamRole.MEMBER,
                         )
                     )
-                team_invitation.accepted_at = datetime.now()
+                team_invitation.accepted_at = datetime.now(UTC)
                 team_invitation.accepted_user_id = user.id
                 await uow.invitation.save(team_invitation)
         if not identity:
@@ -215,14 +238,18 @@ async def oauth_callback(
                     email_verified=True,
                 )
             )
+        await uow.commit()
 
     tokens = await auth_service.issue_tokens_for_user(
         user,
         user_agent=request.headers.get("user-agent", ""),
         ip_address=get_client_ip(request),
+        audit_action="oauth_login",
     )
-    response = RedirectResponse(f"{get_settings().frontend_base_url.rstrip('/')}{oauth_redirect}")
-    cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
+    response = RedirectResponse(f"{application_urls.frontend_base_url.rstrip('/')}{oauth_redirect}")
+    cookie_manager.set_auth_cookies(
+        response, access_token=tokens.access_token, refresh_token=tokens.refresh_token
+    )
     return response
 
 
@@ -230,19 +257,20 @@ async def _resolve_oauth_registration_invitation(uow, *, email: str, team_invite
     if team_invite_token:
         invitation = await uow.invitation.get_by_token(team_invite_token)
         if (
-                invitation
-                and invitation.type == InvitationType.TEAM
-                and invitation.team_id
-                and not invitation.accepted
-                and invitation.expires_at >= datetime.now()
-                and invitation.email
-                and invitation.email.strip().lower() == email
+            invitation
+            and invitation.type == InvitationType.TEAM
+            and invitation.team_id
+            and not invitation.accepted
+            and invitation.expires_at >= datetime.now(UTC)
+            and invitation.email
+            and invitation.email.strip().lower() == email
         ):
             return invitation
     invitations = await uow.invitation.list(invitation_type=InvitationType.PLATFORM, limit=500)
     return next(
         (
-            item for item in invitations
+            item
+            for item in invitations
             if item.email and item.email.strip().lower() == email and not item.accepted
         ),
         None,

@@ -34,7 +34,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 
+import { useCapabilities } from "@/hooks/use-capabilities";
 import { patrolStatusVariant, usePatrolLabels } from "@/hooks/use-patrol-labels";
+import { canProposePatrolRemediation } from "@/lib/api/capabilities";
 import { patrolsApi } from "@/lib/api/patrols";
 import type { PatrolFinding, PatrolRemediation, PatrolRunDetail } from "@/lib/api/types";
 
@@ -49,6 +51,10 @@ export function PatrolRunDetailView({
 }) {
   const t = useTranslations("patrol");
   const labels = usePatrolLabels();
+  const { loading: capabilityLoading, capability } = useCapabilities();
+  const remediationCapability = capability("ops_patrol_remediation");
+  const remediationProposalAvailable = canProposePatrolRemediation(remediationCapability);
+  const remediationExecutionAvailable = remediationCapability?.state === "available";
   const [decision, setDecision] = useState<{
     finding: PatrolFinding;
     action: "acknowledge" | "resolve" | "false-positive";
@@ -98,7 +104,7 @@ export function PatrolRunDetailView({
   };
   return (
     <div className="grid gap-5">
-      <Card className="sticky top-0 z-10 bg-background/95 backdrop-blur">
+      <Card className="bg-background/95 sticky top-0 z-10 backdrop-blur">
         <CardContent className="grid gap-4 p-5">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -108,7 +114,8 @@ export function PatrolRunDetailView({
               </StatusBadge>
             </div>
             <p className="text-muted-foreground mt-1 text-xs">
-              Run {run.id} · Pack v{run.pack_version} ·{" "}
+              {t("labels.run")} {run.id} · {t("labels.pack")}{" "}
+              <span translate="no">v{run.pack_version}</span> ·{" "}
               {labels.trigger[run.trigger_type] ?? run.trigger_type}
             </p>
           </div>
@@ -170,7 +177,11 @@ export function PatrolRunDetailView({
                     <Button
                       size="sm"
                       variant="outline"
-                      className="border-warning/40 text-warning hover:bg-gate-subtle"
+                      className="border-warning/40 text-warning hover:bg-approval-subtle"
+                      disabled={capabilityLoading || !remediationProposalAvailable}
+                      title={
+                        remediationProposalAvailable ? undefined : t("remediation.unavailable")
+                      }
                       onClick={() => setRemediationTarget(finding)}
                     >
                       {t("actions.remediate")}
@@ -293,6 +304,7 @@ export function PatrolRunDetailView({
           }}
           finding={remediationTarget}
           run={run}
+          executionAvailable={remediationExecutionAvailable}
         />
       )}
     </div>

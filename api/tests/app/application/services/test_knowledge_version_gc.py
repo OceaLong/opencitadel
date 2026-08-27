@@ -1,10 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Application and scheduler contracts for bounded knowledge-version GC."""
+
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -12,21 +11,25 @@ from pydantic import ValidationError
 from app.application.services.resource_version_gc_service import (
     ResourceVersionGCService,
 )
-from app.domain.models.app_config import KnowledgeBaseConfig
+from app.domain.repositories.codebase_version_repository import CodebaseVersionGCResult
 from app.domain.repositories.knowledge_version_repository import (
     KnowledgeVersionGCResult,
 )
+from app.domain.runtime_policy import (
+    OperationsPolicy,
+    ResourceGcPolicy,
+    ResourceVersionGcPolicy,
+    SchedulerPolicy,
+)
+from app.infrastructure.adapters.redis_capabilities import RedisLeaseManager
 from app.infrastructure.external.scheduler.job_scheduler import (
     KNOWLEDGE_VERSION_GC_LEASE_KEY,
-    acquire_scheduler_lease,
-    release_scheduler_lease,
-    renew_scheduler_lease,
     run_knowledge_version_gc_tick,
     run_scheduler_loop,
 )
+from tests.runtime_policy_support import MutablePolicyReader
 
-
-NOW = datetime(2026, 7, 30, 4, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 30, 4, 0, tzinfo=UTC)
 
 
 class _ExactLeaseRedis:
@@ -56,17 +59,16 @@ class _ExactLeaseRedis:
         assert key_count == 1
         self._purge_expired(key)
         current = self._values.get(key)
-        if "opencitadel:renew-scheduler-lease" in script:
+        if "opencitadel:renew-lease" in script:
             assert ttl_ms is not None
             if current is None or current[0] != str(token):
                 return 0
             self._values[key] = (
                 current[0],
-                asyncio.get_running_loop().time()
-                + (int(ttl_ms) / 1000),
+                asyncio.get_running_loop().time() + (int(ttl_ms) / 1000),
             )
             return 1
-        if "opencitadel:release-scheduler-lease" in script:
+        if "opencitadel:release-lease" in script:
             assert ttl_ms is None
             if current is None or current[0] != str(token):
                 return 0
@@ -102,6 +104,9 @@ class _Uow:
         self.entered += 1
         return self
 
+    async def commit(self):
+        return None
+
     async def __aexit__(self, exc_type, exc, tb):
         self.exited += 1
 
@@ -116,7 +121,39 @@ def _result(*version_ids: str) -> KnowledgeVersionGCResult:
         retained_shared_revisions=1,
         protected_active_versions=1,
         protected_bound_versions=2,
-        protected_active_build_versions=1,
+        protected_building_versions=1,
+    )
+
+
+def _job_service():
+    return SimpleNamespace(
+        reconcile_running_runs=AsyncMock(return_value=0),
+    )
+
+
+def _operations(
+    *,
+    scheduler_enabled: bool = True,
+    gc_enabled: bool = True,
+    retain_count: int = 2,
+    min_age_days: int = 30,
+    batch_size: int = 50,
+) -> OperationsPolicy:
+    return OperationsPolicy(
+        scheduler=SchedulerPolicy(
+            enabled=scheduler_enabled,
+            poll_interval_seconds=0.1,
+            leader_lease_seconds=30,
+            max_concurrent_jobs=5,
+        ),
+        resource_gc=ResourceGcPolicy(
+            knowledge_base=ResourceVersionGcPolicy(
+                enabled=gc_enabled,
+                retention_count=retain_count,
+                retention_min_days=min_age_days,
+                batch_size=batch_size,
+            )
+        ),
     )
 
 
@@ -124,16 +161,16 @@ def _result(*version_ids: str) -> KnowledgeVersionGCResult:
 async def test_collect_forwards_zero_count_and_age_with_utc_cutoff():
     repository = _GCRepository([_result("old-a", "old-b")])
     uow = _Uow(repository)
+    reader = MutablePolicyReader(
+        operations=_operations(retain_count=0, min_age_days=0, batch_size=2)
+    )
     service = ResourceVersionGCService(
         uow_factory=lambda: uow,
+        policy_reader=reader,
         clock=lambda: NOW,
     )
 
-    result = await service.collect_knowledge_versions(
-        retain_count=0,
-        min_age_days=0,
-        batch_size=2,
-    )
+    result = await service.collect_knowledge_versions()
 
     assert result.collected_version_ids == ("old-a", "old-b")
     assert result.deleted_versions == 2
@@ -146,6 +183,64 @@ async def test_collect_forwards_zero_count_and_age_with_utc_cutoff():
         }
     ]
     assert uow.entered == uow.exited == 1
+    assert reader.operations_calls == [(True, NOW)]
+
+
+@pytest.mark.asyncio
+async def test_disabled_gc_policy_never_opens_a_unit_of_work() -> None:
+    factory = Mock()
+    service = ResourceVersionGCService(
+        uow_factory=factory,
+        policy_reader=MutablePolicyReader(operations=OperationsPolicy()),
+        clock=lambda: NOW,
+    )
+
+    result = await service.collect_knowledge_versions()
+
+    assert result == KnowledgeVersionGCResult()
+    factory.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_codebase_gc_uses_only_its_current_typed_policy() -> None:
+    repository = SimpleNamespace(collect_garbage=AsyncMock(return_value=CodebaseVersionGCResult()))
+
+    class _CodebaseUow:
+        codebase_version = repository
+
+        async def __aenter__(self):
+            return self
+
+        async def commit(self):
+            return None
+
+        async def __aexit__(self, *_args):
+            return None
+
+    uow = _CodebaseUow()
+    codebase_policy = ResourceVersionGcPolicy(
+        enabled=True,
+        retention_count=4,
+        retention_min_days=9,
+        batch_size=17,
+    )
+    reader = MutablePolicyReader(
+        operations=OperationsPolicy(resource_gc=ResourceGcPolicy(codebase=codebase_policy))
+    )
+    service = ResourceVersionGCService(
+        uow_factory=lambda: uow,
+        policy_reader=reader,
+        clock=lambda: NOW,
+    )
+
+    await service.collect_codebase_versions()
+
+    repository.collect_garbage.assert_awaited_once_with(
+        retain_count=4,
+        older_than=NOW - timedelta(days=9),
+        batch_size=17,
+    )
+    assert reader.operations_calls == [(True, NOW)]
 
 
 @pytest.mark.asyncio
@@ -153,11 +248,12 @@ async def test_collect_uses_created_at_age_cutoff_and_is_repeat_idempotent():
     repository = _GCRepository([_result("expired"), KnowledgeVersionGCResult()])
     service = ResourceVersionGCService(
         uow_factory=lambda: _Uow(repository),
+        policy_reader=MutablePolicyReader(operations=_operations()),
         clock=lambda: NOW,
     )
 
-    first = await service.collect_knowledge_versions(2, 30, 50)
-    second = await service.collect_knowledge_versions(2, 30, 50)
+    first = await service.collect_knowledge_versions()
+    second = await service.collect_knowledge_versions()
 
     assert first.collected_version_ids == ("expired",)
     assert second.collected_version_ids == ()
@@ -165,35 +261,18 @@ async def test_collect_uses_created_at_age_cutoff_and_is_repeat_idempotent():
     assert repository.calls[1]["older_than"] == NOW - timedelta(days=30)
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("retain_count", "min_age_days", "batch_size"),
-    (
-        (-1, 0, 1),
-        (0, -1, 1),
-        (0, 0, 0),
-        (0, 0, 501),
-    ),
+    "payload",
+    [
+        {"retention_count": -1},
+        {"retention_min_days": -1},
+        {"batch_size": 0},
+        {"batch_size": 501},
+    ],
 )
-async def test_collect_rejects_invalid_policy_without_opening_uow(
-    retain_count,
-    min_age_days,
-    batch_size,
-):
-    factory = AsyncMock()
-    service = ResourceVersionGCService(
-        uow_factory=factory,
-        clock=lambda: NOW,
-    )
-
-    with pytest.raises(ValueError):
-        await service.collect_knowledge_versions(
-            retain_count,
-            min_age_days,
-            batch_size,
-        )
-
-    factory.assert_not_called()
+def test_invalid_gc_policy_cannot_be_activated(payload):
+    with pytest.raises(ValidationError):
+        ResourceVersionGcPolicy(**payload)
 
 
 def test_gc_result_is_frozen_and_metrics_are_deterministic():
@@ -203,8 +282,6 @@ def test_gc_result_is_frozen_and_metrics_are_deterministic():
         result.deleted_versions = 99
     assert result.metrics() == {
         "collected_versions": 2,
-        "deleted_build_events": 0,
-        "deleted_builds": 0,
         "deleted_chunks": 0,
         "deleted_entities": 0,
         "deleted_entity_refs": 0,
@@ -212,7 +289,7 @@ def test_gc_result_is_frozen_and_metrics_are_deterministic():
         "deleted_relations": 0,
         "deleted_revisions": 2,
         "deleted_versions": 2,
-        "protected_active_build_versions": 1,
+        "protected_building_versions": 1,
         "protected_active_versions": 1,
         "protected_age_versions": 0,
         "protected_bound_versions": 2,
@@ -233,56 +310,38 @@ def test_gc_result_rejects_negative_reclaimed_logical_bytes():
 
 def test_gc_metrics_expose_byte_count_without_chunk_content():
     chunk_content = "private-token-知识"
-    result = KnowledgeVersionGCResult(
-        reclaimed_logical_bytes=len(chunk_content.encode("utf-8"))
-    )
+    result = KnowledgeVersionGCResult(reclaimed_logical_bytes=len(chunk_content.encode("utf-8")))
 
     metrics = result.metrics()
 
-    assert metrics["reclaimed_logical_bytes"] == len(
-        chunk_content.encode("utf-8")
-    )
+    assert metrics["reclaimed_logical_bytes"] == len(chunk_content.encode("utf-8"))
     assert chunk_content not in repr(metrics)
     assert all(isinstance(value, int) for value in metrics.values())
 
 
-def test_gc_config_is_default_off_and_policy_bounds_are_validated():
-    config = KnowledgeBaseConfig()
+def test_gc_operations_policy_is_default_off_and_bounded():
+    config = ResourceVersionGcPolicy()
 
-    assert config.version_gc_enabled is False
-    assert config.version_retention_count == 10
-    assert config.version_retention_min_days == 30
-    assert config.version_gc_batch_size == 50
-    assert KnowledgeBaseConfig(
-        version_retention_count=0,
-        version_retention_min_days=0,
-        version_gc_batch_size=1,
-    ).version_retention_count == 0
+    assert config.enabled is False
+    assert config.retention_count == 10
+    assert config.retention_min_days == 30
+    assert config.batch_size == 50
+    assert (
+        ResourceVersionGcPolicy(
+            retention_count=0,
+            retention_min_days=0,
+            batch_size=1,
+        ).retention_count
+        == 0
+    )
     for payload in (
-        {"version_retention_count": -1},
-        {"version_retention_min_days": -1},
-        {"version_gc_batch_size": 0},
-        {"version_gc_batch_size": 501},
+        {"retention_count": -1},
+        {"retention_min_days": -1},
+        {"batch_size": 0},
+        {"batch_size": 501},
     ):
         with pytest.raises(ValidationError):
-            KnowledgeBaseConfig(**payload)
-
-
-def _runtime_config(*, scheduler_enabled: bool, gc_enabled: bool):
-    return SimpleNamespace(
-        scheduler=SimpleNamespace(
-            enabled=scheduler_enabled,
-            poll_interval_seconds=0.01,
-            leader_lease_seconds=30,
-            max_concurrent_jobs=5,
-        ),
-        knowledge_base=SimpleNamespace(
-            version_gc_enabled=gc_enabled,
-            version_retention_count=2,
-            version_retention_min_days=30,
-            version_gc_batch_size=50,
-        ),
-    )
+            ResourceVersionGcPolicy(**payload)
 
 
 class _SchedulerUow:
@@ -296,14 +355,55 @@ class _SchedulerUow:
         return None
 
 
+def test_scheduler_requires_an_explicit_stop_event_and_lease_manager() -> None:
+    import inspect
+
+    parameters = inspect.signature(run_scheduler_loop).parameters
+
+    assert parameters["leases"].default is inspect.Parameter.empty
+    assert parameters["stop_event"].default is inspect.Parameter.empty
+
+
+@pytest.mark.asyncio
+async def test_disabled_scheduler_stops_without_waiting_for_poll_interval() -> None:
+    stop = asyncio.Event()
+    policy_reader = MutablePolicyReader(
+        operations=_operations(scheduler_enabled=False),
+    )
+    entered_wait = asyncio.Event()
+
+    async def observe_wait(stopping, seconds):
+        assert seconds > 0
+        entered_wait.set()
+        await stopping.wait()
+
+    with patch(
+        "app.infrastructure.external.scheduler.job_scheduler._wait_or_stop",
+        side_effect=observe_wait,
+    ):
+        running = asyncio.create_task(
+            run_scheduler_loop(
+                lambda: _SchedulerUow(),
+                _job_service(),
+                leases=SimpleNamespace(),
+                worker_id="scheduler-test",
+                policy_reader=policy_reader,
+                stop_event=stop,
+            )
+        )
+        await asyncio.wait_for(entered_wait.wait(), timeout=1)
+        stop.set()
+        await asyncio.wait_for(running, timeout=1)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("scheduler_enabled", "gc_enabled", "expected_gc_calls"),
-    (
+    [
         (False, True, 0),
         (True, False, 0),
         (True, True, 1),
-    ),
+    ],
 )
 async def test_scheduler_respects_global_and_gc_disable_gates(
     scheduler_enabled,
@@ -311,46 +411,43 @@ async def test_scheduler_respects_global_and_gc_disable_gates(
     expected_gc_calls,
 ):
     stop = asyncio.Event()
-    gc_service = SimpleNamespace(
-        collect_knowledge_versions=AsyncMock(return_value=_result("old"))
-    )
+    gc_service = SimpleNamespace(collect_knowledge_versions=AsyncMock(return_value=_result("old")))
     leader = AsyncMock(return_value=True)
+    policy_reader = MutablePolicyReader(
+        operations=_operations(
+            scheduler_enabled=scheduler_enabled,
+            gc_enabled=gc_enabled,
+        )
+    )
 
     async def run_gc_tick(service, **_kwargs):
-        return await service.collect_knowledge_versions(2, 30, 50)
+        return await service.collect_knowledge_versions()
 
     gc_tick = AsyncMock(side_effect=run_gc_tick)
 
-    async def stop_after_tick(_seconds):
+    async def stop_after_tick(_stopping, _seconds):
         stop.set()
 
     with (
         patch(
-            "app.infrastructure.external.scheduler.job_scheduler."
-            "get_runtime_config",
-            return_value=_runtime_config(
-                scheduler_enabled=scheduler_enabled,
-                gc_enabled=gc_enabled,
-            ),
-        ),
-        patch(
-            "app.infrastructure.external.scheduler.job_scheduler."
-            "try_become_scheduler_leader",
+            "app.infrastructure.external.scheduler.job_scheduler.try_become_scheduler_leader",
             leader,
         ),
         patch(
-            "app.infrastructure.external.scheduler.job_scheduler.asyncio.sleep",
+            "app.infrastructure.external.scheduler.job_scheduler._wait_or_stop",
             side_effect=stop_after_tick,
         ),
         patch(
-            "app.infrastructure.external.scheduler.job_scheduler."
-            "run_knowledge_version_gc_tick",
+            "app.infrastructure.external.scheduler.job_scheduler.run_knowledge_version_gc_tick",
             gc_tick,
         ),
     ):
         await run_scheduler_loop(
             lambda: _SchedulerUow(),
-            SimpleNamespace(),
+            _job_service(),
+            leases=SimpleNamespace(),
+            worker_id="scheduler-test",
+            policy_reader=policy_reader,
             resource_version_gc_service=gc_service,
             stop_event=stop,
         )
@@ -365,50 +462,40 @@ async def test_scheduler_respects_global_and_gc_disable_gates(
 async def test_scheduler_logs_gc_failure_and_continues_scheduled_jobs():
     stop = asyncio.Event()
     gc_service = SimpleNamespace(
-        collect_knowledge_versions=AsyncMock(
-            side_effect=RuntimeError("injected GC failure")
-        )
+        collect_knowledge_versions=AsyncMock(side_effect=RuntimeError("injected GC failure"))
     )
     uow = _SchedulerUow()
+    policy_reader = MutablePolicyReader(operations=_operations())
 
     async def run_gc_tick(service, **_kwargs):
-        return await service.collect_knowledge_versions(2, 30, 50)
+        return await service.collect_knowledge_versions()
 
     gc_tick = AsyncMock(side_effect=run_gc_tick)
 
-    async def stop_after_tick(_seconds):
+    async def stop_after_tick(_stopping, _seconds):
         stop.set()
 
     with (
         patch(
-            "app.infrastructure.external.scheduler.job_scheduler."
-            "get_runtime_config",
-            return_value=_runtime_config(
-                scheduler_enabled=True,
-                gc_enabled=True,
-            ),
-        ),
-        patch(
-            "app.infrastructure.external.scheduler.job_scheduler."
-            "try_become_scheduler_leader",
+            "app.infrastructure.external.scheduler.job_scheduler.try_become_scheduler_leader",
             AsyncMock(return_value=True),
         ),
         patch(
-            "app.infrastructure.external.scheduler.job_scheduler.asyncio.sleep",
+            "app.infrastructure.external.scheduler.job_scheduler._wait_or_stop",
             side_effect=stop_after_tick,
         ),
+        patch("app.infrastructure.external.scheduler.job_scheduler.logger") as logger,
         patch(
-            "app.infrastructure.external.scheduler.job_scheduler.logger"
-        ) as logger,
-        patch(
-            "app.infrastructure.external.scheduler.job_scheduler."
-            "run_knowledge_version_gc_tick",
+            "app.infrastructure.external.scheduler.job_scheduler.run_knowledge_version_gc_tick",
             gc_tick,
         ),
     ):
         await run_scheduler_loop(
             lambda: uow,
-            SimpleNamespace(),
+            _job_service(),
+            leases=SimpleNamespace(),
+            worker_id="scheduler-test",
+            policy_reader=policy_reader,
             resource_version_gc_service=gc_service,
             stop_event=stop,
         )
@@ -420,35 +507,28 @@ async def test_scheduler_logs_gc_failure_and_continues_scheduled_jobs():
 @pytest.mark.asyncio
 async def test_scheduler_non_leader_never_runs_gc():
     stop = asyncio.Event()
-    gc_service = SimpleNamespace(
-        collect_knowledge_versions=AsyncMock()
-    )
+    gc_service = SimpleNamespace(collect_knowledge_versions=AsyncMock())
+    policy_reader = MutablePolicyReader(operations=_operations())
 
-    async def stop_after_tick(_seconds):
+    async def stop_after_tick(_stopping, _seconds):
         stop.set()
 
     with (
         patch(
-            "app.infrastructure.external.scheduler.job_scheduler."
-            "get_runtime_config",
-            return_value=_runtime_config(
-                scheduler_enabled=True,
-                gc_enabled=True,
-            ),
-        ),
-        patch(
-            "app.infrastructure.external.scheduler.job_scheduler."
-            "try_become_scheduler_leader",
+            "app.infrastructure.external.scheduler.job_scheduler.try_become_scheduler_leader",
             AsyncMock(return_value=False),
         ),
         patch(
-            "app.infrastructure.external.scheduler.job_scheduler.asyncio.sleep",
+            "app.infrastructure.external.scheduler.job_scheduler._wait_or_stop",
             side_effect=stop_after_tick,
         ),
     ):
         await run_scheduler_loop(
             lambda: _SchedulerUow(),
-            SimpleNamespace(),
+            _job_service(),
+            leases=SimpleNamespace(),
+            worker_id="scheduler-test",
+            policy_reader=policy_reader,
             resource_version_gc_service=gc_service,
             stop_event=stop,
         )
@@ -459,37 +539,20 @@ async def test_scheduler_non_leader_never_runs_gc():
 @pytest.mark.asyncio
 async def test_stale_owner_cannot_renew_or_release_new_owner_lease():
     redis = _ExactLeaseRedis()
-    with patch(
-        "app.infrastructure.external.scheduler.job_scheduler.get_redis",
-        return_value=redis,
-    ):
-        assert await acquire_scheduler_lease(
-            "lease:test",
-            "worker-old",
-            0.05,
-        )
-        await asyncio.sleep(0.07)
-        assert await acquire_scheduler_lease(
-            "lease:test",
-            "worker-new",
-            0.2,
-        )
+    leases = RedisLeaseManager(redis)
+    assert await leases.acquire("lease:test", "worker-old", ttl_seconds=0.05)
+    await asyncio.sleep(0.07)
+    assert await leases.acquire("lease:test", "worker-new", ttl_seconds=0.2)
 
-        assert not await renew_scheduler_lease(
-            "lease:test",
-            "worker-old",
-            0.2,
-        )
-        assert not await release_scheduler_lease(
-            "lease:test",
-            "worker-old",
-        )
-        assert redis.owner("lease:test") == "worker-new"
+    assert not await leases.renew("lease:test", "worker-old", ttl_seconds=0.2)
+    assert not await leases.release("lease:test", "worker-old")
+    assert redis.owner("lease:test") == "worker-new"
 
 
 @pytest.mark.asyncio
 async def test_two_workers_cannot_overlap_gc_past_original_lease_expiry():
     redis = _ExactLeaseRedis()
+    leases = RedisLeaseManager(redis)
     first_started = asyncio.Event()
     release_first = asyncio.Event()
 
@@ -498,46 +561,36 @@ async def test_two_workers_cannot_overlap_gc_past_original_lease_expiry():
         await release_first.wait()
         return _result("old-a")
 
-    first_service = SimpleNamespace(
-        collect_knowledge_versions=AsyncMock(side_effect=collect_first)
-    )
+    first_service = SimpleNamespace(collect_knowledge_versions=AsyncMock(side_effect=collect_first))
     second_service = SimpleNamespace(
         collect_knowledge_versions=AsyncMock(return_value=_result("old-b"))
     )
-    with patch(
-        "app.infrastructure.external.scheduler.job_scheduler.get_redis",
-        return_value=redis,
-    ):
-        first_tick = asyncio.create_task(
-            run_knowledge_version_gc_tick(
-                first_service,
-                retain_count=2,
-                min_age_days=30,
-                batch_size=50,
-                lease_seconds=0.12,
-                owner_token="worker-a:tick-1",
-            )
-        )
-        await asyncio.wait_for(first_started.wait(), timeout=1)
-        # Exceed the lease acquired at tick start. The keepalive must retain
-        # ownership for worker A throughout the still-running collection.
-        await asyncio.sleep(0.2)
-        second = await run_knowledge_version_gc_tick(
-            second_service,
-            retain_count=2,
-            min_age_days=30,
-            batch_size=50,
+    first_tick = asyncio.create_task(
+        run_knowledge_version_gc_tick(
+            first_service,
+            leases=leases,
+            worker_id="worker-a",
             lease_seconds=0.12,
-            owner_token="worker-b:tick-1",
+            owner_token="worker-a:tick-1",
         )
+    )
+    await asyncio.wait_for(first_started.wait(), timeout=1)
+    # Exceed the lease acquired at tick start. The keepalive must retain
+    # ownership for worker A throughout the still-running collection.
+    await asyncio.sleep(0.2)
+    second = await run_knowledge_version_gc_tick(
+        second_service,
+        leases=leases,
+        worker_id="worker-b",
+        lease_seconds=0.12,
+        owner_token="worker-b:tick-1",
+    )
 
-        assert second is None
-        second_service.collect_knowledge_versions.assert_not_awaited()
-        assert redis.owner(KNOWLEDGE_VERSION_GC_LEASE_KEY) == (
-            "worker-a:tick-1"
-        )
-        release_first.set()
-        first = await asyncio.wait_for(first_tick, timeout=1)
+    assert second is None
+    second_service.collect_knowledge_versions.assert_not_awaited()
+    assert redis.owner(KNOWLEDGE_VERSION_GC_LEASE_KEY) == ("worker-a:tick-1")
+    release_first.set()
+    first = await asyncio.wait_for(first_tick, timeout=1)
 
     assert first.collected_version_ids == ("old-a",)
     assert redis.owner(KNOWLEDGE_VERSION_GC_LEASE_KEY) is None

@@ -12,8 +12,13 @@ export function InvitationStatusBadge({ status }: { status: PlatformInvitation["
   // accepted → success (was secondary/neutral; success reads as the completed state)
   // pending  → warning (was outline; warning reads as "awaiting action")
   // expired  → destructive (unchanged)
-  const variant = status === "accepted" ? "success" : status === "pending" ? "warning" : "destructive";
+  const variant =
+    status === "accepted" ? "success" : status === "pending" ? "warning" : "destructive";
   const label =
-    status === "accepted" ? t("inviteAccepted") : status === "pending" ? t("invitePending") : t("inviteExpired");
+    status === "accepted"
+      ? t("inviteAccepted")
+      : status === "pending"
+        ? t("invitePending")
+        : t("inviteExpired");
   return <StatusBadge variant={variant}>{label}</StatusBadge>;
 }

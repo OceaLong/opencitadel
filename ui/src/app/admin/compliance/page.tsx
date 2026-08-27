@@ -91,10 +91,9 @@ export default function AdminCompliancePage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("colTitle")}</th>
-                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("colScope")}</th>
-                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("colGate")}</th>
-                    <th className="text-muted-foreground pb-2 pr-4 font-medium">{t("colChain")}</th>
+                    <th className="text-muted-foreground pr-4 pb-2 font-medium">{t("colTitle")}</th>
+                    <th className="text-muted-foreground pr-4 pb-2 font-medium">{t("colScope")}</th>
+                    <th className="text-muted-foreground pr-4 pb-2 font-medium">{t("colChain")}</th>
                     <th className="text-muted-foreground pb-2 font-medium">{t("colActions")}</th>
                   </tr>
                 </thead>
@@ -120,13 +119,6 @@ export default function AdminCompliancePage() {
                         )}
                       </td>
                       <td className="py-3 pr-4">
-                        {s.gate_profile ? (
-                          <Badge variant="secondary">{s.gate_profile}</Badge>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="py-3 pr-4">
                         <StatusBadge variant={s.chain_ok ? "success" : "destructive"}>
                           {s.chain_ok ? t("chainOk") : t("chainFail")}
                         </StatusBadge>
@@ -139,7 +131,11 @@ export default function AdminCompliancePage() {
                             disabled={verifyingSessionId === s.session_id}
                             onClick={() => void verifySessionChain(s.session_id)}
                           >
-                            {verifyingSessionId === s.session_id ? <LoadingSpinner /> : t("verifySessionChain")}
+                            {verifyingSessionId === s.session_id ? (
+                              <LoadingSpinner />
+                            ) : (
+                              t("verifySessionChain")
+                            )}
                           </Button>
                           <Button variant="outline" size="sm" asChild>
                             <a href={complianceApi.evidencePackageUrl(s.session_id)}>

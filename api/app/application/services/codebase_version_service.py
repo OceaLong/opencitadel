@@ -1,7 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Owner-scoped ResourceVersionProvider for codebase analysis versions."""
-from collections.abc import Callable
+
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from app.application.services.resource_version_provider import (
@@ -12,7 +11,7 @@ from app.domain.models.codebase_version import (
     CodebaseVersion,
     CodebaseVersionState,
 )
-from app.domain.models.resource_governance import ResourceKind
+from app.domain.models.resource_bindings import ResourceKind
 from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.codebase.version_builder import (
@@ -37,11 +36,13 @@ class CodebaseVersionService(OwnerScopedVersionProvider[Codebase, CodebaseVersio
         *,
         actor_id: str,
         scope: OwnerScope,
+        before_commit: Callable[[IUnitOfWork, CodebaseBuildPlan], Awaitable[None]] | None = None,
     ) -> CodebaseBuildPlan:
         return await self._builder.create_reanalysis(
             codebase_id,
             actor_id=actor_id,
             scope=scope,
+            before_commit=before_commit,
         )
 
     async def _get_resource(
@@ -73,14 +74,10 @@ class CodebaseVersionService(OwnerScopedVersionProvider[Codebase, CodebaseVersio
 
     @classmethod
     def _is_published(cls, version: CodebaseVersion) -> bool:
-        return (
-            version.published_at is not None
-            and version.state
-            in {
-                CodebaseVersionState.READY,
-                CodebaseVersionState.DEGRADED,
-            }
-        )
+        return version.published_at is not None and version.state in {
+            CodebaseVersionState.READY,
+            CodebaseVersionState.DEGRADED,
+        }
 
     @classmethod
     def _is_degraded(cls, version: CodebaseVersion) -> bool:

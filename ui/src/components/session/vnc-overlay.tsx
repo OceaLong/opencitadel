@@ -88,7 +88,9 @@ export function VNCOverlay({ sessionId, onClose }: VNCOverlayProps) {
           <div className="bg-terminal/80 absolute inset-0 z-10 flex flex-col items-center justify-center">
             <div className="border-terminal-foreground/20 bg-terminal/90 flex flex-col items-center gap-3 rounded-2xl border px-10 py-8">
               <WifiOff className="text-terminal-foreground/70 size-10" />
-              <div className="text-terminal-foreground text-base font-medium">{t("cannotConnectSandbox")}</div>
+              <div className="text-terminal-foreground text-base font-medium">
+                {t("cannotConnectSandbox")}
+              </div>
               <p className="text-terminal-foreground/70 max-w-[280px] text-center text-sm leading-relaxed">
                 {errorDetail || t("sandboxClosedHint")}
               </p>

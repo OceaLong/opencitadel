@@ -1,12 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Fail-closed validation and DNS resolution for server-side outbound URLs."""
+
 from __future__ import annotations
 
 import ipaddress
 import socket
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Iterable, Optional, Sequence
 from urllib.parse import urlparse
 
 Resolver = Callable[..., Sequence[tuple]]
@@ -15,14 +14,14 @@ DEFAULT_OUTBOUND_PORTS = frozenset({80, 443, 8080, 8443})
 
 
 def parse_allowed_ports(value: str) -> frozenset[int]:
-    """Parse Settings.outbound_allowed_ports ("80,443,...") into a port set.
+    """Parse DeploymentSettings.outbound_allowed_ports into a port set.
 
-    Shared by every caller that wants the *configured* allowlist instead of
-    this module's own conservative DEFAULT_OUTBOUND_PORTS fallback (mirrors
-    the inline set-comprehension previously duplicated in
-    llm_endpoint_service.py's _validate_endpoint()).
+    Shared by every caller that uses the configured allowlist rather than the
+    conservative module default.
     """
     return frozenset(int(item.strip()) for item in value.split(",") if item.strip())
+
+
 _ALWAYS_BLOCKED_HOSTS = frozenset(
     {
         "instance-data",
@@ -70,10 +69,7 @@ def _normalise_hostname(hostname: str) -> str:
 def _host_matches(hostname: str, patterns: Iterable[str]) -> bool:
     for value in patterns:
         pattern = _normalise_hostname(value)
-        if pattern and (
-            hostname == pattern
-            or hostname.endswith(f".{pattern}")
-        ):
+        if pattern and (hostname == pattern or hostname.endswith(f".{pattern}")):
             return True
     return False
 
@@ -82,11 +78,7 @@ def _private_host_explicitly_allowed(
     hostname: str,
     allow_private_hosts: Iterable[str],
 ) -> bool:
-    return hostname in {
-        _normalise_hostname(item)
-        for item in allow_private_hosts
-        if item.strip()
-    }
+    return hostname in {_normalise_hostname(item) for item in allow_private_hosts if item.strip()}
 
 
 def _resolve_addresses(
@@ -138,16 +130,13 @@ def _ensure_safe_addresses(
         if ip.is_global:
             continue
         if not private_allowed:
-            raise OutboundURLRejected(
-                f"不允许访问内网、本地、保留或元数据地址: {hostname} ({ip})"
-            )
+            raise OutboundURLRejected(f"不允许访问内网、本地、保留或元数据地址: {hostname} ({ip})")
         if not any(
             ip.version == network.version and ip in network
             for network in _OPERATOR_ALLOWABLE_PRIVATE_NETWORKS
         ):
             raise OutboundURLRejected(
-                f"私网白名单不能覆盖元数据、环回、链路本地或保留地址: "
-                f"{hostname} ({ip})"
+                f"私网白名单不能覆盖元数据、环回、链路本地或保留地址: {hostname} ({ip})"
             )
 
 
@@ -158,7 +147,7 @@ def resolve_outbound_url(
     allowlist: Iterable[str] = (),
     denylist: Iterable[str] = (),
     allow_private_hosts: Iterable[str] = (),
-    resolver: Optional[Resolver] = None,
+    resolver: Resolver | None = None,
     resolve_dns: bool = True,
 ) -> ResolvedOutboundURL:
     """Validate a URL and return every DNS address approved for connection."""
@@ -180,8 +169,7 @@ def resolve_outbound_url(
     if hostname in _ALWAYS_BLOCKED_HOSTS:
         raise OutboundURLRejected(f"不允许访问本地或元数据主机: {hostname}")
     if (
-        hostname == "localhost"
-        or hostname.endswith(_BLOCKED_HOST_SUFFIXES)
+        hostname == "localhost" or hostname.endswith(_BLOCKED_HOST_SUFFIXES)
     ) and not private_host_allowed:
         raise OutboundURLRejected(f"不允许访问本地或元数据主机: {hostname}")
     if _host_matches(hostname, denylist):

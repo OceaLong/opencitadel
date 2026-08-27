@@ -1,7 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from fastapi import APIRouter, Depends, Request, Response as StarletteResponse
+from fastapi import APIRouter, Depends, Request
+from fastapi import Response as StarletteResponse
 
+from app.application.ports.crypto import CookieManagerPort
 from app.application.services.auth_service import AuthService
 from app.application.services.team_service import TeamService
 from app.interfaces.auth_dependencies import get_current_principal
@@ -19,8 +19,11 @@ from app.interfaces.schemas.team import (
     TeamResponse,
     UpdateTeamMemberRoleRequest,
 )
-from app.interfaces.service_dependencies import get_auth_service, get_cookie_manager, get_team_service
-from app.infrastructure.security.cookie import AuthCookieManager
+from app.interfaces.service_dependencies import (
+    get_auth_service,
+    get_cookie_manager,
+    get_team_service,
+)
 
 router = APIRouter(prefix="/teams", tags=["团队模块"])
 invitation_router = APIRouter(prefix="/invitations", tags=["邀请模块"])
@@ -29,9 +32,9 @@ public_invitation_router = APIRouter(prefix="/invitations", tags=["邀请模块"
 
 @router.post("", response_model=Response[TeamResponse])
 async def create_team(
-        request: CreateTeamRequest,
-        principal=Depends(get_current_principal),
-        service: TeamService = Depends(get_team_service),
+    request: CreateTeamRequest,
+    principal=Depends(get_current_principal),
+    service: TeamService = Depends(get_team_service),
 ) -> Response[TeamResponse]:
     team = await service.create_team(
         name=request.name,
@@ -43,18 +46,20 @@ async def create_team(
 
 @router.get("", response_model=Response[ListTeamsResponse])
 async def list_my_teams(
-        principal=Depends(get_current_principal),
-        service: TeamService = Depends(get_team_service),
+    principal=Depends(get_current_principal),
+    service: TeamService = Depends(get_team_service),
 ) -> Response[ListTeamsResponse]:
     teams = await service.list_my_teams(principal.user_id)
-    return Response.success(data=ListTeamsResponse(teams=[TeamResponse.from_domain(t) for t in teams]))
+    return Response.success(
+        data=ListTeamsResponse(teams=[TeamResponse.from_domain(t) for t in teams])
+    )
 
 
 @router.get("/{team_id}", response_model=Response[TeamResponse])
 async def get_team(
-        team_id: str,
-        principal=Depends(get_current_principal),
-        service: TeamService = Depends(get_team_service),
+    team_id: str,
+    principal=Depends(get_current_principal),
+    service: TeamService = Depends(get_team_service),
 ) -> Response[TeamResponse]:
     team = await service.get_team(team_id, principal.user_id)
     return Response.success(data=TeamResponse.from_domain(team))
@@ -62,9 +67,9 @@ async def get_team(
 
 @router.get("/{team_id}/members", response_model=Response[ListTeamMemberDetailsResponse])
 async def list_members(
-        team_id: str,
-        principal=Depends(get_current_principal),
-        service: TeamService = Depends(get_team_service),
+    team_id: str,
+    principal=Depends(get_current_principal),
+    service: TeamService = Depends(get_team_service),
 ) -> Response[ListTeamMemberDetailsResponse]:
     members = await service.list_member_details(team_id, principal.user_id)
     return Response.success(data=ListTeamMemberDetailsResponse(members=members))
@@ -72,9 +77,9 @@ async def list_members(
 
 @router.post("/{team_id}/leave", response_model=Response[None])
 async def leave_team(
-        team_id: str,
-        principal=Depends(get_current_principal),
-        service: TeamService = Depends(get_team_service),
+    team_id: str,
+    principal=Depends(get_current_principal),
+    service: TeamService = Depends(get_team_service),
 ) -> Response[None]:
     await service.leave_team(team_id=team_id, user_id=principal.user_id)
     return Response.success()
@@ -82,10 +87,10 @@ async def leave_team(
 
 @router.post("/{team_id}/invitations", response_model=Response[InvitationLinkResponse])
 async def create_team_invitation(
-        team_id: str,
-        request: CreateTeamInvitationRequest,
-        principal=Depends(get_current_principal),
-        service: TeamService = Depends(get_team_service),
+    team_id: str,
+    request: CreateTeamInvitationRequest,
+    principal=Depends(get_current_principal),
+    service: TeamService = Depends(get_team_service),
 ) -> Response[InvitationLinkResponse]:
     url = await service.create_team_invitation(
         team_id=team_id,
@@ -98,8 +103,8 @@ async def create_team_invitation(
 
 @public_invitation_router.get("/{token}", response_model=Response[TeamInvitationPreviewResponse])
 async def preview_invitation(
-        token: str,
-        service: TeamService = Depends(get_team_service),
+    token: str,
+    service: TeamService = Depends(get_team_service),
 ) -> Response[TeamInvitationPreviewResponse]:
     preview = await service.preview_invitation(token=token)
     return Response.success(data=preview)
@@ -107,13 +112,13 @@ async def preview_invitation(
 
 @public_invitation_router.post("/{token}/register", response_model=Response[TeamMemberResponse])
 async def register_and_accept_invitation(
-        token: str,
-        request: TeamInvitationRegisterRequest,
-        response: StarletteResponse,
-        http_request: Request,
-        service: TeamService = Depends(get_team_service),
-        auth_service: AuthService = Depends(get_auth_service),
-        cookie_manager: AuthCookieManager = Depends(get_cookie_manager),
+    token: str,
+    request: TeamInvitationRegisterRequest,
+    response: StarletteResponse,
+    http_request: Request,
+    service: TeamService = Depends(get_team_service),
+    auth_service: AuthService = Depends(get_auth_service),
+    cookie_manager: CookieManagerPort = Depends(get_cookie_manager),
 ) -> Response[TeamMemberResponse]:
     result = await service.register_and_accept_invitation(
         token=token,
@@ -121,22 +126,25 @@ async def register_and_accept_invitation(
         username=request.username,
         password=request.password,
     )
-    user, tokens = await auth_service.login(
+    _user, tokens = await auth_service.login(
         email_or_username=result.user.email,
         password=request.password,
         user_agent=http_request.headers.get("user-agent", ""),
         ip_address=get_client_ip(http_request),
     )
-    cookie_manager.set_auth_cookies(response, access_token=tokens.access_token, refresh_token=tokens.refresh_token)
-    return Response.success(data=TeamMemberResponse.from_domain(result.member),
+    cookie_manager.set_auth_cookies(
+        response, access_token=tokens.access_token, refresh_token=tokens.refresh_token
+    )
+    return Response.success(
+        data=TeamMemberResponse.from_domain(result.member),
     )
 
 
 @invitation_router.post("/{token}/accept", response_model=Response[TeamMemberResponse])
 async def accept_invitation(
-        token: str,
-        principal=Depends(get_current_principal),
-        service: TeamService = Depends(get_team_service),
+    token: str,
+    principal=Depends(get_current_principal),
+    service: TeamService = Depends(get_team_service),
 ) -> Response[TeamMemberResponse]:
     member = await service.accept_invitation(token=token, user_id=principal.user_id)
     return Response.success(data=TeamMemberResponse.from_domain(member))
@@ -144,9 +152,9 @@ async def accept_invitation(
 
 @router.delete("/{team_id}", response_model=Response[None])
 async def delete_team(
-        team_id: str,
-        principal=Depends(get_current_principal),
-        service: TeamService = Depends(get_team_service),
+    team_id: str,
+    principal=Depends(get_current_principal),
+    service: TeamService = Depends(get_team_service),
 ) -> Response[None]:
     await service.delete_team(team_id=team_id, actor_user_id=principal.user_id)
     return Response.success()
@@ -154,22 +162,24 @@ async def delete_team(
 
 @router.delete("/{team_id}/members/{user_id}", response_model=Response[None])
 async def remove_member(
-        team_id: str,
-        user_id: str,
-        principal=Depends(get_current_principal),
-        service: TeamService = Depends(get_team_service),
+    team_id: str,
+    user_id: str,
+    principal=Depends(get_current_principal),
+    service: TeamService = Depends(get_team_service),
 ) -> Response[None]:
-    await service.remove_member(team_id=team_id, actor_user_id=principal.user_id, target_user_id=user_id)
+    await service.remove_member(
+        team_id=team_id, actor_user_id=principal.user_id, target_user_id=user_id
+    )
     return Response.success()
 
 
 @router.patch("/{team_id}/members/{user_id}", response_model=Response[TeamMemberResponse])
 async def update_member_role(
-        team_id: str,
-        user_id: str,
-        request: UpdateTeamMemberRoleRequest,
-        principal=Depends(get_current_principal),
-        service: TeamService = Depends(get_team_service),
+    team_id: str,
+    user_id: str,
+    request: UpdateTeamMemberRoleRequest,
+    principal=Depends(get_current_principal),
+    service: TeamService = Depends(get_team_service),
 ) -> Response[TeamMemberResponse]:
     member = await service.update_member_role(
         team_id=team_id,

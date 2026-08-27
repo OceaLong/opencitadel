@@ -1,16 +1,12 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from io import BytesIO
-from typing import Optional
-from unittest.mock import MagicMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.domain.errors import BadRequestError
 from app.application.services.codebase_service import CodebaseService
+from app.domain.errors import BadRequestError
 from app.domain.models.codebase import Codebase
 from app.domain.models.codebase_version import (
     CodebaseVersion,
@@ -21,7 +17,7 @@ from app.domain.services.codebase.snapshot_service import CodeSnapshotService
 
 
 class _ObjectStorage:
-    def __init__(self, objects: Optional[dict[str, bytes]] = None) -> None:
+    def __init__(self, objects: dict[str, bytes] | None = None) -> None:
         self.objects = objects or {}
         self.get_keys: list[str] = []
 
@@ -50,13 +46,13 @@ class _CodebaseRepo:
 class _CodebaseVersionRepo:
     def __init__(self, version: CodebaseVersion) -> None:
         self._version = version
-        self.calls: list[tuple[str, Optional[str]]] = []
+        self.calls: list[tuple[str, str | None]] = []
 
     async def get_version(
         self,
         version_id: str,
         *,
-        codebase_id: Optional[str] = None,
+        codebase_id: str | None = None,
     ):
         self.calls.append((version_id, codebase_id))
         if version_id == self._version.id and codebase_id == self._version.codebase_id:
@@ -127,7 +123,7 @@ async def _service_fixture():
         id="cbv1",
         codebase_id="cb1",
         state=CodebaseVersionState.READY,
-        published_at=datetime.now(timezone.utc),
+        published_at=datetime.now(UTC),
         source_snapshot_key=materialized.snapshot_key,
         source_digest=materialized.source_digest,
         source_revision=materialized.source_revision,
@@ -135,8 +131,11 @@ async def _service_fixture():
     uow = _Uow(codebase, version)
     service = CodebaseService(
         uow_factory=lambda: uow,
-        sandbox_cls=MagicMock(),
+        sandbox_factory=MagicMock(),
         file_storage=MagicMock(),
+        run_admission_service=AsyncMock(),
+        run_control_service=AsyncMock(),
+        run_projection=AsyncMock(),
     )
     return service, storage, codebase, version, materialized, uow
 
@@ -163,7 +162,7 @@ async def test_read_source_uses_bound_published_snapshot_without_ingestion_sandb
 async def test_read_source_rejects_path_traversal_before_snapshot_lookup():
     service, storage, _codebase, _version, _materialized, _uow = await _service_fixture()
 
-    with pytest.raises(BadRequestError, match="目录穿越|相对路径"):
+    with pytest.raises(BadRequestError, match=r"(?:目录穿越|相对路径)"):
         await service.read_source(
             "cb1",
             "../secret.py",
@@ -186,15 +185,11 @@ async def test_attach_to_session_sandbox_restores_bound_snapshot_and_versioned_s
         codebase_version_id="cbv1",
     )
 
-    sentinel_path = (
-        f"/home/ubuntu/.oc_codebase_attached_cb1_cbv1_{version.source_digest}"
-    )
+    sentinel_path = f"/home/ubuntu/.oc_codebase_attached_cb1_cbv1_{version.source_digest}"
     assert sandbox.checked_paths == [sentinel_path]
     assert sandbox.restores == [("codebase-cb1-cbv1", materialized.snapshot_bytes)]
     assert sandbox.ensure_calls == 1
-    assert sandbox.writes == [
-        (sentinel_path, f"attached:cb1:cbv1:{version.source_digest}\n")
-    ]
+    assert sandbox.writes == [(sentinel_path, f"attached:cb1:cbv1:{version.source_digest}\n")]
 
 
 @pytest.mark.anyio

@@ -1,9 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Progressive skill prompt rendering."""
-from __future__ import annotations
 
-from typing import List
+from __future__ import annotations
 
 from app.domain.models.skill import Skill, SkillResource
 
@@ -16,12 +13,11 @@ def render_metadata(skill: Skill) -> str:
     ]
     if skill.examples:
         lines.append("Examples:")
-        for example in skill.examples[:5]:
-            lines.append(f"- {example}")
+        lines.extend(f"- {example}" for example in skill.examples[:5])
     return "\n".join(lines)
 
 
-def _render_resource_index(resources: List[SkillResource]) -> str:
+def _render_resource_index(resources: list[SkillResource]) -> str:
     if not resources:
         return ""
     lines = ["Available skill resources (read via file tools when needed):"]
@@ -33,7 +29,7 @@ def _render_resource_index(resources: List[SkillResource]) -> str:
 
 def render_active(skill: Skill) -> str:
     """Full skill instructions after a skill is selected."""
-    parts: List[str] = []
+    parts: list[str] = []
     if skill.system_prompt.strip():
         parts.append(skill.system_prompt.strip())
     if skill.body.strip():

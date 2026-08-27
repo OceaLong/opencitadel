@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import List, Optional, Tuple
-
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,19 +27,21 @@ class DBCodebaseRepository(CodebaseRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
-    def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
+    def _apply_scope(self, stmt, scope: OwnerScope | None):
         if scope is None:
             return stmt
         if scope.type == OwnerScopeType.TEAM:
             return stmt.where(CodebaseModel.team_id == scope.team_id)
-        return stmt.where(CodebaseModel.owner_user_id == scope.user_id, CodebaseModel.team_id.is_(None))
+        return stmt.where(
+            CodebaseModel.owner_user_id == scope.user_id, CodebaseModel.team_id.is_(None)
+        )
 
     def _apply_version_projection(
-            self,
-            stmt,
-            row_model,
-            codebase_id: str,
-            version_id: Optional[str],
+        self,
+        stmt,
+        row_model,
+        codebase_id: str,
+        version_id: str | None,
     ):
         if version_id is not None:
             return stmt.where(row_model.version_id == version_id)
@@ -53,10 +51,7 @@ class DBCodebaseRepository(CodebaseRepository):
             .scalar_subquery()
         )
         return stmt.where(
-            (
-                active_version_id.is_(None)
-                & row_model.version_id.is_(None)
-            )
+            (active_version_id.is_(None) & row_model.version_id.is_(None))
             | (row_model.version_id == active_version_id)
         )
 
@@ -76,7 +71,6 @@ class DBCodebaseRepository(CodebaseRepository):
         record.sandbox_id = codebase.sandbox_id
         record.workspace_path = codebase.workspace_path
         record.snapshot_key = codebase.snapshot_key
-        record.ingest_task_id = codebase.ingest_task_id
         record.error = codebase.error
         record.vector_degraded = codebase.vector_degraded
         record.active_version_id = codebase.active_version_id
@@ -84,13 +78,17 @@ class DBCodebaseRepository(CodebaseRepository):
         record.team_id = codebase.team_id
         record.updated_at = codebase.updated_at
 
-    async def get_by_id(self, codebase_id: str, scope: Optional[OwnerScope] = None) -> Optional[Codebase]:
-        stmt = self._apply_scope(select(CodebaseModel).where(CodebaseModel.id == codebase_id), scope)
+    async def get_by_id(self, codebase_id: str, scope: OwnerScope | None = None) -> Codebase | None:
+        stmt = self._apply_scope(
+            select(CodebaseModel).where(CodebaseModel.id == codebase_id), scope
+        )
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         return record.to_domain() if record else None
 
-    async def list_all(self, limit: int = 100, offset: int = 0, scope: Optional[OwnerScope] = None) -> List[Codebase]:
+    async def list_all(
+        self, limit: int = 100, offset: int = 0, scope: OwnerScope | None = None
+    ) -> list[Codebase]:
         stmt = (
             self._apply_scope(select(CodebaseModel), scope)
             .order_by(CodebaseModel.updated_at.desc())
@@ -104,10 +102,10 @@ class DBCodebaseRepository(CodebaseRepository):
         await self.db_session.execute(delete(CodebaseModel).where(CodebaseModel.id == codebase_id))
 
     async def update_status(
-            self,
-            codebase_id: str,
-            status: CodebaseStatus,
-            error: Optional[str] = None,
+        self,
+        codebase_id: str,
+        status: CodebaseStatus,
+        error: str | None = None,
     ) -> None:
         values = {"status": status.value}
         if error is not None:
@@ -116,7 +114,7 @@ class DBCodebaseRepository(CodebaseRepository):
             update(CodebaseModel).where(CodebaseModel.id == codebase_id).values(**values)
         )
 
-    async def save_files(self, files: List[CodebaseFile]) -> None:
+    async def save_files(self, files: list[CodebaseFile]) -> None:
         for f in files:
             self.db_session.add(
                 CodebaseFileModel(
@@ -131,10 +129,10 @@ class DBCodebaseRepository(CodebaseRepository):
             )
 
     async def list_files(
-            self,
-            codebase_id: str,
-            version_id: Optional[str] = None,
-    ) -> List[CodebaseFile]:
+        self,
+        codebase_id: str,
+        version_id: str | None = None,
+    ) -> list[CodebaseFile]:
         stmt = (
             select(CodebaseFileModel)
             .where(CodebaseFileModel.codebase_id == codebase_id)
@@ -150,11 +148,11 @@ class DBCodebaseRepository(CodebaseRepository):
         return [r.to_domain() for r in result.scalars().all()]
 
     async def get_file_by_path(
-            self,
-            codebase_id: str,
-            path: str,
-            version_id: Optional[str] = None,
-    ) -> Optional[CodebaseFile]:
+        self,
+        codebase_id: str,
+        path: str,
+        version_id: str | None = None,
+    ) -> CodebaseFile | None:
         stmt = (
             select(CodebaseFileModel)
             .where(CodebaseFileModel.codebase_id == codebase_id)
@@ -170,7 +168,7 @@ class DBCodebaseRepository(CodebaseRepository):
         record = result.scalar_one_or_none()
         return record.to_domain() if record else None
 
-    async def save_symbols(self, symbols: List[CodebaseSymbol]) -> None:
+    async def save_symbols(self, symbols: list[CodebaseSymbol]) -> None:
         for s in symbols:
             self.db_session.add(
                 CodebaseSymbolModel(
@@ -191,11 +189,11 @@ class DBCodebaseRepository(CodebaseRepository):
             )
 
     async def list_symbols(
-            self,
-            codebase_id: str,
-            name: Optional[str] = None,
-            version_id: Optional[str] = None,
-    ) -> List[CodebaseSymbol]:
+        self,
+        codebase_id: str,
+        name: str | None = None,
+        version_id: str | None = None,
+    ) -> list[CodebaseSymbol]:
         stmt = select(CodebaseSymbolModel).where(CodebaseSymbolModel.codebase_id == codebase_id)
         stmt = self._apply_version_projection(
             stmt,
@@ -210,11 +208,11 @@ class DBCodebaseRepository(CodebaseRepository):
         return [r.to_domain() for r in result.scalars().all()]
 
     async def find_symbol_by_name(
-            self,
-            codebase_id: str,
-            name: str,
-            version_id: Optional[str] = None,
-    ) -> List[CodebaseSymbol]:
+        self,
+        codebase_id: str,
+        name: str,
+        version_id: str | None = None,
+    ) -> list[CodebaseSymbol]:
         stmt = (
             select(CodebaseSymbolModel)
             .where(CodebaseSymbolModel.codebase_id == codebase_id)
@@ -229,7 +227,7 @@ class DBCodebaseRepository(CodebaseRepository):
         result = await self.db_session.execute(stmt)
         return [r.to_domain() for r in result.scalars().all()]
 
-    async def save_edges(self, edges: List[CodebaseEdge]) -> None:
+    async def save_edges(self, edges: list[CodebaseEdge]) -> None:
         for e in edges:
             self.db_session.add(
                 CodebaseEdgeModel(
@@ -247,13 +245,13 @@ class DBCodebaseRepository(CodebaseRepository):
             )
 
     async def list_edges(
-            self,
-            codebase_id: str,
-            src_symbol_id: Optional[str] = None,
-            dst_symbol_id: Optional[str] = None,
-            callee_name: Optional[str] = None,
-            version_id: Optional[str] = None,
-    ) -> List[CodebaseEdge]:
+        self,
+        codebase_id: str,
+        src_symbol_id: str | None = None,
+        dst_symbol_id: str | None = None,
+        callee_name: str | None = None,
+        version_id: str | None = None,
+    ) -> list[CodebaseEdge]:
         stmt = select(CodebaseEdgeModel).where(CodebaseEdgeModel.codebase_id == codebase_id)
         stmt = self._apply_version_projection(
             stmt,
@@ -271,11 +269,11 @@ class DBCodebaseRepository(CodebaseRepository):
         return [r.to_domain() for r in result.scalars().all()]
 
     async def list_symbols_by_ids(
-            self,
-            codebase_id: str,
-            symbol_ids: List[str],
-            version_id: Optional[str] = None,
-    ) -> List[CodebaseSymbol]:
+        self,
+        codebase_id: str,
+        symbol_ids: list[str],
+        version_id: str | None = None,
+    ) -> list[CodebaseSymbol]:
         if not symbol_ids:
             return []
         stmt = (
@@ -292,7 +290,7 @@ class DBCodebaseRepository(CodebaseRepository):
         result = await self.db_session.execute(stmt)
         return [r.to_domain() for r in result.scalars().all()]
 
-    async def save_chunks(self, chunks: List[CodebaseChunk]) -> None:
+    async def save_chunks(self, chunks: list[CodebaseChunk]) -> None:
         for chunk in chunks:
             if chunk.embedding:
                 await self.db_session.execute(
@@ -307,7 +305,7 @@ class DBCodebaseRepository(CodebaseRepository):
                             (
                                 :id, :codebase_id, :version_id, :file_id,
                                 :symbol_id, :content, :search_text,
-                                :embedding::vector
+                                CAST(:embedding AS vector)
                             )
                         """
                     ),
@@ -336,12 +334,12 @@ class DBCodebaseRepository(CodebaseRepository):
                 )
 
     async def search_chunks(
-            self,
-            codebase_id: str,
-            query_embedding: List[float],
-            limit: int = 10,
-            version_id: Optional[str] = None,
-    ) -> List[Tuple[CodebaseChunk, float]]:
+        self,
+        codebase_id: str,
+        query_embedding: list[float],
+        limit: int = 10,
+        version_id: str | None = None,
+    ) -> list[tuple[CodebaseChunk, float]]:
         if version_id is not None:
             return await self.search_vector(
                 codebase_id,
@@ -370,11 +368,11 @@ class DBCodebaseRepository(CodebaseRepository):
             f"""
             SELECT id, codebase_id, version_id, file_id, symbol_id, content,
                    search_text,
-                   1 - (embedding <=> :query::vector) AS score
+                   1 - (embedding <=> CAST(:query AS vector)) AS score
             FROM codebase_chunks
             WHERE codebase_id = :codebase_id AND embedding IS NOT NULL
               {version_filter}
-            ORDER BY embedding <=> :query::vector
+            ORDER BY embedding <=> CAST(:query AS vector)
             LIMIT :limit
             """
         )
@@ -382,12 +380,12 @@ class DBCodebaseRepository(CodebaseRepository):
         return self._rows_to_chunk_scores(result.fetchall())
 
     async def search_vector(
-            self,
-            codebase_id: str,
-            version_id: str,
-            query_embedding: List[float],
-            limit: int = 10,
-    ) -> List[Tuple[CodebaseChunk, float]]:
+        self,
+        codebase_id: str,
+        version_id: str,
+        query_embedding: list[float],
+        limit: int = 10,
+    ) -> list[tuple[CodebaseChunk, float]]:
         if not query_embedding:
             return []
         result = await self.db_session.execute(
@@ -395,12 +393,12 @@ class DBCodebaseRepository(CodebaseRepository):
                 """
                 SELECT id, codebase_id, version_id, file_id, symbol_id, content,
                        search_text,
-                       1 - (embedding <=> :query::vector) AS score
+                       1 - (embedding <=> CAST(:query AS vector)) AS score
                 FROM codebase_chunks
                 WHERE codebase_id = :codebase_id
                   AND version_id = :version_id
                   AND embedding IS NOT NULL
-                ORDER BY embedding <=> :query::vector
+                ORDER BY embedding <=> CAST(:query AS vector)
                 LIMIT :limit
                 """
             ),
@@ -414,12 +412,12 @@ class DBCodebaseRepository(CodebaseRepository):
         return self._rows_to_chunk_scores(result.fetchall())
 
     async def search_lexical(
-            self,
-            codebase_id: str,
-            version_id: str,
-            query: str,
-            limit: int = 10,
-    ) -> List[Tuple[CodebaseChunk, float]]:
+        self,
+        codebase_id: str,
+        version_id: str,
+        query: str,
+        limit: int = 10,
+    ) -> list[tuple[CodebaseChunk, float]]:
         if not str(query or "").strip():
             return []
         result = await self.db_session.execute(
@@ -449,8 +447,8 @@ class DBCodebaseRepository(CodebaseRepository):
         return self._rows_to_chunk_scores(result.fetchall())
 
     @staticmethod
-    def _rows_to_chunk_scores(rows) -> List[Tuple[CodebaseChunk, float]]:
-        out: List[Tuple[CodebaseChunk, float]] = []
+    def _rows_to_chunk_scores(rows) -> list[tuple[CodebaseChunk, float]]:
+        out: list[tuple[CodebaseChunk, float]] = []
         for row in rows:
             chunk = CodebaseChunk(
                 id=row.id,
@@ -464,7 +462,7 @@ class DBCodebaseRepository(CodebaseRepository):
             out.append((chunk, float(row.score or 0)))
         return out
 
-    async def save_artifacts(self, artifacts: List[CodebaseArtifact]) -> None:
+    async def save_artifacts(self, artifacts: list[CodebaseArtifact]) -> None:
         for a in artifacts:
             self.db_session.add(
                 CodebaseArtifactModel(
@@ -481,11 +479,11 @@ class DBCodebaseRepository(CodebaseRepository):
             )
 
     async def list_artifacts(
-            self,
-            codebase_id: str,
-            kind: Optional[ArtifactKind] = None,
-            version_id: Optional[str] = None,
-    ) -> List[CodebaseArtifact]:
+        self,
+        codebase_id: str,
+        kind: ArtifactKind | None = None,
+        version_id: str | None = None,
+    ) -> list[CodebaseArtifact]:
         stmt = select(CodebaseArtifactModel).where(CodebaseArtifactModel.codebase_id == codebase_id)
         stmt = self._apply_version_projection(
             stmt,

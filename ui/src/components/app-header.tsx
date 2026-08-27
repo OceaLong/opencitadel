@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -17,10 +17,9 @@ import {
 } from "@/components/ui/breadcrumb";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 
+import { useCapabilities } from "@/hooks/use-capabilities";
 import { useNavModules } from "@/hooks/use-nav-modules";
 import { matchAdminNav } from "@/lib/admin-nav";
-import { isModelUnavailableStatus, llmStatusApi } from "@/lib/api/llm-status";
-import type { LLMStatusData } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 import { usePageTitle } from "@/providers/page-title-provider";
 
@@ -44,32 +43,12 @@ export function AppHeader() {
   const showActiveModule = moduleVisible && (activeModule?.key !== "admin" || adminVisible);
   const pageTitle = usePageTitle();
   const adminItem = activeModule?.key === "admin" ? matchAdminNav(pathname) : undefined;
-  const [llmStatus, setLlmStatus] = useState<LLMStatusData["status"]>("unknown");
+  const { capability } = useCapabilities();
+  const chatState = capability("chat")?.state;
+  const modelUnavailable = Boolean(chatState && chatState !== "available");
 
   const modelStatusKey =
-    llmStatus === "unknown"
-      ? "unknown"
-      : isModelUnavailableStatus(llmStatus)
-        ? "unavailable"
-        : "ok";
-
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      try {
-        const data = await llmStatusApi.getStatus();
-        if (mounted) setLlmStatus(data.status ?? "unknown");
-      } catch {
-        if (mounted) setLlmStatus("unknown");
-      }
-    };
-    void load();
-    const timer = setInterval(load, isModelUnavailableStatus(llmStatus) ? 10_000 : 30_000);
-    return () => {
-      mounted = false;
-      clearInterval(timer);
-    };
-  }, [llmStatus]);
+    chatState === undefined ? "unknown" : modelUnavailable ? "unavailable" : "ok";
 
   const crumbs: { label: string; href?: string }[] = [];
   if (activeModule && showActiveModule) {
@@ -114,7 +93,7 @@ export function AppHeader() {
       </div>
       <div className="flex items-center gap-1">
         <Badge
-          variant={isModelUnavailableStatus(llmStatus) ? "destructive" : "secondary"}
+          variant={modelUnavailable ? "destructive" : "secondary"}
           className="text-2xs hidden sm:inline-flex"
         >
           {t("modelStatus", { status: modelStatusKey })}
@@ -122,8 +101,8 @@ export function AppHeader() {
         <span
           className={cn(
             "inline-flex size-2.5 shrink-0 rounded-full sm:hidden",
-            isModelUnavailableStatus(llmStatus) ? "bg-destructive" : "bg-success",
-            llmStatus === "unknown" && "bg-muted-foreground",
+            modelUnavailable ? "bg-destructive" : "bg-success",
+            chatState === undefined && "bg-muted-foreground",
           )}
           title={t("modelStatus", { status: modelStatusKey })}
           aria-label={t("modelStatus", { status: modelStatusKey })}

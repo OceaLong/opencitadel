@@ -1,31 +1,39 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import DateTime, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.models.user import GlobalRole, User, UserStatus
+
 from .base import Base
 
 
 class UserORM(Base):
     __tablename__ = "users"
 
-    id: Mapped[str] = mapped_column(String(255), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        String(255), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     username: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    display_name: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    display_name: Mapped[str] = mapped_column(
+        String(255), nullable=False, server_default=text("''")
+    )
     avatar_url: Mapped[str] = mapped_column(String(1024), nullable=False, server_default=text("''"))
-    global_role: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'user'"))
+    global_role: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'user'")
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'active'"))
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)"))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)"))
-    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     @classmethod
     def from_domain(cls, user: User) -> "UserORM":

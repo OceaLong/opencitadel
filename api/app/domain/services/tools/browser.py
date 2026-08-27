@@ -1,9 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.domain.external.browser import Browser
 from app.domain.models.tool_result import ToolResult
+
 from .base import BaseTool, tool
 from .capability_policy import INTERACTIVE_BROWSER, WEB_READ
 
@@ -24,6 +23,7 @@ def _wrap_untrusted_page_content(result: ToolResult) -> ToolResult:
 
 class BrowserTool(BaseTool):
     """浏览器工具"""
+
     name: str = "browser"
 
     def __init__(self, browser: Browser) -> None:
@@ -31,11 +31,12 @@ class BrowserTool(BaseTool):
         super().__init__()
         self.browser = browser
 
-    def get_tools(self) -> List[Dict[str, Any]]:
+    def get_tools(self) -> list[dict[str, Any]]:
         tools = super().get_tools()
-        if not getattr(self.browser, "supports_multimodal", False):
+        if not getattr(self.browser, "vision_enabled", False):
             tools = [
-                schema for schema in tools
+                schema
+                for schema in tools
                 if schema.get("function", {}).get("name") != "browser_screenshot"
             ]
         return tools
@@ -68,7 +69,7 @@ class BrowserTool(BaseTool):
         parameters={
             "url": {
                 "type": "string",
-                "description": "要访问的完整URL，必须包含协议前缀(如https://)"
+                "description": "要访问的完整URL，必须包含协议前缀(如https://)",
             }
         },
         required=["url"],
@@ -84,7 +85,7 @@ class BrowserTool(BaseTool):
         parameters={
             "url": {
                 "type": "string",
-                "description": "要访问的完整URL，必须包含协议前缀(如https://)"
+                "description": "要访问的完整URL，必须包含协议前缀(如https://)",
             }
         },
         required=["url"],
@@ -98,32 +99,23 @@ class BrowserTool(BaseTool):
         name="browser_click",
         description="点击当前页面中的元素，在需要点击页面元素时使用。",
         parameters={
-            "index": {
-                "type": "integer",
-                "description": "(可选)需要点击的元素索引"
-            },
-            "coordinate_x": {
-                "type": "number",
-                "description": "(可选)点击位置的x坐标"
-            },
-            "coordinate_y": {
-                "type": "number",
-                "description": "(可选)点击位置的y坐标"
-            },
+            "index": {"type": "integer", "description": "(可选)需要点击的元素索引"},
+            "coordinate_x": {"type": "number", "description": "(可选)点击位置的x坐标"},
+            "coordinate_y": {"type": "number", "description": "(可选)点击位置的y坐标"},
             "description": {
                 "type": "string",
-                "description": "(可选)当无法使用索引时，用自然语言描述要点击的元素，系统将尝试视觉定位"
-            }
+                "description": "(可选)当无法使用索引时，用自然语言描述要点击的元素，系统将尝试视觉定位",
+            },
         },
         required=[],
         policy=INTERACTIVE_BROWSER,
     )
     async def browser_click(
-            self,
-            index: Optional[int] = None,
-            coordinate_x: Optional[float] = None,
-            coordinate_y: Optional[float] = None,
-            description: Optional[str] = None,
+        self,
+        index: int | None = None,
+        coordinate_x: float | None = None,
+        coordinate_y: float | None = None,
+        description: str | None = None,
     ) -> ToolResult:
         """传递页面元素索引、坐标或视觉描述点击对应元素"""
         return await self.browser.click(index, coordinate_x, coordinate_y, description)
@@ -140,29 +132,20 @@ class BrowserTool(BaseTool):
                 "type": "boolean",
                 "description": "输入后是否按下回车键",
             },
-            "index": {
-                "type": "integer",
-                "description": "(可选)需要填充文本的元素索引"
-            },
-            "coordinate_x": {
-                "type": "number",
-                "description": "(可选)需要填充文本元素的x坐标"
-            },
-            "coordinate_y": {
-                "type": "number",
-                "description": "(可选)需要填充文本元素的y坐标"
-            },
+            "index": {"type": "integer", "description": "(可选)需要填充文本的元素索引"},
+            "coordinate_x": {"type": "number", "description": "(可选)需要填充文本元素的x坐标"},
+            "coordinate_y": {"type": "number", "description": "(可选)需要填充文本元素的y坐标"},
         },
         required=["text", "press_enter"],
         policy=INTERACTIVE_BROWSER,
     )
     async def browser_input(
-            self,
-            text: str,
-            press_enter: bool,
-            index: Optional[int] = None,
-            coordinate_x: Optional[float] = None,
-            coordinate_y: Optional[float] = None,
+        self,
+        text: str,
+        press_enter: bool,
+        index: int | None = None,
+        coordinate_x: float | None = None,
+        coordinate_y: float | None = None,
     ) -> ToolResult:
         """根据传递的元素索引或xy坐标，实现浏览器内容输入"""
         return await self.browser.input(text, press_enter, index, coordinate_x, coordinate_y)
@@ -171,14 +154,8 @@ class BrowserTool(BaseTool):
         name="browser_move_mouse",
         description="将鼠标光标移动至当前浏览器页面的指定位置，用于模拟用户的鼠标移动",
         parameters={
-            "coordinate_x": {
-                "type": "number",
-                "description": "目标光标位置的x坐标"
-            },
-            "coordinate_y": {
-                "type": "number",
-                "description": "目标光标位置的y坐标"
-            },
+            "coordinate_x": {"type": "number", "description": "目标光标位置的x坐标"},
+            "coordinate_y": {"type": "number", "description": "目标光标位置的y坐标"},
         },
         required=["coordinate_x", "coordinate_y"],
         policy=INTERACTIVE_BROWSER,
@@ -207,13 +184,10 @@ class BrowserTool(BaseTool):
         name="browser_select_option",
         description="从当前浏览器页面的下拉列表元素中选择指定选项，用于选择下拉菜单中的选项",
         parameters={
-            "index": {
-                "type": "integer",
-                "description": "需要操作的下拉列表元素的索引号(序号)"
-            },
+            "index": {"type": "integer", "description": "需要操作的下拉列表元素的索引号(序号)"},
             "option": {
                 "type": "integer",
-                "description": "要选择的选项序号，从0开始(注: 指下拉框里的第几项)。"
+                "description": "要选择的选项序号，从0开始(注: 指下拉框里的第几项)。",
             },
         },
         required=["index", "option"],
@@ -229,13 +203,13 @@ class BrowserTool(BaseTool):
         parameters={
             "to_top": {
                 "type": "boolean",
-                "description": "(可选)是否直接滚动到页面顶部，而非向上滚动一屏。"
+                "description": "(可选)是否直接滚动到页面顶部，而非向上滚动一屏。",
             }
         },
         required=[],
         policy=INTERACTIVE_BROWSER,
     )
-    async def browser_scroll_up(self, to_top: Optional[bool] = None) -> ToolResult:
+    async def browser_scroll_up(self, to_top: bool | None = None) -> ToolResult:
         """向上滚动当前浏览器页面，支持滚动一页或者滚动到顶部"""
         return await self.browser.scroll_up(to_top)
 
@@ -245,13 +219,13 @@ class BrowserTool(BaseTool):
         parameters={
             "to_bottom": {
                 "type": "boolean",
-                "description": "(可选)是否直接滚动到页面底部，而非向下滚动一屏"
+                "description": "(可选)是否直接滚动到页面底部，而非向下滚动一屏",
             }
         },
         required=[],
         policy=INTERACTIVE_BROWSER,
     )
-    async def browser_scroll_down(self, to_bottom: Optional[bool] = None) -> ToolResult:
+    async def browser_scroll_down(self, to_bottom: bool | None = None) -> ToolResult:
         """向下滚动当前浏览器页面，支持滚动一页或者滚动到底部"""
         return await self.browser.scroll_down(to_bottom)
 
@@ -261,7 +235,7 @@ class BrowserTool(BaseTool):
         parameters={
             "javascript": {
                 "type": "string",
-                "description": "要执行的JavaScript代码，请注意运行时环境为浏览器控制台。"
+                "description": "要执行的JavaScript代码，请注意运行时环境为浏览器控制台。",
             },
         },
         required=["javascript"],
@@ -274,15 +248,10 @@ class BrowserTool(BaseTool):
     @tool(
         name="browser_console_view",
         description="查看浏览器控制台输出，用于检查JavaScript日志或调试页面错误。",
-        parameters={
-            "max_lines": {
-                "type": "integer",
-                "description": "(可选)返回的最大日志行数。"
-            }
-        },
+        parameters={"max_lines": {"type": "integer", "description": "(可选)返回的最大日志行数。"}},
         required=[],
         policy=WEB_READ,
     )
-    async def browser_console_view(self, max_lines: Optional[int] = None) -> ToolResult:
+    async def browser_console_view(self, max_lines: int | None = None) -> ToolResult:
         """传递浏览的最大行数查看控制台的输出"""
         return await self.browser.console_view(max_lines)

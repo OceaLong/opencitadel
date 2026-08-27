@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from sqlalchemy import select
 
 from app.domain.models.scope import OwnerScope

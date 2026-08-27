@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Host-level memory probe for sandbox admission (docker driver)."""
+
 from __future__ import annotations
 
 import logging
@@ -14,7 +13,7 @@ def get_host_available_mb() -> int | None:
         import psutil
 
         return int(psutil.virtual_memory().available / (1024 * 1024))
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         logger.warning("Memory probe failed: %s", exc)
         return None
 

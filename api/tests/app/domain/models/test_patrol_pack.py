@@ -3,20 +3,41 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.domain.models.patrol import PatrolAssertion, PatrolPackConfig
+from app.domain.models.patrol import (
+    PatrolAssertion,
+    PatrolPackConfig,
+    PatrolRun,
+    PatrolTriggerType,
+)
 
 
 def valid_pack() -> dict:
     return {
         "target_ref": "local",
         "timezone": "Asia/Shanghai",
-        "scope": {"cluster": "demo", "namespaces": ["opencitadel"], "environment": "staging"},
+        "scope": {
+            "cluster": "demo",
+            "namespaces": ["opencitadel"],
+            "environment": "staging",
+        },
         "checks": [
             {
                 "id": "k8s-workload-availability",
                 "title": "Availability",
-                "probe": {"tool": "k8s_workload_summary", "args": {"namespace": "opencitadel"}, "output_schema_hash": "schema-v1"},
-                "assertions": [{"id": "ready", "field": "$.unavailable_replicas", "op": "eq", "value": 0, "message": "not ready"}],
+                "probe": {
+                    "tool": "k8s_workload_summary",
+                    "args": {"namespace": "opencitadel"},
+                    "output_schema_hash": "schema-v1",
+                },
+                "assertions": [
+                    {
+                        "id": "ready",
+                        "field": "$.unavailable_replicas",
+                        "op": "eq",
+                        "value": 0,
+                        "message": "not ready",
+                    }
+                ],
                 "severity_on_fail": "critical",
                 "required_evidence": ["summary", "resource_refs"],
             }
@@ -25,7 +46,9 @@ def valid_pack() -> dict:
 
 
 def test_accepts_builtin_workload_check() -> None:
-    assert PatrolPackConfig.model_validate(valid_pack()).checks[0].probe.tool == "k8s_workload_summary"
+    assert (
+        PatrolPackConfig.model_validate(valid_pack()).checks[0].probe.tool == "k8s_workload_summary"
+    )
 
 
 def test_rejects_duplicate_check_ids() -> None:
@@ -65,3 +88,14 @@ def test_rejects_probe_tool_outside_allowlist() -> None:
     data["checks"][0]["probe"]["tool"] = "shell_execute"
     with pytest.raises(ValidationError):
         PatrolPackConfig.model_validate(data)
+
+
+def test_patrol_run_requires_formal_execution_identity() -> None:
+    with pytest.raises(ValidationError, match="execution_run_id"):
+        PatrolRun(
+            pack_id="pack-1",
+            pack_version=1,
+            pack_snapshot={"config": valid_pack()},
+            trigger_type=PatrolTriggerType.MANUAL,
+            idempotency_key="run-1",
+        )

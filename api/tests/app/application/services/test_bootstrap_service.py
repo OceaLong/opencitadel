@@ -1,9 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from types import SimpleNamespace
-
 import pytest
 
+from app.application.ports.crypto import BootstrapAdminCredentials
 from app.application.services.bootstrap_service import bootstrap_admin_user
 from app.domain.models.user import GlobalRole, User
 from app.infrastructure.security.password_hasher import PasswordHasher
@@ -46,6 +43,9 @@ class FakeUow:
     async def __aenter__(self):
         return self
 
+    async def commit(self):
+        return None
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         return False
 
@@ -55,41 +55,8 @@ def anyio_backend():
     return "asyncio"
 
 
-@pytest.fixture
-def settings(monkeypatch):
-    config = SimpleNamespace(
-        bootstrap_admin_email="admin",
-        bootstrap_admin_password="admin",
-    )
-    monkeypatch.setattr(
-        "app.application.services.bootstrap_service.get_settings",
-        lambda: config,
-    )
-    return config
-
-
 @pytest.mark.anyio
-async def test_bootstrap_admin_backfills_missing_password(settings):
-    admin = User(
-        email="admin",
-        username="admin",
-        password_hash="",
-        display_name="Administrator",
-        global_role=GlobalRole.ADMIN,
-    )
-    repo = InMemoryUserRepo([admin])
-    hasher = PasswordHasher()
-
-    await bootstrap_admin_user(lambda: FakeUow(repo))
-
-    saved = await repo.get_by_email("admin")
-    assert saved is not None
-    assert saved.password_hash
-    assert hasher.verify("admin", saved.password_hash)
-
-
-@pytest.mark.anyio
-async def test_bootstrap_admin_does_not_overwrite_existing_password(settings):
+async def test_bootstrap_admin_does_not_overwrite_existing_password():
     hasher = PasswordHasher()
     admin = User(
         email="admin",
@@ -101,7 +68,11 @@ async def test_bootstrap_admin_does_not_overwrite_existing_password(settings):
     repo = InMemoryUserRepo([admin])
     original_hash = admin.password_hash
 
-    await bootstrap_admin_user(lambda: FakeUow(repo))
+    await bootstrap_admin_user(
+        lambda: FakeUow(repo),
+        BootstrapAdminCredentials(email="admin", password="admin"),
+        hasher,
+    )
 
     saved = await repo.get_by_email("admin")
     assert saved is not None
@@ -111,11 +82,15 @@ async def test_bootstrap_admin_does_not_overwrite_existing_password(settings):
 
 
 @pytest.mark.anyio
-async def test_bootstrap_admin_creates_user_on_empty_database(settings):
+async def test_bootstrap_admin_creates_user_on_empty_database():
     repo = InMemoryUserRepo()
     hasher = PasswordHasher()
 
-    await bootstrap_admin_user(lambda: FakeUow(repo))
+    await bootstrap_admin_user(
+        lambda: FakeUow(repo),
+        BootstrapAdminCredentials(email="admin", password="admin"),
+        hasher,
+    )
 
     saved = await repo.get_by_email("admin")
     assert saved is not None
@@ -123,3 +98,13 @@ async def test_bootstrap_admin_creates_user_on_empty_database(settings):
     assert saved.global_role == GlobalRole.ADMIN
     assert saved.password_hash
     assert hasher.verify("admin", saved.password_hash)
+
+
+@pytest.mark.anyio
+async def test_bootstrap_admin_requires_password_when_email_is_configured():
+    with pytest.raises(RuntimeError, match="BOOTSTRAP_ADMIN_PASSWORD is required"):
+        await bootstrap_admin_user(
+            lambda: FakeUow(InMemoryUserRepo()),
+            BootstrapAdminCredentials(email="admin", password=""),
+            PasswordHasher(),
+        )

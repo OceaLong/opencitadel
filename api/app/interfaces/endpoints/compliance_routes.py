@@ -1,7 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette.responses import Response, StreamingResponse
@@ -68,9 +65,8 @@ async def list_evidence_sessions(
     service: EvidenceService = Depends(get_evidence_service),
 ):
     items = await service.list_evidence_sessions(limit=limit, offset=offset)
-    return ApiResponse.success(data=EvidenceSessionListResponse(
-            sessions=[EvidenceSessionItem(**item) for item in items]
-        )
+    return ApiResponse.success(
+        data=EvidenceSessionListResponse(sessions=[EvidenceSessionItem(**item) for item in items])
     )
 
 
@@ -89,9 +85,7 @@ async def download_evidence_package(
     return StreamingResponse(
         iter([data]),
         media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="evidence-{session_id}.zip"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="evidence-{session_id}.zip"'},
     )
 
 
@@ -100,13 +94,13 @@ async def download_evidence_package(
     dependencies=[Depends(require_auditor_or_admin)],
 )
 async def get_compliance_report(
-    framework: Optional[str] = Query(None),
-    start: Optional[datetime] = Query(None),
-    end: Optional[datetime] = Query(None),
+    framework: str | None = Query(None),
+    start: datetime | None = Query(None),
+    end: datetime | None = Query(None),
     format: str = Query("json", pattern="^(json|md|pdf)$"),
     service: ComplianceService = Depends(get_compliance_service),
 ):
-    frameworks: Optional[List[str]] = [framework] if framework else None
+    frameworks: list[str] | None = [framework] if framework else None
     report = await service.build_report(start_at=start, end_at=end, frameworks=frameworks)
     if format == "json":
         return ApiResponse.success(data=ComplianceReportResponse(report=report))

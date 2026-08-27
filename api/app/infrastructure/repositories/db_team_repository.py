@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import List, Optional
-
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,11 +10,11 @@ class DBTeamRepository(TeamRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
-    async def get_by_id(self, team_id: str) -> Optional[Team]:
+    async def get_by_id(self, team_id: str) -> Team | None:
         record = await self.db_session.get(TeamORM, team_id)
         return record.to_domain() if record else None
 
-    async def list_for_user(self, user_id: str) -> List[Team]:
+    async def list_for_user(self, user_id: str) -> list[Team]:
         stmt = (
             select(TeamORM)
             .join(TeamMemberORM, TeamMemberORM.team_id == TeamORM.id)
@@ -28,7 +24,7 @@ class DBTeamRepository(TeamRepository):
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
 
-    async def list_all(self, limit: int = 100, offset: int = 0) -> List[Team]:
+    async def list_all(self, limit: int = 100, offset: int = 0) -> list[Team]:
         stmt = select(TeamORM).order_by(TeamORM.created_at.desc()).limit(limit).offset(offset)
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
@@ -39,13 +35,11 @@ class DBTeamRepository(TeamRepository):
 
     async def count_members(self, team_id: str) -> int:
         result = await self.db_session.execute(
-            select(func.count())
-            .select_from(TeamMemberORM)
-            .where(TeamMemberORM.team_id == team_id),
+            select(func.count()).select_from(TeamMemberORM).where(TeamMemberORM.team_id == team_id),
         )
         return int(result.scalar_one() or 0)
 
-    async def count_members_by_teams(self, team_ids: List[str]) -> dict[str, int]:
+    async def count_members_by_teams(self, team_ids: list[str]) -> dict[str, int]:
         if not team_ids:
             return {}
         result = await self.db_session.execute(
@@ -66,11 +60,11 @@ class DBTeamRepository(TeamRepository):
     async def delete_by_id(self, team_id: str) -> None:
         await self.db_session.execute(delete(TeamORM).where(TeamORM.id == team_id))
 
-    async def get_member(self, team_id: str, user_id: str) -> Optional[TeamMember]:
+    async def get_member(self, team_id: str, user_id: str) -> TeamMember | None:
         record = await self.db_session.get(TeamMemberORM, {"team_id": team_id, "user_id": user_id})
         return record.to_domain() if record else None
 
-    async def list_members(self, team_id: str) -> List[TeamMember]:
+    async def list_members(self, team_id: str) -> list[TeamMember]:
         stmt = select(TeamMemberORM).where(TeamMemberORM.team_id == team_id)
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]

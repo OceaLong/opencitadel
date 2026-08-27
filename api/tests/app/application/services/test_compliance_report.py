@@ -1,14 +1,21 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import pytest
 
+from app.application.ports.queries import ComplianceEvidenceSnapshot
+from app.application.ports.reporting import ComplianceRuntimeValues
 from app.application.services.compliance_service import ComplianceService
 from app.domain.services.compliance.control_mapping import CONTROLS
+from tests.app.application_test_support import FakeReportRenderer
+from tests.runtime_policy_support import MutablePolicyReader
 
 
 class _FakeAudit:
     async def verify_chain(self, **kwargs):
-        return {"ok": True, "total": 0, "first_broken_seq": None, "checked_at": "2026-07-03T00:00:00Z"}
+        return {
+            "ok": True,
+            "total": 0,
+            "first_broken_seq": None,
+            "checked_at": "2026-07-03T00:00:00Z",
+        }
 
 
 class _FakeSession:
@@ -51,12 +58,7 @@ class _FakeSessionRepo:
         return 0
 
 
-class _FakeCheckpointRepo:
-    async def count_created_between(self, start_at, end_at):
-        return 0
-
-
-class _FakeLlmEndpointRepo:
+class _FakeInferenceEndpointRepo:
     async def list_hosts(self):
         return []
 
@@ -67,8 +69,7 @@ class _FakeUow:
         self.audit = _FakeAuditRepo()
         self.user = _FakeUserRepo()
         self.session = _FakeSessionRepo()
-        self.checkpoint = _FakeCheckpointRepo()
-        self.llm_endpoint = _FakeLlmEndpointRepo()
+        self.inference_endpoint = _FakeInferenceEndpointRepo()
 
     async def __aenter__(self):
         return self
@@ -77,27 +78,65 @@ class _FakeUow:
         return False
 
 
+class _FakeRunProjection:
+    async def execution_metrics(self, *, start_at=None, end_at=None):
+        return {
+            "run_count": 0,
+            "tool_activity_count": 0,
+            "approval_request_count": 0,
+            "activity_failure_count": 0,
+        }
+
+
+class _FakeEvidenceQuery:
+    async def collect(self, *, start_at=None, end_at=None):
+        del start_at, end_at
+        return ComplianceEvidenceSnapshot(
+            audit_count=0,
+            operator_scope_count=0,
+            operator_sessions=0,
+            auth_event_count=0,
+            role_distribution={},
+            inference_endpoint_hosts=(),
+            evidence_export_count=0,
+            admin_action_count=0,
+            redaction_sample_logs=(),
+            timestamp_chain_logs=(),
+        )
+
+
+def _service() -> ComplianceService:
+    return ComplianceService(
+        _FakeEvidenceQuery(),
+        _FakeAudit(),
+        _FakeRunProjection(),
+        ComplianceRuntimeValues(
+            sandbox_driver="docker",
+            metrics_token_configured=True,
+            audit_signing_key_id="primary",
+            signing_key_is_default=False,
+        ),
+        MutablePolicyReader(),
+        FakeReportRenderer(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_compliance_report_includes_all_controls(monkeypatch):
-    service = ComplianceService(lambda: _FakeUow(), _FakeAudit())
+    service = _service()
 
     async def _metrics(*args, **kwargs):
         return {
             "audit_count": 1,
-            "gate_approval_count": 0,
-            "tool_invoke_count": 0,
+            "run_count": 0,
+            "approval_request_count": 0,
+            "tool_activity_count": 0,
+            "activity_failure_count": 0,
             "operator_scope_count": 0,
             "operator_sessions": 0,
-            "rollback_count": 0,
-            "hitl_enabled": True,
-            "plan_gate": True,
-            "tool_gate": True,
-            "gate_profiles": ["standard"],
             "auth_event_count": 0,
             "role_distribution": {"admin": 1, "user": 3},
-            "agent_session_count": 0,
-            "checkpoint_count": 0,
-            "llm_endpoint_hosts": [],
+            "inference_endpoint_hosts": [],
             "evidence_export_count": 0,
             "admin_action_count": 0,
             "redaction_spot_check": [],
@@ -106,6 +145,13 @@ async def test_compliance_report_includes_all_controls(monkeypatch):
             "metrics_token_configured": True,
             "audit_signing_key_id": "primary",
             "signing_key_is_default": False,
+            "runtime_policy": {
+                "head_version": 1,
+                "execution_revision_id": "execution-1",
+                "execution_digest": "sha256:" + "a" * 64,
+                "operations_revision_id": "operations-1",
+                "operations_digest": "sha256:" + "b" * 64,
+            },
         }
 
     monkeypatch.setattr(service, "_collect_metrics", _metrics)
@@ -117,6 +163,13 @@ async def test_compliance_report_includes_all_controls(monkeypatch):
     ] + report["summary"]["not_verified"] + report["summary"]["na"] == len(CONTROLS)
     for item in report["controls"]:
         assert item["status"] in ("pass", "gap", "attention", "not_verified", "na")
+    assert set(report["runtime_policy"]) == {
+        "head_version",
+        "execution_revision_id",
+        "execution_digest",
+        "operations_revision_id",
+        "operations_digest",
+    }
 
     md = service.render_markdown(report)
     assert "合规审计报告" in md
@@ -136,24 +189,21 @@ async def test_collect_metrics_returns_every_key_the_evaluators_read():
     updating the evaluator (or vice versa) makes this test fail, instead of
     only surfacing as a silent `KeyError`/`None` read in production.
     """
-    service = ComplianceService(lambda: _FakeUow(), _FakeAudit())
+    service = _service()
 
     metrics = await service._collect_metrics(None, None)
 
     expected_keys = {
         "audit_count",
-        "gate_approval_count",
-        "tool_invoke_count",
+        "run_count",
+        "approval_request_count",
+        "tool_activity_count",
+        "activity_failure_count",
         "operator_scope_count",
         "operator_sessions",
-        "hitl_enabled",
-        "plan_gate",
-        "gate_profiles",
         "auth_event_count",
         "role_distribution",
-        "agent_session_count",
-        "checkpoint_count",
-        "llm_endpoint_hosts",
+        "inference_endpoint_hosts",
         "evidence_export_count",
         "admin_action_count",
         "redaction_spot_check",
@@ -162,5 +212,6 @@ async def test_collect_metrics_returns_every_key_the_evaluators_read():
         "metrics_token_configured",
         "audit_signing_key_id",
         "signing_key_is_default",
+        "runtime_policy",
     }
     assert expected_keys <= metrics.keys()

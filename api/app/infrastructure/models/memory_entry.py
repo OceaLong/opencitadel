@@ -1,60 +1,65 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import List, Optional
 
-from sqlalchemy import String, Integer, DateTime, Text, text, ForeignKey
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base
+from ...domain.models.inference import PLATFORM_EMBEDDING_DIMENSIONS
 from ...domain.models.memory_entry import MemoryEntry, MemoryScope, MemorySource
+from .base import Base
 
 try:
     from pgvector.sqlalchemy import Vector
 except ImportError:  # pragma: no cover
     Vector = None  # type: ignore[misc, assignment]
 
-_EMBEDDING_DIM = 1536
-
 
 class MemoryEntryORM(Base):
     """长期记忆ORM"""
+
     __tablename__ = "memory_entries"
+    __table_args__ = (
+        Index(
+            "ix_memory_entries_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     scope: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'global'"))
-    session_id: Mapped[Optional[str]] = mapped_column(
+    session_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("sessions.id", ondelete="CASCADE"),
         nullable=True,
     )
     title: Mapped[str] = mapped_column(String(512), nullable=False, server_default=text("''"))
     content: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    tags: Mapped[List[str]] = mapped_column(
+    tags: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
-    owner_user_id: Mapped[Optional[str]] = mapped_column(
+    owner_user_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
-    team_id: Mapped[Optional[str]] = mapped_column(
+    team_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("teams.id", ondelete="SET NULL"),
         nullable=True,
     )
     source: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'manual'"))
-    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     use_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
-    embedding: Mapped[Optional[List[float]]] = mapped_column(
-        Vector(_EMBEDDING_DIM) if Vector is not None else JSONB,
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(PLATFORM_EMBEDDING_DIMENSIONS) if Vector is not None else JSONB,
         nullable=True,
     )
 

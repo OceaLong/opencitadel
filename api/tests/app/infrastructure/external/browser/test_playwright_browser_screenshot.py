@@ -1,13 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from app.infrastructure.external.browser.playwright_browser import PlaywrightBrowser
 
 
 async def _test_view_page_always_returns_text_content():
-    browser = PlaywrightBrowser("http://127.0.0.1:9222", supports_multimodal=True)
+    browser = PlaywrightBrowser("http://127.0.0.1:9222", vision_enabled=True)
     browser._ensure_page = AsyncMock()
     browser.wait_for_page_load = AsyncMock()
     browser._extract_interactive_elements = AsyncMock(return_value=["0:<button>Go</button>"])
@@ -24,11 +22,12 @@ def test_view_page_always_returns_text_content():
 
 
 async def _test_take_screenshot_returns_base64_when_multimodal():
-    browser = PlaywrightBrowser("http://127.0.0.1:9222", supports_multimodal=True)
-    with patch.object(browser, "_ensure_page", AsyncMock()), patch.object(
-            browser, "wait_for_page_load", AsyncMock()
-    ), patch.object(browser, "screenshot", AsyncMock(return_value=b"png-bytes")), patch.object(
-            browser, "_extract_interactive_elements", AsyncMock(return_value=[])
+    browser = PlaywrightBrowser("http://127.0.0.1:9222", vision_enabled=True)
+    with (
+        patch.object(browser, "_ensure_page", AsyncMock()),
+        patch.object(browser, "wait_for_page_load", AsyncMock()),
+        patch.object(browser, "screenshot", AsyncMock(return_value=b"png-bytes")),
+        patch.object(browser, "_extract_interactive_elements", AsyncMock(return_value=[])),
     ):
         result = await browser.take_screenshot()
     assert result.success is True
@@ -40,7 +39,7 @@ def test_take_screenshot_returns_base64_when_multimodal():
 
 
 async def _test_take_screenshot_rejects_non_multimodal():
-    browser = PlaywrightBrowser("http://127.0.0.1:9222", supports_multimodal=False)
+    browser = PlaywrightBrowser("http://127.0.0.1:9222", vision_enabled=False)
     result = await browser.take_screenshot()
     assert result.success is False
 

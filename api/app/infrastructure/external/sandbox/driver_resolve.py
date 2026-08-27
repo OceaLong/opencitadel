@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Sandbox driver name resolution without circular imports."""
+
 from __future__ import annotations
 
 import os

@@ -1,24 +1,19 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import io
 import json
 import zipfile
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import ValidationError
 
-from app.domain.errors import BadRequestError
 from app.application.services.codebase_service import CodebaseService
+from app.domain.errors import BadRequestError
 from app.domain.models.codebase import CodebaseSourceType
 from app.domain.models.file import File
+from app.domain.models.inference import EmbeddingModelSettings
 from app.domain.models.scope import OwnerScope
 from app.interfaces.schemas.codebase import CreateCodebaseRequest
-
-
-class _FakeTaskState:
-    def __init__(self):
-        self.register_task = AsyncMock()
 
 
 class _CodebaseRepo:
@@ -37,12 +32,14 @@ class _FileRepo:
         file = self.files.get(file_id)
         if file is None:
             return None
-        if scope and scope.type.value == "personal":
-            if file.owner_user_id != scope.user_id or file.team_id is not None:
-                return None
-        if scope and scope.type.value == "team":
-            if file.team_id != scope.team_id:
-                return None
+        if (
+            scope
+            and scope.type.value == "personal"
+            and (file.owner_user_id != scope.user_id or file.team_id is not None)
+        ):
+            return None
+        if scope and scope.type.value == "team" and file.team_id != scope.team_id:
+            return None
         return file
 
     async def list_by_ids(self, file_ids, scope=None):
@@ -58,9 +55,15 @@ class _Uow:
     def __init__(self, codebase_repo: _CodebaseRepo, file_repo: _FileRepo):
         self.codebase = codebase_repo
         self.file = file_repo
+        self.execution_commands = MagicMock()
+        self.codebase_version = MagicMock()
+        self.codebase_version.add_version = AsyncMock(side_effect=lambda version: version)
 
     async def __aenter__(self):
         return self
+
+    async def commit(self):
+        return None
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
@@ -86,12 +89,25 @@ def _zip_bytes(entries: dict[str, str]) -> bytes:
 def _service(files: dict[str, File], payloads: dict[str, bytes] | None = None):
     codebase_repo = _CodebaseRepo()
     file_repo = _FileRepo(files)
+    admission = MagicMock()
+    admission.admit = AsyncMock()
+    inference_bindings = MagicMock()
+    inference_bindings.resolve = AsyncMock(
+        return_value=SimpleNamespace(
+            id="embedding-1",
+            model=SimpleNamespace(settings=EmbeddingModelSettings()),
+        )
+    )
     service = CodebaseService(
         uow_factory=lambda: _Uow(codebase_repo, file_repo),
-        sandbox_cls=MagicMock(),
+        sandbox_factory=MagicMock(),
         file_storage=_Storage(payloads or {}),
+        run_admission_service=admission,
+        run_control_service=AsyncMock(),
+        run_projection=AsyncMock(),
+        inference_bindings=inference_bindings,
     )
-    service._task_state = _FakeTaskState()  # type: ignore[method-assign]
+    service._test_admission = admission
     return service, codebase_repo
 
 
@@ -109,12 +125,8 @@ def test_missing_source_payload_is_rejected_by_schema(payload):
 
 
 @pytest.mark.asyncio
-async def test_invalid_git_source_is_rejected_before_persistence(monkeypatch):
+async def test_invalid_git_source_is_rejected_before_persistence():
     service, repo = _service({})
-    monkeypatch.setattr(
-        "app.application.services.codebase_service.RedisStreamTask.dispatch_to_worker",
-        AsyncMock(),
-    )
 
     with pytest.raises(BadRequestError):
         await service.create_codebase(
@@ -125,18 +137,12 @@ async def test_invalid_git_source_is_rejected_before_persistence(monkeypatch):
         )
 
     assert repo.saved == []
-    service._task_state.register_task.assert_not_awaited()
+    service._test_admission.admit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_unowned_file_source_is_rejected_before_persistence(monkeypatch):
-    service, repo = _service(
-        {"file-1": File(id="file-1", owner_user_id="other")}
-    )
-    monkeypatch.setattr(
-        "app.application.services.codebase_service.RedisStreamTask.dispatch_to_worker",
-        AsyncMock(),
-    )
+async def test_unowned_file_source_is_rejected_before_persistence():
+    service, repo = _service({"file-1": File(id="file-1", owner_user_id="other")})
 
     with pytest.raises(BadRequestError):
         await service.create_codebase(
@@ -147,18 +153,14 @@ async def test_unowned_file_source_is_rejected_before_persistence(monkeypatch):
         )
 
     assert repo.saved == []
-    service._task_state.register_task.assert_not_awaited()
+    service._test_admission.admit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_zip_is_downloaded_and_validated_before_persistence(monkeypatch):
+async def test_zip_is_downloaded_and_validated_before_persistence():
     service, repo = _service(
         {"zip-1": File(id="zip-1", owner_user_id="owner")},
         {"zip-1": _zip_bytes({"../escape.py": "x"})},
-    )
-    monkeypatch.setattr(
-        "app.application.services.codebase_service.RedisStreamTask.dispatch_to_worker",
-        AsyncMock(),
     )
 
     with pytest.raises(BadRequestError):
@@ -170,20 +172,16 @@ async def test_zip_is_downloaded_and_validated_before_persistence(monkeypatch):
         )
 
     assert repo.saved == []
-    service._task_state.register_task.assert_not_awaited()
+    service._test_admission.admit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_valid_files_source_is_deduplicated_and_serialized(monkeypatch):
+async def test_valid_files_source_is_deduplicated_and_serialized():
     service, repo = _service(
         {
             "file-1": File(id="file-1", owner_user_id="owner"),
             "file-2": File(id="file-2", owner_user_id="owner"),
         }
-    )
-    monkeypatch.setattr(
-        "app.application.services.codebase_service.RedisStreamTask.dispatch_to_worker",
-        AsyncMock(),
     )
 
     codebase = await service.create_codebase(
@@ -194,4 +192,5 @@ async def test_valid_files_source_is_deduplicated_and_serialized(monkeypatch):
     )
 
     assert json.loads(codebase.source_ref) == {"file_ids": ["file-1", "file-2"]}
-    assert len(repo.saved) == 2
+    assert len(repo.saved) == 1
+    service._test_admission.admit.assert_awaited_once()

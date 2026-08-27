@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Shared tokenizer for Chinese-friendly PostgreSQL simple tsvector."""
+
 import re
 
 _SPACE_RE = re.compile(r"\s+")

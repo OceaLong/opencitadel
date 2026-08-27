@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """ShellService 行为测试（侦察 §5.3 B/C/D 点）。"""
+
 import asyncio
 
 from app.services.shell import ShellService

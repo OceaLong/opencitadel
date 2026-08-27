@@ -1,0 +1,20 @@
+{{- if .Values.autoscaling.executionKernel.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "opencitadel.fullname" . }}-execution-kernel
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "opencitadel.fullname" . }}-execution-kernel
+  minReplicas: {{ .Values.autoscaling.executionKernel.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.executionKernel.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.executionKernel.targetCPUUtilizationPercentage }}
+{{- end }}

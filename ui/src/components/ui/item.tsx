@@ -126,12 +126,4 @@ function ItemActions({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-export {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-};
+export { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle };

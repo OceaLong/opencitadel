@@ -1,12 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Immutable knowledge-base version, revision, and manifest values."""
+
 import uuid
 from collections.abc import Mapping
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import (
     BaseModel,
@@ -21,10 +20,7 @@ def _deep_freeze(value: Any) -> Any:
     if isinstance(value, FrozenMapping):
         return value
     if isinstance(value, Mapping):
-        return FrozenMapping(
-            (key, _deep_freeze(nested))
-            for key, nested in value.items()
-        )
+        return FrozenMapping((key, _deep_freeze(nested)) for key, nested in value.items())
     if isinstance(value, (list, tuple)):
         return tuple(_deep_freeze(item) for item in value)
     if isinstance(value, (set, frozenset)):
@@ -35,10 +31,7 @@ def _deep_freeze(value: Any) -> Any:
 def mutable_json_value(value: Any) -> Any:
     """Return JSON-native defensive data at a persistence boundary."""
     if isinstance(value, Mapping):
-        return {
-            key: mutable_json_value(nested)
-            for key, nested in value.items()
-        }
+        return {key: mutable_json_value(nested) for key, nested in value.items()}
     if isinstance(value, (tuple, list)):
         return [mutable_json_value(item) for item in value]
     if isinstance(value, (set, frozenset)):
@@ -56,12 +49,7 @@ class FrozenMapping(Mapping):
         object.__setattr__(
             self,
             "_data",
-            MappingProxyType(
-                {
-                    key: _deep_freeze(value)
-                    for key, value in mutable.items()
-                }
-            ),
+            MappingProxyType({key: _deep_freeze(value) for key, value in mutable.items()}),
         )
 
     def __getitem__(self, key: Any) -> Any:
@@ -76,7 +64,7 @@ class FrozenMapping(Mapping):
     def __repr__(self) -> str:
         return repr(dict(self._data))
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, Mapping):
             return False
         return dict(self.items()) == dict(other.items())
@@ -94,14 +82,14 @@ class FrozenMapping(Mapping):
         return self
 
 
-class KnowledgeVersionState(str, Enum):
+class KnowledgeVersionState(StrEnum):
     BUILDING = "building"
     READY = "ready"
     DEGRADED = "degraded"
     FAILED = "failed"
 
 
-class DocumentRevisionState(str, Enum):
+class DocumentRevisionState(StrEnum):
     UPLOADED = "uploaded"
     PARSING = "parsing"
     PARSED = "parsed"
@@ -115,16 +103,15 @@ class KnowledgeBaseVersion(BaseModel):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     knowledge_base_id: str
-    parent_version_id: Optional[str] = None
-    build_id: Optional[str] = None
+    parent_version_id: str | None = None
+    build_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    request_key: str = Field(default_factory=lambda: uuid.uuid4().hex * 2)
     state: KnowledgeVersionState = KnowledgeVersionState.BUILDING
     capabilities: FrozenMapping = Field(default_factory=FrozenMapping)
     degraded_reasons: tuple[str, ...] = ()
     metrics: FrozenMapping = Field(default_factory=FrozenMapping)
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
-    published_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    published_at: datetime | None = None
 
     @field_validator("capabilities", "metrics", mode="before")
     @classmethod
@@ -151,16 +138,9 @@ class KnowledgeDocumentRevision(BaseModel):
     parsed_blocks: tuple[Any, ...] = ()
     page_count: int = 0
     state: DocumentRevisionState = DocumentRevisionState.UPLOADED
-    # c7 imported already-indexed legacy rows without durable parse blocks.
-    # The marker belongs to the immutable content revision (rather than one
-    # version generation) so every descendant manifest that reuses the exact
-    # revision can safely clone its durable chunks without regressing state.
-    needs_chunk_clone: bool = False
-    error: Optional[str] = None
-    warning: Optional[str] = None
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    error: str | None = None
+    warning: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("parsed_blocks", mode="before")
     @classmethod
@@ -180,5 +160,5 @@ class KnowledgeVersionDocument(BaseModel):
     document_revision_id: str
     ordinal: int
     state: DocumentRevisionState = DocumentRevisionState.UPLOADED
-    error: Optional[str] = None
-    warning: Optional[str] = None
+    error: str | None = None
+    warning: str | None = None

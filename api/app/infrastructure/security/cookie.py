@@ -1,24 +1,19 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import secrets
 
 from starlette.responses import Response
 
-
-ACCESS_COOKIE = "access_token"
-REFRESH_COOKIE = "refresh_token"
-CSRF_COOKIE = "csrf_token"
+from app.application.ports.crypto import ACCESS_COOKIE, CSRF_COOKIE, REFRESH_COOKIE
 
 
 class AuthCookieManager:
     def __init__(
-            self,
-            *,
-            domain: str | None = None,
-            secure: bool = True,
-            same_site: str = "lax",
-            access_max_age: int = 900,
-            refresh_max_age: int = 60 * 60 * 24 * 30,
+        self,
+        *,
+        domain: str | None = None,
+        secure: bool = True,
+        same_site: str = "lax",
+        access_max_age: int = 900,
+        refresh_max_age: int = 60 * 60 * 24 * 30,
     ) -> None:
         self.domain = domain or None
         self.secure = secure

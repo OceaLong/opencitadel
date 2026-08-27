@@ -57,6 +57,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-opencitadel}
       OPENCITADEL_APP_USER: ${POSTGRES_USER:-opencitadel_app}
       OPENCITADEL_APP_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      OPENCITADEL_MIGRATION_USER: ${POSTGRES_MIGRATION_USER:-opencitadel_migration_runtime}
+      OPENCITADEL_MIGRATION_PASSWORD: ${POSTGRES_MIGRATION_PASSWORD:?POSTGRES_MIGRATION_PASSWORD must be set}
+      OPENCITADEL_KERNEL_USER: ${POSTGRES_KERNEL_USER:-opencitadel_execution_kernel_runtime}
+      OPENCITADEL_KERNEL_PASSWORD: ${POSTGRES_KERNEL_PASSWORD:?POSTGRES_KERNEL_PASSWORD must be set}
     command:
       - postgres
       - -c
@@ -221,10 +225,6 @@ services:
       SANDBOX_IMAGE: opencitadel-sandbox
       SANDBOX_NAME_PREFIX: opencitadel-sandbox
       SANDBOX_NETWORK: opencitadel-sandbox-network
-      SANDBOX_TTL_MINUTES: "20"
-      SANDBOX_MEMORY_LIMIT: 1g
-      SANDBOX_CPU_LIMIT: "2"
-      SANDBOX_PIDS_LIMIT: "512"
       SANDBOX_HTTP_PROXY: http://opencitadel-sandbox-egress:3128
       SANDBOX_HTTPS_PROXY: http://opencitadel-sandbox-egress:3128
       SANDBOX_NO_PROXY: localhost,127.0.0.1
@@ -259,6 +259,9 @@ services:
     mem_limit: 512m
     env_file:
       - ${OPENCITADEL_ENV_FILE:-.env}
+    environment:
+      POSTGRES_ADMIN_USER: ${POSTGRES_MIGRATION_USER:-opencitadel_migration_runtime}
+      POSTGRES_ADMIN_PASSWORD: ${POSTGRES_MIGRATION_PASSWORD:?POSTGRES_MIGRATION_PASSWORD must be set}
     depends_on:
       opencitadel-postgres:
         condition: service_healthy
@@ -281,19 +284,24 @@ services:
     image: opencitadel-api
     container_name: opencitadel-api
     restart: unless-stopped
+    stop_grace_period: 45s
     mem_limit: 640m
     mem_reservation: 384m
     cpus: "2.00"
     env_file:
       - ${OPENCITADEL_ENV_FILE:-.env}
     environment:
+      POSTGRES_ADMIN_USER: ""
+      POSTGRES_ADMIN_PASSWORD: ""
+      POSTGRES_MIGRATION_USER: ""
+      POSTGRES_MIGRATION_PASSWORD: ""
+      POSTGRES_KERNEL_USER: ""
+      POSTGRES_KERNEL_PASSWORD: ""
       SANDBOX_BROKER_URL: http://opencitadel-sandbox-broker:8090
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    volumes:
-      - ./api/config.yaml:/app/config.yaml:ro
     depends_on:
       opencitadel-redis:
         condition: service_healthy
@@ -307,43 +315,48 @@ services:
       - opencitadel-network
       - opencitadel-sandbox-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/status"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health/ready"]
       interval: 15s
       timeout: 10s
       retries: 5
       start_period: 20s
 
-  # ==================== Agent Worker ====================
+  # ==================== Universal Execution Kernel ====================
 
-  opencitadel-worker:
+  opencitadel-execution-kernel:
     build:
       context: ./api
       dockerfile: Dockerfile
-      target: worker
+      target: execution-kernel
       args:
         <<: *pip-build-args
         # 本地 compose 使用 docker 驱动沙箱,不需要 kubernetes SDK;CI/发布构建不传此参数,默认 1(全功能)
         WITH_K8S: "0"
-    image: opencitadel-worker
-    container_name: opencitadel-worker
+    image: opencitadel-execution-kernel
+    container_name: opencitadel-execution-kernel
     restart: unless-stopped
+    stop_grace_period: 45s
     mem_limit: 1024m
     mem_reservation: 512m
     cpus: "2.00"
     env_file:
       - ${OPENCITADEL_ENV_FILE:-.env}
     environment:
+      POSTGRES_USER: ${POSTGRES_KERNEL_USER:-opencitadel_execution_kernel_runtime}
+      POSTGRES_PASSWORD: ${POSTGRES_KERNEL_PASSWORD:?POSTGRES_KERNEL_PASSWORD must be set}
+      POSTGRES_ADMIN_USER: ""
+      POSTGRES_ADMIN_PASSWORD: ""
+      POSTGRES_MIGRATION_USER: ""
+      POSTGRES_MIGRATION_PASSWORD: ""
       SANDBOX_BROKER_URL: http://opencitadel-sandbox-broker:8090
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    volumes:
-      - ./api/config.yaml:/app/config.yaml:ro
     expose:
       - "9108"
     depends_on:
       opencitadel-redis:
-        condition: service_healthy
+        condition: service_started
       opencitadel-postgres:
         condition: service_healthy
       opencitadel-migrate:
@@ -353,12 +366,13 @@ services:
     networks:
       - opencitadel-network
       - opencitadel-sandbox-network
-    command: ["./worker.sh"]
+    command: ["python", "-m", "app.execution_kernel_main"]
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import os, redis; redis.Redis(host=os.getenv('REDIS_HOST','localhost'), port=int(os.getenv('REDIS_PORT','6379')), password=os.getenv('REDIS_PASSWORD') or None).ping()\""]
+      test: ["CMD", "python", "-m", "app.execution_kernel_health", "readiness"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 15s
 
   # ==================== 前端 UI ====================
 

@@ -1,13 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Import Claude/Cursor SKILL.md into OpenCitadel Skill model."""
+
 from __future__ import annotations
 
 import re
-from typing import Optional, Tuple
 
 from app.domain.models.skill import Skill
-
+from app.domain.utils.slug import slugify
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)$", re.DOTALL)
 
@@ -43,9 +41,8 @@ def parse_skill_md(content: str, *, slug: str = "") -> Skill:
     )
 
 
-def import_skill_md(content: str, *, slug: Optional[str] = None) -> Skill:
+def import_skill_md(content: str, *, slug: str | None = None) -> Skill:
     skill = parse_skill_md(content, slug=slug or "")
     if not skill.slug:
-        from app.application.services.skill_service import SkillService
-        skill.slug = SkillService._slugify(skill.name)
+        skill.slug = slugify(skill.name, fallback="skill")
     return skill

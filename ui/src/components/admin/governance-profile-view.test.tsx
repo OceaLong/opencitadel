@@ -16,73 +16,66 @@ const profile: GovernanceProfile = {
     id: "s1",
     title: "t",
     status: "failed",
-    gate_profile: "strict",
     operator_scope: "owned",
+    operator_domains: ["example.com"],
     created_at: "2026-08-04T00:00:00Z",
     updated_at: "2026-08-04T01:00:00Z",
   },
-  chain: { verified: true, checked_entries: 3 },
+  chain: { verified: true, checked_runs: 1, checked_entries: 7 },
+  runs: [
+    {
+      run_id: "run-1",
+      family: "agent",
+      status: "failed",
+      created_at: "2026-08-04T00:00:00Z",
+      updated_at: "2026-08-04T01:00:00Z",
+      terminal_at: "2026-08-04T01:00:00Z",
+    },
+  ],
   approvals: [
     {
-      action: "agent_tool_reject",
-      decision: "reject",
-      actor_user_id: "u1",
-      created_at: "2026-08-04T00:30:00Z",
-      pending_phase: "TOOL_APPROVAL_PHASE",
-      tool: "shell_exec",
-      approval_batch_id: "b1",
+      approval_id: "approval-1",
+      run_id: "run-1",
+      approval_kind: "tool_effect",
+      subject_activity_id: "activity-1",
+      subject_label: "shell_exec",
+      risk_summary: "external write",
+      status: "rejected",
+      decision: "rejected",
+      decided_by_user_id: "u1",
       feedback: "risky",
+      requested_at: "2026-08-04T00:29:00Z",
+      decided_at: "2026-08-04T00:30:00Z",
     },
   ],
-  gate_hits: [
+  activities: [
     {
-      tool: "shell_exec",
-      gated: true,
-      gate_profile: "strict",
-      created_at: "2026-08-04T00:29:00Z",
-    },
-  ],
-  checkpoints: [
-    { id: "c1", anchor_type: "step", label: "before-shell", created_at: "2026-08-04T00:28:00Z" },
-  ],
-  terminal: { status: "failed", reached_at: "2026-08-04T01:00:00Z" },
-  denials: [
-    {
-      tool: "write_file",
-      layer: "execution",
-      reason: "当前会话策略禁止工具[write_file]",
-      created_at: "2026-08-04T00:27:00Z",
+      activity_id: "activity-1",
+      run_id: "run-1",
+      activity_type: "tool.call",
+      status: "failed",
+      attempt: 1,
+      failure_code: "ACTIVITY_HANDLER_ERROR",
+      created_at: "2026-08-04T00:31:00Z",
+      terminal_at: "2026-08-04T00:32:00Z",
     },
   ],
 };
 
 describe("GovernanceProfileView", () => {
-  afterEach(() => {
-    document.body.replaceChildren();
-  });
+  afterEach(() => document.body.replaceChildren());
 
-  it("renders approvals, gate hits, checkpoints and terminal state", async () => {
+  it("renders formal runs, approvals, activities and verified chain counts", async () => {
     const { container, unmount } = await renderComponent(
       <GovernanceProfileView profile={profile} />,
     );
 
     const text = container.textContent ?? "";
+    expect(text).toContain("run-1");
     expect(text).toContain("shell_exec");
-    expect(text.toLowerCase()).toContain("reject");
-    expect(text).toContain("before-shell");
-    expect(text.toLowerCase()).toContain("failed");
-    await unmount();
-  });
-
-  it("renders policy denials with tool, layer and reason", async () => {
-    const { container, unmount } = await renderComponent(
-      <GovernanceProfileView profile={profile} />,
-    );
-
-    const text = container.textContent ?? "";
-    expect(text).toContain("write_file");
-    expect(text).toContain("execution");
-    expect(text).toContain("当前会话策略禁止工具[write_file]");
+    expect(text).toContain("tool.call");
+    expect(text).toContain("ACTIVITY_HANDLER_ERROR");
+    expect(text).toContain("example.com");
     await unmount();
   });
 
@@ -93,45 +86,24 @@ describe("GovernanceProfileView", () => {
     ["pending", "secondary"],
     ["running", "secondary"],
     ["waiting", "secondary"],
-  ] as const)(
-    "colors the terminal status badge %s as %s",
-    async (status, expectedVariant) => {
-      const statusProfile: GovernanceProfile = {
-        ...profile,
-        terminal: { status, reached_at: "2026-08-04T01:00:00Z" },
-      };
-      const { container, unmount } = await renderComponent(
-        <GovernanceProfileView profile={statusProfile} />,
-      );
-
-      const badge = container.querySelector('[data-testid="terminal-status-badge"]');
-      expect(badge?.textContent).toBe(status);
-      expect(badge?.getAttribute("data-variant")).toBeNull();
-      if (expectedVariant === "success") {
-        expect(badge?.className).toContain("bg-success");
-      } else if (expectedVariant === "destructive") {
-        expect(badge?.className).toContain("bg-destructive/15");
-      } else {
-        expect(badge?.className).toContain("bg-muted");
-      }
-      await unmount();
-    },
-  );
-
-  it("renders empty states when profile sections have no data", async () => {
-    const emptyProfile: GovernanceProfile = {
-      ...profile,
-      approvals: [],
-      gate_hits: [],
-      checkpoints: [],
-      denials: [],
-    };
+  ] as const)("colors session status %s as %s", async (status, expectedVariant) => {
     const { container, unmount } = await renderComponent(
-      <GovernanceProfileView profile={emptyProfile} />,
+      <GovernanceProfileView profile={{ ...profile, session: { ...profile.session, status } }} />,
     );
+    const badge = container.querySelector('[data-testid="session-status-badge"]');
+    expect(badge?.textContent).toBe(status);
+    if (expectedVariant === "success") expect(badge?.className).toContain("bg-success");
+    else if (expectedVariant === "destructive")
+      expect(badge?.className).toContain("bg-destructive/15");
+    else expect(badge?.className).toContain("bg-muted");
+    await unmount();
+  });
 
-    const text = container.textContent ?? "";
-    expect(text).toContain("noData");
+  it("renders empty states when all formal timelines are empty", async () => {
+    const { container, unmount } = await renderComponent(
+      <GovernanceProfileView profile={{ ...profile, runs: [], approvals: [], activities: [] }} />,
+    );
+    expect(container.textContent).toContain("noData");
     await unmount();
   });
 });

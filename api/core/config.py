@@ -1,10 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from functools import lru_cache
 import ipaddress
 from urllib.parse import quote_plus
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_LOCAL_URI = "postgresql+asyncpg://postgres:postgres@localhost:5432/opencitadel"
@@ -21,14 +18,17 @@ def _looks_like_placeholder(value: str) -> bool:
     return any(marker in normalized for marker in _PLACEHOLDER_MARKERS)
 
 
-class Settings(BaseSettings):
-    """启动引导与密钥配置，从 .env 或环境变量加载。行为类配置见 config.yaml。"""
+class DeploymentSettings(BaseSettings):
+    """Restart-bound process topology, connectivity, and secrets."""
 
     # 项目基础
     env: str = "development"
     log_level: str = "INFO"
     log_format: str = "text"  # text | json
-    app_config_filepath: str = "config.yaml"
+    cors_origins: str = "*"
+    otel_enabled: bool = False
+    otel_service_name: str = "opencitadel-api"
+    otel_exporter_endpoint: str = ""
     api_key_secret: str = "opencitadel-api-key-secret-change-in-production"
     api_key_secret_id: str = "primary"
     api_key_previous_secrets: dict[str, str] = Field(default_factory=dict)
@@ -39,6 +39,26 @@ class Settings(BaseSettings):
     session_secret: str = "opencitadel-session-secret-change-in-production"
     sandbox_broker_url: str = ""
     sandbox_broker_token: str = ""
+    sandbox_driver: str = "auto"
+    sandbox_address: str = ""
+    sandbox_image: str = ""
+    sandbox_name_prefix: str = ""
+    sandbox_network: str = ""
+    sandbox_chrome_args: str = ""
+    sandbox_https_proxy: str = ""
+    sandbox_http_proxy: str = ""
+    sandbox_no_proxy: str = ""
+    sandbox_k8s_namespace: str = "default"
+    sandbox_k8s_pod_label: str = "app=opencitadel-sandbox"
+    policy_head_refresh_interval_seconds: float = 5.0
+    policy_max_staleness_seconds: float = 30.0
+    shutdown_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices(
+            "OPENCITADEL_SHUTDOWN_TIMEOUT_SECONDS",
+            "shutdown_timeout_seconds",
+        ),
+    )
     # 8090/8091: bundled Ops Patrol Collector/Actuator (docker-compose.yml), the
     # only registered-MCP-server ports outside the plain HTTP/HTTPS defaults.
     outbound_allowed_ports: str = "80,443,8080,8443,8090,8091,11434"
@@ -54,8 +74,14 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     github_client_id: str = ""
     github_client_secret: str = ""
-    bootstrap_admin_email: str = "admin@example.com"
+    # Administrator seeding is opt-in. Deployment manifests and .env.example
+    # configure the initial account explicitly; library/test startup remains
+    # valid without silently assuming an identity whose password is unknown.
+    bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
+    # Fixture replay is a process-local test/demo mechanism, never a runtime
+    # product capability and never allowed when ENV=production.
+    patrol_fixture_replay_enabled: bool = False
 
     # 数据库连接（引导层，启动前必须可用）
     postgres_user: str = "postgres"
@@ -63,6 +89,9 @@ class Settings(BaseSettings):
     postgres_db: str = "opencitadel"
     postgres_host: str = "localhost"
     sqlalchemy_database_uri: str = ""
+    postgres_admin_user: str = "postgres"
+    postgres_admin_password: str = ""
+    sqlalchemy_migration_database_uri: str = ""
     sqlalchemy_echo: bool = False
     postgres_pool_size: int = 5
     postgres_max_overflow: int = 5
@@ -93,18 +122,10 @@ class Settings(BaseSettings):
     minio_secure: bool = False
     minio_public_endpoint: str = ""
 
-    # 嵌入 / 可观测性密钥
-    embedding_api_key: str = ""
-    langfuse_public_key: str = ""
-    langfuse_secret_key: str = ""
-
     # Prometheus 指标：metrics_token 为空表示 /api/metrics 关闭（404，fail-closed）；
-    # worker_metrics_port 为 0 表示 worker 侧 metrics HTTP server 关闭。
+    # execution_kernel_metrics_port 为 0 表示执行内核指标端口关闭。
     metrics_token: str = ""
-    worker_metrics_port: int = 9108
-
-    # 应用配置存储：false=本地 config.yaml，true=PostgreSQL app_configs 表
-    use_db_app_config: bool = True
+    execution_kernel_metrics_port: int = 9108
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -113,7 +134,7 @@ class Settings(BaseSettings):
     )
 
     @model_validator(mode="after")
-    def derive_sqlalchemy_database_uri(self) -> "Settings":
+    def derive_sqlalchemy_database_uri(self) -> "DeploymentSettings":
         uri = (self.sqlalchemy_database_uri or "").strip()
         if not uri or uri == _DEFAULT_LOCAL_URI:
             user = quote_plus(self.postgres_user)
@@ -141,13 +162,9 @@ class Settings(BaseSettings):
             for field in secret_fields:
                 value = getattr(self, field)
                 if len(value) < 32:
-                    raise ValueError(
-                        f"{field} must contain at least 32 characters in production"
-                    )
+                    raise ValueError(f"{field} must contain at least 32 characters in production")
                 if _looks_like_placeholder(value):
-                    raise ValueError(
-                        f"{field} must not contain a placeholder value in production"
-                    )
+                    raise ValueError(f"{field} must not contain a placeholder value in production")
             secret_values = [getattr(self, field) for field in secret_fields]
             if len(set(secret_values)) != len(secret_values):
                 raise ValueError(
@@ -163,22 +180,17 @@ class Settings(BaseSettings):
                     "sandbox_broker_token must contain at least 32 characters "
                     "when sandbox_broker_url is configured"
                 )
-            if self.sandbox_broker_url and _looks_like_placeholder(
-                self.sandbox_broker_token
-            ):
+            if self.sandbox_broker_url and _looks_like_placeholder(self.sandbox_broker_token):
                 raise ValueError(
-                    "sandbox_broker_token must not contain a placeholder value "
-                    "in production"
+                    "sandbox_broker_token must not contain a placeholder value in production"
                 )
             if not self.cookie_secure:
                 raise ValueError("cookie_secure must be true in production")
-            if (
-                len(self.bootstrap_admin_password) < 12
-                or _looks_like_placeholder(self.bootstrap_admin_password)
+            if len(self.bootstrap_admin_password) < 12 or _looks_like_placeholder(
+                self.bootstrap_admin_password
             ):
                 raise ValueError(
-                    "bootstrap_admin_password must contain at least 12 "
-                    "characters in production"
+                    "bootstrap_admin_password must contain at least 12 characters in production"
                 )
             if (
                 self.postgres_password == "postgres"
@@ -194,9 +206,7 @@ class Settings(BaseSettings):
                 or len(self.redis_password) < 16
                 or _looks_like_placeholder(self.redis_password)
             ):
-                raise ValueError(
-                    "redis_password must contain at least 16 characters in production"
-                )
+                raise ValueError("redis_password must contain at least 16 characters in production")
         try:
             for value in self.trusted_proxy_cidrs.split(","):
                 if value.strip():
@@ -213,16 +223,43 @@ class Settings(BaseSettings):
             raise ValueError("outbound_allowed_ports must contain integers") from exc
         if not ports or any(port < 1 or port > 65535 for port in ports):
             raise ValueError("outbound_allowed_ports contains an invalid port")
+        if self.policy_head_refresh_interval_seconds <= 0:
+            raise ValueError("policy_head_refresh_interval_seconds must be positive")
+        if self.shutdown_timeout_seconds <= 0:
+            raise ValueError("shutdown_timeout_seconds must be positive")
+        if self.policy_max_staleness_seconds <= self.policy_head_refresh_interval_seconds:
+            raise ValueError(
+                "policy_max_staleness_seconds must exceed policy_head_refresh_interval_seconds"
+            )
         return self
 
 
-def sqlalchemy_sync_database_uri(settings: Settings | None = None) -> str:
+def sqlalchemy_sync_database_uri(settings: DeploymentSettings) -> str:
     """Return sync SQLAlchemy URL (psycopg2) from bootstrap settings."""
-    settings = settings or get_settings()
     return settings.sqlalchemy_database_uri.replace("+asyncpg", "+psycopg2")
 
 
-@lru_cache()
-def get_settings() -> Settings:
-    """获取启动引导配置（进程内缓存）。"""
-    return Settings()
+def sqlalchemy_sync_migration_database_uri(
+    settings: DeploymentSettings,
+) -> str:
+    """Return the privileged DDL URL used only by Alembic."""
+    explicit = settings.sqlalchemy_migration_database_uri.strip()
+    if explicit:
+        return explicit.replace("+asyncpg", "+psycopg2")
+    admin_user = settings.postgres_admin_user.strip()
+    admin_password = settings.postgres_admin_password
+    if admin_user and admin_password:
+        user = quote_plus(admin_user)
+        password = quote_plus(admin_password)
+        return (
+            f"postgresql+psycopg2://{user}:{password}@"
+            f"{settings.postgres_host}:5432/{settings.postgres_db}"
+        )
+    if settings.env.lower() == "production":
+        raise ValueError("migration database credentials are required in production")
+    return sqlalchemy_sync_database_uri(settings)
+
+
+def load_deployment_settings() -> DeploymentSettings:
+    """Load and validate one independent restart-bound settings value."""
+    return DeploymentSettings()

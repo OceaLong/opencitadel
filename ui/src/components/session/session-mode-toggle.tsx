@@ -27,11 +27,17 @@ export function SessionModeToggle({ mode, onChange, className }: SessionModeTogg
       }}
       className={cn("bg-muted rounded-lg p-0.5", className)}
     >
-      <ToggleGroupItem value="ask" className="h-7 gap-1 px-2 text-xs data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
+      <ToggleGroupItem
+        value="ask"
+        className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground h-7 gap-1 px-2 text-xs"
+      >
         <IconAsk className="size-3.5" />
         {t("ask")}
       </ToggleGroupItem>
-      <ToggleGroupItem value="agent" className="h-7 gap-1 px-2 text-xs data-[state=on]:bg-primary data-[state=on]:text-primary-foreground">
+      <ToggleGroupItem
+        value="agent"
+        className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground h-7 gap-1 px-2 text-xs"
+      >
         <IconAgent className="size-3.5" />
         {t("agent")}
       </ToggleGroupItem>

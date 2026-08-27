@@ -19,9 +19,7 @@ export function PageHeader({ title, description, actions, className }: PageHeade
     >
       <div className="min-w-0 flex-1">
         <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-        {description ? (
-          <p className="text-muted-foreground mt-1 text-sm">{description}</p>
-        ) : null}
+        {description ? <p className="text-muted-foreground mt-1 text-sm">{description}</p> : null}
       </div>
       {actions ? (
         <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">

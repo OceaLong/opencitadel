@@ -1,30 +1,16 @@
 import { Stethoscope } from "lucide-react";
 import type { ComponentType } from "react";
 
-import {
-  IconAdmin,
-  IconAgent,
-  IconAutomation,
-  IconCodebase,
-  IconKnowledge,
-} from "@/lib/icons";
+import { IconAdmin, IconAgent, IconAutomation, IconCodebase, IconKnowledge } from "@/lib/icons";
 
-export type NavModuleKey =
-  | "chat"
-  | "patrol"
-  | "automation"
-  | "knowledge"
-  | "codebase"
-  | "admin";
+export type NavModuleKey = "chat" | "patrol" | "automation" | "knowledge" | "codebase" | "admin";
 
 export type NavModule = {
   key: NavModuleKey;
   href: string;
   icon: ComponentType<{ className?: string }>;
   match: (pathname: string) => boolean;
-  /** feature flag 名，缺省表示恒可见 */
-  requiresFlag?: "opsPatrolEnabled";
-  /** 该模块是否有第二列上下文面板（Phase 2：chat 与 admin） */
+  /** 该模块是否有第二列上下文面板（chat 与 admin） */
   hasContextPanel?: boolean;
   /** 移动端底导航优先占格（spec §3.2：Chat/Patrol/Knowledge） */
   mobilePrimary?: boolean;
@@ -46,9 +32,7 @@ export const NAV_MODULES: NavModule[] = [
     key: "patrol",
     href: "/patrols",
     icon: Stethoscope,
-    match: (pathname) =>
-      prefixMatch("/patrols")(pathname) || prefixMatch("/patrol-runs")(pathname),
-    requiresFlag: "opsPatrolEnabled",
+    match: (pathname) => prefixMatch("/patrols")(pathname) || prefixMatch("/patrol-runs")(pathname),
     hasContextPanel: true,
     mobilePrimary: true,
   },
@@ -93,9 +77,7 @@ export function splitMobileNav(modules: NavModule[]): {
 } {
   const preferred = modules.filter((m) => m.mobilePrimary);
   const backfill = modules.filter((m) => !m.mobilePrimary);
-  const chosen = new Set(
-    [...preferred, ...backfill].slice(0, 3).map((m) => m.key),
-  );
+  const chosen = new Set([...preferred, ...backfill].slice(0, 3).map((m) => m.key));
   return {
     primary: modules.filter((m) => chosen.has(m.key)),
     overflow: modules.filter((m) => !chosen.has(m.key)),

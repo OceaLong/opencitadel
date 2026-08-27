@@ -31,10 +31,7 @@ function isAuthRoute(pathname: string): boolean {
 }
 
 function isShelllessRoute(pathname: string): boolean {
-  return (
-    isAuthRoute(pathname) ||
-    SHELLLESS_PREFIXES.some((prefix) => pathname.startsWith(prefix))
-  );
+  return isAuthRoute(pathname) || SHELLLESS_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
 function requiresAuth(pathname: string): boolean {
@@ -72,7 +69,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [loading, authRequiredRoute, router, user]);
 
   if (loading && authRequiredRoute) {
-    return <div className="bg-background flex min-h-screen items-center justify-center text-sm">{tCommon("loading")}</div>;
+    return (
+      <div className="bg-background flex min-h-screen items-center justify-center text-sm">
+        {tCommon("loading")}
+      </div>
+    );
   }
 
   if (!user && authRequiredRoute) {
@@ -84,7 +85,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <ContextPanel module={activeModule} />
       <div className="bg-background flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
         <AppHeader />
-        <div className="min-h-0 flex-1 overflow-hidden pb-mobile-nav md:pb-0">{children}</div>
+        <div className="pb-mobile-nav min-h-0 flex-1 overflow-hidden md:pb-0">{children}</div>
         <MobileBottomNav />
       </div>
     </>
@@ -94,7 +95,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="bg-background min-h-screen">{children}</div>
   ) : (
     <PageTitleProvider>
-      <SidebarProvider className="[--sidebar-width:18rem] md:[--sidebar-width:280px] md:[--sidebar-left-offset:3.5rem]">
+      <SidebarProvider className="[--sidebar-width:18rem] md:[--sidebar-left-offset:3.5rem] md:[--sidebar-width:280px]">
         <IconRail />
         {activeModule?.key === "patrol" ? (
           <PatrolPacksProvider>{shellBody}</PatrolPacksProvider>

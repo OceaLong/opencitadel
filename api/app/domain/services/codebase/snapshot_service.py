@@ -1,20 +1,19 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Content-addressed immutable source snapshots for codebase builds."""
+
 from __future__ import annotations
 
 import gzip
 import hashlib
 import io
 import tarfile
+from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import Enum
-from typing import BinaryIO, Mapping, Optional
+from enum import StrEnum
+from typing import BinaryIO
 
 from app.domain.errors import BadRequestError, NotFoundError
 from app.domain.external.object_storage import ObjectStoragePort
 from app.domain.services.codebase.source_validator import normalize_contained_path
-
 
 SNAPSHOT_PREFIX = "codebase-snapshots/sha256"
 
@@ -28,7 +27,7 @@ class MaterializedSource:
     source_revision: str = ""
 
 
-class CodeSourceProvenance(str, Enum):
+class CodeSourceProvenance(StrEnum):
     PUBLISHED_VERSION = "published_version"
     SESSION_WORKSPACE = "session_workspace"
 
@@ -38,8 +37,8 @@ class CodeSourceReadResult:
     path: str
     content: str
     provenance: CodeSourceProvenance
-    base_version_id: Optional[str] = None
-    source_digest: Optional[str] = None
+    base_version_id: str | None = None
+    source_digest: str | None = None
 
 
 class VersionedCodeSource:
@@ -52,7 +51,7 @@ class VersionedCodeSource:
         snapshot_key: str,
         source_digest: str,
         object_storage: ObjectStoragePort,
-        default_max_length: Optional[int] = 10000,
+        default_max_length: int | None = 10000,
     ) -> None:
         if not version_id:
             raise ValueError("version_id is required")
@@ -67,20 +66,16 @@ class VersionedCodeSource:
     async def read(
         self,
         path: str,
-        start_line: Optional[int] = None,
-        end_line: Optional[int] = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
         *,
-        max_length: Optional[int] = None,
+        max_length: int | None = None,
     ) -> CodeSourceReadResult:
         relative_path = self._normalize_snapshot_path(path)
         snapshot_bytes = await self._object_storage.get_bytes(self.snapshot_key)
         content = self._read_member(snapshot_bytes, relative_path)
         content = self._slice_lines(content, start_line, end_line)
-        effective_max_length = (
-            self._default_max_length
-            if max_length is None
-            else max_length
-        )
+        effective_max_length = self._default_max_length if max_length is None else max_length
         if effective_max_length is not None:
             content = content[:effective_max_length]
         return CodeSourceReadResult(
@@ -122,8 +117,8 @@ class VersionedCodeSource:
     @staticmethod
     def _slice_lines(
         content: str,
-        start_line: Optional[int],
-        end_line: Optional[int],
+        start_line: int | None,
+        end_line: int | None,
     ) -> str:
         if start_line is None and end_line is None:
             return content

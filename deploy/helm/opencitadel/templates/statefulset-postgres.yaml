@@ -36,7 +36,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ printf "%s-secret" (include "opencitadel.fullname" .) }}
+                  name: {{ include "opencitadel.fullname" . }}-postgres-bootstrap-secret
                   key: POSTGRES_ADMIN_PASSWORD
             - name: POSTGRES_DB
               value: {{ .Values.postgresql.database | quote }}
@@ -46,6 +46,20 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ printf "%s-secret" (include "opencitadel.fullname" .) }}
+                  key: POSTGRES_PASSWORD
+            - name: OPENCITADEL_MIGRATION_USER
+              value: {{ .Values.postgresql.migrationUser | quote }}
+            - name: OPENCITADEL_MIGRATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "opencitadel.fullname" . }}-migration-secret
+                  key: POSTGRES_PASSWORD
+            - name: OPENCITADEL_KERNEL_USER
+              value: {{ .Values.executionKernel.databaseUser | quote }}
+            - name: OPENCITADEL_KERNEL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "opencitadel.fullname" . }}-execution-kernel-secret
                   key: POSTGRES_PASSWORD
           volumeMounts:
             - name: data

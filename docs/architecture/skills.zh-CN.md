@@ -1,78 +1,42 @@
-[English](skills.md) · [简体中文](skills.zh-CN.md)
+# Skill
 
-# Skills
+[English](skills.md)
 
-Skill 模板塑造 Agent 行为：系统提示词、允许工具、MCP/A2A 范围、温度覆盖与 HITL 默认值。Skill 是会话创建时绑定的第一类资源。
+Skill 是由用户显式选择、受 OwnerScope 约束的 Agent 执行 Profile。它不是自治路由器，
+系统不会通过隐藏推荐逻辑自动选择 Skill。
 
-## 数据模型
+## 契约
 
-| 字段 | 作用 |
-|------|------|
-| `name`、`slug`、`description`、`icon`、`category` | UI 展示与发现 |
-| `system_prompt` | 注入 Agent 运行时提示词（`skill_loader.render_active`） |
-| `allowed_tools` | 工具白名单（fnmatch 模式，如 `browser_*`） |
-| `agent_params` | 覆盖项：`max_iterations`、`max_retries`、`temperature_override`、`tool_gate_call_level_enabled`、`writing_style_override` |
-| `mcp_server_refs` | 限制该 Skill 可用的 MCP 服务 |
-| `a2a_server_refs` | 限制出站 A2A 服务 |
-| `recommended_model_id` | 会话未显式选模型时的默认模型 |
-| `override_base_rules` | 替换基础安全规则而非追加 |
-| `is_builtin` | 内置 Skill，不可删除 |
-| `enabled` | 禁用的 Skill 在运行时被跳过 |
+| 字段 | 含义 |
+| --- | --- |
+| `system_prompt`、`body` | 渲染进模型 Context 的指令 |
+| `resources` | 为 Run 挂载的内联 Template、Script、Reference |
+| `allowed_tools` | 精确工具名 Allowlist；空列表不暴露 Skill 范围工具 |
+| `mcp_server_refs` | 可贡献允许工具的 MCP Server |
+| `a2a_server_refs` | 可贡献允许工具的 A2A Server |
+| `recommended_model_id` | 仅当调用方/Session 未选模型时采用 |
+| `agent_params` | Admission 时冻结的 `max_iterations`、`max_retries`、`temperature_override` |
+| `override_base_rules` | 明确允许替换而非追加基础指令 |
+| `visibility`、Owner/Team | 资源授权边界 |
 
-内置 Skill 含 `ops-patrol`、`ops-patrol-remediation`、`coding`、`research`、`data-analysis`、`writing`、`web-operator`、`refund-reconciliation` — 见 `api/app/application/services/skill_service.py`。
+UI 或 API 必须提交 `skill_id`。Admission 在当前 OwnerScope 中解析 Skill、验证 Enabled、
+检查推荐模型和 Integration Reference，再把有效设置冻结进 Run Input。不存在自动推荐 Endpoint
+或 Feature Flag。
 
-## API
+## 工具收窄
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/skills` | 列表（经 `X-Workspace-Id` 限定 owner scope） |
-| POST | `/api/skills` | 创建自定义 Skill |
-| GET/PUT/DELETE | `/api/skills/{id}` | CRUD |
-| POST | `/api/skills/recommend` | 根据用户消息推荐 Skill |
-| POST | `/api/skills/import` | 从外部格式导入 |
+工具可用性取平台注册、Run Mode、Operator Scope、Skill Allowlist、Integration Reference 与
+执行 Policy 的交集。Skill 只能收窄能力，不能授予调用方或平台原本没有的工具。
 
-## 运行时链路
+MCP/A2A 工具名必须有对应 Server Ref。Global Skill 只能引用 Global Integration。重复、缺失、
+跨 Scope 或 Disabled Reference 都会被拒绝。未声明 Policy 的工具采用最保守的 Effect、
+Idempotency 与 Approval 分类。
 
-```mermaid
-flowchart LR
-  Session["Session.skill_id"] --> Factory["TaskRunnerFactory"]
-  Factory --> Load["SkillService.get_skill"]
-  Load --> Render["skill_loader.render_active"]
-  Render --> Prompt["注入 skill_prompt"]
-  Load --> Params["agent_params 覆盖"]
-  Load --> Tools["allowed_tools 白名单"]
-  Load --> MCP["mcp_server_refs 过滤"]
-  Load --> A2A["a2a_server_refs 过滤"]
-  Factory --> Runner["AgentTaskRunner"]
-```
+## 执行
 
-1. **会话绑定**：首页或 API 在创建会话时设置 `skill_id`。
-2. **自动推荐**（可选）：当 `feature_flags.enable_skill_auto_recommend=true` 且会话无 Skill 时，`SkillRecommenderService` 从当前 owner scope 的启用 Skill 中选取。
-3. **TaskRunnerFactory** 加载 Skill、渲染活动提示词、应用 `agent_params`、过滤 MCP/A2A 连接，并将 `skill_prompt` 传给 `AgentTaskRunner`。
-4. **ToolRegistry** 遵守 `allowed_tools`；Ask 流程无论 Skill 如何均使用只读工具子集。
-5. **Web Operator**：Skill `web-operator` 在创建会话时触发 `operator-scope-dialog.tsx`，并启用更严格的 HITL 默认。
+Model-call Activity 加载已准入 Skill、渲染 Active Instruction 并应用冻结的 Temperature。
+Agent Tool Catalog 挂载 Skill Resource，只暴露已准入工具。外部调用仍走正式持久 Activity 与
+审批协议，Skill 文本不能绕过。
 
-### 受治理的单工具会话
-
-`ops-patrol` 与 `ops-patrol-remediation` 会话是**受治理的单工具会话**：`TaskRunnerFactory` 推导出单一标志 `is_governed_single_tool_session = is_patrol or is_remediation`（`task_runner_factory.py:363`），并用它统一压制两种会话的所有通用能力——MCP（改用空 `MCPConfig()`）、A2A（改用空 `A2AConfig()`）、记忆工具、子代理工具、Artifact 交付、图像生成，均与 Skill 上的 `mcp_server_refs`/`a2a_server_refs` 设置无关地被禁用。修复会话进一步强制清空 MCP 配置——即便 Actuator MCP 服务本身存在，因为 `PatrolRemediationService.execute()` 是在服务端直接调用 Actuator，模型侧从未看到对应的 MCP 工具。模型最终只保留 Skill 自身的 `allowed_tools`（`patrol_submit_results` / `patrol_execute_remediation` + `message_notify_user`）。
-
-## UI
-
-| 入口 | 组件 | 路径 |
-|------|------|------|
-| 设置 → Skill | `SkillsSettings` | `ui/src/components/settings/skills-settings.tsx` |
-| 首页 / 会话选择 | 模型 + Skill 选择器 | `ui/src/app/page.tsx`、`ui/src/components/session/session-detail-view.tsx` |
-| Web Operator 范围 | `OperatorScopeDialog` | `ui/src/components/session/operator-scope-dialog.tsx` |
-
-## 配置
-
-- **全局默认**：`api/config.yaml` → `agent_config`；HITL 门控在 AppConfig
-- **按 Skill 覆盖**：Skill 实体上的 `agent_params`
-- **集成过滤**：Skill 上的 `mcp_server_refs` / `a2a_server_refs`；为空表示所有已启用服务
-
-## 相关文档
-
-- [前端 UI](frontend-ui.zh-CN.md) — 设置 Tab 与会话流程
-- [A2A 与服务 API Key](integrations-a2a-service-keys.zh-CN.md) — 出站 A2A 过滤
-- [检查点与 HITL](checkpoints-and-hitl.zh-CN.md) — gate profile 与 Web Operator
-- [教程 4：受治理 Web Operator](../tutorials/04-governed-web-operator.zh-CN.md)
+内置 Skill 作为产品 Template Seed。个人/团队 Skill 是通过同一验证的 CRUD 资源。Markdown
+Import 先转换成 Native Skill；运行时只有一个 Native Model。

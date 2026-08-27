@@ -13,7 +13,7 @@
 
 测试配合 [教程 4：受治理 Web Operator](../docs/tutorials/04-governed-web-operator.zh-CN.md) — 在演示栈启动后运行。
 
-**未覆盖范围**：设置弹窗、HITL 门控、团队邀请、知识库摄取、代码库流程、管理后台、移动导航。UI 单元测试位于 `ui/src/**/*.test.ts`（仅逻辑层，无组件回归）。请勿将 `ui/` 或 `e2e/` 的 `npm test` 视为完整 UI 覆盖。
+**未覆盖范围**：设置弹窗、正式审批流程、团队邀请、知识库摄取、代码库流程、管理后台、移动导航。UI 单元测试位于 `ui/src/**/*.test.ts`（仅逻辑层，无组件回归）。请勿将 `ui/` 或 `e2e/` 的 `npm test` 视为完整 UI 覆盖。
 
 ## 前置条件
 
@@ -23,9 +23,13 @@
 
 ```bash
 # 在仓库根目录 — 启动平台 + OpsConsole 演示
-docker compose --profile local --profile demo up -d --build
-docker compose build opencitadel-sandbox   # 若尚未构建
+docker compose --env-file .env.e2e build opencitadel-sandbox
+docker compose --env-file .env.e2e \
+  --profile local --profile demo --profile patrol up -d --build
 ```
+
+必须显式构建 sandbox 镜像：broker 会从 `opencitadel-sandbox` 创建动态容器，
+而声明该镜像构建的 Compose 服务属于未启用的 `fixed-sandbox` profile。
 
 OpsConsole 默认地址：`http://localhost:9099`（可通过 `OPS_CONSOLE_URL` 覆盖）。
 
@@ -33,7 +37,7 @@ OpsConsole 默认地址：`http://localhost:9099`（可通过 `OPS_CONSOLE_URL` 
 
 ```bash
 cd e2e
-npm install
+npm ci
 npm test
 ```
 
@@ -46,13 +50,13 @@ npm test
 
 ## Ops Patrol 真实运行时路径
 
-`patrol.spec.ts` 需要正常运行且已配置工具调用模型的 Worker，以及预先完成配置的 Collector 环境。启用测试前必须持久化九个固定只读 MCP Tool Policy，并为十项 Baseline 检查提供健康输入（Kubernetes 访问及六个注册目标 ID）。Compose Profile 只提供传输，不提供 Kubernetes 凭据或注册探针后端，因此需要显式启用：
+`patrol.spec.ts` 需要正常运行且已配置工具调用模型的执行内核，以及预先完成配置的 Collector 环境。启用测试前必须持久化九个固定只读 MCP Tool Policy，并为十项 Baseline 检查提供健康输入（Kubernetes 访问及六个注册目标 ID）。Compose Profile 只提供传输，不提供 Kubernetes 凭据或注册探针后端，因此需要显式启用：
 
 ```bash
 PATROL_E2E=1 npm test -- patrol.spec.ts
 ```
 
-该场景经过真实 UI、任务运行时、MCP transport、Collector、服务端断言、证据下载、功能总开关和 390px 溢出检查，不通过 HTTP 捷径注入 fixture 结果。CI 仅在提供模型的受保护环境中通过仓库变量 `PATROL_E2E_ENABLED=1` 启用。
+该场景经过真实 UI、正式 Run/Activity 运行时、MCP transport、Collector、服务端断言、证据下载、功能总开关和 390px 溢出检查，不通过 HTTP 捷径注入 fixture 结果。CI 仅在提供模型的受保护环境中通过仓库变量 `PATROL_E2E_ENABLED=1` 启用。
 
 测试只会启用/关闭已有 MCP 记录和产品开关，不会创建安全 Policy 或伪造 Probe 结果。受保护 E2E 环境准备流程见 [Ops Patrol 运维手册](../docs/operations/ops-patrol.zh-CN.md#注册-mcp-server)。
 

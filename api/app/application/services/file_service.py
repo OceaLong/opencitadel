@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Tuple, BinaryIO, Callable
+from collections.abc import Callable
+from typing import BinaryIO
 
 from fastapi import UploadFile
 
@@ -15,9 +14,9 @@ class FileService:
     """OpenCitadel 文件系统服务"""
 
     def __init__(
-            self,
-            uow_factory: Callable[[], IUnitOfWork],
-            file_storage: FileStorage,
+        self,
+        uow_factory: Callable[[], IUnitOfWork],
+        file_storage: FileStorage,
     ) -> None:
         """构造函数，完成文件服务的初始化"""
         self.file_storage = file_storage
@@ -44,7 +43,7 @@ class FileService:
             raise NotFoundError(f"该文件[{file_id}]不存在")
         return file
 
-    async def download_file(self, file_id: str, scope: OwnerScope) -> Tuple[BinaryIO, File]:
+    async def download_file(self, file_id: str, scope: OwnerScope) -> tuple[BinaryIO, File]:
         """根据传递的文件id下载文件"""
         file = await self.get_file_info(file_id, scope=scope)
         file_data, _ = await self.file_storage.download_file(file_id)

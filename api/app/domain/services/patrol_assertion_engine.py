@@ -1,8 +1,9 @@
 """Pure deterministic evaluation of Patrol observations."""
+
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.domain.models.patrol import (
@@ -15,7 +16,6 @@ from app.domain.models.patrol import (
     PatrolObservationSubmission,
     PatrolProbeStatus,
 )
-
 
 _MISSING = object()
 
@@ -34,14 +34,14 @@ def _parse_time(value: Any) -> datetime | None:
         parsed = value
     elif isinstance(value, str):
         try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value)
         except ValueError:
             return None
     else:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _compare(assertion: PatrolAssertion, observed: Any, now: datetime) -> bool:
@@ -75,7 +75,11 @@ def _compare(assertion: PatrolAssertion, observed: Any, now: datetime) -> bool:
     if op == "contains":
         return isinstance(observed, (str, list, dict)) and expected in observed
     if op == "regex":
-        return isinstance(observed, str) and isinstance(expected, str) and re.search(expected, observed) is not None
+        return (
+            isinstance(observed, str)
+            and isinstance(expected, str)
+            and re.search(expected, observed) is not None
+        )
     if op in {"age_lt_seconds", "age_lte_seconds"}:
         parsed = _parse_time(observed)
         if parsed is None or not isinstance(expected, (int, float)) or isinstance(expected, bool):
@@ -93,7 +97,7 @@ class PatrolAssertionEngine:
         *,
         now: datetime | None = None,
     ) -> PatrolEvaluatedCheck:
-        reference_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        reference_time = (now or datetime.now(UTC)).astimezone(UTC)
         if not check.enabled:
             return PatrolEvaluatedCheck(
                 check_id=check.id,

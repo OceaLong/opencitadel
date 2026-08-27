@@ -1,11 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""KBGraphMixin: versioned graph writes and active-version reads.
-
-Pure re-homed methods split out of db_knowledge_base_repository.py
-(Phase C task 5, KB repository mixin split).
-"""
-from typing import List, Optional, Tuple
+"""Versioned graph writes and active-version reads."""
 
 from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -15,6 +8,7 @@ from app.domain.models.knowledge_base import (
     KnowledgeEntityRef,
     KnowledgeRelation,
 )
+from app.domain.models.knowledge_version import KnowledgeVersionState
 from app.infrastructure.models.knowledge_base import (
     KnowledgeBaseModel,
     KnowledgeEntityModel,
@@ -22,7 +16,6 @@ from app.infrastructure.models.knowledge_base import (
     KnowledgeRelationModel,
 )
 from app.infrastructure.models.knowledge_version import KnowledgeBaseVersionORM
-from app.domain.models.knowledge_version import KnowledgeVersionState
 from app.infrastructure.repositories.kb._shared import _normalize_graph_identity
 
 
@@ -30,19 +23,16 @@ class KBGraphMixin:
     """Candidate graph write path plus active-version graph reads."""
 
     async def replace_candidate_graph(
-            self,
-            kb_id: str,
-            version_id: str,
-            entities: List[KnowledgeEntity],
-            relations: List[KnowledgeRelation],
-            refs: List[KnowledgeEntityRef],
+        self,
+        kb_id: str,
+        version_id: str,
+        entities: list[KnowledgeEntity],
+        relations: list[KnowledgeRelation],
+        refs: list[KnowledgeEntityRef],
     ) -> None:
         await self._require_building_candidate(kb_id, version_id)
         rows = [*entities, *relations, *refs]
-        if any(
-            row.kb_id != kb_id or row.version_id != version_id
-            for row in rows
-        ):
+        if any(row.kb_id != kb_id or row.version_id != version_id for row in rows):
             raise ValueError("candidate graph rows must carry exact version ownership")
         await self._delete_candidate_graph(version_id)
         self.db_session.add_all(
@@ -52,10 +42,7 @@ class KBGraphMixin:
                     kb_id=entity.kb_id,
                     version_id=entity.version_id,
                     name=entity.name,
-                    normalized_name=(
-                        entity.normalized_name
-                        or entity.name.strip().lower()
-                    ),
+                    normalized_name=(entity.normalized_name or entity.name.strip().lower()),
                     type=entity.type,
                     description=entity.description,
                 )
@@ -92,25 +79,20 @@ class KBGraphMixin:
         await self.db_session.flush()
 
     async def upsert_candidate_graph_batch(
-            self,
-            kb_id: str,
-            version_id: str,
-            entities: List[KnowledgeEntity],
-            relations: List[KnowledgeRelation],
-            refs: List[KnowledgeEntityRef],
+        self,
+        kb_id: str,
+        version_id: str,
+        entities: list[KnowledgeEntity],
+        relations: list[KnowledgeRelation],
+        refs: list[KnowledgeEntityRef],
     ) -> None:
         """Merge one extraction batch without a select-then-insert race."""
         if not kb_id.strip() or not version_id.strip():
             raise ValueError("candidate graph identity cannot be empty")
         await self._require_building_candidate(kb_id, version_id)
         rows = [*entities, *relations, *refs]
-        if any(
-            row.kb_id != kb_id or row.version_id != version_id
-            for row in rows
-        ):
-            raise ValueError(
-                "candidate graph rows must carry exact version ownership"
-            )
+        if any(row.kb_id != kb_id or row.version_id != version_id for row in rows):
+            raise ValueError("candidate graph rows must carry exact version ownership")
 
         temp_to_persistent: dict[str, str] = {}
         for entity in sorted(
@@ -124,13 +106,9 @@ class KBGraphMixin:
             normalized_name = _normalize_graph_identity(entity.name)
             entity_type = _normalize_graph_identity(entity.type)
             if not normalized_name or not entity_type:
-                raise ValueError(
-                    "candidate entity identity requires normalized name/type"
-                )
+                raise ValueError("candidate entity identity requires normalized name/type")
             if entity.normalized_name != normalized_name:
-                raise ValueError(
-                    "candidate entity normalized_name is not canonical"
-                )
+                raise ValueError("candidate entity normalized_name is not canonical")
             insert_stmt = pg_insert(KnowledgeEntityModel).values(
                 id=entity.id,
                 kb_id=kb_id,
@@ -154,16 +132,12 @@ class KBGraphMixin:
                     "description": case(
                         (
                             func.length(insert_stmt.excluded.description)
-                            > func.length(
-                                KnowledgeEntityModel.description
-                            ),
+                            > func.length(KnowledgeEntityModel.description),
                             insert_stmt.excluded.description,
                         ),
                         (
                             func.length(insert_stmt.excluded.description)
-                            < func.length(
-                                KnowledgeEntityModel.description
-                            ),
+                            < func.length(KnowledgeEntityModel.description),
                             KnowledgeEntityModel.description,
                         ),
                         else_=func.least(
@@ -182,9 +156,7 @@ class KBGraphMixin:
             src_id = temp_to_persistent.get(relation.src_entity_id)
             dst_id = temp_to_persistent.get(relation.dst_entity_id)
             if src_id is None or dst_id is None:
-                raise ValueError(
-                    "candidate relation endpoints are not in its entity batch"
-                )
+                raise ValueError("candidate relation endpoints are not in its entity batch")
             remapped_relations.append(
                 {
                     "id": relation.id,
@@ -200,18 +172,14 @@ class KBGraphMixin:
             await self.db_session.execute(
                 pg_insert(KnowledgeRelationModel)
                 .values(remapped_relations)
-                .on_conflict_do_nothing(
-                    index_elements=[KnowledgeRelationModel.id]
-                )
+                .on_conflict_do_nothing(index_elements=[KnowledgeRelationModel.id])
             )
 
         remapped_refs: list[dict[str, object]] = []
         for ref in refs:
             entity_id = temp_to_persistent.get(ref.entity_id)
             if entity_id is None:
-                raise ValueError(
-                    "candidate entity reference is not in its entity batch"
-                )
+                raise ValueError("candidate entity reference is not in its entity batch")
             remapped_refs.append(
                 {
                     "id": ref.id,
@@ -236,22 +204,16 @@ class KBGraphMixin:
 
     async def _delete_candidate_graph(self, version_id: str) -> None:
         await self.db_session.execute(
-            delete(KnowledgeRelationModel).where(
-                KnowledgeRelationModel.version_id == version_id
-            )
+            delete(KnowledgeRelationModel).where(KnowledgeRelationModel.version_id == version_id)
         )
         await self.db_session.execute(
-            delete(KnowledgeEntityRefModel).where(
-                KnowledgeEntityRefModel.version_id == version_id
-            )
+            delete(KnowledgeEntityRefModel).where(KnowledgeEntityRefModel.version_id == version_id)
         )
         await self.db_session.execute(
-            delete(KnowledgeEntityModel).where(
-                KnowledgeEntityModel.version_id == version_id
-            )
+            delete(KnowledgeEntityModel).where(KnowledgeEntityModel.version_id == version_id)
         )
 
-    async def list_entities(self, kb_id: str, name: Optional[str] = None) -> List[KnowledgeEntity]:
+    async def list_entities(self, kb_id: str, name: str | None = None) -> list[KnowledgeEntity]:
         stmt = (
             select(KnowledgeEntityModel)
             .join(
@@ -263,11 +225,7 @@ class KBGraphMixin:
                 self._active_version_join_predicate(),
             )
             .where(KnowledgeEntityModel.kb_id == kb_id)
-            .where(
-                self._active_version_row_predicate(
-                    KnowledgeEntityModel.version_id
-                )
-            )
+            .where(self._active_version_row_predicate(KnowledgeEntityModel.version_id))
         )
         if name:
             stmt = stmt.where(KnowledgeEntityModel.name.ilike(f"%{name}%"))
@@ -276,10 +234,10 @@ class KBGraphMixin:
         return [record.to_domain() for record in result.scalars().all()]
 
     async def list_relations_for_entities(
-            self,
-            kb_id: str,
-            entity_ids: List[str],
-    ) -> List[KnowledgeRelation]:
+        self,
+        kb_id: str,
+        entity_ids: list[str],
+    ) -> list[KnowledgeRelation]:
         if not entity_ids:
             return []
         stmt = (
@@ -293,11 +251,7 @@ class KBGraphMixin:
                 self._active_version_join_predicate(),
             )
             .where(KnowledgeRelationModel.kb_id == kb_id)
-            .where(
-                self._active_version_row_predicate(
-                    KnowledgeRelationModel.version_id
-                )
-            )
+            .where(self._active_version_row_predicate(KnowledgeRelationModel.version_id))
             .where(
                 or_(
                     KnowledgeRelationModel.src_entity_id.in_(entity_ids),
@@ -309,7 +263,9 @@ class KBGraphMixin:
         result = await self.db_session.execute(stmt)
         return [record.to_domain() for record in result.scalars().all()]
 
-    async def get_related_chunk_ids(self, kb_id: str, chunk_ids: List[str], limit: int = 20) -> List[str]:
+    async def get_related_chunk_ids(
+        self, kb_id: str, chunk_ids: list[str], limit: int = 20
+    ) -> list[str]:
         if not chunk_ids:
             return []
         seed_result = await self.db_session.execute(
@@ -323,11 +279,7 @@ class KBGraphMixin:
                 self._active_version_join_predicate(),
             )
             .where(KnowledgeRelationModel.kb_id == kb_id)
-            .where(
-                self._active_version_row_predicate(
-                    KnowledgeRelationModel.version_id
-                )
-            )
+            .where(self._active_version_row_predicate(KnowledgeRelationModel.version_id))
             .where(KnowledgeRelationModel.chunk_id.in_(chunk_ids))
         )
         entity_ids = set()
@@ -347,11 +299,7 @@ class KBGraphMixin:
                 self._active_version_join_predicate(),
             )
             .where(KnowledgeRelationModel.kb_id == kb_id)
-            .where(
-                self._active_version_row_predicate(
-                    KnowledgeRelationModel.version_id
-                )
-            )
+            .where(self._active_version_row_predicate(KnowledgeRelationModel.version_id))
             .where(KnowledgeRelationModel.chunk_id.is_not(None))
             .where(KnowledgeRelationModel.chunk_id.not_in(chunk_ids))
             .where(
@@ -365,23 +313,17 @@ class KBGraphMixin:
         return [str(chunk_id) for chunk_id in related_result.scalars().all() if chunk_id]
 
     async def list_entities_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            name: Optional[str] = None,
-    ) -> List[KnowledgeEntity]:
+        self,
+        kb_id: str,
+        version_id: str,
+        name: str | None = None,
+    ) -> list[KnowledgeEntity]:
         stmt = (
             select(KnowledgeEntityModel)
             .join(
                 KnowledgeBaseVersionORM,
-                (
-                    KnowledgeBaseVersionORM.id
-                    == KnowledgeEntityModel.version_id
-                )
-                & (
-                    KnowledgeBaseVersionORM.knowledge_base_id
-                    == KnowledgeEntityModel.kb_id
-                ),
+                (KnowledgeBaseVersionORM.id == KnowledgeEntityModel.version_id)
+                & (KnowledgeBaseVersionORM.knowledge_base_id == KnowledgeEntityModel.kb_id),
             )
             .where(
                 KnowledgeEntityModel.kb_id == kb_id,
@@ -396,9 +338,7 @@ class KBGraphMixin:
             )
         )
         if name:
-            stmt = stmt.where(
-                KnowledgeEntityModel.name.ilike(f"%{name}%")
-            )
+            stmt = stmt.where(KnowledgeEntityModel.name.ilike(f"%{name}%"))
         stmt = stmt.order_by(
             KnowledgeEntityModel.normalized_name.asc(),
             KnowledgeEntityModel.id.asc(),
@@ -407,27 +347,21 @@ class KBGraphMixin:
         return [record.to_domain() for record in result.scalars().all()]
 
     async def list_entities_page_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            *,
-            q: Optional[str],
-            after: Optional[Tuple[str, str]],
-            limit: int,
-    ) -> Tuple[List[KnowledgeEntity], Optional[Tuple[str, str]]]:
+        self,
+        kb_id: str,
+        version_id: str,
+        *,
+        q: str | None,
+        after: tuple[str, str] | None,
+        limit: int,
+    ) -> tuple[list[KnowledgeEntity], tuple[str, str] | None]:
         bounded_limit = max(1, min(limit, 100))
         stmt = (
             select(KnowledgeEntityModel)
             .join(
                 KnowledgeBaseVersionORM,
-                (
-                    KnowledgeBaseVersionORM.id
-                    == KnowledgeEntityModel.version_id
-                )
-                & (
-                    KnowledgeBaseVersionORM.knowledge_base_id
-                    == KnowledgeEntityModel.kb_id
-                ),
+                (KnowledgeBaseVersionORM.id == KnowledgeEntityModel.version_id)
+                & (KnowledgeBaseVersionORM.knowledge_base_id == KnowledgeEntityModel.kb_id),
             )
             .where(
                 KnowledgeEntityModel.kb_id == kb_id,
@@ -443,9 +377,7 @@ class KBGraphMixin:
             )
         )
         if q:
-            stmt = stmt.where(
-                KnowledgeEntityModel.name.ilike(f"%{q}%")
-            )
+            stmt = stmt.where(KnowledgeEntityModel.name.ilike(f"%{q}%"))
         if after is not None:
             stmt = stmt.where(
                 or_(
@@ -472,32 +404,24 @@ class KBGraphMixin:
         return [record.to_domain() for record in records], next_key
 
     async def get_entities_by_ids_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            entity_ids: List[str],
-    ) -> List[KnowledgeEntity]:
+        self,
+        kb_id: str,
+        version_id: str,
+        entity_ids: list[str],
+    ) -> list[KnowledgeEntity]:
         if not entity_ids:
             return []
         stmt = (
             select(KnowledgeEntityModel)
             .join(
                 KnowledgeBaseVersionORM,
-                (
-                    KnowledgeBaseVersionORM.id
-                    == KnowledgeEntityModel.version_id
-                )
-                & (
-                    KnowledgeBaseVersionORM.knowledge_base_id
-                    == KnowledgeEntityModel.kb_id
-                ),
+                (KnowledgeBaseVersionORM.id == KnowledgeEntityModel.version_id)
+                & (KnowledgeBaseVersionORM.knowledge_base_id == KnowledgeEntityModel.kb_id),
             )
             .where(
                 KnowledgeEntityModel.kb_id == kb_id,
                 KnowledgeEntityModel.version_id == version_id,
-                KnowledgeEntityModel.id.in_(
-                    list(dict.fromkeys(entity_ids))
-                ),
+                KnowledgeEntityModel.id.in_(list(dict.fromkeys(entity_ids))),
                 KnowledgeBaseVersionORM.state.in_(
                     (
                         KnowledgeVersionState.READY.value,
@@ -512,31 +436,22 @@ class KBGraphMixin:
             )
         )
         result = await self.db_session.execute(stmt)
-        return [
-            record.to_domain()
-            for record in result.scalars().all()
-        ]
+        return [record.to_domain() for record in result.scalars().all()]
 
     async def list_relations_for_entities_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            entity_ids: List[str],
-    ) -> List[KnowledgeRelation]:
+        self,
+        kb_id: str,
+        version_id: str,
+        entity_ids: list[str],
+    ) -> list[KnowledgeRelation]:
         if not entity_ids:
             return []
         stmt = (
             select(KnowledgeRelationModel)
             .join(
                 KnowledgeBaseVersionORM,
-                (
-                    KnowledgeBaseVersionORM.id
-                    == KnowledgeRelationModel.version_id
-                )
-                & (
-                    KnowledgeBaseVersionORM.knowledge_base_id
-                    == KnowledgeRelationModel.kb_id
-                ),
+                (KnowledgeBaseVersionORM.id == KnowledgeRelationModel.version_id)
+                & (KnowledgeBaseVersionORM.knowledge_base_id == KnowledgeRelationModel.kb_id),
             )
             .where(
                 KnowledgeRelationModel.kb_id == kb_id,
@@ -563,12 +478,12 @@ class KBGraphMixin:
         return [record.to_domain() for record in result.scalars().all()]
 
     async def get_related_chunk_ids_for_version(
-            self,
-            kb_id: str,
-            version_id: str,
-            chunk_ids: List[str],
-            limit: int = 20,
-    ) -> List[str]:
+        self,
+        kb_id: str,
+        version_id: str,
+        chunk_ids: list[str],
+        limit: int = 20,
+    ) -> list[str]:
         if not chunk_ids:
             return []
         published = (
@@ -621,8 +536,6 @@ class KBGraphMixin:
             )
             .limit(max(1, min(limit, 100)))
         )
-        return list(dict.fromkeys(
-            str(chunk_id)
-            for chunk_id in related_result.scalars().all()
-            if chunk_id
-        ))
+        return list(
+            dict.fromkeys(str(chunk_id) for chunk_id in related_result.scalars().all() if chunk_id)
+        )

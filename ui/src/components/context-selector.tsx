@@ -46,9 +46,7 @@ type ContextSelectorProps = {
 function matchesSearch(query: string, name: string, description?: string) {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return (
-    name.toLowerCase().includes(q) || (description?.toLowerCase().includes(q) ?? false)
-  );
+  return name.toLowerCase().includes(q) || (description?.toLowerCase().includes(q) ?? false);
 }
 
 type ContextOptionRowProps = {
@@ -193,9 +191,7 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
   const contextKind = getSessionContextKind({
     resource_bindings: [
       ...(value.codebaseId ? [{ resource_kind: "codebase" as const }] : []),
-      ...(value.knowledgeBaseId
-        ? [{ resource_kind: "knowledge_base" as const }]
-        : []),
+      ...(value.knowledgeBaseId ? [{ resource_kind: "knowledge_base" as const }] : []),
     ],
   });
 
@@ -234,10 +230,7 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
     >
       <SessionContextTriggerIcon
         kind={contextKind}
-        className={cn(
-          "size-4 shrink-0",
-          hasSelection ? "text-primary" : "text-muted-foreground",
-        )}
+        className={cn("size-4 shrink-0", hasSelection ? "text-primary" : "text-muted-foreground")}
       />
       <span className="truncate">{label}</span>
       <ChevronDown className="size-3 shrink-0 opacity-60" />
@@ -277,7 +270,9 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
         ) : (
           <>
             <div className="px-2 pb-1">
-              <p className="text-muted-foreground mb-1 text-xs font-medium">{t("codebaseSection")}</p>
+              <p className="text-muted-foreground mb-1 text-xs font-medium">
+                {t("codebaseSection")}
+              </p>
               {readyCodebases.length === 0 ? (
                 <p className="text-muted-foreground px-3 py-2 text-xs">{t("noCodebase")}</p>
               ) : filteredCodebases.length === 0 ? (
@@ -299,7 +294,9 @@ export function ContextSelector({ value, onChange, disabled, className }: Contex
             <DropdownMenuSeparator />
 
             <div className="px-2 pb-1">
-              <p className="text-muted-foreground mb-1 text-xs font-medium">{t("knowledgeSection")}</p>
+              <p className="text-muted-foreground mb-1 text-xs font-medium">
+                {t("knowledgeSection")}
+              </p>
               {readyKnowledgeBases.length === 0 ? (
                 <p className="text-muted-foreground px-3 py-2 text-xs">{t("noKnowledge")}</p>
               ) : filteredKnowledgeBases.length === 0 ? (

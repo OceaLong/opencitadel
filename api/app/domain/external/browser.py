@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Protocol, Optional
+from typing import Protocol
 
 from app.domain.models.tool_result import ToolResult
 
@@ -21,22 +19,22 @@ class Browser(Protocol):
         ...
 
     async def click(
-            self,
-            index: Optional[int] = None,
-            coordinate_x: Optional[float] = None,
-            coordinate_y: Optional[float] = None,
-            description: Optional[str] = None,
+        self,
+        index: int | None = None,
+        coordinate_x: float | None = None,
+        coordinate_y: float | None = None,
+        description: str | None = None,
     ) -> ToolResult:
         """传递对应的元素索引或者xy坐标实现点击功能"""
         ...
 
     async def input(
-            self,
-            text: str,
-            press_enter: bool,
-            index: Optional[int] = None,
-            coordinate_x: Optional[float] = None,
-            coordinate_y: Optional[float] = None,
+        self,
+        text: str,
+        press_enter: bool,
+        index: int | None = None,
+        coordinate_x: float | None = None,
+        coordinate_y: float | None = None,
     ) -> ToolResult:
         """传递文本+回车标识+索引+xy坐标实现在网页输入框中输入对应内容"""
         ...
@@ -53,15 +51,15 @@ class Browser(Protocol):
         """传递索引+选项标识在下拉菜单中选择指定的选项"""
         ...
 
-    async def scroll_up(self, to_top: Optional[bool] = None) -> ToolResult:
+    async def scroll_up(self, to_top: bool | None = None) -> ToolResult:
         """向上滚动浏览器，如果没传递to_top=True则向上滚动一屏"""
         ...
 
-    async def scroll_down(self, to_down: Optional[bool] = None) -> ToolResult:
+    async def scroll_down(self, to_down: bool | None = None) -> ToolResult:
         """向下滚动浏览器，如果没传递to_down=True则向下滚动一屏"""
         ...
 
-    async def screenshot(self, full_page: Optional[bool] = None) -> bytes:
+    async def screenshot(self, full_page: bool | None = None) -> bytes:
         """传递full_page完成网页截图"""
         ...
 
@@ -73,6 +71,6 @@ class Browser(Protocol):
         """传递对应的js脚本在浏览器的控制台执行"""
         ...
 
-    async def console_view(self, max_lines: Optional[int] = None) -> ToolResult:
+    async def console_view(self, max_lines: int | None = None) -> ToolResult:
         """传递最大输出行数，获取控制台的输出结果，如果不传递则获取所有结果"""
         ...

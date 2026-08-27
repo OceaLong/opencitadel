@@ -100,8 +100,9 @@ alwaysApply: true
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/llm-models` | 获取模型列表 |
-| POST | `/llm-models` | 新增模型 |
+| GET/POST | `/inference/endpoints` | 查询或创建推理 Endpoint |
+| GET/POST | `/inference/models` | 查询或创建类型化推理 Model |
+| GET/PUT/DELETE | `/inference/bindings/{purpose}` | 查询或修改用途 Binding |
 | GET | `/app-config/agent` | 获取 Agent 通用配置 |
 | POST | `/app-config/agent` | 更新 Agent 通用配置 |
 | GET | `/app-config/mcp-servers` | 获取 MCP 服务器列表 |

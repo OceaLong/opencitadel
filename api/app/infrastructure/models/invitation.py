@@ -1,31 +1,39 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.team import TeamRole
+
 from .base import Base
 
 
 class InvitationORM(Base):
     __tablename__ = "invitations"
 
-    id: Mapped[str] = mapped_column(String(255), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        String(255), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     type: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'platform'"))
-    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    team_id: Mapped[Optional[str]] = mapped_column(String(255), ForeignKey("teams.id", ondelete="CASCADE"), nullable=True)
-    team_role: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    team_id: Mapped[str | None] = mapped_column(
+        String(255), ForeignKey("teams.id", ondelete="CASCADE"), nullable=True
+    )
+    team_role: Mapped[str | None] = mapped_column(String(32), nullable=True)
     token: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    invited_by: Mapped[Optional[str]] = mapped_column(String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    accepted_user_id: Mapped[Optional[str]] = mapped_column(String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)"))
+    invited_by: Mapped[str | None] = mapped_column(
+        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_user_id: Mapped[str | None] = mapped_column(
+        String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+    )
 
     @classmethod
     def from_domain(cls, invitation: Invitation) -> "InvitationORM":

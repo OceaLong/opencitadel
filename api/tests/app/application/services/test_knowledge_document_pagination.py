@@ -1,17 +1,18 @@
 """Task 7 RED tests for exact immutable document-source pagination."""
+
 from __future__ import annotations
 
 import base64
-from dataclasses import FrozenInstanceError, fields
 import importlib
 import inspect
 import json
+from dataclasses import FrozenInstanceError, fields
 from types import SimpleNamespace
 
 import pytest
 
-from app.domain.errors import BadRequestError, NotFoundError
 from app.application.services.knowledge_base_service import KnowledgeBaseService
+from app.domain.errors import BadRequestError, NotFoundError
 from app.domain.models.knowledge_base import (
     ChunkLevel,
     KnowledgeBase,
@@ -23,24 +24,16 @@ from app.infrastructure.repositories.db_knowledge_base_repository import (
     DBKnowledgeBaseRepository,
 )
 from app.interfaces.endpoints import knowledge_base_routes
-from app.interfaces.schemas.knowledge_base import (
-    KnowledgeDocumentResponse,
-    ReadKnowledgeDocumentResponse,
-)
 
 
 def _document_page_type():
-    module = importlib.import_module(
-        "app.domain.repositories.knowledge_base_repository"
-    )
-    return getattr(module, "DocumentPage")
+    module = importlib.import_module("app.domain.repositories.knowledge_base_repository")
+    return module.DocumentPage
 
 
 def _document_page_item_type():
-    module = importlib.import_module(
-        "app.domain.repositories.knowledge_base_repository"
-    )
-    return getattr(module, "DocumentPageItem")
+    module = importlib.import_module("app.domain.repositories.knowledge_base_repository")
+    return module.DocumentPageItem
 
 
 def _chunk(
@@ -217,32 +210,56 @@ async def test_exact_first_next_final_pages_have_no_gaps_or_duplicates():
     c = _chunk("c", ordinal=1)
     d = _chunk("d", page_no=2, ordinal=2)
     e = _chunk("e", page_no=3, ordinal=3)
-    session = _PageSession([
-        5, [a, b, c],
-        _AnchorProbe("b"),
-        5, [c, d, e],
-        _AnchorProbe("d"),
-        5, [e],
-    ])
+    session = _PageSession(
+        [
+            5,
+            [a, b, c],
+            _AnchorProbe("b"),
+            5,
+            [c, d, e],
+            _AnchorProbe("d"),
+            5,
+            [e],
+        ]
+    )
     repo = DBKnowledgeBaseRepository(session)
 
     first = await repo.read_document_page_for_version(
-        "kb1", "kbv1", "doc1", "rev1", limit=2,
+        "kb1",
+        "kbv1",
+        "doc1",
+        "rev1",
+        limit=2,
     )
     second = await repo.read_document_page_for_version(
-        "kb1", "kbv1", "doc1", "rev1",
-        cursor=first.next_cursor, limit=2,
+        "kb1",
+        "kbv1",
+        "doc1",
+        "rev1",
+        cursor=first.next_cursor,
+        limit=2,
     )
     final = await repo.read_document_page_for_version(
-        "kb1", "kbv1", "doc1", "rev1",
-        cursor=second.next_cursor, limit=2,
+        "kb1",
+        "kbv1",
+        "doc1",
+        "rev1",
+        cursor=second.next_cursor,
+        limit=2,
     )
 
-    assert [item.id for page in (first, second, final)
-            for item in page.items] == ["a", "b", "c", "d", "e"]
+    assert [item.id for page in (first, second, final) for item in page.items] == [
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+    ]
     assert [page.total for page in (first, second, final)] == [5, 5, 5]
     assert [page.truncated for page in (first, second, final)] == [
-        True, True, False,
+        True,
+        True,
+        False,
     ]
     assert first.next_cursor
     assert second.next_cursor
@@ -255,11 +272,15 @@ async def test_document_page_filters_parents_before_limit_and_uses_exact_closure
     repo = DBKnowledgeBaseRepository(session)
 
     page = await repo.read_document_page_for_version(
-        "kb1", "kbv1", "doc1", "rev1", page_no=1, limit=2,
+        "kb1",
+        "kbv1",
+        "doc1",
+        "rev1",
+        page_no=1,
+        limit=2,
     )
 
-    assert all(type(item) is _document_page_item_type()
-               for item in page.items)
+    assert all(type(item) is _document_page_item_type() for item in page.items)
     count_stmt, page_stmt = session.statements
     count_sql = str(count_stmt).lower()
     page_sql = str(page_stmt).lower()
@@ -294,7 +315,12 @@ async def test_empty_page_keeps_exact_pre_cursor_total():
     repo = DBKnowledgeBaseRepository(_PageSession([7, []]))
 
     page = await repo.read_document_page_for_version(
-        "kb1", "kbv1", "doc1", "rev1", page_no=99, limit=20,
+        "kb1",
+        "kbv1",
+        "doc1",
+        "rev1",
+        page_no=99,
+        limit=20,
     )
 
     assert page.items == ()
@@ -305,15 +331,17 @@ async def test_empty_page_keeps_exact_pre_cursor_total():
 
 def _cursor_payload(cursor: str) -> dict:
     padding = "=" * (-len(cursor) % 4)
-    return json.loads(
-        base64.urlsafe_b64decode(cursor + padding).decode("utf-8")
-    )
+    return json.loads(base64.urlsafe_b64decode(cursor + padding).decode("utf-8"))
 
 
 def _encode_cursor(payload: dict) -> str:
-    return base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    ).decode().rstrip("=")
+    return (
+        base64.urlsafe_b64encode(
+            json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
 
 
 class _NoExecuteSession:
@@ -345,14 +373,16 @@ class _RejectAnchorSession:
 
 
 def _bound_cursor(key: tuple[int | None, int, str]) -> str:
-    return _encode_cursor({
-        "kb": "kb1",
-        "version": "kbv1",
-        "document": "doc1",
-        "revision": "rev1",
-        "page": None,
-        "key": list(key),
-    })
+    return _encode_cursor(
+        {
+            "kb": "kb1",
+            "version": "kbv1",
+            "document": "doc1",
+            "revision": "rev1",
+            "page": None,
+            "key": list(key),
+        }
+    )
 
 
 @pytest.mark.anyio
@@ -406,12 +436,15 @@ async def test_cursor_anchor_must_exist_in_exact_parent_revision_before_count(
 
 @pytest.mark.anyio
 async def test_cursor_rejects_malformed_every_wrong_identity_and_invalid_key_type():
-    seed_repo = DBKnowledgeBaseRepository(
-        _PageSession([2, [_chunk("a"), _chunk("b")]])
-    )
+    seed_repo = DBKnowledgeBaseRepository(_PageSession([2, [_chunk("a"), _chunk("b")]]))
     valid = (
         await seed_repo.read_document_page_for_version(
-            "kb1", "kbv1", "doc1", "rev1", page_no=1, limit=1,
+            "kb1",
+            "kbv1",
+            "doc1",
+            "rev1",
+            page_no=1,
+            limit=1,
         )
     ).next_cursor
     assert valid is not None
@@ -426,23 +459,30 @@ async def test_cursor_rejects_malformed_every_wrong_identity_and_invalid_key_typ
     ]
     payload = _cursor_payload(valid)
     payload["key"][1] = "not-an-integer"
-    bad_requests.append((
-        "kb1", "kbv1", "doc1", "rev1", 1, _encode_cursor(payload),
-    ))
+    bad_requests.append(
+        (
+            "kb1",
+            "kbv1",
+            "doc1",
+            "rev1",
+            1,
+            _encode_cursor(payload),
+        )
+    )
     wrong_key_page = _cursor_payload(valid)
     wrong_key_page["key"][0] = 99
-    bad_requests.append((
-        "kb1",
-        "kbv1",
-        "doc1",
-        "rev1",
-        1,
-        _encode_cursor(wrong_key_page),
-    ))
+    bad_requests.append(
+        (
+            "kb1",
+            "kbv1",
+            "doc1",
+            "rev1",
+            1,
+            _encode_cursor(wrong_key_page),
+        )
+    )
 
-    for kb_id, version_id, doc_id, revision_id, page_no, cursor in (
-        bad_requests
-    ):
+    for kb_id, version_id, doc_id, revision_id, page_no, cursor in bad_requests:
         repo = DBKnowledgeBaseRepository(_NoExecuteSession())
         with pytest.raises(ValueError, match="cursor"):
             await repo.read_document_page_for_version(
@@ -480,9 +520,14 @@ class _ServiceRepo:
         return {"kb1": 1}
 
     async def get_document_for_version(self, kb_id, version_id, doc_id):
-        self.calls.append((
-            "get_document_for_version", kb_id, version_id, doc_id,
-        ))
+        self.calls.append(
+            (
+                "get_document_for_version",
+                kb_id,
+                version_id,
+                doc_id,
+            )
+        )
         if (kb_id, version_id, doc_id) == ("kb1", "kbv1", "doc1"):
             return self.doc, "rev1"
         return None
@@ -498,10 +543,18 @@ class _ServiceRepo:
         cursor=None,
         limit=30,
     ):
-        self.calls.append((
-            "read_page", kb_id, version_id, doc_id, revision_id,
-            page_no, cursor, limit,
-        ))
+        self.calls.append(
+            (
+                "read_page",
+                kb_id,
+                version_id,
+                doc_id,
+                revision_id,
+                page_no,
+                cursor,
+                limit,
+            )
+        )
         return _document_page_type()(
             items=(_chunk("a"),),
             next_cursor="next",
@@ -527,6 +580,10 @@ async def test_service_authorizes_owner_then_reads_exact_historical_revision():
     service = KnowledgeBaseService(
         uow_factory=lambda: _Uow(repo),
         file_storage=SimpleNamespace(),
+        run_admission_service=SimpleNamespace(),
+        run_control_service=SimpleNamespace(),
+        run_projection=SimpleNamespace(),
+        web_documents=SimpleNamespace(),
     )
     scope = OwnerScope.personal("u1")
 
@@ -546,11 +603,20 @@ async def test_service_authorizes_owner_then_reads_exact_historical_revision():
     assert page.total == 2
     assert repo.calls[0] == ("get_kb", "kb1", scope)
     assert (
-        "get_document_for_version", "kb1", "kbv1", "doc1",
+        "get_document_for_version",
+        "kb1",
+        "kbv1",
+        "doc1",
     ) in repo.calls
     assert (
-        "read_page", "kb1", "kbv1", "doc1", "rev1",
-        1, "opaque", 1,
+        "read_page",
+        "kb1",
+        "kbv1",
+        "doc1",
+        "rev1",
+        1,
+        "opaque",
+        1,
     ) in repo.calls
 
 
@@ -560,11 +626,18 @@ async def test_service_rejects_unauthorized_owner_before_exact_document_read():
     service = KnowledgeBaseService(
         uow_factory=lambda: _Uow(repo),
         file_storage=SimpleNamespace(),
+        run_admission_service=SimpleNamespace(),
+        run_control_service=SimpleNamespace(),
+        run_projection=SimpleNamespace(),
+        web_documents=SimpleNamespace(),
     )
 
     with pytest.raises(NotFoundError):
         await service.read_document_page(
-            "kb1", "kbv1", "doc1", scope=OwnerScope.personal("attacker"),
+            "kb1",
+            "kbv1",
+            "doc1",
+            scope=OwnerScope.personal("attacker"),
         )
 
     assert not any(call[0] == "get_document_for_version" for call in repo.calls)
@@ -580,30 +653,20 @@ async def test_service_rejects_unbounded_page_inputs(page, limit):
     service = KnowledgeBaseService(
         uow_factory=lambda: _Uow(repo),
         file_storage=SimpleNamespace(),
+        run_admission_service=SimpleNamespace(),
+        run_control_service=SimpleNamespace(),
+        run_projection=SimpleNamespace(),
+        web_documents=SimpleNamespace(),
     )
 
     with pytest.raises(BadRequestError):
         await service.read_document_page(
-            "kb1", "kbv1", "doc1", page=page, limit=limit,
+            "kb1",
+            "kbv1",
+            "doc1",
+            page=page,
+            limit=limit,
         )
-
-
-def test_legacy_document_response_remains_additively_compatible():
-    document = KnowledgeDocumentResponse.model_validate(
-        KnowledgeDocument(id="doc1", kb_id="kb1", title="Legacy"),
-        from_attributes=True,
-    )
-
-    response = ReadKnowledgeDocumentResponse(
-        document=document,
-        content="legacy parent content",
-    )
-
-    assert response.content == "legacy parent content"
-    assert response.items == []
-    assert response.next_cursor is None
-    assert response.total == 0
-    assert response.truncated is False
 
 
 @pytest.mark.anyio
@@ -631,7 +694,9 @@ async def test_version_content_route_projects_page_and_owner_scope():
             }
             return (
                 KnowledgeDocument(
-                    id="doc1", kb_id="kb1", title="Historical",
+                    id="doc1",
+                    kb_id="kb1",
+                    title="Historical",
                 ),
                 "rev1",
                 page,
@@ -651,20 +716,16 @@ async def test_version_content_route_projects_page_and_owner_scope():
     assert response.data.version_id == "kbv1"
     assert response.data.document_revision_id == "rev1"
     assert [item.id for item in response.data.items] == ["a"]
-    assert response.data.content == "content-a"
+    assert response.data.items[0].content == "content-a"
     assert response.data.next_cursor == "next"
     assert response.data.total == 2
     assert response.data.truncated is True
 
 
 def test_version_content_route_declares_bounded_query_contract():
-    signature = inspect.signature(
-        knowledge_base_routes.read_document_version_content
-    )
+    signature = inspect.signature(knowledge_base_routes.read_document_version_content)
     assert signature.parameters["page"].default.default is None
-    assert "Ge(ge=1)" in repr(
-        signature.parameters["page"].default.metadata
-    )
+    assert "Ge(ge=1)" in repr(signature.parameters["page"].default.metadata)
     assert signature.parameters["limit"].default.default == 30
     limit_metadata = repr(signature.parameters["limit"].default.metadata)
     assert "Ge(ge=1)" in limit_metadata

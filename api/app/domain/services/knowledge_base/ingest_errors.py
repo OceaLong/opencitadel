@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Non-recoverable knowledge-base ingestion failures."""
+
 from app.domain.models.error_codes import DOCUMENT_PARSE_FAILED
 
 

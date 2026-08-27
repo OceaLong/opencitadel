@@ -1,14 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import json
-from typing import Dict, Optional, Tuple
 
 
 def encode_notification_message(
-        message: str,
-        *,
-        i18n_key: Optional[str] = None,
-        i18n_params: Optional[Dict[str, str]] = None,
+    message: str,
+    *,
+    i18n_key: str | None = None,
+    i18n_params: dict[str, str] | None = None,
 ) -> str:
     if not i18n_key:
         return message
@@ -21,7 +18,7 @@ def encode_notification_message(
     return json.dumps(payload, ensure_ascii=False)
 
 
-def decode_notification_message(raw: str) -> Tuple[str, Optional[str], Optional[Dict[str, str]]]:
+def decode_notification_message(raw: str) -> tuple[str, str | None, dict[str, str] | None]:
     try:
         parsed = json.loads(raw)
     except (TypeError, json.JSONDecodeError):

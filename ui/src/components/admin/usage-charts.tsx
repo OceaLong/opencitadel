@@ -79,9 +79,30 @@ export function UsageTimeseriesChart({ points }: { points: UsageTimeseriesPoint[
               <YAxis tickFormatter={formatCompactNumber} tick={{ fontSize: 12 }} width={48} />
               <Tooltip content={<ChartTooltip />} />
               <Legend />
-              <Line type="monotone" dataKey="prompt_tokens" name={t("chartPrompt")} stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="completion_tokens" name={t("chartCompletion")} stroke={CHART_COLORS[1]} strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="total_tokens" name={t("chartTotal")} stroke={CHART_COLORS[2]} strokeWidth={2} dot={false} />
+              <Line
+                type="monotone"
+                dataKey="prompt_tokens"
+                name={t("chartPrompt")}
+                stroke={CHART_COLORS[0]}
+                strokeWidth={2}
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="completion_tokens"
+                name={t("chartCompletion")}
+                stroke={CHART_COLORS[1]}
+                strokeWidth={2}
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="total_tokens"
+                name={t("chartTotal")}
+                stroke={CHART_COLORS[2]}
+                strokeWidth={2}
+                dot={false}
+              />
             </LineChart>
           </ResponsiveContainer>
         )}
@@ -113,7 +134,12 @@ export function UsageCallsChart({ points }: { points: UsageTimeseriesPoint[] }) 
               <XAxis dataKey="label" tick={{ fontSize: 12 }} />
               <YAxis tick={{ fontSize: 12 }} width={40} />
               <Tooltip content={<ChartTooltip />} />
-              <Bar dataKey="call_count" name={t("chartCalls")} fill={CHART_COLORS[0]} radius={[6, 6, 0, 0]} />
+              <Bar
+                dataKey="call_count"
+                name={t("chartCalls")}
+                fill={CHART_COLORS[0]}
+                radius={[6, 6, 0, 0]}
+              />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -172,11 +198,7 @@ export function UsageBreakdownChart({
   );
 }
 
-export function AuditActivityChart({
-  byDay,
-}: {
-  byDay: Array<{ date: string; count: number }>;
-}) {
+export function AuditActivityChart({ byDay }: { byDay: Array<{ date: string; count: number }> }) {
   const t = useTranslations("admin");
   const data = byDay.map((item) => ({
     ...item,
@@ -199,7 +221,12 @@ export function AuditActivityChart({
               <XAxis dataKey="label" tick={{ fontSize: 12 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 12 }} width={32} />
               <Tooltip content={<ChartTooltip />} />
-              <Bar dataKey="count" name={t("chartEvents")} fill={CHART_COLORS[3]} radius={[6, 6, 0, 0]} />
+              <Bar
+                dataKey="count"
+                name={t("chartEvents")}
+                fill={CHART_COLORS[3]}
+                radius={[6, 6, 0, 0]}
+              />
             </BarChart>
           </ResponsiveContainer>
         )}

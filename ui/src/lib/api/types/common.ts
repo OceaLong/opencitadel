@@ -30,7 +30,7 @@ export type ExecutionStatus = "pending" | "running" | "completed" | "failed";
 /**
  * 工具事件状态
  */
-export type ToolEventStatus = "calling" | "called" | "error";
+export type ToolEventStatus = "started" | "completed" | "failed";
 
 /**
  * MCP 传输类型

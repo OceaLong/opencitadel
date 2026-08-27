@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Resolve node identity for per-node sandbox quota buckets."""
+
 from __future__ import annotations
 
 import os

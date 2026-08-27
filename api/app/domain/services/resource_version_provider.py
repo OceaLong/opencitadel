@@ -1,10 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Provider contract and registry for independently versioned resources."""
+
 from collections.abc import Iterable
 from typing import Protocol
 
-from app.domain.models.resource_governance import (
+from app.domain.models.resource_bindings import (
     PublishedResourceVersion,
     ResourceKind,
 )
@@ -24,7 +23,9 @@ class ResourceVersionProvider(Protocol):
         ...
 
     async def list_published_versions(
-        self, resource_id: str, scope: OwnerScope,
+        self,
+        resource_id: str,
+        scope: OwnerScope,
     ) -> list[PublishedResourceVersion]:
         """Return owner-scoped upgrade targets, including the current pin."""
         ...
@@ -50,13 +51,9 @@ class ResourceVersionProviderRegistry:
         try:
             kind = ResourceKind(provider.kind)
         except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "resource version provider must declare a valid kind"
-            ) from exc
+            raise ValueError("resource version provider must declare a valid kind") from exc
         if kind in self._providers:
-            raise ValueError(
-                f"resource version provider already registered for {kind.value}"
-            )
+            raise ValueError(f"resource version provider already registered for {kind.value}")
         self._providers[kind] = provider
 
     def get(self, kind: ResourceKind) -> ResourceVersionProvider:
@@ -64,7 +61,6 @@ class ResourceVersionProviderRegistry:
         provider = self._providers.get(resolved_kind)
         if provider is None:
             raise ResourceVersionProviderNotRegisteredError(
-                f"no resource version provider registered for "
-                f"{resolved_kind.value}"
+                f"no resource version provider registered for {resolved_kind.value}"
             )
         return provider

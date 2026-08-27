@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+from types import SimpleNamespace
+
 import pytest
 
 from app.application.services.a2a_server_service import (
@@ -7,10 +7,11 @@ from app.application.services.a2a_server_service import (
     build_a2a_text_response,
     extract_text_from_a2a_params,
 )
-from app.domain.models.event import DoneEvent, MessageEvent
 from app.domain.models.scope import Principal
 from app.domain.models.session import Session
 from app.domain.models.user import GlobalRole
+from app.domain.runtime_policy import ExecutionPolicy
+from tests.app.application_test_support import FakeCircuitBreaker
 
 
 def test_extract_text_from_a2a_params():
@@ -41,9 +42,17 @@ class _FakeSessionService:
 
 
 class _FakeAgentService:
-    async def chat(self, session_id: str, message: str):
-        yield MessageEvent(role="assistant", message=f"ok:{message}")
-        yield DoneEvent()
+    async def chat(self, session_id: str, *, owner_scope, message: str, request_id):
+        assert request_id is not None
+        yield type(
+            "Event",
+            (),
+            {
+                "event_type": "message",
+                "payload": {"role": "assistant", "message": f"ok:{message}"},
+            },
+        )()
+        yield type("Event", (), {"event_type": "done", "payload": {}})()
 
 
 class _FakeSkillService:
@@ -52,12 +61,14 @@ class _FakeSkillService:
 
 
 class _FakeModelService:
-    async def get_default_model(self):
+    async def resolve_chat(self, *, scope):
+        assert scope.user_id == "owner-1"
         return type("Model", (), {"id": "model-1"})()
 
 
-async def _closed_circuit(_model_id: str) -> bool:
-    return False
+class _PolicyHeads:
+    async def active_execution(self, **_kwargs):
+        return SimpleNamespace(revision=SimpleNamespace(policy=ExecutionPolicy()))
 
 
 @pytest.mark.asyncio
@@ -67,9 +78,10 @@ async def test_a2a_message_send_creates_owned_session():
         agent_service=_FakeAgentService(),
         session_service=session_service,
         skill_service=_FakeSkillService(),
-        llm_model_service=_FakeModelService(),
+        inference_model_service=_FakeModelService(),
+        policy_heads=_PolicyHeads(),
+        breaker=FakeCircuitBreaker(),
     )
-    service._breaker.is_open = _closed_circuit
 
     response = await service.handle_message_send(
         {

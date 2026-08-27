@@ -1,94 +1,73 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
+from app.application.ports.queries import PatrolRetentionResult
 from app.application.services.patrol_retention_service import PatrolRetentionService
+from app.domain.runtime_policy import OperationsPolicy, PatrolRetentionPolicy
 from app.infrastructure.external.scheduler.job_scheduler import run_patrol_retention_tick
+from tests.runtime_policy_support import MutablePolicyReader
 
 
-class _ScalarResult:
-    def __init__(self, values):
-        self._values = values
+class _Store:
+    def __init__(self) -> None:
+        self.calls = []
 
-    def scalars(self):
-        return self._values
-
-
-class _Db:
-    def __init__(self):
-        self.select_results = iter([["finding-1"], ["result-1", "result-2"], ["run-1"]])
-        self.statements = []
-
-    async def execute(self, statement):
-        self.statements.append(statement)
-        if getattr(statement, "is_select", False):
-            return _ScalarResult(next(self.select_results))
-        return SimpleNamespace()
-
-
-class _Uow:
-    def __init__(self, db):
-        self.db_session = db
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_args):
-        return None
+    async def cleanup(self, **kwargs):
+        self.calls.append(kwargs)
+        return PatrolRetentionResult(1, 1, 2)
 
 
 @pytest.mark.asyncio
 async def test_retention_purges_evidence_findings_and_runs_but_never_audit_rows():
-    db = _Db()
-    service = PatrolRetentionService(lambda: _Uow(db))
-    result = await service.cleanup(
-        run_days=30,
-        finding_days=14,
-        evidence_days=7,
-        now=datetime(2026, 8, 3, tzinfo=timezone.utc),
+    store = _Store()
+    service = PatrolRetentionService(
+        store,
+        policy_reader=MutablePolicyReader(
+            operations=OperationsPolicy(
+                patrol_retention=PatrolRetentionPolicy(
+                    run_days=30,
+                    finding_days=14,
+                    collector_evidence_days=7,
+                )
+            )
+        ),
+        clock=lambda: datetime(2026, 8, 3, tzinfo=UTC),
     )
+    result = await service.cleanup()
     assert result == {
         "runs_deleted": 1,
         "findings_deleted": 1,
         "evidence_refs_purged": 2,
     }
-    rendered = "\n".join(str(statement) for statement in db.statements).lower()
-    assert "patrol_findings" in rendered
-    assert "patrol_check_results" in rendered
-    assert "patrol_runs" in rendered
-    assert "audit" not in rendered
+    assert store.calls == [
+        {
+            "run_cutoff": datetime(2026, 7, 4, tzinfo=UTC),
+            "finding_cutoff": datetime(2026, 7, 20, tzinfo=UTC),
+            "evidence_cutoff": datetime(2026, 7, 27, tzinfo=UTC),
+            "limit": 100,
+        }
+    ]
 
 
 @pytest.mark.asyncio
 async def test_patrol_retention_tick_is_lease_guarded():
     service = SimpleNamespace(cleanup=AsyncMock(return_value={"runs_deleted": 1}))
-    with (
-        patch(
-            "app.infrastructure.external.scheduler.job_scheduler.acquire_scheduler_lease",
-            AsyncMock(return_value=True),
-        ) as acquire,
-        patch(
-            "app.infrastructure.external.scheduler.job_scheduler.release_scheduler_lease",
-            AsyncMock(return_value=True),
-        ) as release,
-    ):
-        result = await run_patrol_retention_tick(
-            service,
-            run_days=30,
-            finding_days=30,
-            evidence_days=7,
-            batch_size=100,
-            lease_seconds=15,
-            owner_token="worker-1",
-        )
-    assert result == {"runs_deleted": 1}
-    service.cleanup.assert_awaited_once_with(
-        run_days=30,
-        finding_days=30,
-        evidence_days=7,
-        batch_size=100,
+    leases = SimpleNamespace(
+        acquire=AsyncMock(return_value=True),
+        renew=AsyncMock(return_value=True),
+        release=AsyncMock(return_value=True),
     )
-    acquire.assert_awaited_once()
-    release.assert_awaited_once()
+    result = await run_patrol_retention_tick(
+        service,
+        leases=leases,
+        worker_id="worker-1",
+        lease_seconds=15,
+        owner_token="worker-1:tick-1",
+    )
+    assert result == {"runs_deleted": 1}
+    service.cleanup.assert_awaited_once_with()
+    leases.acquire.assert_awaited_once()
+    leases.release.assert_awaited_once()

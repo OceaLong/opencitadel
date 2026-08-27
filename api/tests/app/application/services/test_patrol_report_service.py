@@ -1,10 +1,11 @@
+from uuid import uuid4
+
 from app.application.patrol_templates import load_patrol_template
 from app.application.services.patrol_report_service import PatrolReportService
 from app.domain.models.patrol import (
     PatrolCheckResult,
     PatrolCheckStatus,
     PatrolFindingSeverity,
-    PatrolPackStatus,
     PatrolRun,
     PatrolRunStatus,
     PatrolTriggerType,
@@ -16,6 +17,7 @@ def test_report_has_six_fixed_sections_is_deterministic_and_redacts_secrets():
     config.checks = config.checks[:1]
     run = PatrolRun(
         pack_id="pack-1",
+        execution_run_id=uuid4(),
         pack_version=1,
         pack_snapshot={"name": "Daily", "config": config.model_dump(mode="json")},
         trigger_type=PatrolTriggerType.MANUAL,
@@ -39,7 +41,14 @@ def test_report_has_six_fixed_sections_is_deterministic_and_redacts_secrets():
     second = PatrolReportService.render(run, [result], [])
 
     assert first == second
-    for heading in ("执行摘要", "需要处理", "全部检查结果", "与上次运行的变化", "证据与审计", "限制与缺失数据"):
+    for heading in (
+        "执行摘要",
+        "需要处理",
+        "全部检查结果",
+        "与上次运行的变化",
+        "证据与审计",
+        "限制与缺失数据",
+    ):
         assert f"## {heading}" in first
     assert "do-not-render" not in first
     assert "super-secret" not in first

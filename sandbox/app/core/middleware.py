@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
 
 from fastapi import Request
@@ -24,17 +22,16 @@ async def auto_extend_timeout_middleware(request: Request, call_next):
         "/api/supervisor/timeout-status",
     )
     if (
-            settings.server_timeout_minutes is not None
-            and supervisor_service.timeout_active
-            and request.url.path.startswith("/api/")
-            and not request.url.path.startswith(ignore_paths)
-            and supervisor_service.expand_enabled
+        settings.server_timeout_minutes is not None
+        and supervisor_service.timeout_active
+        and request.url.path.startswith("/api/")
+        and not request.url.path.startswith(ignore_paths)
+        and supervisor_service.expand_enabled
     ):
         try:
             await supervisor_service.extend_timeout(3)
             logger.debug("调用API请求而自动延长超时销毁时长: %s", request.url.path)
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             logger.warning("自动延长超时失败: %s", str(e))
 
-    response = await call_next(request)
-    return response
+    return await call_next(request)

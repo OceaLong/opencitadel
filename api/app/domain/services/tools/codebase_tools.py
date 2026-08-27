@@ -1,23 +1,26 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Codebase retrieval tools for Ask/Agent modes."""
+
 import logging
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from app.domain.errors import NotFoundError
 from app.domain.external.sandbox import Sandbox
 from app.domain.models.codebase import ArtifactKind
+from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
+from app.domain.runtime_policy import CodebaseRetrievalRunPolicy
+from app.domain.services.codebase.hybrid_retriever import HybridCodeRetriever
 from app.domain.services.codebase.snapshot_service import (
     CodeSourceProvenance,
     CodeSourceReadResult,
     VersionedCodeSource,
 )
-from app.domain.services.codebase.hybrid_retriever import HybridCodeRetriever
 from app.domain.services.codebase.source_validator import normalize_contained_path
+from app.domain.services.codebase.vector_service import CodebaseVectorService
 from app.domain.services.tools.base import BaseTool, tool
 from app.domain.services.tools.capability_policy import CODE_READ
 from app.domain.utils.sandbox_result import file_content
+from app.domain.vector_port import EmbeddingPort
 
 logger = logging.getLogger(__name__)
 
@@ -26,25 +29,42 @@ class CodebaseTool(BaseTool):
     name: str = "codebase"
 
     def __init__(
-            self,
-            uow_factory: Callable[[], IUnitOfWork],
-            codebase_id: str,
-            sandbox: Sandbox,
-            workspace_path: str = "/home/ubuntu/codebase",
-            version_id: Optional[str] = None,
-            source_reader: Optional[VersionedCodeSource] = None,
-            base_version_id: Optional[str] = None,
-            retriever: Optional[HybridCodeRetriever] = None,
+        self,
+        uow_factory: Callable[[], IUnitOfWork],
+        codebase_id: str,
+        sandbox: Sandbox,
+        *,
+        policy: CodebaseRetrievalRunPolicy,
+        workspace_path: str = "/home/ubuntu/codebase",
+        version_id: str | None = None,
+        source_reader: VersionedCodeSource | None = None,
+        base_version_id: str | None = None,
+        retriever: HybridCodeRetriever | None = None,
+        embeddings: EmbeddingPort | None = None,
+        owner_scope: OwnerScope | None = None,
     ) -> None:
         super().__init__()
         self._uow_factory = uow_factory
         self._codebase_id = codebase_id
         self._sandbox = sandbox
+        self._policy = policy
         self._workspace = workspace_path.rstrip("/")
         self._version_id = version_id
         self._source_reader = source_reader
         self._base_version_id = base_version_id or version_id
-        self._retriever = retriever or HybridCodeRetriever(uow_factory)
+        self._retriever = retriever or HybridCodeRetriever(
+            uow_factory,
+            policy=policy,
+            vector_service=(
+                CodebaseVectorService(
+                    embeddings,
+                    scope=owner_scope,
+                    enabled=policy.vector_enabled,
+                )
+                if embeddings is not None
+                else None
+            ),
+        )
 
     @tool(
         name="semantic_search",
@@ -56,20 +76,26 @@ class CodebaseTool(BaseTool):
         required=["query"],
         policy=CODE_READ,
     )
-    async def semantic_search(self, query: str, limit: int = 5) -> str:
+    async def semantic_search(self, query: str, limit: int | None = None) -> str:
         if not self._version_id:
             return "代码库版本未绑定，无法执行版本隔离检索"
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
+        ):
+            raise ValueError("limit must be a positive integer")
+        effective_limit = min(
+            limit or self._policy.retrieval.final_top_k,
+            self._policy.retrieval.final_top_k,
+        )
         response = await self._retriever.retrieve(
             self._codebase_id,
             self._version_id,
             query,
-            limit,
+            effective_limit,
         )
         lines = []
         if response.degraded_reasons:
-            lines.append(
-                "检索降级: " + ", ".join(response.degraded_reasons)
-            )
+            lines.append("检索降级: " + ", ".join(response.degraded_reasons))
         for item in response.items:
             start, end = item.lines
             line_suffix = f":{start}-{end}" if start or end else ""
@@ -248,6 +274,7 @@ class CodebaseTool(BaseTool):
                 node = node.setdefault(part, {})
             node.setdefault("_files", []).append(parts[-1])
         import json
+
         return json.dumps(dirs, ensure_ascii=False, indent=2)[:8000]
 
     @tool(
@@ -262,10 +289,10 @@ class CodebaseTool(BaseTool):
         policy=CODE_READ,
     )
     async def read_code(
-            self,
-            path: str,
-            start_line: Optional[int] = None,
-            end_line: Optional[int] = None,
+        self,
+        path: str,
+        start_line: int | None = None,
+        end_line: int | None = None,
     ) -> str:
         try:
             result = await self.read(
@@ -273,7 +300,7 @@ class CodebaseTool(BaseTool):
                 start_line=start_line,
                 end_line=end_line,
             )
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             return f"读取失败: {exc}"
         loc = f"{result.path}:{start_line or 1}"
         meta = f"# {loc} provenance={result.provenance.value}"
@@ -284,10 +311,10 @@ class CodebaseTool(BaseTool):
         return f"```{result.path}\n{meta}\n{result.content}\n```"
 
     async def read(
-            self,
-            path: str,
-            start_line: Optional[int] = None,
-            end_line: Optional[int] = None,
+        self,
+        path: str,
+        start_line: int | None = None,
+        end_line: int | None = None,
     ) -> CodeSourceReadResult:
         if self._source_reader is not None:
             return await self._source_reader.read(
@@ -304,9 +331,7 @@ class CodebaseTool(BaseTool):
         )
         if not result.success:
             raise NotFoundError(result.message or path)
-        relative = str(
-            normalize_contained_path("/source", path).relative_to("/source")
-        )
+        relative = str(normalize_contained_path("/source", path).relative_to("/source"))
         return CodeSourceReadResult(
             path=relative,
             content=file_content(result),

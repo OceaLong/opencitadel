@@ -1,7 +1,8 @@
 """Environment-only Collector configuration; credentials never leave this process."""
+
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -9,7 +10,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class HttpTarget(BaseModel):
     url: str
-    expected_statuses: list[int] = Field(default_factory=lambda: list(range(200, 300)), max_length=20)
+    expected_statuses: list[int] = Field(
+        default_factory=lambda: list(range(200, 300)), max_length=20
+    )
     timeout_seconds: float = Field(default=10, gt=0, le=120)
 
 

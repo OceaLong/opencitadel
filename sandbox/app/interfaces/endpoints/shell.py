@@ -1,18 +1,22 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-import os
-
+from anyio import Path as AsyncPath
 from fastapi import APIRouter, Depends
 
 from app.interfaces.errors.exceptions import BadRequestException
 from app.interfaces.schemas.base import Response
-from app.interfaces.schemas.shell import ShellExecuteRequest, ShellReadRequest, ShellWaitRequest, ShellWriteRequest, \
-    ShellKillRequest
+from app.interfaces.schemas.shell import (
+    ShellExecuteRequest,
+    ShellKillRequest,
+    ShellReadRequest,
+    ShellWaitRequest,
+    ShellWriteRequest,
+)
 from app.interfaces.service_dependencies import get_shell_service
 from app.models.shell import (
+    ShellExecuteResult,
+    ShellKillResult,
+    ShellReadResult,
     ShellWaitResult,
     ShellWriteResult,
-    ShellKillResult, ShellExecuteResult, ShellReadResult,
 )
 from app.services.shell import ShellService
 
@@ -24,8 +28,8 @@ router = APIRouter(prefix="/shell", tags=["Shell模块"])
     response_model=Response[ShellExecuteResult],
 )
 async def exec_command(
-        request: ShellExecuteRequest,
-        shell_service: ShellService = Depends(get_shell_service),
+    request: ShellExecuteRequest,
+    shell_service: ShellService = Depends(get_shell_service),
 ) -> Response[ShellExecuteResult]:
     """在指定的Shell会话中运行命令"""
     # 1.判断下是否传递了session_id，如果不存在则新建一个session_id
@@ -34,7 +38,7 @@ async def exec_command(
 
     # 2.判断下是否传递了执行目录，如果未传递则使用根目录作为执行路径
     if not request.exec_dir or request.exec_dir == "":
-        request.exec_dir = os.path.expanduser("~")
+        request.exec_dir = str(await AsyncPath.home())
 
     # 3.调用服务执行命令获取结果
     result = await shell_service.exec_command(
@@ -46,13 +50,10 @@ async def exec_command(
     return Response.success(data=result)
 
 
-@router.post(
-    path="/read-shell-output",
-    response_model=Response[ShellReadResult]
-)
+@router.post(path="/read-shell-output", response_model=Response[ShellReadResult])
 async def read_shell_output(
-        request: ShellReadRequest,
-        shell_service: ShellService = Depends(get_shell_service),
+    request: ShellReadRequest,
+    shell_service: ShellService = Depends(get_shell_service),
 ) -> Response[ShellReadResult]:
     """根据传递的会话id+是否返回控制台标识获取Shell命令执行结果"""
     # 1.判断下Shell会话id是否存在
@@ -70,8 +71,8 @@ async def read_shell_output(
     response_model=Response[ShellWaitResult],
 )
 async def wait_process(
-        request: ShellWaitRequest,
-        shell_service: ShellService = Depends(get_shell_service),
+    request: ShellWaitRequest,
+    shell_service: ShellService = Depends(get_shell_service),
 ) -> Response[ShellWaitResult]:
     """传递会话id+描述执行等待并获取等待结果"""
     # 1.判断下Shell会话id是否存在
@@ -92,8 +93,8 @@ async def wait_process(
     response_model=Response[ShellWriteResult],
 )
 async def write_shell_input(
-        request: ShellWriteRequest,
-        shell_service: ShellService = Depends(get_shell_service),
+    request: ShellWriteRequest,
+    shell_service: ShellService = Depends(get_shell_service),
 ) -> Response[ShellWriteResult]:
     """根据传递的会话+写入内容+按下回车标识向指定子进程写入数据"""
     # 1.判断下Shell会话id是否存在
@@ -118,8 +119,8 @@ async def write_shell_input(
     response_model=Response[ShellKillResult],
 )
 async def kill_process(
-        request: ShellKillRequest,
-        shell_service: ShellService = Depends(get_shell_service),
+    request: ShellKillRequest,
+    shell_service: ShellService = Depends(get_shell_service),
 ) -> Response[ShellKillResult]:
     """传递Shell会话id关闭指定会话"""
     # 1.判断下Shell会话id是否存在

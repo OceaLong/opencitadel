@@ -16,7 +16,6 @@ from app.domain.models.patrol import (
 )
 from app.domain.services.patrol_assertion_engine import PatrolAssertionEngine
 
-
 FIXTURES = Path(__file__).parents[4] / "deploy" / "patrol-demo" / "fixtures"
 
 # This suite replays PatrolAssertionEngine (a pure, read-only check
@@ -54,17 +53,43 @@ HEALTHY = {
 }
 
 OVERRIDES = {
-    "02-unavailable-replica": {"k8s-workload-availability": {"unavailable_replicas": 1, "not_ready_workloads": ["deployment/fixture-unavailable"]}},
+    "02-unavailable-replica": {
+        "k8s-workload-availability": {
+            "unavailable_replicas": 1,
+            "not_ready_workloads": ["deployment/fixture-unavailable"],
+        }
+    },
     "03-crashloop": {
-        "k8s-workload-availability": {"unavailable_replicas": 1, "not_ready_workloads": ["deployment/fixture-crashloop"]},
+        "k8s-workload-availability": {
+            "unavailable_replicas": 1,
+            "not_ready_workloads": ["deployment/fixture-crashloop"],
+        },
         "k8s-restart-spike": {"restart_count_1h": 11},
     },
-    "04-image-pull": {"k8s-pending-failed": {"pending_pods": [{"ref": "pod/fixture-image-pull", "reason": "ImagePullBackOff"}], "failed_jobs": [], "stale_cronjobs": []}},
+    "04-image-pull": {
+        "k8s-pending-failed": {
+            "pending_pods": [{"ref": "pod/fixture-image-pull", "reason": "ImagePullBackOff"}],
+            "failed_jobs": [],
+            "stale_cronjobs": [],
+        }
+    },
     "05-failed-scheduling": {"k8s-warning-events": {"high_risk_count": 1}},
     "06-restarts-warn": {"k8s-restart-spike": {"restart_count_1h": 4}},
     "07-restarts-fail": {"k8s-restart-spike": {"restart_count_1h": 11}},
-    "08-failed-job": {"k8s-pending-failed": {"pending_pods": [], "failed_jobs": ["job/fixture-failed-job"], "stale_cronjobs": []}},
-    "09-stale-cronjob": {"k8s-pending-failed": {"pending_pods": [], "failed_jobs": [], "stale_cronjobs": ["cronjob/fixture-stale-cronjob"]}},
+    "08-failed-job": {
+        "k8s-pending-failed": {
+            "pending_pods": [],
+            "failed_jobs": ["job/fixture-failed-job"],
+            "stale_cronjobs": [],
+        }
+    },
+    "09-stale-cronjob": {
+        "k8s-pending-failed": {
+            "pending_pods": [],
+            "failed_jobs": [],
+            "stale_cronjobs": ["cronjob/fixture-stale-cronjob"],
+        }
+    },
 }
 
 
@@ -84,7 +109,11 @@ def _evidence(check) -> list[PatrolEvidenceRef]:
 def _fixture_state(case_id: str) -> dict:
     setup = FIXTURES / case_id / "setup.yaml"
     for document in yaml.safe_load_all(setup.read_text()):
-        if document and document.get("kind") == "ConfigMap" and document.get("metadata", {}).get("name") == "patrol-fixture-state":
+        if (
+            document
+            and document.get("kind") == "ConfigMap"
+            and document.get("metadata", {}).get("name") == "patrol-fixture-state"
+        ):
             return json.loads(document["data"]["state.json"])
     return {}
 
@@ -172,9 +201,7 @@ def score_fixture_catalog() -> dict:
         evidence_total += len(relevant)
         evidence_complete += sum(item.evidence_complete for item in relevant)
         actual_evidence = {
-            evidence.type
-            for item in results.values()
-            for evidence in item.evidence_refs
+            evidence.type for item in results.values() for evidence in item.evidence_refs
         }
         case_scores.append(
             {
@@ -192,7 +219,9 @@ def score_fixture_catalog() -> dict:
     return {
         "total_cases": len(case_scores),
         "expected_result_matches": sum(item["matched"] for item in case_scores),
-        "injected_fault_detections": sum(item["matched"] for item in case_scores if item["case_id"] != "01-healthy"),
+        "injected_fault_detections": sum(
+            item["matched"] for item in case_scores if item["case_id"] != "01-healthy"
+        ),
         "false_positives": false_positives,
         "evidence_completeness": evidence_complete / evidence_total if evidence_total else 0.0,
         "required_evidence_case_matches": sum(item["evidence_matched"] for item in case_scores),
@@ -215,10 +244,16 @@ def test_golden_fixture_matches_server_authoritative_classification(expected_pat
         if "error_code" in row:
             assert actual.error_code == row["error_code"]
         if "assertion_id" in row:
-            assertion = next(item for item in actual.assertion_results if item.assertion_id == row["assertion_id"])
+            assertion = next(
+                item
+                for item in actual.assertion_results
+                if item.assertion_id == row["assertion_id"]
+            )
             assert assertion.passed is False
     assert all(item.evidence_complete for item in results.values() if item.status.value != "error")
-    actual_evidence = {evidence.type for item in results.values() for evidence in item.evidence_refs}
+    actual_evidence = {
+        evidence.type for item in results.values() for evidence in item.evidence_refs
+    }
     assert set(expected["required_evidence"]) <= actual_evidence
 
 

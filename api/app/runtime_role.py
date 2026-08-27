@@ -1,36 +1,16 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""Explicit process role for API, Worker, and Migrate entrypoints."""
+"""Immutable process-role values passed through explicit composition roots."""
+
 from __future__ import annotations
 
-import os
-from enum import Enum
-
-_ROLE_ENV = "OPENCITADEL_PROCESS_ROLE"
+from enum import StrEnum
 
 
-class ProcessRole(str, Enum):
+class ProcessRole(StrEnum):
     API = "api"
-    WORKER = "worker"
+    EXECUTION_KERNEL = "execution-kernel"
     MIGRATE = "migrate"
+    SEED = "seed"
+    SANDBOX_BROKER = "sandbox-broker"
 
 
-_current_role: ProcessRole | None = None
-
-
-def set_role(role: ProcessRole) -> None:
-    global _current_role
-    _current_role = role
-    os.environ[_ROLE_ENV] = role.value
-
-
-def get_role() -> ProcessRole:
-    global _current_role
-    if _current_role is not None:
-        return _current_role
-    raw = os.environ.get(_ROLE_ENV, ProcessRole.API.value)
-    try:
-        _current_role = ProcessRole(raw)
-    except ValueError:
-        _current_role = ProcessRole.API
-    return _current_role
+__all__ = ["ProcessRole"]

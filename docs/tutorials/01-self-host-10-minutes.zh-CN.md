@@ -32,8 +32,8 @@ make quickstart
 
 `make quickstart` 会依次执行：
 
-1. `docker compose build opencitadel-sandbox` — 动态沙箱所需镜像（compose 中该服务在 `fixed-sandbox` profile 下，默认不启动，但 Worker 创建的沙箱依赖此镜像）
-2. `docker compose up -d --build` — 启动 API、Worker、UI、Postgres、Redis，以及（quickstart 默认）MinIO
+1. `docker compose build opencitadel-sandbox` — 动态沙箱所需镜像（compose 中该服务在 `fixed-sandbox` profile 下，默认不启动，但执行内核创建的沙箱依赖此镜像）
+2. `docker compose up -d --build` — 启动 API、执行内核、UI、Postgres、Redis，以及（quickstart 默认）MinIO
 
 首次构建可能需要 5–10 分钟。
 
@@ -46,14 +46,16 @@ make quickstart
 - 邮箱：`BOOTSTRAP_ADMIN_EMAIL` 的值（默认 `admin@example.com`）
 - 密码：你设置的 `BOOTSTRAP_ADMIN_PASSWORD`
 
-### 4. 添加端点与模型
+### 4. 配置推理
 
-LLM 配置分两步：**端点**（Provider + API Key）→ **模型**（该端点下的模型名）。完整说明见[生产部署 — 模型](../operations/deployment.zh-CN.md#模型skill-与记忆)。
+推理配置是显式三层结构：**Endpoint** 持有 Provider 与 Credential，类型化 **Model**
+隶属于 Endpoint，**Binding** 为每个用途选择 Model。完整说明见
+[推理控制面](../architecture/inference-control-plane.zh-CN.md)。
 
-1. 打开 **Settings → Models**
+1. 打开 **设置 → 推理**
 2. 点击 **Add endpoint** — 选择 Provider、Base URL、粘贴 API Key
-3. 在该端点下点击 **Add model** — 填写模型名
-4. 设为默认模型
+3. 在该 Endpoint 下点击 **Add model** — 填写模型名并选择 `chat`
+4. 将 `chat` 用途绑定到该 Model
 
 ### 5. 运行首个任务
 
@@ -75,7 +77,10 @@ FRONTEND_BASE_URL=http://localhost:8088
 OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal
 ```
 
-安装 [Ollama](https://ollama.com)，拉取一个模型，然后在设置中添加**端点**（`http://host.docker.internal:11434/v1`）与其下的**模型**。保留精确白名单，不要使用通配符。完整本地模式说明见[部署指南 — local 模式](../operations/deployment.zh-CN.md#local-模式配置)。
+安装 [Ollama](https://ollama.com)，拉取模型，然后在设置 → 推理中添加 **Endpoint**
+（`http://host.docker.internal:11434/v1`）、Chat **Model** 与 `chat` **Binding**。
+保留精确白名单，不要使用通配符。完整本地模式说明见
+[部署指南 — local 模式](../operations/deployment.zh-CN.md#local-模式配置)。
 
 **注意：** 较小的本地模型可能难以完成多步 Agent 任务。自带云端 API Key 能获得最佳首次体验。
 
@@ -84,7 +89,7 @@ OUTBOUND_PRIVATE_HOST_ALLOWLIST=host.docker.internal
 | 问题 | 解决方法 |
 |------|----------|
 | 登录 502 | 等待 `opencitadel-migrate` 完成；查看 `docker compose logs opencitadel-migrate` |
-| Agent 无响应 | 确认已设置带有效 API Key 的默认模型 |
+| Agent 无响应 | 确认有效 `chat` Binding 能解析到可访问 Model 与 Endpoint Credential |
 | OOM / 运行缓慢 | 参见 [部署指南](../operations/deployment.zh-CN.md) 内存调优；在小 VM 上启用 swap |
 
 ## 下一步

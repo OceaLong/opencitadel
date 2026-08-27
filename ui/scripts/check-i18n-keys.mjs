@@ -1,320 +1,333 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.join(__dirname, "..");
-const srcDir = path.join(root, "src");
+import { analyzeCatalog, assertCatalogClean } from "./i18n/catalog-checker.mjs";
 
-function flatten(obj, prefix = "") {
-  const keys = [];
-  for (const [key, value] of Object.entries(obj)) {
-    const full = prefix ? `${prefix}.${key}` : key;
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      keys.push(...flatten(value, full));
-    } else {
-      keys.push(full);
-    }
-  }
-  return keys;
-}
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
+const root = path.join(scriptDirectory, "..");
+const repositoryRoot = path.join(root, "..");
+const sourceRoot = path.join(root, "src");
+const runtimeKeyManifest = JSON.parse(
+  fs.readFileSync(path.join(repositoryRoot, "contracts/i18n-runtime-keys.json"), "utf8"),
+);
 
-function walk(dir, out = []) {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      walk(fullPath, out);
-    } else if (/\.(tsx?|jsx?)$/.test(entry.name)) {
-      out.push(fullPath);
-    }
-  }
-  return out;
-}
-
-/** Expand known dynamic t(`foo.${var}`) patterns used in the codebase. */
-/** Keep aligned with api/app/domain/models/app_config.py and runtime-settings.tsx RUNTIME_SECTIONS. */
-const RUNTIME_CONFIG_FIELDS = {
-  feature_flags: [
-    "enable_agent_features",
-    "enable_embeddings",
-    "enable_parallel_step_execution",
-    "enable_artifacts",
-    "enable_hitl_gates",
-    "enable_skill_auto_recommend",
-  ],
-  scheduler: [
-    "enabled",
-    "poll_interval_seconds",
-    "max_concurrent_jobs",
-    "max_concurrent_jobs_per_job",
-    "leader_lease_seconds",
-    "webhook_idempotency_ttl_seconds",
-  ],
-  server: [
-    "cors_origins",
-    "rate_limit_enabled",
-    "rate_limit_per_minute",
-    "sessions_stream_interval_seconds",
-  ],
-  sandbox: [
-    "driver",
-    "address",
-    "image",
-    "name_prefix",
-    "ttl_minutes",
-    "network",
-    "chrome_args",
-    "https_proxy",
-    "http_proxy",
-    "no_proxy",
-    "cleanup_interval_seconds",
-    "memory_limit",
-    "cpu_limit",
-    "pids_limit",
-    "pool_enabled",
-    "pool_size",
-    "idle_timeout_minutes",
-    "warmup_retry_interval_seconds",
-    "k8s_namespace",
-    "k8s_pod_label",
-  ],
-  worker: [
-    "max_concurrent_tasks",
-    "task_dispatch_max_retries",
-    "tool_timeout_seconds",
-    "mcp_connect_timeout_seconds",
-    "max_sandboxes_per_node",
-    "max_dynamic_sandboxes_global",
-    "admission_min_host_available_mb",
-    "admission_reclaim_target_mb",
-    "admission_poll_interval_seconds",
-    "admission_settle_seconds",
-    "admission_reclaim_enabled",
-    "task_execution_lease_seconds",
-    "reclaim_leader_lease_seconds",
-    "memory_probe_source",
-  ],
-  streams: [
-    "dispatch_maxlen",
-    "task_input_maxlen",
-    "task_output_maxlen",
-    "stream_maxlen",
-  ],
-  observability: [
-    "otel_enabled",
-    "otel_service_name",
-    "otel_exporter_endpoint",
-    "langfuse_enabled",
+const RUNTIME_POLICY_GROUPS = {
+  execution: ["agent", "model_resilience", "activity", "memory", "knowledge_base", "codebase"],
+  operations: [
+    "traffic",
+    "scheduler",
+    "patrol",
+    "sandbox",
+    "resource_gc",
+    "patrol_retention",
+    "source_access",
   ],
 };
 
-const RUNTIME_FIELD_EXPANSIONS = Object.entries(RUNTIME_CONFIG_FIELDS).flatMap(
-  ([section, fields]) => [
-    { prefix: `settingsRuntime.fields.${section}.`, values: fields },
-    { prefix: `settingsRuntime.descriptions.${section}.`, values: fields },
-  ],
-);
+const RUNTIME_POLICY_FIELD_PATHS = [
+  "agent.max_iterations",
+  "agent.max_retries",
+  "model_resilience.enabled",
+  "model_resilience.fallback_enabled",
+  "model_resilience.allow_cross_provider_fallback",
+  "model_resilience.fallback_on_quota_exceeded",
+  "model_resilience.allow_cross_provider_fallback_on_quota",
+  "model_resilience.max_attempts_per_call",
+  "model_resilience.max_call_budget_seconds",
+  "model_resilience.breaker_window_seconds",
+  "model_resilience.breaker_error_threshold",
+  "model_resilience.breaker_open_ttl_seconds",
+  "model_resilience.breaker_halfopen_probe_timeout_seconds",
+  "model_resilience.fast_fail_on_open_circuit",
+  "activity.tool_timeout_seconds",
+  "activity.mcp_connect_timeout_seconds",
+  "memory.recall_limit",
+  "memory.vector_enabled",
+  "knowledge_base.vector_enabled",
+  "knowledge_base.chunk.parent_max_chars",
+  "knowledge_base.chunk.child_max_chars",
+  "knowledge_base.chunk.overlap",
+  "knowledge_base.retrieval.vector_top_k",
+  "knowledge_base.retrieval.bm25_top_k",
+  "knowledge_base.retrieval.rrf_k",
+  "knowledge_base.retrieval.final_top_k",
+  "knowledge_base.rerank.enabled",
+  "knowledge_base.rerank.timeout_seconds",
+  "knowledge_base.graphrag.enabled",
+  "knowledge_base.graphrag.max_parent_chunks_per_doc",
+  "knowledge_base.graphrag.concurrency",
+  "knowledge_base.graphrag.max_chunks",
+  "knowledge_base.graphrag.max_llm_calls",
+  "knowledge_base.graphrag.max_tokens",
+  "knowledge_base.graphrag.deadline_seconds",
+  "knowledge_base.ocr.mode",
+  "knowledge_base.ocr.max_pages",
+  "knowledge_base.document.max_bytes",
+  "knowledge_base.document.max_pages",
+  "codebase.vector_enabled",
+  "codebase.analysis.max_file_size_bytes",
+  "codebase.analysis.max_files",
+  "codebase.analysis.chunk_max_chars",
+  "codebase.analysis.source_read_batch_size",
+  "codebase.retrieval.fetch_multiplier",
+  "codebase.retrieval.rrf_k",
+  "codebase.retrieval.final_top_k",
+  "traffic.rate_limit_enabled",
+  "traffic.requests_per_minute",
+  "traffic.session_stream_interval_seconds",
+  "scheduler.enabled",
+  "scheduler.poll_interval_seconds",
+  "scheduler.max_concurrent_jobs",
+  "scheduler.leader_lease_seconds",
+  "scheduler.webhook_idempotency_ttl_seconds",
+  "patrol.admission",
+  "patrol.remediation",
+  "sandbox.ttl_minutes",
+  "sandbox.cleanup_interval_seconds",
+  "sandbox.memory_limit",
+  "sandbox.cpu_limit",
+  "sandbox.pids_limit",
+  "sandbox.pool_enabled",
+  "sandbox.pool_size",
+  "sandbox.idle_timeout_minutes",
+  "sandbox.warmup_retry_interval_seconds",
+  "sandbox.warmup_max_retries",
+  "sandbox.fast_warmup_max_retries",
+  "sandbox.max_sandboxes_per_node",
+  "sandbox.max_dynamic_sandboxes_global",
+  "sandbox.admission_min_host_available_mb",
+  "sandbox.admission_reclaim_target_mb",
+  "sandbox.admission_poll_interval_seconds",
+  "sandbox.admission_settle_seconds",
+  "sandbox.admission_reclaim_enabled",
+  "sandbox.reclaim_leader_lease_seconds",
+  "resource_gc.knowledge_base.enabled",
+  "resource_gc.knowledge_base.retention_count",
+  "resource_gc.knowledge_base.retention_min_days",
+  "resource_gc.knowledge_base.batch_size",
+  "resource_gc.codebase.enabled",
+  "resource_gc.codebase.retention_count",
+  "resource_gc.codebase.retention_min_days",
+  "resource_gc.codebase.batch_size",
+  "patrol_retention.run_days",
+  "patrol_retention.finding_days",
+  "patrol_retention.collector_evidence_days",
+  "patrol_retention.cleanup_batch_size",
+  "source_access.url_allowlist",
+  "source_access.url_denylist",
+];
 
 const DYNAMIC_EXPANSIONS = [
-  { prefix: "sessionList.filter.", values: ["all", "general", "codebase", "knowledge", "hybrid"] },
-  { prefix: "operatorScope.gateProfile.", suffix: ".title", values: ["loose", "standard", "strict"] },
-  { prefix: "operatorScope.gateProfile.", suffix: ".description", values: ["loose", "standard", "strict"] },
-  { prefix: "settingsHitl.gateProfile.", values: ["loose", "standard", "strict"] },
-  { prefix: "codebase.artifacts.", values: ["architecture", "dataFlow", "moduleDir", "callChain", "flowchart", "overview"] },
-  { prefix: "sessionMemory.roles.", values: ["system", "user", "assistant", "tool", "unknown"] },
+  ...Object.entries(RUNTIME_POLICY_GROUPS).flatMap(([kind, groups]) => [
+    {
+      namespace: "runtimePolicy",
+      template: `groups.${kind}.${"${group.key}"}`,
+      keys: groups.map((group) => `groups.${kind}.${group}`),
+    },
+    {
+      namespace: "runtimePolicy",
+      template: `groupDescriptions.${kind}.${"${group.key}"}`,
+      keys: groups.map((group) => `groupDescriptions.${kind}.${group}`),
+    },
+  ]),
   {
-    prefix: "settingsRuntime.sections.",
-    values: ["feature_flags", "scheduler", "server"],
-  },
-  ...RUNTIME_FIELD_EXPANSIONS,
-  {
-    prefix: "settings.",
-    values: ["common", "agent", "interfaceTheme", "models", "skills", "memory", "integrations", "hitl", "runtime"],
-  },
-  {
-    prefix: "adminNav.",
-    values: ["overview", "users", "teams", "invitations", "audit", "evidence", "complianceReport", "governance"],
+    namespace: "runtimePolicy",
+    template: "fields.${definition.path}",
+    keys: RUNTIME_POLICY_FIELD_PATHS.map((path) => `fields.${path}`),
   },
   {
-    prefix: "nav.",
-    values: ["chat", "patrol", "automation", "knowledge", "codebase", "admin", "label"],
+    namespace: "sessionList",
+    template: "filter.${option}",
+    keys: ["filter.all", "filter.general", "filter.codebase", "filter.knowledge", "filter.hybrid"],
+  },
+  {
+    namespace: "sessionList",
+    template: "filter.${contextKind}",
+    keys: ["filter.codebase", "filter.knowledge", "filter.hybrid"],
+  },
+  {
+    namespace: "codebase",
+    template: "artifacts.${key}",
+    keys: [
+      "artifacts.architecture",
+      "artifacts.dataFlow",
+      "artifacts.moduleDir",
+      "artifacts.callChain",
+      "artifacts.flowchart",
+      "artifacts.overview",
+    ],
+  },
+  {
+    namespace: "settingsInference",
+    template: "purpose_${purpose}",
+    keys: ["purpose_chat", "purpose_embedding", "purpose_rerank"],
+  },
+  {
+    namespace: "automation",
+    template: "labelKey",
+    keys: ["webhookUrlLabel", "tokenLabel", "secretLabel"],
+  },
+  {
+    namespace: "automation",
+    template: "ariaKey",
+    keys: ["copyWebhookUrlAria", "copyTokenAria", "copySecretAria"],
+  },
+  {
+    namespace: "automation",
+    template: 'TRIGGER_LABEL[form.trigger_type ?? "interval"]',
+    keys: ["triggerInterval", "triggerCron", "triggerWebhook"],
+  },
+  {
+    namespace: "admin",
+    template: "option.labelKey",
+    keys: ["timeRange7d", "timeRange30d", "timeRange90d", "timeRangeAll"],
+  },
+  {
+    namespace: "adminNav",
+    template: "labelKey",
+    keys: [
+      "overview",
+      "users",
+      "teams",
+      "invitations",
+      "audit",
+      "governance",
+      "evidence",
+      "complianceReport",
+    ],
+  },
+  {
+    namespace: "adminNav",
+    template: "adminItem.labelKey",
+    keys: [
+      "overview",
+      "users",
+      "teams",
+      "invitations",
+      "audit",
+      "governance",
+      "evidence",
+      "complianceReport",
+    ],
+  },
+  {
+    namespace: "nav",
+    template: "module.key",
+    keys: ["chat", "patrol", "automation", "knowledge", "codebase", "admin"],
+  },
+  {
+    namespace: "nav",
+    template: "activeModule.key",
+    keys: ["chat", "patrol", "automation", "knowledge", "codebase", "admin"],
+  },
+  {
+    namespace: "codebase",
+    template: "CODEBASE_STATUS_LABEL_KEYS[cb.status]",
+    keys: [
+      "status.pending",
+      "status.materializing",
+      "status.analyzing",
+      "status.indexing",
+      "status.generating",
+      "status.ready",
+      "status.failed",
+    ],
+  },
+  {
+    namespace: "knowledge",
+    template: "KB_STATUS_LABEL_KEYS[kb.status]",
+    keys: [
+      "status.pending",
+      "status.parsing",
+      "status.chunking",
+      "status.indexing",
+      "status.graph_building",
+      "status.ready",
+      "status.failed",
+    ],
+  },
+  {
+    namespace: "settings",
+    template: "errorKey",
+    keys: [
+      "mcpUrlRequired",
+      "mcpUrlInvalidScheme",
+      "mcpParamValueRequiredWhenUndecryptable",
+      "mcpCommandRequired",
+    ],
+  },
+  {
+    namespace: "settings",
+    template: 'transport === "stdio" ? "mcpCommandRequired" : "mcpUrlRequired"',
+    keys: ["mcpCommandRequired", "mcpUrlRequired"],
+  },
+  {
+    namespace: "settings",
+    template: "validationError",
+    keys: ["mcpUrlRequired", "mcpUrlInvalidScheme"],
+  },
+  {
+    namespace: "settings",
+    template: "menu.labelKey",
+    keys: ["common", "agent", "inference", "skills", "memory", "integrations", "runtime"],
+  },
+  {
+    template: "body.error_key",
+    keys: runtimeKeyManifest.apiErrorKeys,
+  },
+  {
+    template: "item.i18n_key",
+    keys: runtimeKeyManifest.notificationKeys,
+  },
+  {
+    template: "WEEKDAY_KEYS[date.getDay()]",
+    keys: [
+      "common.dates.weekdaySun",
+      "common.dates.weekdayMon",
+      "common.dates.weekdayTue",
+      "common.dates.weekdayWed",
+      "common.dates.weekdayThu",
+      "common.dates.weekdayFri",
+      "common.dates.weekdaySat",
+    ],
   },
 ];
 
-function collectUsedKeys() {
-  const used = new Set();
-  const unresolvedDynamic = new Set();
-
-  for (const file of walk(srcDir)) {
-    const src = fs.readFileSync(file, "utf8");
-    const varNs = {};
-
-    for (const re of [
-      /(?:const|let|var)\s+(\w+)\s*=\s*useTranslations\(\s*"([^"]+)"\s*\)/g,
-      /(?:const|let|var)\s+(\w+)\s*=\s*await\s+getTranslations\(\s*(?:\{[^}]*namespace:\s*)?"([^"]+)"/g,
-    ]) {
-      let match;
-      while ((match = re.exec(src))) {
-        varNs[match[1]] = match[2];
-      }
-    }
-
-    for (const [varName, namespace] of Object.entries(varNs)) {
-      const callRe = new RegExp(`\\b${varName}\\(\\s*("([^"]*)"|\`([^\`]*)\`)`, "g");
-      let call;
-      while ((call = callRe.exec(src))) {
-        if (call[2] !== undefined) {
-          used.add(`${namespace}.${call[2]}`);
-        } else {
-          unresolvedDynamic.add(`${namespace} :: ${call[3]}`);
-        }
-      }
+function walkSources(directory, files = []) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const absolutePath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      walkSources(absolutePath, files);
+    } else if (/\.[cm]?[jt]sx?$/.test(entry.name)) {
+      files.push({
+        path: path.relative(root, absolutePath),
+        source: fs.readFileSync(absolutePath, "utf8"),
+      });
     }
   }
-
-  for (const { prefix, suffix = "", values } of DYNAMIC_EXPANSIONS) {
-    for (const value of values) {
-      used.add(`${prefix}${value}${suffix}`);
-    }
-  }
-
-  return { used, unresolvedDynamic };
+  return files;
 }
 
-const zh = JSON.parse(fs.readFileSync(path.join(root, "messages/zh.json"), "utf8"));
-const en = JSON.parse(fs.readFileSync(path.join(root, "messages/en.json"), "utf8"));
-const zhKeys = new Set(flatten(zh));
-const enKeys = new Set(flatten(en));
-
-let failed = false;
-
-const onlyZh = [...zhKeys].filter((k) => !enKeys.has(k)).sort();
-const onlyEn = [...enKeys].filter((k) => !zhKeys.has(k)).sort();
-
-if (onlyZh.length || onlyEn.length) {
-  failed = true;
-  console.error("i18n locale key mismatch:");
-  if (onlyZh.length) console.error("  only in zh.json:", onlyZh.join(", "));
-  if (onlyEn.length) console.error("  only in en.json:", onlyEn.join(", "));
-}
-
-const { used, unresolvedDynamic } = collectUsedKeys();
-const missingFromEn = [...used].filter((k) => !enKeys.has(k)).sort();
-const missingFromZh = [...used].filter((k) => !zhKeys.has(k)).sort();
-
-if (missingFromEn.length || missingFromZh.length) {
-  failed = true;
-  console.error("i18n keys used in code but missing from message files:");
-  if (missingFromEn.length) {
-    console.error(`  missing from en.json (${missingFromEn.length}):`);
-    console.error("   ", missingFromEn.join(", "));
-  }
-  if (missingFromZh.length) {
-    console.error(`  missing from zh.json (${missingFromZh.length}):`);
-    console.error("   ", missingFromZh.join(", "));
-  }
-}
-
-// check B': keys present in messages but never referenced in code (warn only)
-const ALLOWED_UNUSED_PREFIXES = ["metadata."];
-const unusedKeys = [...enKeys].filter(
-  (key) =>
-    !used.has(key) &&
-    !ALLOWED_UNUSED_PREFIXES.some((prefix) => key.startsWith(prefix)) &&
-    !key.startsWith("settingsRuntime."),
+const locales = Object.fromEntries(
+  ["en", "zh"].map((locale) => [
+    locale,
+    JSON.parse(fs.readFileSync(path.join(root, `messages/${locale}.json`), "utf8")),
+  ]),
 );
-if (unusedKeys.length) {
-  console.warn(`\n[warn] ${unusedKeys.length} unused key(s):`);
-  for (const key of unusedKeys) console.warn(`  - ${key}`);
+const report = analyzeCatalog({
+  locales,
+  sourceFiles: walkSources(sourceRoot),
+  dynamicExpansions: DYNAMIC_EXPANSIONS,
+});
+
+try {
+  assertCatalogClean(report);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
 }
 
-const missingRuntimeFields = [];
-for (const [section, fields] of Object.entries(RUNTIME_CONFIG_FIELDS)) {
-  for (const field of fields) {
-    for (const kind of ["fields", "descriptions"]) {
-      const key = `settingsRuntime.${kind}.${section}.${field}`;
-      if (!enKeys.has(key)) missingRuntimeFields.push(`${key} (en)`);
-      if (!zhKeys.has(key)) missingRuntimeFields.push(`${key} (zh)`);
-    }
-  }
+if (process.exitCode !== 1) {
+  console.log("i18n catalog is aligned, fully referenced, and free of hardcoded UI strings");
 }
-
-if (missingRuntimeFields.length) {
-  failed = true;
-  console.error("settingsRuntime config field i18n missing:");
-  console.error("   ", missingRuntimeFields.join(", "));
-}
-
-const knownDynamicPatterns = new Set([
-  "sessionList :: filter.${option}",
-  "sessionList :: filter.${contextKind}",
-  "operatorScope :: gateProfile.${profile}.title",
-  "operatorScope :: gateProfile.${profile}.description",
-  "codebase :: artifacts.${key}",
-  "sessionMemory :: roles.${role}",
-  "settingsRuntime :: sections.${activeSection}",
-  "settingsRuntime :: sections.${section}",
-  "settingsRuntime :: fields.${section}.${key}",
-  "settingsRuntime :: descriptions.${section}.${key}",
-  "settingsHitl :: gateProfile.${profile}",
-]);
-
-const unknownDynamic = [...unresolvedDynamic].filter((p) => !knownDynamicPatterns.has(p)).sort();
-if (unknownDynamic.length) {
-  failed = true;
-  console.error("Unhandled dynamic i18n key patterns (add to DYNAMIC_EXPANSIONS or use static keys):");
-  for (const pattern of unknownDynamic) {
-    console.error("  ", pattern);
-  }
-}
-
-if (failed) {
-  process.exit(1);
-}
-
-/** Heuristic scan for likely hardcoded user-facing strings (warnings only). */
-const HARDCODED_PATTERNS = [
-  {
-    name: "toast literal",
-    re: /toast\.(?:success|error|info|warning)\(\s*["'`][^"'`]+["'`]/g,
-    allow: (line) => line.includes("t(") || line.includes("translate("),
-  },
-  {
-    name: "JSX Chinese text",
-    re: />[^<{]*[\u4e00-\u9fff][^<{]*</g,
-    allow: (line) => line.trim().startsWith("//") || line.includes("{/*"),
-  },
-];
-
-const hardcodedFindings = [];
-for (const file of walk(srcDir)) {
-  const rel = path.relative(root, file);
-  if (rel.includes("/components/ui/")) continue;
-  const lines = fs.readFileSync(file, "utf8").split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    for (const { name, re, allow } of HARDCODED_PATTERNS) {
-      if (allow?.(line)) continue;
-      re.lastIndex = 0;
-      if (re.test(line)) {
-        hardcodedFindings.push(`${rel}:${i + 1} [${name}] ${line.trim().slice(0, 120)}`);
-      }
-    }
-  }
-}
-
-if (hardcodedFindings.length) {
-  console.warn(
-    `i18n heuristic: ${hardcodedFindings.length} possible hardcoded string(s) (review manually):`,
-  );
-  for (const finding of hardcodedFindings.slice(0, 20)) {
-    console.warn(" ", finding);
-  }
-  if (hardcodedFindings.length > 20) {
-    console.warn(`  ... and ${hardcodedFindings.length - 20} more`);
-  }
-}
-
-console.log(
-  `i18n OK: ${zhKeys.size} keys aligned; ${used.size} code-referenced keys present in en.json and zh.json`,
-);

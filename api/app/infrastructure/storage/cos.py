@@ -1,14 +1,11 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
 import logging
-from functools import lru_cache
-from typing import Any, Optional
+from typing import Any
 
-from qcloud_cos import CosS3Client, CosConfig
+from qcloud_cos import CosConfig, CosS3Client
 from starlette.concurrency import run_in_threadpool
 
-from core.config import Settings, get_settings
+from core.config import DeploymentSettings
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +26,7 @@ def _read_body_fully(body: Any) -> bytes:
     return b"".join(chunks)
 
 
-def _parse_content_length(response: dict) -> Optional[int]:
+def _parse_content_length(response: dict) -> int | None:
     expected_length = response.get("Content-Length")
     if expected_length is None:
         return None
@@ -42,10 +39,10 @@ def _parse_content_length(response: dict) -> Optional[int]:
 class Cos:
     """腾讯云Cos对象存储"""
 
-    def __init__(self):
+    def __init__(self, settings: DeploymentSettings) -> None:
         """构造函数，完成配置获取+Cos客户端初始化赋值"""
-        self._settings: Settings = get_settings()
-        self._client: Optional[CosS3Client] = None
+        self._settings = settings
+        self._client: CosS3Client | None = None
 
     async def init(self) -> None:
         """完成cos腾讯云对象存储客户端的创建"""
@@ -69,8 +66,8 @@ class Cos:
             )
             self._client = CosS3Client(config)
             logger.info("Cos腾讯云对象存储初始化成功")
-        except Exception as e:
-            logger.error(f"Cos腾讯云对象存储初始化失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("Cos腾讯云对象存储初始化失败: %s", e)
             raise
 
     async def shutdown(self) -> None:
@@ -78,8 +75,6 @@ class Cos:
         if self._client is not None:
             self._client = None
             logger.info("关闭腾讯云Cos对象存储成功")
-
-        get_cos.cache_clear()
 
     @property
     def client(self) -> CosS3Client:
@@ -102,7 +97,7 @@ class Cos:
             Key=key,
         )
 
-    async def _fetch_object_bytes(self, key: str) -> tuple[bytes, Optional[int]]:
+    async def _fetch_object_bytes(self, key: str) -> tuple[bytes, int | None]:
         response = await run_in_threadpool(
             self.client.get_object,
             Bucket=self.bucket,
@@ -116,7 +111,7 @@ class Cos:
     async def get_bytes(self, key: str) -> bytes:
         """Download raw bytes from COS."""
         last_data = b""
-        last_expected_length: Optional[int] = None
+        last_expected_length: int | None = None
 
         for attempt in range(_GET_BYTES_MAX_ATTEMPTS):
             if attempt > 0:
@@ -146,8 +141,7 @@ class Cos:
             return data
 
         raise RuntimeError(
-            f"COS get_bytes 读取失败 key={key} "
-            f"expected={last_expected_length} got={len(last_data)}"
+            f"COS get_bytes 读取失败 key={key} expected={last_expected_length} got={len(last_data)}"
         )
 
     async def delete_bytes(self, key: str) -> None:
@@ -158,7 +152,7 @@ class Cos:
             Key=key,
         )
 
-    async def presigned_get_url(self, key: str, expires_seconds: int = 604800) -> Optional[str]:
+    async def presigned_get_url(self, key: str, expires_seconds: int = 604800) -> str | None:
         """Generate a presigned download URL for LLM-accessible image references."""
         if self._settings.env == "test":
             return f"https://example.com/{key}"
@@ -168,9 +162,3 @@ class Cos:
             Key=key,
             Expired=expires_seconds,
         )
-
-
-@lru_cache()
-def get_cos() -> Cos:
-    """获取腾讯云cos对象存储"""
-    return Cos()

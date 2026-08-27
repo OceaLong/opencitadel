@@ -1,11 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Python AST parser adapter for codebase static analysis."""
+
 from __future__ import annotations
 
 import ast
 from pathlib import PurePosixPath
-from typing import Optional
 
 from app.domain.models.codebase import SymbolKind
 from app.domain.services.codebase.parsers.base import (
@@ -22,7 +20,7 @@ class PythonParser:
 
     def parse(self, path: str, content: str) -> ParsedFile:
         tree = ast.parse(content)
-        lines = content.splitlines()
+        content.splitlines()
         module_name = self._module_name(path)
         symbols: list[ParsedSymbol] = []
         calls: list[ParsedCallSite] = []
@@ -66,11 +64,7 @@ class PythonParser:
                 qualified = ".".join([*self.scope, name])
                 args = getattr(getattr(node, "args", None), "args", [])
                 arg_names = [getattr(arg, "arg", "") for arg in args]
-                kind = (
-                    SymbolKind.METHOD
-                    if self.class_depth > 0
-                    else SymbolKind.FUNCTION
-                )
+                kind = SymbolKind.METHOD if self.class_depth > 0 else SymbolKind.FUNCTION
                 symbols.append(
                     ParsedSymbol(
                         name=name,
@@ -117,7 +111,7 @@ class PythonParser:
         return ".".join(parts)
 
     @staticmethod
-    def _call_name(node: ast.AST) -> Optional[str]:
+    def _call_name(node: ast.AST) -> str | None:
         if isinstance(node, ast.Name):
             return node.id
         if isinstance(node, ast.Attribute):

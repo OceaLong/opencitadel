@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -27,8 +25,7 @@ def setup_logging() -> None:
 
     # 4.日志输出格式定义
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     )
 
     # 5.创建控制台日志输出处理器

@@ -11,59 +11,55 @@ MCP 服务器暴露工具（如 `maps_geocode`、`read_url`），Agent 可像调
 - `stdio` — 本地进程
 - `sse` / `streamable_http` — 远程 HTTP 服务
 
-配置位于 `api/config.yaml` 的 `mcp_config.mcpServers`（以服务器名为键的字典）。也可在 **设置 → 集成**（设置弹窗 Tab）中管理。
+MCP Server 是一等、Owner Scope 的 Integration Resource。通过 **设置 → 集成** 或 `/api/integrations/mcp-servers` 创建和管理；Skill 与 Automation 使用稳定 Resource ID 引用。
 
 ## 示例：添加远程 MCP 服务器
 
-编辑 `api/config.yaml`：
+打开 **设置 → 集成 → 添加服务器**，提交：
 
-```yaml
-mcp_config:
-  mcpServers:
-    jina-mcp-server:
-      transport: streamable_http
-      url: https://mcp.jina.ai/sse
-      enabled: true
+```json
+{
+  "name": "jina-mcp-server",
+  "transport": "streamable_http",
+  "url": "https://mcp.jina.ai/sse",
+  "enabled": true,
+  "visibility": "private"
+}
 ```
 
-重启 API 与 Worker：
-
-```bash
-docker compose restart opencitadel-api opencitadel-worker
-```
-
-工具会以 `mcp_` 前缀出现在 Agent 工具列表中。
+无需重启服务。Integration List 会投影连接状态与发现的工具；Agent 工具使用 `mcp_` 前缀。
 
 ## 示例：内部 HTTP MCP 网关
 
 对于内网系统，在 VPC 内运行 MCP 网关：
 
-```yaml
-mcp_config:
-  mcpServers:
-    internal-crm:
-      transport: streamable_http
-      url: http://mcp-gateway.internal:8080/sse
-      enabled: true
-      headers:
-        Authorization: "Bearer ${CRM_MCP_TOKEN}"
+```json
+{
+  "name": "internal-crm",
+  "transport": "streamable_http",
+  "url": "http://mcp-gateway.internal:8080/sse",
+  "enabled": true,
+  "visibility": "private",
+  "headers": {"Authorization": "Bearer <token>"}
+}
 ```
 
-密钥存放在 `.env` 中，通过部署环境的 Secret 注入机制引用。
+Credential 使用当前 API 加密密钥加密存储，读取时脱敏。不要把 Integration Credential 放入部署变量或 Runtime Policy。
 
 ## 模板：stdio MCP（本地脚本）
 
-```yaml
-mcp_config:
-  mcpServers:
-    company-tools:
-      transport: stdio
-      command: python
-      args: ["/opt/mcp/company_tools_server.py"]
-      enabled: true
+```json
+{
+  "name": "company-tools",
+  "transport": "stdio",
+  "command": "python",
+  "args": ["/opt/mcp/company_tools_server.py"],
+  "enabled": true,
+  "visibility": "global"
+}
 ```
 
-将脚本挂载进 Worker 容器，或通过 HTTP 可达的 sidecar 运行 MCP。
+只有管理员可以创建 stdio 或 Global Resource。可将脚本挂载进执行内核容器；多副本场景优先使用所有内核均可达的 HTTP Sidecar。
 
 ## 验证工具
 
@@ -80,7 +76,7 @@ mcp_config:
 
 ## 通过 UI 管理
 
-打开 **设置 → 集成** 可查看 MCP 与 A2A 配置；当 `USE_DB_APP_CONFIG=true` 时，运行时修改会持久化到数据库。
+打开 **设置 → 集成** 管理 MCP 与 A2A Resource。修改会立即持久化到 PostgreSQL；连接健康与能力发现由 Read-side Projection 提供。
 
 ## 下一步
 

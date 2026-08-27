@@ -1,14 +1,10 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import Optional, List
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.file import File
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.file_repository import FileRepository
-from app.infrastructure.models import FileModel
+from app.infrastructure.models.file import FileModel
 
 
 class DBFileRepository(FileRepository):
@@ -18,7 +14,7 @@ class DBFileRepository(FileRepository):
         """构造函数，完成数据仓库初始化"""
         self.db_session = db_session
 
-    def _apply_scope(self, stmt, scope: Optional[OwnerScope]):
+    def _apply_scope(self, stmt, scope: OwnerScope | None):
         if scope is None:
             return stmt
         if scope.type == OwnerScopeType.TEAM:
@@ -41,7 +37,7 @@ class DBFileRepository(FileRepository):
         # 3.文件存在则直接更新文件
         record.update_from_domain(file)
 
-    async def get_by_id(self, file_id: str, scope: Optional[OwnerScope] = None) -> Optional[File]:
+    async def get_by_id(self, file_id: str, scope: OwnerScope | None = None) -> File | None:
         """根据传递的文件id获取文件信息"""
         # 1.根据id查询记录是否存在
         stmt = self._apply_scope(select(FileModel).where(FileModel.id == file_id), scope)
@@ -51,7 +47,7 @@ class DBFileRepository(FileRepository):
         # 2.判断文件记录是否存在返回不同的值
         return record.to_domain() if record is not None else None
 
-    async def list_by_ids(self, file_ids: List[str], scope: Optional[OwnerScope] = None) -> List[File]:
+    async def list_by_ids(self, file_ids: list[str], scope: OwnerScope | None = None) -> list[File]:
         """根据传递的文件id列表批量获取文件信息，并按输入顺序返回。"""
         if not file_ids:
             return []

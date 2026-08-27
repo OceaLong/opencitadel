@@ -19,9 +19,8 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 
-import { configApi } from "@/lib/api/config";
+import { integrationsApi, type MCPServer } from "@/lib/api";
 import { patrolsApi } from "@/lib/api/patrols";
-import type { ListMCPServerItem } from "@/lib/api/types";
 
 export function PackWizard() {
   const router = useRouter();
@@ -61,7 +60,7 @@ export function PackWizard() {
     { name: t("checks.endpoint"), tool: "http_probe", threshold: t("thresholds.endpoint") },
   ];
   const [step, setStep] = useState(0);
-  const [servers, setServers] = useState<ListMCPServerItem[]>([]);
+  const [servers, setServers] = useState<MCPServer[]>([]);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: t("wizard.defaultName"),
@@ -75,14 +74,12 @@ export function PackWizard() {
     scheduleEnabled: false,
   });
   useEffect(() => {
-    void configApi
-      .getMCPServers()
-      .then((data) =>
-        setServers(data.mcp_servers.filter((item) => item.enabled && item.server_id)),
-      );
+    void integrationsApi
+      .listMCPServers()
+      .then((data) => setServers(data.items.filter((item) => item.enabled)));
   }, []);
   const selected = useMemo(
-    () => servers.find((item) => item.server_id === form.serverId),
+    () => servers.find((item) => item.id === form.serverId),
     [servers, form.serverId],
   );
   const canContinue =
@@ -163,11 +160,8 @@ export function PackWizard() {
                   </SelectTrigger>
                   <SelectContent>
                     {servers.map((server) => (
-                      <SelectItem
-                        key={server.server_id ?? server.server_name}
-                        value={server.server_id ?? ""}
-                      >
-                        {server.server_name} · {server.connection_status ?? "unknown"}
+                      <SelectItem key={server.id} value={server.id}>
+                        {server.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -182,7 +176,7 @@ export function PackWizard() {
           {step === 1 && (
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-2">
-                <Label htmlFor="patrol-target-ref">Target Ref</Label>
+                <Label htmlFor="patrol-target-ref">{t("labels.targetRef")}</Label>
                 <Input
                   id="patrol-target-ref"
                   value={form.targetRef}
@@ -190,7 +184,7 @@ export function PackWizard() {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="patrol-cluster">Cluster</Label>
+                <Label htmlFor="patrol-cluster">{t("labels.cluster")}</Label>
                 <Input
                   id="patrol-cluster"
                   value={form.cluster}
@@ -198,7 +192,7 @@ export function PackWizard() {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="patrol-namespace">Namespace</Label>
+                <Label htmlFor="patrol-namespace">{t("labels.namespace")}</Label>
                 <Input
                   id="patrol-namespace"
                   value={form.namespace}
@@ -206,7 +200,7 @@ export function PackWizard() {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="patrol-environment">Environment</Label>
+                <Label htmlFor="patrol-environment">{t("labels.environment")}</Label>
                 <Select
                   value={form.environment}
                   onValueChange={(value) => setForm({ ...form, environment: value })}

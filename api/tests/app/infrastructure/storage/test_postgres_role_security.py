@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import pytest
 
 from app.infrastructure.storage.postgres import ensure_rls_capable_role
@@ -31,7 +29,7 @@ def test_production_accepts_non_superuser_non_bypass_role():
     )
 
 
-def test_development_keeps_local_superuser_compatibility():
+def test_development_allows_local_superuser():
     ensure_rls_capable_role(
         env="development",
         role_name="postgres",

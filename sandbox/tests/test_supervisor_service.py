@@ -1,8 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """SupervisorService 行为测试：fake rpc 下的 get_all_processes，以及惰性连接 + 超时状态机。"""
-import pytest
 
+import pytest
 from app.interfaces.errors.exceptions import AppException
 
 

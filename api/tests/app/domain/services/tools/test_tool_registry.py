@@ -1,14 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from unittest.mock import MagicMock
 
 from app.domain.services.tools.a2a import A2ATool
 from app.domain.services.tools.base import BaseTool
-from app.domain.services.tools.browser import BrowserTool
-from app.domain.services.tools.file import FileTool
 from app.domain.services.tools.mcp import MCPTool
-from app.domain.services.tools.message import MessageTool
-from app.domain.services.tools.shell import ShellTool
 from app.domain.services.tools.tool_registry import ToolRegistry
 
 
@@ -33,7 +27,6 @@ def test_build_ask_tools_excludes_shell_file_browser():
     assert "file" not in tool_names
     assert "shell" not in tool_names
     assert "browser" not in tool_names
-    assert "message" in tool_names
     assert "mcp" in tool_names
     assert "a2a" in tool_names
     assert "dummy" in tool_names

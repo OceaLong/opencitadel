@@ -1,11 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, List
 
+from app.application.ports.crypto import ServiceKeyPort
 from app.domain.models.service_api_key import ServiceApiKey
 from app.domain.repositories.uow import IUnitOfWork
-from app.infrastructure.security.service_api_key import ServiceApiKeyHasher
 
 
 @dataclass(frozen=True)
@@ -16,9 +14,9 @@ class CreatedServiceApiKey:
 
 class ServiceApiKeyService:
     def __init__(
-            self,
-            uow_factory: Callable[[], IUnitOfWork],
-            hasher: ServiceApiKeyHasher,
+        self,
+        uow_factory: Callable[[], IUnitOfWork],
+        hasher: ServiceKeyPort,
     ) -> None:
         self._uow_factory = uow_factory
         self._hasher = hasher
@@ -33,12 +31,14 @@ class ServiceApiKeyService:
         )
         async with self._uow_factory() as uow:
             await uow.service_api_key.save(key)
+            await uow.commit()
         return CreatedServiceApiKey(key=key, plaintext=generated.plaintext)
 
-    async def list_keys(self, user_id: str) -> List[ServiceApiKey]:
+    async def list_keys(self, user_id: str) -> list[ServiceApiKey]:
         async with self._uow_factory() as uow:
             return await uow.service_api_key.list_for_user(user_id)
 
     async def revoke_key(self, *, user_id: str, key_id: str) -> None:
         async with self._uow_factory() as uow:
             await uow.service_api_key.revoke(key_id, user_id)
+            await uow.commit()

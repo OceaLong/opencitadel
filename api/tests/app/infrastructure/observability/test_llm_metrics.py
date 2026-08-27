@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from app.infrastructure.observability.llm_metrics import (
     get_llm_metrics_snapshot,
     record_multimodal_fallback,

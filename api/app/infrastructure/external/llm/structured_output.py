@@ -1,19 +1,18 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Provider-specific structured output schema helpers."""
+
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Type
+from typing import Any
 
 from pydantic import BaseModel
 
 
-def _json_schema_for(model_class: Type[BaseModel]) -> Dict[str, Any]:
+def _json_schema_for(model_class: type[BaseModel]) -> dict[str, Any]:
     return model_class.model_json_schema()
 
 
-def _resolve_ref(ref: str, root: Dict[str, Any]) -> Dict[str, Any]:
+def _resolve_ref(ref: str, root: dict[str, Any]) -> dict[str, Any]:
     if not ref.startswith("#/$defs/"):
         return {}
     key = ref.removeprefix("#/$defs/")
@@ -22,7 +21,7 @@ def _resolve_ref(ref: str, root: Dict[str, Any]) -> Dict[str, Any]:
     return deepcopy(target)
 
 
-def _inline_refs(node: Any, root: Dict[str, Any]) -> Any:
+def _inline_refs(node: Any, root: dict[str, Any]) -> Any:
     if isinstance(node, list):
         return [_inline_refs(item, root) for item in node]
     if not isinstance(node, dict):
@@ -33,11 +32,7 @@ def _inline_refs(node: Any, root: Dict[str, Any]) -> Any:
         merged = {**resolved, **{k: v for k, v in node.items() if k != "$ref"}}
         return _inline_refs(merged, root)
 
-    return {
-        key: _inline_refs(value, root)
-        for key, value in node.items()
-        if key != "$defs"
-    }
+    return {key: _inline_refs(value, root) for key, value in node.items() if key != "$defs"}
 
 
 def _to_strict_object(node: Any) -> Any:
@@ -55,8 +50,10 @@ def _to_strict_object(node: Any) -> Any:
     return converted
 
 
-def to_openai_strict(model_class: Type[BaseModel]) -> Dict[str, Any]:
-    schema = _to_strict_object(_inline_refs(_json_schema_for(model_class), _json_schema_for(model_class)))
+def to_openai_strict(model_class: type[BaseModel]) -> dict[str, Any]:
+    schema = _to_strict_object(
+        _inline_refs(_json_schema_for(model_class), _json_schema_for(model_class))
+    )
     schema.pop("$defs", None)
     return {
         "type": "json_schema",
@@ -74,7 +71,7 @@ def _to_gemini_schema(node: Any) -> Any:
     if not isinstance(node, dict):
         return node
 
-    converted: Dict[str, Any] = {}
+    converted: dict[str, Any] = {}
     for key, value in node.items():
         if key in {"additionalProperties", "$defs", "title", "default"}:
             continue
@@ -91,15 +88,16 @@ def _to_gemini_schema(node: Any) -> Any:
     return converted
 
 
-def to_gemini_schema(model_class: Type[BaseModel]) -> Dict[str, Any]:
+def to_gemini_schema(model_class: type[BaseModel]) -> dict[str, Any]:
     strict_schema = to_openai_strict(model_class)["json_schema"]["schema"]
     return _to_gemini_schema(strict_schema)
 
 
-def schema_payload(model_class: Type[BaseModel]) -> Dict[str, Any]:
+def schema_payload(model_class: type[BaseModel]) -> dict[str, Any]:
     return {
         "name": model_class.__name__,
-        "schema": _to_strict_object(_inline_refs(_json_schema_for(model_class), _json_schema_for(model_class))),
+        "schema": _to_strict_object(
+            _inline_refs(_json_schema_for(model_class), _json_schema_for(model_class))
+        ),
         "model_class": model_class,
     }
-

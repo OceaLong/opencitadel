@@ -2,10 +2,23 @@
 
 import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Bot, FileSearch, Globe, Maximize2, Monitor, Package, Search, Terminal, Wrench } from "lucide-react";
+import {
+  Bot,
+  FileSearch,
+  Globe,
+  Maximize2,
+  Monitor,
+  Package,
+  Search,
+  Terminal,
+  Wrench,
+} from "lucide-react";
 
 import { ArtifactWorkbench } from "@/components/session/artifact-workbench";
-import { JumpToLatestButton, ToolPreviewContent } from "@/components/session/tool-preview-renderers";
+import {
+  JumpToLatestButton,
+  ToolPreviewContent,
+} from "@/components/session/tool-preview-renderers";
 import { StatusBadge } from "@/components/status-badge";
 import type { ToolKind } from "@/components/tool-use/utils";
 import { getFriendlyToolLabel, getToolKind } from "@/components/tool-use/utils";
@@ -29,7 +42,10 @@ export type ToolPreviewPanelProps = {
   onOpenVNC?: () => void;
 };
 
-function getToolDescription(kind: ToolKind, t: ReturnType<typeof useTranslations<"toolPreview">>): string {
+function getToolDescription(
+  kind: ToolKind,
+  t: ReturnType<typeof useTranslations<"toolPreview">>,
+): string {
   const map: Record<ToolKind, string> = {
     bash: t("toolTerminal"),
     browser: t("toolBrowser"),
@@ -37,7 +53,6 @@ function getToolDescription(kind: ToolKind, t: ReturnType<typeof useTranslations
     file: t("toolFile"),
     mcp: t("toolMcp"),
     a2a: t("toolA2a"),
-    message: t("toolMessage"),
     default: t("toolDefault"),
   };
   return map[kind];
@@ -50,7 +65,6 @@ const TOOL_ICONS: Record<ToolKind, typeof Terminal> = {
   file: FileSearch,
   mcp: Wrench,
   a2a: Bot,
-  message: Monitor,
   default: Monitor,
 };
 
@@ -69,13 +83,7 @@ function formatArgs(args: Record<string, unknown>): string {
   }
 }
 
-function ToolPreviewHeader({
-  tool,
-  onClose,
-}: {
-  tool: ToolEvent;
-  onClose: () => void;
-}) {
+function ToolPreviewHeader({ tool, onClose }: { tool: ToolEvent; onClose: () => void }) {
   const t = useTranslations("toolPreview");
   const kind = getToolKind(tool);
   const label = getFriendlyToolLabel(tool);
@@ -111,15 +119,15 @@ function ToolPreviewHeader({
         {tool.status && (
           <StatusBadge
             variant={
-              tool.status === "calling"
+              tool.status === "started"
                 ? "warning"
-                : tool.status === "called"
+                : tool.status === "completed"
                   ? "success"
                   : "destructive"
             }
-            className="uppercase tracking-wide"
+            className="tracking-wide uppercase"
           >
-            {tool.status === "calling" ? "running" : tool.status}
+            {tool.status === "started" ? "running" : tool.status}
           </StatusBadge>
         )}
         {tool.duration_ms != null && (
@@ -135,13 +143,15 @@ function ToolPreviewHeader({
         )}
       </div>
       {tool.error && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
+        <div className="border-destructive/30 bg-destructive/10 text-destructive rounded-lg border px-2.5 py-1.5 text-xs">
           {tool.error}
         </div>
       )}
       {tool.args && Object.keys(tool.args).length > 0 && (
         <details className="border-border/70 bg-background/60 rounded-lg border px-2.5 py-1.5 text-xs">
-          <summary className="text-muted-foreground cursor-pointer select-none">{t("viewArgs")}</summary>
+          <summary className="text-muted-foreground cursor-pointer select-none">
+            {t("viewArgs")}
+          </summary>
           <pre className="text-muted-foreground mt-2 max-h-40 overflow-auto font-mono whitespace-pre-wrap">
             {formatArgs(tool.args)}
           </pre>
@@ -187,7 +197,7 @@ export function ToolPreviewPanel({
   }
 
   return (
-    <div className="bg-card flex h-full flex-col overflow-hidden rounded-2xl shadow-panel">
+    <div className="bg-card shadow-panel flex h-full flex-col overflow-hidden rounded-2xl">
       {showTabs ? (
         <Tabs
           value={effectiveTab}
@@ -215,7 +225,10 @@ export function ToolPreviewPanel({
               <Maximize2 size={16} />
             </Button>
           </div>
-          <TabsContent value="artifacts" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden">
+          <TabsContent
+            value="artifacts"
+            className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden"
+          >
             <ArtifactWorkbench
               sessionId={sessionId}
               artifacts={artifacts}

@@ -94,7 +94,10 @@ function buildAuthHeaders(method: string = "GET", headers: HeadersInit = {}): He
   return mergedHeaders;
 }
 
-export async function authenticatedFetch(input: string, options: RequestOptions = {}): Promise<Response> {
+export async function authenticatedFetch(
+  input: string,
+  options: RequestOptions = {},
+): Promise<Response> {
   const url = input.startsWith("http") ? input : `${API_CONFIG.baseURL}${input}`;
   const method = (options.method || "GET").toString().toUpperCase();
   const { skipAuthRefresh = false, skipAuthRedirect = false, ...fetchOptions } = options;
@@ -210,10 +213,7 @@ function fetchWithTimeout(
 /**
  * 核心请求函数
  */
-async function request<T = unknown>(
-  endpoint: string,
-  options: RequestOptions = {},
-): Promise<T> {
+async function request<T = unknown>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const url = endpoint.startsWith("http") ? endpoint : `${API_CONFIG.baseURL}${endpoint}`;
 
   const {
@@ -670,7 +670,11 @@ function processSSEEvent(
       );
     } catch (error) {
       if (onError) {
-        onError(error instanceof Error ? error : new Error(translate("errors.sseParseFailed", { eventData })));
+        onError(
+          error instanceof Error
+            ? error
+            : new Error(translate("errors.sseParseFailed", { eventData })),
+        );
       }
     }
   }

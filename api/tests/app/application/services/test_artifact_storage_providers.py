@@ -1,16 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.application.services.artifact_service import ArtifactService
-from app.container import _create_object_storage
 from app.domain.models.artifact import Artifact
 from app.infrastructure.adapters.object_storage import (
     CosObjectStorageAdapter,
     MinioObjectStorageAdapter,
+    create_object_storage_adapter,
 )
 
 
@@ -47,10 +45,8 @@ def _artifact_uow_with_saved_lookup():
     ],
 )
 def test_create_object_storage_respects_provider(provider, adapter_cls):
-    settings = MagicMock()
-    settings.storage_provider = provider
     client = MagicMock()
-    adapter = _create_object_storage(client, settings)
+    adapter = create_object_storage_adapter(provider=provider, client=client)
     assert isinstance(adapter, adapter_cls)
 
 
@@ -79,7 +75,7 @@ def test_artifact_write_and_read_via_storage_adapter(adapter_cls, client_kwarg):
     service = ArtifactService(lambda: uow, object_storage=adapter)
 
     async def _run():
-        artifact, _ = await service.write_content(
+        artifact = await service.write_content(
             session_id="s1",
             artifact_id=None,
             kind="doc",

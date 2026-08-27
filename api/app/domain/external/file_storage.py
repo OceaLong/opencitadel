@@ -1,7 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from dataclasses import dataclass
-from typing import Optional, Protocol, Tuple, BinaryIO
+from typing import BinaryIO, Protocol
 
 from app.domain.models.file import File
 
@@ -10,10 +8,10 @@ from app.domain.models.file import File
 class FileUploadPayload:
     file: BinaryIO
     filename: str
-    size: Optional[int] = None
+    size: int | None = None
     content_type: str = ""
-    owner_user_id: Optional[str] = None
-    team_id: Optional[str] = None
+    owner_user_id: str | None = None
+    team_id: str | None = None
 
 
 class FileStorage(Protocol):
@@ -23,6 +21,15 @@ class FileStorage(Protocol):
         """根据传递的文件源上传文件后返回文件信息"""
         ...
 
-    async def download_file(self, file_id: str) -> Tuple[BinaryIO, File]:
+    async def download_file(self, file_id: str) -> tuple[BinaryIO, File]:
         """根据传递的文件id下载文件，并返回文件源+文件信息"""
+        ...
+
+    async def presigned_get_url(
+        self,
+        key: str,
+        *,
+        expires_seconds: int,
+    ) -> str | None:
+        """Return an externally reachable temporary URL for a stored object."""
         ...

@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """containment 与 sudo 分支注入相关的负向测试。
 
 这些用例针对侦察确认的真实缺陷编写：
@@ -10,11 +8,13 @@
 
 在修复前运行本文件，多数用例应为 FAIL；修复后应全绿。
 """
+
 import asyncio
+import os
 import shlex
 
 import pytest
-
+from anyio import Path as AsyncPath
 from app.interfaces.errors.exceptions import BadRequestException
 from app.services.file import FileService
 
@@ -36,6 +36,7 @@ class _FakeProcess:
 # ---------------------------------------------------------------------------
 # containment：拒绝逃逸路径
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "evil",
@@ -72,6 +73,7 @@ async def test_legit_path_within_home_is_allowed(sandbox_home):
 # 此前完全绕过归一化的4个方法，逐一断言"../x"式路径被拒绝
 # ---------------------------------------------------------------------------
 
+
 async def test_find_files_rejects_escape(sandbox_home):
     with pytest.raises(BadRequestException):
         await FileService.find_files(ESCAPE_PATH, "*")
@@ -95,6 +97,7 @@ async def test_delete_file_rejects_escape(sandbox_home):
 # ---------------------------------------------------------------------------
 # sudo 分支：恶意 filepath 不能作为独立 shell 词元出现
 # ---------------------------------------------------------------------------
+
 
 async def test_sudo_write_quotes_filepath(sandbox_home, monkeypatch):
     captured = {}
@@ -122,29 +125,30 @@ async def test_sudo_write_quotes_filepath(sandbox_home, monkeypatch):
 # sudo write 的临时文件清理须在 finally 中：子进程非0退出（抛异常）时也不能残留（M4）。
 # ---------------------------------------------------------------------------
 
-async def test_sudo_write_cleans_temp_file_even_on_failure(sandbox_home, monkeypatch):
-    import os
 
+async def test_sudo_write_cleans_temp_file_even_on_failure(sandbox_home, monkeypatch):
     async def fake_exec_failure(cmd, **kwargs):
         return _FakeProcess(returncode=1, stderr=b"boom")
 
     monkeypatch.setattr(asyncio, "create_subprocess_shell", fake_exec_failure)
 
     temp_file = f"/tmp/file_write_{os.getpid()}.tmp"
+    temp_path = AsyncPath(temp_file)
     # 保证测试开始前环境干净，避免与其它测试/进程遗留文件互相干扰
-    if os.path.exists(temp_file):
-        os.unlink(temp_file)
+    if await temp_path.exists():
+        await temp_path.unlink()
 
     with pytest.raises(BadRequestException):
         await FileService.write_file("report.md", "data", sudo=True)
 
-    assert not os.path.exists(temp_file), "sudo写入失败后临时文件应被finally清理，不应残留"
+    assert not await temp_path.exists(), "sudo写入失败后临时文件应被finally清理，不应残留"
 
 
 # ---------------------------------------------------------------------------
 # find_files 的目录参数须走"目录规则"：末尾斜杠/相对路径/'.' 均应正常解析，
 # 而不是被文件路径的 basename in ("", ".", "..") 规则误伤（C1）。
 # ---------------------------------------------------------------------------
+
 
 async def test_find_files_accepts_relative_subdir_with_trailing_slash(sandbox_home):
     (sandbox_home / "sub").mkdir()

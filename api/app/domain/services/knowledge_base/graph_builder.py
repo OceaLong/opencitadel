@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Bounded, resumable GraphRAG extraction for immutable KB versions."""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,9 +9,10 @@ import logging
 import time
 import unicodedata
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable, List, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from app.domain.external.json_parser import JSONParser
 from app.domain.external.llm import LLM
@@ -72,9 +72,7 @@ class GraphBudget:
         }
         for name, (value, minimum, maximum) in bounds.items():
             if not minimum <= value <= maximum:
-                raise ValueError(
-                    f"{name} must be between {minimum} and {maximum}"
-                )
+                raise ValueError(f"{name} must be between {minimum} and {maximum}")
 
 
 @dataclass(frozen=True)
@@ -111,34 +109,32 @@ class GraphBuildResult:
             and self.degraded_reason is None
         )
 
+
 class GraphBuilder:
     def __init__(
         self,
         uow_factory: Callable[[], IUnitOfWork],
-        llm: Optional[LLM],
+        llm: LLM | None,
         json_parser: JSONParser,
         *,
-        max_parent_chunks_per_doc: int = 200,
-        concurrency: int = 3,
+        max_parent_chunks_per_doc: int,
+        concurrency: int,
     ) -> None:
         self._uow_factory = uow_factory
         self._llm = llm
         self._json_parser = json_parser
-        self._max_parent_chunks_per_doc = max(
-            0, max_parent_chunks_per_doc
-        )
+        self._max_parent_chunks_per_doc = max(0, max_parent_chunks_per_doc)
         self._concurrency = max(1, concurrency)
 
     async def build(
         self,
         kb_id: str,
-        parent_chunks: List[KnowledgeChunk],
+        parent_chunks: list[KnowledgeChunk],
         *,
         version_id: str,
-        budget: GraphBudget | None = None,
+        budget: GraphBudget,
         resume_cursor: str | None = None,
-        checkpoint: Callable[[dict[str, Any]], Awaitable[None]]
-        | None = None,
+        checkpoint: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         deadline_utc: str | datetime | None = None,
         consumed_chunks: int = 0,
         consumed_llm_calls: int = 0,
@@ -146,7 +142,6 @@ class GraphBuilder:
         consumed_reserved_tokens: int | None = None,
         consumed_actual_tokens: int | None = None,
     ) -> GraphBuildResult:
-        budget = budget or GraphBudget()
         if consumed_reserved_tokens is None:
             consumed_reserved_tokens = consumed_tokens
         if consumed_actual_tokens is None:
@@ -177,12 +172,9 @@ class GraphBuilder:
                 degraded_reason="GRAPH_UNAVAILABLE",
             )
         if not version_id.strip() or any(
-            chunk.kb_id != kb_id or chunk.version_id != version_id
-            for chunk in parent_chunks
+            chunk.kb_id != kb_id or chunk.version_id != version_id for chunk in parent_chunks
         ):
-            raise ValueError(
-                "candidate graph requires exact version-scoped chunks"
-            )
+            raise ValueError("candidate graph requires exact version-scoped chunks")
 
         async with self._uow_factory() as uow:
             atomic_candidate_upsert = callable(
@@ -200,25 +192,16 @@ class GraphBuilder:
                 kb_id=kb_id,
                 version_id=version_id,
             )
-            if not any(
-                _chunk_sort_key(chunk) == cursor_key
-                for chunk in selected
-            ):
-                raise ValueError(
-                    "invalid graph cursor: checkpoint chunk is absent"
-                )
-            selected = [
-                chunk
-                for chunk in selected
-                if _chunk_sort_key(chunk) > cursor_key
-            ]
+            if not any(_chunk_sort_key(chunk) == cursor_key for chunk in selected):
+                raise ValueError("invalid graph cursor: checkpoint chunk is absent")
+            selected = [chunk for chunk in selected if _chunk_sort_key(chunk) > cursor_key]
 
         deadline_iso, deadline_at = _resolve_deadline(
             deadline_utc,
             budget.deadline_seconds,
         )
-        queue: asyncio.Queue[tuple[int, KnowledgeChunk, int] | None] = (
-            asyncio.Queue(maxsize=2 * self._concurrency)
+        queue: asyncio.Queue[tuple[int, KnowledgeChunk, int] | None] = asyncio.Queue(
+            maxsize=2 * self._concurrency
         )
         outcomes: asyncio.Queue[
             tuple[
@@ -241,9 +224,7 @@ class GraphBuilder:
         reserved_tokens = 0
         cursor: str | None = resume_cursor
         persistence_error: str | None = None
-        deadline_stopped = bool(
-            selected and deadline_at <= time.monotonic()
-        )
+        deadline_stopped = bool(selected and deadline_at <= time.monotonic())
         token_stopped = False
         cursor_blocked = False
         persisted_entity_keys: set[tuple[str, str]] = set()
@@ -299,9 +280,7 @@ class GraphBuilder:
                                 None,
                                 0,
                                 False,
-                                TimeoutError(
-                                    "graph build deadline exceeded"
-                                ),
+                                TimeoutError("graph build deadline exceeded"),
                             )
                         )
                         continue
@@ -321,11 +300,9 @@ class GraphBuilder:
                                 None,
                             )
                         )
-                    except Exception as exc:
+                    except (OSError, RuntimeError, ValueError) as exc:
                         used_tokens = (
-                            exc.actual_tokens
-                            if isinstance(exc, _ExtractionFailure)
-                            else 0
+                            exc.actual_tokens if isinstance(exc, _ExtractionFailure) else 0
                         )
                         logger.warning(
                             "GraphRAG 片段抽取失败 chunk=%s: %s",
@@ -346,10 +323,7 @@ class GraphBuilder:
                 finally:
                     queue.task_done()
 
-        workers = [
-            asyncio.create_task(worker())
-            for _ in range(self._concurrency)
-        ]
+        workers = [asyncio.create_task(worker()) for _ in range(self._concurrency)]
         buffered: dict[
             int,
             tuple[
@@ -368,15 +342,8 @@ class GraphBuilder:
             while (
                 scheduled < len(selected)
                 and in_flight < self._concurrency
-                and (
-                    max(consumed_chunks, consumed_llm_calls)
-                    + calls
-                    < budget.max_chunks
-                )
-                and (
-                    consumed_llm_calls + calls
-                    < budget.max_llm_calls
-                )
+                and (max(consumed_chunks, consumed_llm_calls) + calls < budget.max_chunks)
+                and (consumed_llm_calls + calls < budget.max_llm_calls)
                 and not token_stopped
                 and not deadline_stopped
             ):
@@ -388,12 +355,7 @@ class GraphBuilder:
                     self._llm,
                     chunk,
                 )
-                if (
-                    consumed_reserved_tokens
-                    + reserved_tokens
-                    + reservation
-                    > budget.max_tokens
-                ):
+                if consumed_reserved_tokens + reserved_tokens + reservation > budget.max_tokens:
                     return
                 index = scheduled
                 scheduled += 1
@@ -440,10 +402,7 @@ class GraphBuilder:
                 if overage:
                     reserved_tokens += used_tokens - reservation
                     token_stopped = True
-                if (
-                    consumed_reserved_tokens + reserved_tokens
-                    > budget.max_tokens
-                ):
+                if consumed_reserved_tokens + reserved_tokens > budget.max_tokens:
                     token_stopped = True
                 buffered[index] = (
                     chunk,
@@ -485,19 +444,15 @@ class GraphBuilder:
                         failed += 1
                     elif ordered_overage:
                         cursor_blocked = True
-                    elif not _valid_extraction_payload(
-                        ordered_payload
-                    ):
+                    elif not _valid_extraction_payload(ordered_payload):
                         cursor_blocked = True
                         invalid += 1
                     else:
-                        entities, relations, refs = (
-                            _graph_batch_from_payload(
-                                kb_id,
-                                version_id,
-                                ordered_chunk,
-                                ordered_payload,
-                            )
+                        entities, relations, refs = _graph_batch_from_payload(
+                            kb_id,
+                            version_id,
+                            ordered_chunk,
+                            ordered_payload,
                         )
                         if not entities:
                             cursor_blocked = True
@@ -505,13 +460,10 @@ class GraphBuilder:
                         else:
                             try:
                                 if atomic_candidate_upsert:
-                                    remaining = (
-                                        deadline_at - time.monotonic()
-                                    )
+                                    remaining = deadline_at - time.monotonic()
                                     if remaining <= 0:
                                         raise TimeoutError(
-                                            "graph build deadline exceeded "
-                                            "before persistence"
+                                            "graph build deadline exceeded before persistence"
                                         )
                                     await asyncio.wait_for(
                                         self._persist_batch(
@@ -541,26 +493,18 @@ class GraphBuilder:
                                     )
                                     for entity in entities
                                 )
-                                persisted_relation_ids.update(
-                                    relation.id
-                                    for relation in relations
-                                )
+                                persisted_relation_ids.update(relation.id for relation in relations)
                                 if not cursor_blocked:
                                     next_cursor = _encode_cursor(
                                         kb_id,
                                         version_id,
-                                        _chunk_sort_key(
-                                            ordered_chunk
-                                        ),
+                                        _chunk_sort_key(ordered_chunk),
                                     )
-                            except (
-                                TimeoutError,
-                                asyncio.TimeoutError,
-                            ) as exc:
+                            except TimeoutError as exc:
                                 deadline_stopped = True
                                 cursor_blocked = True
                                 persistence_error = str(exc)
-                            except Exception as exc:
+                            except (OSError, RuntimeError, ValueError) as exc:
                                 cursor_blocked = True
                                 logger.warning(
                                     "GraphRAG persistence failed: %s",
@@ -569,23 +513,12 @@ class GraphBuilder:
                                 persistence_error = str(exc)
 
                     checkpoint_cursor = cursor
-                    if (
-                        atomic_candidate_upsert
-                        and outcome_succeeded
-                        and not cursor_blocked
-                    ):
+                    if atomic_candidate_upsert and outcome_succeeded and not cursor_blocked:
                         checkpoint_cursor = next_cursor
-                    elif (
-                        not atomic_candidate_upsert
-                        and outcome_succeeded
-                        and not cursor_blocked
-                    ):
+                    elif not atomic_candidate_upsert and outcome_succeeded and not cursor_blocked:
                         pending_cursor = next_cursor
                     await durable_checkpoint(checkpoint_cursor)
-                    if (
-                        atomic_candidate_upsert
-                        and checkpoint_cursor != cursor
-                    ):
+                    if atomic_candidate_upsert and checkpoint_cursor != cursor:
                         cursor = checkpoint_cursor
                 await admit_available()
         except BaseException:
@@ -600,9 +533,7 @@ class GraphBuilder:
             try:
                 remaining = deadline_at - time.monotonic()
                 if remaining <= 0:
-                    raise TimeoutError(
-                        "graph build deadline exceeded before persistence"
-                    )
+                    raise TimeoutError("graph build deadline exceeded before persistence")
                 await asyncio.wait_for(
                     self._persist_aggregate(
                         kb_id,
@@ -617,11 +548,11 @@ class GraphBuilder:
                 if not cursor_blocked:
                     await durable_checkpoint(pending_cursor)
                 cursor = pending_cursor
-            except (TimeoutError, asyncio.TimeoutError) as exc:
+            except TimeoutError as exc:
                 deadline_stopped = True
                 cursor_blocked = True
                 persistence_error = str(exc)
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 logger.warning("GraphRAG persistence failed: %s", exc)
                 persistence_error = str(exc)
 
@@ -634,13 +565,12 @@ class GraphBuilder:
         ):
             try:
                 async with self._uow_factory() as uow:
-                    metrics = (
-                        await uow.knowledge_base
-                        .get_candidate_index_metrics(kb_id, version_id)
+                    metrics = await uow.knowledge_base.get_candidate_index_metrics(
+                        kb_id, version_id
                     )
                 entity_count = int(metrics.get("entity_count", 0))
                 relation_count = int(metrics.get("relation_count", 0))
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 persistence_error = str(exc)
 
         persisted = (
@@ -659,13 +589,7 @@ class GraphBuilder:
             degraded_reason = "GRAPH_UNAVAILABLE"
 
         warning_parts: list[str] = []
-        if (
-            failed
-            or invalid
-            or capped_count
-            or budget_stopped
-            or deadline_stopped
-        ):
+        if failed or invalid or capped_count or budget_stopped or deadline_stopped:
             warning_parts.append(
                 f"{degraded_reason or 'GRAPH_INCOMPLETE'} "
                 f"attempted={scheduled} succeeded={succeeded} "
@@ -673,9 +597,7 @@ class GraphBuilder:
                 f"skipped={capped_count}"
             )
         if persistence_error is not None:
-            warning_parts.append(
-                f"GRAPH_PERSISTENCE_FAILED: {persistence_error}"
-            )
+            warning_parts.append(f"GRAPH_PERSISTENCE_FAILED: {persistence_error}")
         return GraphBuildResult(
             attempted=scheduled,
             succeeded=succeeded,
@@ -733,6 +655,7 @@ class GraphBuilder:
                 relations,
                 refs,
             )
+            await uow.commit()
 
     async def _persist_aggregate(
         self,
@@ -750,13 +673,10 @@ class GraphBuilder:
                 relations,
                 refs,
             )
+            await uow.commit()
 
-    async def _extract_chunk(
-        self, chunk: KnowledgeChunk
-    ) -> tuple[Any, int]:
-        prompt = GRAPH_EXTRACT_PROMPT.format(
-            content=chunk.content[:6000]
-        )
+    async def _extract_chunk(self, chunk: KnowledgeChunk) -> tuple[Any, int]:
+        prompt = GRAPH_EXTRACT_PROMPT.format(content=chunk.content[:6000])
         response = await self._llm.invoke(
             messages=[
                 {
@@ -768,21 +688,19 @@ class GraphBuilder:
         provider_tokens = _provider_total_tokens(response)
         try:
             text_content = _extract_llm_text_content(response)
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             raise _ExtractionFailure(
                 str(exc),
                 actual_tokens=provider_tokens or 0,
             ) from exc
         if provider_tokens is None:
-            provider_tokens = _estimate_total_tokens(
-                prompt
-            ) + _estimate_total_tokens(text_content)
+            provider_tokens = _estimate_total_tokens(prompt) + _estimate_total_tokens(text_content)
         try:
             payload = await self._json_parser.invoke(
                 text_content,
                 default_value={},
             )
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             raise _ExtractionFailure(
                 str(exc),
                 actual_tokens=provider_tokens,
@@ -965,13 +883,8 @@ def _decode_cursor(
 ) -> tuple[str, int, str]:
     try:
         padding = "=" * (-len(value) % 4)
-        payload = json.loads(
-            base64.urlsafe_b64decode(value + padding).decode()
-        )
-        if (
-            payload.get("kb") != kb_id
-            or payload.get("version") != version_id
-        ):
+        payload = json.loads(base64.urlsafe_b64decode(value + padding).decode())
+        if payload.get("kb") != kb_id or payload.get("version") != version_id:
             raise ValueError
         document_id = payload["doc"]
         ordinal = payload["ordinal"]
@@ -986,7 +899,7 @@ def _decode_cursor(
         ):
             raise ValueError
         return document_id, ordinal, chunk_id
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise ValueError("invalid graph cursor") from exc
 
 
@@ -999,11 +912,9 @@ def _worst_case_token_reservation(
     llm: LLM,
     chunk: KnowledgeChunk,
 ) -> int:
-    prompt = GRAPH_EXTRACT_PROMPT.format(
-        content=chunk.content[:6000]
-    )
+    prompt = GRAPH_EXTRACT_PROMPT.format(content=chunk.content[:6000])
     try:
-        configured = int(getattr(llm, "max_tokens"))
+        configured = int(llm.max_tokens)
     except (AttributeError, TypeError, ValueError):
         configured = _DEFAULT_COMPLETION_TOKEN_ALLOWANCE
     if configured <= 0:
@@ -1018,21 +929,17 @@ def _resolve_deadline(
     value: str | datetime | None,
     deadline_seconds: float,
 ) -> tuple[str, float]:
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     if value is None:
         deadline = now_utc + timedelta(seconds=deadline_seconds)
     else:
         try:
-            deadline = (
-                value
-                if isinstance(value, datetime)
-                else datetime.fromisoformat(value)
-            )
+            deadline = value if isinstance(value, datetime) else datetime.fromisoformat(value)
         except (TypeError, ValueError) as exc:
             raise ValueError("invalid graph deadline") from exc
         if deadline.tzinfo is None:
             raise ValueError("graph deadline must be timezone-aware")
-        deadline = deadline.astimezone(timezone.utc)
+        deadline = deadline.astimezone(UTC)
     remaining = max(0.0, (deadline - now_utc).total_seconds())
     return deadline.isoformat(), time.monotonic() + remaining
 

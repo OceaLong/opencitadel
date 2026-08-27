@@ -1,11 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel
 
+from app.application.dto.team import InvitationStatus
 from app.domain.models.audit_log import AuditLog
 from app.domain.models.invitation import Invitation
 from app.domain.models.user import GlobalRole, User, UserStatus
@@ -20,7 +17,7 @@ class AdminUserResponse(BaseModel):
     status: UserStatus
     token_version: int
     created_at: datetime
-    last_login_at: Optional[datetime] = None
+    last_login_at: datetime | None = None
 
     @classmethod
     def from_domain(cls, user: User) -> "AdminUserResponse":
@@ -33,9 +30,9 @@ class ListAdminUsersResponse(BaseModel):
 
 
 class PatchUserRequest(BaseModel):
-    global_role: Optional[GlobalRole] = None
-    status: Optional[UserStatus] = None
-    display_name: Optional[str] = None
+    global_role: GlobalRole | None = None
+    status: UserStatus | None = None
+    display_name: str | None = None
 
 
 class CreatePlatformInvitationRequest(BaseModel):
@@ -43,19 +40,19 @@ class CreatePlatformInvitationRequest(BaseModel):
 
 
 class QuotaRequest(BaseModel):
-    monthly_token_limit: Optional[int] = None
-    daily_session_limit: Optional[int] = None
-    max_concurrent_tasks: Optional[int] = None
-    max_storage_bytes: Optional[int] = None
+    monthly_token_limit: int | None = None
+    daily_session_limit: int | None = None
+    max_concurrent_tasks: int | None = None
+    max_storage_bytes: int | None = None
 
 
 class AuditLogResponse(BaseModel):
     id: str
-    actor_user_id: Optional[str]
+    actor_user_id: str | None
     action: str
     resource_type: str
     resource_id: str
-    team_id: Optional[str]
+    team_id: str | None
     request_id: str
     created_at: datetime
 
@@ -67,7 +64,7 @@ class AuditLogResponse(BaseModel):
 class AuditLogDetailResponse(AuditLogResponse):
     actor_ip: str = ""
     metadata: dict = {}
-    chain_seq: Optional[int] = None
+    chain_seq: int | None = None
 
     @classmethod
     def from_domain(cls, log: AuditLog) -> "AuditLogDetailResponse":
@@ -126,20 +123,14 @@ class AuditSummaryResponse(BaseModel):
     by_action: list[AuditSummaryActionItem]
 
 
-class InvitationStatus(str, Enum):
-    PENDING = "pending"
-    ACCEPTED = "accepted"
-    EXPIRED = "expired"
-
-
 class PlatformInvitationResponse(BaseModel):
     id: str
-    email: Optional[str]
+    email: str | None
     status: InvitationStatus
-    invited_by: Optional[str]
+    invited_by: str | None
     expires_at: datetime
-    accepted_at: Optional[datetime] = None
-    accepted_user_id: Optional[str] = None
+    accepted_at: datetime | None = None
+    accepted_user_id: str | None = None
     created_at: datetime
 
     @classmethod

@@ -1,10 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from unittest.mock import AsyncMock
 
 import pytest
 
 from app.domain.models.codebase import CodebaseFile, CodebaseSymbol, SymbolKind
+from app.domain.runtime_policy import CodebaseAnalysisPolicy
 from app.domain.services.codebase.indexer import CodebaseIndexer
 from app.domain.services.codebase.lexical_indexer import CodebaseLexicalIndexer
 
@@ -52,7 +51,10 @@ async def test_codebase_indexer_keeps_mandatory_lexical_chunks_when_embedding_fa
         end_line=2,
     )
 
-    chunks = await CodebaseIndexer(vector_service=vector).build_chunks(
+    chunks = await CodebaseIndexer(
+        policy=CodebaseAnalysisPolicy(),
+        vector_service=vector,
+    ).build_chunks(
         "cb1",
         [file],
         [symbol],

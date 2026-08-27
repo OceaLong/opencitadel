@@ -53,7 +53,6 @@ const api = vi.hoisted(() => {
       has_earlier: false,
     })),
     getSessionFiles: vi.fn(async () => []),
-    listCheckpoints: vi.fn(async () => ({ checkpoints: [] })),
     getResourceBindings: vi.fn(async () => (state.upgraded ? [v2] : [v1])),
     getAvailableResourceVersions: vi.fn(async () => [v1, v2]),
     upgradeResourceBinding: vi.fn(async () => {
@@ -67,7 +66,6 @@ const api = vi.hoisted(() => {
     clearUnreadMessageCount: vi.fn(async () => undefined),
     updateSessionConfig: vi.fn(),
     stopSession: vi.fn(),
-    restoreCheckpoint: vi.fn(),
   };
 });
 
@@ -83,14 +81,12 @@ vi.mock("@/lib/api/session", () => ({
     getSessionDetail: api.getSessionDetail,
     getSessionEvents: api.getSessionEvents,
     getSessionFiles: api.getSessionFiles,
-    listCheckpoints: api.listCheckpoints,
     getResourceBindings: api.getResourceBindings,
     getAvailableResourceVersions: api.getAvailableResourceVersions,
     upgradeResourceBinding: api.upgradeResourceBinding,
     clearUnreadMessageCount: api.clearUnreadMessageCount,
     updateSessionConfig: api.updateSessionConfig,
     stopSession: api.stopSession,
-    restoreCheckpoint: api.restoreCheckpoint,
   },
 }));
 
@@ -160,10 +156,6 @@ vi.mock("@/components/session/session-header", () => ({
   SessionHeader: () => <div>session header</div>,
 }));
 
-vi.mock("@/components/session/checkpoint-restore-dialog", () => ({
-  CheckpointRestoreDialog: () => null,
-}));
-
 vi.mock("@/components/session/operator-scope-dialog", () => ({
   OperatorScopeDialog: () => null,
 }));
@@ -176,16 +168,8 @@ vi.mock("@/components/session/tool-preview-panel", () => ({
   ToolPreviewPanel: () => null,
 }));
 
-vi.mock("@/components/session/gate-actions-bar", () => ({
-  GateActionsBar: () => null,
-}));
-
-vi.mock("@/components/session/plan-approval-bar", () => ({
-  PlanApprovalBar: () => null,
-}));
-
-vi.mock("@/components/session/plan-panel", () => ({
-  PlanPanel: () => null,
+vi.mock("@/components/session/approval-actions-bar", () => ({
+  ApprovalActionsBar: () => null,
 }));
 
 vi.mock("@/components/session/session-mode-toggle", () => ({
@@ -233,7 +217,7 @@ describe("SessionDetailView resource version integration", () => {
     await settle();
 
     const current = container.querySelector("section[aria-label='资源版本上下文']");
-    const historical = container.querySelector("[aria-label='消息资源版本']");
+    const historical = container.querySelector("span[aria-label='资源版本上下文']");
     expect(current?.textContent).toContain("knowledge_base: v1");
     expect(historical?.textContent).toBe("v1");
     expect(container.textContent).toContain("历史回答");

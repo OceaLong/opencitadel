@@ -1,6 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """PDF rendering via weasyprint with graceful degradation."""
+
 from __future__ import annotations
 
 

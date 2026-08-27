@@ -1,315 +1,341 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-import logging
+"""Typed FastAPI accessors for the lifespan-owned API runtime."""
 
-from dependency_injector.wiring import Provide, inject
-from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from __future__ import annotations
 
+from fastapi import Depends, Request, WebSocket
+
+from app.application.ports.coordination import RateLimitStorePort
+from app.application.ports.crypto import (
+    ApplicationUrls,
+    CookieManagerPort,
+    CsrfPort,
+    OAuthRegistryPort,
+    ServiceKeyPort,
+    TokenCodecPort,
+)
+from app.application.ports.streams import (
+    NotificationStreamFactory,
+    SessionListStreamFactory,
+)
 from app.application.services.a2a_server_service import A2AServerService
 from app.application.services.agent_service import AgentService
-from app.application.services.app_config_service import AppConfigService
-from app.application.services.auth_service import AuthService
+from app.application.services.artifact_service import ArtifactService
 from app.application.services.audit_service import AuditService
-from app.application.services.compliance_service import ComplianceService
+from app.application.services.auth_service import AuthService
+from app.application.services.capability_service import CapabilityService
 from app.application.services.codebase_service import CodebaseService
+from app.application.services.compliance_service import ComplianceService
 from app.application.services.evidence_service import EvidenceService
+from app.application.services.file_service import FileService
 from app.application.services.governance_overview_service import GovernanceOverviewService
 from app.application.services.governance_profile_service import GovernanceProfileService
-from app.application.services.file_service import FileService
+from app.application.services.inference_binding_service import InferenceBindingService
+from app.application.services.inference_endpoint_service import InferenceEndpointService
+from app.application.services.inference_model_service import InferenceModelService
+from app.application.services.inference_status_service import InferenceStatusService
+from app.application.services.integration_projection_service import IntegrationProjectionService
+from app.application.services.integration_server_service import (
+    A2AIntegrationService,
+    MCPServerService,
+)
 from app.application.services.knowledge_base_service import KnowledgeBaseService
-from app.application.services.llm_status_service import LLMStatusService
-from app.application.services.llm_endpoint_service import LLMEndpointService
-from app.application.services.llm_model_service import LLMModelService
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.memory_service import MemoryService
-from app.application.services.quota_service import QuotaService
+from app.application.services.notification_service import NotificationService
 from app.application.services.patrol_evidence_service import PatrolEvidenceService
 from app.application.services.patrol_pack_service import PatrolPackService
 from app.application.services.patrol_remediation_service import PatrolRemediationService
 from app.application.services.patrol_run_service import PatrolRunService
-from app.application.services.session_service import SessionService
+from app.application.services.quota_service import QuotaService
 from app.application.services.resource_binding_service import ResourceBindingService
-from app.application.services.resource_build_service import ResourceBuildService
+from app.application.services.runtime_policy_reader import RuntimePolicyReader
+from app.application.services.runtime_policy_service import RuntimePolicyService
+from app.application.services.scheduled_job_service import ScheduledJobService
 from app.application.services.service_api_key_service import ServiceApiKeyService
+from app.application.services.session_service import SessionService
 from app.application.services.skill_service import SkillService
+from app.application.services.status_service import StatusService
 from app.application.services.team_service import TeamService
 from app.application.services.usage_stats_service import UsageStatsService
-from app.application.services.status_service import StatusService
-from app.container import ApiContainer
+from app.composition.types import ApiRuntime
 from app.domain.external.object_storage import ObjectStoragePort
-from app.infrastructure.external.health_checker.postgres_health_checker import PostgresHealthChecker
-from app.infrastructure.external.health_checker.redis_health_checker import RedisHealthChecker
-from app.infrastructure.storage.postgres import get_db_session
-from app.infrastructure.storage.redis import RedisClient
-from app.infrastructure.external.resource_build_event_notifier import (
-    RedisResourceBuildEventNotifier,
-)
-from app.infrastructure.security.cookie import AuthCookieManager
-
-logger = logging.getLogger(__name__)
+from app.domain.external.sandbox import SandboxFactoryPort
+from app.domain.repositories.uow import UnitOfWorkFactory
 
 
-@inject
-async def get_auth_service(
-        service: AuthService = Depends(Provide[ApiContainer.auth_service]),
-) -> AuthService:
-    return service
+class ApiRuntimeUnavailableError(RuntimeError):
+    """The ASGI lifespan has not installed its process runtime."""
 
 
-@inject
-async def get_audit_service(
-        service: AuditService = Depends(Provide[ApiContainer.audit_service]),
-) -> AuditService:
-    return service
+def require_api_runtime(request: Request) -> ApiRuntime:
+    runtime = getattr(request.app.state, "runtime", None)
+    if not isinstance(runtime, ApiRuntime):
+        raise ApiRuntimeUnavailableError("API runtime is not initialized")
+    return runtime
 
 
-@inject
-async def get_usage_stats_service(
-        service: UsageStatsService = Depends(Provide[ApiContainer.usage_stats_service]),
+def require_websocket_api_runtime(websocket: WebSocket) -> ApiRuntime:
+    runtime = getattr(websocket.app.state, "runtime", None)
+    if not isinstance(runtime, ApiRuntime):
+        raise ApiRuntimeUnavailableError("API runtime is not initialized")
+    return runtime
+
+
+def get_uow_factory(runtime: ApiRuntime = Depends(require_api_runtime)) -> UnitOfWorkFactory:
+    return runtime.uow_factory
+
+
+def get_token_codec(runtime: ApiRuntime = Depends(require_api_runtime)) -> TokenCodecPort:
+    return runtime.token_codec
+
+
+def get_service_key_hasher(runtime: ApiRuntime = Depends(require_api_runtime)) -> ServiceKeyPort:
+    return runtime.service_api_key_hasher
+
+
+def get_csrf_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> CsrfPort:
+    return runtime.csrf_service
+
+
+def get_oauth_registry(runtime: ApiRuntime = Depends(require_api_runtime)) -> OAuthRegistryPort:
+    return runtime.oauth_registry
+
+
+def get_application_urls(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> ApplicationUrls:
+    return runtime.application_urls
+
+
+def get_rate_limit_store(runtime: ApiRuntime = Depends(require_api_runtime)) -> RateLimitStorePort:
+    return runtime.rate_limit_store
+
+
+def get_sandbox_factory(runtime: ApiRuntime = Depends(require_api_runtime)) -> SandboxFactoryPort:
+    return runtime.sandbox_factory
+
+
+def get_auth_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> AuthService:
+    return runtime.auth_service
+
+
+def get_audit_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> AuditService:
+    return runtime.audit_service
+
+
+def get_usage_stats_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> UsageStatsService:
-    return service
+    return runtime.usage_stats_service
 
 
-@inject
-async def get_quota_service(
-        service: QuotaService = Depends(Provide[ApiContainer.quota_service]),
-) -> QuotaService:
-    return service
+def get_quota_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> QuotaService:
+    return runtime.quota_service
 
 
-@inject
-async def get_cookie_manager(
-        manager: AuthCookieManager = Depends(Provide[ApiContainer.cookie_manager]),
-) -> AuthCookieManager:
-    return manager
+def get_cookie_manager(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> CookieManagerPort:
+    return runtime.cookie_manager
 
 
-@inject
-async def get_app_config_service(
-        service: AppConfigService = Depends(Provide[ApiContainer.app_config_service]),
-) -> AppConfigService:
-    return service
+def get_mcp_integration_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> MCPServerService:
+    return runtime.mcp_integration_service
 
 
-@inject
-async def get_llm_model_service(
-        service: LLMModelService = Depends(Provide[ApiContainer.llm_model_service]),
-) -> LLMModelService:
-    return service
+def get_a2a_integration_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> A2AIntegrationService:
+    return runtime.a2a_integration_service
 
 
-@inject
-async def get_llm_endpoint_service(
-        service: LLMEndpointService = Depends(Provide[ApiContainer.llm_endpoint_service]),
-) -> LLMEndpointService:
-    return service
+def get_integration_projection_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> IntegrationProjectionService:
+    return runtime.integration_projection_service
 
 
-@inject
-async def get_skill_service(
-        service: SkillService = Depends(Provide[ApiContainer.skill_service]),
-) -> SkillService:
-    return service
+def get_inference_model_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> InferenceModelService:
+    return runtime.inference_model_service
 
 
-@inject
-async def get_team_service(
-        service: TeamService = Depends(Provide[ApiContainer.team_service]),
-) -> TeamService:
-    return service
+def get_inference_endpoint_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> InferenceEndpointService:
+    return runtime.inference_endpoint_service
 
 
-@inject
-async def get_service_api_key_service(
-        service: ServiceApiKeyService = Depends(Provide[ApiContainer.service_api_key_service]),
+def get_inference_binding_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> InferenceBindingService:
+    return runtime.inference_binding_service
+
+
+def get_capability_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> CapabilityService:
+    return runtime.capability_service
+
+
+def get_inference_status_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> InferenceStatusService:
+    return runtime.inference_status_service
+
+
+def get_skill_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> SkillService:
+    return runtime.skill_service
+
+
+def get_team_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> TeamService:
+    return runtime.team_service
+
+
+def get_service_api_key_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> ServiceApiKeyService:
-    return service
+    return runtime.service_api_key_service
 
 
-@inject
-async def get_memory_service(
-        service: MemoryService = Depends(Provide[ApiContainer.memory_service]),
-) -> MemoryService:
-    return service
+def get_memory_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> MemoryService:
+    return runtime.memory_service
 
 
-@inject
-async def get_llm_token_usage_service(
-        service: LLMTokenUsageService = Depends(Provide[ApiContainer.llm_token_usage_service]),
+def get_runtime_policy_reader(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> RuntimePolicyReader:
+    return runtime.runtime_policy_reader
+
+
+def get_runtime_policy_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> RuntimePolicyService:
+    return runtime.runtime_policy_service
+
+
+def get_llm_token_usage_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> LLMTokenUsageService:
-    return service
+    return runtime.llm_token_usage_service
 
 
-@inject
-async def get_status_service(
-        db_session: AsyncSession = Depends(get_db_session),
-        redis_client: RedisClient = Depends(Provide[ApiContainer.redis]),
-) -> StatusService:
-    postgres_checker = PostgresHealthChecker(db_session)
-    redis_checker = RedisHealthChecker(redis_client)
-    return StatusService(checkers=[postgres_checker, redis_checker])
+def get_status_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> StatusService:
+    return runtime.status_service
 
 
-@inject
-async def get_llm_status_service(
-        llm_model_service: LLMModelService = Depends(Provide[ApiContainer.llm_model_service]),
-) -> LLMStatusService:
-    return LLMStatusService(llm_model_service=llm_model_service)
-
-
-@inject
-async def get_object_storage(
-        storage: ObjectStoragePort = Depends(Provide[ApiContainer.object_storage]),
+def get_object_storage(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> ObjectStoragePort:
-    return storage
+    return runtime.object_storage
 
 
-@inject
-async def get_file_service(
-        service: FileService = Depends(Provide[ApiContainer.file_service]),
-) -> FileService:
-    return service
+def get_file_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> FileService:
+    return runtime.file_service
 
 
-@inject
-async def get_session_service(
-        service: SessionService = Depends(Provide[ApiContainer.session_service]),
-) -> SessionService:
-    return service
+def get_session_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> SessionService:
+    return runtime.session_service
 
 
-@inject
-async def get_resource_binding_service(
-        service: ResourceBindingService = Depends(
-            Provide[ApiContainer.resource_binding_service]
-        ),
+def get_session_list_stream_factory(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> SessionListStreamFactory:
+    return runtime.session_streams
+
+
+def get_notification_stream_factory(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> NotificationStreamFactory:
+    return runtime.notification_streams
+
+
+def get_resource_binding_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> ResourceBindingService:
-    return service
+    return runtime.resource_binding_service
 
 
-@inject
-async def get_resource_build_service(
-        service: ResourceBuildService = Depends(
-            Provide[ApiContainer.resource_build_service]
-        ),
-) -> ResourceBuildService:
-    return service
+def get_agent_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> AgentService:
+    return runtime.agent_service
 
 
-@inject
-async def get_resource_build_event_notifier(
-        notifier: RedisResourceBuildEventNotifier = Depends(
-            Provide[ApiContainer.resource_build_event_notifier]
-        ),
-) -> RedisResourceBuildEventNotifier:
-    return notifier
+def get_codebase_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> CodebaseService:
+    return runtime.codebase_service
 
 
-@inject
-async def get_agent_service(
-        service: AgentService = Depends(Provide[ApiContainer.agent_service]),
-) -> AgentService:
-    return service
-
-
-@inject
-async def get_codebase_service(
-        service: CodebaseService = Depends(Provide[ApiContainer.codebase_service]),
-) -> CodebaseService:
-    return service
-
-
-@inject
-async def get_knowledge_base_service(
-        service: KnowledgeBaseService = Depends(Provide[ApiContainer.knowledge_base_service]),
+def get_knowledge_base_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> KnowledgeBaseService:
-    return service
+    return runtime.knowledge_base_service
 
 
-@inject
-async def get_a2a_server_service(
-        service: A2AServerService = Depends(Provide[ApiContainer.a2a_server_service]),
+def get_a2a_server_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> A2AServerService:
-    return service
+    return runtime.a2a_server_service
 
 
-@inject
-async def get_artifact_service(
-        service=Depends(Provide[ApiContainer.artifact_service]),
-):
-    return service
+def get_artifact_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> ArtifactService:
+    return runtime.artifact_service
 
 
-@inject
-async def get_notification_service(
-        service=Depends(Provide[ApiContainer.notification_service]),
-):
-    return service
+def get_notification_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> NotificationService:
+    return runtime.notification_service
 
 
-@inject
-async def get_scheduled_job_service(
-        service=Depends(Provide[ApiContainer.scheduled_job_service]),
-):
-    return service
+def get_scheduled_job_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
+) -> ScheduledJobService:
+    return runtime.scheduled_job_service
 
 
-@inject
-async def get_evidence_service(
-        service: EvidenceService = Depends(Provide[ApiContainer.evidence_service]),
-) -> EvidenceService:
-    return service
+def get_evidence_service(runtime: ApiRuntime = Depends(require_api_runtime)) -> EvidenceService:
+    return runtime.evidence_service
 
 
-@inject
-async def get_patrol_pack_service(
-        service: PatrolPackService = Depends(Provide[ApiContainer.patrol_pack_service]),
+def get_patrol_pack_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> PatrolPackService:
-    return service
+    return runtime.patrol_pack_service
 
 
-@inject
-async def get_patrol_run_service(
-        service: PatrolRunService = Depends(Provide[ApiContainer.patrol_run_service]),
+def get_patrol_run_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> PatrolRunService:
-    return service
+    return runtime.patrol_run_service
 
 
-@inject
-async def get_patrol_evidence_service(
-        service: PatrolEvidenceService = Depends(Provide[ApiContainer.patrol_evidence_service]),
+def get_patrol_evidence_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> PatrolEvidenceService:
-    return service
+    return runtime.patrol_evidence_service
 
 
-@inject
-async def get_patrol_remediation_service(
-        service: PatrolRemediationService = Depends(Provide[ApiContainer.patrol_remediation_service]),
+def get_patrol_remediation_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> PatrolRemediationService:
-    return service
+    return runtime.patrol_remediation_service
 
 
-@inject
-async def get_compliance_service(
-        service: ComplianceService = Depends(Provide[ApiContainer.compliance_service]),
+def get_compliance_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> ComplianceService:
-    return service
+    return runtime.compliance_service
 
 
-@inject
-async def get_governance_profile_service(
-        service: GovernanceProfileService = Depends(
-            Provide[ApiContainer.governance_profile_service]
-        ),
+def get_governance_profile_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> GovernanceProfileService:
-    return service
+    return runtime.governance_profile_service
 
 
-@inject
-async def get_governance_overview_service(
-        service: GovernanceOverviewService = Depends(
-            Provide[ApiContainer.governance_overview_service]
-        ),
+def get_governance_overview_service(
+    runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> GovernanceOverviewService:
-    return service
+    return runtime.governance_overview_service

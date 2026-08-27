@@ -1,8 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -16,9 +15,10 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.domain.models.inference import PLATFORM_EMBEDDING_DIMENSIONS
 from app.domain.models.knowledge_base import (
     ChunkLevel,
     DocStatus,
@@ -31,6 +31,7 @@ from app.domain.models.knowledge_base import (
     KnowledgeEntityRef,
     KnowledgeRelation,
 )
+
 from .base import Base
 
 
@@ -52,32 +53,37 @@ class KnowledgeBaseModel(Base):
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     name: Mapped[str] = mapped_column(String(512), nullable=False, server_default=text("''"))
-    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'pending'"))
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'pending'")
+    )
     doc_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    ingest_task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    vector_degraded: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
-    active_version_id: Mapped[Optional[str]] = mapped_column(
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vector_degraded: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    active_version_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
     )
-    settings: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
-    owner_user_id: Mapped[Optional[str]] = mapped_column(
+    settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    owner_user_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
-    team_id: Mapped[Optional[str]] = mapped_column(
+    team_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("teams.id", ondelete="SET NULL"),
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
 
     def to_domain(self) -> KnowledgeBase:
@@ -87,7 +93,6 @@ class KnowledgeBaseModel(Base):
             status=KBStatus(self.status),
             doc_count=self.doc_count or 0,
             chunk_count=self.chunk_count or 0,
-            ingest_task_id=self.ingest_task_id,
             error=self.error,
             vector_degraded=bool(self.vector_degraded),
             active_version_id=self.active_version_id,
@@ -106,7 +111,6 @@ class KnowledgeBaseModel(Base):
             status=kb.status.value,
             doc_count=kb.doc_count,
             chunk_count=kb.chunk_count,
-            ingest_task_id=kb.ingest_task_id,
             error=kb.error,
             vector_degraded=kb.vector_degraded,
             active_version_id=kb.active_version_id,
@@ -134,19 +138,23 @@ class KnowledgeDocumentModel(Base):
         String(255), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False
     )
     title: Mapped[str] = mapped_column(String(512), nullable=False)
-    source_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'upload'"))
+    source_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'upload'")
+    )
     source_ref: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     mime: Mapped[str] = mapped_column(String(255), nullable=False, server_default=text("''"))
-    file_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     page_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'pending'"))
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    warning: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'pending'")
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    warning: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
 
     def to_domain(self) -> KnowledgeDocument:
@@ -196,6 +204,17 @@ class KnowledgeChunkModel(Base):
         Index("ix_kb_chunks_doc_ordinal", "doc_id", "ordinal"),
         Index("ix_kb_chunks_version_doc", "version_id", "doc_id"),
         Index("ix_kb_chunks_version", "version_id"),
+        Index(
+            "ix_kb_chunks_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        Index(
+            "ix_kb_chunks_tsv",
+            "content_tsv",
+            postgresql_using="gin",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
@@ -209,12 +228,16 @@ class KnowledgeChunkModel(Base):
         String(255),
         nullable=False,
     )
-    parent_id: Mapped[Optional[str]] = mapped_column(
+    parent_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("knowledge_chunks.id", ondelete="CASCADE"), nullable=True
     )
     level: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'child'"))
     content: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    page_no: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    content_tsv: Mapped[str | None] = mapped_column(TSVECTOR, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(PLATFORM_EMBEDDING_DIMENSIONS), nullable=True
+    )
+    page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
     heading_path: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     ordinal: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
 
@@ -269,7 +292,7 @@ class KnowledgeEntityModel(Base):
         nullable=False,
     )
     name: Mapped[str] = mapped_column(String(512), nullable=False)
-    normalized_name: Mapped[Optional[str]] = mapped_column(
+    normalized_name: Mapped[str | None] = mapped_column(
         String(512),
         nullable=True,
     )
@@ -335,7 +358,7 @@ class KnowledgeRelationModel(Base):
         String(255), ForeignKey("knowledge_entities.id", ondelete="CASCADE"), nullable=False
     )
     relation: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    chunk_id: Mapped[Optional[str]] = mapped_column(
+    chunk_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("knowledge_chunks.id", ondelete="SET NULL"), nullable=True
     )
 
@@ -397,7 +420,7 @@ class KnowledgeEntityRefModel(Base):
         String(255), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
 
     def to_domain(self) -> KnowledgeEntityRef:

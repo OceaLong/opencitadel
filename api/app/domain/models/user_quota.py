@@ -1,16 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
+
+from app.domain.utils.time_utils import utc_now
 
 
 class UserQuota(BaseModel):
     user_id: str
-    monthly_token_limit: Optional[int] = Field(default=None, ge=0)
-    daily_session_limit: Optional[int] = Field(default=None, ge=0)
-    max_concurrent_tasks: Optional[int] = Field(default=None, ge=0)
-    max_storage_bytes: Optional[int] = Field(default=None, ge=0)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    monthly_token_limit: int | None = Field(default=None, ge=0)
+    daily_session_limit: int | None = Field(default=None, ge=0)
+    max_concurrent_tasks: int | None = Field(default=None, ge=0)
+    max_storage_bytes: int | None = Field(default=None, ge=0)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)

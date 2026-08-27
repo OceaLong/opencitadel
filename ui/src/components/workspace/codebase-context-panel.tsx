@@ -183,8 +183,7 @@ export function CodebaseContextPanel({
     }
   }, [loadSource, onSourceClickRef]);
 
-  const activeArtifact = (kind: CodebaseArtifact["kind"]) =>
-    artifacts.find((a) => a.kind === kind);
+  const activeArtifact = (kind: CodebaseArtifact["kind"]) => artifacts.find((a) => a.kind === kind);
 
   const callChainLocations = useMemo(() => {
     const art = artifacts.find((a) => a.kind === "call_chain");

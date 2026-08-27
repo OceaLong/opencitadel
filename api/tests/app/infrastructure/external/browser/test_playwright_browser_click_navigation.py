@@ -1,11 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
-from app.domain.models.tool_result import ToolResult
 from app.infrastructure.external.browser.playwright_browser import (
     PlaywrightBrowser,
     _is_navigation_context_error,
@@ -14,7 +9,9 @@ from app.infrastructure.external.browser.playwright_browser import (
 
 def test_is_navigation_context_error():
     assert _is_navigation_context_error(
-        Exception("Page.evaluate: Execution context was destroyed, most likely because of a navigation")
+        Exception(
+            "Page.evaluate: Execution context was destroyed, most likely because of a navigation"
+        )
     )
     assert not _is_navigation_context_error(Exception("element not found"))
 
@@ -31,7 +28,9 @@ async def _test_build_action_verification_note_survives_navigation_error():
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            raise Exception("Execution context was destroyed, most likely because of a navigation")
+            raise RuntimeError(
+                "Execution context was destroyed, most likely because of a navigation"
+            )
         return 5
 
     browser._interactive_element_count = flaky_count
@@ -57,7 +56,7 @@ async def _test_build_action_verification_note_degrades_when_count_unavailable()
     browser._wait_for_stable_page = AsyncMock()
     browser._current_page_url = MagicMock(return_value="https://example.com/same")
     browser._interactive_element_count = AsyncMock(
-        side_effect=Exception("Execution context was destroyed")
+        side_effect=RuntimeError("Execution context was destroyed")
     )
 
     note = await browser._build_action_verification_note(
@@ -80,9 +79,7 @@ async def _test_click_returns_success_after_navigation():
     browser.page = MagicMock()
     browser.page.mouse = MagicMock()
     browser.page.mouse.click = AsyncMock()
-    browser._build_action_verification_note = AsyncMock(
-        return_value="点击已执行; URL: old -> new"
-    )
+    browser._build_action_verification_note = AsyncMock(return_value="点击已执行; URL: old -> new")
 
     result = await browser.click(coordinate_x=10.0, coordinate_y=20.0)
     assert result.success is True

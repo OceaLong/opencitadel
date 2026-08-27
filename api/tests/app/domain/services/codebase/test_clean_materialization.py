@@ -1,17 +1,14 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import io
 import json
-from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.domain.errors import BadRequestError
 from app.domain.models.codebase import Codebase, CodebaseSourceType
 from app.domain.models.tool_result import ToolResult
 from app.domain.services.codebase.ingestion_runner import CodebaseIngestionRunner
-from app.domain.services.codebase.static_analyzer import AnalysisResult
 
 
 class _Repo:
@@ -94,7 +91,7 @@ def _runner(codebase):
     return (
         CodebaseIngestionRunner(
             uow_factory=lambda: _Uow(repo),
-            sandbox_cls=sandbox_cls,
+            sandbox_factory=sandbox_cls,
             file_storage=storage,
         ),
         repo,
@@ -106,14 +103,14 @@ def _runner(codebase):
 async def test_files_reanalysis_uses_unique_clean_workspace(monkeypatch):
     codebase = Codebase(
         id="cb1",
+        owner_user_id="user-1",
         source_type=CodebaseSourceType.FILES,
         source_ref=json.dumps({"file_ids": ["old", "keep"]}),
-        ingest_task_id="build-1",
     )
     runner, _repo, sandbox = _runner(codebase)
     exec_calls: list[tuple[str, str, str]] = []
 
-    async def fake_exec_await(sb, session_id, exec_dir, command, *, timeout=120):
+    async def fake_exec_await(sb, session_id, exec_dir, command, *, timeout_seconds=120):
         exec_calls.append((session_id, exec_dir, command))
         return ""
 
@@ -122,10 +119,15 @@ async def test_files_reanalysis_uses_unique_clean_workspace(monkeypatch):
         fake_exec_await,
     )
 
-    _sandbox, first_workspace = await runner._materialize(codebase)
-    codebase.ingest_task_id = "build-2"
+    _sandbox, first_workspace = await runner._materialize(
+        codebase,
+        build_identity="build-1",
+    )
     codebase.source_ref = json.dumps({"file_ids": ["keep"]})
-    _sandbox, second_workspace = await runner._materialize(codebase)
+    _sandbox, second_workspace = await runner._materialize(
+        codebase,
+        build_identity="build-2",
+    )
 
     assert first_workspace.endswith("/codebase-builds/build-1")
     assert second_workspace.endswith("/codebase-builds/build-2")
@@ -141,12 +143,11 @@ async def test_git_clone_command_cannot_interpolate_shell(monkeypatch):
         id="cb1",
         source_type=CodebaseSourceType.GIT,
         source_ref="https://example.com/repo.git;touch /tmp/pwned",
-        ingest_task_id="build-1",
     )
     runner, _repo, _sandbox = _runner(codebase)
     exec_calls: list[str] = []
 
-    async def fake_exec_await(sb, session_id, exec_dir, command, *, timeout=120):
+    async def fake_exec_await(sb, session_id, exec_dir, command, *, timeout_seconds=120):
         exec_calls.append(command)
         return ""
 
@@ -155,47 +156,7 @@ async def test_git_clone_command_cannot_interpolate_shell(monkeypatch):
         fake_exec_await,
     )
 
-    with pytest.raises(Exception):
-        await runner._materialize(codebase)
+    with pytest.raises(BadRequestError, match="Git URL 包含不安全字符"):
+        await runner._materialize(codebase, build_identity="build-1")
 
     assert exec_calls == []
-
-
-@pytest.mark.asyncio
-async def test_run_persists_snapshot_before_analysis(monkeypatch):
-    codebase = Codebase(
-        id="cb1",
-        name="demo",
-        source_type=CodebaseSourceType.FILES,
-        source_ref=json.dumps({"file_ids": ["main"]}),
-        ingest_task_id="build-1",
-    )
-    runner, repo, sandbox = _runner(codebase)
-    expected_digest = sha256(b"snapshot-bytes").hexdigest()
-    expected_key = f"codebase-snapshots/sha256/{expected_digest}.tgz"
-
-    monkeypatch.setattr(
-        "app.domain.services.codebase.ingestion_runner.CodebaseIngestionRunner._materialize",
-        AsyncMock(return_value=(sandbox, "/home/ubuntu/codebase-builds/build-1")),
-    )
-    monkeypatch.setattr(
-        "app.domain.services.codebase.ingestion_runner.CodebaseIngestionRunner._collect_files",
-        AsyncMock(return_value=[("main.py", "def main(): pass")]),
-    )
-
-    def analyze_tree(codebase_id, workspace, entries):
-        assert repo._codebase.snapshot_key == expected_key
-        return AnalysisResult(file_contents={"main.py": "def main(): pass"})
-
-    runner._analyzer.analyze_tree = MagicMock(side_effect=analyze_tree)
-    runner._indexer.build_chunks = AsyncMock(return_value=[])
-    monkeypatch.setattr(
-        "app.domain.services.codebase.ingestion_runner.ArtifactGenerator.generate_all",
-        lambda *args, **kwargs: [],
-    )
-
-    events = []
-    async for event in runner.run("cb1"):
-        events.append(event)
-
-    assert repo._codebase.snapshot_key == expected_key

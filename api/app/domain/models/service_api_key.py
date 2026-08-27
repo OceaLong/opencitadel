@@ -1,10 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
+
+from app.domain.utils.time_utils import utc_now
 
 
 class ServiceApiKey(BaseModel):
@@ -13,9 +12,9 @@ class ServiceApiKey(BaseModel):
     name: str
     key_hash: str
     prefix: str
-    last_used_at: Optional[datetime] = None
-    revoked_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.now)
+    last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
 
     @property
     def revoked(self) -> bool:

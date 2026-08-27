@@ -1,6 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.llm_token_usage import LLMTokenUsage, SessionTokenUsageSummary
@@ -34,14 +32,18 @@ class DBLLMTokenUsageRepository(LLMTokenUsageRepository):
             func.coalesce(func.sum(LLMTokenUsageORM.prompt_tokens), 0),
             func.coalesce(func.sum(LLMTokenUsageORM.completion_tokens), 0),
             func.coalesce(func.sum(LLMTokenUsageORM.total_tokens), 0),
+            func.coalesce(func.sum(LLMTokenUsageORM.cached_tokens), 0),
+            func.coalesce(func.sum(LLMTokenUsageORM.cache_write_tokens), 0),
             func.count(LLMTokenUsageORM.id),
         ).where(LLMTokenUsageORM.session_id == session_id)
         result = await self.db_session.execute(stmt)
-        prompt, completion, total, count = result.one()
+        prompt, completion, total, cached, cache_write, count = result.one()
         return SessionTokenUsageSummary(
             session_id=session_id,
             prompt_tokens=int(prompt or 0),
             completion_tokens=int(completion or 0),
             total_tokens=int(total or 0),
+            cached_tokens=int(cached or 0),
+            cache_write_tokens=int(cache_write or 0),
             call_count=int(count or 0),
         )

@@ -112,7 +112,7 @@ POST /knowledge-bases/{kb_id}/builds/{build_id}/retry
 POST /knowledge-bases/{kb_id}/builds/{build_id}/cancel
 ```
 
-该请求让 worker 在安全边界停止。请继续观察构建状态，直到进入终态。如果任务派发或 worker lease 中断，恢复任务会继续持久构建，或将其标记失败，且不会改变 active 版本。
+该请求在 Run 中记录取消，并在 Activity 边界停止。请继续观察构建状态直到进入终态。如果 Activity Claim 过期，执行内核会安全继续持久构建，或将其标记失败，且不会改变 Active 版本。
 
 ## 10. 显式升级会话
 

@@ -1,16 +1,37 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import asyncio
 import json
+from enum import StrEnum
 
-from app.domain.models.llm_model import LLMModel, LLMProvider
-from app.domain.schemas.planner_output import PlannerPlanSchema
+from pydantic import BaseModel, Field
+
+from app.domain.models.inference import InferenceProvider
 from app.infrastructure.external.llm.anthropic_llm import AnthropicLLM
-from app.infrastructure.external.llm.structured_output import to_openai_strict, to_gemini_schema
+from app.infrastructure.external.llm.structured_output import to_gemini_schema, to_openai_strict
+from tests.app.infrastructure.external.llm.inference_model_factory import (
+    resolved_chat_model,
+)
+
+
+class _Status(StrEnum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+
+
+class _Step(BaseModel):
+    description: str
+    status: _Status = _Status.PENDING
+
+
+class _StructuredResponse(BaseModel):
+    title: str
+    goal: str = ""
+    language: str = "zh"
+    steps: list[_Step] = Field(min_length=1)
+    status: _Status = _Status.PENDING
 
 
 def test_openai_strict_schema_inlines_array_refs_and_preserves_enum():
-    payload = to_openai_strict(PlannerPlanSchema)
+    payload = to_openai_strict(_StructuredResponse)
     schema = payload["json_schema"]["schema"]
     assert payload["json_schema"]["strict"] is True
     assert schema["additionalProperties"] is False
@@ -22,7 +43,7 @@ def test_openai_strict_schema_inlines_array_refs_and_preserves_enum():
 
 
 def test_gemini_schema_removes_additional_properties():
-    schema = to_gemini_schema(PlannerPlanSchema)
+    schema = to_gemini_schema(_StructuredResponse)
     assert "additionalProperties" not in json.dumps(schema)
     assert schema["properties"]["steps"]["items"]["properties"]["description"]["type"] == "string"
 
@@ -38,8 +59,16 @@ class _FakeAnthropicStreamResponse:
                 "index": 0,
                 "content_block": {"type": "tool_use", "id": "toolu_1", "name": "emit_result"},
             },
-            {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": '{"title"'}},
-            {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": ':"ok"}'}},
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": '{"title"'},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": ':"ok"}'},
+            },
             {"type": "message_delta", "usage": {"output_tokens": 2}},
         ]
         for event in events:
@@ -47,10 +76,18 @@ class _FakeAnthropicStreamResponse:
 
 
 async def _collect_anthropic_synthetic_stream():
-    llm = AnthropicLLM(LLMModel(provider=LLMProvider.ANTHROPIC, api_key="sk-test", model_name="claude-test"))
+    llm = AnthropicLLM(
+        resolved_chat_model(
+            provider=InferenceProvider.ANTHROPIC,
+            credential="sk-test",
+            model_name="claude-test",
+        )
+    )
     return [
         chunk
-        async for chunk in llm._iter_stream_lines(_FakeAnthropicStreamResponse(), synthetic_schema=True)
+        async for chunk in llm._iter_stream_lines(
+            _FakeAnthropicStreamResponse(), synthetic_schema=True
+        )
     ]
 
 
@@ -60,4 +97,3 @@ def test_anthropic_synthetic_tool_stream_yields_content_not_tool_calls():
     assert chunks[1] == {"content": ':"ok"}'}
     assert all("tool_calls" not in chunk for chunk in chunks)
     assert chunks[-1]["usage"]["total_tokens"] == 3
-

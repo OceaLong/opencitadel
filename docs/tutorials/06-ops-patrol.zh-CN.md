@@ -8,11 +8,11 @@ Ops Patrol 通过固定的只读 MCP Collector 检查自托管 Kubernetes 应用
 
 需要准备：
 
-- 正常运行的 API、Worker、PostgreSQL、Redis 与支持工具调用的模型；
+- 正常运行的 API、执行内核、PostgreSQL、Redis 与支持工具调用的模型；
 - 使用专用只读 ServiceAccount 部署在目标集群的 Ops Collector；
 - 已评审的 Namespace/Workload 白名单与注册探针；
 - 已启用的 Streamable HTTP MCP Server，九个 Tool Policy 均固定为只读；
-- 可启用全局功能开关的管理员；
+- 可管理全局 Patrol Policy 的管理员；
 - Operator 对目标工作区有权限。Auditor 可以复核，但不能创建、触发或决策 Finding。
 
 仅验证本地传输时可以启动：
@@ -40,7 +40,8 @@ Compose Profile 不会挂载宿主机 kubeconfig。真实 Kubernetes 观察应�
 
 在 **设置 → 集成** 中，把内部 URL（默认 Helm Release 为 `http://opencitadel-ops-collector:8090/mcp`）注册为 Streamable HTTP 并启用。然后使用 [Ops Patrol 运维手册](../operations/ops-patrol.zh-CN.md#注册-mcp-server) 中的已认证管理 API Payload 持久化九个 Tool Policy；当前 UI 表单不负责编辑这些 Policy。
 
-管理员打开 **设置 → 运行时 → feature_flags**，启用 `enable_ops_patrol`，并保持 `enable_ops_patrol_fixture_replay` 关闭。启用 DB AppConfig 时，仅修改 `api/config.yaml` 不会覆盖已有全局配置行。
+管理员打开 **设置 → 运行时策略 → Operations → Patrol**，确认 `admission=accepting`。
+Fixture Replay 是非生产部署选项，不会修改活动 Policy Revision。
 
 ## 创建并验证 Pack
 
@@ -79,7 +80,9 @@ Pack 详情显示 30 天计划运行成功率、Finding/误报数与复核时间
 
 ## 安全回滚
 
-在全局运行时设置中设 `feature_flags.enable_ops_patrol=false`。导航与新工作会隐藏，计划停止创建 Run，但已有且有权访问的 Run/证据仍可读取。重新启用不会丢失配置和历史。
+在全局运行时设置中设 `patrol_policy.admission=paused`。导航与已有且有权访问的 Run/证据
+仍可读取，手动与计划任务的新 Run Admission Fail Closed。依赖恢复健康后设回
+`admission=accepting`；配置与历史不会丢失。
 
 部署、权限、证据验证、备份恢复与排障参见 [Ops Patrol 运维手册](../operations/ops-patrol.zh-CN.md)。
 

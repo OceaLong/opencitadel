@@ -1,5 +1,4 @@
 import pytest
-
 from opencitadel_ops_collector.redaction import redact, redact_text
 
 

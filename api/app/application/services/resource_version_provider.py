@@ -1,14 +1,13 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Shared owner-scoped ResourceVersionProvider skeleton for versioned resources."""
+
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import datetime
-from typing import ClassVar, Generic, TypeVar
+from typing import ClassVar, TypeVar
 
 from app.domain.errors import BadRequestError, NotFoundError
-from app.domain.models.resource_governance import (
-    BuildState,
+from app.domain.models.resource_bindings import (
+    PublicationState,
     PublishedResourceVersion,
     ResourceKind,
 )
@@ -19,12 +18,12 @@ TResource = TypeVar("TResource")
 TVersion = TypeVar("TVersion")
 
 
-class OwnerScopedVersionProvider(ABC, Generic[TResource, TVersion]):
+class OwnerScopedVersionProvider[TResource, TVersion](ABC):
     kind: ClassVar[ResourceKind]
     _PAGE_SIZE = 500
-    _resource_label: ClassVar[str]   # "knowledge base" / "codebase"
-    _version_label: ClassVar[str]    # "knowledge-base version" / "codebase version"
-    _cursor_label: ClassVar[str]     # "knowledge-version" / "codebase-version"
+    _resource_label: ClassVar[str]  # "knowledge base" / "codebase"
+    _version_label: ClassVar[str]  # "knowledge-base version" / "codebase version"
+    _cursor_label: ClassVar[str]  # "knowledge-version" / "codebase-version"
 
     def __init__(self, *, uow_factory: Callable[[], IUnitOfWork]) -> None:
         self._uow_factory = uow_factory
@@ -94,9 +93,7 @@ class OwnerScopedVersionProvider(ABC, Generic[TResource, TVersion]):
             before: tuple[datetime, str] | None = None
             seen_ids: set[str] = set()
             while True:
-                page = await self._list_page(
-                    uow, resource_id, limit=self._PAGE_SIZE, before=before
-                )
+                page = await self._list_page(uow, resource_id, limit=self._PAGE_SIZE, before=before)
                 for version in page:
                     vid = self._resource_version_id(version)
                     if vid not in seen_ids:
@@ -106,13 +103,9 @@ class OwnerScopedVersionProvider(ABC, Generic[TResource, TVersion]):
                     break
                 next_before = (page[-1].created_at, page[-1].id)
                 if next_before == before:
-                    raise RuntimeError(
-                        f"{self._cursor_label} pagination cursor did not advance"
-                    )
+                    raise RuntimeError(f"{self._cursor_label} pagination cursor did not advance")
                 before = next_before
-            return [
-                self._published_projection(v) for v in versions if self._is_published(v)
-            ]
+            return [self._published_projection(v) for v in versions if self._is_published(v)]
 
     @staticmethod
     def _resource_version_id(version: TVersion) -> str:
@@ -126,19 +119,14 @@ class OwnerScopedVersionProvider(ABC, Generic[TResource, TVersion]):
         degraded = cls._is_degraded(version)
         if (not degraded and reasons) or (
             degraded
-            and (
-                not reasons
-                or any(not isinstance(r, str) or not r.strip() for r in reasons)
-            )
+            and (not reasons or any(not isinstance(r, str) or not r.strip() for r in reasons))
         ):
-            raise BadRequestError(
-                f"{cls._version_label} has inconsistent degradation metadata"
-            )
+            raise BadRequestError(f"{cls._version_label} has inconsistent degradation metadata")
         return PublishedResourceVersion(
             resource_kind=cls.kind,
             resource_id=cls._resource_id_of(version),
             version_id=version.id,
-            state=BuildState.DEGRADED if degraded else BuildState.SUCCEEDED,
+            state=PublicationState.DEGRADED if degraded else PublicationState.READY,
             published=True,
             degraded=degraded,
             capabilities=dict(version.capabilities),

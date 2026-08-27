@@ -1,11 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Tests for LLM circuit breaker state machine and error classification."""
+
 import asyncio
 import time
-from types import SimpleNamespace
-from unittest.mock import patch
 
+from app.domain.runtime_policy import ModelResiliencePolicy
 from app.domain.utils.llm_retry import is_breaker_eligible_error, is_retriable_llm_error
 from app.infrastructure.external.llm.circuit_breaker import LLMCircuitBreaker
 
@@ -30,32 +28,30 @@ class TestBreakerErrorClassification:
 
 
 async def _test_circuit_breaker_state_machine_open_halfopen_close():
-    breaker = LLMCircuitBreaker()
     redis = _FakeRedisClient()
-    breaker._redis = SimpleNamespace(client=redis)
+    breaker = LLMCircuitBreaker(redis)
 
-    with patch("app.infrastructure.external.llm.circuit_breaker.get_runtime_config") as cfg:
-        cfg.return_value.model_resilience = _breaker_config(threshold=2)
+    policy = _breaker_policy(threshold=2)
 
-        assert await breaker.get_state("model-1") == "closed"
+    assert await breaker.get_state("model-1", policy) == "closed"
 
-        await breaker.record_failure("model-1", Exception("503 service unavailable"))
-        assert await breaker.get_state("model-1") == "closed"
+    await breaker.record_failure("model-1", Exception("503 service unavailable"), policy)
+    assert await breaker.get_state("model-1", policy) == "closed"
 
-        await breaker.record_failure("model-1", Exception("503 service unavailable"))
-        assert await breaker.get_state("model-1") == "open"
-        assert await breaker.is_open("model-1") is True
-        assert await breaker.allow_request("model-1") == "deny"
-        assert await breaker.is_open("model-1") is True
+    await breaker.record_failure("model-1", Exception("503 service unavailable"), policy)
+    assert await breaker.get_state("model-1", policy) == "open"
+    assert await breaker.is_open("model-1", policy) is True
+    assert await breaker.allow_request("model-1", policy) == "deny"
+    assert await breaker.is_open("model-1", policy) is True
 
-        redis.store[breaker._open_until_key("model-1")] = str(time.time() - 1)
-        assert await breaker.get_state("model-1") == "half_open"
-        assert await breaker.allow_request("model-1") == "probe"
-        assert await breaker.allow_request("model-1") == "deny"
+    redis.store[breaker._open_until_key("model-1")] = str(time.time() - 1)
+    assert await breaker.get_state("model-1", policy) == "half_open"
+    assert await breaker.allow_request("model-1", policy) == "probe"
+    assert await breaker.allow_request("model-1", policy) == "deny"
 
-        await breaker.record_success("model-1")
-        assert await breaker.get_state("model-1") == "closed"
-        assert await redis.get(breaker._open_until_key("model-1")) is None
+    await breaker.record_success("model-1", policy)
+    assert await breaker.get_state("model-1", policy) == "closed"
+    assert await redis.get(breaker._open_until_key("model-1")) is None
 
 
 def test_circuit_breaker_state_machine_open_halfopen_close():
@@ -63,35 +59,27 @@ def test_circuit_breaker_state_machine_open_halfopen_close():
 
 
 async def _test_halfopen_probe_failure_reopens_circuit():
-    breaker = LLMCircuitBreaker()
     redis = _FakeRedisClient()
-    breaker._redis = SimpleNamespace(client=redis)
+    breaker = LLMCircuitBreaker(redis)
 
-    with patch("app.infrastructure.external.llm.circuit_breaker.get_runtime_config") as cfg:
-        cfg.return_value.model_resilience = _breaker_config(threshold=5)
-        redis.store[breaker._open_until_key("model-1")] = str(time.time() - 1)
+    policy = _breaker_policy(threshold=5)
+    redis.store[breaker._open_until_key("model-1")] = str(time.time() - 1)
 
-        assert await breaker.allow_request("model-1") == "probe"
-        assert breaker._probe_key("model-1") in redis.store
-        await breaker.record_failure("model-1", Exception("503 service unavailable"))
+    assert await breaker.allow_request("model-1", policy) == "probe"
+    assert breaker._probe_key("model-1") in redis.store
+    await breaker.record_failure("model-1", Exception("503 service unavailable"), policy)
 
-        assert await breaker.get_state("model-1") == "open"
-        assert await breaker.is_open("model-1") is True
-        assert breaker._probe_key("model-1") not in redis.store
+    assert await breaker.get_state("model-1", policy) == "open"
+    assert await breaker.is_open("model-1", policy) is True
+    assert breaker._probe_key("model-1") not in redis.store
 
 
 def test_halfopen_probe_failure_reopens_circuit():
     asyncio.run(_test_halfopen_probe_failure_reopens_circuit())
 
 
-def _breaker_config(*, threshold: int):
-    return SimpleNamespace(
-        enabled=True,
-        breaker_window_seconds=60,
-        breaker_error_threshold=threshold,
-        breaker_open_ttl_seconds=60,
-        breaker_halfopen_probe_timeout_seconds=10,
-    )
+def _breaker_policy(*, threshold: int) -> ModelResiliencePolicy:
+    return ModelResiliencePolicy(breaker_error_threshold=threshold)
 
 
 class _FakeRedisClient:
@@ -131,22 +119,24 @@ class _FakeRedisClient:
         return "allow"
 
     def _record_error_eval(
-            self,
-            errors_key: str,
-            open_until_key: str,
-            probe_key: str,
-            now: str,
-            window: str,
-            threshold: str,
-            open_ttl: str,
-            key_ttl: str,
+        self,
+        errors_key: str,
+        open_until_key: str,
+        probe_key: str,
+        now: str,
+        window: str,
+        threshold: str,
+        open_ttl: str,
+        key_ttl: str,
     ):
         del key_ttl
         current = float(now)
         window_seconds = float(window)
         threshold_count = int(threshold)
         open_ttl_seconds = float(open_ttl)
-        zset = [score for score in self.zsets.get(errors_key, []) if score >= current - window_seconds]
+        zset = [
+            score for score in self.zsets.get(errors_key, []) if score >= current - window_seconds
+        ]
         zset.append(current)
         self.zsets[errors_key] = zset
         open_until = float(self.store.get(open_until_key) or 0)
@@ -158,4 +148,3 @@ class _FakeRedisClient:
             self.store[open_until_key] = str(current + open_ttl_seconds)
             return "open"
         return "closed"
-

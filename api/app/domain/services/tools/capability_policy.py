@@ -1,8 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Mode-scoped capability policy interfaces."""
+
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, Optional
 
 from app.domain.models.codebase import SessionMode
 from app.domain.models.tool_policy import (
@@ -13,7 +12,6 @@ from app.domain.models.tool_policy import (
     ToolIdempotency,
 )
 from app.domain.services.tools.tool_names import is_tool_allowed
-
 
 READ_SAFE = ToolExecutionPolicy(
     capability=ToolCapability.KNOWLEDGE_READ,
@@ -42,13 +40,10 @@ INTERACTIVE_BROWSER = ToolExecutionPolicy(
     approval=ApprovalMode.POLICY,
     concurrency_group="browser",
 )
-MESSAGE_READ = READ_SAFE.model_copy(update={"capability": ToolCapability.MESSAGE})
 CODE_READ = READ_SAFE.model_copy(update={"capability": ToolCapability.CODE_READ})
 INTEGRATION_READ = READ_SAFE.model_copy(update={"capability": ToolCapability.INTEGRATION_READ})
 WEB_READ = READ_SAFE.model_copy(update={"capability": ToolCapability.WEB_READ})
-SHELL_INTERACTIVE = INTERACTIVE_BROWSER.model_copy(
-    update={"concurrency_group": "shell"}
-)
+SHELL_INTERACTIVE = INTERACTIVE_BROWSER.model_copy(update={"concurrency_group": "shell"})
 GENERATION_WRITE = ToolExecutionPolicy(
     capability=ToolCapability.GENERATION,
     effect=ToolEffect.EXTERNAL_WRITE,
@@ -57,38 +52,24 @@ GENERATION_WRITE = ToolExecutionPolicy(
     concurrency_group="generation",
 )
 
-_ASK_CAPABILITIES = frozenset({
-    ToolCapability.MESSAGE,
-    ToolCapability.KNOWLEDGE_READ,
-    ToolCapability.CODE_READ,
-    ToolCapability.INTEGRATION_READ,
-})
+_ASK_CAPABILITIES = frozenset(
+    {
+        ToolCapability.KNOWLEDGE_READ,
+        ToolCapability.CODE_READ,
+        ToolCapability.INTEGRATION_READ,
+    }
+)
 
 
 class CapabilityDeniedError(PermissionError):
-    """Raised when a tool request exceeds the active capability policy.
-
-    ``layer`` identifies which enforcement layer produced the denial, for
-    governance observability (Phase A / Task 2):
-      - ``assembly``: denied while assembling a (sub-)agent's capability
-        policy, before any tool set was exposed (e.g. an Ask sub-agent with
-        no explicit allowlist requesting tools at all).
-      - ``exposure``: denied because the request would expose a tool beyond
-        what the parent policy already granted.
-      - ``execution`` (default): denied at the point of actually invoking a
-        tool whose descriptor policy the active ``CapabilityPolicy`` rejects.
-    ``tool_name`` carries the concrete tool name being denied when the
-    raise site has one in hand; ``None`` when the denial concerns a set of
-    requested tools rather than a single call (e.g. ``for_child``'s
-    no-allowlist-at-all case).
-    """
+    """Raised when assembly, exposure, or execution exceeds policy."""
 
     def __init__(
-            self,
-            message: str,
-            *,
-            layer: str = "execution",
-            tool_name: Optional[str] = None,
+        self,
+        message: str,
+        *,
+        layer: str = "execution",
+        tool_name: str | None = None,
     ) -> None:
         super().__init__(message)
         self.layer = layer
@@ -98,22 +79,22 @@ class CapabilityDeniedError(PermissionError):
 @dataclass(frozen=True)
 class CapabilityPolicy:
     mode: SessionMode
-    allowed_tool_names: Optional[frozenset[str]] = None
+    allowed_tool_names: frozenset[str] | None = None
 
     @classmethod
     def for_mode(
-            cls,
-            mode: SessionMode,
-            allowed_tool_names: Optional[Iterable[str]] = None,
+        cls,
+        mode: SessionMode,
+        allowed_tool_names: Iterable[str] | None = None,
     ) -> "CapabilityPolicy":
         names = frozenset(allowed_tool_names) if allowed_tool_names is not None else None
         return cls(mode=mode, allowed_tool_names=names)
 
     def allows(
-            self,
-            execution_policy: ToolExecutionPolicy,
-            *,
-            tool_name: Optional[str] = None,
+        self,
+        execution_policy: ToolExecutionPolicy,
+        *,
+        tool_name: str | None = None,
     ) -> bool:
         if (
             tool_name is not None
@@ -129,10 +110,10 @@ class CapabilityPolicy:
         )
 
     def allows_integration(
-            self,
-            execution_policy: ToolExecutionPolicy,
-            *,
-            tool_name: Optional[str] = None,
+        self,
+        execution_policy: ToolExecutionPolicy,
+        *,
+        tool_name: str | None = None,
     ) -> bool:
         """Require integration declarations to use their dedicated read capability."""
         if self.mode == SessionMode.ASK and (
@@ -141,7 +122,7 @@ class CapabilityPolicy:
             return False
         return self.allows(execution_policy, tool_name=tool_name)
 
-    def for_child(self, requested_tool_names: Optional[Iterable[str]] = None) -> "CapabilityPolicy":
+    def for_child(self, requested_tool_names: Iterable[str] | None = None) -> "CapabilityPolicy":
         if requested_tool_names is None:
             return self
         requested = frozenset(requested_tool_names)
@@ -152,7 +133,8 @@ class CapabilityPolicy:
             )
         if self.allowed_tool_names is not None:
             expanded = [
-                name for name in requested
+                name
+                for name in requested
                 if not is_tool_allowed(name, list(self.allowed_tool_names))
             ]
             if expanded:

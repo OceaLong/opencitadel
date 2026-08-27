@@ -1,10 +1,6 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import AsyncIterator, List, Optional
+from datetime import UTC, datetime
 
-from sqlalchemy import select, delete, text, update, or_, and_
+from sqlalchemy import and_, delete, or_, select, text, update
 from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,46 +9,39 @@ from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.repositories.memory_entry_repository import MemoryEntryRepository
 from app.infrastructure.models.memory_entry import MemoryEntryORM
 from app.infrastructure.models.session import SessionModel
-from app.infrastructure.security.db_authorization import configure_session_authorization
-from app.infrastructure.storage.postgres import get_postgres
-
-
-@asynccontextmanager
-async def open_standalone_memory_session() -> AsyncIterator[AsyncSession]:
-    """Open a short-lived DB session with RLS authorization configured.
-
-    Used by callers (e.g. VectorMemoryService) that need to read/write
-    memory_entries without an already-active unit-of-work session.
-    """
-    async with get_postgres().session_factory() as session:
-        await configure_session_authorization(session)
-        yield session
 
 
 class DBMemoryEntryRepository(MemoryEntryRepository):
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
-    def _scope_conditions(self, owner_scope: Optional[OwnerScope]):
+    def _scope_conditions(self, owner_scope: OwnerScope | None):
         if owner_scope is None:
             return []
         if owner_scope.type == OwnerScopeType.TEAM:
             return [MemoryEntryORM.team_id == owner_scope.team_id]
-        return [MemoryEntryORM.owner_user_id == owner_scope.user_id, MemoryEntryORM.team_id.is_(None)]
+        return [
+            MemoryEntryORM.owner_user_id == owner_scope.user_id,
+            MemoryEntryORM.team_id.is_(None),
+        ]
 
     async def get_all(
-            self,
-            scope: Optional[MemoryScope] = None,
-            session_id: Optional[str] = None,
-            q: Optional[str] = None,
-            tags: Optional[List[str]] = None,
-            limit: int = 100,
-            owner_scope: Optional[OwnerScope] = None,
-    ) -> List[MemoryEntry]:
-        stmt = select(MemoryEntryORM).order_by(
-            MemoryEntryORM.last_used_at.desc().nullslast(),
-            MemoryEntryORM.created_at.desc(),
-        ).limit(limit)
+        self,
+        scope: MemoryScope | None = None,
+        session_id: str | None = None,
+        q: str | None = None,
+        tags: list[str] | None = None,
+        limit: int = 100,
+        owner_scope: OwnerScope | None = None,
+    ) -> list[MemoryEntry]:
+        stmt = (
+            select(MemoryEntryORM)
+            .order_by(
+                MemoryEntryORM.last_used_at.desc().nullslast(),
+                MemoryEntryORM.created_at.desc(),
+            )
+            .limit(limit)
+        )
         conditions = self._scope_conditions(owner_scope)
         if scope:
             conditions.append(MemoryEntryORM.scope == scope.value)
@@ -67,13 +56,17 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
         result = await self.db_session.execute(stmt)
         return [r.to_domain() for r in result.scalars().all()]
 
-    async def get_by_id(self, entry_id: str, owner_scope: Optional[OwnerScope] = None) -> Optional[MemoryEntry]:
-        stmt = select(MemoryEntryORM).where(MemoryEntryORM.id == entry_id, *self._scope_conditions(owner_scope))
+    async def get_by_id(
+        self, entry_id: str, owner_scope: OwnerScope | None = None
+    ) -> MemoryEntry | None:
+        stmt = select(MemoryEntryORM).where(
+            MemoryEntryORM.id == entry_id, *self._scope_conditions(owner_scope)
+        )
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
         return record.to_domain() if record else None
 
-    async def recall_for_session(self, session_id: str, limit: int = 20) -> List[MemoryEntry]:
+    async def recall_for_session(self, session_id: str, limit: int = 20) -> list[MemoryEntry]:
         fetch_limit = max(limit * 3, limit)
         session = await self.db_session.scalar(
             select(SessionModel).where(SessionModel.id == session_id).limit(1)
@@ -115,7 +108,7 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
         stmt = select(MemoryEntryORM).where(MemoryEntryORM.id == entry.id)
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
-        entry.updated_at = datetime.now()
+        entry.updated_at = datetime.now(UTC)
         if record:
             record.scope = entry.scope.value
             record.session_id = entry.session_id
@@ -131,42 +124,42 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
         else:
             self.db_session.add(MemoryEntryORM.from_domain(entry))
 
-    async def delete_by_id(self, entry_id: str, owner_scope: Optional[OwnerScope] = None) -> None:
+    async def delete_by_id(self, entry_id: str, owner_scope: OwnerScope | None = None) -> None:
         await self.db_session.execute(
-            delete(MemoryEntryORM).where(MemoryEntryORM.id == entry_id, *self._scope_conditions(owner_scope))
+            delete(MemoryEntryORM).where(
+                MemoryEntryORM.id == entry_id, *self._scope_conditions(owner_scope)
+            )
         )
 
-    async def touch_used(self, entry_ids: List[str]) -> None:
+    async def touch_used(self, entry_ids: list[str]) -> None:
         if not entry_ids:
             return
         await self.db_session.execute(
             update(MemoryEntryORM)
             .where(MemoryEntryORM.id.in_(entry_ids))
             .values(
-                last_used_at=datetime.now(),
+                last_used_at=datetime.now(UTC),
                 use_count=MemoryEntryORM.use_count + 1,
             )
         )
 
-    async def update_embedding(self, entry_id: str, embedding: List[float]) -> None:
+    async def update_embedding(self, entry_id: str, embedding: list[float]) -> None:
         stmt = (
-            update(MemoryEntryORM)
-            .where(MemoryEntryORM.id == entry_id)
-            .values(embedding=embedding)
+            update(MemoryEntryORM).where(MemoryEntryORM.id == entry_id).values(embedding=embedding)
         )
         await self.db_session.execute(stmt)
 
     async def vector_search_entries(
-            self,
-            query_embedding: List[float],
-            session_id: Optional[str] = None,
-            limit: int = 20,
-    ) -> List[MemoryEntry]:
+        self,
+        query_embedding: list[float],
+        session_id: str | None = None,
+        limit: int = 20,
+    ) -> list[MemoryEntry]:
         # 向量距离检索仍使用 pgvector 运算符（ORM 不直接支持 <=>）
         stmt = text("""
             SELECT id, scope, session_id, title, content, tags, owner_user_id,
                    team_id, source, last_used_at, use_count, created_at, updated_at,
-                   embedding <=> :query_vec::vector AS distance
+                   embedding <=> CAST(:query_vec AS vector) AS distance
             FROM memory_entries
             WHERE embedding IS NOT NULL
               AND EXISTS (
@@ -186,7 +179,7 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
                 scope = 'global'
                 OR (scope = 'session' AND session_id = :session_id)
               )
-            ORDER BY embedding <=> :query_vec::vector
+            ORDER BY embedding <=> CAST(:query_vec AS vector)
             LIMIT :limit
         """)
         params = {
@@ -197,9 +190,8 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
         result = await self.db_session.execute(stmt, params)
         rows = result.fetchall()
 
-        entries: List[MemoryEntry] = []
-        for row in rows:
-            entries.append(MemoryEntry(
+        return [
+            MemoryEntry(
                 id=row.id,
                 scope=MemoryScope(row.scope),
                 session_id=row.session_id,
@@ -214,5 +206,6 @@ class DBMemoryEntryRepository(MemoryEntryRepository):
                 vector_score=max(0.0, 1.0 - float(row.distance or 0.0)),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            ))
-        return entries
+            )
+            for row in rows
+        ]

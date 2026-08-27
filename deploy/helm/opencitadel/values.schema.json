@@ -2,6 +2,33 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "replicaCount": {
+      "type": "object",
+      "not": { "required": ["worker"] }
+    },
+    "image": {
+      "type": "object",
+      "not": { "required": ["worker"] }
+    },
+    "executionKernel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["replicas", "databaseUser", "metricsPort"],
+      "properties": {
+        "replicas": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "databaseUser": { "type": "string", "minLength": 1 },
+        "metricsPort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "shutdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeoutSeconds", "terminationGracePeriodSeconds"],
+      "properties": {
+        "timeoutSeconds": { "type": "integer", "minimum": 1 },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 2 }
+      }
+    },
     "opsCollector": {
       "type": "object",
       "required": ["enabled", "targetRef", "allowedNamespaces"],
@@ -24,6 +51,10 @@
         }
       }
     },
+    "autoscaling": {
+      "type": "object",
+      "not": { "required": ["worker"] }
+    },
     "secrets": {
       "type": "object",
       "required": [
@@ -33,7 +64,9 @@
         "sessionSecret",
         "bootstrapAdminPassword",
         "postgresAdminPassword",
+        "postgresMigrationPassword",
         "postgresPassword",
+        "executionKernelPostgresPassword",
         "redisPassword"
       ],
       "properties": {
@@ -43,7 +76,9 @@
         "sessionSecret": { "type": "string", "minLength": 32 },
         "bootstrapAdminPassword": { "type": "string", "minLength": 12 },
         "postgresAdminPassword": { "type": "string", "minLength": 16 },
+        "postgresMigrationPassword": { "type": "string", "minLength": 16 },
         "postgresPassword": { "type": "string", "minLength": 16 },
+        "executionKernelPostgresPassword": { "type": "string", "minLength": 16 },
         "redisPassword": { "type": "string", "minLength": 16 }
       }
     }

@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Tests for DBMemoryEntryRepository's pgvector-backed methods.
 
 pgvector's `<=>` operator has no SQLite equivalent, so these methods can't be
@@ -11,13 +9,12 @@ layers:
    (`str(stmt)`) and contains the expected pgvector fragments, and that the
    bound params match the call arguments. We also feed back canned rows to
    verify the row -> MemoryEntry mapping.
-2. A `OPENCITADEL_RUN_POSTGRES_INTEGRATION`-gated test that exercises the
-   real query against Postgres, following the existing `*_postgres.py`
-   convention (e.g. test_db_resource_binding_postgres.py).
+2. A canonical PostgreSQL test that exercises the real query whenever the
+   shared integration database fixture is available.
 """
-import os
+
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -26,8 +23,6 @@ from app.domain.models.memory_entry import MemoryScope, MemorySource
 from app.infrastructure.repositories.db_memory_entry_repository import (
     DBMemoryEntryRepository,
 )
-
-RUN_POSTGRES_INTEGRATION = os.getenv("OPENCITADEL_RUN_POSTGRES_INTEGRATION") == "1"
 
 
 class _RecordingSession:
@@ -45,22 +40,22 @@ class _RecordingSession:
 
 
 def _row(**overrides):
-    defaults = dict(
-        id="mem-1",
-        scope="global",
-        session_id=None,
-        title="title",
-        content="content",
-        tags=["a", "b"],
-        owner_user_id="user-1",
-        team_id=None,
-        source="manual",
-        last_used_at=None,
-        use_count=3,
-        created_at=datetime(2026, 8, 14, tzinfo=timezone.utc),
-        updated_at=datetime(2026, 8, 14, tzinfo=timezone.utc),
-        distance=0.25,
-    )
+    defaults = {
+        "id": "mem-1",
+        "scope": "global",
+        "session_id": None,
+        "title": "title",
+        "content": "content",
+        "tags": ["a", "b"],
+        "owner_user_id": "user-1",
+        "team_id": None,
+        "source": "manual",
+        "last_used_at": None,
+        "use_count": 3,
+        "created_at": datetime(2026, 8, 14, tzinfo=UTC),
+        "updated_at": datetime(2026, 8, 14, tzinfo=UTC),
+        "distance": 0.25,
+    }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
 
@@ -74,7 +69,7 @@ async def test_vector_search_entries_builds_pgvector_statement_with_scope_isolat
 
     assert session.stmt is not None
     compiled = str(session.stmt)  # asserts the statement compiles
-    assert "embedding <=> :query_vec" in compiled
+    assert "embedding <=> CAST(:query_vec AS vector)" in compiled
     assert "memory_entries" in compiled
     # EXISTS subquery enforces team/owner scope isolation via the session row
     assert "EXISTS" in compiled
@@ -121,26 +116,28 @@ async def test_update_embedding_executes_update_statement_for_entry():
     assert "embedding" in compiled
 
 
-@pytest.mark.skipif(
-    not RUN_POSTGRES_INTEGRATION,
-    reason="set OPENCITADEL_RUN_POSTGRES_INTEGRATION=1 for PostgreSQL proof",
-)
 @pytest.mark.asyncio
-async def test_postgres_vector_search_entries_ranks_by_similarity(_db_schema):
+@pytest.mark.usefixtures("postgres_integration")
+async def test_postgres_vector_search_entries_ranks_by_similarity():
     from sqlalchemy import insert
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import create_async_engine
 
     from app.domain.models.authorization import AuthorizationContext
     from app.infrastructure.models.memory_entry import MemoryEntryORM
     from app.infrastructure.models.session import SessionModel
-    from app.infrastructure.models.user import UserModel
+    from app.infrastructure.models.user import UserORM
     from app.infrastructure.security.db_authorization import (
         configure_session_authorization,
     )
-    from core.config import get_settings
+    from core.config import load_deployment_settings
+    from tests.app.execution_test_support import authenticated_session_factory
 
-    engine = create_async_engine(get_settings().sqlalchemy_database_uri)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    settings = load_deployment_settings()
+    engine = create_async_engine(settings.sqlalchemy_database_uri)
+    session_factory = authenticated_session_factory(
+        engine,
+        signing_secret=settings.session_secret,
+    )
     user_id = f"vec-user-{uuid.uuid4()}"
     session_id = f"vec-session-{uuid.uuid4()}"
     close_id = f"mem-close-{uuid.uuid4()}"
@@ -152,9 +149,7 @@ async def test_postgres_vector_search_entries_ranks_by_similarity(_db_schema):
                 setup, AuthorizationContext.system("vector-search-postgres-setup")
             )
             await setup.execute(
-                insert(UserModel).values(
-                    id=user_id, email=f"{user_id}@test.local", username=user_id
-                )
+                insert(UserORM).values(id=user_id, email=f"{user_id}@test.local", username=user_id)
             )
             await setup.execute(
                 insert(SessionModel).values(id=session_id, owner_user_id=user_id, status="pending")
@@ -199,8 +194,10 @@ async def test_postgres_vector_search_entries_ranks_by_similarity(_db_schema):
             )
             from sqlalchemy import delete
 
-            await cleanup.execute(delete(MemoryEntryORM).where(MemoryEntryORM.id.in_([close_id, far_id])))
+            await cleanup.execute(
+                delete(MemoryEntryORM).where(MemoryEntryORM.id.in_([close_id, far_id]))
+            )
             await cleanup.execute(delete(SessionModel).where(SessionModel.id == session_id))
-            await cleanup.execute(delete(UserModel).where(UserModel.id == user_id))
+            await cleanup.execute(delete(UserORM).where(UserORM.id == user_id))
             await cleanup.commit()
         await engine.dispose()

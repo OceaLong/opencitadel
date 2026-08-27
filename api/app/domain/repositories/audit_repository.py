@@ -1,56 +1,51 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+import builtins
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.domain.models.audit_log import AuditLog
 
 
 class AuditRepository(ABC):
     @abstractmethod
-    async def add(self, log: AuditLog) -> None:
-        ...
+    async def add(self, log: AuditLog) -> None: ...
 
     @abstractmethod
     async def list(
         self,
         *,
-        actor_user_id: Optional[str] = None,
-        action: Optional[str] = None,
-        start_at: Optional[datetime] = None,
-        end_at: Optional[datetime] = None,
-        resource_id: Optional[str] = None,
-        resource_type: Optional[str] = None,
+        actor_user_id: str | None = None,
+        action: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        resource_id: str | None = None,
+        resource_type: str | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[AuditLog]:
-        ...
+    ) -> list[AuditLog]: ...
 
     @abstractmethod
-    async def get_by_id(self, log_id: str) -> Optional[AuditLog]:
-        ...
+    async def get_by_id(self, log_id: str) -> AuditLog | None: ...
 
     @abstractmethod
     async def count(
         self,
         *,
-        actor_user_id: Optional[str] = None,
-        action: Optional[str] = None,
-        start_at: Optional[datetime] = None,
-        end_at: Optional[datetime] = None,
-        resource_id: Optional[str] = None,
-        resource_type: Optional[str] = None,
-    ) -> int:
-        ...
+        actor_user_id: str | None = None,
+        action: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        resource_id: str | None = None,
+        resource_type: str | None = None,
+    ) -> int: ...
 
     @abstractmethod
     async def count_by_actions(
         self,
-        actions: List[str],
+        actions: builtins.list[str],
         *,
-        start_at: Optional[datetime] = None,
-        end_at: Optional[datetime] = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
     ) -> int:
         """Count audit logs whose action is in the given set (e.g. login-related actions)."""
         ...
@@ -60,14 +55,14 @@ class AuditRepository(ABC):
         self,
         prefix: str,
         *,
-        start_at: Optional[datetime] = None,
-        end_at: Optional[datetime] = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
     ) -> int:
         """Count audit logs whose action starts with the given prefix (e.g. 'admin.')."""
         ...
 
     @abstractmethod
-    async def list_recent_chained(self, limit: int = 20) -> List[AuditLog]:
+    async def list_recent_chained(self, limit: int = 20) -> builtins.list[AuditLog]:
         """The most recent ``limit`` chained entries, ordered ascending by
         ``chain_seq`` (oldest of the batch first).
 
@@ -80,21 +75,21 @@ class AuditRepository(ABC):
         """
         ...
 
+    @abstractmethod
     async def list_chained(
         self,
         *,
-        limit: Optional[int] = None,
-        resource_id: Optional[str] = None,
-    ) -> List[AuditLog]:
-        raise NotImplementedError
+        limit: int | None = None,
+        resource_id: str | None = None,
+    ) -> builtins.list[AuditLog]: ...
 
     @abstractmethod
     async def daily_action_counts(
         self,
-        actions: List[str],
+        actions: builtins.list[str],
         *,
-        since: Optional[datetime] = None,
-    ) -> List[Dict[str, Any]]:
+        since: datetime | None = None,
+    ) -> builtins.list[dict[str, Any]]:
         """Per-day, per-action counts for the given actions.
 
         Returns one row per ``(date, action)`` pair that has at least one

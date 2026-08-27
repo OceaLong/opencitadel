@@ -4,11 +4,11 @@ Mirrored verbatim from
 ops-collector/src/opencitadel_ops_collector/redaction.py (the two services
 are deployed independently and do not share a package).
 """
+
 from __future__ import annotations
 
 import re
 from typing import Any
-
 
 _PATTERNS = (
     re.compile(r"(?i)\b(authorization\s*:\s*bearer|bearer)\s+[A-Za-z0-9._~+/=-]{8,}"),
@@ -30,7 +30,17 @@ def redact(value: Any) -> Any:
     if isinstance(value, str):
         return redact_text(value)
     if isinstance(value, dict):
-        return {key: ("***REDACTED***" if any(token in key.lower() for token in ("password", "secret", "token", "authorization", "cookie", "dsn")) else redact(item)) for key, item in value.items()}
+        return {
+            key: (
+                "***REDACTED***"
+                if any(
+                    token in key.lower()
+                    for token in ("password", "secret", "token", "authorization", "cookie", "dsn")
+                )
+                else redact(item)
+            )
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [redact(item) for item in value]
     return value

@@ -102,6 +102,10 @@ export default function AutomationPage() {
       toast.error(t("nameRequired"));
       return;
     }
+    if (form.operator_scope && !form.operator_domains?.length) {
+      toast.error(t("operatorDomainsRequired"));
+      return;
+    }
     setCreating(true);
     try {
       if (editingJob) {

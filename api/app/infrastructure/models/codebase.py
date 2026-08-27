@@ -1,8 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -24,7 +23,6 @@ from app.domain.models.codebase import (
     ArtifactKind,
     Codebase,
     CodebaseArtifact,
-    CodebaseChunk,
     CodebaseEdge,
     CodebaseFile,
     CodebaseSourceType,
@@ -34,6 +32,8 @@ from app.domain.models.codebase import (
     SymbolKind,
 )
 from app.domain.models.codebase_version import CodeEvidenceRef
+from app.domain.models.inference import PLATFORM_EMBEDDING_DIMENSIONS
+
 from .base import Base
 
 
@@ -51,41 +51,42 @@ class CodebaseModel(Base):
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     name: Mapped[str] = mapped_column(String(512), nullable=False, server_default=text("''"))
-    source_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'files'"))
+    source_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'files'")
+    )
     source_ref: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'pending'"))
-    language_stats: Mapped[Dict[str, Any]] = mapped_column(
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'pending'")
+    )
+    language_stats: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     file_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    sandbox_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    sandbox_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     workspace_path: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'/home/ubuntu/codebase'")
     )
-    snapshot_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    ingest_task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    snapshot_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     vector_degraded: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
-    active_version_id: Mapped[Optional[str]] = mapped_column(
-        String(255), nullable=True
-    )
-    owner_user_id: Mapped[Optional[str]] = mapped_column(
+    active_version_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    owner_user_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
-    team_id: Mapped[Optional[str]] = mapped_column(
+    team_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("teams.id", ondelete="SET NULL"),
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
 
     def to_domain(self) -> Codebase:
@@ -100,7 +101,6 @@ class CodebaseModel(Base):
             sandbox_id=self.sandbox_id,
             workspace_path=self.workspace_path or "/home/ubuntu/codebase",
             snapshot_key=self.snapshot_key,
-            ingest_task_id=self.ingest_task_id,
             error=self.error,
             vector_degraded=bool(self.vector_degraded),
             active_version_id=self.active_version_id,
@@ -123,7 +123,6 @@ class CodebaseModel(Base):
             sandbox_id=codebase.sandbox_id,
             workspace_path=codebase.workspace_path,
             snapshot_key=codebase.snapshot_key,
-            ingest_task_id=codebase.ingest_task_id,
             error=codebase.error,
             vector_degraded=codebase.vector_degraded,
             active_version_id=codebase.active_version_id,
@@ -146,7 +145,7 @@ class CodebaseFileModel(Base):
     codebase_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("codebases.id", ondelete="CASCADE"), nullable=False
     )
-    version_id: Mapped[Optional[str]] = mapped_column(
+    version_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("codebase_versions.id", ondelete="CASCADE"),
         nullable=True,
@@ -180,7 +179,7 @@ class CodebaseSymbolModel(Base):
     codebase_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("codebases.id", ondelete="CASCADE"), nullable=False
     )
-    version_id: Mapped[Optional[str]] = mapped_column(
+    version_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("codebase_versions.id", ondelete="CASCADE"),
         nullable=True,
@@ -196,13 +195,9 @@ class CodebaseSymbolModel(Base):
     signature: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     start_line: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     end_line: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    parent_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    parser: Mapped[str] = mapped_column(
-        String(64), nullable=False, server_default=text("'regex'")
-    )
-    confidence: Mapped[float] = mapped_column(
-        Float, nullable=False, server_default=text("0")
-    )
+    parent_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    parser: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'regex'"))
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0"))
 
     def to_domain(self) -> CodebaseSymbol:
         return CodebaseSymbol(
@@ -234,7 +229,7 @@ class CodebaseEdgeModel(Base):
     codebase_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("codebases.id", ondelete="CASCADE"), nullable=False
     )
-    version_id: Mapped[Optional[str]] = mapped_column(
+    version_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("codebase_versions.id", ondelete="CASCADE"),
         nullable=True,
@@ -242,7 +237,7 @@ class CodebaseEdgeModel(Base):
     src_symbol_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("codebase_symbols.id", ondelete="CASCADE"), nullable=False
     )
-    dst_symbol_id: Mapped[Optional[str]] = mapped_column(
+    dst_symbol_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("codebase_symbols.id", ondelete="SET NULL"), nullable=True
     )
     callee_name: Mapped[str] = mapped_column(String(512), nullable=False, server_default=text("''"))
@@ -250,10 +245,8 @@ class CodebaseEdgeModel(Base):
     resolution: Mapped[str] = mapped_column(
         String(64), nullable=False, server_default=text("'unresolved'")
     )
-    confidence: Mapped[float] = mapped_column(
-        Float, nullable=False, server_default=text("0")
-    )
-    evidence: Mapped[List[Dict[str, Any]]] = mapped_column(
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0"))
+    evidence: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
 
@@ -277,25 +270,34 @@ class CodebaseChunkModel(Base):
     __table_args__ = (
         Index("ix_codebase_chunks_codebase", "codebase_id"),
         Index("ix_codebase_chunks_version", "version_id"),
+        Index(
+            "ix_codebase_chunks_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     codebase_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("codebases.id", ondelete="CASCADE"), nullable=False
     )
-    version_id: Mapped[Optional[str]] = mapped_column(
+    version_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("codebase_versions.id", ondelete="CASCADE"),
         nullable=True,
     )
-    file_id: Mapped[Optional[str]] = mapped_column(
+    file_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("codebase_files.id", ondelete="SET NULL"), nullable=True
     )
-    symbol_id: Mapped[Optional[str]] = mapped_column(
+    symbol_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("codebase_symbols.id", ondelete="SET NULL"), nullable=True
     )
     content: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     search_text: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(PLATFORM_EMBEDDING_DIMENSIONS), nullable=True
+    )
 
 
 class CodebaseArtifactModel(Base):
@@ -309,20 +311,22 @@ class CodebaseArtifactModel(Base):
     codebase_id: Mapped[str] = mapped_column(
         String(255), ForeignKey("codebases.id", ondelete="CASCADE"), nullable=False
     )
-    version_id: Mapped[Optional[str]] = mapped_column(
+    version_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("codebase_versions.id", ondelete="CASCADE"),
         nullable=True,
     )
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
-    format: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'mermaid'"))
+    format: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'mermaid'")
+    )
     title: Mapped[str] = mapped_column(String(512), nullable=False, server_default=text("''"))
     content: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    meta: Mapped[Dict[str, Any]] = mapped_column(
+    meta: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
 
     def to_domain(self) -> CodebaseArtifact:

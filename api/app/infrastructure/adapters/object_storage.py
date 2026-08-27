@@ -1,8 +1,21 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from app.domain.external.object_storage import ObjectStoragePort
 from app.infrastructure.storage.cos import Cos
 from app.infrastructure.storage.minio import Minio
+
+ObjectStorageClient = Cos | Minio
+
+
+def create_object_storage_adapter(
+    *,
+    provider: str,
+    client: ObjectStorageClient,
+) -> ObjectStoragePort:
+    normalized = provider.strip().lower()
+    if normalized == "minio":
+        return MinioObjectStorageAdapter(minio=client)  # type: ignore[arg-type]
+    if normalized == "cos":
+        return CosObjectStorageAdapter(cos=client)  # type: ignore[arg-type]
+    raise ValueError(f"unsupported storage provider: {provider}")
 
 
 class CosObjectStorageAdapter(ObjectStoragePort):

@@ -1,20 +1,18 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.domain.execution.run import RunStatus
 from app.domain.models.codebase import SessionMode
 from app.domain.models.knowledge_base import DocStatus, KBSourceType, KBStatus
-from app.domain.models.knowledge_version import KnowledgeVersionState
-from app.domain.models.resource_governance import BuildState
 from app.domain.models.knowledge_citation import KnowledgeCitation
+from app.domain.models.knowledge_version import KnowledgeVersionState
 
 
 class CreateKnowledgeBaseRequest(BaseModel):
     name: str = "未命名知识库"
-    settings: Dict[str, Any] = Field(default_factory=dict)
+    settings: dict[str, Any] = Field(default_factory=dict)
 
 
 class KnowledgeBaseResponse(BaseModel):
@@ -23,18 +21,17 @@ class KnowledgeBaseResponse(BaseModel):
     status: KBStatus
     doc_count: int = 0
     chunk_count: int = 0
-    ingest_task_id: Optional[str] = None
-    error: Optional[str] = None
+    error: str | None = None
     vector_degraded: bool = False
     ready_doc_count: int = 0
-    active_version_id: Optional[str] = None
-    settings: Dict[str, Any] = Field(default_factory=dict)
+    active_version_id: str | None = None
+    settings: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
 
 class ListKnowledgeBasesResponse(BaseModel):
-    knowledge_bases: List[KnowledgeBaseResponse]
+    knowledge_bases: list[KnowledgeBaseResponse]
 
 
 class KnowledgeDocumentResponse(BaseModel):
@@ -43,31 +40,31 @@ class KnowledgeDocumentResponse(BaseModel):
     title: str
     source_type: KBSourceType
     mime: str = ""
-    file_id: Optional[str] = None
+    file_id: str | None = None
     page_count: int = 0
     status: DocStatus
-    error: Optional[str] = None
-    warning: Optional[str] = None
+    error: str | None = None
+    warning: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class AddKnowledgeDocumentsRequest(BaseModel):
-    file_ids: List[str] = Field(default_factory=list)
-    urls: List[str] = Field(default_factory=list)
+    file_ids: list[str] = Field(default_factory=list)
+    urls: list[str] = Field(default_factory=list)
     source_type: KBSourceType = KBSourceType.UPLOAD
 
 
 class ListKnowledgeDocumentsResponse(BaseModel):
-    documents: List[KnowledgeDocumentResponse]
+    documents: list[KnowledgeDocumentResponse]
     total: int = 0
 
 
 class CreateKnowledgeBaseSessionRequest(BaseModel):
     mode: SessionMode = SessionMode.ASK
-    model_id: Optional[str] = None
-    skill_id: Optional[str] = None
-    knowledge_base_version_id: Optional[str] = None
+    model_id: str | None = None
+    skill_id: str | None = None
+    knowledge_base_version_id: str | None = None
 
 
 class CreateKnowledgeBaseSessionResponse(BaseModel):
@@ -78,7 +75,7 @@ class CreateKnowledgeBaseSessionResponse(BaseModel):
 
 class KnowledgeDocumentContentItemResponse(BaseModel):
     id: str
-    page_no: Optional[int] = None
+    page_no: int | None = None
     heading_path: str = ""
     ordinal: int = 0
     content: str = ""
@@ -86,15 +83,12 @@ class KnowledgeDocumentContentItemResponse(BaseModel):
 
 class ReadKnowledgeDocumentResponse(BaseModel):
     document: KnowledgeDocumentResponse
-    content: str
-    version_id: Optional[str] = None
-    document_revision_id: Optional[str] = None
-    items: List[KnowledgeDocumentContentItemResponse] = Field(
-        default_factory=list
-    )
-    next_cursor: Optional[str] = None
-    total: int = 0
-    truncated: bool = False
+    version_id: str
+    document_revision_id: str
+    items: list[KnowledgeDocumentContentItemResponse]
+    next_cursor: str | None = None
+    total: int
+    truncated: bool
 
 
 class KnowledgeGraphNodeResponse(BaseModel):
@@ -109,35 +103,28 @@ class KnowledgeGraphEdgeResponse(BaseModel):
     source: str
     target: str
     relation: str = ""
-    evidence: List[KnowledgeCitation] = Field(default_factory=list)
+    evidence: list[KnowledgeCitation] = Field(default_factory=list)
 
 
 class KnowledgeGraphResponse(BaseModel):
-    nodes: List[KnowledgeGraphNodeResponse] = Field(default_factory=list)
-    edges: List[KnowledgeGraphEdgeResponse] = Field(default_factory=list)
+    nodes: list[KnowledgeGraphNodeResponse] = Field(default_factory=list)
+    edges: list[KnowledgeGraphEdgeResponse] = Field(default_factory=list)
     capability: bool
-    next_cursor: Optional[str] = None
+    next_cursor: str | None = None
 
 
 class KnowledgeBuildResponse(BaseModel):
     id: str
+    run_id: str | None = None
     knowledge_base_id: str
     version_id: str
-    parent_version_id: Optional[str] = None
-    command_key: str
-    state: BuildState
-    phase: Optional[str] = None
-    progress: float = 0.0
-    capabilities: List[Any] = Field(default_factory=list)
-    degraded_reasons: List[Any] = Field(default_factory=list)
-    metrics: Dict[str, Any] = Field(default_factory=dict)
-    error_code: Optional[str] = None
-    error_message: Optional[str] = None
-    heartbeat_at: Optional[datetime] = None
-    last_event_seq: int = 0
+    status: RunStatus
+    phase: str | None = None
+    progress: int = 0
+    failure_code: str | None = None
     created_at: datetime
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
+    updated_at: datetime
+    terminal_at: datetime | None = None
     can_retry: bool = False
     can_cancel: bool = False
 
@@ -145,22 +132,22 @@ class KnowledgeBuildResponse(BaseModel):
 class KnowledgeVersionResponse(BaseModel):
     id: str
     knowledge_base_id: str
-    parent_version_id: Optional[str] = None
-    build_id: Optional[str] = None
+    parent_version_id: str | None = None
+    build_id: str
     state: KnowledgeVersionState
-    capabilities: Dict[str, Any] = Field(default_factory=dict)
-    degraded_reasons: List[str] = Field(default_factory=list)
-    metrics: Dict[str, Any] = Field(default_factory=dict)
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    degraded_reasons: list[str] = Field(default_factory=list)
+    metrics: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
-    published_at: Optional[datetime] = None
+    published_at: datetime | None = None
     is_active: bool = False
     is_published: bool = False
     is_candidate: bool = False
-    build: Optional[KnowledgeBuildResponse] = None
+    build: KnowledgeBuildResponse | None = None
 
 
 class ListKnowledgeVersionsResponse(BaseModel):
     knowledge_base_id: str
-    active_version_id: Optional[str] = None
-    active_build: Optional[KnowledgeBuildResponse] = None
-    versions: List[KnowledgeVersionResponse] = Field(default_factory=list)
+    active_version_id: str | None = None
+    active_build: KnowledgeBuildResponse | None = None
+    versions: list[KnowledgeVersionResponse] = Field(default_factory=list)

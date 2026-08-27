@@ -1,137 +1,52 @@
-# Configuration Source Governance
+# Configuration Sources and Governance
 
 [简体中文](config-source-governance.zh-CN.md)
 
-This document is the authoritative reference for OpenCitadel configuration sources, behavioral flag ownership, and configuration sync requirements.
+Every value has exactly one authority.
 
-## Single Source of Truth
+| Kind | Authority | Examples |
+| --- | --- | --- |
+| Deployment topology and secrets | Environment or secret manager | database identities, signing/encryption keys, OAuth, storage, sandbox driver/image/network |
+| Live runtime behavior | PostgreSQL Runtime Policy head | admission, timeouts, retries, scheduler, sandbox limits, retention |
+| Integrations | Owner-scoped PostgreSQL resources | inference endpoints/models/bindings, MCP, A2A, Skills |
+| Product data | Domain tables | sessions, jobs, Packs, resources, versions |
 
-| Type | Source | Examples |
-|------|--------|----------|
-| Behavioral config | `AppConfig`, backed by DB; `config.yaml` / Helm `appConfig` are seed only | `model_resilience`, `feature_flags`, `worker`, `sandbox` |
-| Secrets / connections | `Settings` environment variables | `EMBEDDING_API_KEY`, Postgres, Redis, COS, MinIO |
+There is no runtime YAML overlay, per-user behavior override, or environment
+fallback for policy fields. Migration creates a typed Execution Policy revision,
+a typed Operations Policy revision, and one atomic head that activates both.
+Later changes are immutable revisions created through the admin API/UI.
 
-### Ops Patrol split ownership
+## Runtime Policy boundaries
 
-| Concern | Source |
-|---------|--------|
-| Product/fixture flags | Global DB-backed `feature_flags` AppConfig section |
-| Retention defaults | `patrol_retention` in the persisted AppConfig seeded from `api/config.yaml` / Helm `appConfig` |
-| Collector connection and tool policies | Persisted MCP Server entity |
-| Collector target allowlists, registered probes, limits, Kubernetes identity | `OPS_COLLECTOR_*` plus its ServiceAccount in the Collector deployment, not API/Worker Settings |
-| Evidence HMAC | API/Worker `AUDIT_SIGNING_KEY` Settings and key-rotation fields |
+- Execution Policy is frozen into every admitted Run. In-flight Runs keep their
+  original revision and policy snapshot.
+- Operations Policy controls live admission, traffic, scheduling, sandbox
+  creation, patrol posture, source access, garbage collection, and retention.
+- Every read verifies the head/revision pair, schema version, digest, and
+  staleness. Integrity, unavailable, or stale state fails closed.
+- Updates use head-version compare-and-swap. A conflict preserves the admin's
+  draft and requires an explicit reload or retry.
+- Restore creates a new revision; history is never mutated.
 
-Do not copy Kubernetes credentials or raw probe destinations into a Pack. See [Ops Patrol architecture](ops-patrol.md) and the [Collector README](../../ops-collector/README.md).
+## Deployment and Integration boundaries
 
-## Object storage provider
+Deployment Settings describe where and how processes run. They never carry
+behavioral limits. Sandbox topology is deployment-owned, while each authenticated
+create request carries the active Operations Policy revision and resource limits.
 
-| Setting | Default | Compose local | Helm default |
-|---------|---------|---------------|--------------|
-| `STORAGE_PROVIDER` | `cos` (`.env.example`) | `minio` with `COMPOSE_PROFILES=local` | External COS/S3 — `minio.enabled: false` |
+Inference, MCP, and A2A are first-class owner-scoped resources. Credentials are
+stored in versioned encrypted envelopes and masked on reads. Stable IDs bind
+Skills, Automations, and execution requests; display names are not identities.
 
-Implementation: `api/app/infrastructure/external/file_storage/` — `CosFileStorage` and `MinioFileStorage`. Postgres stores object keys only.
+## Change rules
 
-For local trials without cloud credentials, set `COMPOSE_PROFILES=local` and `STORAGE_PROVIDER=minio` before first start. See [Production deployment](../operations/deployment.md).
+- Add a policy field only in the typed model, initial seed, admin form, OpenAPI
+  contract, tests, and Runtime Policy architecture/operations documentation.
+- Add a deployment setting only in `core/config.py`, `.env.example`, Compose,
+  Helm, validation schemas, and deployment documentation.
+- Never copy a value between these authorities or introduce a fallback path.
+- Never place secrets in Runtime Policy revisions, Run public projections, or
+  UI event payloads.
 
-## Upload size limits (cross-layer)
-
-These limits are **not** a single AppConfig field — sync docs when changing any layer:
-
-| Feature | Limit | Enforced by |
-|---------|-------|-------------|
-| Gateway POST body | 200 MB | `nginx/nginx.conf` `client_max_body_size 200m` |
-| Codebase ZIP | 200 MB | `ui/src/lib/constants.ts` `CODEBASE_ZIP_MAX_BYTES` |
-| KB document | 50 MB default | `knowledge_base.document.max_bytes` |
-
-See [Nginx gateway](../../nginx/README.md) and [Knowledge base ingestion](knowledge-base-ingestion.md).
-
-## Configuration flow
-
-```mermaid
-flowchart LR
-  subgraph secrets ["Secrets Settings .env"]
-    Env[".env / K8s Secret"]
-    Settings["Settings pydantic"]
-  end
-  subgraph behavior ["Behavior AppConfig"]
-    Yaml["api/config.yaml seed"]
-    Helm["Helm appConfig seed"]
-    DB["app_configs table"]
-    Runtime["AppConfig runtime"]
-  end
-  Env --> Settings
-  Yaml -->|"USE_DB_APP_CONFIG=false (Compose override)"| Runtime
-  Yaml -->|"migrate seed if empty"| DB
-  Helm -->|"USE_DB_APP_CONFIG=true Helm default"| DB
-  DB -->|"USE_DB_APP_CONFIG=true"| Runtime
-  Settings --> API["API / Worker processes"]
-  Runtime --> API
-```
-
-## Decision Tree
-
-```mermaid
-flowchart TD
-  Start["New config item"] --> SecretCheck{"Contains secret or connection address?"}
-  SecretCheck -->|"yes"| Settings["Put in Settings env vars"]
-  SecretCheck -->|"no"| BehaviorCheck{"Affects runtime behavior?"}
-  BehaviorCheck -->|"yes"| AppConfig["Put in AppConfig"]
-  BehaviorCheck -->|"no"| BuildCheck{"Build-time only?"}
-  BuildCheck -->|"yes"| BuildArgs["Put in Docker build args"]
-  BuildCheck -->|"no"| AskReview["Design review to confirm ownership"]
-  AppConfig --> Seed["Sync config.yaml and Helm appConfig"]
-  Settings --> DeploySecret["Sync deployment Secret or env"]
-```
-
-## Production Deployment
-
-- **Must** set `USE_DB_APP_CONFIG=true` (now the code default); Helm `env` is already configured; Docker Compose should set explicitly in `.env`
-- `config.yaml` / Helm `appConfig` are initial defaults; migrate job seeds DB when the table is empty
-
-## Three-tier storage (2026-07)
-
-| Tier | Storage | Examples | Admin UI |
-|------|---------|----------|----------|
-| Bootstrap secrets | `.env` / `Settings` | Postgres, Redis, JWT, COS keys | N/A |
-| Behavioral config | `app_configs` JSONB (`scope=global` + optional `scope=user` overrides) | `worker`, `sandbox`, `feature_flags`, per-user `agent_config` | Settings → Runtime / Common |
-| Integration entities | `mcp_servers`, `a2a_servers`, `llm_endpoints`, `llm_models` tables | MCP/A2A connections; LLM provider endpoints and model configs | Settings → Integrations / Models |
-
-### Per-user overrides
-
-Only session-scoped sections may be overridden per user: `agent_config`, `memory`, `hitl`, `model_resilience`, `knowledge_base`. Process-scoped sections remain global: `server`, `worker`, `streams`, `sandbox`, `scheduler`, `observability`, `feature_flags`.
-
-### Hot reload vs restart
-
-- Hot reload (Redis invalidate → reload `app_configs` → re-apply sandbox/worker/streams module settings): most `AppConfig` sections
-- Requires API restart: `server.cors_origins` (CORS middleware registered at app build time)
-
-### Audit / rollback
-
-- `app_config_revisions` stores snapshots on every `app_configs` save (global and user rows)
-- MCP/A2A CRUD is recorded via `AuditService`
-
-### Known limitations
-
-- `OwnerScope.team(...)` does not filter MCP/A2A or `llm_endpoints` / `llm_models` by `team_id`; team members do not automatically share those resources. This is an existing architectural limitation.
-- Global `app_configs` JSONB row uses read-modify-write without optimistic locking; concurrent edits may race (low priority, consistent with prior patterns).
-
-## Prohibited
-
-- Do not add parallel environment variables for behavioral flags (except emergency triage: rollback image/config)
-
-## Sync Checklist
-
-When modifying `AppConfig` fields, sync: `app_config.py` schema, `config.yaml`, Helm `appConfig`, and related documentation.
-
-| Change type | Must sync |
-|-------------|-----------|
-| New `AppConfig` field | `api/app/domain/models/app_config.py`, `api/config.yaml`, Helm `appConfig`, related docs |
-| New environment variable | `Settings` schema, `.env.example`, deployment docs / Helm env |
-| New user-visible contract | API schema, frontend types, compatibility policy docs |
-
-## Related Documentation
-
-- [Architecture Overview](overview.md)
-- [Model Resilience Design](model-resilience.md)
-- [API/SSE Protocol Compatibility](contract-compatibility.md)
-- [Ops Patrol](ops-patrol.md)
+See [Runtime Policy Control Plane](runtime-policy-control-plane.md) for the
+revision, consistency, and consumer model.

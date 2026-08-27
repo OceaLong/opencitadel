@@ -1,17 +1,18 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from prometheus_client import REGISTRY
 
+from app.application.ports.reporting import AuditVerificationKeyring
 from app.domain.models.audit_log import AuditLog
 from app.domain.services.audit_chain import (
     GENESIS,
     compute_entry_hash,
     entry_fields,
 )
+from app.infrastructure.adapters.reporting_ports import PrometheusGovernanceMetricsAdapter
+from tests.app.application_test_support import EmptyAuditSummaryQuery
 
 
 def _counter_value(name: str, labels: dict) -> float:
@@ -25,18 +26,35 @@ def test_compute_entry_hash_deterministic():
         id="log-1",
         actor_user_id="u1",
         actor_ip="127.0.0.1",
-        action="agent_tool_invoke",
+        action="resource_updated",
         resource_type="session",
         resource_id="s1",
         team_id=None,
         request_id="req-1",
-        metadata={"tool": "browser_click"},
-        created_at=datetime(2026, 7, 3, 0, 0, 0, tzinfo=timezone.utc),
+        metadata={"resource": "session"},
+        created_at=datetime(2026, 7, 3, 0, 0, 0, tzinfo=UTC),
     )
     h1 = compute_entry_hash(secret, fields, GENESIS)
     h2 = compute_entry_hash(secret, fields, GENESIS)
     assert h1 == h2
     assert len(h1) == 64
+
+
+def test_entry_fields_rejects_naive_created_at():
+    with pytest.raises(ValueError, match="timezone-aware"):
+        entry_fields(
+            chain_seq=1,
+            id="log-1",
+            actor_user_id=None,
+            actor_ip="",
+            action="test",
+            resource_type="session",
+            resource_id="s1",
+            team_id=None,
+            request_id="req-1",
+            metadata={},
+            created_at=datetime(2026, 7, 3, tzinfo=UTC).replace(tzinfo=None),
+        )
 
 
 @pytest.mark.asyncio
@@ -47,7 +65,7 @@ async def test_verify_chain_detects_tamper_and_emits_critical_alert(caplog):
 
     class _Repo:
         async def list_chained(self, **kwargs):
-            created = datetime(2026, 7, 3, 0, 0, 0, tzinfo=timezone.utc)
+            created = datetime(2026, 7, 3, 0, 0, 0, tzinfo=UTC)
             f1 = entry_fields(
                 chain_seq=1,
                 id="a",
@@ -66,6 +84,7 @@ async def test_verify_chain_detects_tamper_and_emits_critical_alert(caplog):
                 id="a",
                 action="test",
                 chain_seq=1,
+                signing_key_id="primary",
                 prev_hash=GENESIS,
                 entry_hash=h1,
                 created_at=created,
@@ -74,6 +93,7 @@ async def test_verify_chain_detects_tamper_and_emits_critical_alert(caplog):
                 id="b",
                 action="test",
                 chain_seq=2,
+                signing_key_id="primary",
                 prev_hash=h1,
                 entry_hash="bad" * 16,
                 created_at=created,
@@ -90,32 +110,17 @@ async def test_verify_chain_detects_tamper_and_emits_critical_alert(caplog):
         async def __aexit__(self, *args):
             return False
 
-    service = AuditService(lambda: _Uow())
-
-    import app.application.services.audit_service as audit_mod
-
-    original = audit_mod.get_settings
-
-    class _Settings:
-        audit_signing_key = secret
-        audit_signing_key_id = "primary"
-        audit_previous_signing_keys = {}
-        api_key_secret = "legacy-api-key"
-        api_key_previous_secrets = {}
-
-    audit_mod.get_settings = lambda: _Settings()  # type: ignore[assignment]
-    before = _counter_value(
-        "governance_audit_chain_verifications_total", {"result": "broken"}
+    service = AuditService(
+        lambda: _Uow(),
+        AuditVerificationKeyring(keys={"primary": (secret,)}),
+        PrometheusGovernanceMetricsAdapter(),
+        EmptyAuditSummaryQuery(),
     )
-    try:
-        with caplog.at_level(logging.CRITICAL):
-            result = await service.verify_chain()
-    finally:
-        audit_mod.get_settings = original
+    before = _counter_value("governance_audit_chain_verifications_total", {"result": "broken"})
+    with caplog.at_level(logging.CRITICAL):
+        result = await service.verify_chain()
 
-    after = _counter_value(
-        "governance_audit_chain_verifications_total", {"result": "broken"}
-    )
+    after = _counter_value("governance_audit_chain_verifications_total", {"result": "broken"})
     assert result["ok"] is False
     assert result["first_broken_seq"] == 2
     assert "AUDIT_CHAIN_INTEGRITY_FAILURE" in caplog.text
@@ -123,13 +128,11 @@ async def test_verify_chain_detects_tamper_and_emits_critical_alert(caplog):
 
 
 @pytest.mark.asyncio
-async def test_session_verification_uses_global_chain_not_invalid_filtered_subset(
-    monkeypatch,
-):
+async def test_session_verification_uses_global_chain_not_invalid_filtered_subset():
     from app.application.services.audit_service import AuditService
 
     secret = "test-secret-key-at-least-32-chars!!"
-    created = datetime(2026, 7, 3, 0, 0, 0, tzinfo=timezone.utc)
+    created = datetime(2026, 7, 3, 0, 0, 0, tzinfo=UTC)
     logs = []
     previous = GENESIS
     for seq, resource_id in ((1, "other"), (2, "session-1"), (3, "other")):
@@ -177,27 +180,16 @@ async def test_session_verification_uses_global_chain_not_invalid_filtered_subse
         async def __aexit__(self, *args):
             return False
 
-    class _Settings:
-        audit_signing_key = secret
-        audit_signing_key_id = "primary"
-        audit_previous_signing_keys = {}
-        api_key_secret = "legacy-api-key"
-        api_key_previous_secrets = {}
+    before = _counter_value("governance_audit_chain_verifications_total", {"result": "intact"})
 
-    monkeypatch.setattr(
-        "app.application.services.audit_service.get_settings",
-        lambda: _Settings(),
-    )
+    result = await AuditService(
+        lambda: _Uow(),
+        AuditVerificationKeyring(keys={"primary": (secret,)}),
+        PrometheusGovernanceMetricsAdapter(),
+        EmptyAuditSummaryQuery(),
+    ).verify_session_chain("session-1")
 
-    before = _counter_value(
-        "governance_audit_chain_verifications_total", {"result": "intact"}
-    )
-
-    result = await AuditService(lambda: _Uow()).verify_session_chain("session-1")
-
-    after = _counter_value(
-        "governance_audit_chain_verifications_total", {"result": "intact"}
-    )
+    after = _counter_value("governance_audit_chain_verifications_total", {"result": "intact"})
     assert result["ok"] is True
     assert result["session_ok"] is True
     assert result["session_entries"] == 1

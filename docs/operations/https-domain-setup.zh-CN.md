@@ -77,7 +77,6 @@ ENV=production
 COOKIE_SECURE=true
 FRONTEND_BASE_URL=https://your-domain.com
 OAUTH_REDIRECT_BASE=https://your-domain.com/api/auth/oauth
-USE_DB_APP_CONFIG=true
 ```
 
 **本地 HTTP 快速体验**（`make quickstart`）请使用 `ENV=development`、`COOKIE_SECURE=false`、`FRONTEND_BASE_URL=http://localhost:8088`。
@@ -140,7 +139,7 @@ sudo ufw reload
 
 ### WebSocket / SSE 异常
 
-模板已包含 `Upgrade` / `Connection` 头与长超时，一般无需额外修改。若仍有问题，检查 `api/config.yaml` 中外部服务 URL 是否使用 HTTPS。
+模板已包含 `Upgrade` / `Connection` 头与长超时，一般无需额外修改。若仍有问题，检查一等 Inference 与 Integration Resource URL 是否使用 HTTPS。
 
 ---
 

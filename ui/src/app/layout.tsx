@@ -7,6 +7,7 @@ import { AppShell } from "@/components/app-shell";
 import { Toaster } from "@/components/ui/sonner";
 
 import { AuthProvider } from "@/providers/auth-provider";
+import { ClientDataProvider } from "@/providers/client-data-provider";
 import { ThemeProvider } from "@/providers/theme-provider";
 
 import { plexMono, plexSans } from "@/fonts";
@@ -57,10 +58,12 @@ export default async function RootLayout({
       <body className="h-screen overflow-hidden font-sans">
         <NextIntlClientProvider locale={locale} messages={messages}>
           <ThemeProvider>
-            <AuthProvider>
-              <AppShell>{children}</AppShell>
-              <Toaster position="top-center" richColors />
-            </AuthProvider>
+            <ClientDataProvider>
+              <AuthProvider>
+                <AppShell>{children}</AppShell>
+                <Toaster position="top-center" richColors />
+              </AuthProvider>
+            </ClientDataProvider>
           </ThemeProvider>
         </NextIntlClientProvider>
       </body>

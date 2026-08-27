@@ -1,8 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-from typing import List, Optional
-
-from sqlalchemy import select, update, func
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.notification import Notification
@@ -16,30 +12,32 @@ class DBNotificationRepository(NotificationRepository):
         self.db_session = db_session
 
     async def save(self, notification: Notification) -> None:
-        self.db_session.add(NotificationModel(
-            id=notification.id,
-            user_id=notification.user_id,
-            type=notification.type,
-            session_id=notification.session_id,
-            artifact_id=notification.artifact_id,
-            job_id=notification.job_id,
-            message=encode_notification_message(
-                notification.message,
-                i18n_key=notification.i18n_key,
-                i18n_params=notification.i18n_params,
-            ),
-            read=notification.read,
-            created_at=notification.created_at,
-        ))
+        self.db_session.add(
+            NotificationModel(
+                id=notification.id,
+                user_id=notification.user_id,
+                type=notification.type,
+                session_id=notification.session_id,
+                artifact_id=notification.artifact_id,
+                job_id=notification.job_id,
+                message=encode_notification_message(
+                    notification.message,
+                    i18n_key=notification.i18n_key,
+                    i18n_params=notification.i18n_params,
+                ),
+                read=notification.read,
+                created_at=notification.created_at,
+            )
+        )
 
     async def list_for_user(
-            self,
-            user_id: str,
-            *,
-            unread_only: bool = False,
-            limit: int = 50,
-            after_id: Optional[str] = None,
-    ) -> List[Notification]:
+        self,
+        user_id: str,
+        *,
+        unread_only: bool = False,
+        limit: int = 50,
+        after_id: str | None = None,
+    ) -> list[Notification]:
         stmt = select(NotificationModel).where(NotificationModel.user_id == user_id)
         if unread_only:
             stmt = stmt.where(NotificationModel.read.is_(False))

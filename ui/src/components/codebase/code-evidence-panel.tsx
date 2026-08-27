@@ -33,10 +33,7 @@ function evidenceEdges(artifact: CodebaseArtifact): EvidenceEdge[] {
   return Array.isArray(raw) ? (raw as EvidenceEdge[]) : [];
 }
 
-export function CodeEvidencePanel({
-  artifact,
-  onOpenSource,
-}: CodeEvidencePanelProps) {
+export function CodeEvidencePanel({ artifact, onOpenSource }: CodeEvidencePanelProps) {
   const t = useTranslations("codebase");
   const edges = useMemo(() => evidenceEdges(artifact), [artifact]);
   if (!edges.length) return null;
@@ -68,9 +65,7 @@ export function CodeEvidencePanel({
                     edge.kind,
                     edge.resolution,
                     ref.analyzer,
-                    typeof ref.confidence === "number"
-                      ? ref.confidence.toFixed(2)
-                      : undefined,
+                    typeof ref.confidence === "number" ? ref.confidence.toFixed(2) : undefined,
                   ]
                     .filter(Boolean)
                     .join(" · ")}

@@ -70,10 +70,7 @@ export const codebaseApi = {
     versionId: string,
     params: ReadSourceParams,
   ): Promise<ReadSourceData> => {
-    return post<ReadSourceData>(
-      `/codebases/${codebaseId}/versions/${versionId}/source`,
-      params,
-    );
+    return post<ReadSourceData>(`/codebases/${codebaseId}/versions/${versionId}/source`, params);
   },
 
   createSnapshot: (codebaseId: string): Promise<DownloadCodebaseData> => {
@@ -87,7 +84,13 @@ export const codebaseApi = {
     eventId?: string,
     onComplete?: () => void,
   ): (() => void) => {
-    return createIngestStream(`/codebases/${codebaseId}/ingest`, onEvent, onError, eventId, onComplete);
+    return createIngestStream(
+      `/codebases/${codebaseId}/ingest`,
+      onEvent,
+      onError,
+      eventId,
+      onComplete,
+    );
   },
 };
 

@@ -1,17 +1,17 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Session evidence package builder (ZIP + PDF summary)."""
+
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
 import io
 import json
 import zipfile
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
+from app.application.ports.queries import EvidenceSessionQueryPort
+from app.application.ports.reporting import EvidenceSignerPort, ReportRendererPort
 from app.application.services.artifact_service import ArtifactService
 from app.application.services.audit_service import AuditService
 from app.application.services.governance_profile_service import GovernanceProfileService
@@ -19,10 +19,6 @@ from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.services.audit_chain import canonical as canonical_json
 from app.domain.utils.audit_redaction import redact_value, scrub_secret_patterns
-from app.infrastructure.external.report.pdf_renderer import PdfUnavailableError, render_html_to_pdf
-from app.infrastructure.models.session import SessionModel
-from core.config import get_settings
-from sqlalchemy import func, or_, select
 
 
 def _md_value(key: str, value: Any) -> str:
@@ -58,7 +54,7 @@ def _redact_profile_for_export(key: str, value: Any) -> Any:
     return value
 
 
-def render_governance_profile_md(profile: Dict[str, Any]) -> bytes:
+def render_governance_profile_md(profile: dict[str, Any]) -> bytes:
     """Deterministic, LLM-free Markdown rendering of a governance profile.
 
     Pure function: same input dict always yields the same bytes. All
@@ -67,11 +63,9 @@ def render_governance_profile_md(profile: Dict[str, Any]) -> bytes:
     """
     session = profile.get("session") or {}
     chain = profile.get("chain") or {}
-    terminal = profile.get("terminal") or {}
+    runs = profile.get("runs") or []
     approvals = profile.get("approvals") or []
-    gate_hits = profile.get("gate_hits") or []
-    checkpoints = profile.get("checkpoints") or []
-    denials = profile.get("denials") or []
+    activities = profile.get("activities") or []
 
     lines: list[str] = [
         f"# 治理档案: {_md_value('id', session.get('id'))}",
@@ -80,126 +74,102 @@ def render_governance_profile_md(profile: Dict[str, Any]) -> bytes:
         "",
         f"- 标题: {_md_value('title', session.get('title'))}",
         f"- 状态: {_md_value('status', session.get('status'))}",
-        f"- Gate Profile: {_md_value('gate_profile', session.get('gate_profile'))}",
         f"- Operator Scope: {_md_value('operator_scope', session.get('operator_scope'))}",
+        f"- Operator Domains: {_md_value('operator_domains', session.get('operator_domains'))}",
         f"- 创建时间: {_md_value('created_at', session.get('created_at'))}",
         f"- 更新时间: {_md_value('updated_at', session.get('updated_at'))}",
-        f"- 审计链校验: {'通过' if chain.get('verified') else '异常'} (`{chain.get('checked_entries')}` 条)",
+        (
+            f"- 执行事件链校验: {'通过' if chain.get('verified') else '异常'} "
+            f"(`{chain.get('checked_runs')}` Runs / `{chain.get('checked_entries')}` 事件)"
+        ),
         "",
-        "## 审批时间线",
+        "## Run 时间线",
         "",
-        "| 时间 | 动作 | 决定 | 操作者 | 工具 | 阶段 | 批次 | 反馈 |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Run ID | 类型 | 状态 | 创建时间 | 终止时间 |",
+        "| --- | --- | --- | --- | --- |",
     ]
-    if approvals:
-        for row in approvals:
-            lines.append(
+    if runs:
+        lines.extend(
+            (
                 "| "
                 + " | ".join(
                     [
+                        _md_value("run_id", row.get("run_id")),
+                        _md_value("family", row.get("family")),
+                        _md_value("status", row.get("status")),
                         _md_value("created_at", row.get("created_at")),
-                        _md_value("action", row.get("action")),
-                        _md_value("decision", row.get("decision")),
-                        _md_value("actor_user_id", row.get("actor_user_id")),
-                        _md_value("tool", row.get("tool")),
-                        _md_value("pending_phase", row.get("pending_phase")),
-                        _md_value("approval_batch_id", row.get("approval_batch_id")),
+                        _md_value("terminal_at", row.get("terminal_at")),
+                    ]
+                )
+                + " |"
+            )
+            for row in runs
+        )
+    else:
+        lines.append("| - | - | - | - | - |")
+
+    lines.extend(
+        [
+            "",
+            "## 审批时间线",
+            "",
+            "| 请求时间 | 决定时间 | 状态 | 操作者 | 对象 | Approval ID | 反馈 |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    if approvals:
+        lines.extend(
+            (
+                "| "
+                + " | ".join(
+                    [
+                        _md_value("requested_at", row.get("requested_at")),
+                        _md_value("decided_at", row.get("decided_at")),
+                        _md_value("status", row.get("status")),
+                        _md_value("decided_by_user_id", row.get("decided_by_user_id")),
+                        _md_value("subject_label", row.get("subject_label")),
+                        _md_value("approval_id", row.get("approval_id")),
                         _md_value("feedback", row.get("feedback")),
                     ]
                 )
                 + " |"
             )
+            for row in approvals
+        )
     else:
-        lines.append("| - | - | - | - | - | - | - | - |")
+        lines.append("| - | - | - | - | - | - | - |")
 
     lines.extend(
         [
             "",
-            "## Gate 命中",
+            "## Activity 时间线",
             "",
-            "| 时间 | 工具 | Gate Profile | Gated |",
-            "| --- | --- | --- | --- |",
+            "| 创建时间 | Activity ID | 类型 | 状态 | 尝试 | 失败代码 |",
+            "| --- | --- | --- | --- | --- | --- |",
         ]
     )
-    if gate_hits:
-        for row in gate_hits:
-            lines.append(
+    if activities:
+        lines.extend(
+            (
                 "| "
                 + " | ".join(
                     [
                         _md_value("created_at", row.get("created_at")),
-                        _md_value("tool", row.get("tool")),
-                        _md_value("gate_profile", row.get("gate_profile")),
-                        _md_value("gated", row.get("gated")),
+                        _md_value("activity_id", row.get("activity_id")),
+                        _md_value("activity_type", row.get("activity_type")),
+                        _md_value("status", row.get("status")),
+                        _md_value("attempt", row.get("attempt")),
+                        _md_value("failure_code", row.get("failure_code")),
                     ]
                 )
                 + " |"
             )
+            for row in activities
+        )
     else:
-        lines.append("| - | - | - | - |")
+        lines.append("| - | - | - | - | - | - |")
 
-    lines.extend(
-        [
-            "",
-            "## 策略拒绝",
-            "",
-            "| 时间 | 工具 | 层级 | 原因 |",
-            "| --- | --- | --- | --- |",
-        ]
-    )
-    if denials:
-        for row in denials:
-            lines.append(
-                "| "
-                + " | ".join(
-                    [
-                        _md_value("created_at", row.get("created_at")),
-                        _md_value("tool", row.get("tool")),
-                        _md_value("layer", row.get("layer")),
-                        _md_value("reason", row.get("reason")),
-                    ]
-                )
-                + " |"
-            )
-    else:
-        lines.append("| - | - | - | - |")
-
-    lines.extend(
-        [
-            "",
-            "## 检查点",
-            "",
-            "| 时间 | ID | 类型 | 标签 |",
-            "| --- | --- | --- | --- |",
-        ]
-    )
-    if checkpoints:
-        for row in checkpoints:
-            lines.append(
-                "| "
-                + " | ".join(
-                    [
-                        _md_value("created_at", row.get("created_at")),
-                        _md_value("id", row.get("id")),
-                        _md_value("anchor_type", row.get("anchor_type")),
-                        _md_value("label", row.get("label")),
-                    ]
-                )
-                + " |"
-            )
-    else:
-        lines.append("| - | - | - | - |")
-
-    lines.extend(
-        [
-            "",
-            "## 终态",
-            "",
-            f"- 状态: {_md_value('status', terminal.get('status'))}",
-            f"- 到达时间: {_md_value('reached_at', terminal.get('reached_at'))}",
-            "",
-        ]
-    )
+    lines.append("")
     return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
 
@@ -210,180 +180,168 @@ class EvidenceService:
         audit_service: AuditService,
         artifact_service: ArtifactService,
         governance_profile_service: GovernanceProfileService,
+        report_renderer: ReportRendererPort,
+        evidence_signer: EvidenceSignerPort,
+        session_query: EvidenceSessionQueryPort,
     ) -> None:
         self._uow_factory = uow_factory
         self._audit_service = audit_service
         self._artifact_service = artifact_service
         self._governance_profile_service = governance_profile_service
+        self._report_renderer = report_renderer
+        self._evidence_signer = evidence_signer
+        self._session_query = session_query
 
     async def list_evidence_sessions(
         self,
         *,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[dict[str, Any]]:
-        async with self._uow_factory() as uow:
-            stmt = (
-                select(SessionModel)
-                .where(
-                    or_(
-                        SessionModel.operator_scope.isnot(None),
-                        SessionModel.gate_profile.isnot(None),
-                    )
-                )
-                .order_by(SessionModel.updated_at.desc())
-                .offset(max(0, offset))
-                .limit(max(1, min(limit, 200)))
-            )
-            result = await uow.db_session.execute(stmt)
-            sessions = result.scalars().all()
+    ) -> list[dict[str, Any]]:
+        sessions = await self._session_query.list_sessions(limit=limit, offset=offset)
 
-        items: List[dict[str, Any]] = []
+        items: list[dict[str, Any]] = []
         for record in sessions:
-            session_id = record.id
-            chain = await self._audit_service.verify_session_chain(session_id)
-            logs = await self._audit_service.list_logs(resource_id=session_id, limit=1000)
-            tool_count = sum(1 for log in logs if log.action == "agent_tool_invoke")
-            gov_count = sum(1 for log in logs if log.action != "agent_tool_invoke")
+            session_id = record.session_id
+            if record.team_id:
+                scope = OwnerScope.team("evidence-auditor", record.team_id)
+            elif record.owner_user_id:
+                scope = OwnerScope.personal(record.owner_user_id)
+            else:
+                continue
+            profile = await self._governance_profile_service.build_profile(
+                session_id,
+                scope=scope,
+            )
             items.append(
                 {
                     "session_id": session_id,
                     "title": record.title,
                     "operator_scope": record.operator_scope,
-                    "gate_profile": record.gate_profile,
                     "status": record.status,
                     "updated_at": record.updated_at.isoformat() if record.updated_at else None,
-                    "chain_ok": chain.get("session_ok", chain.get("ok", False)),
-                    "tool_invocation_count": tool_count,
-                    "governance_action_count": gov_count,
+                    "chain_ok": profile["chain"]["verified"],
+                    "tool_invocation_count": sum(
+                        1
+                        for activity in profile["activities"]
+                        if activity["activity_type"] == "tool.call"
+                    ),
+                    "governance_action_count": len(profile["approvals"]),
                 }
             )
         return items
 
     async def build_session_evidence_package(
-        self, session_id: str, scope: Optional[OwnerScope] = None
+        self, session_id: str, scope: OwnerScope | None = None
     ) -> bytes:
-        chain = await self._audit_service.verify_session_chain(session_id)
+        async with self._uow_factory() as uow:
+            session = await uow.session.get_by_id(session_id, scope=scope)
+            if not session:
+                raise ValueError(f"会话[{session_id}]不存在")
+        resolved_scope = scope
+        if resolved_scope is None:
+            if session.team_id:
+                resolved_scope = OwnerScope.team("evidence-auditor", session.team_id)
+            elif session.owner_user_id:
+                resolved_scope = OwnerScope.personal(session.owner_user_id)
+            else:
+                raise ValueError(f"会话[{session_id}]没有所有权作用域")
+
+        audit_chain = await self._audit_service.verify_session_chain(session_id)
         audit_json = await self._audit_service.build_session_audit_report_json(session_id)
         audit_md = await self._audit_service.build_session_audit_report(session_id)
 
         async with self._uow_factory() as uow:
-            session = await uow.session.get_by_id(session_id)
-            if not session:
-                raise ValueError(f"会话[{session_id}]不存在")
-            checkpoints = await uow.checkpoint.list_by_session(session_id)
-            events = await uow.session.list_events(session_id, limit=5000)
-
-        async with self._uow_factory() as uow:
             chained = await uow.audit.list_chained(resource_id=session_id)
         chain_by_id = {log.id: log for log in chained}
-        for entry in audit_json.get("tool_invocations", []) + audit_json.get("governance_actions", []):
+        for entry in audit_json.get("entries", []):
             log = chain_by_id.get(entry.get("id", ""))
             if log:
                 entry["chain_seq"] = log.chain_seq
                 entry["prev_hash"] = log.prev_hash
                 entry["entry_hash"] = log.entry_hash
 
-        artifacts = await self._artifact_service.list_by_session(session_id)
+        artifacts = await self._artifact_service.list_by_session(
+            session_id,
+            scope=resolved_scope,
+        )
         artifact_files: dict[str, bytes] = {}
         for art in artifacts:
-            try:
-                content = await self._artifact_service.get_content(art.id, scope=None, sanitize_html=False)
-                ext = "md" if art.kind == "doc" else "html"
-                artifact_files[f"reconciliation/{art.id}-{art.title[:40]}.{ext}"] = content
-            except Exception:
-                continue
+            content = await self._artifact_service.get_content(
+                art.id,
+                scope=resolved_scope,
+                sanitize_html=False,
+            )
+            ext = "md" if art.kind == "doc" else "html"
+            artifact_files[f"artifacts/{art.id}.{ext}"] = content
 
-        screenshots: dict[str, bytes] = {}
-        shot_idx = 0
-        for _seq, event in events:
-            if getattr(event, "function_name", None) != "browser_screenshot":
-                continue
-            result = getattr(event, "function_result", None)
-            data = getattr(result, "data", None) if result else None
-            b64 = data.get("screenshot_base64") if isinstance(data, dict) else None
-            if b64:
-                shot_idx += 1
-                screenshots[f"screenshots/{shot_idx:03d}.png"] = base64.b64decode(b64)
-
-        checkpoints_data = [
-            {
-                "id": cp.id,
-                "anchor_type": cp.anchor_type,
-                "created_at": cp.created_at.isoformat() if cp.created_at else None,
-            }
-            for cp in checkpoints
-        ]
-
-        profile = await self._governance_profile_service.build_profile(session_id, scope=scope)
-        governance_profile_json = canonical_json(
-            _redact_profile_for_export("", profile)
-        ).encode("utf-8")
+        profile = await self._governance_profile_service.build_profile(
+            session_id,
+            scope=resolved_scope,
+        )
+        governance_profile_json = canonical_json(_redact_profile_for_export("", profile)).encode(
+            "utf-8"
+        )
         governance_profile_md = render_governance_profile_md(profile)
 
         file_hashes: dict[str, str] = {}
         buffer = io.BytesIO()
         pdf_skipped = False
-        pdf_bytes: Optional[bytes] = None
+        pdf_bytes: bytes | None = None
 
-        summary_html = (
-            f"<html><head><meta charset='utf-8'></head><body>"
-            f"<h1>证据摘要</h1><p>Session: {session_id}</p>"
-            f"<p>Operator scope: {session.operator_scope}</p>"
-            f"<p>Gate profile: {session.gate_profile}</p>"
-            f"<p>链校验: {'通过' if chain.get('session_ok') else '异常'}</p>"
-            f"<p>工具调用: {len(audit_json.get('tool_invocations', []))}</p>"
-            f"<p>治理动作: {len(audit_json.get('governance_actions', []))}</p>"
-            f"</body></html>"
+        summary_markdown = (
+            f"Session: {session_id}\n\n"
+            f"- Operator scope: {session.operator_scope}\n"
+            f"- 执行事件链: {'通过' if profile['chain']['verified'] else '异常'}\n"
+            f"- Runs: {len(profile['runs'])}\n"
+            f"- Activities: {len(profile['activities'])}\n"
+            f"- Approvals: {len(profile['approvals'])}\n"
         )
-        try:
-            pdf_bytes = render_html_to_pdf(summary_html)
-        except PdfUnavailableError:
-            pdf_skipped = True
+        pdf_bytes = self._report_renderer.render_pdf(
+            markdown=summary_markdown,
+            title="证据摘要",
+        )
+        pdf_skipped = pdf_bytes is None
 
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+
             def _add(name: str, data: bytes) -> None:
                 zf.writestr(name, data)
                 file_hashes[name] = hashlib.sha256(data).hexdigest()
 
             _add("audit.json", json.dumps(audit_json, ensure_ascii=False, indent=2).encode("utf-8"))
             _add("audit-report.md", audit_md.encode("utf-8"))
-            _add("checkpoints.json", json.dumps(checkpoints_data, ensure_ascii=False, indent=2).encode("utf-8"))
             _add("governance-profile.json", governance_profile_json)
             _add("governance-profile.md", governance_profile_md)
-            for name, data in screenshots.items():
-                _add(name, data)
             for name, data in artifact_files.items():
                 _add(name, data)
             if pdf_bytes:
                 _add("evidence-summary.pdf", pdf_bytes)
 
-            manifest: Dict[str, Any] = {
+            manifest: dict[str, Any] = {
                 "session_id": session_id,
                 "title": session.title,
                 "operator_scope": session.operator_scope,
                 "operator_domains": session.operator_domains,
-                "gate_profile": session.gate_profile,
-                "generated_at": datetime.now(timezone.utc)
+                "generated_at": datetime.now(UTC)
                 .replace(microsecond=0)
                 .isoformat()
                 .replace("+00:00", "Z"),
-                "chain_verification": chain,
+                "execution_chain_verification": profile["chain"],
+                "audit_chain_verification": audit_chain,
                 "file_hashes": file_hashes,
                 "pdf": "skipped" if pdf_skipped else "included",
             }
             manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
             _add("manifest.json", manifest_bytes)
 
-            settings = get_settings()
-            secret = settings.audit_signing_key
-            sig = hmac.new(secret.encode(), manifest_bytes, hashlib.sha256).hexdigest()
+            sig = self._evidence_signer.sign(manifest_bytes)
             sig_text = (
                 f"manifest HMAC-SHA256: {sig}\n"
                 "Verify: HMAC-SHA256("
-                f"AUDIT_SIGNING_KEY[{settings.audit_signing_key_id}], "
+                f"AUDIT_SIGNING_KEY[{self._evidence_signer.key_id}], "
                 "manifest.json bytes)\n"
-            ).encode("utf-8")
+            ).encode()
             _add("chain-signature.txt", sig_text)
 
         return buffer.getvalue()

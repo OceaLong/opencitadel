@@ -1,10 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
+
+from app.domain.utils.time_utils import utc_now
 
 
 class RefreshToken(BaseModel):
@@ -12,10 +11,10 @@ class RefreshToken(BaseModel):
     user_id: str
     token_hash: str
     expires_at: datetime
-    revoked_at: Optional[datetime] = None
+    revoked_at: datetime | None = None
     user_agent: str = ""
     ip_address: str = ""
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=utc_now)
 
     @property
     def revoked(self) -> bool:

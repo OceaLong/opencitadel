@@ -5,12 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { ApiError } from "@/lib/api";
 import { sessionApi } from "@/lib/api/session";
-import type {
-  SessionCheckpoint,
-  SessionDetail,
-  SessionFile,
-  UpdateSessionConfigParams,
-} from "@/lib/api/types";
+import type { SessionDetail, SessionFile, UpdateSessionConfigParams } from "@/lib/api/types";
 
 function isSessionMissingError(err: unknown): boolean {
   if (err instanceof ApiError) {
@@ -22,15 +17,11 @@ function isSessionMissingError(err: unknown): boolean {
   return false;
 }
 
-export function useSessionMeta(
-  sessionId: string | null,
-  onSessionMissing: (err: unknown) => void,
-) {
+export function useSessionMeta(sessionId: string | null, onSessionMissing: (err: unknown) => void) {
   const t = useTranslations("sessionDetail");
   const tCommon = useTranslations("common");
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [files, setFiles] = useState<SessionFile[]>([]);
-  const [checkpoints, setCheckpoints] = useState<SessionCheckpoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -59,16 +50,12 @@ export function useSessionMeta(
     if (!sessionId) return;
     setError(null);
     try {
-      const [detail, fileListRaw, checkpointData] = await Promise.all([
-        sessionApi.getSessionDetail(sessionId, { include_debug: false, events_limit: 1 }),
+      const [detail, fileListRaw] = await Promise.all([
+        sessionApi.getSessionDetail(sessionId, { events_limit: 1 }),
         sessionApi.getSessionFiles(sessionId),
-        sessionApi.listCheckpoints(sessionId).catch(() => ({ checkpoints: [] })),
       ]);
-      setCheckpoints(checkpointData.checkpoints ?? []);
       const normalizedDetail =
-        (detail.unread_message_count ?? 0) > 0
-          ? { ...detail, unread_message_count: 0 }
-          : detail;
+        (detail.unread_message_count ?? 0) > 0 ? { ...detail, unread_message_count: 0 } : detail;
       setSession(normalizedDetail);
       if ((detail.unread_message_count ?? 0) > 0) {
         sessionApi.clearUnreadMessageCount(sessionId).catch(() => undefined);
@@ -111,7 +98,6 @@ export function useSessionMeta(
   const resetMeta = useCallback(() => {
     setSession(null);
     setFiles([]);
-    setCheckpoints([]);
     setError(null);
     setLoading(false);
   }, []);
@@ -119,7 +105,6 @@ export function useSessionMeta(
   return {
     session,
     files,
-    checkpoints,
     loading,
     error,
     setError,

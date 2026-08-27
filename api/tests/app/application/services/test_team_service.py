@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """TeamService: membership/admin-guard/ownership coverage.
 
 The invitation-flow methods (`preview_invitation`, `register_and_accept_invitation`,
@@ -10,15 +8,16 @@ leave_team owner-protection, delete_team permission, the four admin_* guards,
 and get_team/list_members non-member access. Fake repo shapes are copied from
 test_team_invitation_service.py's InMemory*Repo/FakeUow pattern.
 """
-from datetime import datetime, timedelta
 
 import pytest
 
-from app.domain.errors import BadRequestError, ForbiddenError, NotFoundError
+from app.application.ports.crypto import ApplicationUrls
 from app.application.services.team_service import TeamService
+from app.domain.errors import BadRequestError, ForbiddenError, NotFoundError
 from app.domain.models.invitation import Invitation
 from app.domain.models.team import Team, TeamMember, TeamRole
 from app.domain.models.user import User
+from app.infrastructure.security.password_hasher import PasswordHasher
 
 
 class InMemoryInvitationRepo:
@@ -33,7 +32,9 @@ class InMemoryInvitationRepo:
 
 
 class InMemoryTeamRepo:
-    def __init__(self, teams: list[Team] | None = None, members: list[TeamMember] | None = None) -> None:
+    def __init__(
+        self, teams: list[Team] | None = None, members: list[TeamMember] | None = None
+    ) -> None:
         self.teams = {team.id: team for team in (teams or [])}
         self.members = {(member.team_id, member.user_id): member for member in (members or [])}
         self.deleted_team_ids: list[str] = []
@@ -55,7 +56,7 @@ class InMemoryTeamRepo:
         return [member for member in self.members.values() if member.team_id == team_id]
 
     async def list_all(self, limit: int = 100, offset: int = 0):
-        return list(self.teams.values())[offset: offset + limit]
+        return list(self.teams.values())[offset : offset + limit]
 
     async def count(self) -> int:
         return len(self.teams)
@@ -112,6 +113,9 @@ class FakeUow:
     async def __aenter__(self):
         return self
 
+    async def commit(self):
+        return None
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         return False
 
@@ -121,15 +125,28 @@ def anyio_backend():
     return "asyncio"
 
 
-def _team_with_members(*members: TeamMember, team_id: str = "team-1") -> tuple[Team, InMemoryTeamRepo]:
-    team = Team(id=team_id, name="Product", description="", created_by=members[0].user_id if members else "owner-1")
+def _team_with_members(
+    *members: TeamMember, team_id: str = "team-1"
+) -> tuple[Team, InMemoryTeamRepo]:
+    team = Team(
+        id=team_id,
+        name="Product",
+        description="",
+        created_by=members[0].user_id if members else "owner-1",
+    )
     team_repo = InMemoryTeamRepo([team], list(members))
     return team, team_repo
 
 
-def _build_service(team_repo: InMemoryTeamRepo, user_repo: InMemoryUserRepo | None = None) -> TeamService:
+def _build_service(
+    team_repo: InMemoryTeamRepo, user_repo: InMemoryUserRepo | None = None
+) -> TeamService:
     return TeamService(
-        uow_factory=lambda: FakeUow(InMemoryInvitationRepo(), team_repo, user_repo or InMemoryUserRepo())
+        uow_factory=lambda: FakeUow(
+            InMemoryInvitationRepo(), team_repo, user_repo or InMemoryUserRepo()
+        ),
+        password_hasher=PasswordHasher(),
+        application_urls=ApplicationUrls(frontend_base_url="https://app.example.test"),
     )
 
 
@@ -137,9 +154,12 @@ def _build_service(team_repo: InMemoryTeamRepo, user_repo: InMemoryUserRepo | No
 # get_team / list_members — non-member access
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.anyio
 async def test_get_team_returns_team_for_member():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     result = await service.get_team("team-1", "owner-1")
@@ -149,7 +169,9 @@ async def test_get_team_returns_team_for_member():
 
 @pytest.mark.anyio
 async def test_get_team_non_member_raises_forbidden():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     with pytest.raises(ForbiddenError):
@@ -167,7 +189,9 @@ async def test_get_team_missing_team_raises_not_found():
 
 @pytest.mark.anyio
 async def test_list_members_non_member_raises_forbidden():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     with pytest.raises(ForbiddenError):
@@ -176,7 +200,7 @@ async def test_list_members_non_member_raises_forbidden():
 
 @pytest.mark.anyio
 async def test_list_members_member_sees_roster():
-    team, team_repo = _team_with_members(
+    _team, team_repo = _team_with_members(
         TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER),
         TeamMember(team_id="team-1", user_id="member-1", role=TeamRole.MEMBER),
     )
@@ -191,22 +215,25 @@ async def test_list_members_member_sees_roster():
 # remove_member
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.anyio
 async def test_remove_member_success():
-    team, team_repo = _team_with_members(
+    _team, team_repo = _team_with_members(
         TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER),
         TeamMember(team_id="team-1", user_id="member-1", role=TeamRole.MEMBER),
     )
     service = _build_service(team_repo)
 
-    await service.remove_member(team_id="team-1", actor_user_id="owner-1", target_user_id="member-1")
+    await service.remove_member(
+        team_id="team-1", actor_user_id="owner-1", target_user_id="member-1"
+    )
 
     assert ("team-1", "member-1") not in team_repo.members
 
 
 @pytest.mark.anyio
 async def test_remove_member_non_admin_actor_raises_forbidden():
-    team, team_repo = _team_with_members(
+    _team, team_repo = _team_with_members(
         TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER),
         TeamMember(team_id="team-1", user_id="member-1", role=TeamRole.MEMBER),
         TeamMember(team_id="team-1", user_id="member-2", role=TeamRole.MEMBER),
@@ -214,34 +241,44 @@ async def test_remove_member_non_admin_actor_raises_forbidden():
     service = _build_service(team_repo)
 
     with pytest.raises(ForbiddenError):
-        await service.remove_member(team_id="team-1", actor_user_id="member-1", target_user_id="member-2")
+        await service.remove_member(
+            team_id="team-1", actor_user_id="member-1", target_user_id="member-2"
+        )
 
 
 @pytest.mark.anyio
 async def test_remove_member_missing_target_raises_not_found():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     with pytest.raises(NotFoundError):
-        await service.remove_member(team_id="team-1", actor_user_id="owner-1", target_user_id="ghost")
+        await service.remove_member(
+            team_id="team-1", actor_user_id="owner-1", target_user_id="ghost"
+        )
 
 
 @pytest.mark.anyio
 async def test_remove_member_last_owner_is_protected():
     """`_ensure_removable_owner`: removing the sole owner must fail even
     when the actor is themselves an admin acting on the owner."""
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     with pytest.raises(BadRequestError, match="不能移除或降级唯一的所有者"):
-        await service.remove_member(team_id="team-1", actor_user_id="owner-1", target_user_id="owner-1")
+        await service.remove_member(
+            team_id="team-1", actor_user_id="owner-1", target_user_id="owner-1"
+        )
 
     assert ("team-1", "owner-1") in team_repo.members
 
 
 @pytest.mark.anyio
 async def test_remove_member_non_sole_owner_is_removable():
-    team, team_repo = _team_with_members(
+    _team, team_repo = _team_with_members(
         TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER),
         TeamMember(team_id="team-1", user_id="owner-2", role=TeamRole.OWNER),
     )
@@ -256,9 +293,10 @@ async def test_remove_member_non_sole_owner_is_removable():
 # update_member_role
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.anyio
 async def test_update_member_role_success_by_owner():
-    team, team_repo = _team_with_members(
+    _team, team_repo = _team_with_members(
         TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER),
         TeamMember(team_id="team-1", user_id="member-1", role=TeamRole.MEMBER),
     )
@@ -273,7 +311,7 @@ async def test_update_member_role_success_by_owner():
 
 @pytest.mark.anyio
 async def test_update_member_role_by_non_owner_raises_forbidden():
-    team, team_repo = _team_with_members(
+    _team, team_repo = _team_with_members(
         TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER),
         TeamMember(team_id="team-1", user_id="admin-1", role=TeamRole.ADMIN),
         TeamMember(team_id="team-1", user_id="member-1", role=TeamRole.MEMBER),
@@ -282,13 +320,18 @@ async def test_update_member_role_by_non_owner_raises_forbidden():
 
     with pytest.raises(ForbiddenError, match="只有团队所有者可修改成员角色"):
         await service.update_member_role(
-            team_id="team-1", actor_user_id="admin-1", target_user_id="member-1", role=TeamRole.ADMIN
+            team_id="team-1",
+            actor_user_id="admin-1",
+            target_user_id="member-1",
+            role=TeamRole.ADMIN,
         )
 
 
 @pytest.mark.anyio
 async def test_update_member_role_downgrading_last_owner_is_protected():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     with pytest.raises(BadRequestError, match="不能移除或降级唯一的所有者"):
@@ -299,7 +342,9 @@ async def test_update_member_role_downgrading_last_owner_is_protected():
 
 @pytest.mark.anyio
 async def test_update_member_role_missing_target_raises_not_found():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     with pytest.raises(NotFoundError):
@@ -313,9 +358,12 @@ async def test_update_member_role_missing_target_raises_not_found():
 # test_team_invitation_service.py's uow-boundary test)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.anyio
 async def test_leave_team_last_owner_is_protected():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     with pytest.raises(BadRequestError, match="请先转移所有权或解散团队"):
@@ -326,7 +374,7 @@ async def test_leave_team_last_owner_is_protected():
 
 @pytest.mark.anyio
 async def test_leave_team_non_owner_member_leaves_freely():
-    team, team_repo = _team_with_members(
+    _team, team_repo = _team_with_members(
         TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER),
         TeamMember(team_id="team-1", user_id="member-1", role=TeamRole.MEMBER),
     )
@@ -341,9 +389,12 @@ async def test_leave_team_non_owner_member_leaves_freely():
 # delete_team — permission
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.anyio
 async def test_delete_team_by_owner_succeeds():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     await service.delete_team(team_id="team-1", actor_user_id="owner-1")
@@ -353,7 +404,7 @@ async def test_delete_team_by_owner_succeeds():
 
 @pytest.mark.anyio
 async def test_delete_team_by_admin_raises_forbidden():
-    team, team_repo = _team_with_members(
+    _team, team_repo = _team_with_members(
         TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER),
         TeamMember(team_id="team-1", user_id="admin-1", role=TeamRole.ADMIN),
     )
@@ -367,7 +418,9 @@ async def test_delete_team_by_admin_raises_forbidden():
 
 @pytest.mark.anyio
 async def test_delete_team_non_member_raises_forbidden():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     with pytest.raises(ForbiddenError):
@@ -379,9 +432,12 @@ async def test_delete_team_non_member_raises_forbidden():
 # these operate directly on team_id without an actor-membership check)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.anyio
 async def test_admin_delete_team_removes_existing_team():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     await service.admin_delete_team("team-1")
@@ -409,8 +465,12 @@ async def test_admin_list_member_details_missing_team_raises_not_found():
 
 @pytest.mark.anyio
 async def test_admin_list_member_details_enriches_with_user_profile():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
-    user = User(id="owner-1", email="owner@example.com", username="owner1", display_name="Owner One")
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
+    user = User(
+        id="owner-1", email="owner@example.com", username="owner1", display_name="Owner One"
+    )
     service = _build_service(team_repo, InMemoryUserRepo([user]))
 
     details = await service.admin_list_member_details("team-1")
@@ -431,7 +491,9 @@ async def test_admin_remove_member_missing_team_raises_not_found():
 
 @pytest.mark.anyio
 async def test_admin_remove_member_protects_last_owner():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     with pytest.raises(BadRequestError, match="不能移除或降级唯一的所有者"):
@@ -440,7 +502,7 @@ async def test_admin_remove_member_protects_last_owner():
 
 @pytest.mark.anyio
 async def test_admin_remove_member_succeeds_for_non_owner():
-    team, team_repo = _team_with_members(
+    _team, team_repo = _team_with_members(
         TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER),
         TeamMember(team_id="team-1", user_id="member-1", role=TeamRole.MEMBER),
     )
@@ -462,7 +524,9 @@ async def test_admin_update_member_role_missing_team_raises_not_found():
 
 @pytest.mark.anyio
 async def test_admin_update_member_role_protects_last_owner_downgrade():
-    team, team_repo = _team_with_members(TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER))
+    _team, team_repo = _team_with_members(
+        TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER)
+    )
     service = _build_service(team_repo)
 
     with pytest.raises(BadRequestError, match="不能移除或降级唯一的所有者"):
@@ -471,7 +535,7 @@ async def test_admin_update_member_role_protects_last_owner_downgrade():
 
 @pytest.mark.anyio
 async def test_admin_update_member_role_succeeds():
-    team, team_repo = _team_with_members(
+    _team, team_repo = _team_with_members(
         TeamMember(team_id="team-1", user_id="owner-1", role=TeamRole.OWNER),
         TeamMember(team_id="team-1", user_id="member-1", role=TeamRole.MEMBER),
     )

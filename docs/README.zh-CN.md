@@ -35,22 +35,21 @@
 | [治理平面](architecture/governance-plane.zh-CN.md) | 效果契约、能力收窄、整批审批、终态闩、证据 |
 | [Ops Patrol](architecture/ops-patrol.zh-CN.md) | Pack/Run 生命周期、Collector 信任边界、证据与租户隔离 |
 | [技术选型](architecture/technical-decisions.zh-CN.md) | 技术选择与替代方案对比 |
-| [LLM 端点与模型](architecture/llm-endpoints-and-models.zh-CN.md) | 端点/模型拆分、加密、UI 流程 |
-| [前端 UI](architecture/frontend-ui.zh-CN.md) | Next.js Shell、SSE 投影、HITL 组件 |
-| [任务恢复](architecture/task-recovery.zh-CN.md) | 可恢复重试、检查点恢复、DLQ |
+| [推理控制面](architecture/inference-control-plane.zh-CN.md) | Endpoint/Model/Binding 所有权、能力、加密与 UI 流程 |
+| [前端 UI](architecture/frontend-ui.zh-CN.md) | Next.js Shell、公开 SSE 投影、审批界面 |
+| [执行内核](architecture/execution-kernel.zh-CN.md) | Command、Event Store、Activity、恢复、投影、SSE 与权限边界 |
+| [执行内核切换证据](architecture/execution-kernel-cutover-evidence.zh-CN.md) | Greenfield Schema 边界与可复核验收结果 |
 | [安全模型](architecture/security-model.zh-CN.md) | 信任边界、沙箱隔离、认证与授权 |
-| [事件系统](architecture/events.zh-CN.md) | 领域事件、SSE 契约、持久化与 replay |
-| [检查点与 HITL](architecture/checkpoints-and-hitl.zh-CN.md) | 门控契约、回滚、Web Operator、浏览器 Profile 快照 |
-| [Web Operator](architecture/web-operator.zh-CN.md) | 门控档位、审计契约、OpsConsole 演示 |
+| [Web Operator](architecture/web-operator.zh-CN.md) | 精确主机边界、逐调用审批、证据 |
 | [团队与工作区](architecture/teams-and-workspaces.zh-CN.md) | 团队角色、`X-Workspace-Id`、邀请 |
 | [管理、审计与合规](architecture/admin-auditor-compliance.zh-CN.md) | 平台管理、证据链、合规报告 |
 | [A2A 与服务 API Key](architecture/integrations-a2a-service-keys.zh-CN.md) | 入站/出站 A2A、`X-Api-Key` |
 | [Skills](architecture/skills.zh-CN.md) | Skill 模板、运行时覆盖、MCP/A2A 过滤 |
 | [交付物与分享](architecture/artifacts-sharing.zh-CN.md) | 会话交付物、公开分享链接 |
 | [自动化与调度](architecture/automation-scheduler.zh-CN.md) | Cron/Webhook 任务、Leader 选举、通知 |
-| [配置来源治理](architecture/config-source-governance.zh-CN.md) | AppConfig、config.yaml、环境变量边界 |
+| [配置来源治理](architecture/config-source-governance.zh-CN.md) | Deployment Settings、Runtime Policy、Integration 边界 |
+| [Runtime Policy 控制面](architecture/runtime-policy-control-plane.zh-CN.md) | 不可变 Revision、原子 Head、CAS 与 Fail-closed Consumer |
 | [模型韧性设计](architecture/model-resilience.zh-CN.md) | 熔断、fallback、SLO 与运行手册 |
-| [API/SSE 协议兼容策略](architecture/contract-compatibility.zh-CN.md) | 前后端契约兼容窗口 |
 | [Codebase 向量降级与重新索引](architecture/codebase-reindex.zh-CN.md) | embedding 不可用时的降级与恢复 |
 | [知识库摄取](architecture/knowledge-base-ingestion.zh-CN.md) | 解析、OCR、GraphRAG、摄取失败 |
 | [架构演进指南](architecture/architecture-evolution.zh-CN.md) | Compose → K8s / 外置沙箱演进 |
@@ -78,17 +77,10 @@
 | [SECURITY.zh-CN.md](../.github/SECURITY.zh-CN.md) | 漏洞披露政策 |
 | [CODE_OF_CONDUCT.zh-CN.md](../.github/CODE_OF_CONDUCT.zh-CN.md) | 行为准则 |
 
-### 历史审计
-
-| 文档 | 说明 |
-|------|------|
-| [2026-07-28 治理审计](superpowers/audits/2026-07-28-agent-kb-codebase-governance-audit.md) | 已过时的审计快照（仅中文，见文首状态块） |
-| [2026-08-04 治理 P0 复核](superpowers/audits/2026-08-04-governance-p0-reverification.md) | 对 2026-07-28 审计 P0 结论的复核（仅中文） |
-
 ## 维护规则
 
 - **一主题一权威文档**：避免在 README 与专题文档中重复维护同一策略。
-- **配置事实来源**：环境变量以 `.env.example` 为准；行为配置以 `api/config.yaml` 为准。
+- **配置事实来源**：部署输入以 `.env.example` 为准；实时行为以 PostgreSQL Runtime Policy Revision 为准。
 - **双语成对**：新增或修改文档时，同步更新对应语言的配对文件。
 - **链接约定**：中文文档优先链接 `*.zh-CN.md`；英文文档优先链接 `*.md`。
 - **索引同步**：新增教程或架构文档时，同步更新本索引、根目录 [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md) 文档地图，并在中英文文件文首添加语言切换链接。

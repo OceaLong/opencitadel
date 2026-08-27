@@ -1,49 +1,69 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """Standalone database migration entrypoint (run once per deploy)."""
+
 from __future__ import annotations
 
 import asyncio
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+
+from alembic.config import Config
+from sqlalchemy import create_engine, text
 
 from alembic import command
-from alembic.config import Config
-
-import app.application.services.config_provider  # noqa: F401  注册域端口
 from app.infrastructure.logging import setup_logging
-from app.migrate_llm_api_keys import migrate_legacy_plaintext_api_keys
-from app.migrate_llm_api_key_rotation import rotate_llm_endpoint_api_keys
-from app.migrate_app_config_seed import seed_app_config_from_yaml_if_empty
-from app.migrate_mcp_a2a_from_blob import migrate_mcp_a2a_from_blob
-from app.migrate_mcp_url_and_secrets import migrate_mcp_url_and_secrets
-from app.runtime_role import ProcessRole, set_role
+from app.migrate_runtime_policy_seed import seed_runtime_policy_heads
+from core.config import (
+    DeploymentSettings,
+    load_deployment_settings,
+    sqlalchemy_sync_migration_database_uri,
+)
 
-set_role(ProcessRole.MIGRATE)
+logger = logging.getLogger(__name__)
+_MIGRATION_LOCK_ID = 0x4F50454E43495441
 
 
-async def run_data_migrations() -> None:
-    migrated = await migrate_legacy_plaintext_api_keys()
-    print(f"LLM API key migration complete: migrated={migrated}")
+@contextmanager
+def migration_lock(settings: DeploymentSettings) -> Iterator[None]:
+    """Serialize the complete schema-and-seed operation across deployers."""
+    engine = create_engine(
+        sqlalchemy_sync_migration_database_uri(settings),
+        pool_pre_ping=True,
+    )
+    try:
+        with engine.connect() as connection:
+            connection.execute(
+                text("SELECT pg_advisory_lock(:lock_id)"),
+                {"lock_id": _MIGRATION_LOCK_ID},
+            )
+            try:
+                yield
+            finally:
+                try:
+                    connection.execute(
+                        text("SELECT pg_advisory_unlock(:lock_id)"),
+                        {"lock_id": _MIGRATION_LOCK_ID},
+                    )
+                except (OSError, RuntimeError, ValueError):
+                    logger.exception("Failed to release the database migration lock")
+    finally:
+        engine.dispose()
 
-    rotated = await rotate_llm_endpoint_api_keys()
-    print(f"LLM API key rotation complete: {rotated}")
 
-    seeded = await seed_app_config_from_yaml_if_empty()
-    print(f"AppConfig YAML seed complete: seeded={seeded}")
-
-    migrated_integrations = await migrate_mcp_a2a_from_blob()
-    print(f"MCP/A2A blob migration complete: {migrated_integrations}")
-
-    migrated_mcp_secrets = await migrate_mcp_url_and_secrets()
-    print(f"MCP url/secret migration complete: {migrated_mcp_secrets}")
+async def run_data_migrations(settings: DeploymentSettings) -> None:
+    seeded = await seed_runtime_policy_heads(settings)
+    print(f"Runtime Policy seed complete: seeded={seeded}")
 
 
 def main() -> None:
-    setup_logging()
-    alembic_cfg = Config("alembic.ini")
-    command.upgrade(alembic_cfg, "head")
-    print("Database schema migrations applied successfully.")
-
-    asyncio.run(run_data_migrations())
+    settings = load_deployment_settings()
+    setup_logging(settings)
+    with migration_lock(settings):
+        alembic_cfg = Config("alembic.ini")
+        alembic_cfg.attributes["deployment_settings"] = settings
+        command.upgrade(alembic_cfg, "head")
+        print("Database schema migrations applied successfully.")
+        asyncio.run(run_data_migrations(settings))
 
 
 if __name__ == "__main__":

@@ -1,24 +1,27 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import secrets
-from datetime import datetime, timedelta
-from typing import Annotated, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import AfterValidator
-from sqlalchemy import func, select, text
 from starlette.responses import StreamingResponse
 
-from app.domain.errors import BadRequestError, NotFoundError
-from app.domain.utils.time_utils import to_naive_utc
+from app.application.ports.crypto import ApplicationUrls
 from app.application.services.audit_service import AuditService
 from app.application.services.team_service import TeamService
 from app.application.services.usage_stats_service import UsageBreakdownDimension, UsageStatsService
+from app.domain.errors import NotFoundError
 from app.domain.models.audit_log import AuditLog
 from app.domain.models.invitation import Invitation, InvitationType
 from app.domain.models.user import UserStatus
 from app.domain.models.user_quota import UserQuota
-from app.interfaces.auth_dependencies import get_current_principal, require_admin, require_auditor_or_admin
+from app.domain.repositories.uow import UnitOfWorkFactory
+from app.domain.utils.time_utils import to_utc
+from app.interfaces.auth_dependencies import (
+    get_current_principal,
+    require_admin,
+    require_auditor_or_admin,
+)
 from app.interfaces.client_ip import get_client_ip
 from app.interfaces.schemas import Response
 from app.interfaces.schemas.admin import (
@@ -47,44 +50,29 @@ from app.interfaces.schemas.team import (
     TeamMemberResponse,
     UpdateTeamMemberRoleRequest,
 )
-from app.interfaces.service_dependencies import get_audit_service, get_team_service, get_usage_stats_service
-from app.infrastructure.models.user import UserORM
-from app.infrastructure.storage.postgres import get_uow
-from core.config import get_settings
+from app.interfaces.service_dependencies import (
+    get_application_urls,
+    get_audit_service,
+    get_team_service,
+    get_uow_factory,
+    get_usage_stats_service,
+)
 
-
-# HTTP 层可能收到带时区的 ISO datetime（如前端 toISOString 的 Z 后缀），
-# 数据库列为 naive UTC——在参数边界统一规范化，避免 asyncpg 报
-# "can't subtract offset-naive and offset-aware datetimes"。
-NaiveUtcDatetime = Annotated[Optional[datetime], Query(), AfterValidator(to_naive_utc)]
+# HTTP 时间参数必须携带时区，并在进入服务层前规范化为 UTC。
+UtcDatetime = Annotated[datetime | None, Query(), AfterValidator(to_utc)]
 
 router = APIRouter(prefix="/admin", tags=["管理员"])
 
-_OWNED_RESOURCE_TABLES = (
-    "scheduled_jobs",
-    "skills",
-    "mcp_servers",
-    "a2a_servers",
-    "llm_models",
-    "llm_endpoints",
-    "sessions",
-    "memory_entries",
-    "knowledge_bases",
-    "codebases",
-    "files",
-    "llm_token_usages",
-)
-
 
 async def _record_admin_audit(
-        audit_service: AuditService,
-        *,
-        actor_user_id: str,
-        action: str,
-        resource_type: str,
-        resource_id: str,
-        request: Request,
-        metadata: dict | None = None,
+    audit_service: AuditService,
+    *,
+    actor_user_id: str,
+    action: str,
+    resource_type: str,
+    resource_id: str,
+    request: Request,
+    metadata: dict | None = None,
 ) -> None:
     await audit_service.record(
         AuditLog(
@@ -99,55 +87,39 @@ async def _record_admin_audit(
     )
 
 
-async def _transfer_user_resources_to_team(db_session, user_id: str, team_id: str) -> None:
-    for table in _OWNED_RESOURCE_TABLES:
-        await db_session.execute(
-            text(f"UPDATE {table} SET owner_user_id = NULL, team_id = :team_id WHERE owner_user_id = :user_id"),
-            {"team_id": team_id, "user_id": user_id},
-        )
-
-
-async def _delete_user_owned_resources(db_session, user_id: str) -> None:
-    for table in _OWNED_RESOURCE_TABLES:
-        await db_session.execute(
-            text(f"DELETE FROM {table} WHERE owner_user_id = :user_id"),
-            {"user_id": user_id},
-        )
-
-
-async def _revoke_user_security_material(db_session, user_id: str) -> None:
-    await db_session.execute(
-        text("UPDATE service_api_keys SET revoked_at = CURRENT_TIMESTAMP WHERE owner_user_id = :user_id AND revoked_at IS NULL"),
-        {"user_id": user_id},
-    )
-    await db_session.execute(text("DELETE FROM oauth_identities WHERE user_id = :user_id"), {"user_id": user_id})
-    await db_session.execute(text("DELETE FROM team_members WHERE user_id = :user_id"), {"user_id": user_id})
-
-
-@router.get("/users", response_model=Response[ListAdminUsersResponse], dependencies=[Depends(require_admin)])
+@router.get(
+    "/users", response_model=Response[ListAdminUsersResponse], dependencies=[Depends(require_admin)]
+)
 async def list_users(
-        limit: int = Query(100, ge=1, le=500),
-        offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
 ) -> Response[ListAdminUsersResponse]:
-    async with get_uow() as uow:
+    async with uow_factory() as uow:
         users = await uow.user.list(limit=limit, offset=offset)
         total = await uow.user.count()
-    return Response.success(data=ListAdminUsersResponse(
+    return Response.success(
+        data=ListAdminUsersResponse(
             users=[AdminUserResponse.from_domain(u) for u in users],
             total=total,
         ),
     )
 
 
-@router.patch("/users/{user_id}", response_model=Response[AdminUserResponse], dependencies=[Depends(require_admin)])
+@router.patch(
+    "/users/{user_id}",
+    response_model=Response[AdminUserResponse],
+    dependencies=[Depends(require_admin)],
+)
 async def patch_user(
-        user_id: str,
-        request_body: PatchUserRequest,
-        request: Request,
-        audit_service: AuditService = Depends(get_audit_service),
+    user_id: str,
+    request_body: PatchUserRequest,
+    request: Request,
+    audit_service: AuditService = Depends(get_audit_service),
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
 ) -> Response[AdminUserResponse]:
     principal = await get_current_principal()
-    async with get_uow() as uow:
+    async with uow_factory() as uow:
         user = await uow.user.get_by_id(user_id)
         if not user:
             raise NotFoundError("用户不存在")
@@ -159,8 +131,9 @@ async def patch_user(
             await uow.refresh_token.revoke_all_for_user(user.id)
         if request_body.display_name is not None:
             user.display_name = request_body.display_name
-        user.updated_at = datetime.now()
+        user.updated_at = datetime.now(UTC)
         await uow.user.save(user)
+        await uow.commit()
     await _record_admin_audit(
         audit_service,
         actor_user_id=principal.user_id,
@@ -173,23 +146,23 @@ async def patch_user(
     return Response.success(data=AdminUserResponse.from_domain(user))
 
 
-@router.delete("/users/{user_id}", response_model=Response[dict], dependencies=[Depends(require_admin)])
+@router.delete(
+    "/users/{user_id}", response_model=Response[dict], dependencies=[Depends(require_admin)]
+)
 async def delete_user(
-        user_id: str,
-        request: Request,
-        strategy: str = Query("anonymize", pattern="^(cascade|transfer_to_team|anonymize)$"),
-        target_team_id: Optional[str] = Query(None),
-        audit_service: AuditService = Depends(get_audit_service),
+    user_id: str,
+    request: Request,
+    strategy: str = Query("anonymize", pattern="^(cascade|anonymize)$"),
+    audit_service: AuditService = Depends(get_audit_service),
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
 ) -> Response[dict]:
     principal = await get_current_principal()
-    if strategy == "transfer_to_team" and not target_team_id:
-        raise BadRequestError("转移策略需要 target_team_id")
-    async with get_uow() as uow:
+    async with uow_factory() as uow:
         user = await uow.user.get_by_id(user_id)
         if not user:
             raise NotFoundError("用户不存在")
         if strategy == "cascade":
-            await _delete_user_owned_resources(uow.db_session, user_id)
+            await uow.user.delete_owned_resources(user_id)
             await uow.user.delete_by_id(user_id)
         else:
             user.status = UserStatus.DISABLED
@@ -198,13 +171,10 @@ async def delete_user(
                 user.email = f"deleted-{user.id}@deleted.local"
                 user.username = f"deleted-{user.id}"
                 user.display_name = "Deleted User"
-            elif strategy == "transfer_to_team":
-                if not await uow.team.get_by_id(target_team_id):
-                    raise NotFoundError("目标团队不存在")
-                await _transfer_user_resources_to_team(uow.db_session, user_id, target_team_id)
             await uow.user.save(user)
             await uow.refresh_token.revoke_all_for_user(user.id)
-            await _revoke_user_security_material(uow.db_session, user.id)
+            await uow.user.revoke_security_material(user.id)
+        await uow.commit()
     await _record_admin_audit(
         audit_service,
         actor_user_id=principal.user_id,
@@ -212,16 +182,22 @@ async def delete_user(
         resource_type="user",
         resource_id=user_id,
         request=request,
-        metadata={"strategy": strategy, "target_team_id": target_team_id},
+        metadata={"strategy": strategy},
     )
-    return Response.success( data={"strategy": strategy})
+    return Response.success(data={"strategy": strategy})
 
 
-@router.post("/invitations", response_model=Response[InvitationLinkResponse], dependencies=[Depends(require_admin)])
+@router.post(
+    "/invitations",
+    response_model=Response[InvitationLinkResponse],
+    dependencies=[Depends(require_admin)],
+)
 async def create_platform_invitation(
-        request_body: CreatePlatformInvitationRequest,
-        request: Request,
-        audit_service: AuditService = Depends(get_audit_service),
+    request_body: CreatePlatformInvitationRequest,
+    request: Request,
+    audit_service: AuditService = Depends(get_audit_service),
+    application_urls: ApplicationUrls = Depends(get_application_urls),
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
 ) -> Response[InvitationLinkResponse]:
     principal = await get_current_principal()
     token = secrets.token_urlsafe(32)
@@ -230,11 +206,12 @@ async def create_platform_invitation(
         email=request_body.email.strip().lower(),
         token=token,
         invited_by=principal.user_id,
-        expires_at=datetime.now() + timedelta(days=7),
+        expires_at=datetime.now(UTC) + timedelta(days=7),
     )
-    async with get_uow() as uow:
+    async with uow_factory() as uow:
         await uow.invitation.save(invitation)
-    url = f"{get_settings().frontend_base_url.rstrip('/')}/register?invite_token={token}"
+        await uow.commit()
+    url = f"{application_urls.frontend_base_url.rstrip('/')}/register?invite_token={token}"
     await _record_admin_audit(
         audit_service,
         actor_user_id=principal.user_id,
@@ -253,42 +230,59 @@ async def create_platform_invitation(
     dependencies=[Depends(require_admin)],
 )
 async def list_platform_invitations(
-        limit: int = Query(100, ge=1, le=500),
-        offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
 ) -> Response[ListPlatformInvitationsResponse]:
-    now = datetime.now()
-    async with get_uow() as uow:
+    now = datetime.now(UTC)
+    async with uow_factory() as uow:
         invitations = await uow.invitation.list(
             invitation_type=InvitationType.PLATFORM,
             limit=limit,
             offset=offset,
         )
         total = await uow.invitation.count(invitation_type=InvitationType.PLATFORM)
-    return Response.success(data=ListPlatformInvitationsResponse(
-            invitations=[PlatformInvitationResponse.from_domain(item, now=now) for item in invitations],
+    return Response.success(
+        data=ListPlatformInvitationsResponse(
+            invitations=[
+                PlatformInvitationResponse.from_domain(item, now=now) for item in invitations
+            ],
             total=total,
         ),
     )
 
 
-@router.get("/users/{user_id}/quota", response_model=Response[QuotaRequest], dependencies=[Depends(require_admin)])
-async def get_quota(user_id: str) -> Response[QuotaRequest]:
-    async with get_uow() as uow:
+@router.get(
+    "/users/{user_id}/quota",
+    response_model=Response[QuotaRequest],
+    dependencies=[Depends(require_admin)],
+)
+async def get_quota(
+    user_id: str,
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
+) -> Response[QuotaRequest]:
+    async with uow_factory() as uow:
         quota = await uow.quota.get_for_user(user_id)
     return Response.success(data=QuotaRequest(**quota.model_dump()) if quota else QuotaRequest())
 
 
-@router.put("/users/{user_id}/quota", response_model=Response[QuotaRequest], dependencies=[Depends(require_admin)])
+@router.put(
+    "/users/{user_id}/quota",
+    response_model=Response[QuotaRequest],
+    dependencies=[Depends(require_admin)],
+)
 async def put_quota(
-        user_id: str,
-        request_body: QuotaRequest,
-        request: Request,
-        audit_service: AuditService = Depends(get_audit_service),
+    user_id: str,
+    request_body: QuotaRequest,
+    request: Request,
+    audit_service: AuditService = Depends(get_audit_service),
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
 ) -> Response[QuotaRequest]:
     principal = await get_current_principal()
     quota = UserQuota(user_id=user_id, **request_body.model_dump())
-    async with get_uow() as uow:
+    async with uow_factory() as uow:
         await uow.quota.save(quota)
+        await uow.commit()
     await _record_admin_audit(
         audit_service,
         actor_user_id=principal.user_id,
@@ -301,17 +295,22 @@ async def put_quota(
     return Response.success(data=request_body)
 
 
-@router.get("/audit", response_model=Response[ListAuditLogsResponse], dependencies=[Depends(require_auditor_or_admin)])
+@router.get(
+    "/audit",
+    response_model=Response[ListAuditLogsResponse],
+    dependencies=[Depends(require_auditor_or_admin)],
+)
 async def list_audit_logs(
-        limit: int = Query(100, ge=1, le=1000),
-        offset: int = Query(0, ge=0),
-        action: Optional[str] = Query(None),
-        actor_user_id: Optional[str] = Query(None),
-        resource_type: Optional[str] = Query(None),
-        resource_id: Optional[str] = Query(None),
-        start_at: NaiveUtcDatetime = None,
-        end_at: NaiveUtcDatetime = None,
-        service: AuditService = Depends(get_audit_service),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    action: str | None = Query(None),
+    actor_user_id: str | None = Query(None),
+    resource_type: str | None = Query(None),
+    resource_id: str | None = Query(None),
+    start_at: UtcDatetime = None,
+    end_at: UtcDatetime = None,
+    service: AuditService = Depends(get_audit_service),
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
 ) -> Response[ListAuditLogsResponse]:
     logs = await service.list_logs(
         action=action,
@@ -323,7 +322,7 @@ async def list_audit_logs(
         limit=limit,
         offset=offset,
     )
-    async with get_uow() as uow:
+    async with uow_factory() as uow:
         total = await uow.audit.count(
             action=action,
             actor_user_id=actor_user_id,
@@ -332,17 +331,22 @@ async def list_audit_logs(
             start_at=start_at,
             end_at=end_at,
         )
-    return Response.success(data=ListAuditLogsResponse(
+    return Response.success(
+        data=ListAuditLogsResponse(
             logs=[AuditLogResponse.from_domain(log) for log in logs],
             total=total,
         ),
     )
 
 
-@router.get("/audit/{log_id}", response_model=Response[AuditLogDetailResponse], dependencies=[Depends(require_auditor_or_admin)])
+@router.get(
+    "/audit/{log_id}",
+    response_model=Response[AuditLogDetailResponse],
+    dependencies=[Depends(require_auditor_or_admin)],
+)
 async def get_audit_log(
-        log_id: str,
-        service: AuditService = Depends(get_audit_service),
+    log_id: str,
+    service: AuditService = Depends(get_audit_service),
 ) -> Response[AuditLogDetailResponse]:
     log = await service.get_log(log_id)
     if not log:
@@ -350,11 +354,15 @@ async def get_audit_log(
     return Response.success(data=AuditLogDetailResponse.from_domain(log))
 
 
-@router.get("/audit/summary", response_model=Response[AuditSummaryResponse], dependencies=[Depends(require_auditor_or_admin)])
+@router.get(
+    "/audit/summary",
+    response_model=Response[AuditSummaryResponse],
+    dependencies=[Depends(require_auditor_or_admin)],
+)
 async def audit_summary(
-        start_at: NaiveUtcDatetime = None,
-        end_at: NaiveUtcDatetime = None,
-        service: AuditService = Depends(get_audit_service),
+    start_at: UtcDatetime = None,
+    end_at: UtcDatetime = None,
+    service: AuditService = Depends(get_audit_service),
 ) -> Response[AuditSummaryResponse]:
     summary = await service.summarize(start_at=start_at, end_at=end_at)
     return Response.success(data=AuditSummaryResponse(**summary))
@@ -362,13 +370,13 @@ async def audit_summary(
 
 @router.get("/audit/export", dependencies=[Depends(require_auditor_or_admin)])
 async def export_audit_logs(
-        action: Optional[str] = Query(None),
-        actor_user_id: Optional[str] = Query(None),
-        resource_type: Optional[str] = Query(None),
-        resource_id: Optional[str] = Query(None),
-        start_at: NaiveUtcDatetime = None,
-        end_at: NaiveUtcDatetime = None,
-        service: AuditService = Depends(get_audit_service),
+    action: str | None = Query(None),
+    actor_user_id: str | None = Query(None),
+    resource_type: str | None = Query(None),
+    resource_id: str | None = Query(None),
+    start_at: UtcDatetime = None,
+    end_at: UtcDatetime = None,
+    service: AuditService = Depends(get_audit_service),
 ) -> StreamingResponse:
     return StreamingResponse(
         service.export_csv(
@@ -384,13 +392,17 @@ async def export_audit_logs(
     )
 
 
-@router.get("/usage", response_model=Response[UsageSummaryResponse], dependencies=[Depends(require_auditor_or_admin)])
+@router.get(
+    "/usage",
+    response_model=Response[UsageSummaryResponse],
+    dependencies=[Depends(require_auditor_or_admin)],
+)
 async def usage_summary(
-        user_id: Optional[str] = Query(None),
-        team_id: Optional[str] = Query(None),
-        start_at: NaiveUtcDatetime = None,
-        end_at: NaiveUtcDatetime = None,
-        service: UsageStatsService = Depends(get_usage_stats_service),
+    user_id: str | None = Query(None),
+    team_id: str | None = Query(None),
+    start_at: UtcDatetime = None,
+    end_at: UtcDatetime = None,
+    service: UsageStatsService = Depends(get_usage_stats_service),
 ) -> Response[UsageSummaryResponse]:
     data = await service.aggregate_usage(
         owner_user_id=user_id,
@@ -401,24 +413,34 @@ async def usage_summary(
     return Response.success(data=UsageSummaryResponse(**data))
 
 
-@router.get("/usage/summary", response_model=Response[UsageSummaryResponse], dependencies=[Depends(require_auditor_or_admin)])
+@router.get(
+    "/usage/summary",
+    response_model=Response[UsageSummaryResponse],
+    dependencies=[Depends(require_auditor_or_admin)],
+)
 async def usage_summary_alias(
-        user_id: Optional[str] = Query(None),
-        team_id: Optional[str] = Query(None),
-        start_at: NaiveUtcDatetime = None,
-        end_at: NaiveUtcDatetime = None,
-        service: UsageStatsService = Depends(get_usage_stats_service),
+    user_id: str | None = Query(None),
+    team_id: str | None = Query(None),
+    start_at: UtcDatetime = None,
+    end_at: UtcDatetime = None,
+    service: UsageStatsService = Depends(get_usage_stats_service),
 ) -> Response[UsageSummaryResponse]:
-    return await usage_summary(user_id=user_id, team_id=team_id, start_at=start_at, end_at=end_at, service=service)
+    return await usage_summary(
+        user_id=user_id, team_id=team_id, start_at=start_at, end_at=end_at, service=service
+    )
 
 
-@router.get("/usage/timeseries", response_model=Response[UsageTimeseriesResponse], dependencies=[Depends(require_auditor_or_admin)])
+@router.get(
+    "/usage/timeseries",
+    response_model=Response[UsageTimeseriesResponse],
+    dependencies=[Depends(require_auditor_or_admin)],
+)
 async def usage_timeseries(
-        user_id: Optional[str] = Query(None),
-        team_id: Optional[str] = Query(None),
-        start_at: NaiveUtcDatetime = None,
-        end_at: NaiveUtcDatetime = None,
-        service: UsageStatsService = Depends(get_usage_stats_service),
+    user_id: str | None = Query(None),
+    team_id: str | None = Query(None),
+    start_at: UtcDatetime = None,
+    end_at: UtcDatetime = None,
+    service: UsageStatsService = Depends(get_usage_stats_service),
 ) -> Response[UsageTimeseriesResponse]:
     points = await service.usage_timeseries(
         owner_user_id=user_id,
@@ -429,15 +451,19 @@ async def usage_timeseries(
     return Response.success(data=UsageTimeseriesResponse(points=points))
 
 
-@router.get("/usage/breakdown", response_model=Response[UsageBreakdownResponse], dependencies=[Depends(require_auditor_or_admin)])
+@router.get(
+    "/usage/breakdown",
+    response_model=Response[UsageBreakdownResponse],
+    dependencies=[Depends(require_auditor_or_admin)],
+)
 async def usage_breakdown(
-        dimension: UsageBreakdownDimension = Query("model"),
-        user_id: Optional[str] = Query(None),
-        team_id: Optional[str] = Query(None),
-        start_at: NaiveUtcDatetime = None,
-        end_at: NaiveUtcDatetime = None,
-        limit: int = Query(10, ge=1, le=50),
-        service: UsageStatsService = Depends(get_usage_stats_service),
+    dimension: UsageBreakdownDimension = Query("model"),
+    user_id: str | None = Query(None),
+    team_id: str | None = Query(None),
+    start_at: UtcDatetime = None,
+    end_at: UtcDatetime = None,
+    limit: int = Query(10, ge=1, le=50),
+    service: UsageStatsService = Depends(get_usage_stats_service),
 ) -> Response[UsageBreakdownResponse]:
     items = await service.usage_breakdown(
         dimension=dimension,
@@ -450,20 +476,19 @@ async def usage_breakdown(
     return Response.success(data=UsageBreakdownResponse(dimension=dimension, items=items))
 
 
-@router.get("/overview", response_model=Response[AdminOverviewResponse], dependencies=[Depends(require_auditor_or_admin)])
-async def overview() -> Response[AdminOverviewResponse]:
-    now = datetime.now()
-    async with get_uow() as uow:
+@router.get(
+    "/overview",
+    response_model=Response[AdminOverviewResponse],
+    dependencies=[Depends(require_auditor_or_admin)],
+)
+async def overview(
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
+) -> Response[AdminOverviewResponse]:
+    now = datetime.now(UTC)
+    async with uow_factory() as uow:
         total_users = await uow.user.count()
-        active_users_result = await uow.db_session.execute(
-            select(func.count()).select_from(UserORM).where(UserORM.status == UserStatus.ACTIVE.value),
-        )
-        disabled_users_result = await uow.db_session.execute(
-            select(func.count()).select_from(UserORM).where(UserORM.status == UserStatus.DISABLED.value),
-        )
-        admin_users_result = await uow.db_session.execute(
-            select(func.count()).select_from(UserORM).where(UserORM.global_role == "admin"),
-        )
+        status_counts = await uow.user.count_by_status()
+        role_counts = await uow.user.count_by_role()
         invitations = await uow.invitation.list(invitation_type=InvitationType.PLATFORM, limit=500)
         total_teams = await uow.team.count()
         total_sessions = await uow.session.count()
@@ -476,11 +501,12 @@ async def overview() -> Response[AdminOverviewResponse]:
             accepted += 1
         else:
             expired += 1
-    return Response.success(data=AdminOverviewResponse(
+    return Response.success(
+        data=AdminOverviewResponse(
             total_users=total_users,
-            active_users=int(active_users_result.scalar_one() or 0),
-            disabled_users=int(disabled_users_result.scalar_one() or 0),
-            admin_users=int(admin_users_result.scalar_one() or 0),
+            active_users=status_counts.get(UserStatus.ACTIVE.value, 0),
+            disabled_users=status_counts.get(UserStatus.DISABLED.value, 0),
+            admin_users=role_counts.get("admin", 0),
             pending_invitations=pending,
             accepted_invitations=accepted,
             expired_invitations=expired,
@@ -490,16 +516,20 @@ async def overview() -> Response[AdminOverviewResponse]:
     )
 
 
-@router.get("/teams", response_model=Response[ListAdminTeamsResponse], dependencies=[Depends(require_admin)])
+@router.get(
+    "/teams", response_model=Response[ListAdminTeamsResponse], dependencies=[Depends(require_admin)]
+)
 async def list_teams(
-        limit: int = Query(100, ge=1, le=500),
-        offset: int = Query(0, ge=0),
-        team_service: TeamService = Depends(get_team_service),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    team_service: TeamService = Depends(get_team_service),
+    uow_factory: UnitOfWorkFactory = Depends(get_uow_factory),
 ) -> Response[ListAdminTeamsResponse]:
     teams, total = await team_service.admin_list_all(limit=limit, offset=offset)
-    async with get_uow() as uow:
+    async with uow_factory() as uow:
         member_counts = await uow.team.count_members_by_teams([team.id for team in teams])
-    return Response.success(data=ListAdminTeamsResponse(
+    return Response.success(
+        data=ListAdminTeamsResponse(
             teams=[
                 AdminTeamResponse(
                     id=team.id,
@@ -522,20 +552,22 @@ async def list_teams(
     dependencies=[Depends(require_admin)],
 )
 async def list_team_members_admin(
-        team_id: str,
-        team_service: TeamService = Depends(get_team_service),
+    team_id: str,
+    team_service: TeamService = Depends(get_team_service),
 ) -> Response[ListTeamMemberDetailsResponse]:
     members = await team_service.admin_list_member_details(team_id)
     return Response.success(data=ListTeamMemberDetailsResponse(members=members))
 
 
-@router.delete("/teams/{team_id}", response_model=Response[None], dependencies=[Depends(require_admin)])
+@router.delete(
+    "/teams/{team_id}", response_model=Response[None], dependencies=[Depends(require_admin)]
+)
 async def delete_team_admin(
-        team_id: str,
-        request: Request,
-        principal=Depends(get_current_principal),
-        team_service: TeamService = Depends(get_team_service),
-        audit_service: AuditService = Depends(get_audit_service),
+    team_id: str,
+    request: Request,
+    principal=Depends(get_current_principal),
+    team_service: TeamService = Depends(get_team_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> Response[None]:
     await team_service.admin_delete_team(team_id)
     await _record_admin_audit(
@@ -555,12 +587,12 @@ async def delete_team_admin(
     dependencies=[Depends(require_admin)],
 )
 async def remove_team_member_admin(
-        team_id: str,
-        user_id: str,
-        request: Request,
-        principal=Depends(get_current_principal),
-        team_service: TeamService = Depends(get_team_service),
-        audit_service: AuditService = Depends(get_audit_service),
+    team_id: str,
+    user_id: str,
+    request: Request,
+    principal=Depends(get_current_principal),
+    team_service: TeamService = Depends(get_team_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> Response[None]:
     await team_service.admin_remove_member(team_id, user_id)
     await _record_admin_audit(
@@ -581,13 +613,13 @@ async def remove_team_member_admin(
     dependencies=[Depends(require_admin)],
 )
 async def update_team_member_role_admin(
-        team_id: str,
-        user_id: str,
-        request_body: UpdateTeamMemberRoleRequest,
-        request: Request,
-        principal=Depends(get_current_principal),
-        team_service: TeamService = Depends(get_team_service),
-        audit_service: AuditService = Depends(get_audit_service),
+    team_id: str,
+    user_id: str,
+    request_body: UpdateTeamMemberRoleRequest,
+    request: Request,
+    principal=Depends(get_current_principal),
+    team_service: TeamService = Depends(get_team_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> Response[TeamMemberResponse]:
     member = await team_service.admin_update_member_role(team_id, user_id, request_body.role)
     await _record_admin_audit(

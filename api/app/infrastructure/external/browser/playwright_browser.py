@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 # worker 专用重库(markdownify/playwright)延迟到函数内导入,保持 app.main 的 api-lite 导入闭包可用
 from __future__ import annotations
 
@@ -9,22 +7,29 @@ import json
 import logging
 import re
 import time
-from typing import Optional, List, Any, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from app.domain.external.browser import Browser as BrowserProtocol
 from app.domain.external.llm import LLM
+from app.domain.models.operator import assert_operator_url_allowed
 from app.domain.models.tool_result import ToolResult
 from app.infrastructure.observability.browser_metrics import record_vision_fallback
+
 from .playwright_browser_fun import (
-    GET_VISIBLE_CONTENT_FUNC,
     GET_INTERACTIVE_ELEMENTS_FUNC,
+    GET_VISIBLE_CONTENT_FUNC,
     INJECT_CONSOLE_LOGS_FUNC,
 )
 
 if TYPE_CHECKING:
-    from playwright.async_api import Playwright, Browser, Page
+    from playwright.async_api import Browser, Page, Playwright, Route
 
 logger = logging.getLogger(__name__)
+
+
+class BrowserInitializationError(RuntimeError):
+    """Raised when Playwright cannot create a usable browser session."""
+
 
 _NAVIGATION_ERROR_MARKERS = (
     "execution context was destroyed",
@@ -41,29 +46,48 @@ class PlaywrightBrowser(BrowserProtocol):
     """基础Playwright管理的浏览器扩展"""
 
     def __init__(
-            self,
-            cdp_url: str,  # CDP的连接地址
-            llm: Optional[LLM] = None,  # 可选参数，传递LLM，如果传递了则会使用LLM对页面内容进行整理变成markdown格式
-            supports_multimodal: bool = False,
-            vision_llm: Optional[LLM] = None,
+        self,
+        cdp_url: str,  # CDP的连接地址
+        llm: LLM
+        | None = None,  # 可选参数，传递LLM，如果传递了则会使用LLM对页面内容进行整理变成markdown格式
+        vision_enabled: bool = False,
+        vision_llm: LLM | None = None,
+        allowed_domains: frozenset[str] | None = None,
     ) -> None:
         """构造函数，完成Playwright浏览器的初始化"""
         # LLM相关
-        self.llm: Optional[LLM] = llm
-        self.vision_llm: Optional[LLM] = vision_llm or llm
-        self.supports_multimodal: bool = supports_multimodal
+        self.llm: LLM | None = llm
+        self.vision_llm: LLM | None = vision_llm or llm
+        self.vision_enabled: bool = vision_enabled
+        if allowed_domains is not None and not allowed_domains:
+            raise ValueError("operator browser requires at least one allowed domain")
+        self.allowed_domains = allowed_domains
 
         # 浏览器相关
         self.cdp_url: str = cdp_url
-        self.playwright: Optional[Playwright] = None
-        self.browser: Optional[Browser] = None
-        self.page: Optional[Page] = None
+        self.playwright: Playwright | None = None
+        self.browser: Browser | None = None
+        self.page: Page | None = None
+
+    async def _guard_route(self, route: Route) -> None:
+        if self.allowed_domains is None:
+            await route.continue_()
+            return
+        url = route.request.url
+        if url.startswith(("about:", "blob:", "data:")):
+            await route.continue_()
+            return
+        try:
+            assert_operator_url_allowed(url, self.allowed_domains)
+        except (PermissionError, ValueError):
+            await route.abort("blockedbyclient")
+            return
+        await route.continue_()
 
     async def _ensure_browser(self) -> None:
         """确保浏览器存在，如果不存在则初始化"""
-        if not self.browser or not self.page:
-            if not await self.initialize():
-                raise Exception("初始化Playwright浏览器失败")
+        if (not self.browser or not self.page) and not await self.initialize():
+            raise BrowserInitializationError("初始化Playwright浏览器失败")
 
     async def _ensure_page(self) -> None:
         """确保浏览器页面存在，如果不存在则新建"""
@@ -107,21 +131,22 @@ class PlaywrightBrowser(BrowserProtocol):
         # 4.判断是否传递了llm，如果传递了，还可以使用llm对markdown_content进行整理
         if self.llm:
             # 5.调用llm对markdown_content内容进行二次整理
-            response = await self.llm.invoke([
-                {
-                    "role": "system",
-                    "content": "您是一名专业的网页信息提取助手。请从当前页面内容中提取所有信息并将其转换为markdown格式。",
-                },
-                {
-                    "role": "user",
-                    "content": markdown_content[:max_content_length],
-                }
-            ])
+            response = await self.llm.invoke(
+                [
+                    {
+                        "role": "system",
+                        "content": "您是一名专业的网页信息提取助手。请从当前页面内容中提取所有信息并将其转换为markdown格式。",
+                    },
+                    {
+                        "role": "user",
+                        "content": markdown_content[:max_content_length],
+                    },
+                ]
+            )
             return response.get("content", "")
-        else:
-            return markdown_content[:max_content_length]
+        return markdown_content[:max_content_length]
 
-    async def _extract_interactive_elements(self) -> List[str]:
+    async def _extract_interactive_elements(self) -> list[str]:
         """提取当前页面上的可交互元素"""
         # 1.确保页面存在
         await self._ensure_page()
@@ -136,19 +161,18 @@ class PlaywrightBrowser(BrowserProtocol):
         self.page.interactive_elements_cache = interactive_elements
 
         # 5.格式化可交互元素为字符串
-        formatted_elements = []
-        for element in interactive_elements:
-            formatted_elements.append(f"{element['index']}:<{element['tag']}>{element['text']}</{element['tag']}>")
+        return [
+            (f"{element['index']}:<{element['tag']}>{element['text']}</{element['tag']}>")
+            for element in interactive_elements
+        ]
 
-        return formatted_elements
-
-    async def _get_element_by_id(self, index: int) -> Optional[Any]:
+    async def _get_element_by_id(self, index: int) -> Any | None:
         """根据传递的索引/id获取对应的元素"""
         # 1.判断也当前页面是否存在可交互元素缓存
         if (
-                not hasattr(self.page, "interactive_elements_cache") or
-                not self.page.interactive_elements_cache or
-                index >= len(self.page.interactive_elements_cache)
+            not hasattr(self.page, "interactive_elements_cache")
+            or not self.page.interactive_elements_cache
+            or index >= len(self.page.interactive_elements_cache)
         ):
             return None
 
@@ -166,28 +190,28 @@ class PlaywrightBrowser(BrowserProtocol):
         return len(elements)
 
     async def _wait_for_stable_page(
-            self,
-            before_url: Optional[str] = None,
-            timeout_ms: int = 15000,
+        self,
+        before_url: str | None = None,
+        timeout_ms: int = 15000,
     ) -> None:
         """Wait for navigation/load to settle after a click or form submit."""
         await self._ensure_page()
         try:
             await self.page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.debug("wait_for_load_state(domcontentloaded): %s", exc)
         if before_url is not None and self._current_page_url() != before_url:
             try:
                 await self.page.wait_for_load_state("load", timeout=min(timeout_ms, 10000))
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 logger.debug("wait_for_load_state(load) after navigation: %s", exc)
-        await self.wait_for_page_load(timeout=max(1, timeout_ms // 1000))
+        await self.wait_for_page_load(timeout_seconds=max(1, timeout_ms // 1000))
 
-    async def _safe_interactive_element_count(self, retries: int = 3) -> Optional[int]:
+    async def _safe_interactive_element_count(self, retries: int = 3) -> int | None:
         for attempt in range(retries):
             try:
                 return await self._interactive_element_count()
-            except Exception as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 if _is_navigation_context_error(exc) and attempt < retries - 1:
                     logger.debug(
                         "interactive element count retry after navigation (attempt %s): %s",
@@ -202,15 +226,15 @@ class PlaywrightBrowser(BrowserProtocol):
         return None
 
     async def _build_action_verification_note(
-            self,
-            before_url: str,
-            before_element_count: int,
-            action: str,
+        self,
+        before_url: str,
+        before_element_count: int,
+        action: str,
     ) -> str:
         await self._wait_for_stable_page(before_url)
         after_url = self._current_page_url()
         after_count = await self._safe_interactive_element_count()
-        parts: List[str] = [f"{action}已执行"]
+        parts: list[str] = [f"{action}已执行"]
         if before_url != after_url:
             parts.append(f"URL: {before_url} -> {after_url}")
         else:
@@ -223,9 +247,9 @@ class PlaywrightBrowser(BrowserProtocol):
             parts.append(f"可交互元素数量仍为 {after_count}")
         return "; ".join(parts)
 
-    async def _locate_by_vision(self, description: str) -> Optional[Tuple[float, float]]:
+    async def _locate_by_vision(self, description: str) -> tuple[float, float] | None:
         vision_llm = self.vision_llm
-        if not vision_llm or not self.supports_multimodal or not description.strip():
+        if not vision_llm or not self.vision_enabled or not description.strip():
             return None
         started = time.monotonic()
         try:
@@ -240,13 +264,20 @@ class PlaywrightBrowser(BrowserProtocol):
                 f"返回 JSON 对象，包含像素坐标 click_x 与 click_y（原点在左上角，"
                 f"视口约 {int(width)}x{int(height)}）。只返回 JSON，无其它文字。"
             )
-            response = await vision_llm.invoke([{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                ],
-            }])
+            response = await vision_llm.invoke(
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{b64}"},
+                            },
+                        ],
+                    }
+                ]
+            )
             content = (response.get("content") or "").strip()
             if not content:
                 record_vision_fallback("empty_response", time.monotonic() - started)
@@ -263,17 +294,17 @@ class PlaywrightBrowser(BrowserProtocol):
                 fx, fy = fx * width, fy * height
             record_vision_fallback("success", time.monotonic() - started)
             return fx, fy
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("视觉定位失败: %s", exc)
             record_vision_fallback("failure", time.monotonic() - started)
             return None
 
     async def click(
-            self,
-            index: Optional[int] = None,
-            coordinate_x: Optional[float] = None,
-            coordinate_y: Optional[float] = None,
-            description: Optional[str] = None,
+        self,
+        index: int | None = None,
+        coordinate_x: float | None = None,
+        coordinate_y: float | None = None,
+        description: str | None = None,
     ) -> ToolResult:
         """根据传递的索引位置+xy坐标+视觉描述实现点击"""
         await self._ensure_page()
@@ -289,12 +320,15 @@ class PlaywrightBrowser(BrowserProtocol):
                 if coords:
                     await self.page.mouse.click(coords[0], coords[1])
                 else:
-                    return ToolResult(success=False, message=f"使用索引{index}查找该元素无效, 视觉兜底亦未定位")
+                    return ToolResult(
+                        success=False, message=f"使用索引{index}查找该元素无效, 视觉兜底亦未定位"
+                    )
             elif not element:
                 return ToolResult(success=False, message=f"使用索引{index}查找该元素无效, 未找到")
             else:
                 try:
-                    is_visible = await self.page.evaluate("""(element) => {
+                    is_visible = await self.page.evaluate(
+                        """(element) => {
                         if (!element) return false;
                         const rect = element.getBoundingClientRect();
                         const style = window.getComputedStyle(element);
@@ -305,24 +339,29 @@ class PlaywrightBrowser(BrowserProtocol):
                             style.visibility === 'hidden' ||
                             style.opacity === '0'
                         );
-                    }""", element)
+                    }""",
+                        element,
+                    )
                     if not is_visible:
-                        await self.page.evaluate("""(element) => {
+                        await self.page.evaluate(
+                            """(element) => {
                             if (element) {
                                 element.scrollIntoView({behavior: 'smooth', block: 'center'})
                             }
-                        }""", element)
+                        }""",
+                            element,
+                        )
                         await asyncio.sleep(1)
                     await element.click(timeout=5000)
-                except Exception as e:
+                except (OSError, RuntimeError, ValueError) as e:
                     if description:
                         coords = await self._locate_by_vision(description)
                         if coords:
                             await self.page.mouse.click(coords[0], coords[1])
                         else:
-                            return ToolResult(success=False, message=f"点击元素出错: {str(e)}")
+                            return ToolResult(success=False, message=f"点击元素出错: {e!s}")
                     else:
-                        return ToolResult(success=False, message=f"点击元素出错: {str(e)}")
+                        return ToolResult(success=False, message=f"点击元素出错: {e!s}")
         elif description:
             coords = await self._locate_by_vision(description)
             if not coords:
@@ -357,6 +396,10 @@ class PlaywrightBrowser(BrowserProtocol):
                 # 4.获取浏览器的所有上下文
                 contexts = self.browser.contexts
 
+                context = contexts[0] if contexts else await self.browser.new_context()
+                if self.allowed_domains is not None:
+                    await context.route("**/*", self._guard_route)
+
                 # 5.如果上下文存在，并且第一个上下文只有一个页面则执行如下逻辑
                 if contexts and len(contexts[0].pages) == 1:
                     # 6.获取当前上下文的第一个页面
@@ -364,10 +407,10 @@ class PlaywrightBrowser(BrowserProtocol):
 
                     # 7.判断当前页面是不是空页面，如果是则直接使用page，否则新建一个
                     if (
-                            page.url == "about:blank" or
-                            page.url == "chrome://newtab/" or
-                            page.url == "chrome://new-tab-page/" or
-                            not page.url
+                        page.url == "about:blank"
+                        or page.url == "chrome://newtab/"
+                        or page.url == "chrome://new-tab-page/"
+                        or not page.url
                     ):
                         self.page = page
                     else:
@@ -375,23 +418,23 @@ class PlaywrightBrowser(BrowserProtocol):
                         self.page = await contexts[0].new_page()
                 else:
                     # 9.上下文不存在或者页面不唯一则表示数据被污染，新建一个页面
-                    context = contexts[0] if contexts else await self.browser.new_context()
                     self.page = await context.new_page()
 
                 return True
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 # 10.清除所有资源
                 await self.cleanup()
 
                 # 11.判断重试次数是否等于最大重试次数
                 if attempt == max_retries - 1:
-                    logger.error(f"初始化Playwright浏览器失败(已重试{max_retries}次): {str(e)}")
+                    logger.error("初始化Playwright浏览器失败(已重试%s次): %s", max_retries, e)
                     return False
 
                 # 12.使用指数级增长进行休眠，最大休眠时间为10s
                 retry_interval = min(retry_interval * 2, 10)
-                logger.warning(f"初始化Playwright浏览器失败, 即将进行第{attempt + 1}次重试: {str(e)}")
+                logger.warning("初始化Playwright浏览器失败, 即将进行第%s次重试: %s", attempt + 1, e)
                 await asyncio.sleep(retry_interval)
+        return None
 
     async def cleanup(self) -> None:
         """清除Playwright资源，包含浏览器+页面+Playwright"""
@@ -421,16 +464,16 @@ class PlaywrightBrowser(BrowserProtocol):
             # 8.停止playwright
             if self.playwright:
                 await self.playwright.stop()
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             # 9记录错误日志
-            logger.error(f"清理Playwright浏览器资源出错: {str(e)}")
+            logger.error("清理Playwright浏览器资源出错: %s", e)
         finally:
             # 10.重置所有资源
             self.page = None
             self.browser = None
             self.playwright = None
 
-    async def wait_for_page_load(self, timeout: int = 15) -> bool:
+    async def wait_for_page_load(self, timeout_seconds: int = 15) -> bool:
         """传递超时时间，等待当前页面是否加载完毕"""
         # 1.确保当前页面存在
         await self._ensure_page()
@@ -440,7 +483,7 @@ class PlaywrightBrowser(BrowserProtocol):
         check_interval = 5
 
         # 3.循环检测网页是否加载成功
-        while asyncio.get_event_loop().time() - start_time < timeout:
+        while asyncio.get_event_loop().time() - start_time < timeout_seconds:
             # 4.使用js代码判断网页是否加载成功
             is_completed = await self.page.evaluate("""() => document.readyState === 'complete'""")
             if is_completed:
@@ -453,6 +496,8 @@ class PlaywrightBrowser(BrowserProtocol):
 
     async def navigate(self, url: str) -> ToolResult:
         """根据传递的url跳转到指定页面"""
+        if self.allowed_domains is not None:
+            assert_operator_url_allowed(url, self.allowed_domains)
         # 1.确保页面存在
         await self._ensure_page()
 
@@ -468,9 +513,9 @@ class PlaywrightBrowser(BrowserProtocol):
                 "url": self._current_page_url(),
             }
             return ToolResult(success=True, data=data)
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             # 返回错误的工具结果
-            return ToolResult(success=False, message=f"浏览器导航到[{url}]失败: {str(e)}")
+            return ToolResult(success=False, message=f"浏览器导航到[{url}]失败: {e!s}")
 
     async def view_page(self) -> ToolResult:
         """获取当前网页的内容(内容+可交互元素列表)"""
@@ -494,7 +539,7 @@ class PlaywrightBrowser(BrowserProtocol):
 
     async def take_screenshot(self) -> ToolResult:
         """按需捕获当前页面截图。"""
-        if not self.supports_multimodal:
+        if not self.vision_enabled:
             return ToolResult(success=False, message="当前模型不支持多模态，无法使用浏览器截图工具")
         await self._ensure_page()
         await self.wait_for_page_load()
@@ -509,12 +554,12 @@ class PlaywrightBrowser(BrowserProtocol):
         )
 
     async def input(
-            self,
-            text: str,
-            press_enter: bool,
-            index: Optional[int] = None,
-            coordinate_x: Optional[float] = None,
-            coordinate_y: Optional[float] = None,
+        self,
+        text: str,
+        press_enter: bool,
+        index: int | None = None,
+        coordinate_x: float | None = None,
+        coordinate_y: float | None = None,
     ) -> ToolResult:
         """根据传递的文本+换行标识+索引+xy位置实现输入框文本输入"""
         await self._ensure_page()
@@ -530,18 +575,18 @@ class PlaywrightBrowser(BrowserProtocol):
                 # 4.根据索引查找元素
                 element = await self._get_element_by_id(index)
                 if not element:
-                    return ToolResult(success=False, message=f"输入文本失败, 该元素不存在")
+                    return ToolResult(success=False, message="输入文本失败, 该元素不存在")
 
                 try:
                     # 5.先清空原始输入框的内容然后再填充
                     await element.fill("")
                     await element.type(text)
-                except Exception as e:
+                except (OSError, RuntimeError, ValueError):
                     # 6.如果填充失败则尝试点击后输入文本，而不是直接清空
                     await element.click()
                     await element.type(text)
-            except Exception as e:
-                return ToolResult(success=False, message=f"输入文本失败: {str(e)}")
+            except (OSError, RuntimeError, ValueError) as e:
+                return ToolResult(success=False, message=f"输入文本失败: {e!s}")
 
         # 7.判断是否按Enter键
         if press_enter:
@@ -575,20 +620,22 @@ class PlaywrightBrowser(BrowserProtocol):
             # 2.获取元素信息
             element = await self._get_element_by_id(index)
             if not element:
-                return ToolResult(success=False, message=f"使用索引[{index}]查找该下拉菜单元素不存在")
+                return ToolResult(
+                    success=False, message=f"使用索引[{index}]查找该下拉菜单元素不存在"
+                )
 
             # 3.调用函数直接选择对应选项
             await element.select_option(index=option)
             return ToolResult(success=True)
-        except Exception as e:
-            return ToolResult(success=False, message=f"选择下拉菜单选项失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            return ToolResult(success=False, message=f"选择下拉菜单选项失败: {e!s}")
 
     async def restart(self, url: str) -> ToolResult:
         """重启并跳转到指定URL"""
         await self.cleanup()
         return await self.navigate(url)
 
-    async def scroll_up(self, to_top: Optional[bool] = None) -> ToolResult:
+    async def scroll_up(self, to_top: bool | None = None) -> ToolResult:
         """向上滚动浏览器一个屏幕或者整个页面"""
         # 1.确保页面存在
         await self._ensure_page()
@@ -601,7 +648,7 @@ class PlaywrightBrowser(BrowserProtocol):
 
         return ToolResult(success=True)
 
-    async def scroll_down(self, to_down: Optional[bool] = None) -> ToolResult:
+    async def scroll_down(self, to_down: bool | None = None) -> ToolResult:
         """向下滚动浏览器一个屏幕或者到最底部"""
         # 1.确保页面存在
         await self._ensure_page()
@@ -614,16 +661,13 @@ class PlaywrightBrowser(BrowserProtocol):
 
         return ToolResult(success=True)
 
-    async def screenshot(self, full_page: Optional[bool] = None) -> bytes:
+    async def screenshot(self, full_page: bool | None = None) -> bytes:
         """传递full_page完成网页截图"""
         # 1.确保页面存在
         await self._ensure_page()
 
         # 2.创建一个截图配置
-        screenshot_options = {
-            "full_page": full_page,
-            "type": "png"
-        }
+        screenshot_options = {"full_page": full_page, "type": "png"}
 
         return await self.page.screenshot(**screenshot_options)
 
@@ -635,14 +679,14 @@ class PlaywrightBrowser(BrowserProtocol):
         # 2.在正式开始执行代码之前先注入logs
         try:
             await self.page.evaluate(INJECT_CONSOLE_LOGS_FUNC)
-        except Exception as e:
-            logger.warning(f"注入window.console.logs失败: {str(e)}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.warning("注入window.console.logs失败: %s", e)
 
         # 3.正式执行js脚本
         result = await self.page.evaluate(javascript)
         return ToolResult(success=True, data={"result": result})
 
-    async def console_view(self, max_lines: Optional[int] = None) -> ToolResult:
+    async def console_view(self, max_lines: int | None = None) -> ToolResult:
         """根据传递的行数查看控制台的日志"""
         # 1.确保页面存在
         await self._ensure_page()

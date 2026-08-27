@@ -1,7 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from sse_starlette import EventSourceResponse, ServerSentEvent
@@ -20,26 +18,29 @@ a2a_router = APIRouter(tags=["A2A Server"])
 
 @well_known_router.get("/.well-known/agent-card.json")
 async def get_agent_card(
-        request: Request,
-        a2a_server_service: A2AServerService = Depends(get_a2a_server_service),
-) -> Dict[str, Any]:
+    request: Request,
+    a2a_server_service: A2AServerService = Depends(get_a2a_server_service),
+) -> dict[str, Any]:
     base_url = str(request.base_url).rstrip("/")
     return await a2a_server_service.build_agent_card(base_url)
 
 
 @a2a_router.post("")
 async def a2a_jsonrpc(
-        request: Request,
-        payload: Dict[str, Any],
-        principal=Depends(require_service_api_key),
-        a2a_server_service: A2AServerService = Depends(get_a2a_server_service),
+    request: Request,
+    payload: dict[str, Any],
+    principal=Depends(require_service_api_key),
+    a2a_server_service: A2AServerService = Depends(get_a2a_server_service),
 ):
     method = payload.get("method")
     if method == "message/send":
         return await a2a_server_service.handle_message_send(payload, principal=principal)
     if method == "message/stream":
+
         async def event_generator():
-            async for chunk in a2a_server_service.stream_message_events(payload, principal=principal):
+            async for chunk in a2a_server_service.stream_message_events(
+                payload, principal=principal
+            ):
                 yield ServerSentEvent(data=chunk)
 
         return EventSourceResponse(event_generator())

@@ -1,16 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 import base64
 import hashlib
 import logging
 import re
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 from cryptography.fernet import Fernet, InvalidToken
 
+from app.domain.utils.secret_masking import mask_secret
+
 logger = logging.getLogger(__name__)
 
-_FERNET_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]+=*$")
 _KEY_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _VERSIONED_PREFIX = "v2"
 
@@ -33,7 +32,7 @@ class ApiKeyCipher:
         secret: str,
         *,
         key_id: str = "primary",
-        previous_secrets: Optional[Mapping[str, str]] = None,
+        previous_secrets: Mapping[str, str] | None = None,
     ) -> None:
         if not secret:
             raise ValueError("API_KEY_SECRET 未配置，无法初始化密钥加密器")
@@ -49,25 +48,7 @@ class ApiKeyCipher:
                 raise ValueError(f"历史 API Key key id[{previous_key_id}]未配置密钥")
             if previous_key_id == key_id and previous_secret != secret:
                 raise ValueError("当前 key id 不能映射到不同的历史密钥")
-            self._fernets[previous_key_id] = Fernet(
-                _derive_fernet_key(previous_secret)
-            )
-
-    def encrypt(self, plain: str) -> str:
-        if not plain:
-            return ""
-        return self._fernet.encrypt(plain.encode()).decode()
-
-    def decrypt_or_raise(self, encrypted: str) -> str:
-        """Decrypt fernet_v1 ciphertext; raise on invalid token."""
-        if not encrypted:
-            return ""
-        for fernet in self._fernets.values():
-            try:
-                return fernet.decrypt(encrypted.encode()).decode()
-            except InvalidToken:
-                continue
-        raise ApiKeyCipherError("无法解密 LLM API Key，请检查 API_KEY_SECRET 密钥环是否正确")
+            self._fernets[previous_key_id] = Fernet(_derive_fernet_key(previous_secret))
 
     def encrypt_versioned(self, plain: str) -> str:
         if not plain:
@@ -90,12 +71,10 @@ class ApiKeyCipher:
         try:
             return fernet.decrypt(token.encode()).decode()
         except InvalidToken as exc:
-            raise ApiKeyCipherError(
-                f"无法使用 API Key key id[{key_id}]解密凭据"
-            ) from exc
+            raise ApiKeyCipherError(f"无法使用 API Key key id[{key_id}]解密凭据") from exc
 
     @staticmethod
-    def key_id_from_ciphertext(encrypted: str) -> Optional[str]:
+    def key_id_from_ciphertext(encrypted: str) -> str | None:
         try:
             prefix, key_id, _ = encrypted.split(".", 2)
         except ValueError:
@@ -105,23 +84,5 @@ class ApiKeyCipher:
         return key_id
 
     @staticmethod
-    def looks_like_fernet_token(value: str) -> bool:
-        """Heuristic check for Fernet token shape without decrypting."""
-        if not value or len(value) < 44:
-            return False
-        if not _FERNET_TOKEN_RE.fullmatch(value):
-            return False
-        try:
-            padding = b"=" * ((4 - len(value) % 4) % 4)
-            raw = base64.urlsafe_b64decode(value.encode() + padding)
-        except Exception:
-            return False
-        return len(raw) >= 57 and raw[0] == 0x80
-
-    @staticmethod
     def mask(api_key: str) -> str:
-        if not api_key:
-            return ""
-        if len(api_key) <= 8:
-            return "****"
-        return api_key[:4] + "****" + api_key[-4:]
+        return mask_secret(api_key)
