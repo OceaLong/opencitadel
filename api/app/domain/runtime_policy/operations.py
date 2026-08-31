@@ -56,7 +56,6 @@ class SandboxOperationsPolicy(_OperationsPolicyModel):
     idle_timeout_minutes: int = Field(default=30, ge=1, le=1_440)
     warmup_retry_interval_seconds: float = Field(default=0.5, ge=0.05, le=60)
     warmup_max_retries: int = Field(default=30, ge=1, le=1_000)
-    fast_warmup_max_retries: int = Field(default=5, ge=1, le=100)
     max_sandboxes_per_node: int = Field(default=4, ge=1, le=1_000)
     max_dynamic_sandboxes_global: int = Field(default=0, ge=0, le=100_000)
     admission_min_host_available_mb: int = Field(default=3_072, ge=0, le=1_048_576)
@@ -70,8 +69,6 @@ class SandboxOperationsPolicy(_OperationsPolicyModel):
     def validate_pool_and_reclaim(self) -> "SandboxOperationsPolicy":
         if self.pool_enabled and self.pool_size < 1:
             raise ValueError("pool_size must be positive when pool_enabled is true")
-        if self.fast_warmup_max_retries > self.warmup_max_retries:
-            raise ValueError("fast_warmup_max_retries must not exceed warmup_max_retries")
         if (
             self.admission_reclaim_enabled
             and self.admission_reclaim_target_mb < self.admission_min_host_available_mb

@@ -8,8 +8,7 @@ from app.application.services.compliance_service import ComplianceService
 from app.application.services.evidence_service import EvidenceService
 from app.application.services.governance_overview_service import GovernanceOverviewService
 from app.application.services.governance_profile_service import GovernanceProfileService
-from app.domain.models.scope import WorkspaceContext
-from app.interfaces.auth_dependencies import get_workspace_context, require_auditor_or_admin
+from app.interfaces.auth_dependencies import require_auditor_or_admin
 from app.interfaces.schemas import Response as ApiResponse
 from app.interfaces.schemas.compliance import (
     ChainVerifyResponse,
@@ -121,10 +120,14 @@ async def get_compliance_report(
 )
 async def get_governance_profile(
     session_id: str,
-    ctx: WorkspaceContext = Depends(get_workspace_context),
     service: GovernanceProfileService = Depends(get_governance_profile_service),
 ):
-    profile = await service.build_profile(session_id, scope=ctx.scope)
+    # Auditors and admins may inspect any session's governance evidence. This
+    # endpoint is gated by require_auditor_or_admin, so cross-owner reads are
+    # intentional here -- mirrors download_evidence_package, which likewise
+    # passes scope=None. Using the caller's personal ctx.scope previously made
+    # every cross-owner session return 404 (even for admins).
+    profile = await service.build_profile(session_id, scope=None)
     return ApiResponse.success(data=profile)
 
 

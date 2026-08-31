@@ -11,7 +11,10 @@ from functools import partial
 
 from app.application.execution.activities.child_run import ChildRunActivityHandler
 from app.application.execution.activities.model_call import ModelCallActivityHandler
-from app.application.execution.activities.patrol import PatrolExecutionActivityHandler
+from app.application.execution.activities.patrol import (
+    PatrolExecutionActivityHandler,
+    PatrolValidationActivityHandler,
+)
 from app.application.execution.activities.remediation import RemediationActivityHandler
 from app.application.execution.activities.resource_build import (
     CodebaseBuildActivityHandler,
@@ -83,6 +86,7 @@ def _build_activity_registry(shared: SharedServices) -> ActivityRegistry:
         artifacts=shared.artifact_service,
         memories=shared.memory_service,
         embeddings=shared.embedding_service,
+        llm_factory=shared.resilient_llm_factory,
     )
     knowledge_pipeline = KBIngestionRunner(
         uow_factory=shared.uow_factory,
@@ -95,6 +99,7 @@ def _build_activity_registry(shared: SharedServices) -> ActivityRegistry:
         uow_factory=shared.uow_factory,
         sandbox_factory=shared.sandbox_factory,
         file_storage=shared.file_storage,
+        object_storage=shared.object_storage,
         embeddings=shared.embedding_service,
     )
     collector = MCPPatrolCollectorValidator(shared.mcp_connection_pool)
@@ -127,6 +132,8 @@ def _build_activity_registry(shared: SharedServices) -> ActivityRegistry:
         KnowledgeBuildActivityHandler(
             objects=shared.activity_objects,
             pipeline=knowledge_pipeline,
+            models=shared.inference_model_service,
+            client_factory=shared.resilient_llm_factory,
         ),
         CodebaseBuildActivityHandler(
             objects=shared.activity_objects,
@@ -137,6 +144,12 @@ def _build_activity_registry(shared: SharedServices) -> ActivityRegistry:
             uow_factory=shared.uow_factory,
             collector=collector,
             runs=shared.patrol_run_service,
+        ),
+        PatrolValidationActivityHandler(
+            objects=shared.activity_objects,
+            uow_factory=shared.uow_factory,
+            collector=collector,
+            packs=shared.patrol_pack_service,
         ),
     )
 
@@ -239,6 +252,8 @@ async def open_kernel_runtime(
                     stop_event=supervisor.stop_event,
                     resource_version_gc_service=resource_gc,
                     patrol_retention_service=patrol_retention,
+                    mcp_pool=shared.mcp_connection_pool,
+                    a2a_pool=shared.a2a_connection_pool,
                 ),
                 kind=TaskKind.CRITICAL,
             )

@@ -10,7 +10,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
+import { useEnabledOAuthProviders } from "@/hooks/use-oauth-providers";
 import { teamApi, type TeamInvitationPreview, type TeamMember } from "@/lib/api/team";
 import { useAuth } from "@/providers/auth-provider";
 import { useClientDataScope } from "@/providers/client-data-provider";
@@ -48,6 +50,7 @@ export default function AcceptInvitationPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [registerError, setRegisterError] = useState("");
+  const oauthProviders = useEnabledOAuthProviders();
 
   const loginHref = useMemo(
     () => `/login?redirect=${encodeURIComponent(`/invitations/${token}`)}`,
@@ -196,46 +199,67 @@ export default function AcceptInvitationPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={onRegister} className="space-y-4">
-              <Input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder={tAuth("emailPlaceholder")}
-                type="email"
-                autoComplete="email"
-              />
-              <Input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder={tAuth("usernamePlaceholder")}
-                autoComplete="username"
-              />
-              <Input
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={tAuth("passwordMinPlaceholder")}
-                type="password"
-                autoComplete="new-password"
-              />
+              <div className="space-y-2">
+                <Label htmlFor="invite-email">{tAuth("emailPlaceholder")}</Label>
+                <Input
+                  id="invite-email"
+                  name="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder={tAuth("emailPlaceholder")}
+                  type="email"
+                  autoComplete="email"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="invite-username">{tAuth("usernamePlaceholder")}</Label>
+                <Input
+                  id="invite-username"
+                  name="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder={tAuth("usernamePlaceholder")}
+                  autoComplete="username"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="invite-password">{tAuth("passwordMinPlaceholder")}</Label>
+                <Input
+                  id="invite-password"
+                  name="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={tAuth("passwordMinPlaceholder")}
+                  type="password"
+                  autoComplete="new-password"
+                />
+              </div>
               {registerError ? <p className="text-destructive text-sm">{registerError}</p> : null}
               <Button className="w-full" disabled={registering}>
                 {registering ? tAuth("registering") : t("registerAndJoin")}
               </Button>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => (window.location.href = oauthHref("google", token))}
-                >
-                  <span translate="no">Google</span>
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => (window.location.href = oauthHref("github", token))}
-                >
-                  <span translate="no">GitHub</span>
-                </Button>
-              </div>
+              {(oauthProviders.has("google") || oauthProviders.has("github")) && (
+                <div className="grid grid-cols-2 gap-2">
+                  {oauthProviders.has("google") && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => (window.location.href = oauthHref("google", token))}
+                    >
+                      <span translate="no">Google</span>
+                    </Button>
+                  )}
+                  {oauthProviders.has("github") && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => (window.location.href = oauthHref("github", token))}
+                    >
+                      <span translate="no">GitHub</span>
+                    </Button>
+                  )}
+                </div>
+              )}
             </form>
           </CardContent>
         </Card>

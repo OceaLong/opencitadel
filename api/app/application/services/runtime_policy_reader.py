@@ -121,7 +121,15 @@ class RuntimePolicyReader(PolicyHeadReader):
         now: datetime,
     ) -> ActiveExecutionPolicy:
         normalized_now = normalize_utc(now)
-        await self.refresh_if_due(now=normalized_now)
+        if require_fresh:
+            # Run admission freezes the execution policy into an immutable
+            # snapshot. It must observe PostgreSQL after an acknowledged
+            # policy mutation even when the lossy hint has not arrived yet.
+            async with self._lock:
+                self._require_initialized()
+                await self._refresh_locked(now=normalized_now)
+        else:
+            await self.refresh_if_due(now=normalized_now)
         pair = self._require_initialized()
         self._enforce_freshness(require_fresh=require_fresh, now=normalized_now)
         return pair.execution

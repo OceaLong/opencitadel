@@ -124,7 +124,6 @@ async def open_api_runtime(
                 quota_service=shared.quota_service,
                 mcp_integration_service=shared.mcp_integration_service,
                 a2a_integration_service=shared.a2a_integration_service,
-                integration_projection_service=shared.integration_projection_service,
                 inference_model_service=shared.inference_model_service,
                 inference_endpoint_service=shared.inference_endpoint_service,
                 inference_binding_service=shared.inference_binding_service,

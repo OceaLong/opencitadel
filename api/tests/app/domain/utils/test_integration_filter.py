@@ -43,7 +43,10 @@ def test_filter_enabled_a2a_runtime() -> None:
     assert [item.id for item in filter_enabled_a2a_runtime(runtime).servers] == ["1"]
 
 
-def test_filter_mcp_runtime_by_display_name_refs() -> None:
+def test_filter_mcp_runtime_by_stable_id_refs() -> None:
+    # Regression: MCP refs are stable ids (matching the UI writes and the runtime
+    # resolver record.id filter), not display names. Filtering by display name
+    # silently matched zero servers, so skill-bound MCP tools vanished.
     runtime = MCPRuntime(
         servers={
             "id-a": _mcp("id-a", "a"),
@@ -51,7 +54,8 @@ def test_filter_mcp_runtime_by_display_name_refs() -> None:
         }
     )
 
-    assert list(filter_mcp_runtime_by_refs(runtime, ["a"]).servers) == ["id-a"]
+    assert list(filter_mcp_runtime_by_refs(runtime, ["id-a"]).servers) == ["id-a"]
+    assert list(filter_mcp_runtime_by_refs(runtime, ["a"]).servers) == []
 
 
 def test_filter_a2a_runtime_by_stable_id_refs() -> None:

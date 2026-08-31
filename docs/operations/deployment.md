@@ -181,6 +181,37 @@ release workflow scans every image before publish and attaches an SBOM plus
 signed provenance. Deploy by immutable digest after verifying provenance,
 rather than relying on `latest`.
 
+The deterministic inference provider under `e2e/fixtures/` is not a release
+artifact. It exists only in the Compose `acceptance` profile and must never be
+added to Helm, Kustomize, quickstart, production settings, or the release image
+matrix.
+
+## Deterministic acceptance gate
+
+Run the same release-blocking full-stack gate used by CI:
+
+```bash
+./scripts/run-acceptance-e2e.sh --disposable
+```
+
+The runner owns a unique Compose project and run namespace, configures inference
+through the public control plane, exercises the real execution kernel and
+Collector, and writes `tmp/acceptance/<run-id>/manifest.json`. The evidence
+schema is `contracts/acceptance-evidence.schema.json`; missing, duplicated,
+skipped, interrupted, or failed required IDs fail the gate.
+
+Cleanup is label-bound to `com.docker.compose.project`,
+`com.opencitadel.acceptance.project`, and `com.opencitadel.acceptance.run`.
+Dynamic Sandboxes also require `opencitadel.io/sandbox=true` and the run-scoped
+name prefix. With `--disposable`, invocation-owned volumes must reach zero.
+Without it, volumes and product history are retained and reported, while
+containers, networks, and dynamic Sandboxes are still drained.
+
+CI publishes `tmp/acceptance/` as the `acceptance-evidence` artifact even when
+the gate fails. Inspect the manifest `failure_reason`, `logs/stack.log`, and
+Playwright traces/screenshots before retrying. Do not replace runner cleanup
+with a broad Docker prune.
+
 ## Release gates
 
 Before rollout, run:
@@ -201,6 +232,7 @@ npm run build
 cd ..
 docker compose config
 helm lint deploy/helm/opencitadel
+./scripts/run-acceptance-e2e.sh --disposable
 ```
 
 Database-backed execution/RLS tests require a disposable PostgreSQL database

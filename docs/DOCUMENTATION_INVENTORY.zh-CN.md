@@ -77,8 +77,8 @@ OpenCitadel Markdown 文档的权威清单。新增、移动或废弃文档时�
 | [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.zh-CN.md) | Helm 安装 | module | paired | none | low |
 | [deploy/patrol-demo/README.md](../deploy/patrol-demo/README.zh-CN.md) | 一次性 Patrol 故障实验室 | module | paired | none | low |
 | [demo/ops-console/README.md](../demo/ops-console/README.zh-CN.md) | Web Operator 演示后端 | module | paired | none | low |
-| [e2e/README.md](../e2e/README.zh-CN.md) | Playwright E2E 冒烟测试 | module | paired | none | low |
-| [scripts/README.md](../scripts/README.zh-CN.md) | quickstart、check-docs | module | paired | none | low |
+| [e2e/README.md](../e2e/README.zh-CN.md) | 确定性全栈验收、证据与清理 | module | paired | none | high |
+| [scripts/README.md](../scripts/README.zh-CN.md) | quickstart、文档检查、验收 Runner | module | paired | none | medium |
 | [deploy/scripts/README.md](../deploy/scripts/README.zh-CN.md) | 主机调优脚本 | module | paired | none | low |
 
 ## 开源治理（`.github/`）

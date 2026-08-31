@@ -1,21 +1,26 @@
 """Durable Activity boundaries for resource candidate publication."""
 
 import asyncio
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncIterator, Callable
 from typing import Protocol
 
 from app.application.execution.activity_inputs import ActivityObjectStore
+from app.application.services.inference_model_service import InferenceModelService
 from app.domain.execution.activity import (
     ActivityContext,
     ActivityOutcome,
     ActivityRequest,
 )
+from app.domain.external.llm import LLM
 from app.domain.models.build_progress import BuildProgress
 from app.domain.models.inference import PLATFORM_EMBEDDING_DIMENSIONS
 from app.domain.runtime_policy import (
     CodebaseExecutionPolicy,
     KnowledgeBaseExecutionPolicy,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeBuildPipeline(Protocol):
@@ -26,6 +31,8 @@ class KnowledgeBuildPipeline(Protocol):
         policy: KnowledgeBaseExecutionPolicy,
         embedding_model_id: str | None,
         embedding_dimensions: int | None,
+        graph_llm: LLM | None = None,
+        ocr_llm: LLM | None = None,
     ) -> AsyncIterator[BuildProgress]: ...
     async def cancel(self, build_id: str) -> None: ...
 
@@ -145,9 +152,44 @@ class KnowledgeBuildActivityHandler(_ResourceBuildActivity):
         *,
         objects: ActivityObjectStore,
         pipeline: KnowledgeBuildPipeline,
+        models: InferenceModelService | None = None,
+        client_factory: Callable[..., LLM] | None = None,
     ) -> None:
         super().__init__(objects=objects)
         self._pipeline = pipeline
+        self._models = models
+        self._client_factory = client_factory
+
+    async def _resolve_build_llms(
+        self,
+        context: ActivityContext,
+        policy: KnowledgeBaseExecutionPolicy,
+    ) -> tuple[LLM | None, LLM | None]:
+        # GraphRAG and vision OCR need a chat client resolved from the caller's
+        # binding. Absent a binding the build degrades (graph_search unavailable)
+        # rather than failing the whole ingestion.
+        if self._models is None or self._client_factory is None:
+            return None, None
+        need_graph = policy.graphrag.enabled
+        need_ocr = policy.ocr.mode != "off"
+        if not need_graph and not need_ocr:
+            return None, None
+        scope = context.run.owner_scope
+        try:
+            resolved = await self._models.resolve_chat(None, scope=scope)
+            client = self._client_factory(
+                resolved,
+                policy=context.run.policy_snapshot.common.model_resilience,
+                thinking_enabled=False,
+                inference_model_service=self._models,
+                scope=scope,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("kb build chat model unavailable; graph/ocr will degrade: %s", exc)
+            return None, None
+        graph_llm = client if need_graph else None
+        ocr_llm = client if (need_ocr and resolved.model.capabilities.vision) else None
+        return graph_llm, ocr_llm
 
     async def execute(
         self,
@@ -161,6 +203,7 @@ class KnowledgeBuildActivityHandler(_ResourceBuildActivity):
         family_policy = context.run.policy_snapshot.family_policy
         if family_policy.kind != "kb_ingest":
             return ActivityOutcome.failed(failure_code="POLICY_SNAPSHOT_INVALID")
+        graph_llm, ocr_llm = await self._resolve_build_llms(context, family_policy.knowledge_base)
         try:
             return await self._consume(
                 request,
@@ -170,6 +213,8 @@ class KnowledgeBuildActivityHandler(_ResourceBuildActivity):
                     policy=family_policy.knowledge_base,
                     embedding_model_id=embedding_model_id,
                     embedding_dimensions=embedding_dimensions,
+                    graph_llm=graph_llm,
+                    ocr_llm=ocr_llm,
                 ),
             )
         except asyncio.CancelledError:

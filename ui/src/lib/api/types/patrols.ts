@@ -42,10 +42,10 @@ export type PatrolPack = {
   version: number;
   config: PatrolPackConfig;
   mcp_server_id: string;
-  skill_id: string;
   scheduled_job_id?: string | null;
   last_validated_at?: string | null;
   last_validated_version?: number | null;
+  validation_run_id?: string | null;
   validation_summary: {
     ok?: boolean;
     errors?: string[];

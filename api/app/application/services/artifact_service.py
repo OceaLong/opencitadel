@@ -357,6 +357,26 @@ class ArtifactService:
             await uow.commit()
         return token
 
+    async def revoke_share_link(
+        self,
+        artifact_id: str,
+        *,
+        scope: OwnerScope | None = None,
+    ) -> None:
+        """清除交付物的分享令牌，使已发出的分享链接立即失效。"""
+        async with self._uow_factory() as uow:
+            artifact = await uow.artifact.get_by_id(artifact_id)
+            if not artifact:
+                raise ValueError(_artifact_not_found_message(artifact_id))
+            if scope is not None:
+                session = await uow.session.get_metadata(artifact.session_id, scope=scope)
+                if not session:
+                    raise PermissionError(f"无权撤销交付物[{artifact_id}]的分享")
+            artifact.share_token = None
+            artifact.share_expires_at = None
+            await uow.artifact.save(artifact)
+            await uow.commit()
+
     async def get_by_share_token(self, token: str) -> Artifact | None:
         async with self._uow_factory() as uow:
             artifact = await uow.artifact.get_by_share_token(token)

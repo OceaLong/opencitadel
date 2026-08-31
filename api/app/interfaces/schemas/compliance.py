@@ -19,6 +19,8 @@ class ChainVerifyResponse(BaseModel):
 class EvidenceSessionItem(BaseModel):
     session_id: str
     title: str
+    owner_user_id: str | None
+    team_id: str | None
     operator_scope: str | None = None
     status: SessionStatus
     updated_at: str | None = None

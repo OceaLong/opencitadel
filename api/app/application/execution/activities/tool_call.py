@@ -75,6 +75,7 @@ class ToolCallActivityHandler:
                 "kind": "tool",
                 "tool_call_id": call_id,
                 "name": name,
+                "arguments": arguments,
                 "status": "completed" if result.get("success") is True else "failed",
                 "content": content[:16_384],
             },

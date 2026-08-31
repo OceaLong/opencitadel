@@ -45,6 +45,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void refresh();
+
+    // A history traversal can restore a document whose React state still
+    // contains the previous user even though its HttpOnly session cookies
+    // have expired or were cleared in another tab. Revalidate at both SPA
+    // and browser-cache history boundaries before protected content renders
+    // again from stale client state.
+    const revalidateHistoryEntry = () => {
+      void refresh();
+    };
+    window.addEventListener("popstate", revalidateHistoryEntry);
+    window.addEventListener("pageshow", revalidateHistoryEntry);
+    return () => {
+      window.removeEventListener("popstate", revalidateHistoryEntry);
+      window.removeEventListener("pageshow", revalidateHistoryEntry);
+    };
   }, [refresh]);
 
   const value = useMemo(

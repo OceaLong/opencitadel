@@ -193,6 +193,129 @@ def test_runtime_policy_is_visible_only_to_system_or_admin(
         engine.dispose()
 
 
+def test_auditor_reads_across_owners_but_cannot_write(
+    seeded_runtime_policy,
+) -> None:
+    """The greenfield RLS baseline gives the auditor role read-all / no-write.
+
+    A regular user sees no control-plane policy (proved above); an auditor must
+    now SELECT it (compliance read) while every write predicate still rejects
+    them. This exercises the signed is_auditor claim end-to-end against the
+    migrated opencitadel_authorization_valid() function.
+    """
+    del seeded_runtime_policy
+    settings = load_deployment_settings()
+    engine = create_engine(sqlalchemy_sync_database_uri(settings))
+    auditor = AuthorizationContext.for_principal(
+        Principal(user_id="policy-auditor", global_role=GlobalRole.AUDITOR),
+        scope=OwnerScope.personal("policy-auditor"),
+    )
+    try:
+        with engine.connect() as connection:
+            # Auditor may read the seeded control-plane rows across owners.
+            with connection.begin():
+                configure_sync_authorization(
+                    connection, auditor, signing_secret=settings.session_secret
+                )
+                assert all(count >= 1 for count in _visible_policy_counts(connection))
+
+            # ...but the write predicate rejects the auditor: an UPDATE that
+            # would match without RLS touches zero rows under RLS.
+            with connection.begin():
+                configure_sync_authorization(
+                    connection, auditor, signing_secret=settings.session_secret
+                )
+                result = connection.execute(
+                    text(
+                        "UPDATE runtime_policy_heads "
+                        "SET updated_by = 'auditor-should-not-write' "
+                        "WHERE id = 'global'"
+                    )
+                )
+                assert result.rowcount == 0
+    finally:
+        engine.dispose()
+
+
+def test_auditor_reads_private_tenant_rows_across_owners(
+    postgres_integration,
+) -> None:
+    """The read-all wrap also covers private root tables, not just policy tables.
+
+    A row owned by owner-a is invisible to an unrelated regular user but visible
+    to an auditor, and the auditor still cannot mutate it.
+    """
+    del postgres_integration
+    settings = load_deployment_settings()
+    admin_engine = create_engine(sqlalchemy_sync_migration_database_uri(settings))
+    session_id = str(uuid4())
+    try:
+        with admin_engine.begin() as connection:
+            configure_sync_system_authorization(
+                connection,
+                actor="auditor-rls-private-seed",
+                signing_secret=settings.session_secret,
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO sessions (id, owner_user_id, title, status)
+                    VALUES (:id, 'owner-a', 'owned by a', 'active')
+                    """
+                ),
+                {"id": session_id},
+            )
+    finally:
+        admin_engine.dispose()
+
+    engine = create_engine(sqlalchemy_sync_database_uri(settings))
+
+    def _count_visible(connection) -> int:
+        return connection.execute(
+            text("SELECT count(*) FROM sessions WHERE id = :id"),
+            {"id": session_id},
+        ).scalar_one()
+
+    try:
+        with engine.connect() as connection:
+            # A regular, non-owner user must not see owner-a's session.
+            with connection.begin():
+                configure_sync_authorization(
+                    connection,
+                    AuthorizationContext.for_principal(
+                        Principal(user_id="stranger"),
+                        scope=OwnerScope.personal("stranger"),
+                    ),
+                    signing_secret=settings.session_secret,
+                )
+                assert _count_visible(connection) == 0
+
+            # An auditor sees it (read-all) but cannot update it (no-write).
+            auditor = AuthorizationContext.for_principal(
+                Principal(user_id="private-auditor", global_role=GlobalRole.AUDITOR),
+                scope=OwnerScope.personal("private-auditor"),
+            )
+            with connection.begin():
+                configure_sync_authorization(
+                    connection, auditor, signing_secret=settings.session_secret
+                )
+                assert _count_visible(connection) == 1
+                result = connection.execute(
+                    text("UPDATE sessions SET title = 'tampered' WHERE id = :id"),
+                    {"id": session_id},
+                )
+                assert result.rowcount == 0
+    finally:
+        with engine.begin() as connection:
+            configure_sync_system_authorization(
+                connection,
+                actor="auditor-rls-private-cleanup",
+                signing_secret=settings.session_secret,
+            )
+            connection.execute(text("DELETE FROM sessions WHERE id = :id"), {"id": session_id})
+        engine.dispose()
+
+
 def test_runtime_policy_database_privileges_are_least_authority(
     seeded_runtime_policy,
 ) -> None:

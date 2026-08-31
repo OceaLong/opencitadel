@@ -234,7 +234,7 @@ class SessionService:
         async with self._uow_factory() as uow:
             files = await uow.session.get_files(session_id, scope=scope)
         if files is None:
-            raise RuntimeError(f"当前会话不存在[{session_id}], 请核实后重试")
+            raise NotFoundError(f"当前会话不存在[{session_id}]")
         return files
 
     async def read_file(

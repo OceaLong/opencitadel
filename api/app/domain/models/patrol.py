@@ -347,6 +347,7 @@ class PatrolPack(BaseModel):
     scheduled_job_id: str | None = None
     last_validated_at: datetime | None = None
     last_validated_version: int | None = None
+    validation_run_id: str | None = None
     validation_summary: dict[str, Any] = Field(default_factory=dict)
     deleted_at: datetime | None = None
     created_at: datetime = Field(default_factory=utc_now)

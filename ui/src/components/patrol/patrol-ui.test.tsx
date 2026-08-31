@@ -14,6 +14,7 @@ import zh from "../../../messages/zh.json";
 const mocks = vi.hoisted(() => ({
   listMCPServers: vi.fn().mockResolvedValue({ items: [] }),
   remediationState: { state: "disabled" },
+  patrolState: { value: { state: "available" } },
 }));
 
 vi.mock("next/navigation", () => mockNavigation());
@@ -24,7 +25,11 @@ vi.mock("@/hooks/use-capabilities", () => ({
   useCapabilities: () => ({
     loading: false,
     capability: (name: string) =>
-      name === "ops_patrol_remediation" ? mocks.remediationState : undefined,
+      name === "ops_patrol_remediation"
+        ? mocks.remediationState
+        : name === "ops_patrol"
+          ? mocks.patrolState.value
+          : undefined,
   }),
 }));
 vi.mock("@/lib/api/patrols", () => ({
@@ -42,6 +47,7 @@ import { PatrolRunDetailView } from "./patrol-run-detail";
 
 afterEach(() => {
   document.body.replaceChildren();
+  mocks.patrolState.value = { state: "available" };
 });
 
 function runFixture(): PatrolRunDetail {
@@ -59,7 +65,22 @@ function runFixture(): PatrolRunDetail {
     evidence_completeness: 1,
     summary: {},
     created_at: "2026-08-03T00:00:00Z",
-    check_results: [],
+    check_results: [
+      {
+        id: "result-pass-1",
+        run_id: "run-1",
+        check_id: "api-health",
+        status: "pass",
+        severity: "info",
+        observed: { healthy: true },
+        assertion_results: [],
+        evidence_refs: [{ type: "summary" }],
+        explanation: "Healthy",
+        fingerprint: "a".repeat(64),
+        started_at: "2026-08-03T00:00:00Z",
+        finished_at: "2026-08-03T00:01:00Z",
+      },
+    ],
     findings: [
       {
         id: "finding-1",
@@ -90,9 +111,25 @@ describe.each([
       </NextIntlClientProvider>,
     );
     expect(container.textContent).toContain(messages.patrol.wizard.name);
+    expect(container.textContent).toContain(messages.patrol.wizard.template);
     expect(container.textContent).toContain(messages.patrol.wizard.readOnlyBoundary);
     expect(container.querySelector('input[name="url"]')).toBeNull();
     expect(container.querySelector('textarea[name="promql"]')).toBeNull();
+    await unmount();
+  });
+
+  it("surfaces paused Patrol admission without hiding Pack configuration", async () => {
+    mocks.patrolState.value = { state: "denied" };
+    const { container, unmount } = await renderComponent(
+      <NextIntlClientProvider locale={locale} messages={messages}>
+        <PackWizard />
+      </NextIntlClientProvider>,
+    );
+
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      messages.patrol.disabled.description,
+    );
+    expect(container.textContent).toContain(messages.patrol.wizard.name);
     await unmount();
   });
 
@@ -105,6 +142,9 @@ describe.each([
     expect(container.textContent).toContain(messages.patrol.actions.downloadEvidence);
     expect(container.textContent).not.toContain(messages.patrol.actions.acknowledge);
     expect(container.textContent).not.toContain(messages.patrol.actions.falsePositive);
+    expect(
+      container.querySelector(`details[aria-label="api-health ${messages.patrol.status.pass}"]`),
+    ).not.toBeNull();
     await unmount();
   });
 

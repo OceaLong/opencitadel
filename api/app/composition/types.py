@@ -51,9 +51,6 @@ if TYPE_CHECKING:
     from app.application.services.inference_endpoint_service import InferenceEndpointService
     from app.application.services.inference_model_service import InferenceModelService
     from app.application.services.inference_status_service import InferenceStatusService
-    from app.application.services.integration_projection_service import (
-        IntegrationProjectionService,
-    )
     from app.application.services.integration_server_service import (
         A2AIntegrationService,
         MCPServerService,
@@ -156,7 +153,6 @@ class ApiRuntime:
     quota_service: QuotaService
     mcp_integration_service: MCPServerService
     a2a_integration_service: A2AIntegrationService
-    integration_projection_service: IntegrationProjectionService
     inference_model_service: InferenceModelService
     inference_endpoint_service: InferenceEndpointService
     inference_binding_service: InferenceBindingService

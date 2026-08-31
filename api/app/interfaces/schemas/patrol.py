@@ -57,6 +57,7 @@ class PatrolPackResponse(BaseModel):
     scheduled_job_id: str | None
     last_validated_at: datetime | None
     last_validated_version: int | None
+    validation_run_id: str | None
     validation_summary: dict[str, Any]
     created_at: datetime
     updated_at: datetime

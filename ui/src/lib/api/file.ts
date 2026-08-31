@@ -2,7 +2,7 @@ import { FILE_UPLOAD_TIMEOUT_MS } from "@/lib/constants";
 
 import { translate } from "@/i18n/translate";
 
-import { API_CONFIG, authenticatedFetch, get, post } from "./fetch";
+import { API_CONFIG, authenticatedFetch, del, get, post } from "./fetch";
 import type { FileInfo, FileUploadParams } from "./types";
 
 /**
@@ -58,5 +58,14 @@ export const fileApi = {
    */
   getFileDownloadUrl: (fileId: string): string => {
     return `${API_CONFIG.baseURL}/files/${fileId}/download`;
+  },
+
+  /**
+   * 删除文件
+   * @param fileId 文件 ID
+   * @returns 删除结果
+   */
+  deleteFile: (fileId: string): Promise<{ deleted: boolean }> => {
+    return del<{ deleted: boolean }>(`/files/${fileId}`);
   },
 };

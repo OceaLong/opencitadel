@@ -31,6 +31,7 @@ from app.interfaces.service_dependencies import (
     get_notification_stream_factory,
     get_scheduled_job_service,
 )
+from app.interfaces.streaming import finish_snapshot_before_cancellation
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,9 @@ async def notification_stream(
     user_id = ctx.principal.user_id
 
     async def event_generator():
-        unread = await service.list_for_user(user_id, unread_only=True)
+        unread = await finish_snapshot_before_cancellation(
+            service.list_for_user(user_id, unread_only=True)
+        )
         yield ServerSentEvent(
             event="connected",
             data=json.dumps({"user_id": user_id, "unread_count": len(unread)}),

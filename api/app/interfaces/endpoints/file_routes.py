@@ -5,11 +5,12 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from starlette.responses import StreamingResponse
 
 from app.application.services.file_service import FileService
+from app.application.services.quota_service import QuotaService
 from app.domain.models.file import File as FileInfo
 from app.domain.models.scope import WorkspaceContext
 from app.interfaces.auth_dependencies import get_workspace_context, require_non_auditor
 from app.interfaces.schemas import Response
-from app.interfaces.service_dependencies import get_file_service
+from app.interfaces.service_dependencies import get_file_service, get_quota_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/files", tags=["文件模块"])
@@ -26,8 +27,10 @@ async def upload_file(
     ctx: WorkspaceContext = Depends(get_workspace_context),
     _write_guard=Depends(require_non_auditor),
     file_service: FileService = Depends(get_file_service),
+    quota_service: QuotaService = Depends(get_quota_service),
 ) -> Response[FileInfo]:
     """文件上传接口，传递文件返回文件的File信息"""
+    await quota_service.check_storage_quota(ctx.principal.user_id, incoming_bytes=file.size or 0)
     fileinfo = await file_service.upload_file(upload_file=file, scope=ctx.scope)
     return Response.success(
         data=fileinfo,
@@ -50,6 +53,23 @@ async def get_file_info(
     return Response.success(
         data=fileinfo,
     )
+
+
+@router.delete(
+    path="/{file_id}",
+    response_model=Response[dict],
+    summary="删除文件接口",
+    description="删除指定文件的对象存储数据与记录（仅限文件归属者/团队）",
+)
+async def delete_file(
+    file_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    _write_guard=Depends(require_non_auditor),
+    file_service: FileService = Depends(get_file_service),
+) -> Response[dict]:
+    """删除指定文件"""
+    await file_service.delete_file(file_id, scope=ctx.scope)
+    return Response.success(data={"deleted": True})
 
 
 @router.get(

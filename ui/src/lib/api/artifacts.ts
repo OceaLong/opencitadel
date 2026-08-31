@@ -1,4 +1,4 @@
-import { get, post } from "./fetch";
+import { del, get, post } from "./fetch";
 import type {
   DeliveryArtifact,
   DeliveryArtifactContent,
@@ -24,6 +24,10 @@ export const artifactsApi = {
 
   share: (artifactId: string): Promise<DeliveryArtifactShare> => {
     return post<DeliveryArtifactShare>(`/artifacts/${artifactId}/share`, {});
+  },
+
+  revokeShare: (artifactId: string): Promise<{ revoked: boolean }> => {
+    return del<{ revoked: boolean }>(`/artifacts/${artifactId}/share`);
   },
 
   getPublicContent: (token: string): Promise<DeliveryArtifactContent> => {

@@ -97,6 +97,8 @@ class PatrolRunService:
                 action=action,
                 resource_type="patrol_run",
                 resource_id=run.id,
+                team_id=run.pack_snapshot.get("team_id"),
+                session_id=run.session_id,
                 metadata={
                     "pack_id": run.pack_id,
                     "session_id": run.session_id,
@@ -197,6 +199,8 @@ class PatrolRunService:
                     "id": pack.id,
                     "name": pack.name,
                     "version": pack.version,
+                    "owner_user_id": pack.owner_user_id,
+                    "team_id": pack.team_id,
                     "mcp_server_id": pack.mcp_server_id,
                     "config": pack.config.model_dump(mode="json"),
                     "capability_hash": capability_hash,

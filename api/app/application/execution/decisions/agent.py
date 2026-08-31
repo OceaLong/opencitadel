@@ -52,7 +52,12 @@ def next_agent_command(
             input_payload={},
         )
     if retrieval_status != "succeeded":
-        return fail_for_activity(state, retrieval_status, max_retries=max_retries)
+        return fail_for_activity(
+            state,
+            retrieval_status,
+            activity_id=retrieval_id,
+            max_retries=max_retries,
+        )
 
     for round_index in range(max_iterations):
         model_key = f"model:{round_index}"
@@ -74,7 +79,12 @@ def next_agent_command(
                 },
             )
         if model_status != "succeeded":
-            return fail_for_activity(state, model_status, max_retries=max_retries)
+            return fail_for_activity(
+                state,
+                model_status,
+                activity_id=model_id,
+                max_retries=max_retries,
+            )
         model_result = activity_result(state, model_id)
         if model_result is None:
             return command(
@@ -136,10 +146,16 @@ def next_agent_command(
                     public_data={
                         "tool_call_id": call_id,
                         "name": name,
+                        "arguments": arguments,
                     },
                 )
             if tool_status != "succeeded":
-                return fail_for_activity(state, tool_status, max_retries=max_retries)
+                return fail_for_activity(
+                    state,
+                    tool_status,
+                    activity_id=tool_id,
+                    max_retries=max_retries,
+                )
     return command(
         state,
         "FailRun",

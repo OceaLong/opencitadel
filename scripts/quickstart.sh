@@ -30,10 +30,13 @@ require_cmd() {
   fi
 }
 
-wait_for_container_health() {
-  local container="$1"
+wait_for_service_health() {
+  local service="$1"
   for _ in $(seq 1 60); do
+    local container
     local status
+    container="$("${COMPOSE_CMD[@]}" ps -q "$service" 2>/dev/null || true)"
+    [[ -z "$container" ]] && sleep 5 && continue
     status="$(docker inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null || echo "unknown")"
     [[ "$status" == "healthy" ]] && return 0
     sleep 5
@@ -169,7 +172,17 @@ if [[ "$DEMO_MODE" -eq 1 ]]; then
   PROFILE="${PROFILE:+$PROFILE,}patrol,demo"
 fi
 
-COMPOSE_CMD=(docker compose)
+_env_compose_project="$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' .env | head -n1)"
+COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-${_env_compose_project:-opencitadel}}"
+if [[ ! "$COMPOSE_PROJECT" =~ ^[a-z0-9][a-z0-9-]{2,47}$ ]]; then
+  err "COMPOSE_PROJECT_NAME must match ^[a-z0-9][a-z0-9-]{2,47}$"
+  exit 1
+fi
+_env_sandbox_network="$(sed -n 's/^SANDBOX_NETWORK=//p' .env | head -n1)"
+SANDBOX_NETWORK="${SANDBOX_NETWORK:-${_env_sandbox_network:-${COMPOSE_PROJECT}_opencitadel-sandbox-network}}"
+export SANDBOX_NETWORK
+
+COMPOSE_CMD=(docker compose --project-name "$COMPOSE_PROJECT")
 if [[ -n "$PROFILE" ]]; then
   info "Using COMPOSE_PROFILES=${PROFILE}$( [[ "$DEMO_MODE" -eq 1 ]] && echo " (--demo)" )"
   # Split on commas into one `--profile X` flag each. A single profile (the
@@ -186,7 +199,7 @@ if [[ -n "$PROFILE" ]]; then
 fi
 
 info "Building sandbox image (required for dynamic Agent tool execution) ..."
-docker compose build opencitadel-sandbox
+"${COMPOSE_CMD[@]}" build opencitadel-sandbox
 
 info "Building and starting OpenCitadel (this may take several minutes on first run) ..."
 "${COMPOSE_CMD[@]}" up -d --build
@@ -201,9 +214,9 @@ done
 
 if [[ "$DEMO_MODE" -eq 1 ]]; then
   info "Waiting for the Ops Patrol demo containers (ops-collector, ops-console) ..."
-  wait_for_container_health opencitadel-ops-collector \
+  wait_for_service_health opencitadel-ops-collector \
     || warn "opencitadel-ops-collector did not report healthy in time; seeding below may fail."
-  wait_for_container_health opencitadel-ops-console \
+  wait_for_service_health ops-console \
     || warn "opencitadel-ops-console did not report healthy in time; seeding below may fail."
 
   info "Seeding Ops Patrol demo data (feature flag, Collector policies, demo Pack) ..."

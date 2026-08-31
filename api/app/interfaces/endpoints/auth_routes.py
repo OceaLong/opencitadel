@@ -124,6 +124,13 @@ async def me(
     return ApiResponse.success(UserResponse.from_domain(user))
 
 
+@router.get("/oauth/providers", response_model=ApiResponse[list[str]])
+async def oauth_providers(
+    oauth_registry: OAuthRegistryPort = Depends(get_oauth_registry),
+) -> ApiResponse[list[str]]:
+    return ApiResponse.success(data=oauth_registry.enabled_providers())
+
+
 @router.get("/oauth/{provider}/login")
 async def oauth_login(
     provider: str,
@@ -267,11 +274,15 @@ async def _resolve_oauth_registration_invitation(uow, *, email: str, team_invite
         ):
             return invitation
     invitations = await uow.invitation.list(invitation_type=InvitationType.PLATFORM, limit=500)
+    now = datetime.now(UTC)
     return next(
         (
             item
             for item in invitations
-            if item.email and item.email.strip().lower() == email and not item.accepted
+            if item.email
+            and item.email.strip().lower() == email
+            and not item.accepted
+            and item.expires_at >= now
         ),
         None,
     )
@@ -279,7 +290,16 @@ async def _resolve_oauth_registration_invitation(uow, *, email: str, team_invite
 
 async def _load_oauth_profile(provider: str, client, token: dict) -> dict:
     if provider == "google":
-        userinfo = token.get("userinfo") or await client.parse_id_token(token)
+        userinfo = token.get("userinfo")
+        if not userinfo:
+            # authorize_access_token normally verifies and populates the OIDC
+            # userinfo. If it is absent the flow lost its nonce/session; return a
+            # readable error instead of calling parse_id_token() without the
+            # now-required nonce positional argument (which raises TypeError).
+            raise BadRequestError(
+                "Google 身份令牌缺失或未通过验证，请重试登录",
+                error_key="apiErrors.auth.oauthProfileUnavailable",
+            )
         return {
             "sub": userinfo.get("sub"),
             "email": userinfo.get("email"),

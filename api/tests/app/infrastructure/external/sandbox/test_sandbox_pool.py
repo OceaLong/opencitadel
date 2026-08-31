@@ -50,7 +50,7 @@ class _Factory:
 
 
 @pytest.mark.asyncio
-async def test_pool_discards_old_policy_before_assignment() -> None:
+async def test_pool_discards_old_policy_and_cold_fallback_uses_full_warmup_budget() -> None:
     old = await _settings(SandboxOperationsPolicy(memory_limit="2g"))
     current = await _settings(SandboxOperationsPolicy(memory_limit="512m"))
     stale_sandbox = _Sandbox(old)
@@ -64,10 +64,7 @@ async def test_pool_discards_old_policy_before_assignment() -> None:
 
     assert acquired is current_sandbox
     stale_sandbox.destroy.assert_awaited_once()
-    factory.create_unpooled.assert_awaited_once_with(
-        current,
-        max_retries=current.policy.fast_warmup_max_retries,
-    )
+    factory.create_unpooled.assert_awaited_once_with(current)
     activity.touch.assert_awaited_once()
 
 

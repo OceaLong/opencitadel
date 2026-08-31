@@ -166,6 +166,14 @@ class Admission:
         return uuid4()
 
 
+class AuditRecorder:
+    def __init__(self) -> None:
+        self.logs = []
+
+    async def record(self, log):
+        self.logs.append(log)
+
+
 def make_service(
     uow: Uow,
     *,
@@ -173,6 +181,7 @@ def make_service(
     admission: Admission | None = None,
     fixture_replay_enabled: bool = False,
     governance_metrics=None,
+    audit_service=None,
 ) -> PatrolRunService:
     return PatrolRunService(
         lambda: uow,
@@ -181,6 +190,7 @@ def make_service(
         policy_reader=policy_reader or MutablePolicyReader(),
         fixture_replay_enabled=fixture_replay_enabled,
         governance_metrics=governance_metrics or NoopGovernanceMetrics(),
+        audit_service=audit_service,
     )
 
 
@@ -201,6 +211,28 @@ def make_pack():
             "enabled_tools": ["get_capabilities", "k8s_workload_summary"],
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_trigger_audit_preserves_team_and_session_correlation() -> None:
+    pack = make_pack().model_copy(update={"team_id": "team-1"})
+    repo = PatrolRepo(pack)
+    audit = AuditRecorder()
+    service = make_service(Uow(repo), audit_service=audit)
+
+    run = await service.trigger_pack(
+        pack.id,
+        OwnerScope.team("user-1", "team-1"),
+        "user-1",
+        idempotency_key="team-run-1",
+    )
+
+    assert run.pack_snapshot["owner_user_id"] == "user-1"
+    assert run.pack_snapshot["team_id"] == "team-1"
+    assert len(audit.logs) == 1
+    assert audit.logs[0].resource_id == run.id
+    assert audit.logs[0].session_id == run.session_id
+    assert audit.logs[0].team_id == "team-1"
 
 
 @pytest.mark.asyncio

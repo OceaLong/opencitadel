@@ -334,6 +334,7 @@ class SqlAlchemyExecutionOrchestrator:
                 "ActivityCompleted": "succeeded",
                 "ActivityFailed": "failed",
                 "ActivityOutcomeUnknown": "unknown",
+                "ActivityCancelled": "cancelled",
             }.get(event.event_type)
             if terminal_activity_status is None:
                 continue

@@ -123,7 +123,9 @@ export default function TeamsPage() {
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <CardTitle className="text-base">{team.name}</CardTitle>
+                    <CardTitle role="heading" aria-level={2} className="text-base">
+                      {team.name}
+                    </CardTitle>
                     {team.description ? (
                       <CardDescription className="mt-1">{team.description}</CardDescription>
                     ) : null}

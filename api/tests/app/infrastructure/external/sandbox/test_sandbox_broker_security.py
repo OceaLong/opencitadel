@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+import httpx
 import pytest
 from docker.errors import NotFound
 from fastapi import HTTPException
@@ -11,6 +12,7 @@ from app.infrastructure.external.sandbox.broker import (
     _validate_name,
     build_broker_runtime,
     create_sandbox,
+    list_sandboxes,
 )
 from app.infrastructure.external.sandbox.sandbox_container_policy import (
     CreateSandboxRequest,
@@ -20,12 +22,17 @@ from app.infrastructure.external.sandbox.settings import SandboxHostAccess
 from core.config import DeploymentSettings
 
 
-def _settings(*, token: str = "b" * 32) -> DeploymentSettings:
+def _settings(
+    *,
+    token: str = "b" * 32,
+    labels: dict[str, str] | None = None,
+) -> DeploymentSettings:
     return DeploymentSettings(
         sandbox_broker_token=token,
         sandbox_driver="docker",
         sandbox_image="sandbox:test",
         sandbox_name_prefix="opencitadel-sandbox",
+        sandbox_labels=labels or {},
     )
 
 
@@ -60,7 +67,41 @@ def test_broker_client_encodes_sandbox_id_as_one_path_segment():
     )
 
 
+def test_broker_client_converts_http_failures_to_runtime_errors(monkeypatch):
+    request = httpx.Request("POST", "http://broker/v1/sandboxes")
+    response = httpx.Response(
+        400,
+        request=request,
+        json={"detail": "invalid sandbox id"},
+    )
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def request(self, *args, **kwargs):
+            return response
+
+    monkeypatch.setattr(docker_sandbox.httpx, "Client", lambda **kwargs: _Client())
+    host = SandboxHostAccess(
+        environment="production",
+        broker_url="http://broker",
+        broker_token="b" * 32,
+        redis_host="redis",
+        redis_port=6379,
+        redis_db=0,
+        redis_password=None,
+    )
+
+    with pytest.raises(docker_sandbox.DockerSandboxError, match=r"HTTP 400.*invalid sandbox id"):
+        docker_sandbox._broker_call(host, "POST", "/v1/sandboxes", json={})
+
+
 def test_broker_rejects_same_prefix_container_without_sandbox_label():
+    runtime = build_broker_runtime(_settings())
     container = type(
         "_Container",
         (),
@@ -71,9 +112,77 @@ def test_broker_rejects_same_prefix_container_without_sandbox_label():
     )()
 
     with pytest.raises(HTTPException) as exc_info:
-        _require_managed_sandbox(container)
+        _require_managed_sandbox(container, runtime)
 
     assert exc_info.value.status_code == 404
+
+
+def test_broker_rejects_managed_container_from_another_acceptance_run():
+    runtime = build_broker_runtime(
+        _settings(
+            labels={
+                "com.docker.compose.project": "opencitadel-acceptance",
+                "com.opencitadel.acceptance.project": "opencitadel-acceptance",
+                "com.opencitadel.acceptance.run": "run-a",
+            }
+        )
+    )
+    container = type(
+        "_Container",
+        (),
+        {
+            "attrs": {
+                "Config": {
+                    "Labels": {
+                        "opencitadel.io/sandbox": "true",
+                        "com.docker.compose.project": "opencitadel-acceptance",
+                        "com.opencitadel.acceptance.project": "opencitadel-acceptance",
+                        "com.opencitadel.acceptance.run": "run-b",
+                    }
+                }
+            },
+            "reload": lambda self: None,
+        },
+    )()
+
+    with pytest.raises(HTTPException) as exc_info:
+        _require_managed_sandbox(container, runtime)
+
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_broker_lists_only_sandboxes_with_every_runtime_label():
+    class _Containers:
+        def __init__(self):
+            self.filters = None
+
+        def list(self, *, all, filters):
+            assert all is True
+            self.filters = filters
+            return []
+
+    containers = _Containers()
+    labels = {
+        "com.docker.compose.project": "opencitadel-acceptance",
+        "com.opencitadel.acceptance.project": "opencitadel-acceptance",
+        "com.opencitadel.acceptance.run": "run-a",
+    }
+    runtime = build_broker_runtime(
+        _settings(labels=labels),
+        docker_factory=lambda: type("_Docker", (), {"containers": containers})(),
+    )
+
+    assert await list_sandboxes(runtime) == {"sandboxes": []}
+    assert containers.filters == {
+        "label": [
+            "opencitadel.io/sandbox=true",
+            "com.docker.compose.project=opencitadel-acceptance",
+            "com.opencitadel.acceptance.project=opencitadel-acceptance",
+            "com.opencitadel.acceptance.run=run-a",
+        ],
+        "name": "opencitadel-sandbox-",
+    }
 
 
 def test_production_never_falls_back_to_direct_docker():
@@ -121,7 +230,13 @@ async def test_broker_create_uses_request_policy_not_resource_env(monkeypatch):
 
     containers = _Containers()
     runtime = build_broker_runtime(
-        _settings(),
+        _settings(
+            labels={
+                "com.docker.compose.project": "opencitadel-acceptance",
+                "com.opencitadel.acceptance.project": "opencitadel-acceptance",
+                "com.opencitadel.acceptance.run": "run-a",
+            }
+        ),
         docker_factory=lambda: type("_Docker", (), {"containers": containers})(),
     )
 
@@ -143,3 +258,4 @@ async def test_broker_create_uses_request_policy_not_resource_env(monkeypatch):
     assert containers.run_kwargs["nano_cpus"] == 1_250_000_000
     assert containers.run_kwargs["environment"]["SERVER_TIMEOUT_MINUTES"] == "17"
     assert containers.run_kwargs["labels"]["opencitadel.io/operations-revision"] == str(revision_id)
+    assert containers.run_kwargs["labels"]["com.opencitadel.acceptance.run"] == "run-a"

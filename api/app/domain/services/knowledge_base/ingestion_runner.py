@@ -30,6 +30,7 @@ from app.domain.models.error_codes import (
 )
 from app.domain.models.inference import PLATFORM_EMBEDDING_DIMENSIONS
 from app.domain.models.knowledge_base import (
+    DocStatus,
     KBSourceType,
     KBStatus,
     KnowledgeBase,
@@ -64,6 +65,14 @@ from app.domain.services.knowledge_base.vector_service import KBVectorService
 from app.domain.vector_port import EmbeddingPort
 
 logger = logging.getLogger(__name__)
+
+
+def _published_document_status(state: DocumentRevisionState) -> DocStatus:
+    if state is DocumentRevisionState.INDEXED:
+        return DocStatus.READY
+    if state is DocumentRevisionState.FAILED:
+        return DocStatus.FAILED
+    raise ValueError("published knowledge document revision must be terminal")
 
 
 def _resource_scope(owner_user_id: str | None, team_id: str | None) -> OwnerScope | None:
@@ -114,7 +123,11 @@ class KBIngestionRunner:
         policy: KnowledgeBaseExecutionPolicy,
         embedding_model_id: str | None = None,
         embedding_dimensions: int | None = None,
+        graph_llm: LLM | None = None,
+        ocr_llm: LLM | None = None,
     ) -> AsyncGenerator[BuildProgress, None]:
+        effective_graph_llm = graph_llm if graph_llm is not None else self._llm
+        effective_ocr_llm = ocr_llm if ocr_llm is not None else self._ocr_llm
         context: (
             tuple[
                 KnowledgeBaseVersion,
@@ -230,6 +243,7 @@ class KBIngestionRunner:
                         blocks, page_count, warning = await self._parse_document(
                             _revision_document(document, revision),
                             policy=policy,
+                            ocr_llm=effective_ocr_llm,
                         )
                         if not blocks:
                             raise ValueError("文档未提取到可索引文本")
@@ -373,7 +387,7 @@ class KBIngestionRunner:
                     "正在构建候选知识图谱...",
                     BuildProgressStatus.STARTED,
                 )
-                if self._json_parser is None or self._llm is None:
+                if self._json_parser is None or effective_graph_llm is None:
                     graph_failed = True
                 else:
                     try:
@@ -442,7 +456,7 @@ class KBIngestionRunner:
 
                         graph_result = await GraphBuilder(
                             uow_factory=self._uow_factory,
-                            llm=self._llm,
+                            llm=effective_graph_llm,
                             json_parser=self._json_parser,
                             max_parent_chunks_per_doc=(policy.graphrag.max_parent_chunks_per_doc),
                             concurrency=policy.graphrag.concurrency,
@@ -695,6 +709,18 @@ class KBIngestionRunner:
             )
             # Candidate metadata and active pin commit in the same UoW.
             async with self._uow_factory() as uow:
+                published_revisions = await uow.knowledge_version.get_revisions(
+                    [entry.document_revision_id for entry in manifest],
+                    knowledge_base_id=kb_id,
+                )
+                document_projections = []
+                for entry in manifest:
+                    revision = published_revisions.get(entry.document_revision_id)
+                    if revision is None or revision.document_id != entry.document_id:
+                        raise ValueError("published knowledge document revision is missing")
+                    document_projections.append(
+                        (entry.document_id, revision, _published_document_status(revision.state))
+                    )
                 published = await uow.knowledge_version.publish_candidate(
                     version_id,
                     knowledge_base_id=kb_id,
@@ -706,6 +732,14 @@ class KBIngestionRunner:
                 )
                 if not published:
                     raise ConflictError("knowledge-base candidate lost active-version CAS")
+                for document_id, revision, document_status in document_projections:
+                    await uow.knowledge_base.update_document_status(
+                        document_id,
+                        document_status,
+                        error=revision.error,
+                        warning=revision.warning,
+                        page_count=revision.page_count,
+                    )
                 current = await uow.knowledge_base.get_kb(kb_id)
                 if current is None:
                     raise RuntimeError("published knowledge base disappeared")
@@ -739,7 +773,7 @@ class KBIngestionRunner:
         except asyncio.CancelledError:
             await self._fail_candidate(build_id, "knowledge-base build cancelled")
             raise
-        except (OSError, RuntimeError, ValueError) as exc:
+        except Exception as exc:
             logger.exception("知识库候选摄取失败")
             if published_committed:
                 yield build_done()
@@ -885,6 +919,7 @@ class KBIngestionRunner:
         doc: KnowledgeDocument,
         *,
         policy: KnowledgeBaseExecutionPolicy,
+        ocr_llm: LLM | None = None,
     ) -> tuple[list[PageBlock], int, str | None]:
         if doc.source_type == KBSourceType.WEB:
             web_doc = await self._web_documents.fetch(
@@ -960,7 +995,7 @@ class KBIngestionRunner:
         ):
             ocr_blocks, ocr_warning = await ocr_pdf_to_blocks(
                 data,
-                self._ocr_llm,
+                ocr_llm if ocr_llm is not None else self._ocr_llm,
                 max_pages=policy.ocr.max_pages,
             )
             if ocr_blocks:

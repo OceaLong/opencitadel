@@ -45,6 +45,7 @@ async def test_kernel_runtime_contains_execution_services_only(monkeypatch) -> N
             "knowledge.build",
             "model.call",
             "patrol.execute",
+            "patrol.validate",
             "remediation.execute",
             "retrieval.search",
             "tool.call",

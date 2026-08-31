@@ -92,7 +92,12 @@ export default function AdminCompliancePage() {
                 <thead>
                   <tr className="border-b text-left">
                     <th className="text-muted-foreground pr-4 pb-2 font-medium">{t("colTitle")}</th>
-                    <th className="text-muted-foreground pr-4 pb-2 font-medium">{t("colScope")}</th>
+                    <th className="text-muted-foreground pr-4 pb-2 font-medium">
+                      {t("colWorkspace")}
+                    </th>
+                    <th className="text-muted-foreground pr-4 pb-2 font-medium">
+                      {t("colOperatorScope")}
+                    </th>
                     <th className="text-muted-foreground pr-4 pb-2 font-medium">{t("colChain")}</th>
                     <th className="text-muted-foreground pb-2 font-medium">{t("colActions")}</th>
                   </tr>
@@ -110,6 +115,11 @@ export default function AdminCompliancePage() {
                         >
                           {s.title || s.session_id}
                         </Link>
+                      </td>
+                      <td className="py-3 pr-4">
+                        <Badge variant="outline">
+                          {s.team_id ? `team:${s.team_id}` : `user:${s.owner_user_id ?? "—"}`}
+                        </Badge>
                       </td>
                       <td className="py-3 pr-4">
                         {s.operator_scope ? (

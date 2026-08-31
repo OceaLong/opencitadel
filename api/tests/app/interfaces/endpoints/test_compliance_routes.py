@@ -24,9 +24,14 @@ class _FakeGovernanceProfileService:
     def __init__(self):
         self.calls: list[tuple[str, OwnerScope]] = []
 
-    async def build_profile(self, session_id: str, scope: OwnerScope):
+    async def build_profile(self, session_id: str, scope: OwnerScope | None = None):
         self.calls.append((session_id, scope))
-        if session_id != "session-1" or scope.team_id != "team-1":
+        # The endpoint now passes scope=None so auditors/admins can read any
+        # session's evidence cross-owner. Previously the caller's personal
+        # ctx.scope was forwarded and every cross-owner session returned 404.
+        if scope is not None:
+            raise AssertionError("governance profile must be read cross-owner (scope=None)")
+        if session_id != "session-1":
             raise NotFoundError("session not found")
         return {
             "session": {"id": session_id, "status": "completed"},

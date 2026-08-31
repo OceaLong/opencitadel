@@ -11,16 +11,8 @@ import sqlalchemy as sa
 from alembic import op
 from app.infrastructure.models.registry import model_metadata
 from app.infrastructure.security.tenant_rls import (
-    CHILD_TABLES,
     EXECUTION_ROOT_TABLES,
-    POLICY_ROOT_TABLES,
-    PRIVATE_ROOT_TABLES,
-    VISIBILITY_ROOT_TABLES,
-    child_predicate,
-    policy_control_plane_predicate,
-    policy_statements,
-    preference_select_predicate,
-    preference_write_predicate,
+    apply_row_level_security,
 )
 
 revision: str = "0001greenfield"
@@ -146,7 +138,9 @@ def _install_authorization_guard() -> None:
                     chr(31),
                     COALESCE(current_setting('app.request_id', true), ''),
                     chr(31),
-                    COALESCE(current_setting('app.system_actor', true), '')
+                    COALESCE(current_setting('app.system_actor', true), ''),
+                    chr(31),
+                    COALESCE(current_setting('app.is_auditor', true), '')
                 );
                 expected_signature := encode(
                     public.hmac(
@@ -165,59 +159,8 @@ def _install_authorization_guard() -> None:
 
 
 def _apply_row_level_security() -> None:
-    for table in sorted(PRIVATE_ROOT_TABLES):
-        _execute(policy_statements(table))
-    for table in sorted(VISIBILITY_ROOT_TABLES):
-        _execute(policy_statements(table, has_visibility=True))
-    for table in sorted(POLICY_ROOT_TABLES):
-        _execute(
-            policy_statements(
-                table,
-                select_predicate=policy_control_plane_predicate(),
-                write_predicate=policy_control_plane_predicate(),
-            )
-        )
-    for table, (parent, foreign_key, parent_key) in sorted(CHILD_TABLES.items()):
-        _execute(
-            policy_statements(
-                table,
-                inherited_predicate=child_predicate(
-                    table,
-                    parent,
-                    foreign_key,
-                    parent_key,
-                ),
-            )
-        )
-    for table in sorted(EXECUTION_ROOT_TABLES):
-        _execute(policy_statements(table))
-    _execute(
-        policy_statements(
-            "inference_bindings",
-            select_predicate=preference_select_predicate(),
-            write_predicate=preference_write_predicate(),
-        )
-    )
-
-    user_id = "NULLIF(current_setting('app.user_id', true), '')"
-    system_or_admin = (
-        "COALESCE(current_setting('app.auth_mode', true), 'anonymous') = "
-        "'system' OR COALESCE(current_setting('app.is_admin', true), "
-        "'false') = 'true'"
-    )
-    for table, column in {
-        "notifications": "user_id",
-        "service_api_keys": "owner_user_id",
-        "user_quotas": "user_id",
-    }.items():
-        predicate = f"({system_or_admin}) OR {column} = {user_id}"
-        _execute(
-            policy_statements(
-                table,
-                select_predicate=predicate,
-                write_predicate=predicate,
-            )
-        )
+    # Single canonical policy matrix (auditor read-all / no-write baked in).
+    apply_row_level_security(_execute)
 
 
 def _install_append_only_guards() -> None:

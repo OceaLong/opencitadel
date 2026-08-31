@@ -9,6 +9,7 @@
 .worktrees/
 docker-compose.override.yml
 /tmp/
+/tmp/acceptance/
 
 __pycache__/
 *.py[cod]

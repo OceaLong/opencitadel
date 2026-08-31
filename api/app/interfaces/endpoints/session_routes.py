@@ -53,6 +53,7 @@ from app.interfaces.service_dependencies import (
     get_session_service,
     get_skill_service,
 )
+from app.interfaces.streaming import finish_snapshot_before_cancellation
 
 router = APIRouter(prefix="/sessions", tags=["会话模块"])
 
@@ -99,6 +100,7 @@ async def create_session(
                 resource_type="session",
                 resource_id=session.id,
                 team_id=ctx.scope.team_id if ctx.scope.type == OwnerScopeType.TEAM else None,
+                session_id=session.id,
                 metadata={
                     "ownership": request.operator_scope,
                     "operator_domains": request.operator_domains,
@@ -127,8 +129,8 @@ async def stream_sessions(
         """Push session list updates on Redis pub/sub; heartbeat on idle timeout."""
 
         async def build_sessions_event() -> ServerSentEvent:
-            sessions = await session_service.get_all_sessions(
-                limit=limit, offset=offset, scope=ctx.scope
+            sessions = await finish_snapshot_before_cancellation(
+                session_service.get_all_sessions(limit=limit, offset=offset, scope=ctx.scope)
             )
             session_items = [_session_to_list_item(session) for session in sessions]
             return ServerSentEvent(

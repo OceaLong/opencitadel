@@ -132,7 +132,12 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     };
 
     const handleRemoveFile = (fileId: string) => {
+      // Drop from the pending list immediately, then best-effort delete the
+      // already-uploaded blob so a removed-before-send attachment doesn't
+      // orphan an object in storage. The file is not yet referenced by any
+      // sent message, so deletion is safe; cleanup failure is non-fatal.
       setFiles((prev) => prev.filter((file) => file.id !== fileId));
+      void fileApi.deleteFile(fileId).catch(() => undefined);
     };
 
     const handleSend = async () => {

@@ -92,6 +92,17 @@ async def test_notification_is_published_after_commit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_patrol_completion_is_a_first_class_notification_type() -> None:
+    events: list[str] = []
+    service = _notification_service(events, _NotificationPublisher(events))
+
+    created = await service.send("user-1", "patrol_complete", "patrol done")
+
+    assert created.type == "patrol_complete"
+    assert events == ["save", "commit", "publish"]
+
+
+@pytest.mark.asyncio
 async def test_failed_notification_hint_does_not_reverse_committed_write() -> None:
     events: list[str] = []
     service = _notification_service(

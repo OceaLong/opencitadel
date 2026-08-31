@@ -87,6 +87,7 @@ async def update_memory(
     entry_id: str,
     request: MemoryEntryUpdateRequest,
     ctx: WorkspaceContext = Depends(get_workspace_context),
+    _write_guard=Depends(require_non_auditor),
     memory_service: MemoryService = Depends(get_memory_service),
     policy_reader: RuntimePolicyReader = Depends(get_runtime_policy_reader),
 ) -> Response[MemoryEntryResponse]:
@@ -113,6 +114,7 @@ async def update_memory(
 async def delete_memory(
     entry_id: str,
     ctx: WorkspaceContext = Depends(get_workspace_context),
+    _write_guard=Depends(require_non_auditor),
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> Response[dict | None]:
     await memory_service.delete_entry(entry_id, owner_scope=ctx.scope)

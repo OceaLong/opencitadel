@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -25,6 +26,8 @@ from app.domain.execution.commands import CommandContext, RegisteredCommand
 from app.domain.execution.context import RunExecutionContext
 from app.domain.models.scope import OwnerScopeType
 from app.domain.runtime_policy.errors import RuntimePolicyIntegrityError
+
+logger = logging.getLogger(__name__)
 
 
 class ActivityStore(Protocol):
@@ -124,13 +127,8 @@ class ActivityWorker:
             "stale": 0,
             "deferred": 0,
         }
-        batch_started = time.monotonic()
-        for claim in claims:
-            elapsed = time.monotonic() - batch_started
-            status = await self._execute_claim(
-                claim,
-                now=now + timedelta(seconds=elapsed),
-            )
+        statuses = await asyncio.gather(*(self._execute_claim(claim, now=now) for claim in claims))
+        for status in statuses:
             counts[status] += 1
         return ActivityBatchStats(**counts)
 
@@ -227,7 +225,12 @@ class ActivityWorker:
             if claim_lost.is_set():
                 return "stale"
             raise
-        except (OSError, RuntimeError, ValueError):
+        except Exception:
+            logger.exception(
+                "Activity handler failed activity_id=%s activity_type=%s",
+                claim.request.activity_id,
+                claim.request.activity_type,
+            )
             outcome = ActivityOutcome.failed(failure_code="ACTIVITY_HANDLER_ERROR")
         finally:
             stop_heartbeat.set()

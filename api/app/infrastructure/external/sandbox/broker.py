@@ -80,10 +80,14 @@ def _container_payload(container, deployment: SandboxDeployment) -> dict:
     }
 
 
-def _require_managed_sandbox(container):
+def _require_managed_sandbox(container, runtime: BrokerRuntime):
     container.reload()
     labels = (container.attrs.get("Config") or {}).get("Labels") or {}
-    if labels.get("opencitadel.io/sandbox") != "true":
+    expected = {
+        "opencitadel.io/sandbox": "true",
+        **runtime.deployment.labels,
+    }
+    if any(labels.get(key) != value for key, value in expected.items()):
         raise HTTPException(status_code=404, detail="sandbox not found")
     return container
 
@@ -92,7 +96,10 @@ async def list_sandboxes(runtime: BrokerRuntime) -> dict:
     containers = runtime.docker_factory().containers.list(
         all=True,
         filters={
-            "label": "opencitadel.io/sandbox=true",
+            "label": [
+                "opencitadel.io/sandbox=true",
+                *(f"{key}={value}" for key, value in runtime.deployment.labels.items()),
+            ],
             "name": f"{runtime.deployment.name_prefix}-",
         },
     )
@@ -117,6 +124,7 @@ async def create_sandbox(
             body.policy,
             sandbox_id,
             operations_revision_id=body.operations_revision_id,
+            access_token=body.access_token,
         )
     )
     payload = _container_payload(container, runtime.deployment)
@@ -132,7 +140,7 @@ async def get_sandbox(sandbox_id: str, runtime: BrokerRuntime) -> dict:
         container = runtime.docker_factory().containers.get(sandbox_id)
     except docker.errors.NotFound as exc:
         raise HTTPException(status_code=404, detail="sandbox not found") from exc
-    _require_managed_sandbox(container)
+    _require_managed_sandbox(container, runtime)
     return _container_payload(container, runtime.deployment)
 
 
@@ -142,7 +150,7 @@ async def delete_sandbox(sandbox_id: str, runtime: BrokerRuntime) -> dict:
         container = runtime.docker_factory().containers.get(sandbox_id)
     except docker.errors.NotFound:
         return {"deleted": False}
-    _require_managed_sandbox(container)
+    _require_managed_sandbox(container, runtime)
     container.remove(force=True)
     return {"deleted": True}
 

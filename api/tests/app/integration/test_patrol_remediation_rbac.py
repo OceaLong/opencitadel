@@ -112,6 +112,11 @@ class Uow:
         self.patrol = repo
         self.execution_commands = object()
         self.session = SimpleNamespace(save=AsyncMock(), update_status=AsyncMock())
+        # propose() captures the Actuator capability baseline, which requires an
+        # enabled Actuator MCP server to be resolvable from the UoW.
+        self.mcp_server = SimpleNamespace(
+            get_by_name=AsyncMock(return_value=SimpleNamespace(enabled=True))
+        )
 
     async def __aenter__(self):
         return self
@@ -135,7 +140,9 @@ async def test_attacker_scope_get_remediation_is_indistinguishable_from_missing(
     repo = Repo()
     service = PatrolRemediationService(
         lambda: Uow(repo),
-        actuator_client=SimpleNamespace(),
+        actuator_client=SimpleNamespace(
+            get_capabilities=AsyncMock(return_value={"overall_capability_hash": "capability-v1"})
+        ),
         patrol_run_service=SimpleNamespace(),
         run_admission_service=SimpleNamespace(admit=AsyncMock(return_value=uuid4())),
         policy_reader=POLICY_READER,
@@ -166,7 +173,9 @@ async def test_attacker_scope_propose_against_foreign_finding_returns_not_found(
     repo = Repo()
     service = PatrolRemediationService(
         lambda: Uow(repo),
-        actuator_client=SimpleNamespace(),
+        actuator_client=SimpleNamespace(
+            get_capabilities=AsyncMock(return_value={"overall_capability_hash": "capability-v1"})
+        ),
         patrol_run_service=SimpleNamespace(),
         run_admission_service=SimpleNamespace(admit=AsyncMock(return_value=uuid4())),
         policy_reader=POLICY_READER,

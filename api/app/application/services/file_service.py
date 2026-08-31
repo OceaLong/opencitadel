@@ -48,3 +48,9 @@ class FileService:
         file = await self.get_file_info(file_id, scope=scope)
         file_data, _ = await self.file_storage.download_file(file_id)
         return file_data, file
+
+    async def delete_file(self, file_id: str, scope: OwnerScope) -> None:
+        """根据传递的文件id删除文件（先校验归属，再删除对象与记录）"""
+        # get_file_info 使用 scope 校验归属，非本人/本团队文件会抛 NotFoundError
+        await self.get_file_info(file_id, scope=scope)
+        await self.file_storage.delete_file(file_id)

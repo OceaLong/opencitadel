@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -77,3 +78,24 @@ def test_runtime_i18n_key_manifest_matches_python_emitters() -> None:
 
     normalized_manifest = {group: sorted(keys) for group, keys in manifest.items()}
     assert {group: sorted(keys) for group, keys in emitted.items()} == normalized_manifest
+
+
+def test_execution_cutover_evidence_has_no_hand_maintained_test_counts() -> None:
+    paths = (
+        REPOSITORY_ROOT / "docs/architecture/execution-kernel-cutover-evidence.md",
+        REPOSITORY_ROOT / "docs/architecture/execution-kernel-cutover-evidence.zh-CN.md",
+    )
+    volatile_count = re.compile(
+        r"\b\d[\d,]*\s+(?:passed|skipped|tests?\s+passed|个测试通过|条依赖)",
+        re.IGNORECASE,
+    )
+
+    offenders = {
+        path.relative_to(REPOSITORY_ROOT).as_posix(): volatile_count.findall(
+            path.read_text(encoding="utf-8")
+        )
+        for path in paths
+        if volatile_count.search(path.read_text(encoding="utf-8"))
+    }
+
+    assert offenders == {}

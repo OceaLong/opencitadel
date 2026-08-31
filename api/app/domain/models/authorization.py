@@ -71,3 +71,7 @@ class AuthorizationContext(BaseModel):
     @property
     def is_admin(self) -> bool:
         return bool(self.principal and self.principal.is_admin)
+
+    @property
+    def is_auditor(self) -> bool:
+        return bool(self.principal and self.principal.is_auditor)

@@ -6,7 +6,6 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends
 
-from app.application.services.integration_projection_service import IntegrationProjectionService
 from app.application.services.integration_server_service import (
     A2AIntegrationService,
     MCPServerService,
@@ -28,7 +27,6 @@ from app.interfaces.schemas.integration import (
 )
 from app.interfaces.service_dependencies import (
     get_a2a_integration_service,
-    get_integration_projection_service,
     get_mcp_integration_service,
 )
 
@@ -38,13 +36,11 @@ router = APIRouter(prefix="/integrations", tags=["Integrations"])
 @router.get("/mcp-servers", response_model=Response[MCPServerListResponse])
 async def list_mcp_servers(
     ctx: WorkspaceContext = Depends(get_workspace_context),
-    service: IntegrationProjectionService = Depends(get_integration_projection_service),
+    service: MCPServerService = Depends(get_mcp_integration_service),
 ) -> Response[MCPServerListResponse]:
-    projections = await service.list_mcp_servers(scope=ctx.scope)
+    records = await service.list_servers(scope=ctx.scope)
     return Response.success(
-        MCPServerListResponse(
-            items=[MCPServerResponse.from_projection(item) for item in projections]
-        )
+        MCPServerListResponse(items=[MCPServerResponse.from_domain(item) for item in records])
     )
 
 
@@ -123,13 +119,11 @@ async def set_mcp_server_enabled(
 @router.get("/a2a-servers", response_model=Response[A2AServerListResponse])
 async def list_a2a_servers(
     ctx: WorkspaceContext = Depends(get_workspace_context),
-    service: IntegrationProjectionService = Depends(get_integration_projection_service),
+    service: A2AIntegrationService = Depends(get_a2a_integration_service),
 ) -> Response[A2AServerListResponse]:
-    projections = await service.list_a2a_servers(scope=ctx.scope)
+    records = await service.list_servers(scope=ctx.scope)
     return Response.success(
-        A2AServerListResponse(
-            items=[A2AServerResponse.from_projection(item) for item in projections]
-        )
+        A2AServerListResponse(items=[A2AServerResponse.from_domain(item) for item in records])
     )
 
 

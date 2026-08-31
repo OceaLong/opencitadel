@@ -2,8 +2,9 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Loader2, Pause, Play, ShieldCheck } from "lucide-react";
+import { Loader2, Pause, Play, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
@@ -12,6 +13,14 @@ import { ScrollablePageContent } from "@/components/scrollable-page-content";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { useCapabilities } from "@/hooks/use-capabilities";
@@ -29,11 +38,14 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
   const { loading: capabilityLoading, capability } = useCapabilities();
   const runAdmissionAvailable = isCapabilityAvailable(capability("ops_patrol"));
   const { user } = useAuth();
+  const router = useRouter();
   const readOnly = user?.global_role === "auditor";
   const [pack, setPack] = useState<PatrolPack | null>(null);
   const [runs, setRuns] = useState<PatrolRun[]>([]);
   const [metrics, setMetrics] = useState<PatrolPackMetrics | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   useReportPageTitle(pack?.name);
   const load = useCallback(async () => {
     const [item, history, metricData] = await Promise.all([
@@ -73,6 +85,21 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
       toast.error(error instanceof Error ? error.message : t("errors.action"));
     } finally {
       setBusy(null);
+    }
+  };
+  const deletable =
+    pack !== null &&
+    (pack.status === "draft" || pack.status === "paused" || pack.status === "invalid");
+  const confirmDelete = async () => {
+    if (!pack) return;
+    setDeleting(true);
+    try {
+      await patrolsApi.deletePack(pack.id);
+      toast.success(t("delete.success"));
+      router.push("/patrols");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("errors.delete"));
+      setDeleting(false);
     }
   };
   if (!pack)
@@ -136,6 +163,17 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
                   )}
                   {t("actions.runNow")}
                 </Button>
+                {deletable && (
+                  <Button
+                    variant="outline"
+                    className="text-destructive hover:text-destructive"
+                    disabled={Boolean(busy)}
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    <Trash2 className="size-4" />
+                    {t("actions.delete")}
+                  </Button>
+                )}
               </>
             )
           }
@@ -280,6 +318,23 @@ export default function PatrolPackPage({ params }: { params: Promise<{ id: strin
           </CardContent>
         </Card>
       </div>
+      <Dialog open={deleteOpen} onOpenChange={(open) => !deleting && setDeleteOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("delete.title")}</DialogTitle>
+            <DialogDescription>{t("delete.description")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={deleting} onClick={() => setDeleteOpen(false)}>
+              {t("actions.cancel")}
+            </Button>
+            <Button variant="destructive" disabled={deleting} onClick={() => void confirmDelete()}>
+              {deleting && <Loader2 className="size-4 animate-spin" />}
+              {t("actions.delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ScrollablePageContent>
   );
 }

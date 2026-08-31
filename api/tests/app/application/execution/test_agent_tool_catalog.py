@@ -146,6 +146,7 @@ def _catalog(
     *,
     model: ResolvedInferenceModel | None = None,
     image_generator=None,
+    llm_factory=None,
 ):
     mcp_servers = _MCPServers()
     a2a_servers = _A2AServers()
@@ -164,6 +165,7 @@ def _catalog(
         codebases=object(),
         artifacts=object(),
         memories=object(),
+        llm_factory=llm_factory,
     )
     return catalog, mcp_servers, a2a_servers
 
@@ -282,3 +284,35 @@ async def test_session_sandbox_allocation_passes_verified_owner_scope() -> None:
     factory.create.assert_awaited_once_with(owner_scope=scope)
     repository.save.assert_awaited_once_with(session)
     assert session.sandbox_id == "sandbox-1"
+
+
+@pytest.mark.asyncio
+async def test_rerank_llm_is_wired_when_kb_bound() -> None:
+    # Regression: rerank stayed a no-op because the catalog never built a chat
+    # client for the KnowledgeBaseTool. With a bound KB and rerank enabled the
+    # llm_factory must be invoked so retrieval can actually rerank.
+    skill = Skill(id="skill-1", name="kb", slug="kb", allowed_tools=["kb_search"])
+    calls: list[dict] = []
+
+    def _factory(model, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(invoke=AsyncMock())
+
+    catalog, _, _ = _catalog(skill, llm_factory=_factory)
+    payload = {
+        "session_id": "session-1",
+        "mode": "agent",
+        "skill_id": "skill-1",
+        "resource_bindings": [
+            {
+                "resource_kind": "knowledge_base",
+                "resource_id": "kb-1",
+                "version_id": "v1",
+            }
+        ],
+    }
+
+    await catalog.definitions(payload, CONTEXT)
+
+    assert len(calls) == 1
+    assert calls[0]["thinking_enabled"] is False

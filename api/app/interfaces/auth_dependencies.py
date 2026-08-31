@@ -10,6 +10,7 @@ from app.domain.errors import ForbiddenError, UnauthorizedError
 from app.domain.models.authorization import AuthorizationContext, AuthorizationMode
 from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
 from app.domain.repositories.uow import UnitOfWorkFactory
+from app.domain.utils.time_utils import utc_now
 from app.interfaces.auth_context import get_principal, set_principal
 from app.interfaces.service_dependencies import (
     get_csrf_service,
@@ -131,6 +132,10 @@ async def require_service_api_key(
         )
         if principal.is_auditor:
             raise ForbiddenError("审计员为只读角色，无法使用服务 API Key 执行操作")
+        # Record last use so admins can see which keys are live / stale. The
+        # column existed but was never written.
+        await uow.service_api_key.save(key.model_copy(update={"last_used_at": utc_now()}))
+        await uow.commit()
         set_principal(principal)
         set_authorization_context(
             AuthorizationContext.for_principal(

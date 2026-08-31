@@ -39,6 +39,37 @@ async def test_connect_mcp_server_safely_records_connection_errors():
 
 
 @pytest.mark.asyncio
+async def test_connect_mcp_server_safely_never_turns_dependency_failure_into_empty_success():
+    manager = MCPClientManager(
+        runtime=MCPRuntime(
+            servers={
+                "server-id": MCPServerRuntime(
+                    id="server-id",
+                    name="missing-runtime-server",
+                    transport=MCPTransport.STREAMABLE_HTTP,
+                    url="https://example.invalid/mcp",
+                    enabled=True,
+                ),
+            },
+        ),
+        connect_timeout=timedelta(seconds=7),
+        tool_timeout=timedelta(seconds=11),
+    )
+
+    with patch.object(
+        manager,
+        "_connect_mcp_server",
+        new=AsyncMock(side_effect=ModuleNotFoundError("No module named 'mcp'")),
+    ):
+        await manager._connect_mcp_server_safely(
+            "missing-runtime-server",
+            manager._runtime.servers["server-id"],
+        )
+
+    assert manager.connection_errors == {"missing-runtime-server": "No module named 'mcp'"}
+
+
+@pytest.mark.asyncio
 async def test_cache_mcp_server_tools_records_list_tools_errors():
     manager = MCPClientManager(
         runtime=MCPRuntime(),

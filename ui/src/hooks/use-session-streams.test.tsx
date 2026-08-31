@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SSEEventData } from "@/lib/api/types";
@@ -45,7 +45,7 @@ function makeCallbacks(): VolatileCallbacks {
 }
 
 function Harness({ callbacks }: { callbacks: VolatileCallbacks }) {
-  useSessionStreams({
+  const streams = useSessionStreams({
     sessionId: "session-1",
     sessionStatus: "running",
     appendEvent: callbacks.appendEvent,
@@ -56,8 +56,16 @@ function Harness({ callbacks }: { callbacks: VolatileCallbacks }) {
     initialEventsLoaded: true,
     onReconnect: callbacks.onReconnect,
   });
+  useEffect(() => {
+    currentStreams = streams;
+    return () => {
+      currentStreams = null;
+    };
+  }, [streams]);
   return null;
 }
+
+let currentStreams: ReturnType<typeof useSessionStreams> | null = null;
 
 describe("useSessionStreams empty stream lifecycle", () => {
   const cleanups: Array<ReturnType<typeof vi.fn>> = [];
@@ -75,6 +83,7 @@ describe("useSessionStreams empty stream lifecycle", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    currentStreams = null;
     document.body.replaceChildren();
   });
 
@@ -101,4 +110,43 @@ describe("useSessionStreams empty stream lifecycle", () => {
     await unmount();
     expect(cleanups[0]).toHaveBeenCalledTimes(1);
   });
+
+  it("resumes a durable event stream after an approval command", async () => {
+    const callbacks = makeCallbacks();
+    const { unmount } = await renderComponent(<WaitingHarness callbacks={callbacks} />);
+
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(mocks.chat).not.toHaveBeenCalled();
+
+    await act(async () => {
+      currentStreams?.resumeAfterExternalCommand();
+    });
+
+    expect(mocks.chat).toHaveBeenCalledTimes(1);
+    expect(mocks.chat.mock.calls[0][1]).toEqual({ event_id: "10" });
+    await unmount();
+  });
 });
+
+function WaitingHarness({ callbacks }: { callbacks: VolatileCallbacks }) {
+  const streams = useSessionStreams({
+    sessionId: "session-1",
+    sessionStatus: "waiting",
+    appendEvent: callbacks.appendEvent,
+    onSessionMissing: callbacks.onSessionMissing,
+    applySessionPatch: callbacks.applySessionPatch,
+    setError: callbacks.setError,
+    lastEventIdRef,
+    initialEventsLoaded: true,
+    onReconnect: callbacks.onReconnect,
+  });
+  useEffect(() => {
+    currentStreams = streams;
+    return () => {
+      currentStreams = null;
+    };
+  }, [streams]);
+  return null;
+}

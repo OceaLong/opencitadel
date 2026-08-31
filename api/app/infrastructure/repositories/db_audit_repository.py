@@ -57,6 +57,7 @@ class DBAuditRepository(AuditRepository):
             resource_type=log.resource_type,
             resource_id=log.resource_id,
             team_id=log.team_id,
+            session_id=log.session_id,
             request_id=log.request_id,
             metadata=log.metadata,
             created_at=log.created_at,
@@ -77,6 +78,7 @@ class DBAuditRepository(AuditRepository):
         end_at: datetime | None = None,
         resource_id: str | None = None,
         resource_type: str | None = None,
+        session_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[AuditLog]:
@@ -89,6 +91,8 @@ class DBAuditRepository(AuditRepository):
             stmt = stmt.where(AuditLogORM.resource_id == resource_id)
         if resource_type:
             stmt = stmt.where(AuditLogORM.resource_type == resource_type)
+        if session_id:
+            stmt = stmt.where(AuditLogORM.session_id == session_id)
         if start_at:
             stmt = stmt.where(AuditLogORM.created_at >= start_at)
         if end_at:
@@ -112,10 +116,13 @@ class DBAuditRepository(AuditRepository):
         *,
         limit: int | None = None,
         resource_id: str | None = None,
+        session_id: str | None = None,
     ) -> builtins.list[AuditLog]:
         stmt = select(AuditLogORM).where(AuditLogORM.chain_seq.isnot(None))
         if resource_id:
             stmt = stmt.where(AuditLogORM.resource_id == resource_id)
+        if session_id:
+            stmt = stmt.where(AuditLogORM.session_id == session_id)
         stmt = stmt.order_by(AuditLogORM.chain_seq.asc())
         if limit is not None:
             stmt = stmt.limit(max(1, limit))
@@ -131,6 +138,7 @@ class DBAuditRepository(AuditRepository):
         end_at: datetime | None = None,
         resource_id: str | None = None,
         resource_type: str | None = None,
+        session_id: str | None = None,
     ) -> int:
         stmt = select(func.count()).select_from(AuditLogORM)
         if actor_user_id:
@@ -141,6 +149,8 @@ class DBAuditRepository(AuditRepository):
             stmt = stmt.where(AuditLogORM.resource_id == resource_id)
         if resource_type:
             stmt = stmt.where(AuditLogORM.resource_type == resource_type)
+        if session_id:
+            stmt = stmt.where(AuditLogORM.session_id == session_id)
         if start_at:
             stmt = stmt.where(AuditLogORM.created_at >= start_at)
         if end_at:

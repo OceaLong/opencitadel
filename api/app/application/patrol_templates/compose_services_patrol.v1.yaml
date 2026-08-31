@@ -1,0 +1,114 @@
+schema_version: 1
+target_ref: opencitadel-local
+timezone: Asia/Shanghai
+schedule:
+  cron: "0 9 * * *"
+  enabled: false
+scope:
+  cluster: opencitadel-compose
+  namespaces: [opencitadel]
+  environment: staging
+defaults:
+  timeout_seconds: 30
+  max_evidence_items: 10
+checks:
+  - id: api-health
+    title: OpenCitadel API health
+    probe:
+      tool: http_probe
+      args: {probe_id: primary-endpoint}
+      output_schema_hash: 03af4b9122da051ecb5e5d707552f27b09875d46b1124b671bb350fad06b28e1
+    assertions:
+      - {id: api-is-healthy, field: $.healthy, op: eq, value: true, status_on_failure: fail, message: OpenCitadel API health probe failed}
+    severity_on_fail: critical
+    required_evidence: [summary]
+  - id: api-status
+    title: OpenCitadel API response status
+    probe:
+      tool: http_probe
+      args: {probe_id: primary-endpoint}
+      output_schema_hash: 03af4b9122da051ecb5e5d707552f27b09875d46b1124b671bb350fad06b28e1
+    assertions:
+      - {id: api-status-is-200, field: $.status_code, op: eq, value: 200, status_on_failure: fail, message: OpenCitadel API did not return HTTP 200}
+    severity_on_fail: critical
+    required_evidence: [summary]
+  - id: api-latency
+    title: OpenCitadel API latency
+    probe:
+      tool: http_probe
+      args: {probe_id: primary-endpoint}
+      output_schema_hash: 03af4b9122da051ecb5e5d707552f27b09875d46b1124b671bb350fad06b28e1
+    assertions:
+      - {id: api-latency-under-two-seconds, field: $.latency_ms, op: lt, value: 2000, status_on_failure: fail, message: OpenCitadel API latency exceeded two seconds}
+    severity_on_fail: critical
+    required_evidence: [summary]
+  - id: api-response-integrity
+    title: OpenCitadel API response integrity
+    probe:
+      tool: http_probe
+      args: {probe_id: primary-endpoint}
+      output_schema_hash: 03af4b9122da051ecb5e5d707552f27b09875d46b1124b671bb350fad06b28e1
+    assertions:
+      - {id: api-response-fingerprint-present, field: $.body_fingerprint, op: regex, value: "^[0-9a-f]{64}$", status_on_failure: fail, message: OpenCitadel API response fingerprint is invalid}
+    severity_on_fail: critical
+    required_evidence: [summary]
+  - id: console-health
+    title: OpsConsole health
+    probe:
+      tool: http_probe
+      args: {probe_id: demo-console}
+      output_schema_hash: 03af4b9122da051ecb5e5d707552f27b09875d46b1124b671bb350fad06b28e1
+    assertions:
+      - {id: console-is-healthy, field: $.healthy, op: eq, value: true, status_on_failure: fail, message: OpsConsole health probe failed}
+    severity_on_fail: critical
+    required_evidence: [summary]
+  - id: console-status
+    title: OpsConsole response status
+    probe:
+      tool: http_probe
+      args: {probe_id: demo-console}
+      output_schema_hash: 03af4b9122da051ecb5e5d707552f27b09875d46b1124b671bb350fad06b28e1
+    assertions:
+      - {id: console-status-is-200, field: $.status_code, op: eq, value: 200, status_on_failure: fail, message: OpsConsole did not return HTTP 200}
+    severity_on_fail: critical
+    required_evidence: [summary]
+  - id: console-latency
+    title: OpsConsole latency
+    probe:
+      tool: http_probe
+      args: {probe_id: demo-console}
+      output_schema_hash: 03af4b9122da051ecb5e5d707552f27b09875d46b1124b671bb350fad06b28e1
+    assertions:
+      - {id: console-latency-under-two-seconds, field: $.latency_ms, op: lt, value: 2000, status_on_failure: fail, message: OpsConsole latency exceeded two seconds}
+    severity_on_fail: critical
+    required_evidence: [summary]
+  - id: console-response-integrity
+    title: OpsConsole response integrity
+    probe:
+      tool: http_probe
+      args: {probe_id: demo-console}
+      output_schema_hash: 03af4b9122da051ecb5e5d707552f27b09875d46b1124b671bb350fad06b28e1
+    assertions:
+      - {id: console-response-fingerprint-present, field: $.body_fingerprint, op: regex, value: "^[0-9a-f]{64}$", status_on_failure: fail, message: OpsConsole response fingerprint is invalid}
+    severity_on_fail: critical
+    required_evidence: [summary]
+  - id: primary-dependencies
+    title: Primary dependency connectivity
+    probe:
+      tool: dependency_status
+      args: {dependency_id: primary-dependencies}
+      output_schema_hash: 03af4b9122da051ecb5e5d707552f27b09875d46b1124b671bb350fad06b28e1
+    assertions:
+      - {id: primary-dependencies-healthy, field: $.healthy, op: eq, value: true, status_on_failure: fail, message: A primary dependency is unavailable}
+    severity_on_fail: critical
+    required_evidence: [summary]
+  - id: console-connectivity
+    title: OpsConsole TCP connectivity
+    probe:
+      tool: dependency_status
+      args: {dependency_id: demo-console-tcp}
+      output_schema_hash: 03af4b9122da051ecb5e5d707552f27b09875d46b1124b671bb350fad06b28e1
+    assertions:
+      - {id: console-connectivity-healthy, field: $.healthy, op: eq, value: true, status_on_failure: fail, message: OpsConsole TCP connectivity failed}
+    severity_on_fail: critical
+    required_evidence: [summary]

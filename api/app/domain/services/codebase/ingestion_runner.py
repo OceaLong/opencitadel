@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import shlex
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urlparse
@@ -17,6 +17,7 @@ from app.domain.errors import (
     NotFoundError,
 )
 from app.domain.external.file_storage import FileStorage
+from app.domain.external.object_storage import ObjectStoragePort
 from app.domain.external.sandbox import Sandbox, SandboxFactoryPort
 from app.domain.models.build_progress import (
     BuildProgress,
@@ -44,7 +45,10 @@ from app.domain.services.codebase.artifact_generator import (
     ArtifactGenerator,
 )
 from app.domain.services.codebase.indexer import CodebaseIndexer
-from app.domain.services.codebase.snapshot_service import CodeSnapshotService
+from app.domain.services.codebase.snapshot_service import (
+    CodeSnapshotService,
+    MaterializedSource,
+)
 from app.domain.services.codebase.source_validator import (
     CodebaseSourceValidator,
     normalize_contained_path,
@@ -145,6 +149,7 @@ class CodebaseIngestionRunner:
         uow_factory: Callable[[], IUnitOfWork],
         sandbox_factory: SandboxFactoryPort,
         file_storage: FileStorage,
+        object_storage: ObjectStoragePort,
         snapshot_service: CodeSnapshotService | None = None,
         source_validator: CodebaseSourceValidator | None = None,
         embeddings: EmbeddingPort | None = None,
@@ -152,6 +157,7 @@ class CodebaseIngestionRunner:
         self._uow_factory = uow_factory
         self._sandbox_factory = sandbox_factory
         self._file_storage = file_storage
+        self._object_storage = object_storage
         self._embeddings = embeddings
         self._snapshot_service = snapshot_service or CodeSnapshotService()
         self._source_validator = source_validator or CodebaseSourceValidator()
@@ -208,19 +214,8 @@ class CodebaseIngestionRunner:
             codebase.status = CodebaseStatus.MATERIALIZING
             codebase.sandbox_id = sandbox.id
             codebase.workspace_path = workspace
-            snapshot = await self._snapshot_service.create_from_sandbox(
-                version.id,
-                sandbox,
-            )
-            codebase.snapshot_key = snapshot.snapshot_key
             async with self._uow_factory() as uow:
                 await uow.codebase.save(codebase)
-                await uow.codebase_version.update_snapshot(
-                    version.id,
-                    source_snapshot_key=snapshot.snapshot_key,
-                    source_revision=snapshot.source_revision,
-                    source_digest=snapshot.source_digest,
-                )
                 await uow.commit()
             yield _step_event("materialize", "候选代码物化完成", BuildProgressStatus.COMPLETED)
 
@@ -234,6 +229,20 @@ class CodebaseIngestionRunner:
             if not collection.entries:
                 raise CodebaseNoIndexableSourceError(collection)
             file_entries = [(entry.path, entry.content) for entry in collection.entries]
+            snapshot = await self._create_and_store_snapshot(
+                version.id,
+                dict(file_entries),
+            )
+            codebase.snapshot_key = snapshot.snapshot_key
+            async with self._uow_factory() as uow:
+                await uow.codebase.save(codebase)
+                await uow.codebase_version.update_snapshot(
+                    version.id,
+                    source_snapshot_key=snapshot.snapshot_key,
+                    source_revision=snapshot.source_revision,
+                    source_digest=snapshot.source_digest,
+                )
+                await uow.commit()
 
             analysis = StaticAnalyzer(policy=policy.analysis).analyze_tree(
                 codebase.id,
@@ -364,7 +373,7 @@ class CodebaseIngestionRunner:
             yield _step_event("artifacts", "候选图表生成完成", BuildProgressStatus.COMPLETED)
             yield build_done()
 
-        except (OSError, RuntimeError, ValueError) as exc:
+        except Exception as exc:
             logger.exception("代码库候选构建失败")
             error_code = getattr(
                 exc,
@@ -376,9 +385,18 @@ class CodebaseIngestionRunner:
             elif version is None:
                 try:
                     await self._fail_candidate(build_id, str(exc))
-                except (OSError, RuntimeError, ValueError):
+                except Exception:
                     logger.exception("代码库候选失败状态持久化失败 build=%s", build_id)
             yield build_error(message=str(exc), failure_code=error_code)
+
+    async def _create_and_store_snapshot(
+        self,
+        version_id: str,
+        source_tree: Mapping[str, str | bytes],
+    ) -> MaterializedSource:
+        snapshot = await self._snapshot_service.create(version_id, source_tree)
+        await self._object_storage.put_bytes(snapshot.snapshot_key, snapshot.snapshot_bytes)
+        return snapshot
 
     async def _load_build_context(
         self,
@@ -642,12 +660,24 @@ class CodebaseIngestionRunner:
                         read_result.message,
                     )
                     continue
+                data = read_result.data if isinstance(read_result.data, dict) else {}
                 content = file_content(read_result)
+                size_bytes = len(content.encode("utf-8", errors="ignore"))
+                if data.get("truncated") is True or size_bytes > policy.max_file_size_bytes:
+                    skipped += 1
+                    truncated = True
+                    logger.info(
+                        "代码库文件超过策略大小限制，已跳过: path=%s size_bytes=%s limit=%s",
+                        rel,
+                        data.get("size_bytes", size_bytes),
+                        policy.max_file_size_bytes,
+                    )
+                    continue
                 if not content:
                     skipped += 1
                     continue
                 entries.append(SourceFileEntry(path=rel, content=content))
-                total_bytes += len(content.encode("utf-8", errors="ignore"))
+                total_bytes += size_bytes
         if skipped or failed or truncated:
             logger.info(
                 "代码库文件采集完成: workspace=%s collected=%d "

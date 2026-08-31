@@ -10,12 +10,16 @@ x-pip-build-args: &pip-build-args
   PYPI_FILES_MIRROR: ${PYPI_FILES_MIRROR-https://mirrors.aliyun.com/pypi/packages/}
   NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
 
+x-ownership-labels: &ownership-labels
+  com.opencitadel.acceptance.project: ${ACCEPTANCE_PROJECT_ID:-none}
+  com.opencitadel.acceptance.run: ${ACCEPTANCE_RUN_ID:-none}
+
 services:
   # ==================== 基础设施 ====================
 
   opencitadel-redis:
+    labels: *ownership-labels
     image: redis:7-alpine
-    container_name: opencitadel-redis
     restart: unless-stopped
     mem_limit: 512m
     mem_reservation: 256m
@@ -45,8 +49,8 @@ services:
       retries: 5
 
   opencitadel-postgres:
+    labels: *ownership-labels
     image: pgvector/pgvector:pg16
-    container_name: opencitadel-postgres
     restart: unless-stopped
     mem_limit: 1024m
     mem_reservation: 512m
@@ -85,10 +89,10 @@ services:
       retries: 5
 
   opencitadel-minio:
+    labels: *ownership-labels
     profiles:
       - local
     image: minio/minio:latest
-    container_name: opencitadel-minio
     restart: unless-stopped
     mem_limit: 512m
     mem_reservation: 256m
@@ -110,8 +114,8 @@ services:
   # ==================== 沙箱服务 ====================
 
   opencitadel-sandbox-egress:
+    labels: *ownership-labels
     image: ubuntu/squid:6.6-24.04_edge
-    container_name: opencitadel-sandbox-egress
     restart: unless-stopped
     mem_limit: 256m
     mem_reservation: 128m
@@ -145,6 +149,7 @@ services:
       retries: 5
 
   opencitadel-sandbox:
+    labels: *ownership-labels
     profiles:
       - fixed-sandbox
     build:
@@ -153,7 +158,6 @@ services:
       args:
         <<: *pip-build-args
     image: opencitadel-sandbox
-    container_name: opencitadel-sandbox
     restart: "no"
     mem_limit: 1g
     memswap_limit: 1g
@@ -187,6 +191,7 @@ services:
   # provider, OAuth, or application secrets and exposes a narrow token-
   # authenticated sandbox lifecycle API on the internal network.
   opencitadel-sandbox-broker:
+    labels: *ownership-labels
     build:
       context: ./api
       dockerfile: Dockerfile
@@ -198,7 +203,6 @@ services:
         # "docker"(app/infrastructure/external/sandbox/broker.py),任何场景都不需要 kubernetes SDK
         WITH_K8S: "0"
     image: opencitadel-api
-    container_name: opencitadel-sandbox-broker
     restart: unless-stopped
     command: ["python", "-m", "app.infrastructure.external.sandbox.broker"]
     mem_limit: 256m
@@ -222,9 +226,11 @@ services:
       - "${DOCKER_SOCK_GID:-0}"
     environment:
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
-      SANDBOX_IMAGE: opencitadel-sandbox
-      SANDBOX_NAME_PREFIX: opencitadel-sandbox
-      SANDBOX_NETWORK: opencitadel-sandbox-network
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-opencitadel-sandbox}
+      SANDBOX_NAME_PREFIX: ${SANDBOX_NAME_PREFIX:-opencitadel-sandbox}
+      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-${COMPOSE_PROJECT_NAME:-opencitadel}_opencitadel-sandbox-network}
+      SANDBOX_LABELS: >-
+        ${SANDBOX_LABELS:-{}}
       SANDBOX_HTTP_PROXY: http://opencitadel-sandbox-egress:3128
       SANDBOX_HTTPS_PROXY: http://opencitadel-sandbox-egress:3128
       SANDBOX_NO_PROXY: localhost,127.0.0.1
@@ -247,6 +253,7 @@ services:
   # ==================== 数据库迁移 (一次性) ====================
 
   opencitadel-migrate:
+    labels: *ownership-labels
     build:
       context: ./api
       dockerfile: Dockerfile
@@ -273,6 +280,7 @@ services:
   # ==================== 后端 API ====================
 
   opencitadel-api:
+    labels: *ownership-labels
     build:
       context: ./api
       dockerfile: Dockerfile
@@ -282,7 +290,6 @@ services:
         # 本地 compose 使用 docker 驱动沙箱,不需要 kubernetes SDK;CI/发布构建不传此参数,默认 1(全功能)
         WITH_K8S: "0"
     image: opencitadel-api
-    container_name: opencitadel-api
     restart: unless-stopped
     stop_grace_period: 45s
     mem_limit: 640m
@@ -299,6 +306,11 @@ services:
       POSTGRES_KERNEL_PASSWORD: ""
       SANDBOX_BROKER_URL: http://opencitadel-sandbox-broker:8090
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-opencitadel-sandbox}
+      SANDBOX_NAME_PREFIX: ${SANDBOX_NAME_PREFIX:-opencitadel-sandbox}
+      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-${COMPOSE_PROJECT_NAME:-opencitadel}_opencitadel-sandbox-network}
+      SANDBOX_LABELS: >-
+        ${SANDBOX_LABELS:-{}}
       METRICS_TOKEN: ${METRICS_TOKEN:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -324,6 +336,7 @@ services:
   # ==================== Universal Execution Kernel ====================
 
   opencitadel-execution-kernel:
+    labels: *ownership-labels
     build:
       context: ./api
       dockerfile: Dockerfile
@@ -333,7 +346,6 @@ services:
         # 本地 compose 使用 docker 驱动沙箱,不需要 kubernetes SDK;CI/发布构建不传此参数,默认 1(全功能)
         WITH_K8S: "0"
     image: opencitadel-execution-kernel
-    container_name: opencitadel-execution-kernel
     restart: unless-stopped
     stop_grace_period: 45s
     mem_limit: 1024m
@@ -350,6 +362,11 @@ services:
       POSTGRES_MIGRATION_PASSWORD: ""
       SANDBOX_BROKER_URL: http://opencitadel-sandbox-broker:8090
       SANDBOX_BROKER_TOKEN: ${SANDBOX_BROKER_TOKEN:?SANDBOX_BROKER_TOKEN must be set}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-opencitadel-sandbox}
+      SANDBOX_NAME_PREFIX: ${SANDBOX_NAME_PREFIX:-opencitadel-sandbox}
+      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-${COMPOSE_PROJECT_NAME:-opencitadel}_opencitadel-sandbox-network}
+      SANDBOX_LABELS: >-
+        ${SANDBOX_LABELS:-{}}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     expose:
@@ -377,6 +394,7 @@ services:
   # ==================== 前端 UI ====================
 
   opencitadel-ui:
+    labels: *ownership-labels
     build:
       context: ./ui
       dockerfile: Dockerfile
@@ -384,7 +402,6 @@ services:
         NEXT_PUBLIC_API_BASE_URL: /api
         NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
     image: opencitadel-ui
-    container_name: opencitadel-ui
     restart: unless-stopped
     mem_limit: 384m
     mem_reservation: 192m
@@ -404,13 +421,13 @@ services:
   # Fixed, read-only MCP surface for Ops Patrol. Kubernetes deployments
   # should use the Helm/Kustomize ServiceAccount instead of this local profile.
   opencitadel-ops-collector:
+    labels: *ownership-labels
     profiles:
       - patrol
     build:
       context: ./ops-collector
       dockerfile: Dockerfile
     image: opencitadel-ops-collector
-    container_name: opencitadel-ops-collector
     restart: unless-stopped
     user: "10001:10001"
     read_only: true
@@ -446,13 +463,13 @@ services:
   # deployments should use the Helm/Kustomize ServiceAccount instead of this
   # local profile. Disabled by default (opt-in "actuator" profile).
   opencitadel-ops-actuator:
+    labels: *ownership-labels
     profiles:
       - actuator
     build:
       context: ./ops-actuator
       dockerfile: Dockerfile
     image: opencitadel-ops-actuator
-    container_name: opencitadel-ops-actuator
     restart: unless-stopped
     user: "10001:10001"
     read_only: true
@@ -483,13 +500,13 @@ services:
   # ==================== Demo: OpsConsole 样板工单后台 ====================
 
   ops-console:
+    labels: *ownership-labels
     profiles:
       - demo
     build:
       context: ./demo/ops-console
       dockerfile: Dockerfile
     image: opencitadel-ops-console
-    container_name: opencitadel-ops-console
     restart: unless-stopped
     mem_limit: 256m
     cpus: "0.50"
@@ -505,11 +522,44 @@ services:
       retries: 5
       start_period: 10s
 
+  # Deterministic OpenAI-compatible fixture for the acceptance profile only.
+  # It is registered through the public inference control plane and is never
+  # part of the production image or deployment surface.
+  acceptance-inference:
+    labels: *ownership-labels
+    profiles:
+      - acceptance
+    build:
+      context: ./e2e/fixtures/inference-provider
+      dockerfile: Dockerfile
+    image: opencitadel-acceptance-inference
+    restart: "no"
+    read_only: true
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: "0.25"
+    environment:
+      ACCEPTANCE_PROVIDER_TOKEN: ${ACCEPTANCE_PROVIDER_TOKEN:-}
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m,mode=1777
+    networks:
+      - opencitadel-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   # ==================== Nginx 网关 ====================
 
   opencitadel-nginx:
+    labels: *ownership-labels
     image: nginx:alpine
-    container_name: opencitadel-nginx
     restart: unless-stopped
     mem_limit: 128m
     mem_reservation: 64m
@@ -550,23 +600,27 @@ services:
 # ==================== 数据卷 ====================
 volumes:
   redis_data:
+    labels: *ownership-labels
     driver: local
   postgres_data:
+    labels: *ownership-labels
     driver: local
   minio_data:
+    labels: *ownership-labels
     driver: local
   nginx_conf:
+    labels: *ownership-labels
     driver: local
 
 # ==================== 网络 ====================
 networks:
   opencitadel-network:
-    name: opencitadel-network
+    labels: *ownership-labels
     driver: bridge
   opencitadel-sandbox-network:
-    name: opencitadel-sandbox-network
+    labels: *ownership-labels
     driver: bridge
     internal: true
   opencitadel-egress-network:
-    name: opencitadel-egress-network
+    labels: *ownership-labels
     driver: bridge

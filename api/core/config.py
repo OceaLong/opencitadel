@@ -44,6 +44,7 @@ class DeploymentSettings(BaseSettings):
     sandbox_image: str = ""
     sandbox_name_prefix: str = ""
     sandbox_network: str = ""
+    sandbox_labels: dict[str, str] = Field(default_factory=dict)
     sandbox_chrome_args: str = ""
     sandbox_https_proxy: str = ""
     sandbox_http_proxy: str = ""
@@ -82,6 +83,14 @@ class DeploymentSettings(BaseSettings):
     # Fixture replay is a process-local test/demo mechanism, never a runtime
     # product capability and never allowed when ENV=production.
     patrol_fixture_replay_enabled: bool = False
+
+    # 出站邮件（SMTP）：smtp_host 留空则邮件通知渠道不可用（优雅降级）
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
 
     # 数据库连接（引导层，启动前必须可用）
     postgres_user: str = "postgres"

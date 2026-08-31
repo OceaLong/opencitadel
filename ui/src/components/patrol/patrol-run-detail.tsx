@@ -4,11 +4,13 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   AlertCircle,
+  Ban,
   CheckCircle2,
   Download,
   Link2,
   Loader2,
   MoreHorizontal,
+  RotateCcw,
   ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -63,6 +65,35 @@ export function PatrolRunDetailView({
   const [saving, setSaving] = useState(false);
   const [remediations, setRemediations] = useState<PatrolRemediation[]>([]);
   const [remediationTarget, setRemediationTarget] = useState<PatrolFinding | null>(null);
+  const [lifecycle, setLifecycle] = useState<null | "cancel" | "replay">(null);
+  const cancellable = run.status === "queued" || run.status === "running";
+  const replayable =
+    run.status === "completed" ||
+    run.status === "completed_with_findings" ||
+    run.status === "failed" ||
+    run.status === "cancelled";
+  const cancelRun = async () => {
+    setLifecycle("cancel");
+    try {
+      await patrolsApi.cancelRun(run.id);
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("errors.cancelRun"));
+    } finally {
+      setLifecycle(null);
+    }
+  };
+  const replayRun = async () => {
+    setLifecycle("replay");
+    try {
+      await patrolsApi.replayRun(run.id);
+      onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("errors.replay"));
+    } finally {
+      setLifecycle(null);
+    }
+  };
   const loadRemediations = async () => {
     try {
       const list = await patrolsApi.listRemediations(run.id);
@@ -106,18 +137,54 @@ export function PatrolRunDetailView({
     <div className="grid gap-5">
       <Card className="bg-background/95 sticky top-0 z-10 backdrop-blur">
         <CardContent className="grid gap-4 p-5">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-semibold">{t("run.title")}</h1>
-              <StatusBadge variant={patrolStatusVariant(run.status)}>
-                {labels.status[run.status] ?? run.status}
-              </StatusBadge>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-xl font-semibold">{t("run.title")}</h1>
+                <StatusBadge variant={patrolStatusVariant(run.status)}>
+                  {labels.status[run.status] ?? run.status}
+                </StatusBadge>
+              </div>
+              <p className="text-muted-foreground mt-1 text-xs">
+                {t("labels.run")} {run.id} · {t("labels.pack")}{" "}
+                <span translate="no">v{run.pack_version}</span> ·{" "}
+                {labels.trigger[run.trigger_type] ?? run.trigger_type}
+              </p>
             </div>
-            <p className="text-muted-foreground mt-1 text-xs">
-              {t("labels.run")} {run.id} · {t("labels.pack")}{" "}
-              <span translate="no">v{run.pack_version}</span> ·{" "}
-              {labels.trigger[run.trigger_type] ?? run.trigger_type}
-            </p>
+            {!readOnly && (cancellable || replayable) && (
+              <div className="flex items-center gap-2">
+                {cancellable && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={lifecycle !== null}
+                    onClick={() => void cancelRun()}
+                  >
+                    {lifecycle === "cancel" ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Ban className="size-4" />
+                    )}
+                    {t("actions.cancelRun")}
+                  </Button>
+                )}
+                {replayable && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={lifecycle !== null}
+                    onClick={() => void replayRun()}
+                  >
+                    {lifecycle === "replay" ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <RotateCcw className="size-4" />
+                    )}
+                    {t("actions.replay")}
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             {(["pass", "warn", "fail", "error", "skipped"] as const).map((key) => (
@@ -225,7 +292,11 @@ export function PatrolRunDetailView({
         </CardHeader>
         <CardContent className="grid gap-3">
           {run.check_results.map((result) => (
-            <details key={result.id} className="group rounded-lg border p-4">
+            <details
+              key={result.id}
+              className="group rounded-lg border p-4"
+              aria-label={`${result.check_id} ${labels.status[result.status] ?? result.status}`}
+            >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
                 <span className="flex items-center gap-2">
                   {result.status === "pass" ? (

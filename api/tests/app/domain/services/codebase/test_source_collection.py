@@ -55,6 +55,7 @@ def _runner() -> CodebaseIngestionRunner:
         uow_factory=lambda: _Uow(repo),
         sandbox_factory=MagicMock(),
         file_storage=MagicMock(),
+        object_storage=MagicMock(),
     )
 
 
@@ -180,3 +181,44 @@ async def test_collection_reports_failed_reads(monkeypatch):
     assert [entry.path for entry in result.entries] == ["src/ok.py"]
     assert result.failed == 1
     assert result.total_bytes == len(b"print('ok')")
+
+
+@pytest.mark.asyncio
+async def test_collection_rejects_files_reported_truncated_by_sandbox(monkeypatch):
+    runner = _runner()
+    workspace = "/home/ubuntu/codebase"
+    oversized_path = f"{workspace}/src/oversized.py"
+
+    class TruncatingSandbox(_Sandbox):
+        async def read_files(self, filepaths, *, max_length=512000):
+            self.batch_sizes.append(len(filepaths))
+            return [
+                ToolResult(
+                    success=True,
+                    data={
+                        "filepath": oversized_path,
+                        "content": "p(truncated)",
+                        "truncated": True,
+                        "size_bytes": 100,
+                    },
+                )
+            ]
+
+    async def fake_exec_await(*args, **kwargs):
+        return oversized_path
+
+    monkeypatch.setattr(
+        "app.domain.services.codebase.ingestion_runner.exec_command_await",
+        fake_exec_await,
+    )
+
+    result = await runner._collect_source_files(
+        TruncatingSandbox({}),
+        workspace,
+        policy=CodebaseAnalysisPolicy(max_file_size_bytes=1),
+    )
+
+    assert result.entries == []
+    assert result.skipped == 1
+    assert result.truncated is True
+    assert result.total_bytes == 0

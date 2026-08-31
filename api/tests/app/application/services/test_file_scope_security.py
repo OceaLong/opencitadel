@@ -3,6 +3,7 @@ from io import BytesIO
 import pytest
 
 from app.application.services.file_service import FileService
+from app.domain.errors import NotFoundError
 from app.domain.models.file import File
 from app.domain.models.scope import OwnerScope
 
@@ -30,8 +31,14 @@ class _FakeUow:
 
 
 class _FakeStorage:
+    def __init__(self):
+        self.deleted: list[str] = []
+
     async def download_file(self, file_id: str):
         return BytesIO(b"ok"), File(id=file_id, filename="raw.txt")
+
+    async def delete_file(self, file_id: str):
+        self.deleted.append(file_id)
 
 
 @pytest.mark.asyncio
@@ -54,3 +61,28 @@ async def test_file_download_requires_explicit_owner_scope():
 
     with pytest.raises(TypeError):
         await service.download_file("file-1")
+
+
+@pytest.mark.asyncio
+async def test_file_delete_validates_owner_scope_before_storage_delete():
+    repo = _FakeFileRepo()
+    storage = _FakeStorage()
+    service = FileService(lambda: _FakeUow(repo), storage)
+
+    await service.delete_file("file-1", scope=OwnerScope.personal("user-1"))
+
+    assert storage.deleted == ["file-1"]
+
+
+@pytest.mark.asyncio
+async def test_file_delete_rejects_non_owner_before_storage_delete():
+    # Regression: a non-owner scope must fail ownership check and never reach
+    # storage deletion, so one tenant can't delete another tenant's file.
+    repo = _FakeFileRepo()
+    storage = _FakeStorage()
+    service = FileService(lambda: _FakeUow(repo), storage)
+
+    with pytest.raises(NotFoundError):
+        await service.delete_file("file-1", scope=OwnerScope.personal("attacker"))
+
+    assert storage.deleted == []

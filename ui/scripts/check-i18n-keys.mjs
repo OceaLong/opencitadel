@@ -93,7 +93,6 @@ const RUNTIME_POLICY_FIELD_PATHS = [
   "sandbox.idle_timeout_minutes",
   "sandbox.warmup_retry_interval_seconds",
   "sandbox.warmup_max_retries",
-  "sandbox.fast_warmup_max_retries",
   "sandbox.max_sandboxes_per_node",
   "sandbox.max_dynamic_sandboxes_global",
   "sandbox.admission_min_host_available_mb",

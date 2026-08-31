@@ -114,10 +114,12 @@ class SandboxPool:
                 try:
                     sandbox = self._queue.get_nowait()
                 except asyncio.QueueEmpty:
-                    sandbox = await self._factory.create_unpooled(
-                        settings,
-                        max_retries=settings.policy.fast_warmup_max_retries,
-                    )
+                    # The queue is empty, so this is a cold creation rather
+                    # than a pre-warmed checkout. It must use the complete
+                    # policy warmup budget: applying a shorter pool budget
+                    # here races normal Supervisor startup and incorrectly
+                    # fails otherwise healthy builds.
+                    sandbox = await self._factory.create_unpooled(settings)
                     await self.touch_activity(sandbox.id)
                     return sandbox
                 if getattr(sandbox, "settings", None) != settings:

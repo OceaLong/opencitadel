@@ -155,6 +155,33 @@ Release Tag 发布七个镜像：`api`、`execution-kernel`、`migrate`、`ui`�
 与 Trivy；Release Workflow 在发布前扫描每个镜像，并附加 SBOM 与签名 provenance。
 部署时应验证 provenance 并使用不可变 Digest，不依赖 `latest`。
 
+`e2e/fixtures/` 下的确定性推理 Provider 不是发布产物。它只存在于 Compose
+`acceptance` Profile，禁止加入 Helm、Kustomize、Quickstart、生产设置或 Release
+镜像矩阵。
+
+## 确定性验收门禁
+
+运行与 CI 相同的发布阻断全栈门禁：
+
+```bash
+./scripts/run-acceptance-e2e.sh --disposable
+```
+
+Runner 持有唯一 Compose Project 与 Run Namespace，通过公共控制面配置推理，执行真实
+Execution Kernel 与 Collector，并写入 `tmp/acceptance/<run-id>/manifest.json`。证据
+Schema 为 `contracts/acceptance-evidence.schema.json`；任一必需 ID 缺失、重复、跳过、
+中断或失败都会使门禁失败。
+
+清理严格绑定 `com.docker.compose.project`、`com.opencitadel.acceptance.project` 与
+`com.opencitadel.acceptance.run` Label。动态 Sandbox 还必须带有
+`opencitadel.io/sandbox=true` 和 Run Scope 名称前缀。带 `--disposable` 时，本次运行
+归属的 Volume 必须归零；不带时保留并报告 Volume 与产品历史，但 Container、Network
+和动态 Sandbox 仍须排空。
+
+无论门禁成功或失败，CI 都把 `tmp/acceptance/` 发布为 `acceptance-evidence` Artifact。
+重试前检查 Manifest 的 `failure_reason`、`logs/stack.log` 和 Playwright Trace/截图。
+不得用宽泛 Docker Prune 替代 Runner 清理。
+
 ## 发布门禁
 
 ```bash
@@ -173,6 +200,7 @@ npm run build
 cd ..
 docker compose config
 helm lint deploy/helm/opencitadel
+./scripts/run-acceptance-e2e.sh --disposable
 ```
 
 数据库执行/RLS 测试需要一次性 PostgreSQL，覆盖追加式事件、Owner 隔离、角色授权、

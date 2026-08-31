@@ -20,6 +20,7 @@ class AuditRepository(ABC):
         end_at: datetime | None = None,
         resource_id: str | None = None,
         resource_type: str | None = None,
+        session_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[AuditLog]: ...
@@ -37,6 +38,7 @@ class AuditRepository(ABC):
         end_at: datetime | None = None,
         resource_id: str | None = None,
         resource_type: str | None = None,
+        session_id: str | None = None,
     ) -> int: ...
 
     @abstractmethod
@@ -81,6 +83,7 @@ class AuditRepository(ABC):
         *,
         limit: int | None = None,
         resource_id: str | None = None,
+        session_id: str | None = None,
     ) -> builtins.list[AuditLog]: ...
 
     @abstractmethod

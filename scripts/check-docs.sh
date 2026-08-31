@@ -268,6 +268,36 @@ if rg -n 'dependency-injector|dependency_injector|api/app/container\.py|app\.con
   fail "found removed dependency-injector/container architecture in current documentation"
 fi
 
+echo "==> Checking deterministic acceptance documentation ..."
+for f in e2e/README.md e2e/README.zh-CN.md; do
+  for marker in \
+    './scripts/run-acceptance-e2e.sh --disposable' \
+    'contracts/acceptance-evidence.schema.json' \
+    'tmp/acceptance/<run-id>/manifest.json' \
+    'com.docker.compose.project' \
+    'com.opencitadel.acceptance.project' \
+    'com.opencitadel.acceptance.run' \
+    'opencitadel.io/sandbox=true'; do
+    require_marker "$f" "$marker" "deterministic acceptance"
+  done
+done
+for f in scripts/README.md scripts/README.zh-CN.md \
+  docs/operations/deployment.md docs/operations/deployment.zh-CN.md \
+  docs/architecture/execution-kernel-cutover-evidence.md \
+  docs/architecture/execution-kernel-cutover-evidence.zh-CN.md; do
+  require_marker "$f" './scripts/run-acceptance-e2e.sh --disposable' \
+    "deterministic acceptance entrypoint"
+done
+if rg -n 'PATROL_E2E|PATROL_E2E_ENABLED|patrol\.spec\.ts' \
+  .github/workflows/ci.yml e2e/README.md e2e/README.zh-CN.md 2>/dev/null; then
+  fail "found removed external-model Patrol E2E gate in current acceptance docs or CI"
+fi
+if rg -ni '[0-9][0-9,]*[[:space:]]+(passed|skipped|tests?[[:space:]]+passed)' \
+  docs/architecture/execution-kernel-cutover-evidence.md \
+  docs/architecture/execution-kernel-cutover-evidence.zh-CN.md 2>/dev/null; then
+  fail "found volatile hand-maintained test counts in cutover evidence"
+fi
+
 if [[ "$errors" -gt 0 ]]; then
   echo "Documentation check failed with $errors error(s)." >&2
   exit 1

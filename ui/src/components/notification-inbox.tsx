@@ -21,6 +21,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { notificationsApi } from "@/lib/api/notifications";
 import type { Notification } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/auth-provider";
 
 import { translate } from "@/i18n/translate";
 
@@ -51,6 +52,10 @@ function notificationHref(item: Notification): string | null {
 export function NotificationInbox({ className }: { className?: string }) {
   const t = useTranslations("notifications");
   const locale = useLocale();
+  const { user, loading: authLoading } = useAuth();
+  const userId = user?.id ?? null;
+  const authRef = useRef({ loading: authLoading, userId });
+  authRef.current = { loading: authLoading, userId };
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -58,23 +63,37 @@ export function NotificationInbox({ className }: { className?: string }) {
   const streamRef = useRef<EventSource | null>(null);
 
   const refresh = useCallback(async () => {
+    const requestedUserId = authRef.current.userId;
+    if (authRef.current.loading || !requestedUserId) return;
     setLoading(true);
     try {
       const data = await notificationsApi.list();
-      setItems(data.notifications);
-      setUnreadCount(data.unread_count);
+      if (authRef.current.userId === requestedUserId && !authRef.current.loading) {
+        setItems(data.notifications);
+        setUnreadCount(data.unread_count);
+      }
     } catch {
       // ignore when unauthenticated
     } finally {
-      setLoading(false);
+      if (authRef.current.userId === requestedUserId && !authRef.current.loading) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
+    if (authLoading || !userId) {
+      setOpen(false);
+      setItems([]);
+      setUnreadCount(0);
+      setLoading(false);
+      return;
+    }
     void refresh();
-  }, [refresh]);
+  }, [authLoading, refresh, userId]);
 
   useEffect(() => {
+    if (authLoading || !userId) return;
     const url = notificationsApi.streamUrl();
     const source = new EventSource(url, { withCredentials: true });
     streamRef.current = source;
@@ -90,7 +109,7 @@ export function NotificationInbox({ className }: { className?: string }) {
       source.close();
       streamRef.current = null;
     };
-  }, [refresh]);
+  }, [authLoading, refresh, userId]);
 
   const handleMarkRead = async (item: Notification) => {
     if (item.read) return;

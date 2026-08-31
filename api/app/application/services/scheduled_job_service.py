@@ -29,7 +29,11 @@ from app.domain.models.scheduled_job import (
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.session import Session, SessionMode, SessionStatus
 from app.domain.repositories.uow import IUnitOfWork
-from app.domain.utils.schedule_utils import compute_next_run, render_prompt_template
+from app.domain.utils.schedule_utils import (
+    compute_next_run,
+    render_prompt_template,
+    validate_trigger_spec,
+)
 from app.domain.utils.time_utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -135,6 +139,8 @@ class ScheduledJobService:
         source_id: str | None = None,
         scope: OwnerScope | None = None,
     ) -> tuple[ScheduledJob, str | None]:
+        if trigger_type != "webhook":
+            validate_trigger_spec(trigger_type, trigger_spec)
         webhook_secret: str | None = None
         job = ScheduledJob(
             name=name,
@@ -220,6 +226,7 @@ class ScheduledJobService:
                     setattr(job, key, value)
             job = ScheduledJob.model_validate(job.model_dump(mode="python"))
             if job.trigger_type != "webhook":
+                validate_trigger_spec(job.trigger_type, job.trigger_spec)
                 job.next_run_at = compute_next_run(
                     job.trigger_type, job.trigger_spec, timezone_name=job.timezone
                 )
@@ -327,7 +334,7 @@ class ScheduledJobService:
                 job_id=job.id,
             )
             if job.notify_channels:
-                await self._notification_service.send_im_via_mcp(
+                await self._notification_service.dispatch_notify_channels(
                     job.owner_user_id,
                     self._scope_for_job(job),
                     job.notify_channels_dict(),
@@ -476,7 +483,7 @@ class ScheduledJobService:
             job_id=job.id,
         )
         if job.notify_channels:
-            await self._notification_service.send_im_via_mcp(
+            await self._notification_service.dispatch_notify_channels(
                 job.owner_user_id,
                 self._scope_for_job(job),
                 job.notify_channels_dict(),

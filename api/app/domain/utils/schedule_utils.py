@@ -71,6 +71,38 @@ def _next_cron(spec: str, now: datetime, timezone_name: str = "UTC") -> datetime
     raise ValueError("could not compute next daily run")
 
 
+def validate_trigger_spec(trigger_type: str, trigger_spec: str) -> None:
+    """Reject schedules that compute_next_run would silently degrade to hourly.
+
+    The scheduler intentionally has no cron dependency, so only 'HH:MM' and
+    'minute hour * * *' daily cron are supported. Without this gate a spec like
+    '*/15 * * * *' was accepted and silently run once an hour instead.
+    """
+    spec = (trigger_spec or "").strip()
+    if trigger_type == "interval":
+        if not spec.isdigit():
+            raise ValueError("interval 触发的 trigger_spec 必须是表示秒数的整数")
+        return
+    if trigger_type == "cron":
+        if re.fullmatch(r"\d{1,2}:\d{2}", spec):
+            hour, minute = map(int, spec.split(":"))
+        else:
+            parts = spec.split()
+            if (
+                len(parts) != 5
+                or parts[2:] != ["*", "*", "*"]
+                or not parts[0].isdigit()
+                or not parts[1].isdigit()
+            ):
+                raise ValueError(
+                    "不支持的 cron 表达式：仅支持 'HH:MM' 或 'minute hour * * *' 每日计划"
+                )
+            minute, hour = int(parts[0]), int(parts[1])
+        if not 0 <= minute <= 59 or not 0 <= hour <= 23:
+            raise ValueError("cron 的分钟/小时超出范围")
+        return
+
+
 def render_prompt_template(template: str, payload: dict | None = None) -> str:
     result = template or ""
     payload = payload or {}

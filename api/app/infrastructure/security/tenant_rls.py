@@ -86,6 +86,7 @@ _AUTH_MODE = "COALESCE(current_setting('app.auth_mode', true), 'anonymous')"
 _USER_ID = "NULLIF(current_setting('app.user_id', true), '')"
 _TEAM_ID = "NULLIF(current_setting('app.team_id', true), '')"
 _IS_ADMIN = "COALESCE(current_setting('app.is_admin', true), 'false') = 'true'"
+_IS_AUDITOR = "COALESCE(current_setting('app.is_auditor', true), 'false') = 'true'"
 _AUTHORIZATION_VALID = "opencitadel_authorization_valid()"
 
 
@@ -182,6 +183,13 @@ def policy_statements(
         or inherited_predicate
         or direct_write_predicate(has_visibility=has_visibility)
     )
+    # An auditor (read-only global role) may SELECT across every owner for
+    # compliance/evidence, but must never satisfy any write predicate. These
+    # wraps are uniform and central so no per-table predicate can accidentally
+    # omit the guarantee. Only auditors carry is_auditor=true, so `NOT
+    # is_auditor` is a no-op for system/admin/regular users.
+    resolved_select = f"{_IS_AUDITOR} OR ({resolved_select})"
+    resolved_write = f"(NOT {_IS_AUDITOR}) AND ({resolved_write})"
     resolved_select = f"{_AUTHORIZATION_VALID} AND ({resolved_select})"
     resolved_write = f"{_AUTHORIZATION_VALID} AND ({resolved_write})"
     prefix = f"{table}_tenant"
@@ -200,6 +208,63 @@ def policy_statements(
         ),
         (f"CREATE POLICY {prefix}_delete ON {table} FOR DELETE USING ({resolved_write})"),
     ]
+
+
+_CUSTOM_OWNER_TABLES = {
+    "notifications": "user_id",
+    "service_api_keys": "owner_user_id",
+    "user_quotas": "user_id",
+}
+
+
+def _custom_owner_predicate(column: str) -> str:
+    return f"({_system_or_admin()}) OR {_identifier(column)} = {_USER_ID}"
+
+
+def apply_row_level_security(execute) -> None:
+    """Recreate the full tenant RLS policy matrix.
+
+    Callers pass an ``execute(statements)`` callback (a list[str] runner). This
+    is the single canonical matrix for every tenant-owned table; the auditor
+    read-all / no-write guarantee is baked into ``policy_statements`` itself.
+    """
+    for table in sorted(PRIVATE_ROOT_TABLES):
+        execute(policy_statements(table))
+    for table in sorted(VISIBILITY_ROOT_TABLES):
+        execute(policy_statements(table, has_visibility=True))
+    for table in sorted(POLICY_ROOT_TABLES):
+        execute(
+            policy_statements(
+                table,
+                select_predicate=policy_control_plane_predicate(),
+                write_predicate=policy_control_plane_predicate(),
+            )
+        )
+    for table, (parent, foreign_key, parent_key) in sorted(CHILD_TABLES.items()):
+        execute(
+            policy_statements(
+                table,
+                inherited_predicate=child_predicate(table, parent, foreign_key, parent_key),
+            )
+        )
+    for table in sorted(EXECUTION_ROOT_TABLES):
+        execute(policy_statements(table))
+    execute(
+        policy_statements(
+            "inference_bindings",
+            select_predicate=preference_select_predicate(),
+            write_predicate=preference_write_predicate(),
+        )
+    )
+    for table, column in _CUSTOM_OWNER_TABLES.items():
+        predicate = _custom_owner_predicate(column)
+        execute(
+            policy_statements(
+                table,
+                select_predicate=predicate,
+                write_predicate=predicate,
+            )
+        )
 
 
 def disable_policy_statements(table_name: str) -> list[str]:

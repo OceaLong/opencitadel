@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import StreamingResponse
@@ -15,7 +15,6 @@ from app.application.services.patrol_remediation_service import (
     _allowed_actions_for_probe_tool,
 )
 from app.application.services.patrol_run_service import PatrolRunService
-from app.application.services.runtime_policy_reader import RuntimePolicyReader
 from app.domain.errors import BadRequestError
 from app.domain.models.patrol import (
     PatrolCheckResult,
@@ -48,7 +47,6 @@ from app.interfaces.service_dependencies import (
     get_patrol_pack_service,
     get_patrol_remediation_service,
     get_patrol_run_service,
-    get_runtime_policy_reader,
 )
 
 router = APIRouter(tags=["Ops Patrol"])
@@ -177,19 +175,13 @@ async def validate_pack(
     ctx: WorkspaceContext = Depends(get_workspace_context),
     _write_guard=Depends(require_non_auditor),
     service: PatrolPackService = Depends(get_patrol_pack_service),
-    policy_reader: RuntimePolicyReader = Depends(get_runtime_policy_reader),
 ):
-    active = await policy_reader.active_execution(
-        require_fresh=True,
-        now=datetime.now(UTC),
-    )
     return ApiResponse.success(
         PatrolPackResponse.from_domain(
-            await service.validate_pack(
+            await service.request_validation(
                 pack_id,
                 ctx.scope,
                 ctx.principal.user_id,
-                policy=active.revision.policy.activity,
             )
         )
     )

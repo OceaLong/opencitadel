@@ -22,7 +22,6 @@ from app.application.services.patrol_pack_service import PatrolPackService
 from app.domain.models.inference import InferencePurpose, ResourceVisibility
 from app.domain.models.integration_server import MCPServerRecord
 from app.domain.models.patrol import PatrolPackConfig
-from app.domain.runtime_policy import ActivityExecutionPolicy
 from app.infrastructure.adapters.inference_ports import InfrastructureInferenceProviderAdapter
 from app.infrastructure.adapters.security_ports import FernetSecretEnvelopeAdapter
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
@@ -30,7 +29,6 @@ from app.seed_demo import (
     DEMO_INFERENCE_ENDPOINT_NAME,
     DEMO_MCP_SERVER_ID,
     DEMO_MCP_SERVER_NAME,
-    DEMO_OUTPUT_SCHEMA_HASH,
     DEMO_PACK_SLUG,
     DemoInferenceEnv,
     SeedDeps,
@@ -189,26 +187,6 @@ class FakeUow:
         return False
 
 
-class _FakeCollectorValidator:
-    """Stands in for MCPPatrolCollectorValidator's live MCP calls."""
-
-    def __init__(self, tools: set[str], *, dry_run_ok: bool = True) -> None:
-        self._tools = tools
-        self._dry_run_ok = dry_run_ok
-
-    async def get_capabilities(self, server, *, policy):
-        assert isinstance(policy, ActivityExecutionPolicy)
-        return {
-            "enabled_tools": sorted(self._tools | {"get_capabilities"}),
-            "output_schema_hashes": dict.fromkeys(self._tools, DEMO_OUTPUT_SCHEMA_HASH),
-            "overall_capability_hash": "c" * 64,
-        }
-
-    async def dry_run(self, server, config, *, policy):
-        assert isinstance(policy, ActivityExecutionPolicy)
-        return {"mode": "fake", "ok": self._dry_run_ok, "probes": []}
-
-
 # ---------------------------------------------------------------------------
 # Shared fixture: a full SeedDeps wired against the fakes above
 # ---------------------------------------------------------------------------
@@ -262,17 +240,13 @@ def deps(repos) -> SeedDeps:
         provider_adapter,
     )
     inference_binding_service = InferenceBindingService(repos.uow_factory, provider_adapter)
-    patrol_pack_service = PatrolPackService(
-        repos.uow_factory,
-        collector_validator=_FakeCollectorValidator({"dependency_status", "http_probe"}),
-    )
+    patrol_pack_service = PatrolPackService(repos.uow_factory)
     return SeedDeps(
         mcp_server_service=mcp_server_service,
         inference_endpoint_service=inference_endpoint_service,
         inference_model_service=inference_model_service,
         inference_binding_service=inference_binding_service,
         patrol_pack_service=patrol_pack_service,
-        activity_policy=ActivityExecutionPolicy(),
         admin_user_id="admin-1",
         demo_inference_env=None,
     )
@@ -417,29 +391,27 @@ async def test_seed_inference_creates_endpoint_model_and_binding_then_skips(deps
 
 
 @pytest.mark.asyncio
-async def test_seed_demo_pack_creates_validates_activates_then_skips(deps, repos):
-    # ops-collector must already be enabled with policies for validation to pass.
+async def test_seed_demo_pack_creates_draft_then_skips(deps, repos):
+    # The seed is control-plane-only; live validation belongs to the kernel.
     await seed_mcp_tool_policies(deps.mcp_server_service, actor_user_id="admin-1")
 
     first = await seed_demo_pack(
         deps.patrol_pack_service,
         deps.mcp_server_service,
         owner_user_id="admin-1",
-        activity_policy=deps.activity_policy,
     )
     assert first == "create"
     assert len(repos.patrol.packs) == 1
     pack = next(iter(repos.patrol.packs.values()))
     assert pack.slug == DEMO_PACK_SLUG
-    assert pack.status.value == "active"
-    assert pack.last_validated_version == pack.version
+    assert pack.status.value == "draft"
+    assert pack.last_validated_version is None
     save_calls_after_first = repos.patrol.save_calls
 
     second = await seed_demo_pack(
         deps.patrol_pack_service,
         deps.mcp_server_service,
         owner_user_id="admin-1",
-        activity_policy=deps.activity_policy,
     )
     assert second == "skip"
     assert repos.patrol.save_calls == save_calls_after_first
@@ -453,24 +425,6 @@ async def test_seed_demo_pack_raises_when_collector_missing(deps, repos):
             deps.patrol_pack_service,
             deps.mcp_server_service,
             owner_user_id="admin-1",
-            activity_policy=deps.activity_policy,
-        )
-
-
-@pytest.mark.asyncio
-async def test_seed_demo_pack_surfaces_validation_failure(deps, repos):
-    await seed_mcp_tool_policies(deps.mcp_server_service, actor_user_id="admin-1")
-    # Swap in a collector validator whose live dry run fails, simulating an
-    # unreachable/misconfigured Collector at seed time.
-    deps.patrol_pack_service._collector_validator = _FakeCollectorValidator(
-        {"dependency_status", "http_probe"}, dry_run_ok=False
-    )
-    with pytest.raises(RuntimeError, match="failed validation"):
-        await seed_demo_pack(
-            deps.patrol_pack_service,
-            deps.mcp_server_service,
-            owner_user_id="admin-1",
-            activity_policy=deps.activity_policy,
         )
 
 
@@ -559,30 +513,6 @@ async def test_main_seeds_integration_with_postgres_only(monkeypatch, repos):
         )
 
     monkeypatch.setattr(seed_demo_module, "create_uow_factory", _fake_uow_factory)
-
-    class _FakeRuntimePolicyRepository:
-        def __init__(self, **_kwargs):
-            pass
-
-        async def load_active_pair(self):
-            return SimpleNamespace(
-                execution=SimpleNamespace(
-                    revision=SimpleNamespace(
-                        policy=SimpleNamespace(activity=ActivityExecutionPolicy())
-                    )
-                )
-            )
-
-    monkeypatch.setattr(
-        seed_demo_module,
-        "PostgresRuntimePolicyRepository",
-        _FakeRuntimePolicyRepository,
-    )
-    monkeypatch.setattr(
-        seed_demo_module,
-        "MCPPatrolCollectorValidator",
-        lambda adapter: _FakeCollectorValidator({"dependency_status", "http_probe"}),
-    )
 
     await seed_demo_module.run_seed_command(
         seed_demo_module.load_deployment_settings(),

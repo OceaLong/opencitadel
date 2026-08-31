@@ -32,3 +32,8 @@ class OAuthClients:
 
     def get(self, provider: str):
         return self.oauth.create_client(provider)
+
+    def enabled_providers(self) -> list[str]:
+        # Only providers with configured client id + secret are registered, so
+        # the UI can hide SSO buttons that would otherwise 400 on click.
+        return [name for name in ("google", "github") if self.oauth.create_client(name) is not None]

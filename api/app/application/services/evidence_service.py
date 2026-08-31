@@ -73,6 +73,8 @@ def render_governance_profile_md(profile: dict[str, Any]) -> bytes:
         "## Session 概要",
         "",
         f"- 标题: {_md_value('title', session.get('title'))}",
+        f"- 所有者: {_md_value('owner_user_id', session.get('owner_user_id'))}",
+        f"- 团队: {_md_value('team_id', session.get('team_id'))}",
         f"- 状态: {_md_value('status', session.get('status'))}",
         f"- Operator Scope: {_md_value('operator_scope', session.get('operator_scope'))}",
         f"- Operator Domains: {_md_value('operator_domains', session.get('operator_domains'))}",
@@ -217,6 +219,8 @@ class EvidenceService:
                 {
                     "session_id": session_id,
                     "title": record.title,
+                    "owner_user_id": record.owner_user_id,
+                    "team_id": record.team_id,
                     "operator_scope": record.operator_scope,
                     "status": record.status,
                     "updated_at": record.updated_at.isoformat() if record.updated_at else None,

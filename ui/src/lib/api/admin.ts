@@ -18,6 +18,7 @@ export type AuditLog = {
   resource_type: string;
   resource_id: string;
   team_id?: string | null;
+  session_id?: string | null;
   request_id: string;
   created_at: string;
 };
@@ -160,11 +161,12 @@ export const adminApi = {
     actor_user_id?: string;
     resource_type?: string;
     resource_id?: string;
+    session_id?: string;
     start_at?: string;
     end_at?: string;
   }) => get<{ logs: AuditLog[]; total: number }>("/admin/audit", buildParams(params)),
 
-  auditDetail: (logId: string) => get<AuditLogDetail>(`/admin/audit/${logId}`),
+  auditDetail: (logId: string) => get<AuditLogDetail>(`/admin/audit/logs/${logId}`),
 
   auditSummary: (params?: AdminDateRangeParams) =>
     get<AuditSummary>("/admin/audit/summary", buildParams(params)),
@@ -174,6 +176,7 @@ export const adminApi = {
     actor_user_id?: string;
     resource_type?: string;
     resource_id?: string;
+    session_id?: string;
     start_at?: string;
     end_at?: string;
   }) => {

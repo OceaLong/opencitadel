@@ -221,6 +221,26 @@ class KubernetesSandbox(Sandbox):
                                 name="SERVER_TIMEOUT_MINUTES",
                                 value=str(policy.ttl_minutes),
                             ),
+                            # Chromium must run with --no-sandbox under the
+                            # hardened Pod (cap_drop ALL + read-only rootfs),
+                            # and egress must go through the proxy -- matching
+                            # the docker driver, which previously left these
+                            # unset on Kubernetes (dead config).
+                            client.V1EnvVar(
+                                name="CHROME_ARGS",
+                                value=(
+                                    deployment.chrome_args
+                                    if "--no-sandbox" in deployment.chrome_args.split()
+                                    else f"{deployment.chrome_args} --no-sandbox".strip()
+                                ),
+                            ),
+                            client.V1EnvVar(name="HTTP_PROXY", value=deployment.http_proxy or ""),
+                            client.V1EnvVar(name="HTTPS_PROXY", value=deployment.https_proxy or ""),
+                            client.V1EnvVar(name="NO_PROXY", value=deployment.no_proxy or ""),
+                            client.V1EnvVar(name="http_proxy", value=deployment.http_proxy or ""),
+                            client.V1EnvVar(name="https_proxy", value=deployment.https_proxy or ""),
+                            client.V1EnvVar(name="no_proxy", value=deployment.no_proxy or ""),
+                            client.V1EnvVar(name="HOME", value="/home/ubuntu"),
                         ],
                     )
                 ],
@@ -508,6 +528,97 @@ class KubernetesSandbox(Sandbox):
             f"{self._base_url}/api/file/upload-file",
             files=files,
             data={"filepath": filepath},
+        )
+        return ToolResult.from_sandbox(**response.json())
+
+    async def replace_in_file(
+        self,
+        filepath: str,
+        old_str: str,
+        new_str: str,
+        sudo: bool = False,
+    ) -> ToolResult:
+        response = await self.client.post(
+            f"{self._base_url}/api/file/replace-in-file",
+            json={
+                "filepath": filepath,
+                "old_str": old_str,
+                "new_str": new_str,
+                "sudo": sudo,
+            },
+        )
+        return ToolResult.from_sandbox(**response.json())
+
+    async def search_in_file(self, filepath: str, regex: str, sudo: bool = False) -> ToolResult:
+        response = await self.client.post(
+            f"{self._base_url}/api/file/search-in-file",
+            json={"filepath": filepath, "regex": regex, "sudo": sudo},
+        )
+        return ToolResult.from_sandbox(**response.json())
+
+    async def find_files(self, dir_path: str, glob_pattern: str) -> ToolResult:
+        response = await self.client.post(
+            f"{self._base_url}/api/file/find-files",
+            json={"dir_path": dir_path, "glob_pattern": glob_pattern},
+        )
+        return ToolResult.from_sandbox(**response.json())
+
+    async def list_files(self, dir_path: str) -> ToolResult:
+        response = await self.client.get(
+            f"{self._base_url}/api/file/list-files",
+            params={"dir_path": dir_path},
+        )
+        return ToolResult.from_sandbox(**response.json())
+
+    async def check_file_exists(self, filepath: str) -> ToolResult:
+        response = await self.client.get(
+            f"{self._base_url}/api/file/check-file-exists",
+            params={"filepath": filepath},
+        )
+        return ToolResult.from_sandbox(**response.json())
+
+    async def delete_file(self, filepath: str) -> ToolResult:
+        response = await self.client.request(
+            "DELETE",
+            f"{self._base_url}/api/file/delete-file",
+            json={"filepath": filepath},
+        )
+        return ToolResult.from_sandbox(**response.json())
+
+    async def read_shell_output(self, session_id: str, console: bool = False) -> ToolResult:
+        response = await self.client.get(
+            f"{self._base_url}/api/shell/view-shell-session",
+            params={"session_id": session_id, "console": console},
+        )
+        return ToolResult.from_sandbox(**response.json())
+
+    async def write_shell_input(
+        self,
+        session_id: str,
+        press_enter: bool,
+        input_text: str = "",
+    ) -> ToolResult:
+        response = await self.client.post(
+            f"{self._base_url}/api/shell/write-to-process",
+            json={
+                "session_id": session_id,
+                "input": input_text,
+                "press_enter": press_enter,
+            },
+        )
+        return ToolResult.from_sandbox(**response.json())
+
+    async def wait_process(self, session_id: str, seconds: int | None = None) -> ToolResult:
+        response = await self.client.post(
+            f"{self._base_url}/api/shell/wait-for-process",
+            json={"session_id": session_id, "seconds": seconds},
+        )
+        return ToolResult.from_sandbox(**response.json())
+
+    async def kill_process(self, session_id: str) -> ToolResult:
+        response = await self.client.post(
+            f"{self._base_url}/api/shell/kill-process",
+            json={"session_id": session_id},
         )
         return ToolResult.from_sandbox(**response.json())
 

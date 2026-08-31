@@ -166,6 +166,7 @@ class PatrolRemediationService:
                 action=action,
                 resource_type="patrol_remediation",
                 resource_id=remediation.id,
+                session_id=remediation.session_id,
                 metadata={
                     "finding_id": remediation.finding_id,
                     "run_id": remediation.run_id,
@@ -266,6 +267,28 @@ class PatrolRemediationService:
                 action.value, namespace, resolved_workload, kind, params
             )
 
+            # Capture the Actuator capability baseline BEFORE the remediation is
+            # admitted and sent for approval. execute() re-reads the live hash
+            # post-approval and refuses to act if it drifted. Without this
+            # preflight the baseline stayed None and every approved remediation
+            # failed closed with CAPABILITY_BASELINE_MISSING.
+            actuator_server = await uow.mcp_server.get_by_name(ACTUATOR_MCP_SERVER_NAME)
+            if actuator_server is None or not actuator_server.enabled:
+                raise NotFoundError(
+                    "Ops Actuator 未注册或已禁用",
+                    error_key="apiErrors.patrolRemediation.actuatorServerMissing",
+                )
+            baseline = await self._actuator_client.get_capabilities(
+                actuator_server,
+                policy=ActivityExecutionPolicy(),
+            )
+            baseline_hash = str(baseline.get("overall_capability_hash") or "")
+            if not baseline_hash:
+                raise ConflictError(
+                    "无法获取 Ops Actuator capability 基线，拒绝创建修复提案",
+                    error_key="apiErrors.patrolRemediation.capabilityBaselineUnavailable",
+                )
+
             remediation = PatrolRemediation(
                 pack_id=run.pack_id,
                 run_id=run.id,
@@ -282,6 +305,7 @@ class PatrolRemediationService:
                 rollback_hint=_rollback_hint(action),
                 idempotency_key="pending",
                 created_by=actor_user_id,
+                actuator_capability_hash=baseline_hash,
             )
             remediation.idempotency_key = f"rem:{remediation.id}"
 

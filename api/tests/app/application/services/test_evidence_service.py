@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from app.application.ports.queries import EvidenceSession
 from app.application.services.evidence_service import (
     EvidenceService,
     render_governance_profile_md,
@@ -23,6 +24,8 @@ def _profile(*, feedback: str = "approved") -> dict:
         "session": {
             "id": "session-1",
             "title": "demo",
+            "owner_user_id": "user-1",
+            "team_id": None,
             "status": "completed",
             "operator_scope": "owned",
             "operator_domains": ["ops-console"],
@@ -114,6 +117,22 @@ class _Governance:
         return self.profile
 
 
+class _EvidenceSessions:
+    async def list_sessions(self, *, limit, offset):
+        assert (limit, offset) == (25, 5)
+        return (
+            EvidenceSession(
+                session_id="session-1",
+                title="Patrol run",
+                owner_user_id="user-1",
+                team_id="team-1",
+                operator_scope=None,
+                status="completed",
+                updated_at=datetime(2026, 8, 24, 0, 1, tzinfo=UTC),
+            ),
+        )
+
+
 @pytest.fixture
 def service():
     session = Session(
@@ -150,6 +169,31 @@ def test_governance_markdown_contains_only_formal_sections():
     assert "shell_execute" in rendered
     assert "checkpoint" not in rendered.lower()
     assert "gate profile" not in rendered.lower()
+    assert "所有者: user-1" in rendered
+
+
+@pytest.mark.asyncio
+async def test_evidence_session_list_preserves_workspace_provenance(service):
+    evidence, governance = service
+    evidence._session_query = _EvidenceSessions()
+
+    items = await evidence.list_evidence_sessions(limit=25, offset=5)
+
+    assert items == [
+        {
+            "session_id": "session-1",
+            "title": "Patrol run",
+            "owner_user_id": "user-1",
+            "team_id": "team-1",
+            "operator_scope": None,
+            "status": "completed",
+            "updated_at": "2026-08-24T00:01:00+00:00",
+            "chain_ok": True,
+            "tool_invocation_count": 1,
+            "governance_action_count": 1,
+        }
+    ]
+    assert governance.calls == [("session-1", OwnerScope.team("evidence-auditor", "team-1"))]
 
 
 @pytest.mark.asyncio

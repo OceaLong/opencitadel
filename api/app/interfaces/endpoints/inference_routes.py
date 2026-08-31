@@ -319,7 +319,7 @@ async def get_status(
     ctx: WorkspaceContext = Depends(get_workspace_context),
     service: InferenceStatusService = Depends(get_inference_status_service),
 ) -> Response[InferenceStatusResponse]:
-    response.headers["Cache-Control"] = "max-age=30"
+    response.headers["Cache-Control"] = "no-store"
     return Response.success(
         InferenceStatusResponse.model_validate(await service.get_status(ctx.scope))
     )

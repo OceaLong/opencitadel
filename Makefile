@@ -1,4 +1,4 @@
-.PHONY: quickstart build quality-check test test-api test-ui test-patrol test-patrol-fixtures test-actuator
+.PHONY: quickstart build quality-check test test-api test-ui test-patrol test-patrol-fixtures test-actuator acceptance-e2e
 
 quickstart:
 	@bash scripts/quickstart.sh
@@ -45,5 +45,8 @@ test-actuator:
 		tests/app/application/services/test_patrol_remediation_service.py \
 		tests/app/contracts/test_greenfield_execution_boundaries.py \
 		tests/app/integration/test_patrol_remediation_rbac.py
+
+acceptance-e2e:
+	./scripts/run-acceptance-e2e.sh
 
 test: test-api test-ui

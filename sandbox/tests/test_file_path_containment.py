@@ -67,6 +67,18 @@ async def test_legit_path_within_home_is_allowed(sandbox_home):
 
     read_result = await FileService.read_file("nested/report.md")
     assert read_result.content == "hello"
+    assert read_result.truncated is False
+    assert read_result.size_bytes == 5
+
+
+async def test_read_file_reports_truncation_as_structured_metadata(sandbox_home):
+    await FileService.write_file("oversized.txt", "hello")
+
+    result = await FileService.read_file("oversized.txt", max_length=1)
+
+    assert result.content == "h(truncated)"
+    assert result.truncated is True
+    assert result.size_bytes == 5
 
 
 # ---------------------------------------------------------------------------

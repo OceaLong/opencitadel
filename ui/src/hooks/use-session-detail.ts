@@ -34,6 +34,7 @@ export type UseSessionDetailResult = {
       mode?: import("@/lib/api/types").SessionMode;
     },
   ) => Promise<void>;
+  resumeAfterExternalCommand: () => void;
   updateSessionConfig: (params: UpdateSessionConfigParams) => Promise<void>;
   streaming: boolean;
   streamStatus: SessionStreamStatus;
@@ -156,6 +157,7 @@ export function useSessionDetail(
     loadEarlierEvents,
     refreshFiles,
     sendMessage: streams.sendMessage,
+    resumeAfterExternalCommand: streams.resumeAfterExternalCommand,
     updateSessionConfig,
     streaming: streams.streaming,
     streamStatus: streams.streamStatus,

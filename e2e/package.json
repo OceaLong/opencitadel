@@ -3,9 +3,11 @@
   "private": true,
   "scripts": {
     "test": "playwright test",
-    "test:headed": "playwright test --headed"
+    "test:headed": "playwright test --headed",
+    "test:list": "playwright test --list",
+    "test:meta": "playwright test --config meta/playwright.config.ts"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.0"
+    "@playwright/test": "1.62.0"
   }
 }

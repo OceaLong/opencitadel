@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.domain.models.knowledge_base import (
+    ChunkLevel,
     KnowledgeBase,
     KnowledgeChunk,
 )
@@ -87,6 +88,64 @@ async def test_save_chunks_empty_is_noop():
     session = _RecordingSession()
     repo = DBKnowledgeBaseRepository(db_session=session)
     await repo.save_chunks([])
+    assert session.calls == []
+
+
+@pytest.mark.anyio
+async def test_save_chunks_inserts_parent_before_embedded_children():
+    session = _RecordingSession()
+    repo = DBKnowledgeBaseRepository(db_session=session)
+    parent = KnowledgeChunk(
+        id="parent",
+        kb_id="kb1",
+        doc_id="d1",
+        version_id="v1",
+        level=ChunkLevel.PARENT,
+        content="parent",
+    )
+    child = KnowledgeChunk(
+        id="child",
+        kb_id="kb1",
+        doc_id="d1",
+        version_id="v1",
+        parent_id=parent.id,
+        level=ChunkLevel.CHILD,
+        content="child",
+        embedding=[0.1, 0.2],
+    )
+
+    await repo.save_chunks([child, parent])
+
+    assert [[item["id"] for item in params] for _sql, params in session.calls] == [
+        ["parent"],
+        ["child"],
+    ]
+
+
+@pytest.mark.anyio
+async def test_save_chunks_rejects_cyclic_parent_dependencies_before_writing():
+    session = _RecordingSession()
+    repo = DBKnowledgeBaseRepository(db_session=session)
+    first = KnowledgeChunk(
+        id="first",
+        kb_id="kb1",
+        doc_id="d1",
+        version_id="v1",
+        parent_id="second",
+        content="first",
+    )
+    second = KnowledgeChunk(
+        id="second",
+        kb_id="kb1",
+        doc_id="d1",
+        version_id="v1",
+        parent_id="first",
+        content="second",
+    )
+
+    with pytest.raises(ValueError, match="cycle"):
+        await repo.save_chunks([first, second])
+
     assert session.calls == []
 
 

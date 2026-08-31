@@ -7,11 +7,6 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
-from app.application.services.integration_projection_service import (
-    A2AServerProjection,
-    IntegrationConnectionStatus,
-    MCPServerProjection,
-)
 from app.domain.models.inference import ResourceVisibility
 from app.domain.models.integration_runtime import MCPTransport
 from app.domain.models.integration_server import A2AServerRecord, MCPServerRecord
@@ -68,12 +63,6 @@ class SetIntegrationEnabledRequest(_ClosedModel):
     enabled: bool
 
 
-class MCPToolResponse(_ClosedModel):
-    name: str
-    description: str | None = None
-    input_schema: dict[str, JsonValue]
-
-
 class MCPServerResponse(_ClosedModel):
     id: str
     name: str
@@ -92,33 +81,10 @@ class MCPServerResponse(_ClosedModel):
     visibility: ResourceVisibility
     created_at: datetime
     updated_at: datetime
-    tools: list[MCPToolResponse] = Field(default_factory=list)
-    connection_status: IntegrationConnectionStatus
-    connection_error: str | None = None
 
     @classmethod
     def from_domain(cls, record: MCPServerRecord) -> MCPServerResponse:
-        return cls.model_validate(
-            {
-                **record.model_dump(mode="python"),
-                "connection_status": (
-                    IntegrationConnectionStatus.CHECKING
-                    if record.enabled
-                    else IntegrationConnectionStatus.DISABLED
-                ),
-            }
-        )
-
-    @classmethod
-    def from_projection(cls, projection: MCPServerProjection) -> MCPServerResponse:
-        return cls.model_validate(
-            {
-                **projection.record.model_dump(mode="python"),
-                "tools": [tool.model_dump(mode="python") for tool in projection.tools],
-                "connection_status": projection.connection_status,
-                "connection_error": projection.connection_error,
-            }
-        )
+        return cls.model_validate(record.model_dump(mode="python"))
 
 
 class MCPServerListResponse(_ClosedModel):
@@ -135,33 +101,10 @@ class A2AServerResponse(_ClosedModel):
     visibility: ResourceVisibility
     created_at: datetime
     updated_at: datetime
-    agent_card: dict[str, JsonValue] | None = None
-    connection_status: IntegrationConnectionStatus
-    connection_error: str | None = None
 
     @classmethod
     def from_domain(cls, record: A2AServerRecord) -> A2AServerResponse:
-        return cls.model_validate(
-            {
-                **record.model_dump(mode="python"),
-                "connection_status": (
-                    IntegrationConnectionStatus.CHECKING
-                    if record.enabled
-                    else IntegrationConnectionStatus.DISABLED
-                ),
-            }
-        )
-
-    @classmethod
-    def from_projection(cls, projection: A2AServerProjection) -> A2AServerResponse:
-        return cls.model_validate(
-            {
-                **projection.record.model_dump(mode="python"),
-                "agent_card": projection.agent_card,
-                "connection_status": projection.connection_status,
-                "connection_error": projection.connection_error,
-            }
-        )
+        return cls.model_validate(record.model_dump(mode="python"))
 
 
 class A2AServerListResponse(_ClosedModel):
@@ -175,7 +118,6 @@ __all__ = [
     "CreateMCPServerRequest",
     "MCPServerListResponse",
     "MCPServerResponse",
-    "MCPToolResponse",
     "SetIntegrationEnabledRequest",
     "UpdateA2AServerRequest",
     "UpdateMCPServerRequest",

@@ -93,6 +93,7 @@ def _runner(codebase):
             uow_factory=lambda: _Uow(repo),
             sandbox_factory=sandbox_cls,
             file_storage=storage,
+            object_storage=MagicMock(),
         ),
         repo,
         sandbox,

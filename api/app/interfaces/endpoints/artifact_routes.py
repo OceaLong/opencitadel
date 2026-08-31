@@ -103,6 +103,21 @@ async def share_artifact(
     )
 
 
+@router.delete("/artifacts/{artifact_id}/share", response_model=ApiResponse[dict])
+async def revoke_artifact_share(
+    artifact_id: str,
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+    service: ArtifactService = Depends(get_artifact_service),
+):
+    try:
+        await service.revoke_share_link(artifact_id, scope=ctx.scope)
+    except PermissionError as exc:
+        raise _access_denied() from exc
+    except ValueError as exc:
+        raise _access_denied() from exc
+    return ApiResponse.success({"revoked": True})
+
+
 @share_router.get("/share/artifact/{token}", response_model=ApiResponse[ArtifactContentResponse])
 async def public_share_artifact(
     token: str,

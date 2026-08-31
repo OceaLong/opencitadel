@@ -16,6 +16,13 @@ from app.domain.models.build_progress import (
     build_error,
     build_step,
 )
+from app.domain.models.inference import (
+    ChatModelSettings,
+    InferenceCapabilities,
+    InferenceEndpoint,
+    InferenceModel,
+    ResolvedInferenceModel,
+)
 from app.domain.runtime_policy import (
     CodebaseAnalysisPolicy,
     CodebaseExecutionPolicy,
@@ -50,6 +57,8 @@ class Pipeline:
         self.build_ids: list[str] = []
         self.embedding_snapshots: list[tuple[str | None, int | None]] = []
         self.policies: list[KnowledgeBaseExecutionPolicy | CodebaseExecutionPolicy] = []
+        self.graph_llms: list[object] = []
+        self.ocr_llms: list[object] = []
         self.cancelled: list[str] = []
 
     async def run_build(
@@ -59,10 +68,14 @@ class Pipeline:
         policy: KnowledgeBaseExecutionPolicy | CodebaseExecutionPolicy,
         embedding_model_id: str | None,
         embedding_dimensions: int | None,
+        graph_llm=None,
+        ocr_llm=None,
     ):
         self.build_ids.append(build_id)
         self.policies.append(policy)
         self.embedding_snapshots.append((embedding_model_id, embedding_dimensions))
+        self.graph_llms.append(graph_llm)
+        self.ocr_llms.append(ocr_llm)
         for event in self.events:
             yield event
 
@@ -211,3 +224,42 @@ async def test_resource_build_preserves_pipeline_failure_code() -> None:
     assert outcome.status == "failed"
     assert outcome.failure_code == "CLOSURE_INVALID"
     assert objects.results == []
+
+
+class _VisionModels:
+    async def resolve_chat(self, model_id=None, *, scope):
+        return ResolvedInferenceModel(
+            model=InferenceModel(
+                id="model-1",
+                endpoint_id="endpoint-1",
+                display_name="chat",
+                model_name="provider-model",
+                settings=ChatModelSettings(),
+                capabilities=InferenceCapabilities(vision=True),
+            ),
+            endpoint=InferenceEndpoint(
+                id="endpoint-1",
+                display_name="endpoint",
+                credential="secret",
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_knowledge_build_wires_chat_llm_for_graph_and_ocr() -> None:
+    # Regression: the kernel never passed a chat client into the KB pipeline, so
+    # GraphRAG and vision OCR silently degraded on every build. With models and a
+    # client factory the handler must resolve a client and hand it to run_build.
+    sentinel = object()
+    pipeline = Pipeline([build_done()])
+
+    outcome = await KnowledgeBuildActivityHandler(
+        objects=Objects(),
+        pipeline=pipeline,
+        models=_VisionModels(),
+        client_factory=lambda model, **kwargs: sentinel,
+    ).execute(request("knowledge.build"), context([], family="kb_ingest"))
+
+    assert outcome.status == "succeeded"
+    assert pipeline.graph_llms == [sentinel]
+    assert pipeline.ocr_llms == [sentinel]

@@ -25,31 +25,43 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldGroup, FieldLegend, FieldSet } from "@/components/ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 import { type SettingTab, useOpenCitadelSettings } from "@/hooks/use-open-citadel-settings";
-import type { A2AServer, MCPServer, UpdateMCPServerRequest } from "@/lib/api";
+import type {
+  A2AServer,
+  MCPServer,
+  UpdateA2AServerRequest,
+  UpdateMCPServerRequest,
+} from "@/lib/api";
 import { IconDelete, IconIntegration, IconMemory, IconModel, IconSkill } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
-function IntegrationStatusLabel({ status }: { status: MCPServer["connection_status"] }) {
+function IntegrationStatusLabel({ enabled }: { enabled: boolean }) {
   const t = useTranslations("settings");
-  const labels: Record<MCPServer["connection_status"], string> = {
-    checking: t("integrationStatus.checking"),
-    connected: t("integrationStatus.connected"),
-    disabled: t("integrationStatus.disabled"),
-    error: t("integrationStatus.error"),
-    policy_unavailable: t("integrationStatus.policy_unavailable"),
-  };
-  return labels[status];
+  return enabled ? t("integrationStatus.enabled") : t("integrationStatus.disabled");
 }
 
 // ==================== A2A Agent 配置 ====================
@@ -60,6 +72,7 @@ type A2ASettingProps = {
   onToggleEnabled: (id: string, enabled: boolean) => void;
   onDelete: (id: string) => void;
   onAdd: (baseUrl: string) => Promise<boolean>;
+  onEdit: (id: string, body: UpdateA2AServerRequest) => Promise<boolean>;
   readOnly?: boolean;
 };
 
@@ -69,6 +82,7 @@ export function A2ASetting({
   onToggleEnabled,
   onDelete,
   onAdd,
+  onEdit,
   readOnly = false,
 }: A2ASettingProps) {
   const t = useTranslations("settings");
@@ -76,6 +90,35 @@ export function A2ASetting({
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addUrl, setAddUrl] = useState("");
   const [adding, setAdding] = useState(false);
+  const [editTarget, setEditTarget] = useState<A2AServer | null>(null);
+  const [editUrl, setEditUrl] = useState("");
+  const [editVisibility, setEditVisibility] = useState<A2AServer["visibility"]>("private");
+  const [saving, setSaving] = useState(false);
+
+  const openEdit = (server: A2AServer) => {
+    setEditTarget(server);
+    setEditUrl(server.base_url);
+    setEditVisibility(server.visibility);
+  };
+
+  const handleEdit = async () => {
+    if (!editTarget) return;
+    if (!editUrl.trim()) {
+      toast.error(t("enterAgentUrl"));
+      return;
+    }
+    setSaving(true);
+    try {
+      const success = await onEdit(editTarget.id, {
+        base_url: editUrl.trim(),
+        enabled: editTarget.enabled,
+        visibility: editVisibility,
+      });
+      if (success) setEditTarget(null);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleAdd = async () => {
     if (!addUrl.trim()) {
@@ -173,16 +216,23 @@ export function A2ASetting({
                   <ItemContent>
                     <ItemTitle className="text-md text-foreground flex w-full items-center justify-between font-semibold">
                       <div className="flex items-center gap-2">
-                        {typeof server.agent_card?.name === "string"
-                          ? server.agent_card.name
-                          : server.base_url}
+                        {server.base_url}
                         <Badge variant="secondary">
-                          <IntegrationStatusLabel status={server.connection_status} />
+                          <IntegrationStatusLabel enabled={server.enabled} />
                         </Badge>
                       </div>
                       <div className="flex items-center justify-center gap-2">
                         {!readOnly ? (
                           <>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              className="cursor-pointer"
+                              onClick={() => openEdit(server)}
+                            >
+                              <Pencil className="size-4" />
+                            </Button>
                             <Button
                               type="button"
                               variant="ghost"
@@ -202,10 +252,6 @@ export function A2ASetting({
                     </ItemTitle>
                     <ItemDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <Badge variant="secondary">{server.visibility}</Badge>
-                      {typeof server.agent_card?.description === "string"
-                        ? server.agent_card.description
-                        : server.base_url}
-                      {server.connection_error ?? null}
                     </ItemDescription>
                   </ItemContent>
                 </Item>
@@ -214,6 +260,68 @@ export function A2ASetting({
           )}
         </FieldSet>
       </FieldGroup>
+      <Dialog open={editTarget !== null} onOpenChange={(open) => !open && setEditTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-foreground">{t("editRemoteAgent")}</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              {t("a2aEditDescription")}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="w-full"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleEdit();
+            }}
+          >
+            <FieldGroup>
+              <FieldSet className="gap-4">
+                <Field>
+                  <Input
+                    id="a2a_edit_base_url"
+                    type="url"
+                    placeholder={t("a2aUrlPlaceholder")}
+                    value={editUrl}
+                    onChange={(e) => setEditUrl(e.target.value)}
+                    disabled={saving}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="a2a_edit_visibility">{t("visibilityLabel")}</FieldLabel>
+                  <Select
+                    value={editVisibility}
+                    onValueChange={(value) => setEditVisibility(value as A2AServer["visibility"])}
+                    disabled={saving}
+                  >
+                    <SelectTrigger id="a2a_edit_visibility" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="private">{t("visibilityPrivate")}</SelectItem>
+                      <SelectItem value="global">{t("visibilityGlobal")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </FieldSet>
+            </FieldGroup>
+          </form>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              className="cursor-pointer"
+              disabled={saving}
+              onClick={() => setEditTarget(null)}
+            >
+              {tCommon("cancel")}
+            </Button>
+            <Button className="cursor-pointer" onClick={handleEdit} disabled={saving}>
+              {saving && <Loader2 className="animate-spin" />}
+              {tCommon("save")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -446,10 +554,7 @@ export function MCPSetting({
                           <Badge>{server.transport}</Badge>
                           <Badge variant="secondary">{server.visibility}</Badge>
                           <Badge variant="secondary">
-                            <IntegrationStatusLabel status={server.connection_status} />
-                          </Badge>
-                          <Badge variant="outline">
-                            {t("mcpToolCount", { count: server.tools?.length ?? 0 })}
+                            <IntegrationStatusLabel enabled={server.enabled} />
                           </Badge>
                         </div>
                         <div className="flex items-center justify-center gap-2">
@@ -483,9 +588,6 @@ export function MCPSetting({
                       </ItemTitle>
                       {server.description ? (
                         <ItemDescription>{server.description}</ItemDescription>
-                      ) : null}
-                      {server.connection_error ? (
-                        <ItemDescription>{server.connection_error}</ItemDescription>
                       ) : null}
                     </ItemContent>
                   </Item>
@@ -572,6 +674,7 @@ export function SettingsDialog({
     handleA2AToggle,
     handleA2ADelete,
     handleA2AAdd,
+    handleA2AEdit,
   } = useOpenCitadelSettings(open);
   const { isMobile } = useIsMobile();
   const visibleMenus = SETTING_MENUS.filter((menu) => !menu.adminOnly || isAdmin);
@@ -605,6 +708,7 @@ export function SettingsDialog({
             onToggleEnabled={handleA2AToggle}
             onDelete={handleA2ADelete}
             onAdd={handleA2AAdd}
+            onEdit={handleA2AEdit}
             readOnly={false}
           />
           <ServiceKeysSettings />

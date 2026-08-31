@@ -1,0 +1,11 @@
+{
+  "name": "opencitadel-acceptance-inference",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

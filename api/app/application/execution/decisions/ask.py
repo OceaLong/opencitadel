@@ -54,7 +54,12 @@ def next_ask_command(
             input_payload={},
         )
     if retrieval_status != "succeeded":
-        return fail_for_activity(state, retrieval_status, max_retries=max_retries)
+        return fail_for_activity(
+            state,
+            retrieval_status,
+            activity_id=retrieval_id,
+            max_retries=max_retries,
+        )
 
     model_id = activity_identity(state, "model:0")
     model_status = settled_status(state, model_id)
@@ -74,7 +79,12 @@ def next_ask_command(
             },
         )
     if model_status != "succeeded":
-        return fail_for_activity(state, model_status, max_retries=max_retries)
+        return fail_for_activity(
+            state,
+            model_status,
+            activity_id=model_id,
+            max_retries=max_retries,
+        )
     result = activity_result(state, model_id)
     if result is None:
         return command(

@@ -108,7 +108,6 @@ const OPERATIONS_POLICY = {
     idle_timeout_minutes: 30,
     warmup_retry_interval_seconds: 0.5,
     warmup_max_retries: 30,
-    fast_warmup_max_retries: 5,
     max_sandboxes_per_node: 4,
     max_dynamic_sandboxes_global: 0,
     admission_min_host_available_mb: 3072,

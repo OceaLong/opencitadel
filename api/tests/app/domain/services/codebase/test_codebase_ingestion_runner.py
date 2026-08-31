@@ -6,8 +6,9 @@ import pytest
 
 from app.domain.models.codebase import Codebase, CodebaseSourceType, CodebaseStatus
 from app.domain.models.tool_result import ToolResult
-from app.domain.runtime_policy import CodebaseAnalysisPolicy
+from app.domain.runtime_policy import CodebaseAnalysisPolicy, CodebaseExecutionPolicy
 from app.domain.services.codebase.ingestion_runner import CodebaseIngestionRunner
+from app.domain.services.codebase.snapshot_service import VersionedCodeSource
 
 
 class _FakeCodebaseRepo:
@@ -78,10 +79,13 @@ def anyio_backend():
 
 def _make_runner(codebase: Codebase) -> tuple[CodebaseIngestionRunner, _FakeCodebaseRepo]:
     repo = _FakeCodebaseRepo(codebase)
+    object_storage = MagicMock()
+    object_storage.put_bytes = AsyncMock()
     runner = CodebaseIngestionRunner(
         uow_factory=lambda: _FakeUow(repo),
         sandbox_factory=MagicMock(),
         file_storage=MagicMock(),
+        object_storage=object_storage,
     )
     return runner, repo
 
@@ -272,4 +276,43 @@ async def test_materialize_mkdir_uses_sandbox_home(monkeypatch):
         "ingest",
         "/home/ubuntu",
         f"rm -rf {workspace} && mkdir -p {workspace}",
+    )
+
+
+@pytest.mark.anyio
+async def test_run_build_closes_candidate_on_unexpected_pipeline_exception(monkeypatch):
+    runner, _ = _make_runner(Codebase(id="cb1"))
+    failure = LookupError("repository write failed")
+    monkeypatch.setattr(runner, "_load_build_context", AsyncMock(side_effect=failure))
+    fail_candidate = AsyncMock()
+    monkeypatch.setattr(runner, "_fail_candidate", fail_candidate)
+
+    events = [
+        event
+        async for event in runner.run_build(
+            "build-1",
+            policy=CodebaseExecutionPolicy(),
+        )
+    ]
+
+    fail_candidate.assert_awaited_once_with("build-1", "repository write failed")
+    assert len(events) == 1
+    assert events[0].kind == "error"
+    assert events[0].message == "repository write failed"
+
+
+@pytest.mark.anyio
+async def test_candidate_snapshot_is_stored_before_its_key_can_be_published():
+    runner, _ = _make_runner(Codebase(id="cb1"))
+    source_tree = {"src/index.ts": "export const beacon = true;\n"}
+
+    snapshot = await runner._create_and_store_snapshot("version-1", source_tree)
+
+    runner._object_storage.put_bytes.assert_awaited_once_with(
+        snapshot.snapshot_key,
+        snapshot.snapshot_bytes,
+    )
+    assert (
+        VersionedCodeSource._read_member(snapshot.snapshot_bytes, "src/index.ts")
+        == "export const beacon = true;\n"
     )

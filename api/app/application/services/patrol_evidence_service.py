@@ -110,6 +110,8 @@ class PatrolEvidenceService:
                 action="patrol_evidence_downloaded",
                 resource_type="patrol_run",
                 resource_id=run.id,
+                team_id=run.pack_snapshot.get("team_id"),
+                session_id=run.session_id,
                 metadata={
                     "session_id": run.session_id,
                     "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),

@@ -1,76 +1,102 @@
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-# OpenCitadel E2E Tests
+# Deterministic Full-Stack Acceptance
 
-Playwright end-to-end smoke tests for the OpenCitadel UI and the **Web Operator demo backend** (OpsConsole).
+OpenCitadel's release-blocking end-to-end suite is self-contained. It drives
+the real public API and UI through PostgreSQL command admission, the execution
+kernel, provider adapters, projections, approvals, SSE, dynamic Sandboxes,
+Ops Collector, and shutdown cleanup. It does not require external model keys,
+pre-provisioned product data, or an application-side test mode.
 
-## Scope
+## Canonical command
 
-| Suite | File | What it covers |
-|-------|------|----------------|
-| OpsConsole demo | `web-operator.spec.ts` | Login page, ticket list after login |
-| Platform smoke | `web-operator.spec.ts` | OpenCitadel home page loads |
-
-These tests support [Tutorial 4: Governed Web Operator](../docs/tutorials/04-governed-web-operator.md) — run them after standing up the demo stack.
-
-**What is not covered**: settings modal, formal approval flows, team invitations, knowledge-base ingest, codebase flows, admin console, or mobile navigation. UI unit tests live in `ui/src/**/*.test.ts` (logic only, no component regression). Do not treat `npm test` in `ui/` or `e2e/` as full UI coverage.
-
-## Prerequisites
-
-- Node.js >= 22
-- Running OpenCitadel stack (default `http://localhost:8088`)
-- For OpsConsole tests: demo profile enabled
+From the repository root:
 
 ```bash
-# From repo root — start platform + demo OpsConsole
-docker compose --env-file .env.e2e build opencitadel-sandbox
-docker compose --env-file .env.e2e \
-  --profile local --profile demo --profile patrol up -d --build
+./scripts/run-acceptance-e2e.sh --disposable
 ```
 
-The explicit sandbox build is required: the broker starts dynamic sandbox
-containers from `opencitadel-sandbox`, while the Compose service that declares
-that image belongs to the inactive `fixed-sandbox` profile.
+The runner allocates a unique Compose project, loopback ports, product resource
+namespace, and Sandbox prefix. It builds the seven production images plus the
+acceptance-only inference provider, starts the required profiles, runs every
+dependency-ordered Playwright project, writes evidence, and drains only resources
+with its exact ownership identity.
 
-OpsConsole default URL: `http://localhost:9099` (override with `OPS_CONSOLE_URL`).
+Use a partial project only while debugging; partial runs are marked as such in
+the manifest and do not satisfy the release gate:
 
-## Install and run
+```bash
+./scripts/run-acceptance-e2e.sh --playwright-project patrol-admin --disposable
+```
+
+## Product coverage
+
+| Project | Product boundary |
+| --- | --- |
+| `identity` | Login/logout, teams, invitations, workspace isolation, anonymous denial |
+| `control-plane` | Inference endpoint/model/probe/bindings/capabilities and Runtime Policy CAS/history/restore |
+| `resources` | Knowledge and codebase build, publication, pinning, and fail-closed degradation |
+| `execution` | Agent/Ask, SSE, approvals, rejection, cancellation, and Sandbox drain |
+| `patrol-admin` | Formal Patrol validation/execution/evidence/admission, administration, compliance, mobile and keyboard access |
+
+`contracts/acceptance-evidence.schema.json` is the source of truth for required
+acceptance IDs. The zero-skip reporter fails on a missing, duplicated, skipped,
+interrupted, or failed required ID.
+
+## Deterministic inference boundary
+
+`fixtures/inference-provider/` implements the narrow OpenAI-compatible protocol
+used by production adapters. Its responses are deterministic functions of the
+request. The provider is reachable only on the internal Compose network, runs
+non-root with a read-only filesystem and dropped capabilities, and receives no
+database, storage, OAuth, Docker, or production-provider credential.
+
+The service exists only in the Compose `acceptance` profile. It is not part of
+Helm, Kustomize, quickstart, production settings, or the release image matrix.
+External-provider checks, if run separately, are compatibility canaries and do
+not contribute required acceptance coverage.
+
+## Evidence and cleanup
+
+Each invocation writes `tmp/acceptance/<run-id>/manifest.json` plus logs, JUnit,
+Playwright JSON, traces/screenshots on failure, image digests, migration head,
+service health/restarts, Sandbox lifecycle, and residue counts. The manifest is
+validated against `contracts/acceptance-evidence.schema.json` before success.
+
+Ownership requires all applicable labels to agree:
+
+- `com.docker.compose.project=<project-id>`;
+- `com.opencitadel.acceptance.project=<project-id>`;
+- `com.opencitadel.acceptance.run=<run-id>`;
+- dynamic Sandboxes also carry `opencitadel.io/sandbox=true` and the run-scoped
+  name prefix.
+
+Without `--disposable`, product history and project volumes are retained for
+local investigation and are reported in the manifest; containers, networks,
+and dynamic Sandboxes are still drained. With `--disposable`, volumes created
+by that invocation must also reach zero. The runner never uses a broad Docker
+cleanup and must not touch unrelated projects or `voc-*` resources.
+
+On failure, inspect `failure_reason`, `logs/stack.log`, and Playwright artifacts
+under the run directory. Cleanup and evidence capture still execute. For runner
+fault-path development, see the guarded options in `scripts/acceptance/runner.py`.
+
+## Direct Playwright use
+
+`npm test` is useful only when debugging against an already prepared acceptance
+stack. It is not the release gate because it does not own stack isolation,
+bootstrap, evidence validation, or cleanup.
 
 ```bash
 cd e2e
 npm ci
-npm test
-```
-
-Environment variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PLAYWRIGHT_BASE_URL` | `http://localhost:8088` | OpenCitadel UI base URL |
-| `OPS_CONSOLE_URL` | `http://localhost:9099` | OpsConsole demo backend |
-
-## Ops Patrol real-runtime path
-
-`patrol.spec.ts` is opt-in because it requires a running execution kernel with a configured tool-capable model and a pre-provisioned Collector environment. Before enabling the test, persist all nine fixed read-only MCP Tool Policies and provide healthy inputs for all ten baseline checks (Kubernetes access plus the six registered target ids). The Compose profile alone supplies transport, not Kubernetes credentials or registered probe backends:
-
-```bash
-PATROL_E2E=1 npm test -- patrol.spec.ts
-```
-
-It uses the real UI, formal Run/Activity runtime, MCP transport, Collector, server assertion engine, evidence download, kill switch, and 390px overflow check. It never inserts fixture results through an HTTP shortcut. CI enables it with the protected `PATROL_E2E_ENABLED=1` repository variable only in an environment that supplies a model.
-
-The test enables/disables the existing MCP record and product flag, but deliberately does not create security policies or fake probe results. Follow [Ops Patrol operations](../docs/operations/ops-patrol.md#register-the-mcp-server) when preparing the protected E2E environment.
-
-Headed mode (debugging):
-
-```bash
-npm run test:headed
+npx playwright install chromium
+npm run test:meta
 ```
 
 ## Related documentation
 
-- [Governed Web Operator tutorial](../docs/tutorials/04-governed-web-operator.md)
-- [Web Operator architecture](../docs/architecture/web-operator.md)
-- [OpsConsole demo README](../demo/ops-console/README.md)
-- [Ops Patrol tutorial](../docs/tutorials/06-ops-patrol.md)
+- [Repository scripts](../scripts/README.md)
+- [Production deployment](../docs/operations/deployment.md)
+- [Execution-kernel cutover evidence](../docs/architecture/execution-kernel-cutover-evidence.md)
 - [Ops Patrol operations](../docs/operations/ops-patrol.md)

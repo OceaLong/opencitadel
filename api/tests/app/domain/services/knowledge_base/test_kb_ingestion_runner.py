@@ -10,13 +10,18 @@ import pytest
 
 from app.domain.models.file import File
 from app.domain.models.knowledge_base import (
+    DocStatus,
     KBSourceType,
     KnowledgeDocument,
 )
-from app.domain.models.knowledge_version import KnowledgeDocumentRevision
+from app.domain.models.knowledge_version import (
+    DocumentRevisionState,
+    KnowledgeDocumentRevision,
+)
 from app.domain.runtime_policy import KnowledgeBaseExecutionPolicy
 from app.domain.services.knowledge_base.ingestion_runner import (
     KBIngestionRunner,
+    _published_document_status,
     _revision_document,
 )
 from app.domain.services.knowledge_base.parsers import ParseResult
@@ -51,6 +56,25 @@ def test_revision_file_identity_overrides_mutable_logical_projection():
     assert projected.file_id == "new"
     assert projected.source_ref == '{"file_id":"new"}'
     assert logical.file_id == "old"
+
+
+@pytest.mark.parametrize(
+    ("revision_state", "expected"),
+    [
+        (DocumentRevisionState.INDEXED, DocStatus.READY),
+        (DocumentRevisionState.FAILED, DocStatus.FAILED),
+    ],
+)
+def test_published_revision_state_projects_to_logical_document_status(
+    revision_state,
+    expected,
+):
+    assert _published_document_status(revision_state) is expected
+
+
+def test_nonterminal_revision_cannot_be_projected_as_published():
+    with pytest.raises(ValueError, match="terminal"):
+        _published_document_status(DocumentRevisionState.PARSED)
 
 
 @pytest.mark.asyncio
@@ -106,3 +130,29 @@ async def test_empty_pdf_parser_keeps_ocr_warning(monkeypatch):
             document,
             policy=KnowledgeBaseExecutionPolicy(),
         )
+
+
+@pytest.mark.asyncio
+async def test_run_build_closes_candidate_on_unexpected_pipeline_exception(monkeypatch):
+    runner = KBIngestionRunner(
+        uow_factory=MagicMock(),
+        file_storage=MagicMock(),
+        web_documents=MagicMock(),
+    )
+    failure = LookupError("repository write failed")
+    monkeypatch.setattr(runner, "_load_candidate", AsyncMock(side_effect=failure))
+    fail_candidate = AsyncMock()
+    monkeypatch.setattr(runner, "_fail_candidate", fail_candidate)
+
+    events = [
+        event
+        async for event in runner.run_build(
+            "build-1",
+            policy=KnowledgeBaseExecutionPolicy(),
+        )
+    ]
+
+    fail_candidate.assert_awaited_once_with("build-1", "repository write failed")
+    assert len(events) == 1
+    assert events[0].kind == "error"
+    assert events[0].message == "repository write failed"

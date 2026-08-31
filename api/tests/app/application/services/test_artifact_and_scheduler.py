@@ -320,6 +320,52 @@ def test_artifact_get_by_id_requires_scope():
     asyncio.run(_run())
 
 
+def test_artifact_revoke_share_clears_token_for_owner():
+    artifact = Artifact(
+        id="a1", session_id="s1", kind="doc", title="T", share_token="tok", share_expires_at=None
+    )
+    uow = AsyncMock()
+    uow.__aenter__ = AsyncMock(return_value=uow)
+    uow.__aexit__ = AsyncMock(return_value=None)
+    uow.artifact.get_by_id = AsyncMock(return_value=artifact)
+    uow.session.get_metadata = AsyncMock(return_value=object())
+    uow.artifact.save = AsyncMock()
+    uow.commit = AsyncMock()
+
+    service = _artifact_service_without_storage(uow)
+
+    async def _run():
+        await service.revoke_share_link("a1", scope=OwnerScope.personal("owner"))
+        assert artifact.share_token is None
+        assert artifact.share_expires_at is None
+        uow.artifact.save.assert_awaited_once()
+        uow.commit.assert_awaited_once()
+
+    asyncio.run(_run())
+
+
+def test_artifact_revoke_share_denied_without_session_access():
+    # Regression: revoke must enforce owner scope so a non-owner can't clear
+    # another tenant's share token.
+    artifact = Artifact(id="a1", session_id="s1", kind="doc", title="T", share_token="tok")
+    uow = AsyncMock()
+    uow.__aenter__ = AsyncMock(return_value=uow)
+    uow.__aexit__ = AsyncMock(return_value=None)
+    uow.artifact.get_by_id = AsyncMock(return_value=artifact)
+    uow.session.get_metadata = AsyncMock(return_value=None)
+    uow.artifact.save = AsyncMock()
+
+    service = _artifact_service_without_storage(uow)
+
+    async def _run():
+        with pytest.raises(PermissionError):
+            await service.revoke_share_link("a1", scope=OwnerScope.personal("attacker"))
+        assert artifact.share_token == "tok"
+        uow.artifact.save.assert_not_awaited()
+
+    asyncio.run(_run())
+
+
 def test_artifact_tool_requires_content_or_source_path():
     from app.domain.services.tools.artifact import ArtifactTool
 

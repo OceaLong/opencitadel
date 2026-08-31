@@ -59,6 +59,35 @@ _CHUNK_INSERT_PLAIN_SQL = text(
 )
 
 
+def _chunk_insertion_layers(
+    chunks: list[KnowledgeChunk],
+) -> list[list[KnowledgeChunk]]:
+    by_id: dict[str, KnowledgeChunk] = {}
+    for chunk in chunks:
+        if chunk.id in by_id:
+            raise ValueError(f"duplicate knowledge chunk id: {chunk.id}")
+        by_id[chunk.id] = chunk
+
+    pending = list(chunks)
+    inserted: set[str] = set()
+    layers: list[list[KnowledgeChunk]] = []
+    while pending:
+        ready = [
+            chunk
+            for chunk in pending
+            if chunk.parent_id is None
+            or chunk.parent_id not in by_id
+            or chunk.parent_id in inserted
+        ]
+        if not ready:
+            raise ValueError("knowledge chunk parent graph contains a cycle")
+        layers.append(ready)
+        ready_ids = {chunk.id for chunk in ready}
+        inserted.update(ready_ids)
+        pending = [chunk for chunk in pending if chunk.id not in ready_ids]
+    return layers
+
+
 class KBIndexMixin:
     """Chunk/index write path + candidate metrics + document
     count/purge/pagination methods for DBKnowledgeBaseRepository."""
@@ -82,15 +111,19 @@ class KBIndexMixin:
         await self.save_chunks(chunks)
 
     async def save_chunks(self, chunks: list[KnowledgeChunk]) -> None:
-        embedded = [c for c in chunks if c.embedding]
-        plain = [c for c in chunks if not c.embedding]
-        for batch_source, sql in (
-            (embedded, _CHUNK_INSERT_WITH_EMBEDDING_SQL),
-            (plain, _CHUNK_INSERT_PLAIN_SQL),
-        ):
-            for start in range(0, len(batch_source), _CHUNK_INSERT_BATCH_SIZE):
-                batch = batch_source[start : start + _CHUNK_INSERT_BATCH_SIZE]
-                await self.db_session.execute(sql, [self._chunk_params(chunk) for chunk in batch])
+        for layer in _chunk_insertion_layers(chunks):
+            embedded = [chunk for chunk in layer if chunk.embedding]
+            plain = [chunk for chunk in layer if not chunk.embedding]
+            for batch_source, sql in (
+                (embedded, _CHUNK_INSERT_WITH_EMBEDDING_SQL),
+                (plain, _CHUNK_INSERT_PLAIN_SQL),
+            ):
+                for start in range(0, len(batch_source), _CHUNK_INSERT_BATCH_SIZE):
+                    batch = batch_source[start : start + _CHUNK_INSERT_BATCH_SIZE]
+                    await self.db_session.execute(
+                        sql,
+                        [self._chunk_params(chunk) for chunk in batch],
+                    )
 
     async def replace_candidate_chunks(
         self,

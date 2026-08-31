@@ -53,6 +53,7 @@ class AuditLogResponse(BaseModel):
     resource_type: str
     resource_id: str
     team_id: str | None
+    session_id: str | None
     request_id: str
     created_at: datetime
 

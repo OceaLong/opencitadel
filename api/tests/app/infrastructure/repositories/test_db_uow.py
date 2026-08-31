@@ -108,6 +108,7 @@ async def test_db_uow_sets_transaction_local_authorization_context_once() -> Non
         "is_admin": "false",
         "request_id": "request-1",
         "system_actor": "",
+        "is_auditor": "false",
     }
 
     await uow.commit()

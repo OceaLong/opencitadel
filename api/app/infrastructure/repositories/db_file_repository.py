@@ -55,3 +55,13 @@ class DBFileRepository(FileRepository):
         result = await self.db_session.execute(stmt)
         records = {record.id: record.to_domain() for record in result.scalars().all()}
         return [records[file_id] for file_id in file_ids if file_id in records]
+
+    async def delete(self, file_id: str, scope: OwnerScope | None = None) -> bool:
+        """根据传递的文件id删除文件记录，返回是否删除成功。"""
+        stmt = self._apply_scope(select(FileModel).where(FileModel.id == file_id), scope)
+        result = await self.db_session.execute(stmt)
+        record = result.scalar_one_or_none()
+        if record is None:
+            return False
+        await self.db_session.delete(record)
+        return True

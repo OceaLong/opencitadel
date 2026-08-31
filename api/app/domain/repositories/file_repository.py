@@ -18,3 +18,7 @@ class FileRepository(Protocol):
     async def list_by_ids(self, file_ids: list[str], scope: OwnerScope | None = None) -> list[File]:
         """根据传递的文件id列表批量获取文件信息"""
         ...
+
+    async def delete(self, file_id: str, scope: OwnerScope | None = None) -> bool:
+        """根据传递的文件id删除文件记录，返回是否删除成功"""
+        ...

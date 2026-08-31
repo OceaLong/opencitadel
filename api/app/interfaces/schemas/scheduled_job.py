@@ -67,6 +67,7 @@ class ScheduledJobResponse(BaseModel):
     next_run_at: datetime | None = None
     last_run_at: datetime | None = None
     last_run_status: ScheduledRunStatus | None = None
+    last_run_error: str | None = None
     last_run_session_id: str | None = None
     last_execution_run_id: UUID | None = None
     webhook_token: str | None = None

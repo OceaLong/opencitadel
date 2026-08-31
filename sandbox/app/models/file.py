@@ -6,6 +6,8 @@ class FileReadResult(BaseModel):
 
     filepath: str = Field(..., description="要读取的文件绝对路径")
     content: str = Field(..., description="读取的文件内容")
+    truncated: bool = Field(default=False, description="内容是否因 max_length 被截断")
+    size_bytes: int = Field(default=0, ge=0, description="截断前内容的 UTF-8 字节数")
 
 
 class FileWriteResult(BaseModel):

@@ -191,10 +191,10 @@ class SkillService:
         ):
             raise BadRequestError("允许 A2A 工具的 Skill 必须绑定 A2A server refs")
         global_skill = skill.visibility == ResourceVisibility.GLOBAL
-        for name in skill.mcp_server_refs:
-            server = await uow.mcp_server.get_by_name(name, scope=scope)
+        for server_id in skill.mcp_server_refs:
+            server = await uow.mcp_server.get_by_id(server_id, scope=scope)
             if server is None:
-                raise BadRequestError(f"MCP server[{name}]不存在或不可访问")
+                raise BadRequestError(f"MCP server[{server_id}]不存在或不可访问")
             if global_skill and server.visibility != ResourceVisibility.GLOBAL:
                 raise BadRequestError("全局 Skill 只能引用全局 MCP server")
         for server_id in skill.a2a_server_refs:

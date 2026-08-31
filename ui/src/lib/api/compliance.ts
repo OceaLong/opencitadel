@@ -14,6 +14,8 @@ export type ChainVerifyResult = {
 export type EvidenceSessionItem = {
   session_id: string;
   title: string;
+  owner_user_id: string | null;
+  team_id: string | null;
   operator_scope?: string | null;
   status: string;
   updated_at?: string | null;
@@ -51,6 +53,8 @@ export type ComplianceReport = {
 export type GovernanceProfileSession = {
   id: string;
   title: string;
+  owner_user_id: string | null;
+  team_id: string | null;
   status: string;
   operator_scope?: string | null;
   operator_domains: string[];

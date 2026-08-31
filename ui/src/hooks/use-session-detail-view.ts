@@ -81,6 +81,7 @@ export function useSessionDetailView({
     loadEarlierEvents,
     refreshFiles,
     sendMessage,
+    resumeAfterExternalCommand,
     updateSessionConfig,
     streaming,
     streamStatus,
@@ -253,8 +254,9 @@ export function useSessionDetailView({
         rejected ? "rejected" : "approved",
         feedback,
       );
+      resumeAfterExternalCommand();
     },
-    [latestApproval, requireAuth, tAuth],
+    [latestApproval, requireAuth, resumeAfterExternalCommand, tAuth],
   );
 
   const handleThinkingChange = useCallback(

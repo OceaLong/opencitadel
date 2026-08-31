@@ -87,6 +87,25 @@ class MinioFileStorage(FileStorage):
             logger.error("下载文件[%s]失败: %s", file_id, exc)
             raise
 
+    async def delete_file(self, file_id: str) -> None:
+        """根据文件id删除 MinIO 对象及数据库记录。"""
+        try:
+            async with self._uow_factory() as uow:
+                file = await uow.file.get_by_id(file_id)
+                if not file:
+                    raise ValueError(f"该文件不存在, 文件id: {file_id}")
+                await run_in_threadpool(
+                    self.minio.client.remove_object,
+                    self.bucket,
+                    file.key,
+                )
+                await uow.file.delete(file_id)
+                await uow.commit()
+            logger.info("文件删除成功: %s (ID: %s)", file.filename, file_id)
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.error("删除文件[%s]失败: %s", file_id, exc)
+            raise
+
     async def presigned_get_url(
         self,
         key: str,

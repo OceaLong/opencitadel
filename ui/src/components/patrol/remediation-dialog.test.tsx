@@ -86,7 +86,6 @@ function packFixture(
       ],
     },
     mcp_server_id: "server-1",
-    skill_id: "skill-1",
     validation_summary: {},
     created_at: "2026-08-04T00:00:00Z",
     updated_at: "2026-08-04T00:00:00Z",

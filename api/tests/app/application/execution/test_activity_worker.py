@@ -27,12 +27,13 @@ ACTIVITY_ID = UUID("40000000-0000-0000-0000-000000000002")
 
 def claim(
     *,
+    activity_id: UUID = ACTIVITY_ID,
     recovered: bool = False,
     timeout_at: datetime | None = None,
 ) -> ActivityClaim:
     return ActivityClaim(
         request=ActivityRequest(
-            activity_id=ACTIVITY_ID,
+            activity_id=activity_id,
             activity_type="model.call",
             aggregate_type="run",
             aggregate_id=str(RUN_ID),
@@ -141,6 +142,12 @@ class BlockingHandler(Handler):
         raise AssertionError("cancelled handler must not return")
 
 
+class UnexpectedFailureHandler(Handler):
+    async def execute(self, request, context):
+        self.calls.append((request, context))
+        raise LookupError("unexpected adapter failure")
+
+
 class ProgressHandler(Handler):
     async def execute(self, request, context):
         self.calls.append((request, context))
@@ -165,6 +172,26 @@ class ProgressHandler(Handler):
         )
         return ActivityOutcome.succeeded(
             result_ref=None,
+            result_summary="ok",
+        )
+
+
+class ConcurrentHandler(Handler):
+    def __init__(self, first_started, second_started, release) -> None:
+        super().__init__(idempotent=True)
+        self._first_started = first_started
+        self._second_started = second_started
+        self._release = release
+
+    async def execute(self, request, context):
+        self.calls.append((request, context))
+        if request.activity_id == ACTIVITY_ID:
+            self._first_started.set()
+            await self._release.wait()
+        else:
+            self._second_started.set()
+        return ActivityOutcome.succeeded(
+            result_ref=f"object://{request.activity_id}",
             result_summary="ok",
         )
 
@@ -241,6 +268,38 @@ async def test_call_started_event_precedes_external_call_and_completion() -> Non
     assert len(handler.calls) == 1
     assert handler.calls[0][1].idempotency_key == str(ACTIVITY_ID)
     assert stats.succeeded == 1
+
+
+@pytest.mark.asyncio
+async def test_claimed_activities_execute_concurrently_within_the_bounded_batch() -> None:
+    import asyncio
+
+    second_id = UUID("40000000-0000-0000-0000-000000000003")
+    store = FakeStore((claim(), claim(activity_id=second_id)))
+    service = FakeRunService()
+    registry = ActivityRegistry()
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
+    release = asyncio.Event()
+    registry.register(ConcurrentHandler(first_started, second_started, release))
+    worker = ActivityWorker(
+        store=store,
+        run_contexts=FakeRunContexts(),
+        run_service=service,
+        registry=registry,
+        worker_id="worker-1",
+    )
+
+    running = asyncio.create_task(worker.run_once(now=NOW, limit=2))
+    await first_started.wait()
+    try:
+        await asyncio.wait_for(second_started.wait(), timeout=0.1)
+    finally:
+        release.set()
+    stats = await running
+
+    assert stats.claimed == 2
+    assert stats.succeeded == 2
 
 
 @pytest.mark.asyncio
@@ -389,6 +448,32 @@ async def test_activity_crossing_deadline_is_cancelled_and_failed() -> None:
         "FailActivity",
     ]
     assert service.commands[-1][0].payload["failure_code"] == "ACTIVITY_TIMEOUT"
+    assert stats.failed == 1
+
+
+@pytest.mark.asyncio
+async def test_unexpected_handler_exception_fails_activity_without_crashing_worker() -> None:
+    store = FakeStore((claim(),))
+    service = FakeRunService()
+    registry = ActivityRegistry()
+    handler = UnexpectedFailureHandler(idempotent=True)
+    registry.register(handler)
+    worker = ActivityWorker(
+        store=store,
+        run_contexts=FakeRunContexts(),
+        run_service=service,
+        registry=registry,
+        worker_id="worker-1",
+    )
+
+    stats = await worker.run_once(now=NOW, limit=1)
+
+    assert len(handler.calls) == 1
+    assert [item[0].command_type for item in service.commands] == [
+        "MarkActivityCallStarted",
+        "FailActivity",
+    ]
+    assert service.commands[-1][0].payload["failure_code"] == "ACTIVITY_HANDLER_ERROR"
     assert stats.failed == 1
 
 

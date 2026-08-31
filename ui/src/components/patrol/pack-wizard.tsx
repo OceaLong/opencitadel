@@ -19,19 +19,26 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 
+import { useCapabilities } from "@/hooks/use-capabilities";
 import { integrationsApi, type MCPServer } from "@/lib/api";
+import { isCapabilityAvailable } from "@/lib/api/capabilities";
+import { waitForPackValidation } from "@/lib/api/patrol-validation";
 import { patrolsApi } from "@/lib/api/patrols";
+
+type PatrolTemplateId = "kubernetes-baseline-v1" | "compose-services-baseline-v1";
 
 export function PackWizard() {
   const router = useRouter();
   const t = useTranslations("patrol");
+  const { loading: capabilityLoading, capability } = useCapabilities();
+  const runAdmissionAvailable = isCapabilityAvailable(capability("ops_patrol"));
   const steps = [
     t("wizard.steps.target"),
     t("wizard.steps.scope"),
     t("wizard.steps.checks"),
     t("wizard.steps.schedule"),
   ];
-  const checks = [
+  const kubernetesChecks = [
     {
       name: t("checks.availability"),
       tool: "k8s_workload_summary",
@@ -59,11 +66,52 @@ export function PackWizard() {
     },
     { name: t("checks.endpoint"), tool: "http_probe", threshold: t("thresholds.endpoint") },
   ];
+  const composeChecks = [
+    { name: t("checks.apiHealth"), tool: "http_probe", threshold: t("thresholds.healthy") },
+    { name: t("checks.apiStatus"), tool: "http_probe", threshold: t("thresholds.status200") },
+    { name: t("checks.apiLatency"), tool: "http_probe", threshold: t("thresholds.latency") },
+    {
+      name: t("checks.apiIntegrity"),
+      tool: "http_probe",
+      threshold: t("thresholds.responseIntegrity"),
+    },
+    {
+      name: t("checks.consoleHealth"),
+      tool: "http_probe",
+      threshold: t("thresholds.healthy"),
+    },
+    {
+      name: t("checks.consoleStatus"),
+      tool: "http_probe",
+      threshold: t("thresholds.status200"),
+    },
+    {
+      name: t("checks.consoleLatency"),
+      tool: "http_probe",
+      threshold: t("thresholds.latency"),
+    },
+    {
+      name: t("checks.consoleIntegrity"),
+      tool: "http_probe",
+      threshold: t("thresholds.responseIntegrity"),
+    },
+    {
+      name: t("checks.primaryDependencies"),
+      tool: "dependency_status",
+      threshold: t("thresholds.dependency"),
+    },
+    {
+      name: t("checks.consoleConnectivity"),
+      tool: "dependency_status",
+      threshold: t("thresholds.dependency"),
+    },
+  ];
   const [step, setStep] = useState(0);
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: t("wizard.defaultName"),
+    templateId: "kubernetes-baseline-v1" as PatrolTemplateId,
     serverId: "",
     targetRef: "opencitadel-local",
     cluster: "opencitadel-demo",
@@ -82,6 +130,8 @@ export function PackWizard() {
     () => servers.find((item) => item.id === form.serverId),
     [servers, form.serverId],
   );
+  const checks =
+    form.templateId === "compose-services-baseline-v1" ? composeChecks : kubernetesChecks;
   const canContinue =
     step === 0
       ? Boolean(form.serverId && selected?.enabled)
@@ -95,7 +145,7 @@ export function PackWizard() {
       const pack = await patrolsApi.createPack({
         name: form.name,
         mcp_server_id: form.serverId,
-        template_id: "kubernetes-baseline-v1",
+        template_id: form.templateId,
         config: {
           target_ref: form.targetRef,
           timezone: form.timezone,
@@ -107,7 +157,11 @@ export function PackWizard() {
           schedule: { cron: form.cron, enabled: form.scheduleEnabled },
         },
       });
-      const validated = await patrolsApi.validatePack(pack.id);
+      const requested = await patrolsApi.validatePack(pack.id);
+      const validated =
+        requested.status === "validating"
+          ? await waitForPackValidation(() => patrolsApi.getPack(pack.id))
+          : requested;
       if (validated.validation_summary.ok) {
         await patrolsApi.activatePack(pack.id);
         toast.success(t("toast.activated"));
@@ -124,6 +178,14 @@ export function PackWizard() {
 
   return (
     <div className="grid gap-5">
+      {!capabilityLoading && !runAdmissionAvailable && (
+        <div
+          role="status"
+          className="border-warning/40 bg-approval-subtle text-warning rounded-lg border p-3 text-sm"
+        >
+          {t("disabled.description")}
+        </div>
+      )}
       <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={t("wizard.stepsAria")}>
         {steps.map((label, index) => (
           <li
@@ -164,6 +226,27 @@ export function PackWizard() {
                         {server.name}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="patrol-template">{t("wizard.template")}</Label>
+                <Select
+                  value={form.templateId}
+                  onValueChange={(value) =>
+                    setForm({ ...form, templateId: value as PatrolTemplateId })
+                  }
+                >
+                  <SelectTrigger id="patrol-template">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="kubernetes-baseline-v1">
+                      {t("wizard.templates.kubernetes")}
+                    </SelectItem>
+                    <SelectItem value="compose-services-baseline-v1">
+                      {t("wizard.templates.composeServices")}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>

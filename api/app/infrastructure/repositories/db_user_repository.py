@@ -99,6 +99,7 @@ class DBUserRepository(UserRepository):
             record.update_from_domain(user)
         else:
             self.db_session.add(UserORM.from_domain(user))
+        await self.db_session.flush()
 
     async def delete_by_id(self, user_id: str) -> None:
         await self.db_session.execute(delete(UserORM).where(UserORM.id == user_id))

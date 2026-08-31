@@ -150,6 +150,9 @@ class Uow:
         self.patrol = repo
         self.execution_commands = object()
         self.session = SimpleNamespace(save=AsyncMock(), update_status=AsyncMock())
+        self.mcp_server = SimpleNamespace(
+            get_by_name=AsyncMock(return_value=SimpleNamespace(id="server-1", enabled=True))
+        )
 
     async def __aenter__(self):
         return self
@@ -199,7 +202,10 @@ def make_service(
 ) -> PatrolRemediationService:
     return PatrolRemediationService(
         lambda: uow,
-        actuator_client=actuator or SimpleNamespace(),
+        actuator_client=actuator
+        or SimpleNamespace(
+            get_capabilities=AsyncMock(return_value={"overall_capability_hash": "capability-v1"})
+        ),
         patrol_run_service=patrol_runs
         or SimpleNamespace(
             trigger_pack=AsyncMock(return_value=SimpleNamespace(id="default-recheck-run"))
@@ -633,12 +639,19 @@ async def test_policy_tightening_after_capability_check_denies_actuator_call():
         get_by_name=AsyncMock(return_value=SimpleNamespace(enabled=True))
     )
 
+    capability_calls = {"n": 0}
+
     async def tighten_policy(*_args, **_kwargs):
-        _POLICY_READER.set_operations(
-            OperationsPolicy(
-                patrol=PatrolOperationsPolicy(remediation=PatrolRemediationMode.DISABLED)
+        capability_calls["n"] += 1
+        # The proposal preflight captures the baseline first (call #1); only the
+        # post-approval execute-time drift check (call #2) should observe the
+        # policy tightening.
+        if capability_calls["n"] >= 2:
+            _POLICY_READER.set_operations(
+                OperationsPolicy(
+                    patrol=PatrolOperationsPolicy(remediation=PatrolRemediationMode.DISABLED)
+                )
             )
-        )
         return {"overall_capability_hash": "capability-v1"}
 
     actuator = SimpleNamespace(
@@ -682,7 +695,7 @@ async def test_execute_recovery_skips_completed_actuator_call_and_resumes_rechec
     repo = Repo()
     uow = Uow(repo)
     actuator = SimpleNamespace(
-        get_capabilities=AsyncMock(),
+        get_capabilities=AsyncMock(return_value={"overall_capability_hash": "capability-v1"}),
         execute_action=AsyncMock(),
     )
     recheck = SimpleNamespace(id="recheck-run-1")
@@ -702,6 +715,9 @@ async def test_execute_recovery_skips_completed_actuator_call_and_resumes_rechec
             "user-1",
             workload="deployment/api",
         )
+    # The proposal preflight already captured the baseline; only the execute
+    # path is under test here, so forget the propose-time capability call.
+    actuator.get_capabilities.reset_mock()
     remediation.status = PatrolRemediationStatus.EXECUTED
     remediation.before_observation = {"generation": 1}
     remediation.after_observation = {"generation": 2}
@@ -874,3 +890,72 @@ async def test_cancel_if_pending_records_cancelled_remediation_transition():
 
     assert repo.remediations[remediation.id].status == PatrolRemediationStatus.CANCELLED
     assert metrics.remediation_transitions.count("cancelled") == 1
+
+
+@pytest.mark.asyncio
+async def test_propose_persists_pre_approval_capability_baseline():
+    # Regression: propose never captured the Actuator capability baseline, so
+    # actuator_capability_hash stayed None and every approved remediation failed
+    # closed at execute() with CAPABILITY_BASELINE_MISSING.
+    repo = Repo()
+    actuator = SimpleNamespace(
+        get_capabilities=AsyncMock(return_value={"overall_capability_hash": "cap-baseline-9"}),
+        execute_action=AsyncMock(),
+    )
+    service = make_service(Uow(repo), actuator=actuator)
+    scope = OwnerScope.personal("user-1")
+
+    with _patched():
+        remediation = await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
+            workload="deployment/api",
+        )
+
+    assert remediation.actuator_capability_hash == "cap-baseline-9"
+    actuator.get_capabilities.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_fails_closed_when_capability_baseline_missing():
+    # Regression: the CAPABILITY_BASELINE_MISSING fail-closed branch had zero
+    # coverage because every execute test manually injected a baseline hash.
+    repo = Repo()
+    actuator = SimpleNamespace(
+        get_capabilities=AsyncMock(return_value={"overall_capability_hash": "cap-1"}),
+        execute_action=AsyncMock(),
+    )
+    service = make_service(Uow(repo), actuator=actuator)
+    scope = OwnerScope.personal("user-1")
+
+    with _patched():
+        remediation = await service.propose(
+            repo.k8s_finding.id,
+            PatrolRemediationAction.RESTART_WORKLOAD,
+            {},
+            scope,
+            "user-1",
+            workload="deployment/api",
+        )
+        # Simulate the historical defect: no baseline persisted before approval.
+        remediation.actuator_capability_hash = None
+        remediation.status = PatrolRemediationStatus.EXECUTING
+        await repo.save_remediation(remediation)
+
+        with pytest.raises(ConflictError) as missing:
+            await service.execute(
+                remediation.id,
+                remediation.session_id,
+                "activity-delivery",
+                scope,
+                policy=ActivityExecutionPolicy(),
+            )
+
+    assert missing.value.error_key == "apiErrors.patrolRemediation.capabilityBaselineMissing"
+    actuator.execute_action.assert_not_awaited()
+    persisted = repo.remediations[remediation.id]
+    assert persisted.status is PatrolRemediationStatus.FAILED
+    assert persisted.error_code == "CAPABILITY_BASELINE_MISSING"

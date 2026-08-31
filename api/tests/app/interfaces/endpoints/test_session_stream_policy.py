@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -75,3 +76,50 @@ async def test_session_stream_heartbeat_reconciles_from_authoritative_service() 
     assert first.event == "sessions"
     assert heartbeat.event == "sessions"
     assert service.get_all_sessions.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_session_disconnect_finishes_database_snapshot_before_cancelling() -> None:
+    reader = MutablePolicyReader()
+    query_started = asyncio.Event()
+    release_query = asyncio.Event()
+    query_cancelled = asyncio.Event()
+
+    async def get_all_sessions(*_args, **_kwargs):
+        query_started.set()
+        try:
+            await release_query.wait()
+        except asyncio.CancelledError:
+            query_cancelled.set()
+            raise
+        return []
+
+    service = AsyncMock()
+    service.get_all_sessions = AsyncMock(side_effect=get_all_sessions)
+    streams = AsyncMock()
+    response = await stream_sessions(
+        limit=100,
+        offset=0,
+        ctx=WorkspaceContext(
+            principal=Principal(user_id="user-1"),
+            scope=OwnerScope.personal("user-1"),
+        ),
+        session_service=service,
+        policy_reader=reader,
+        streams=streams,
+    )
+
+    reading = asyncio.create_task(anext(response.body_iterator))
+    await asyncio.wait_for(query_started.wait(), timeout=1)
+    reading.cancel()
+    await asyncio.sleep(0)
+
+    assert not reading.done()
+    assert not query_cancelled.is_set()
+
+    release_query.set()
+    with pytest.raises(asyncio.CancelledError):
+        await reading
+
+    assert not query_cancelled.is_set()
+    streams.open.assert_not_called()

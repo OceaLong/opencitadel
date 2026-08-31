@@ -22,9 +22,12 @@ class ScheduledRunStatus(StrEnum):
 
 
 class NotifyChannel(BaseModel):
-    type: str = "mcp"
+    type: str = "mcp"  # mcp | webhook | email
     server_id: str = ""
     channel_arg: str = ""
+    url: str = ""  # webhook target (type=webhook)
+    secret: str = ""  # webhook HMAC-SHA256 signing secret (type=webhook)
+    address: str = ""  # recipient email address (type=email)
 
 
 class ScheduledJob(BaseModel):

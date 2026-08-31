@@ -329,80 +329,46 @@ jobs:
       - name: Run documentation consistency script
         run: ./scripts/check-docs.sh
 
-  e2e-test:
-    name: E2E smoke tests
-    if: github.event_name == 'push'
+  acceptance-e2e:
+    name: Deterministic full-stack acceptance
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    env:
-      OPENCITADEL_ENV_FILE: .env.e2e
+    timeout-minutes: 45
+    needs:
+      - api-test
+      - ui-test
+      - sandbox-test
+      - patrol-collector-test
+      - ops-actuator-test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: e2e/package-lock.json
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned uv
+        run: pip install uv==0.11.19
       - name: Resolve docker socket gid
         run: echo "DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)" >> "$GITHUB_ENV"
-      - name: Generate e2e admin password
-        run: |
-          password=$(openssl rand -hex 10)
-          echo "::add-mask::${password}"
-          sed -i "s/^BOOTSTRAP_ADMIN_PASSWORD=.*/BOOTSTRAP_ADMIN_PASSWORD=${password}/" .env.e2e
-          echo "PATROL_E2E_PASSWORD=${password}" >> "$GITHUB_ENV"
-      # The broker creates dynamic containers from this image. The service that
-      # declares its build belongs to the inactive fixed-sandbox profile, so an
-      # ordinary profile-scoped `up --build` cannot make the image available.
-      - name: Build dynamic sandbox image
-        run: docker compose --env-file .env.e2e build opencitadel-sandbox
-        env:
-          PIP_INDEX_URL: https://pypi.org/simple/
-          UV_INDEX_URL: https://pypi.org/simple/
-          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
-      - name: Start platform and demo stack
-        run: >-
-          docker compose --env-file .env.e2e
-          --profile local --profile demo --profile patrol up -d --build
-        env:
-          PIP_INDEX_URL: https://pypi.org/simple/
-          UV_INDEX_URL: https://pypi.org/simple/
-          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
-      - name: Wait for services to become healthy
-        run: |
-          for attempt in $(seq 1 60); do
-            unhealthy=$(docker compose --env-file .env.e2e --profile local --profile demo --profile patrol ps --format json \
-              | python3 -c "import json,sys; rows=[json.loads(l) for l in sys.stdin if l.strip()]; print(sum(1 for r in rows if r.get('Health') not in ('healthy','') or r.get('State')!='running'))")
-            [ "$unhealthy" = "0" ] && exit 0
-            echo "health check attempt ${attempt}/60: ${unhealthy} service(s) not ready"
-            sleep 10
-          done
-          docker compose --env-file .env.e2e --profile local --profile demo --profile patrol ps
-          docker compose --env-file .env.e2e --profile local --profile demo --profile patrol logs --tail 100
-          exit 1
-      - name: Install e2e dependencies
+      - name: Install locked Playwright dependencies
         working-directory: e2e
         run: |
           npm ci
           npx playwright install --with-deps chromium
-      - name: Run Playwright smoke tests
-        working-directory: e2e
-        run: npm test
+      - name: Run isolated zero-skip acceptance plane
+        run: ./scripts/run-acceptance-e2e.sh --disposable
         env:
-          # PATROL_E2E stays gated behind vars.PATROL_E2E_ENABLED rather than
-          # being unconditionally on: patrol.spec needs a tool-capable LLM
-          # behind the execution kernel and Collector, which CI does not have, so enabling it
-          # here would always fail. Enable only in protected environments
-          # that have a real model configured.
-          PATROL_E2E: ${{ vars.PATROL_E2E_ENABLED }}
-          PATROL_E2E_PASSWORD: ${{ env.PATROL_E2E_PASSWORD }}
-      - name: Upload playwright traces on failure
-        if: failure()
+          PIP_INDEX_URL: https://pypi.org/simple/
+          UV_INDEX_URL: https://pypi.org/simple/
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+      - name: Upload acceptance evidence
+        if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: playwright-results
-          path: e2e/test-results/
-          if-no-files-found: ignore
-      - name: Tear down stack
-        if: always()
-        run: docker compose --env-file .env.e2e --profile local --profile demo --profile patrol down -v
+          name: acceptance-evidence
+          path: tmp/acceptance/
+          if-no-files-found: error

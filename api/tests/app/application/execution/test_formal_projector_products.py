@@ -235,6 +235,212 @@ async def test_failed_formal_patrol_run_closes_running_product_run() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("terminal_event_type", "terminal_payload", "expected_failure_code"),
+    [
+        (
+            "RunFailed",
+            {"failure_code": "PATROL_VALIDATION_INPUT_INVALID"},
+            "PATROL_VALIDATION_INPUT_INVALID",
+        ),
+        ("RunCancelled", {"reason": "operator_cancelled"}, "operator_cancelled"),
+    ],
+)
+@pytest.mark.usefixtures("_db_schema")
+async def test_formal_validation_terminal_event_closes_matching_pack_validation(
+    terminal_event_type: str,
+    terminal_payload: dict,
+    expected_failure_code: str,
+) -> None:
+    owner_user_id = f"validation-user-{uuid4()}"
+    pack_id = str(uuid4())
+    patrol_run_id = str(uuid4())
+    validation_run_id = uuid4()
+    occurred_at = datetime(2026, 8, 24, 12, 30, tzinfo=UTC)
+    projector = FormalProjector(
+        session_factory=None,  # type: ignore[arg-type]
+        authorization=AuthorizationContext.system("product-test"),
+    )
+
+    async with execution_admin_session() as session:
+        try:
+            await _insert_patrol_graph(
+                session,
+                owner_user_id=owner_user_id,
+                pack_id=pack_id,
+                patrol_run_id=patrol_run_id,
+                execution_run_id=validation_run_id,
+            )
+            await session.execute(
+                text(
+                    "UPDATE patrol_packs SET status = 'validating', "
+                    "validation_run_id = :validation_run_id, "
+                    "validation_summary = CAST(:summary AS jsonb) WHERE id = :pack_id"
+                ),
+                {
+                    "pack_id": pack_id,
+                    "validation_run_id": str(validation_run_id),
+                    "summary": json.dumps({"validation_run_id": str(validation_run_id)}),
+                },
+            )
+            await projector._project_run(
+                session,
+                _event(
+                    run_id=validation_run_id,
+                    owner_user_id=owner_user_id,
+                    version=1,
+                    event_type="RunCreated",
+                    occurred_at=occurred_at,
+                    public_payload={
+                        "family": "patrol",
+                        "source_entity_type": "patrol_pack_validation",
+                        "source_entity_id": pack_id,
+                        "parent_run_id": None,
+                        "input": {"operation": "validate"},
+                    },
+                    semantic_payload={
+                        "operation": "validate",
+                        "pack_id": pack_id,
+                        "validation_run_id": str(validation_run_id),
+                    },
+                ),
+            )
+            terminal_at = occurred_at + timedelta(seconds=5)
+            await projector._project_run(
+                session,
+                _event(
+                    run_id=validation_run_id,
+                    owner_user_id=owner_user_id,
+                    version=2,
+                    event_type=terminal_event_type,
+                    occurred_at=terminal_at,
+                    public_payload=terminal_payload,
+                ),
+            )
+            pack = (
+                await session.execute(
+                    text(
+                        "SELECT status, validation_run_id, last_validated_version, "
+                        "last_validated_at, validation_summary "
+                        "FROM patrol_packs WHERE id = :pack_id"
+                    ),
+                    {"pack_id": pack_id},
+                )
+            ).one()
+
+            assert pack.status == "invalid"
+            assert pack.validation_run_id is None
+            assert pack.last_validated_version is None
+            assert pack.last_validated_at == terminal_at
+            assert pack.validation_summary == {
+                "ok": False,
+                "errors": [f"Validation Run terminated: {expected_failure_code}"],
+                "validation_run_id": str(validation_run_id),
+                "failure_code": expected_failure_code,
+                "capability_hash": None,
+                "enabled_tools": [],
+                "dry_run": {},
+            }
+        finally:
+            await session.rollback()
+            await _cleanup_patrol_graph(
+                session,
+                owner_user_id=owner_user_id,
+                pack_id=pack_id,
+                execution_run_id=validation_run_id,
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_db_schema")
+async def test_formal_validation_terminal_event_cannot_overwrite_newer_validation() -> None:
+    owner_user_id = f"validation-stale-user-{uuid4()}"
+    pack_id = str(uuid4())
+    patrol_run_id = str(uuid4())
+    stale_run_id = uuid4()
+    newer_run_id = uuid4()
+    occurred_at = datetime(2026, 8, 24, 12, 45, tzinfo=UTC)
+    projector = FormalProjector(
+        session_factory=None,  # type: ignore[arg-type]
+        authorization=AuthorizationContext.system("product-test"),
+    )
+
+    async with execution_admin_session() as session:
+        try:
+            await _insert_patrol_graph(
+                session,
+                owner_user_id=owner_user_id,
+                pack_id=pack_id,
+                patrol_run_id=patrol_run_id,
+                execution_run_id=stale_run_id,
+            )
+            await session.execute(
+                text(
+                    "UPDATE patrol_packs SET status = 'validating', "
+                    "validation_run_id = :validation_run_id, "
+                    "validation_summary = CAST(:summary AS jsonb) WHERE id = :pack_id"
+                ),
+                {
+                    "pack_id": pack_id,
+                    "validation_run_id": str(newer_run_id),
+                    "summary": json.dumps({"generation": "newer"}),
+                },
+            )
+            await projector._project_run(
+                session,
+                _event(
+                    run_id=stale_run_id,
+                    owner_user_id=owner_user_id,
+                    version=1,
+                    event_type="RunCreated",
+                    occurred_at=occurred_at,
+                    public_payload={
+                        "family": "patrol",
+                        "source_entity_type": "patrol_pack_validation",
+                        "source_entity_id": pack_id,
+                        "parent_run_id": None,
+                        "input": {"operation": "validate"},
+                    },
+                    semantic_payload={"operation": "validate", "pack_id": pack_id},
+                ),
+            )
+            await projector._project_run(
+                session,
+                _event(
+                    run_id=stale_run_id,
+                    owner_user_id=owner_user_id,
+                    version=2,
+                    event_type="RunFailed",
+                    occurred_at=occurred_at + timedelta(seconds=5),
+                    public_payload={"failure_code": "ACTIVITY_TIMEOUT"},
+                ),
+            )
+            pack = (
+                await session.execute(
+                    text(
+                        "SELECT status, validation_run_id, validation_summary "
+                        "FROM patrol_packs WHERE id = :pack_id"
+                    ),
+                    {"pack_id": pack_id},
+                )
+            ).one()
+
+            assert pack.status == "validating"
+            assert pack.validation_run_id == str(newer_run_id)
+            assert pack.validation_summary == {"generation": "newer"}
+        finally:
+            await session.rollback()
+            await _cleanup_patrol_graph(
+                session,
+                owner_user_id=owner_user_id,
+                pack_id=pack_id,
+                execution_run_id=stale_run_id,
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     (
         "product_status",
         "terminal_event_type",

@@ -116,7 +116,12 @@ def next_plan_command(
                 input_payload=activity.input_payload,
             )
         if status != "succeeded":
-            return fail_for_activity(state, status, max_retries=max_retries)
+            return fail_for_activity(
+                state,
+                status,
+                activity_id=activity_id,
+                max_retries=max_retries,
+            )
     return command(state, "CompleteRun", {"result_ref": last_result_ref(state)})
 
 
@@ -173,6 +178,7 @@ def fail_for_activity(
     state: RunState,
     status: str,
     *,
+    activity_id: UUID | None = None,
     max_retries: int,
 ) -> RegisteredCommand:
     if not isinstance(max_retries, int) or isinstance(max_retries, bool):
@@ -183,9 +189,23 @@ def fail_for_activity(
         state,
         "FailRun",
         {
-            "failure_code": f"ACTIVITY_{status.upper()}",
+            "failure_code": (
+                activity_failure_code(state, activity_id) if activity_id is not None else None
+            )
+            or f"ACTIVITY_{status.upper()}",
             "retryable": status == "failed" and state.retry_generation < max_retries,
         },
+    )
+
+
+def activity_failure_code(state: RunState, activity_id: UUID) -> str | None:
+    return next(
+        (
+            failure_code
+            for candidate, generation, failure_code in state.activity_failure_codes
+            if candidate == activity_id and generation == state.retry_generation
+        ),
+        None,
     )
 
 

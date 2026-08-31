@@ -70,6 +70,34 @@ class ExecutionKernelProcess:
             "Execution kernel started: activities=%s",
             self._runtime.activity_registry.registered_types,
         )
+        lanes = {
+            asyncio.create_task(
+                self._run_control_plane(),
+                name="execution-kernel-control-plane",
+            ),
+            asyncio.create_task(
+                self._run_activity_plane(),
+                name="execution-kernel-activity-plane",
+            ),
+        }
+        try:
+            done, _ = await asyncio.wait(
+                lanes,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in done:
+                error = task.exception()
+                if error is not None:
+                    raise error
+            if not self._stopping.is_set():
+                raise RuntimeError("execution kernel lane stopped unexpectedly")
+        finally:
+            for task in lanes:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*lanes, return_exceptions=True)
+
+    async def _run_control_plane(self) -> None:
         while not self._stopping.is_set():
             now = datetime.now(UTC)
             await self._policy_reader.refresh_if_due(now=now)
@@ -93,12 +121,6 @@ class ExecutionKernelProcess:
                 )
             ).submitted
             work += (
-                await self._runtime.run_activities_once(
-                    limit=self._batch_size,
-                    now=now,
-                )
-            ).claimed
-            work += (
                 await self._runtime.run_timers_once(
                     limit=self._batch_size,
                     now=now,
@@ -118,6 +140,21 @@ class ExecutionKernelProcess:
             ).processed
             if work == 0:
                 await self._wait_for_hint()
+
+    async def _run_activity_plane(self) -> None:
+        while not self._stopping.is_set():
+            claimed = (
+                await self._runtime.run_activities_once(
+                    limit=self._batch_size,
+                    now=datetime.now(UTC),
+                )
+            ).claimed
+            if claimed == 0:
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(
+                        self._stopping.wait(),
+                        timeout=self._idle_poll_seconds,
+                    )
 
     async def run_heartbeat(self) -> None:
         """Refresh the liveness marker under external task supervision."""

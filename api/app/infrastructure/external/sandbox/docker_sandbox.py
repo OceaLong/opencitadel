@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import io
 import logging
+import secrets
 import socket
 import time
 import uuid
@@ -46,13 +47,25 @@ def _broker_call(host: SandboxHostAccess, method: str, path: str, **kwargs) -> d
     url = _broker_url(host)
     if not url:
         raise RuntimeError("sandbox broker is not configured")
-    with httpx.Client(
-        headers={"Authorization": f"Bearer {host.broker_token or ''}"},
-        timeout=30,
-        trust_env=False,
-    ) as client:
-        response = client.request(method, f"{url}{path}", **kwargs)
-    response.raise_for_status()
+    try:
+        with httpx.Client(
+            headers={"Authorization": f"Bearer {host.broker_token or ''}"},
+            timeout=30,
+            trust_env=False,
+        ) as client:
+            response = client.request(method, f"{url}{path}", **kwargs)
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        try:
+            detail = str(exc.response.json().get("detail") or "broker rejected request")
+        except (TypeError, ValueError):
+            detail = "broker rejected request"
+        detail = " ".join(detail.split())[:256]
+        raise DockerSandboxError(
+            f"sandbox broker {method} {path} failed with HTTP {exc.response.status_code}: {detail}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise DockerSandboxError(f"sandbox broker {method} {path} is unavailable") from exc
     return response.json()
 
 
@@ -64,11 +77,13 @@ def _broker_create(
     host: SandboxHostAccess,
     container_name: str,
     settings: SandboxEffectiveSettings,
+    access_token: str,
 ) -> dict:
     request = CreateSandboxRequest(
         id=container_name,
         operations_revision_id=settings.operations_revision_id,
         policy=SandboxContainerPolicy.from_operations(settings.policy),
+        access_token=access_token,
     )
     return _broker_call(
         host,
@@ -117,9 +132,13 @@ class DockerSandbox(Sandbox):
         quota: SandboxQuota,
         ip: str | None = None,
         container_name: str | None = None,
+        access_token: str = "",
     ) -> None:
         """构造函数，完成Docker沙箱扩展创建"""
-        self.client = httpx.AsyncClient(timeout=600)
+        self.client = httpx.AsyncClient(
+            timeout=600,
+            headers=({"Authorization": f"Bearer {access_token}"} if access_token else {}),
+        )
         self._ip = ip
         self._container_name = container_name
         self.settings = settings
@@ -251,15 +270,20 @@ class DockerSandbox(Sandbox):
     ) -> Self:
         deployment = settings.deployment
         container: Model | None = None
+        # Per-sandbox bearer token for the data-plane HTTP API. Injected into the
+        # container env and sent on every kernel->sandbox request. The sandbox
+        # only enforces it when the env var is present (backward compatible).
+        access_token = secrets.token_urlsafe(32)
         try:
             if _broker_url(host):
-                payload = _broker_create(host, container_name, settings)
+                payload = _broker_create(host, container_name, settings, access_token)
                 return cls(
                     settings=settings,
                     host=host,
                     quota=quota,
                     ip=payload["ip"],
                     container_name=payload["id"],
+                    access_token=access_token,
                 )
             container = _get_docker_client(host).containers.run(
                 **build_docker_sandbox_config(
@@ -267,6 +291,7 @@ class DockerSandbox(Sandbox):
                     SandboxContainerPolicy.from_operations(settings.policy),
                     container_name,
                     operations_revision_id=settings.operations_revision_id,
+                    access_token=access_token,
                 )
             )
             container.reload()
@@ -281,6 +306,7 @@ class DockerSandbox(Sandbox):
                 quota=quota,
                 ip=ip,
                 container_name=container_name,
+                access_token=access_token,
             )
         except BaseException as exc:
             if container is not None:

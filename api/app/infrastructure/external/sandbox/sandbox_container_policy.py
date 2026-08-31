@@ -33,6 +33,7 @@ class CreateSandboxRequest(BaseModel):
     id: str = Field(min_length=1, max_length=255)
     operations_revision_id: UUID
     policy: SandboxContainerPolicy
+    access_token: str = ""
 
 
 def build_docker_sandbox_config(
@@ -41,6 +42,7 @@ def build_docker_sandbox_config(
     container_name: str,
     *,
     operations_revision_id: UUID,
+    access_token: str = "",
 ) -> dict[str, Any]:
     chrome_args = deployment.chrome_args.strip()
     if "--no-sandbox" not in chrome_args.split():
@@ -64,6 +66,7 @@ def build_docker_sandbox_config(
         "shm_size": "256m",
         "environment": {
             "SERVER_TIMEOUT_MINUTES": str(policy.ttl_minutes),
+            "SANDBOX_ACCESS_TOKEN": access_token,
             "CHROME_ARGS": chrome_args,
             "HTTPS_PROXY": deployment.https_proxy or "",
             "HTTP_PROXY": deployment.http_proxy or "",
@@ -74,6 +77,7 @@ def build_docker_sandbox_config(
             "HOME": "/home/ubuntu",
         },
         "labels": {
+            **deployment.labels,
             "opencitadel.io/sandbox": "true",
             "opencitadel.io/ephemeral": "true",
             "opencitadel.io/operations-revision": str(operations_revision_id),

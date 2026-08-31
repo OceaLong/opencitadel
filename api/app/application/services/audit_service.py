@@ -71,6 +71,7 @@ class AuditService:
         action: str | None = None,
         resource_id: str | None = None,
         resource_type: str | None = None,
+        session_id: str | None = None,
         start_at: datetime | None = None,
         end_at: datetime | None = None,
         limit: int = 100,
@@ -82,6 +83,7 @@ class AuditService:
                 action=action,
                 resource_id=resource_id,
                 resource_type=resource_type,
+                session_id=session_id,
                 start_at=start_at,
                 end_at=end_at,
                 limit=limit,
@@ -112,7 +114,7 @@ class AuditService:
         return "".join(lines)
 
     async def build_session_audit_report_json(self, session_id: str) -> dict[str, Any]:
-        logs = await self.list_logs(resource_id=session_id, limit=1000)
+        logs = await self.list_logs(session_id=session_id, limit=1000)
         entries = [
             {
                 "id": log.id,
@@ -155,7 +157,7 @@ class AuditService:
     async def verify_session_chain(self, session_id: str) -> dict:
         global_result = await self.verify_chain()
         async with self._uow_factory() as uow:
-            session_logs = await uow.audit.list_chained(resource_id=session_id)
+            session_logs = await uow.audit.list_chained(session_id=session_id)
         if not session_logs:
             return {
                 **global_result,
@@ -200,6 +202,7 @@ class AuditService:
                 resource_type=log.resource_type,
                 resource_id=log.resource_id,
                 team_id=log.team_id,
+                session_id=log.session_id,
                 request_id=log.request_id,
                 metadata=log.metadata,
                 created_at=log.created_at,
@@ -243,10 +246,14 @@ class AuditService:
         action: str | None = None,
         resource_id: str | None = None,
         resource_type: str | None = None,
+        session_id: str | None = None,
         start_at: datetime | None = None,
         end_at: datetime | None = None,
     ) -> AsyncGenerator[str, None]:
-        yield "id,actor_user_id,action,resource_type,resource_id,team_id,request_id,created_at\n"
+        yield (
+            "id,actor_user_id,action,resource_type,resource_id,team_id,"
+            "session_id,request_id,created_at\n"
+        )
         offset = 0
         while True:
             logs = await self.list_logs(
@@ -254,6 +261,7 @@ class AuditService:
                 action=action,
                 resource_id=resource_id,
                 resource_type=resource_type,
+                session_id=session_id,
                 start_at=start_at,
                 end_at=end_at,
                 limit=500,
@@ -272,6 +280,7 @@ class AuditService:
                         log.resource_type,
                         log.resource_id,
                         log.team_id or "",
+                        log.session_id or "",
                         log.request_id,
                         log.created_at.isoformat(),
                     ]

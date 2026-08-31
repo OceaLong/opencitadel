@@ -6,7 +6,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.core.middleware import auto_extend_timeout_middleware
+from app.core.middleware import (
+    auto_extend_timeout_middleware,
+    require_sandbox_token_middleware,
+)
 from app.interfaces.endpoints.routes import router
 from app.interfaces.errors.exception_handler import register_exception_handlers
 
@@ -82,8 +85,10 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# 4.添加自动扩展和CORS中间件
+# 4.添加沙箱鉴权、自动扩展和CORS中间件
+# require_sandbox_token 后注册 => 最先执行，未授权请求在扩展超时前即被拒绝。
 app.middleware("http")(auto_extend_timeout_middleware)
+app.middleware("http")(require_sandbox_token_middleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

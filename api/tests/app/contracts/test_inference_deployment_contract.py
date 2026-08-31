@@ -3,13 +3,14 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
 RUNTIME_SURFACES = (
     ".env.example",
     "scripts/quickstart.sh",
-    "e2e/patrol.spec.ts",
+    "e2e/patrol-admin.spec.ts",
     "deploy/helm/opencitadel/values.yaml",
     "deploy/helm/opencitadel/templates/secret.yaml",
 )
@@ -50,6 +51,17 @@ def _source(relative_path: str) -> str:
     return (REPOSITORY_ROOT / relative_path).read_text(encoding="utf-8")
 
 
+EXPECTED_RELEASE_IMAGES = {
+    "api",
+    "execution-kernel",
+    "migrate",
+    "ui",
+    "sandbox",
+    "ops-collector",
+    "ops-actuator",
+}
+
+
 @pytest.mark.parametrize("relative_path", RUNTIME_SURFACES)
 def test_runtime_surfaces_have_no_legacy_inference_or_feature_flag_controls(
     relative_path: str,
@@ -66,7 +78,7 @@ def test_runtime_surfaces_have_no_legacy_inference_or_feature_flag_controls(
 def test_demo_seed_and_patrol_controls_use_canonical_names() -> None:
     environment = _source(".env.example")
     quickstart = _source("scripts/quickstart.sh")
-    e2e = _source("e2e/patrol.spec.ts")
+    e2e = _source("e2e/patrol-admin.spec.ts")
     helm_values = _source("deploy/helm/opencitadel/values.yaml")
 
     for name in (
@@ -94,3 +106,12 @@ def test_primary_documentation_has_no_removed_control_plane_terms(
     assert "DEMO_LLM_" not in source
     assert "feature_flags" not in source
     assert "enable_ops_patrol" not in source
+
+
+def test_release_workflow_ships_exactly_the_production_image_set() -> None:
+    """Catch acceptance fixtures or missing runtimes in either release phase."""
+    workflow = yaml.safe_load(_source(".github/workflows/release.yml"))
+
+    for job_name in ("build-scan", "build-push"):
+        entries = workflow["jobs"][job_name]["strategy"]["matrix"]["include"]
+        assert {entry["name"] for entry in entries} == EXPECTED_RELEASE_IMAGES

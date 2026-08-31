@@ -1,13 +1,18 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import Response as HttpResponse
 
 from app.domain.errors import ForbiddenError
 from app.domain.models.inference import InferenceBinding, InferencePurpose
 from app.domain.models.scope import OwnerScope, Principal, WorkspaceContext
 from app.domain.models.team import TeamRole
 from app.domain.models.user import GlobalRole
-from app.interfaces.endpoints.inference_routes import delete_binding, set_binding
+from app.interfaces.endpoints.inference_routes import (
+    delete_binding,
+    get_status,
+    set_binding,
+)
 from app.interfaces.schemas.inference import (
     InferenceBindingRequest,
     InferenceBindingScope,
@@ -101,3 +106,20 @@ async def test_team_owner_can_delete_team_binding() -> None:
         InferencePurpose.CHAT,
         scope=ctx.scope,
     )
+
+
+@pytest.mark.asyncio
+async def test_inference_status_never_reuses_a_mutable_workspace_projection() -> None:
+    service = AsyncMock()
+    service.get_status.return_value = {
+        "capabilities": {},
+        "circuit_breakers": [],
+        "metrics": {},
+    }
+    ctx = _context(admin=True)
+    response = HttpResponse()
+
+    await get_status(response, ctx=ctx, service=service)
+
+    assert response.headers["Cache-Control"] == "no-store"
+    service.get_status.assert_awaited_once_with(ctx.scope)

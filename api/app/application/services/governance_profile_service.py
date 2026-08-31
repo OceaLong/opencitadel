@@ -25,15 +25,20 @@ class GovernanceProfileService:
     async def build_profile(
         self,
         session_id: str,
-        scope: OwnerScope,
+        scope: OwnerScope | None = None,
     ) -> dict[str, Any]:
         async with self._uow_factory() as uow:
             session = await uow.session.get_by_id(session_id, scope=scope)
+            patrol_run = (
+                await uow.patrol.get_run_by_session_id(session_id) if session is not None else None
+            )
         if session is None:
             raise NotFoundError("session not found")
+        source_entity_type = "patrol_run" if patrol_run is not None else "session"
+        source_entity_id = patrol_run.id if patrol_run is not None else session_id
         execution = await self._runs.source_governance(
-            source_entity_type="session",
-            source_entity_id=session_id,
+            source_entity_type=source_entity_type,
+            source_entity_id=source_entity_id,
             owner_scope=scope,
         )
         return {
@@ -46,6 +51,8 @@ class GovernanceProfileService:
         return {
             "id": session.id,
             "title": session.title,
+            "owner_user_id": session.owner_user_id,
+            "team_id": session.team_id,
             "status": session.status.value,
             "operator_scope": session.operator_scope,
             "operator_domains": list(session.operator_domains),

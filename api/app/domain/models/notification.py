@@ -7,10 +7,12 @@ from pydantic import BaseModel, Field
 from app.domain.utils.time_utils import utc_now
 
 NotificationType = Literal[
+    "job_started",
     "job_complete",
     "job_failed",
     "approval_waiting",
     "artifact_final",
+    "patrol_complete",
 ]
 
 

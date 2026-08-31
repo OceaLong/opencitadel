@@ -80,9 +80,10 @@ class PatrolPackModel(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="draft")
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    mcp_server_id: Mapped[str] = mapped_column(
-        String(255), ForeignKey("mcp_servers.id", ondelete="RESTRICT"), nullable=False
-    )
+    # Historical Patrol evidence retains the Integration ID even after the
+    # Integration is removed. Runtime admission validates the current record;
+    # a database FK would make soft-deleted Packs pin Integrations forever.
+    mcp_server_id: Mapped[str] = mapped_column(String(255), nullable=False)
     scheduled_job_id: Mapped[str | None] = mapped_column(
         String(255), ForeignKey("scheduled_jobs.id", ondelete="SET NULL"), nullable=True
     )
@@ -90,6 +91,7 @@ class PatrolPackModel(Base):
         DateTime(timezone=True), nullable=True
     )
     last_validated_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    validation_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     validation_summary: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
@@ -119,6 +121,7 @@ class PatrolPackModel(Base):
             scheduled_job_id=self.scheduled_job_id,
             last_validated_at=_utc(self.last_validated_at),
             last_validated_version=self.last_validated_version,
+            validation_run_id=self.validation_run_id,
             validation_summary=dict(self.validation_summary or {}),
             deleted_at=_utc(self.deleted_at),
             created_at=_utc(self.created_at),
@@ -140,6 +143,7 @@ class PatrolPackModel(Base):
             scheduled_job_id=pack.scheduled_job_id,
             last_validated_at=pack.last_validated_at,
             last_validated_version=pack.last_validated_version,
+            validation_run_id=pack.validation_run_id,
             validation_summary=pack.validation_summary,
             deleted_at=pack.deleted_at,
             created_at=pack.created_at,

@@ -132,6 +132,21 @@ async def test_hint_forces_refresh_before_poll_deadline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fresh_execution_read_bypasses_poll_interval_for_run_admission() -> None:
+    clock = _Clock()
+    repository = _PolicyRepository(_pair(version=1, requests_per_minute=120))
+    reader = _reader(repository, clock)
+    await reader.initialize()
+
+    repository.pair = _pair(version=2, requests_per_minute=120)
+
+    active = await reader.active_execution(require_fresh=True, now=clock())
+
+    assert active.head.version == 2
+    assert repository.calls == 2
+
+
+@pytest.mark.asyncio
 async def test_transient_database_failure_keeps_last_pair_until_stale() -> None:
     clock = _Clock()
     repository = _PolicyRepository(_pair(version=1, requests_per_minute=120))

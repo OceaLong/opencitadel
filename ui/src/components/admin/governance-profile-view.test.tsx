@@ -15,6 +15,8 @@ const profile: GovernanceProfile = {
   session: {
     id: "s1",
     title: "t",
+    owner_user_id: "u1",
+    team_id: "team-1",
     status: "failed",
     operator_scope: "owned",
     operator_domains: ["example.com"],
@@ -76,6 +78,7 @@ describe("GovernanceProfileView", () => {
     expect(text).toContain("tool.call");
     expect(text).toContain("ACTIVITY_HANDLER_ERROR");
     expect(text).toContain("example.com");
+    expect(text).toContain("team-1");
     await unmount();
   });
 

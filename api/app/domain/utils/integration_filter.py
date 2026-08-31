@@ -25,9 +25,7 @@ def filter_mcp_runtime_by_refs(
     refs = frozenset(server_refs)
     return MCPRuntime(
         servers={
-            server_id: server
-            for server_id, server in enabled.servers.items()
-            if server.name in refs
+            server_id: server for server_id, server in enabled.servers.items() if server_id in refs
         }
     )
 

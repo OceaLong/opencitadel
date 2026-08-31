@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 
@@ -15,7 +16,6 @@ from app.domain.models.tool_policy import (
     ToolExecutionPolicy,
     ToolIdempotency,
 )
-from app.domain.runtime_policy import ActivityExecutionPolicy
 
 READ = ToolExecutionPolicy(
     capability=ToolCapability.INTEGRATION_READ,
@@ -64,6 +64,7 @@ class Uow:
         self.patrol = patrol
         self.mcp_server = SimpleNamespace(get_by_id=AsyncMock(return_value=server))
         self.scheduled_job = jobs
+        self.execution_commands = SimpleNamespace()
 
     async def __aenter__(self):
         return self
@@ -98,7 +99,10 @@ async def test_pack_lifecycle_versions_validation_and_schedule():
     )
     patrol, jobs = Repo(), JobRepo()
     uow = Uow(patrol, server, jobs)
-    service = PatrolPackService(lambda: uow)
+    admission = SimpleNamespace(
+        admit=AsyncMock(return_value=UUID("70000000-0000-0000-0000-000000000001"))
+    )
+    service = PatrolPackService(lambda: uow, run_admission_service=admission)
     scope = OwnerScope.personal("user-1")
 
     pack = await service.create_pack(
@@ -111,13 +115,37 @@ async def test_pack_lifecycle_versions_validation_and_schedule():
     assert pack.version == 1
     assert pack.status.value == "draft"
     assert jobs.jobs[pack.scheduled_job_id].source_id == pack.id
-    validated = await service.validate_pack(
+    validating = await service.request_validation(
         pack.id,
         scope,
         "user-1",
-        policy=ActivityExecutionPolicy(),
+    )
+    assert validating.status.value == "validating"
+    assert validating.validation_run_id is not None
+    UUID(validating.validation_run_id)
+    admission.admit.assert_awaited_once()
+    assert admission.admit.await_args.kwargs["family"].value == "patrol"
+    assert admission.admit.await_args.kwargs["workflow"] == {
+        "operation": "validate",
+        "pack_id": pack.id,
+        "pack_version": 1,
+        "validation_run_id": validating.validation_run_id,
+    }
+    assert admission.admit.await_args.kwargs["run_id"] == UUID(validating.validation_run_id)
+    assert admission.admit.await_args.kwargs["command_sink"] is uow.execution_commands
+
+    validated = await service.complete_validation(
+        pack_id=pack.id,
+        scope=scope,
+        actor_user_id="user-1",
+        validation_run_id=validating.validation_run_id,
+        validated_version=1,
+        capabilities=capabilities,
+        dry_run={"ok": True, "mode": "live-read-only-preflight", "probes": []},
+        errors=[],
     )
     assert validated.last_validated_version == 1
+    assert validated.validation_run_id is None
     active = await service.activate_pack(pack.id, scope, "user-1")
     assert active.status.value == "active"
     patched = await service.patch_pack(
@@ -140,7 +168,11 @@ async def test_validation_rejects_non_read_only_policy():
         transport_options={"patrol_capabilities": {}},
     )
     patrol, jobs = Repo(), JobRepo()
-    service = PatrolPackService(lambda: Uow(patrol, server, jobs))
+    admission = SimpleNamespace(admit=AsyncMock())
+    service = PatrolPackService(
+        lambda: Uow(patrol, server, jobs),
+        run_admission_service=admission,
+    )
     pack = await service.create_pack(
         owner_user_id="user-1",
         scope=OwnerScope.personal("user-1"),
@@ -148,11 +180,52 @@ async def test_validation_rejects_non_read_only_policy():
         mcp_server_id="server-1",
         config=config,
     )
-    invalid = await service.validate_pack(
+    invalid = await service.request_validation(
         pack.id,
         OwnerScope.personal("user-1"),
         "user-1",
-        policy=ActivityExecutionPolicy(),
     )
     assert invalid.status.value == "invalid"
     assert any("policy missing" in item for item in invalid.validation_summary["errors"])
+    admission.admit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_validation_completion_rejects_stale_run_identity():
+    config = load_patrol_template("kubernetes-baseline-v1")
+    tools = ["get_capabilities", *sorted({check.probe.tool for check in config.checks})]
+    server = MCPServerRecord(
+        id="server-1",
+        name="collector",
+        url="https://collector.example/mcp",
+        tool_policies=dict.fromkeys(tools, READ),
+    )
+    patrol, jobs = Repo(), JobRepo()
+    admission = SimpleNamespace(
+        admit=AsyncMock(return_value=UUID("70000000-0000-0000-0000-000000000002"))
+    )
+    service = PatrolPackService(
+        lambda: Uow(patrol, server, jobs),
+        run_admission_service=admission,
+    )
+    scope = OwnerScope.personal("user-1")
+    pack = await service.create_pack(
+        owner_user_id="user-1",
+        scope=scope,
+        name="Daily",
+        mcp_server_id="server-1",
+        config=config,
+    )
+    await service.request_validation(pack.id, scope, "user-1")
+
+    with pytest.raises(ConflictError):
+        await service.complete_validation(
+            pack_id=pack.id,
+            scope=scope,
+            actor_user_id="user-1",
+            validation_run_id="70000000-0000-0000-0000-000000000099",
+            validated_version=1,
+            capabilities={},
+            dry_run={},
+            errors=["stale"],
+        )

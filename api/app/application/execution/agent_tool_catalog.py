@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 from pydantic_core import to_jsonable_python
@@ -23,6 +24,7 @@ from app.domain.external.connection_pool import (
 )
 from app.domain.external.file_storage import FileStorage
 from app.domain.external.image_generation import ImageGenerator
+from app.domain.external.llm import LLM
 from app.domain.external.object_storage import ObjectStoragePort
 from app.domain.external.sandbox import Sandbox, SandboxFactoryPort
 from app.domain.external.search import SearchEngine
@@ -49,6 +51,8 @@ from app.domain.services.tools.shell import ShellTool
 from app.domain.services.tools.tool_registry import ToolRegistry
 from app.domain.vector_port import EmbeddingPort
 
+logger = logging.getLogger(__name__)
+
 
 class AgentToolCatalog:
     """Single fail-closed source for model exposure and tool execution."""
@@ -71,6 +75,7 @@ class AgentToolCatalog:
         artifacts: ArtifactService,
         memories: MemoryService,
         embeddings: EmbeddingPort | None = None,
+        llm_factory: Callable[..., LLM] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._sandbox_factory = sandbox_factory
@@ -87,6 +92,7 @@ class AgentToolCatalog:
         self._artifacts = artifacts
         self._memories = memories
         self._embeddings = embeddings
+        self._llm_factory = llm_factory
 
     async def definitions(
         self,
@@ -287,6 +293,28 @@ class AgentToolCatalog:
                     context=context,
                 )
             )
+        rerank_llm: LLM | None = None
+        if (
+            self._llm_factory is not None
+            and family_policy.knowledge_retrieval.rerank.enabled
+            and any(b["resource_kind"] == ResourceKind.KNOWLEDGE_BASE.value for b in bindings)
+        ):
+            rerank_model_id = payload.get("model_id")
+            if rerank_model_id is None or isinstance(rerank_model_id, str):
+                try:
+                    rerank_model = await self._models.resolve_chat(rerank_model_id, scope=scope)
+                    rerank_llm = self._llm_factory(
+                        rerank_model,
+                        policy=context.run.policy_snapshot.common.model_resilience,
+                        thinking_enabled=False,
+                        inference_model_service=self._models,
+                        scope=scope,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "kb_rerank llm unavailable, retrieval will skip rerank: %s",
+                        exc,
+                    )
         for binding in bindings:
             kind = binding["resource_kind"]
             if kind == ResourceKind.KNOWLEDGE_BASE.value:
@@ -296,6 +324,7 @@ class AgentToolCatalog:
                         kb_id=str(binding["resource_id"]),
                         version_id=str(binding["version_id"]),
                         policy=family_policy.knowledge_retrieval,
+                        llm=rerank_llm,
                         embeddings=self._embeddings,
                         owner_scope=scope,
                     )

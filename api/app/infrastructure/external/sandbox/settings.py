@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from uuid import UUID
 
 from app.domain.runtime_policy import SandboxOperationsPolicy
@@ -11,6 +14,18 @@ from app.infrastructure.external.sandbox.driver_resolve import (
     resolve_sandbox_driver,
 )
 from core.config import DeploymentSettings
+
+_DOCKER_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*(?:/[A-Za-z0-9][A-Za-z0-9_.-]*)?$")
+_RESERVED_SANDBOX_LABELS = {
+    "opencitadel.io/sandbox",
+    "opencitadel.io/ephemeral",
+    "opencitadel.io/operations-revision",
+}
+_ACCEPTANCE_OWNERSHIP_LABELS = {
+    "com.docker.compose.project",
+    "com.opencitadel.acceptance.project",
+    "com.opencitadel.acceptance.run",
+}
 
 
 def _optional(value: str) -> str | None:
@@ -33,6 +48,7 @@ class SandboxDeployment:
     no_proxy: str | None
     k8s_namespace: str
     k8s_pod_label: str
+    labels: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.driver not in {"docker", "kubernetes"}:
@@ -42,6 +58,19 @@ class SandboxDeployment:
         key, separator, value = self.k8s_pod_label.partition("=")
         if separator != "=" or not key.strip() or not value.strip():
             raise ValueError("sandbox Kubernetes pod label must use key=value")
+        normalized: dict[str, str] = {}
+        for label_key, label_value in self.labels.items():
+            if not isinstance(label_key, str) or not _DOCKER_LABEL_PATTERN.fullmatch(label_key):
+                raise ValueError("sandbox labels contain an invalid Docker label key")
+            if label_key in _RESERVED_SANDBOX_LABELS:
+                raise ValueError("sandbox labels cannot override runtime-managed labels")
+            if not isinstance(label_value, str) or not label_value.strip():
+                raise ValueError("sandbox labels must have non-empty string values")
+            normalized[label_key] = label_value.strip()
+        acceptance_keys = _ACCEPTANCE_OWNERSHIP_LABELS.intersection(normalized)
+        if acceptance_keys and acceptance_keys != _ACCEPTANCE_OWNERSHIP_LABELS:
+            raise ValueError("sandbox labels must provide the complete acceptance ownership set")
+        object.__setattr__(self, "labels", MappingProxyType(dict(sorted(normalized.items()))))
 
     @classmethod
     def from_settings(cls, settings: DeploymentSettings) -> SandboxDeployment:
@@ -57,6 +86,7 @@ class SandboxDeployment:
             no_proxy=_optional(settings.sandbox_no_proxy),
             k8s_namespace=settings.sandbox_k8s_namespace.strip(),
             k8s_pod_label=settings.sandbox_k8s_pod_label.strip(),
+            labels=settings.sandbox_labels,
         )
 
 

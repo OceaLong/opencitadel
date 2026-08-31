@@ -66,6 +66,7 @@ class RunState(BaseModel):
     started_activity_ids: tuple[UUID, ...] = ()
     activity_generations: tuple[tuple[UUID, int], ...] = ()
     settled_activities: tuple[tuple[UUID, str, int], ...] = ()
+    activity_failure_codes: tuple[tuple[UUID, int, str], ...] = ()
     requested_activities: tuple[tuple[UUID, str, int], ...] = ()
     activity_progress_sequences: tuple[tuple[UUID, int], ...] = ()
     activity_results: tuple[
@@ -229,6 +230,7 @@ _EVENT_PAYLOADS: dict[str, type[BaseModel]] = {
     "ActivityCompleted": ActivityResultPayload,
     "ActivityFailed": ActivityFailurePayload,
     "ActivityOutcomeUnknown": ActivityFailurePayload,
+    "ActivityCancelled": ActivityFailurePayload,
     "ApprovalRequested": RequestApprovalPayload,
     "ApprovalDecided": DecideApprovalPayload,
 }
@@ -238,7 +240,7 @@ class RunAggregate:
     """One deterministic state machine for all execution lifecycles."""
 
     state_type = RunState
-    snapshot_serializer_version = 2
+    snapshot_serializer_version = 3
 
     def __init__(self) -> None:
         self.command_registry = CommandRegistry()
@@ -428,6 +430,7 @@ class RunAggregate:
             "ActivityCompleted",
             "ActivityFailed",
             "ActivityOutcomeUnknown",
+            "ActivityCancelled",
         }:
             activity_id = UUID(str(payload["activity_id"]))
             generation = int(payload["generation"])
@@ -435,25 +438,43 @@ class RunAggregate:
                 "ActivityCompleted": "succeeded",
                 "ActivityFailed": "failed",
                 "ActivityOutcomeUnknown": "unknown",
+                "ActivityCancelled": "cancelled",
             }[event.event_type]
             activity_results = state.activity_results
             if event.event_type == "ActivityCompleted":
                 decision_data = event.internal_payload.get("decision_data", {})
                 if not isinstance(decision_data, dict):
                     raise ValueError("Activity decision_data must be an object")
-                activity_results = tuple(
+                # Result references are rehydrated as provider conversation history.
+                # Preserve their causal event order; UUID order is deterministic but
+                # semantically meaningless and can place a tool result before the
+                # assistant tool call that produced it.
+                activity_results = (
+                    *state.activity_results,
+                    (
+                        activity_id,
+                        generation,
+                        payload.get("result_ref"),
+                        payload.get("result_summary"),
+                        decision_data,
+                    ),
+                )
+            activity_failure_codes = state.activity_failure_codes
+            if event.event_type in {
+                "ActivityFailed",
+                "ActivityOutcomeUnknown",
+                "ActivityCancelled",
+            }:
+                failure_code = payload.get("failure_code")
+                if not isinstance(failure_code, str) or not failure_code:
+                    raise ValueError("failed Activity requires a failure code")
+                activity_failure_codes = tuple(
                     sorted(
                         (
-                            *state.activity_results,
-                            (
-                                activity_id,
-                                generation,
-                                payload.get("result_ref"),
-                                payload.get("result_summary"),
-                                decision_data,
-                            ),
+                            *state.activity_failure_codes,
+                            (activity_id, generation, failure_code),
                         ),
-                        key=lambda item: str(item[0]),
+                        key=lambda item: (str(item[0]), item[1]),
                     )
                 )
             return state.model_copy(
@@ -475,6 +496,7 @@ class RunAggregate:
                         )
                     ),
                     "activity_results": activity_results,
+                    "activity_failure_codes": activity_failure_codes,
                 }
             )
         raise ValueError(f"unknown Run event: {event.event_type}")
@@ -640,7 +662,31 @@ class RunAggregate:
     def _decide_CancelRun(state: RunState, payload: CancelRunPayload) -> Decision:
         if state.status == RunStatus.NEW:
             raise InvalidRunTransitionError("uncreated Run cannot be cancelled")
-        return RunAggregate._event("RunCancelled", payload.model_dump(mode="json"))
+        generations = dict(state.activity_generations)
+        cancelled_activities = tuple(
+            NewEvent(
+                event_type="ActivityCancelled",
+                event_schema_version=1,
+                public_payload={
+                    "activity_id": str(activity_id),
+                    "generation": generations[activity_id],
+                    "failure_code": "ACTIVITY_CANCELLED",
+                },
+                internal_payload={},
+            )
+            for activity_id in state.active_activity_ids
+        )
+        return Decision(
+            events=(
+                *cancelled_activities,
+                NewEvent(
+                    event_type="RunCancelled",
+                    event_schema_version=1,
+                    public_payload=payload.model_dump(mode="json"),
+                    internal_payload={},
+                ),
+            )
+        )
 
     @staticmethod
     def _decide_RequestActivity(
@@ -696,6 +742,7 @@ class RunAggregate:
                     "ActivityCompleted",
                     "ActivityFailed",
                     "ActivityOutcomeUnknown",
+                    "ActivityCancelled",
                     "RunCompleted",
                     "RunFailed",
                     "RunCancelled",

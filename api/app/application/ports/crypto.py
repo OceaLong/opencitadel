@@ -76,6 +76,7 @@ class CsrfPort(Protocol):
 @runtime_checkable
 class OAuthRegistryPort(Protocol):
     def get(self, provider: str) -> Any: ...
+    def enabled_providers(self) -> list[str]: ...
 
 
 @runtime_checkable

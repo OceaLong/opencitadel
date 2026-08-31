@@ -77,8 +77,8 @@ Authoritative inventory of OpenCitadel Markdown documentation. Update this file 
 | [deploy/helm/opencitadel/README.md](../deploy/helm/opencitadel/README.md) | Helm install | module | paired | none | `deploy/helm/` | low |
 | [deploy/patrol-demo/README.md](../deploy/patrol-demo/README.md) | Disposable Patrol fault lab | module | paired | none | `scripts/run-patrol-fixtures.sh` | low |
 | [demo/ops-console/README.md](../demo/ops-console/README.md) | Web Operator demo backend | module | paired | none | `demo/ops-console/` | low |
-| [e2e/README.md](../e2e/README.md) | Playwright E2E smoke tests | module | paired | none | `e2e/web-operator.spec.ts` | low |
-| [scripts/README.md](../scripts/README.md) | quickstart, check-docs | module | paired | none | `scripts/` | low |
+| [e2e/README.md](../e2e/README.md) | Deterministic full-stack acceptance, evidence, cleanup | module | paired | none | `e2e/*.spec.ts`, `contracts/acceptance-evidence.schema.json` | high |
+| [scripts/README.md](../scripts/README.md) | quickstart, documentation checks, acceptance runner | module | paired | none | `scripts/` | medium |
 | [deploy/scripts/README.md](../deploy/scripts/README.md) | Host tuning scripts | module | paired | none | `deploy/scripts/` | low |
 
 ## Open-source governance (`.github/`)

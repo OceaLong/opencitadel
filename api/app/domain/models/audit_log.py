@@ -13,6 +13,7 @@ class AuditLog(BaseModel):
     resource_type: str = ""
     resource_id: str = ""
     team_id: str | None = None
+    session_id: str | None = None
     request_id: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

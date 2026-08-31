@@ -33,7 +33,6 @@ from app.application.services.inference_binding_service import InferenceBindingS
 from app.application.services.inference_endpoint_service import InferenceEndpointService
 from app.application.services.inference_model_service import InferenceModelService
 from app.application.services.inference_status_service import InferenceStatusService
-from app.application.services.integration_projection_service import IntegrationProjectionService
 from app.application.services.integration_server_service import (
     A2AIntegrationService,
     MCPServerService,
@@ -149,12 +148,6 @@ def get_a2a_integration_service(
     runtime: ApiRuntime = Depends(require_api_runtime),
 ) -> A2AIntegrationService:
     return runtime.a2a_integration_service
-
-
-def get_integration_projection_service(
-    runtime: ApiRuntime = Depends(require_api_runtime),
-) -> IntegrationProjectionService:
-    return runtime.integration_projection_service
 
 
 def get_inference_model_service(

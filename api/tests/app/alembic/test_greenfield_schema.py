@@ -126,6 +126,14 @@ def test_patrol_runs_require_a_formal_execution_identity() -> None:
     assert patrol_runs.c.execution_run_id.nullable is False
 
 
+def test_deleted_patrol_packs_do_not_pin_integration_lifecycle() -> None:
+    patrol_packs = model_metadata.tables["patrol_packs"]
+
+    assert patrol_packs.c.mcp_server_id.nullable is False
+    assert patrol_packs.c.mcp_server_id.foreign_keys == set()
+    assert patrol_packs.c.validation_run_id.nullable is True
+
+
 def test_session_timestamps_are_timezone_aware() -> None:
     sessions = model_metadata.tables["sessions"]
 

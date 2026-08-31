@@ -18,6 +18,7 @@ _AUTHORIZATION_SQL = text(
         set_config('app.is_admin', :is_admin, true),
         set_config('app.request_id', :request_id, true),
         set_config('app.system_actor', :system_actor, true),
+        set_config('app.is_auditor', :is_auditor, true),
         set_config('app.auth_signature', :auth_signature, true)
     """
 )
@@ -41,6 +42,7 @@ def _sign_authorization_claims(
             "is_admin",
             "request_id",
             "system_actor",
+            "is_auditor",
         )
     )
     return hmac.new(
@@ -58,6 +60,7 @@ def _signed_claims(
     is_admin: str,
     request_id: str,
     system_actor: str,
+    is_auditor: str,
     signing_secret: str,
 ) -> dict[str, str]:
     claims = {
@@ -67,6 +70,7 @@ def _signed_claims(
         "is_admin": is_admin,
         "request_id": request_id,
         "system_actor": system_actor,
+        "is_auditor": is_auditor,
     }
     return {
         **claims,
@@ -96,6 +100,7 @@ def configure_sync_system_authorization(
             is_admin="false",
             request_id="",
             system_actor=system_actor,
+            is_auditor="false",
             signing_secret=signing_secret,
         ),
     )
@@ -119,6 +124,7 @@ def configure_sync_authorization(
             is_admin="true" if context.is_admin else "false",
             request_id=request_id,
             system_actor=context.system_actor,
+            is_auditor="true" if context.is_auditor else "false",
             signing_secret=signing_secret,
         ),
     )
@@ -143,6 +149,7 @@ async def configure_session_authorization(
             is_admin="true" if resolved.is_admin else "false",
             request_id=request_id,
             system_actor=resolved.system_actor,
+            is_auditor="true" if resolved.is_auditor else "false",
             signing_secret=(
                 signing_secret
                 or str(session.info.get("database_authorization_signing_secret") or "")

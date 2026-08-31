@@ -77,6 +77,26 @@ class _BlockingRuntime(_IdleRuntime):
         return SimpleNamespace(processed=0)
 
 
+class _BlockingActivityRuntime(_IdleRuntime):
+    def __init__(self, stopping, activity_started, control_progressed) -> None:
+        super().__init__(stopping)
+        self._activity_started = activity_started
+        self._control_progressed = control_progressed
+
+    async def run_inbox_once(self, **_kwargs):
+        self.inbox_calls += 1
+        if self._activity_started.is_set():
+            self._control_progressed.set()
+            self._stopping.set()
+            return SimpleNamespace(loaded=1)
+        return SimpleNamespace(loaded=0)
+
+    async def run_activities_once(self, **_kwargs):
+        self._activity_started.set()
+        await self._stopping.wait()
+        return SimpleNamespace(claimed=1)
+
+
 @pytest.mark.asyncio
 async def test_kernel_keeps_polling_database_when_redis_hint_read_fails():
     """Regression: letting ConnectionError escape stops all durable work."""
@@ -168,6 +188,30 @@ async def test_kernel_heartbeat_continues_during_long_async_work(tmp_path):
     assert second > first
     assert not health_file.exists()
     assert not hasattr(process, "_heartbeat_task")
+
+
+@pytest.mark.asyncio
+async def test_long_activity_does_not_block_control_plane_progress() -> None:
+    import asyncio
+
+    stopping = asyncio.Event()
+    activity_started = asyncio.Event()
+    control_progressed = asyncio.Event()
+    runtime = _BlockingActivityRuntime(stopping, activity_started, control_progressed)
+    process = ExecutionKernelProcess(
+        runtime=runtime,
+        wakeup=_FailingWakeup(),
+        policy_reader=_ReadyPolicyReader(),
+        stopping=stopping,
+        idle_poll_seconds=0,
+    )
+
+    running = asyncio.create_task(process.run())
+    await activity_started.wait()
+    await asyncio.wait_for(control_progressed.wait(), timeout=0.1)
+    await asyncio.wait_for(running, timeout=0.1)
+
+    assert runtime.inbox_calls >= 2
 
 
 @pytest.mark.asyncio

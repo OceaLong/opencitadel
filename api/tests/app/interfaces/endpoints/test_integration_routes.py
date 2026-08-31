@@ -11,6 +11,8 @@ from app.interfaces.endpoints.integration_routes import (
     create_mcp_server,
     delete_a2a_server,
     delete_mcp_server,
+    list_a2a_servers,
+    list_mcp_servers,
     set_a2a_server_enabled,
     set_mcp_server_enabled,
     update_a2a_server,
@@ -52,6 +54,31 @@ def test_integration_routes_use_first_class_prefix_and_stable_ids() -> None:
     }
     assert set(paths["/api/integrations/a2a-servers/{server_id}/enabled"]) == {"patch"}
     assert not any(path.startswith("/api/app-config/") for path in paths)
+
+
+@pytest.mark.asyncio
+async def test_integration_lists_are_passive_registry_reads() -> None:
+    mcp = MCPServerRecord(
+        id="mcp-1",
+        name="docs",
+        url="https://mcp.example.test",
+    )
+    a2a = A2AServerRecord(id="a2a-1", base_url="https://agent.example.test")
+    mcp_service = AsyncMock()
+    mcp_service.list_servers.return_value = [mcp]
+    a2a_service = AsyncMock()
+    a2a_service.list_servers.return_value = [a2a]
+    ctx = _context()
+
+    mcp_response = await list_mcp_servers(ctx=ctx, service=mcp_service)
+    a2a_response = await list_a2a_servers(ctx=ctx, service=a2a_service)
+
+    mcp_service.list_servers.assert_awaited_once_with(scope=ctx.scope)
+    a2a_service.list_servers.assert_awaited_once_with(scope=ctx.scope)
+    assert mcp_response.data.items[0].id == "mcp-1"
+    assert a2a_response.data.items[0].id == "a2a-1"
+    assert "connection_status" not in mcp_response.data.items[0].model_dump()
+    assert "tools" not in mcp_response.data.items[0].model_dump()
 
 
 @pytest.mark.asyncio

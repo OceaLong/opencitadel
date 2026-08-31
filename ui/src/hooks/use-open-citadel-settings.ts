@@ -9,6 +9,7 @@ import {
   type CreateMCPServerRequest,
   integrationsApi,
   type MCPServer,
+  type UpdateA2AServerRequest,
   type UpdateMCPServerRequest,
 } from "@/lib/api";
 
@@ -199,6 +200,23 @@ export function useOpenCitadelSettings(open: boolean) {
     [a2aServers, t, tErrors],
   );
 
+  const handleA2AEdit = useCallback(
+    async (serverId: string, body: UpdateA2AServerRequest): Promise<boolean> => {
+      try {
+        const updated = await integrationsApi.updateA2AServer(serverId, body);
+        setA2aServers((previous) =>
+          previous.map((server) => (server.id === serverId ? updated : server)),
+        );
+        toast.success(t("toastA2aUpdated"));
+        return true;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : tErrors("updateFailed"));
+        return false;
+      }
+    },
+    [t, tErrors],
+  );
+
   const handleA2AAdd = useCallback(
     async (baseUrl: string): Promise<boolean> => {
       try {
@@ -231,5 +249,6 @@ export function useOpenCitadelSettings(open: boolean) {
     handleA2AToggle,
     handleA2ADelete,
     handleA2AAdd,
+    handleA2AEdit,
   };
 }

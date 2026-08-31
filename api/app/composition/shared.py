@@ -49,7 +49,6 @@ from app.application.services.inference_binding_service import InferenceBindingS
 from app.application.services.inference_endpoint_service import InferenceEndpointService
 from app.application.services.inference_model_service import InferenceModelService
 from app.application.services.inference_status_service import InferenceStatusService
-from app.application.services.integration_projection_service import IntegrationProjectionService
 from app.application.services.integration_server_service import (
     A2AIntegrationService,
     MCPServerService,
@@ -59,7 +58,6 @@ from app.application.services.knowledge_version_service import KnowledgeVersionS
 from app.application.services.llm_token_usage_service import LLMTokenUsageService
 from app.application.services.memory_service import MemoryService
 from app.application.services.notification_service import NotificationService
-from app.application.services.patrol_collector_validator import MCPPatrolCollectorValidator
 from app.application.services.patrol_evidence_service import PatrolEvidenceService
 from app.application.services.patrol_pack_service import PatrolPackService
 from app.application.services.patrol_remediation_service import PatrolRemediationService
@@ -97,6 +95,7 @@ from app.infrastructure.adapters.inference_ports import (
     ResilientLLMFactoryAdapter,
 )
 from app.infrastructure.adapters.object_storage import create_object_storage_adapter
+from app.infrastructure.adapters.outbound_notifier import HttpEmailOutboundNotifier
 from app.infrastructure.adapters.query_ports import (
     SqlAlchemyAuditSummaryQuery,
     SqlAlchemyComplianceEvidenceQuery,
@@ -177,7 +176,6 @@ class SharedServices:
     quota_service: QuotaService
     mcp_integration_service: MCPServerService
     a2a_integration_service: A2AIntegrationService
-    integration_projection_service: IntegrationProjectionService
     inference_model_service: InferenceModelService
     inference_endpoint_service: InferenceEndpointService
     inference_binding_service: InferenceBindingService
@@ -485,14 +483,6 @@ def build_shared_services(
         outbound_policy=outbound_policy,
         audit_service=audit_service,
     )
-    integration_projection_service = IntegrationProjectionService(
-        mcp_servers=mcp_integration_service,
-        a2a_servers=a2a_integration_service,
-        mcp_connection_pool=mcp_connection_pool,
-        a2a_connection_pool=a2a_connection_pool,
-        policy_reader=runtime_policy_reader,
-        background_tasks=supervisor,
-    )
     compliance_service = ComplianceService(
         evidence_query=compliance_evidence_query,
         audit_service=audit_service,
@@ -619,19 +609,28 @@ def build_shared_services(
         evidence_signer=evidence_signer,
         session_query=evidence_session_query,
     )
+    outbound_notifier = HttpEmailOutboundNotifier(
+        outbound_policy=outbound_policy,
+        smtp_host=settings.smtp_host,
+        smtp_port=settings.smtp_port,
+        smtp_user=settings.smtp_user,
+        smtp_password=settings.smtp_password,
+        smtp_from=settings.smtp_from,
+        smtp_use_tls=settings.smtp_use_tls,
+    )
     notification_service = NotificationService(
         uow_factory=uow_factory,
         mcp_servers=mcp_integration_service,
         mcp_connection_pool=mcp_connection_pool,
         policy_reader=runtime_policy_reader,
         publisher=notification_publisher,
+        outbound_notifier=outbound_notifier,
     )
-    collector_validator = MCPPatrolCollectorValidator(connection_pool=mcp_connection_pool)
     actuator_client = MCPActuatorClient(connection_pool=mcp_connection_pool)
     patrol_pack_service = PatrolPackService(
         uow_factory=uow_factory,
         audit_service=audit_service,
-        collector_validator=collector_validator,
+        run_admission_service=run_admission_service,
     )
     patrol_run_service = PatrolRunService(
         uow_factory=uow_factory,
@@ -719,7 +718,6 @@ def build_shared_services(
         quota_service=quota_service,
         mcp_integration_service=mcp_integration_service,
         a2a_integration_service=a2a_integration_service,
-        integration_projection_service=integration_projection_service,
         inference_model_service=inference_model_service,
         inference_endpoint_service=inference_endpoint_service,
         inference_binding_service=inference_binding_service,

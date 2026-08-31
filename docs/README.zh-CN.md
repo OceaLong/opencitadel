@@ -65,8 +65,8 @@
 | [Ops Collector](../ops-collector/README.zh-CN.md) | 固定只读 MCP 探针、配置与部署 |
 | [Ops Actuator](../ops-actuator/README.zh-CN.md) | 固定仅 patch 写 MCP 探针、配置与部署 |
 | [OpsConsole 演示](../demo/ops-console/README.zh-CN.md) | Web Operator 工单后台演示 |
-| [E2E 测试](../e2e/README.zh-CN.md) | Playwright 冒烟测试、OpsConsole 演示 |
-| [仓库脚本](../scripts/README.zh-CN.md) | `quickstart.sh`、`check-docs.sh` |
+| [E2E 验收](../e2e/README.zh-CN.md) | 确定性隔离全栈门禁、证据与清理 |
+| [仓库脚本](../scripts/README.zh-CN.md) | `quickstart.sh`、`check-docs.sh`、验收 Runner |
 | [部署脚本](../deploy/scripts/README.zh-CN.md) | 生产主机调优工具 |
 
 ### 开源治理

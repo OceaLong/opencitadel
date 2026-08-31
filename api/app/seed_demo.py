@@ -10,8 +10,8 @@ Automates the manual steps from docs/tutorials/06-ops-patrol.md end to end:
    DEMO_INFERENCE_BASE_URL/DEMO_INFERENCE_CREDENTIAL/DEMO_INFERENCE_MODEL/
    DEMO_INFERENCE_PROVIDER env
    vars, and create the global chat-purpose binding.
-3. Create, validate, and activate a custom "Demo Governance Patrol" Pack
-   with three checks (see build_demo_pack_config()).
+3. Create a draft custom "Demo Governance Patrol" Pack with three checks.
+   Live validation and activation run later through the execution kernel.
 4. Print demo guidance, including how to manufacture a Finding on demand.
 
 Every step is idempotent: re-running this module makes zero additional writes
@@ -59,7 +59,6 @@ from app.application.services.inference_binding_service import InferenceBindingS
 from app.application.services.inference_endpoint_service import InferenceEndpointService
 from app.application.services.inference_model_service import InferenceModelService
 from app.application.services.integration_server_service import MCPServerService
-from app.application.services.patrol_collector_validator import MCPPatrolCollectorValidator
 from app.application.services.patrol_pack_service import PatrolPackService
 from app.composition.uow import DBUnitOfWorkDependencies, create_uow_factory
 from app.domain.models.authorization import AuthorizationContext
@@ -88,18 +87,13 @@ from app.domain.models.tool_policy import (
     ToolExecutionPolicy,
     ToolIdempotency,
 )
-from app.domain.runtime_policy import ActivityExecutionPolicy
 from app.domain.utils.outbound_url import parse_allowed_ports
-from app.infrastructure.adapters.connection_pool import InfrastructureMCPConnectionPoolAdapter
 from app.infrastructure.adapters.inference_ports import InfrastructureInferenceProviderAdapter
 from app.infrastructure.adapters.query_ports import SqlAlchemyAuditSummaryQuery
 from app.infrastructure.adapters.reporting_ports import PrometheusGovernanceMetricsAdapter
 from app.infrastructure.adapters.security_ports import (
     FernetSecretEnvelopeAdapter,
     FernetVersionedSecretCipherAdapter,
-)
-from app.infrastructure.repositories.postgres_runtime_policy_repository import (
-    PostgresRuntimePolicyRepository,
 )
 from app.infrastructure.security.api_key_cipher import ApiKeyCipher
 from app.infrastructure.storage.postgres import Postgres
@@ -134,7 +128,7 @@ DEMO_TOOL_POLICY = ToolExecutionPolicy(
 # api/app/application/patrol_templates/kubernetes_daily_patrol.v1.yaml for
 # all ten of its checks (k8s_workload_summary / k8s_recent_events /
 # prom_query / certificate_status / backup_status / dependency_status /
-# http_probe). PatrolPackService.validate_pack() re-verifies this against
+# http_probe). The execution-kernel validation Run re-verifies this against
 # the live Collector's get_capabilities() before the Pack may activate, so a
 # stale constant here fails closed rather than silently activating.
 DEMO_OUTPUT_SCHEMA_HASH = "03af4b9122da051ecb5e5d707552f27b09875d46b1124b671bb350fad06b28e1"
@@ -265,7 +259,6 @@ class SeedDeps:
     inference_model_service: InferenceModelService
     inference_binding_service: InferenceBindingService
     patrol_pack_service: PatrolPackService
-    activity_policy: ActivityExecutionPolicy
     admin_user_id: str
     demo_inference_env: DemoInferenceEnv | None = None
 
@@ -374,7 +367,6 @@ async def seed_demo_pack(
     mcp_server_service: MCPServerService,
     *,
     owner_user_id: str,
-    activity_policy: ActivityExecutionPolicy,
 ) -> str:
     scope = OwnerScope.personal(owner_user_id)
     existing_packs = await patrol_pack_service.list_packs(scope, limit=100)
@@ -387,7 +379,7 @@ async def seed_demo_pack(
             f"MCP server '{DEMO_MCP_SERVER_NAME}' not found; run seed_mcp_tool_policies() first"
         )
 
-    pack = await patrol_pack_service.create_pack(
+    await patrol_pack_service.create_pack(
         owner_user_id=owner_user_id,
         scope=scope,
         name=DEMO_PACK_NAME,
@@ -395,18 +387,6 @@ async def seed_demo_pack(
         config=build_demo_pack_config(),
         slug=DEMO_PACK_SLUG,
     )
-    validated = await patrol_pack_service.validate_pack(
-        pack.id,
-        scope,
-        owner_user_id,
-        policy=activity_policy,
-    )
-    if not validated.validation_summary.get("ok"):
-        raise RuntimeError(
-            f"Demo pack failed validation against the live Collector: "
-            f"{validated.validation_summary.get('errors')}"
-        )
-    await patrol_pack_service.activate_pack(pack.id, scope, owner_user_id)
     return "create"
 
 
@@ -421,8 +401,10 @@ def _print_demo_guide(results: dict[str, str]) -> None:
     print("OpenCitadel demo data is ready.")
     print("=" * 72)
     print(f"  1. Log in, open 'Ops Patrol', and select '{DEMO_PACK_NAME}'.")
-    print("  2. Click 'Run now' and wait for the Run to reach a terminal state.")
-    print("  3. Open /admin/governance for the governance overview dashboard.")
+    print("  2. Validate and activate the draft Pack; live Collector access runs")
+    print("     as a formal execution-kernel validation Run.")
+    print("  3. Click 'Run now' and wait for the Run to reach a terminal state.")
+    print("  4. Open /admin/governance for the governance overview dashboard.")
     print()
     print("To manufacture a Finding on demand:")
     print("  docker compose stop ops-console")
@@ -463,7 +445,6 @@ async def run_seed(deps: SeedDeps) -> dict[str, str]:
         deps.patrol_pack_service,
         deps.mcp_server_service,
         owner_user_id=deps.admin_user_id,
-        activity_policy=deps.activity_policy,
     )
     _log(f"Patrol pack '{DEMO_PACK_NAME}' ({DEMO_PACK_SLUG})", results["demo_pack"])
 
@@ -531,12 +512,7 @@ async def run_seed_command(
                 outbound_policy,
                 audit_service,
             )
-            collector_validator = MCPPatrolCollectorValidator(
-                InfrastructureMCPConnectionPoolAdapter(
-                    outbound_policy=outbound_policy,
-                )
-            )
-            patrol_pack_service = PatrolPackService(uow_factory, audit_service, collector_validator)
+            patrol_pack_service = PatrolPackService(uow_factory, audit_service)
             inference_model_service = InferenceModelService(
                 uow_factory,
                 provider_adapter,
@@ -550,12 +526,6 @@ async def run_seed_command(
                 provider_adapter,
             )
             inference_binding_service = InferenceBindingService(uow_factory, provider_adapter)
-            runtime_policy_repository = PostgresRuntimePolicyRepository(
-                session_factory=postgres.session_factory,
-                authorization=AuthorizationContext.system("seed-demo-runtime-policy"),
-            )
-            active_policy = await runtime_policy_repository.load_active_pair()
-
             async with uow_factory() as uow:
                 admin = await uow.user.get_by_email(settings.bootstrap_admin_email)
             if admin is None:
@@ -570,7 +540,6 @@ async def run_seed_command(
                 inference_model_service=inference_model_service,
                 inference_binding_service=inference_binding_service,
                 patrol_pack_service=patrol_pack_service,
-                activity_policy=active_policy.execution.revision.policy.activity,
                 admin_user_id=admin.id,
                 demo_inference_env=read_demo_inference_env(),
             )

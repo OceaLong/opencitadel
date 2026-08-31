@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opencitadel.dev/contracts/acceptance-evidence-v1.schema.json",
+  "title": "OpenCitadel deterministic acceptance evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "requirementId": {
+      "type": "string",
+      "enum": [
+        "ID-LOGIN",
+        "ID-LOGOUT",
+        "ID-TEAM",
+        "ID-INVITE",
+        "ID-SCOPE",
+        "ID-ANON",
+        "INF-ENDPOINT",
+        "INF-MODEL",
+        "INF-PROBE",
+        "INF-BIND",
+        "INF-CAP",
+        "INF-MISMATCH",
+        "POL-EDIT",
+        "POL-HISTORY",
+        "POL-CAS",
+        "POL-RESTORE",
+        "KB-BUILD",
+        "KB-PUBLISH",
+        "KB-PIN",
+        "KB-DEGRADED",
+        "CB-BUILD",
+        "CB-ARTIFACT",
+        "CB-PIN",
+        "CB-FAILSAFE",
+        "RUN-AGENT",
+        "RUN-ASK",
+        "RUN-SSE",
+        "RUN-APPROVE",
+        "RUN-REJECT",
+        "RUN-CANCEL",
+        "PAT-PACK",
+        "PAT-RUN",
+        "PAT-EVIDENCE",
+        "PAT-ADMISSION",
+        "ADM-OVERVIEW",
+        "ADM-GOVERNANCE",
+        "ADM-AUDIT",
+        "ADM-COMPLIANCE",
+        "UI-MOBILE",
+        "UI-KEYBOARD"
+      ]
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "imageDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["passed", "failed"] },
+        "failure_reason": { "type": ["string", "null"] },
+        "started_at": { "type": "string", "format": "date-time" },
+        "finished_at": { "type": "string", "format": "date-time" },
+        "duration_ms": { "$ref": "#/$defs/nonNegativeInteger" }
+      },
+      "required": ["status", "failure_reason", "started_at", "finished_at", "duration_ms"],
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "passed" } } },
+          "then": { "properties": { "failure_reason": { "type": "null" } } },
+          "else": { "properties": { "failure_reason": { "type": "string", "minLength": 1 } } }
+        }
+      ]
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "health": { "enum": ["not_started", "starting", "healthy", "unhealthy", "completed"] },
+        "restart_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "ready_at": { "type": ["string", "null"], "format": "date-time" }
+      },
+      "required": ["name", "health", "restart_count", "ready_at"]
+    },
+    "playwrightProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "tests": { "$ref": "#/$defs/nonNegativeInteger" },
+        "passed": { "$ref": "#/$defs/nonNegativeInteger" },
+        "failed": { "$ref": "#/$defs/nonNegativeInteger" },
+        "skipped": { "$ref": "#/$defs/nonNegativeInteger" },
+        "duration_ms": { "$ref": "#/$defs/nonNegativeInteger" }
+      },
+      "required": ["name", "tests", "passed", "failed", "skipped", "duration_ms"]
+    },
+    "playwrightTotals": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tests": { "$ref": "#/$defs/nonNegativeInteger" },
+        "passed": { "$ref": "#/$defs/nonNegativeInteger" },
+        "failed": { "$ref": "#/$defs/nonNegativeInteger" },
+        "skipped": { "$ref": "#/$defs/nonNegativeInteger" },
+        "duration_ms": { "$ref": "#/$defs/nonNegativeInteger" }
+      },
+      "required": ["tests", "passed", "failed", "skipped", "duration_ms"]
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requirement_id": { "$ref": "#/$defs/requirementId" },
+        "test_id": { "type": "string", "minLength": 1 },
+        "project": {
+          "enum": ["bootstrap", "identity", "control-plane", "resources", "execution", "patrol-admin", "cleanup"]
+        },
+        "status": { "enum": ["passed", "failed", "skipped", "not_run"] }
+      },
+      "required": ["requirement_id", "test_id", "project", "status"]
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+        },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "$ref": "#/$defs/nonNegativeInteger" }
+      },
+      "required": ["kind", "path", "sha256", "size_bytes"]
+    }
+  },
+  "properties": {
+    "schema_version": { "const": 1 },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["full", "partial"] },
+        "requested_projects": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["bootstrap", "identity", "control-plane", "resources", "execution", "patrol-admin", "cleanup"]
+          }
+        }
+      },
+      "required": ["kind", "requested_projects"]
+    },
+    "result": { "$ref": "#/$defs/result" },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "revision": { "type": "string", "pattern": "^[0-9a-f]{7,64}$" },
+        "dirty_tree_digest": { "$ref": "#/$defs/sha256" }
+      },
+      "required": ["revision", "dirty_tree_digest"]
+    },
+    "compose": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_name": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "minLength": 1 },
+        "disposable": { "type": "boolean" }
+      },
+      "required": ["project_name", "run_id", "disposable"]
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "production": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "api": { "$ref": "#/$defs/imageDigest" },
+            "execution-kernel": { "$ref": "#/$defs/imageDigest" },
+            "migrate": { "$ref": "#/$defs/imageDigest" },
+            "ui": { "$ref": "#/$defs/imageDigest" },
+            "sandbox": { "$ref": "#/$defs/imageDigest" },
+            "ops-collector": { "$ref": "#/$defs/imageDigest" },
+            "ops-actuator": { "$ref": "#/$defs/imageDigest" }
+          },
+          "required": ["api", "execution-kernel", "migrate", "ui", "sandbox", "ops-collector", "ops-actuator"]
+        },
+        "acceptance_provider": { "$ref": "#/$defs/imageDigest" }
+      },
+      "required": ["production", "acceptance_provider"]
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "alembic_head": { "type": "string", "minLength": 1 }
+      },
+      "required": ["alembic_head"]
+    },
+    "services": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/service" },
+      "uniqueItems": true
+    },
+    "playwright": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/playwrightProject" },
+          "uniqueItems": true
+        },
+        "totals": { "$ref": "#/$defs/playwrightTotals" }
+      },
+      "required": ["projects", "totals"]
+    },
+    "coverage": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/coverage" }
+    },
+    "sandboxes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "created": { "$ref": "#/$defs/nonNegativeInteger" },
+        "drained": { "$ref": "#/$defs/nonNegativeInteger" }
+      },
+      "required": ["created", "drained"]
+    },
+    "residue": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "containers": { "$ref": "#/$defs/nonNegativeInteger" },
+        "networks": { "$ref": "#/$defs/nonNegativeInteger" },
+        "dynamic_sandboxes": { "$ref": "#/$defs/nonNegativeInteger" },
+        "volumes": { "$ref": "#/$defs/nonNegativeInteger" },
+        "retained_volumes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      },
+      "required": ["containers", "networks", "dynamic_sandboxes", "volumes", "retained_volumes"]
+    },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    }
+  },
+  "required": [
+    "schema_version",
+    "scope",
+    "result",
+    "git",
+    "compose",
+    "images",
+    "migration",
+    "services",
+    "playwright",
+    "coverage",
+    "sandboxes",
+    "residue",
+    "artifacts"
+  ]
+}

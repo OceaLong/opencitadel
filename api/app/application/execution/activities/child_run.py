@@ -47,10 +47,13 @@ class ChildRunActivityHandler:
         source_id = payload.get("child_source_entity_id")
         if not all(isinstance(item, str) and item for item in (source_type, source_id)):
             return ActivityOutcome.failed(failure_code="CHILD_RUN_SOURCE_INVALID")
+        # A team-owned parent run must keep its team scope for the child run,
+        # otherwise the child (and its tools/evidence) silently drops to the
+        # owner's personal scope and loses team visibility.
         scope = (
-            OwnerScope.personal(context.owner_user_id)
-            if context.owner_user_id
-            else OwnerScope.team("execution-kernel", context.team_id or "")
+            OwnerScope.team(context.owner_user_id or "execution-kernel", context.team_id)
+            if context.team_id
+            else OwnerScope.personal(context.owner_user_id or "execution-kernel")
         )
         child_run_id = await self._admission.admit(
             family=RunFamily(str(family_value)),

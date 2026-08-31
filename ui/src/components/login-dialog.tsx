@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
+import { useEnabledOAuthProviders } from "@/hooks/use-oauth-providers";
 import { authApi } from "@/lib/api/auth";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -31,6 +32,7 @@ export function LoginDialog({ open, reason, onOpenChange, onSuccess }: LoginDial
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const oauthProviders = useEnabledOAuthProviders();
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -74,22 +76,28 @@ export function LoginDialog({ open, reason, onOpenChange, onSuccess }: LoginDial
           <Button className="w-full" disabled={loading}>
             {loading ? t("loggingIn") : t("login")}
           </Button>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => (window.location.href = "/api/auth/oauth/google/login")}
-            >
-              <span translate="no">Google</span>
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => (window.location.href = "/api/auth/oauth/github/login")}
-            >
-              <span translate="no">GitHub</span>
-            </Button>
-          </div>
+          {(oauthProviders.has("google") || oauthProviders.has("github")) && (
+            <div className="grid grid-cols-2 gap-2">
+              {oauthProviders.has("google") && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => (window.location.href = "/api/auth/oauth/google/login")}
+                >
+                  <span translate="no">Google</span>
+                </Button>
+              )}
+              {oauthProviders.has("github") && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => (window.location.href = "/api/auth/oauth/github/login")}
+                >
+                  <span translate="no">GitHub</span>
+                </Button>
+              )}
+            </div>
+          )}
           <p className="text-muted-foreground text-center text-xs">
             {t("noAccount")}{" "}
             <Link href="/register" className="text-primary underline underline-offset-4">

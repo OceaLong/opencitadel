@@ -307,6 +307,7 @@ async def list_audit_logs(
     actor_user_id: str | None = Query(None),
     resource_type: str | None = Query(None),
     resource_id: str | None = Query(None),
+    session_id: str | None = Query(None),
     start_at: UtcDatetime = None,
     end_at: UtcDatetime = None,
     service: AuditService = Depends(get_audit_service),
@@ -317,6 +318,7 @@ async def list_audit_logs(
         actor_user_id=actor_user_id,
         resource_type=resource_type,
         resource_id=resource_id,
+        session_id=session_id,
         start_at=start_at,
         end_at=end_at,
         limit=limit,
@@ -328,6 +330,7 @@ async def list_audit_logs(
             actor_user_id=actor_user_id,
             resource_type=resource_type,
             resource_id=resource_id,
+            session_id=session_id,
             start_at=start_at,
             end_at=end_at,
         )
@@ -340,7 +343,7 @@ async def list_audit_logs(
 
 
 @router.get(
-    "/audit/{log_id}",
+    "/audit/logs/{log_id}",
     response_model=Response[AuditLogDetailResponse],
     dependencies=[Depends(require_auditor_or_admin)],
 )
@@ -374,6 +377,7 @@ async def export_audit_logs(
     actor_user_id: str | None = Query(None),
     resource_type: str | None = Query(None),
     resource_id: str | None = Query(None),
+    session_id: str | None = Query(None),
     start_at: UtcDatetime = None,
     end_at: UtcDatetime = None,
     service: AuditService = Depends(get_audit_service),
@@ -384,6 +388,7 @@ async def export_audit_logs(
             actor_user_id=actor_user_id,
             resource_type=resource_type,
             resource_id=resource_id,
+            session_id=session_id,
             start_at=start_at,
             end_at=end_at,
         ),

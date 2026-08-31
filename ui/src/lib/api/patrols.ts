@@ -22,7 +22,7 @@ export type ProposePatrolRemediation = {
 export type CreatePatrolPack = {
   name: string;
   mcp_server_id: string;
-  template_id?: "kubernetes-baseline-v1";
+  template_id?: "kubernetes-baseline-v1" | "compose-services-baseline-v1";
   config?: Partial<PatrolPackConfig>;
 };
 

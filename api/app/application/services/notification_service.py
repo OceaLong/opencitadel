@@ -7,7 +7,8 @@ from app.application.ports.streams import NotificationPublisher
 from app.application.services.integration_server_service import MCPServerService
 from app.application.services.runtime_policy_reader import PolicyHeadReader
 from app.domain.external.connection_pool import MCPConnectionPoolPort
-from app.domain.models.notification import Notification
+from app.domain.external.outbound_notifier import OutboundNotifierPort
+from app.domain.models.notification import Notification, NotificationType
 from app.domain.models.scope import OwnerScope
 from app.domain.repositories.uow import IUnitOfWork
 from app.domain.utils.time_utils import utc_now
@@ -23,17 +24,19 @@ class NotificationService:
         mcp_connection_pool: MCPConnectionPoolPort,
         policy_reader: PolicyHeadReader,
         publisher: NotificationPublisher,
+        outbound_notifier: OutboundNotifierPort | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._mcp_servers = mcp_servers
         self._mcp_connection_pool = mcp_connection_pool
         self._policy_reader = policy_reader
         self._publisher = publisher
+        self._outbound_notifier = outbound_notifier
 
     async def send(
         self,
         user_id: str,
-        type: str,
+        type: NotificationType,
         message: str,
         *,
         session_id: str | None = None,
@@ -44,7 +47,7 @@ class NotificationService:
     ) -> Notification:
         notification = Notification(
             user_id=user_id,
-            type=type,  # type: ignore[arg-type]
+            type=type,
             message=message,
             i18n_key=i18n_key,
             i18n_params=i18n_params,
@@ -147,3 +150,40 @@ class NotificationService:
                 )
             except (OSError, RuntimeError, ValueError) as exc:
                 logger.warning("IM 通知失败 server=%s user=%s: %s", server_id, owner_user_id, exc)
+
+    async def dispatch_notify_channels(
+        self,
+        owner_user_id: str,
+        scope: OwnerScope,
+        notify_channels: list[dict[str, Any]],
+        message: str,
+        *,
+        subject: str = "OpenCitadel 通知",
+    ) -> None:
+        """Fan a notification out to every configured channel by type.
+
+        mcp -> IM via MCP, webhook -> signed HTTP POST, email -> SMTP. Each
+        channel is best-effort and isolated; one failure never blocks another.
+        """
+        if not notify_channels:
+            return
+        mcp_channels = [c for c in notify_channels if str(c.get("type", "mcp")) == "mcp"]
+        if mcp_channels:
+            await self.send_im_via_mcp(owner_user_id, scope, mcp_channels, message)
+        if self._outbound_notifier is None:
+            return
+        for channel in notify_channels:
+            ctype = str(channel.get("type", "mcp"))
+            try:
+                if ctype == "webhook" and channel.get("url"):
+                    await self._outbound_notifier.send_webhook(
+                        str(channel["url"]),
+                        str(channel.get("secret", "")),
+                        {"message": message, "user_id": owner_user_id},
+                    )
+                elif ctype == "email" and channel.get("address"):
+                    await self._outbound_notifier.send_email(
+                        str(channel["address"]), subject, message
+                    )
+            except (OSError, RuntimeError, ValueError) as exc:
+                logger.warning("%s 通知失败 user=%s: %s", ctype, owner_user_id, exc)

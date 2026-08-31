@@ -12,7 +12,9 @@ def patrol_plan(
     timeout_seconds: int,
 ) -> WorkflowPlan:
     if family == RunFamily.PATROL:
-        types = ("patrol.execute",)
+        types = (
+            "patrol.validate" if semantic.get("operation") == "validate" else "patrol.execute",
+        )
     elif family == RunFamily.REMEDIATION:
         types = ("remediation.execute",)
     else:

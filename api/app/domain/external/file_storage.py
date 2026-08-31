@@ -25,6 +25,10 @@ class FileStorage(Protocol):
         """根据传递的文件id下载文件，并返回文件源+文件信息"""
         ...
 
+    async def delete_file(self, file_id: str) -> None:
+        """根据传递的文件id删除对象存储中的文件及其数据库记录"""
+        ...
+
     async def presigned_get_url(
         self,
         key: str,

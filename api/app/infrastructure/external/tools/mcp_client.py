@@ -111,6 +111,14 @@ class MCPClientManager:
     def _tool_call_read_timeout(self) -> timedelta:
         return self._tool_timeout
 
+    def _validate_http_target(self, url: str, *, context: str) -> None:
+        validate_mcp_http_url(
+            url,
+            context=context,
+            allowed_ports=self._outbound_policy.allowed_ports,
+            allow_private_hosts=self._outbound_policy.allow_private_hosts,
+        )
+
     async def initialize(self) -> None:
         """初始化函数，用于连接所有配置的MCP服务器（软失败，不向外抛异常）"""
         if self._initialized and self._owner_task and not self._owner_task.done():
@@ -136,7 +144,7 @@ class MCPClientManager:
             await self._connect_mcp_servers()
             self._initialized = True
             logger.info("MCP客户端管理器加载成功")
-        except (OSError, RuntimeError, ValueError) as exc:
+        except (ImportError, OSError, RuntimeError, TypeError, ValueError) as exc:
             logger.error("MCP客户端管理器加载失败: %s", exc)
             self._connection_errors["__init__"] = str(exc)
             self._initialized = True
@@ -172,7 +180,7 @@ class MCPClientManager:
     ) -> None:
         try:
             await self._connect_mcp_server(server_name, server_config)
-        except (OSError, RuntimeError, ValueError) as e:
+        except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
             error_msg = str(e)
             logger.error("连接MCP服务器[%s]出错: %s", server_name, error_msg)
             self._connection_errors[server_name] = error_msg
@@ -221,10 +229,30 @@ class MCPClientManager:
             raise ValueError("连接stdio-mcp服务器需要配置command命令")
 
         # 3.构建stdio连接参数
+        # Only forward a minimal, non-secret base environment plus the
+        # operator-configured env. Never leak the kernel's full os.environ
+        # (DB passwords, API_KEY_SECRET, signing keys, storage credentials) to a
+        # stdio MCP subprocess.
+        safe_env = {
+            key: os.environ[key]
+            for key in (
+                "PATH",
+                "HOME",
+                "LANG",
+                "LC_ALL",
+                "LC_CTYPE",
+                "TZ",
+                "TMPDIR",
+                "TEMP",
+                "TMP",
+            )
+            if key in os.environ
+        }
+        safe_env.update(env)
         server_parameters = StdioServerParameters(
             command=command,
             args=args,
-            env={**os.environ, **env},
+            env=safe_env,
         )
 
         try:
@@ -270,11 +298,7 @@ class MCPClientManager:
         url = server_config.url
         if not url:
             raise ValueError("连接sse-mcp服务器需要配置url")
-        validate_mcp_http_url(
-            url,
-            context=f"MCP 服务[{server_name}] URL",
-            allowed_ports=self._outbound_policy.allowed_ports,
-        )
+        self._validate_http_target(url, context=f"MCP 服务[{server_name}] URL")
 
         try:
             sse_transport = await self._exit_stack.enter_async_context(
@@ -325,11 +349,7 @@ class MCPClientManager:
         url = server_config.url
         if not url:
             raise ValueError("连接streamable-http-mcp服务器需要配置url")
-        validate_mcp_http_url(
-            url,
-            context=f"MCP 服务[{server_name}] URL",
-            allowed_ports=self._outbound_policy.allowed_ports,
-        )
+        self._validate_http_target(url, context=f"MCP 服务[{server_name}] URL")
 
         try:
             streamable_http_transport = await self._exit_stack.enter_async_context(
@@ -379,7 +399,7 @@ class MCPClientManager:
             tools = tools_response.tools if tools_response else []
             self._tools[server_name] = tools
             logger.info("MCP服务器[%s]提供了%s个工具", server_name, len(tools))
-        except (OSError, RuntimeError, ValueError) as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             # 记录日志并将缓存设置为空
             error_msg = str(e)
             logger.error("获取MCP服务器[%s]工具列表失败: %s", server_name, error_msg)
@@ -459,21 +479,23 @@ class MCPClientManager:
                 read_timeout_seconds=self._tool_call_read_timeout(),
             )
 
-            # 9.判断结果是否存在执行不同的操作
+            # 9. Preserve the MCP result contract: structuredContent is the
+            # canonical machine-readable channel and content is display text.
             if result:
-                # 10.处理MCP工具生成的content
-                content = []
-                if hasattr(result, "content") and result.content:
-                    for item in result.content:
-                        if hasattr(item, "text"):
-                            content.append(item.text)
-                        else:
-                            content.append(str(item))
+                content: list[str] = []
+                for item in result.content or []:
+                    text = getattr(item, "text", None)
+                    content.append(text if isinstance(text, str) else str(item))
+                rendered = "\n".join(content)
 
-                # 11.返回工具结果
-                return ToolResult(
-                    success=True, data="\n".join(content) if content else "工具执行成功"
-                )
+                if result.isError:
+                    return ToolResult(
+                        success=False,
+                        message=rendered or "MCP工具执行失败",
+                    )
+                if result.structuredContent is not None:
+                    return ToolResult(success=True, data=result.structuredContent)
+                return ToolResult(success=True, data=rendered or "工具执行成功")
             return ToolResult(success=True, data="工具执行成功")
         except (OSError, RuntimeError, ValueError) as e:
             # 记录错误日志并返回失败的工具结果

@@ -284,6 +284,45 @@ def test_non_conversational_family_has_one_explicit_activity(
         assert command.payload["activity_type"] == activity_type
 
 
+def test_patrol_validation_run_has_a_dedicated_kernel_activity() -> None:
+    command = _next(
+        _state(
+            RunFamily.PATROL,
+            semantic_payload={
+                **_state(RunFamily.PATROL).semantic_payload,
+                "operation": "validate",
+                "pack_id": "pack-1",
+                "pack_version": 3,
+                "validation_run_id": "run-validation-1",
+            },
+        )
+    )
+
+    assert command is not None
+    assert command.command_type == "RequestActivity"
+    assert command.payload["activity_type"] == "patrol.validate"
+
+
+def test_resource_run_preserves_its_activity_failure_code() -> None:
+    running = _state(RunFamily.CODEBASE_INGEST)
+    request = _next(running)
+    assert request is not None
+    activity_id = UUID(str(request.payload["activity_id"]))
+    failed = running.model_copy(
+        update={
+            "stream_version": 4,
+            "settled_activities": ((activity_id, "failed", 0),),
+            "activity_failure_codes": ((activity_id, 0, "CODEBASE_NO_INDEXABLE_SOURCE"),),
+        }
+    )
+
+    terminal_failure = _next(failed)
+
+    assert terminal_failure is not None
+    assert terminal_failure.command_type == "FailRun"
+    assert terminal_failure.payload["failure_code"] == "CODEBASE_NO_INDEXABLE_SOURCE"
+
+
 def test_repeated_activity_failure_exhausts_run_retries() -> None:
     running = _state(
         RunFamily.ASK,

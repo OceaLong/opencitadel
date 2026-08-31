@@ -40,6 +40,30 @@ def test_compute_entry_hash_deterministic():
     assert len(h1) == 64
 
 
+def test_session_correlation_is_part_of_the_signed_audit_entry():
+    common = {
+        "chain_seq": 1,
+        "id": "log-1",
+        "actor_user_id": "u1",
+        "actor_ip": "127.0.0.1",
+        "action": "patrol_run_triggered",
+        "resource_type": "patrol_run",
+        "resource_id": "run-1",
+        "team_id": "team-1",
+        "request_id": "req-1",
+        "metadata": {},
+        "created_at": datetime(2026, 7, 3, tzinfo=UTC),
+    }
+
+    first = entry_fields(**common, session_id="session-1")
+    second = entry_fields(**common, session_id="session-2")
+
+    assert first["session_id"] == "session-1"
+    assert compute_entry_hash("secret", first, GENESIS) != compute_entry_hash(
+        "secret", second, GENESIS
+    )
+
+
 def test_entry_fields_rejects_naive_created_at():
     with pytest.raises(ValueError, match="timezone-aware"):
         entry_fields(
@@ -145,6 +169,7 @@ async def test_session_verification_uses_global_chain_not_invalid_filtered_subse
             resource_type="session",
             resource_id=resource_id,
             team_id=None,
+            session_id=resource_id,
             request_id="",
             metadata={},
             created_at=created,
@@ -156,6 +181,7 @@ async def test_session_verification_uses_global_chain_not_invalid_filtered_subse
                 action="test",
                 resource_type="session",
                 resource_id=resource_id,
+                session_id=resource_id,
                 chain_seq=seq,
                 signing_key_id="primary",
                 prev_hash=previous,
@@ -166,9 +192,9 @@ async def test_session_verification_uses_global_chain_not_invalid_filtered_subse
         previous = entry_hash
 
     class _Repo:
-        async def list_chained(self, *, resource_id=None, **kwargs):
-            if resource_id:
-                return [log for log in logs if log.resource_id == resource_id]
+        async def list_chained(self, *, session_id=None, **kwargs):
+            if session_id:
+                return [log for log in logs if log.session_id == session_id]
             return logs
 
     class _Uow:

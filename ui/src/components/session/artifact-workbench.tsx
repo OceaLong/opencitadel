@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Download, FileText, Globe, Link2, Loader2 } from "lucide-react";
+import { Download, FileText, Globe, Link2, Link2Off, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/empty-state";
@@ -58,6 +58,8 @@ export function ArtifactWorkbench({
   const [contentIncomplete, setContentIncomplete] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [sharedId, setSharedId] = useState<string | null>(null);
 
   const active = sortedArtifacts.find((item) => item.artifact_id === selectedId) ?? null;
 
@@ -136,11 +138,26 @@ export function ArtifactWorkbench({
         ? result.share_url
         : `${window.location.origin}${result.share_url}`;
       await navigator.clipboard.writeText(url);
+      setSharedId(selectedId);
       toast.success(t("shareLinkCopied"));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("shareLinkFailed"));
     } finally {
       setSharing(false);
+    }
+  }, [selectedId, t]);
+
+  const handleRevoke = useCallback(async () => {
+    if (!selectedId) return;
+    setRevoking(true);
+    try {
+      await artifactsApi.revokeShare(selectedId);
+      setSharedId((current) => (current === selectedId ? null : current));
+      toast.success(t("shareRevoked"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("shareRevokeFailed"));
+    } finally {
+      setRevoking(false);
     }
   }, [selectedId, t]);
 
@@ -205,6 +222,18 @@ export function ArtifactWorkbench({
             <Link2 className="size-3.5" />
             {sharing ? t("generating") : t("share")}
           </Button>
+          {sharedId === selectedId && selectedId !== null && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => void handleRevoke()}
+              disabled={revoking}
+            >
+              <Link2Off className="size-3.5" />
+              {revoking ? t("generating") : t("revokeShare")}
+            </Button>
+          )}
         </div>
       </div>
 

@@ -1,9 +1,11 @@
 # Execution Kernel Greenfield Cutover Evidence
 
-This record captures the acceptance evidence for the destructive, single-runtime
-cutover completed on 2026-08-25. The target is a new installation; no database,
-API, event, deployment, or runtime compatibility with predecessor builds is
-provided.
+[简体中文](execution-kernel-cutover-evidence.zh-CN.md)
+
+This record defines the reproducible evidence contract for the destructive,
+single-runtime cutover. OpenCitadel targets new installations and provides no
+database, API, event, deployment, or runtime compatibility with predecessor
+builds.
 
 ## Final architecture boundary
 
@@ -12,8 +14,8 @@ provided.
 - `api/app/execution_kernel_main.py` is the only execution runtime entrypoint.
 - Redis is wake-up and notification infrastructure only. Losing Redis state does
   not lose accepted work or workflow state.
-- Agent, Ask, knowledge ingestion, codebase indexing, automation, patrol, and
-  remediation all use the same Run aggregate and command path.
+- Agent, Ask, knowledge ingestion, codebase indexing, automation, Patrol, and
+  remediation use the same Run aggregate and command path.
 - Approval is a formal command/state transition. No predecessor execution or
   human-intervention lifecycle remains in production code.
 
@@ -21,57 +23,59 @@ provided.
 
 The repository has one Alembic head: `0001greenfield_initial`. It creates a new
 schema and does not upgrade predecessor data. PostgreSQL provisioning installs
-`vector`, `uuid-ossp`, and `pgcrypto`, then separates three login roles:
+`vector`, `uuid-ossp`, and `pgcrypto`, then separates migration, application,
+and execution-kernel login roles.
 
-| Role | Responsibility |
+The strict database suite exercises a fresh PostgreSQL installation, forced RLS,
+cross-tenant denial, stream-owner matching, immutable event/audit rows, hash
+tamper detection, snapshot corruption fallback, and role grants. Patrol and
+remediation records cannot bypass formal admission. Session turns are serialized
+by a PostgreSQL row lock and keyed by an immutable request UUID.
+
+## Verification authority
+
+Current status comes from executable gates, never hand-maintained pass/skip
+totals:
+
+| Boundary | Authoritative evidence |
 | --- | --- |
-| Application | Product reads/writes allowed by RLS; no execution append or DDL authority |
-| Migration | Schema and extension migration only |
-| Execution kernel | Event append and formal execution projections; no migration authority |
+| Required product journeys | [`contracts/acceptance-evidence.schema.json`](../../contracts/acceptance-evidence.schema.json) and the zero-skip reporter |
+| Full-stack result | `tmp/acceptance/<run-id>/manifest.json` locally; the `acceptance-evidence` artifact from the required [`acceptance-e2e` CI job](../../.github/workflows/ci.yml) |
+| API, database, RLS, architecture | `OPENCITADEL_REQUIRE_POSTGRES_TESTS=1 uv run pytest -q` and `uv run lint-imports` |
+| UI | format, i18n, generated API contract, typecheck, lint, unit suite, and production build in CI |
+| Deployment/release | Compose render, Helm lint/template, Kustomize renders, release matrix contracts, and image builds |
+| Documentation | `./scripts/check-docs.sh` |
 
-The integration suite exercises a fresh PostgreSQL installation, forced RLS,
-cross-tenant denial, stream owner matching, immutable event/audit rows, hash
-tamper detection, snapshot corruption fallback, and role grants.
+The acceptance manifest is content-hashed and includes requirement coverage,
+production/acceptance image digests, Alembic head, service health and restart
+state, Sandbox lifecycle, artifacts, and owned-resource residue. A full run is
+successful only when every required ID is represented by a passing Playwright
+test, no required test is skipped, the manifest validates, and cleanup reaches
+the declared residue contract.
 
-Patrol and remediation product records cannot bypass formal admission: every
-persisted Patrol Run has a non-null formal Run identity. Session turn admission
-is serialized by a PostgreSQL row lock, keyed by an immutable request UUID, and
-covered by a real two-request concurrency test. A real execution-kernel process
-startup exercises the asynchronous composition root and passes readiness with
-the dedicated login role; the probe verifies migrated tables, append privileges,
-and the absence of event mutation privileges.
+The acceptance inference provider is a test fixture under the Compose
+`acceptance` profile. Release contracts prohibit it from Helm, Kustomize,
+quickstart, production configuration, and the seven-image release matrix.
+External-provider canaries are optional compatibility signals and are not
+cutover evidence.
 
-## Verification results
+## Reproduce
 
-| Gate | Result |
-| --- | --- |
-| API full suite | 1,279 passed, 5 skipped |
-| Sandbox | 32 passed |
-| Ops Collector | 33 passed, 2 skipped |
-| Ops Actuator | 31 passed |
-| UI unit suite | 36 files, 133 tests passed |
-| UI lint / typecheck / production build | Passed |
-| UI localization | 1,565 keys aligned; 1,281 code-referenced keys present in English and Chinese |
-| Import boundaries | 515 files / 1,924 dependencies; 5 contracts kept, 0 broken |
-| Import waivers | Zero `ignore_imports`; CI zero-waiver contract passed |
-| Python CI undefined-name gate | `ruff check --select F821 app tests` passed |
-| New execution-kernel code | Full Ruff rules passed |
-| Deployment | API/kernel image builds, Compose config, Helm lint/template, and both Kustomize renders passed |
-| Documentation | Bilingual and architecture contract checks passed |
-| Patch integrity | `git diff --check` passed |
+```bash
+./scripts/run-acceptance-e2e.sh --disposable
+```
 
-The UI localization tool reports unused-key inventory as a warning, not a
-missing/mismatched-key failure. The UI build reports Node's third-party
-`module.register()` deprecation warning. The API suite reports five import-time
-deprecation warnings from the third-party PyMuPDF/SWIG package; application
-deprecation warnings are clean.
+The runner creates a unique Compose project and run namespace, uses only public
+product setup paths, captures evidence on success and failure, and removes only
+resources whose exact project/run labels match. See the
+[E2E acceptance guide](../../e2e/README.md) for retained-volume behavior and
+cleanup diagnostics.
 
 ## Negative residue proof
 
-The greenfield boundary contract rejects predecessor class names, module paths,
-tables, deployment workloads, and environment settings. Repository scans find
-old execution vocabulary only inside those negative assertions. Formal
-`ActivityWorker`, `DecisionWorker`, and `InboxWorker` classes are components of
-the single execution kernel, not separate runtime lifecycles.
+Repository contracts reject predecessor class names, module paths, tables,
+deployment workloads, and environment settings. Formal `ActivityWorker`,
+`DecisionWorker`, and `InboxWorker` classes are components of the single
+execution kernel, not separate runtime lifecycles.
 
-No files were staged or committed by this cutover procedure.
+The cutover workflow does not stage or commit files.

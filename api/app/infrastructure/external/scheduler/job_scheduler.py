@@ -23,6 +23,10 @@ if TYPE_CHECKING:
     from app.application.services.resource_version_gc_service import (
         ResourceVersionGCService,
     )
+    from app.domain.external.connection_pool import (
+        A2AConnectionPoolPort,
+        MCPConnectionPoolPort,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +226,8 @@ async def run_scheduler_loop(
     stop_event: asyncio.Event,
     resource_version_gc_service: Optional["ResourceVersionGCService"] = None,
     patrol_retention_service: Optional["PatrolRetentionService"] = None,
+    mcp_pool: Optional["MCPConnectionPoolPort"] = None,
+    a2a_pool: Optional["A2AConnectionPoolPort"] = None,
 ) -> None:
     """Execution-kernel scheduler loop: poll definitions and admit Runs."""
     while not stop_event.is_set():
@@ -256,6 +262,20 @@ async def run_scheduler_loop(
         if not sched_cfg.enabled:
             await _wait_or_stop(stop_event, sched_cfg.poll_interval_seconds)
             continue
+
+        # Recycle idle MCP/A2A connections (and their stdio subprocesses) that
+        # outlived their config -- e.g. after an integration was disabled or
+        # deleted. Process-local, so every worker prunes its own pool.
+        if mcp_pool is not None:
+            try:
+                await mcp_pool.release_stale()
+            except (OSError, RuntimeError) as exc:
+                logger.warning("MCP pool release_stale failed: %s", exc)
+        if a2a_pool is not None:
+            try:
+                await a2a_pool.release_stale()
+            except (OSError, RuntimeError) as exc:
+                logger.warning("A2A pool release_stale failed: %s", exc)
 
         if not await try_become_scheduler_leader(
             leases,

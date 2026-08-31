@@ -194,6 +194,15 @@ export function useSessionStreams({
       if (friendly) {
         setLatestError(new Error(friendly));
       }
+      const retryable = (ev.data as { retryable?: boolean | null })?.retryable === true;
+      if (retryable) {
+        // The kernel auto-retries this attempt (RunAttemptFailed -> RunRetried).
+        // Surface the transient error but keep the run live so the reconnecting
+        // empty stream picks up the retried attempt instead of freezing the UI
+        // on a dead "failed" state until a manual refresh.
+        setStreamStatus("reconnecting");
+        return;
+      }
       applyLatestSessionPatch({ status: "failed" });
       setStreaming(false);
       setStreamStatus("error");
@@ -365,6 +374,23 @@ export function useSessionStreams({
     [sessionId, handleStreamEvent, startEmptyStream, stopEmptyStream],
   );
 
+  const resumeAfterExternalCommand = useCallback(() => {
+    if (!sessionId || sessionMissingRef.current) return;
+    stopEmptyStream();
+    if (messageStreamCleanupRef.current) {
+      messageStreamCleanupRef.current();
+      messageStreamCleanupRef.current = null;
+    }
+    isSendMessageRef.current = false;
+    emptyStreamRetryCountRef.current = 0;
+    sessionStatusRef.current = "running";
+    sessionStatusStateRef.current.status = "running";
+    dependenciesRef.current.applySessionPatch({ status: "running" });
+    setStreaming(true);
+    setStreamError(null);
+    startEmptyStream();
+  }, [sessionId, startEmptyStream, stopEmptyStream]);
+
   useEffect(() => {
     if (!sessionId || !sessionStatus || sessionMissingRef.current) return;
     if (
@@ -420,6 +446,7 @@ export function useSessionStreams({
     streamStatus,
     streamError,
     sendMessage,
+    resumeAfterExternalCommand,
     resetStreams,
     markSessionMissing: () => {
       sessionMissingRef.current = true;

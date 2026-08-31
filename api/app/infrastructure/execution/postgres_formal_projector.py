@@ -291,6 +291,37 @@ class PostgresFormalProjector:
         )
         if (
             state.family == RunFamily.PATROL
+            and state.source_entity_type == "patrol_pack_validation"
+            and state.source_entity_id
+        ):
+            await session.execute(
+                update(PatrolPackModel)
+                .where(
+                    PatrolPackModel.id == state.source_entity_id,
+                    PatrolPackModel.id.in_(pack_scope),
+                    PatrolPackModel.status == "validating",
+                    PatrolPackModel.validation_run_id == str(state.run_id),
+                )
+                .values(
+                    status="invalid",
+                    last_validated_at=event.occurred_at,
+                    last_validated_version=None,
+                    validation_run_id=None,
+                    validation_summary={
+                        "ok": False,
+                        "errors": [f"Validation Run terminated: {failure_code}"],
+                        "validation_run_id": str(state.run_id),
+                        "failure_code": failure_code,
+                        "capability_hash": None,
+                        "enabled_tools": [],
+                        "dry_run": {},
+                    },
+                    updated_at=event.occurred_at,
+                )
+            )
+            return
+        if (
+            state.family == RunFamily.PATROL
             and state.source_entity_type == "patrol_run"
             and state.source_entity_id
         ):
@@ -359,6 +390,7 @@ class PostgresFormalProjector:
             "ActivityCompleted",
             "ActivityFailed",
             "ActivityOutcomeUnknown",
+            "ActivityCancelled",
         }:
             return
         activity_id = UUID(str(event.public_payload["activity_id"]))
@@ -380,10 +412,11 @@ class PostgresFormalProjector:
                 "ActivityCompleted": "succeeded",
                 "ActivityFailed": "failed",
                 "ActivityOutcomeUnknown": "unknown",
+                "ActivityCancelled": "cancelled",
             }[event.event_type]
             if event.event_type == "ActivityCallStarted":
                 attempt += 1
-        terminal = status in {"succeeded", "failed", "unknown"}
+        terminal = status in {"succeeded", "failed", "unknown", "cancelled"}
         state_json = {
             "activity_id": str(activity_id),
             "run_id": str(run_state.run_id),
@@ -719,7 +752,7 @@ class PostgresFormalProjector:
                     "tool_call_id": str(public_data.get("tool_call_id") or ""),
                     "name": name,
                     "function": name,
-                    "args": {},
+                    "args": public_data.get("arguments") or {},
                     "status": "started",
                 }
             return None
@@ -751,7 +784,7 @@ class PostgresFormalProjector:
                     "tool_call_id": str(public_data.get("tool_call_id") or ""),
                     "name": name,
                     "function": name,
-                    "args": {},
+                    "args": public_data.get("arguments") or {},
                     "status": str(public_data.get("status") or "completed"),
                     "content": public_data.get("content"),
                 }

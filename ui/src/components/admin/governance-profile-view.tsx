@@ -33,12 +33,20 @@ export function GovernanceProfileView({ profile }: Props) {
         <CardHeader>
           <CardTitle className="text-base">{t("summary")}</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <div>
             <p className="text-muted-foreground text-xs">{t("status")}</p>
             <StatusBadge data-testid="session-status-badge" variant={statusVariant(session.status)}>
               {session.status}
             </StatusBadge>
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs">{t("ownerUser")}</p>
+            <p className="font-mono text-xs">{session.owner_user_id ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs">{t("team")}</p>
+            <p className="font-mono text-xs">{session.team_id ?? "—"}</p>
           </div>
           <div>
             <p className="text-muted-foreground text-xs">{t("operatorScope")}</p>

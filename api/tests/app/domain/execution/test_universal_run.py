@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from app.application.execution.decisions.base import result_refs
 from app.domain.execution.aggregate import ReplaySnapshot, replay
 from app.domain.execution.commands import CommandEnvelope
 from app.domain.execution.events import NewEvent, StoredEvent
@@ -260,6 +261,72 @@ def test_cancel_complete_race_has_exactly_one_terminal_event() -> None:
     )
 
 
+def test_cancel_run_formally_settles_every_active_activity() -> None:
+    aggregate = RunAggregate()
+    activity_id = UUID("20000000-0000-0000-0000-000000000077")
+    events: list[StoredEvent] = []
+    decide_and_replay(
+        aggregate,
+        events,
+        command(
+            "CreateRun",
+            0,
+            {
+                "family": "agent",
+                "source_entity_type": "session",
+                "source_entity_id": "session-1",
+                "parent_run_id": None,
+                "semantic_payload": {},
+            },
+        ),
+    )
+    decide_and_replay(aggregate, events, command("StartRun", 1))
+    decide_and_replay(
+        aggregate,
+        events,
+        command(
+            "RequestActivity",
+            2,
+            {
+                "activity_id": str(activity_id),
+                "activity_type": "model.call",
+                "timeout_at": (NOW + timedelta(minutes=5)).isoformat(),
+                "input_ref": "object://request",
+                "input_digest": "a" * 64,
+            },
+        ),
+    )
+    decide_and_replay(
+        aggregate,
+        events,
+        command(
+            "MarkActivityCallStarted",
+            3,
+            {
+                "activity_id": str(activity_id),
+                "generation": 0,
+                "result_ref": None,
+                "result_summary": None,
+            },
+        ),
+    )
+
+    cancelled = decide_and_replay(
+        aggregate,
+        events,
+        command("CancelRun", 4),
+    )
+
+    assert [event.event_type for event in events[-2:]] == [
+        "ActivityCancelled",
+        "RunCancelled",
+    ]
+    assert cancelled.status == "cancelled"
+    assert cancelled.active_activity_ids == ()
+    assert cancelled.settled_activities == ((activity_id, "cancelled", 0),)
+    assert cancelled.activity_failure_codes == ((activity_id, 0, "ACTIVITY_CANCELLED"),)
+
+
 def test_retryable_failure_waits_then_increments_generation() -> None:
     aggregate = RunAggregate()
     events: list[StoredEvent] = []
@@ -490,6 +557,70 @@ def test_activity_request_is_durable_and_active_identity_is_replayed() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("command_type", "expected_status"),
+    [
+        ("FailActivity", "failed"),
+        ("MarkActivityOutcomeUnknown", "unknown"),
+    ],
+)
+def test_activity_failure_code_is_preserved_by_replay(
+    command_type: str,
+    expected_status: str,
+) -> None:
+    aggregate = RunAggregate()
+    activity_id = UUID("20000000-0000-0000-0000-000000000002")
+    events: list[StoredEvent] = []
+    decide_and_replay(
+        aggregate,
+        events,
+        command(
+            "CreateRun",
+            0,
+            {
+                "family": "codebase_ingest",
+                "source_entity_type": "resource_build",
+                "source_entity_id": "build-1",
+                "parent_run_id": None,
+                "semantic_payload": {},
+            },
+        ),
+    )
+    decide_and_replay(aggregate, events, command("StartRun", 1))
+    decide_and_replay(
+        aggregate,
+        events,
+        command(
+            "RequestActivity",
+            2,
+            {
+                "activity_id": str(activity_id),
+                "activity_type": "codebase.build",
+                "timeout_at": (NOW + timedelta(minutes=5)).isoformat(),
+                "input_ref": "object://request",
+                "input_digest": "a" * 64,
+            },
+        ),
+    )
+
+    settled = decide_and_replay(
+        aggregate,
+        events,
+        command(
+            command_type,
+            3,
+            {
+                "activity_id": str(activity_id),
+                "generation": 0,
+                "failure_code": "CODEBASE_NO_INDEXABLE_SOURCE",
+            },
+        ),
+    )
+
+    assert settled.settled_activities == ((activity_id, expected_status, 0),)
+    assert settled.activity_failure_codes == ((activity_id, 0, "CODEBASE_NO_INDEXABLE_SOURCE"),)
+
+
 def test_activity_progress_is_durable_ordered_and_generation_fenced() -> None:
     aggregate = RunAggregate()
     activity_id = UUID("20000000-0000-0000-0000-000000000099")
@@ -584,6 +715,65 @@ def test_activity_progress_is_durable_ordered_and_generation_fenced() -> None:
                 },
             ),
         )
+
+
+def test_activity_results_preserve_causal_completion_order() -> None:
+    aggregate = RunAggregate()
+    first_id = UUID("f0000000-0000-0000-0000-000000000001")
+    second_id = UUID("10000000-0000-0000-0000-000000000002")
+    events: list[StoredEvent] = []
+    decide_and_replay(
+        aggregate,
+        events,
+        command(
+            "CreateRun",
+            0,
+            {
+                "family": "agent",
+                "source_entity_type": "session",
+                "source_entity_id": "session-1",
+                "parent_run_id": None,
+                "semantic_payload": {},
+            },
+        ),
+    )
+    decide_and_replay(aggregate, events, command("StartRun", 1))
+
+    for activity_id, version, result_ref in (
+        (first_id, 2, "object://first"),
+        (second_id, 4, "object://second"),
+    ):
+        decide_and_replay(
+            aggregate,
+            events,
+            command(
+                "RequestActivity",
+                version,
+                {
+                    "activity_id": str(activity_id),
+                    "activity_type": "model.call",
+                    "timeout_at": (NOW + timedelta(minutes=5)).isoformat(),
+                    "input_ref": "object://request",
+                    "input_digest": "a" * 64,
+                },
+            ),
+        )
+        state = decide_and_replay(
+            aggregate,
+            events,
+            command(
+                "CompleteActivity",
+                version + 1,
+                {
+                    "activity_id": str(activity_id),
+                    "generation": 0,
+                    "result_ref": result_ref,
+                    "result_summary": "ok",
+                },
+            ),
+        )
+
+    assert result_refs(state) == ["object://first", "object://second"]
 
 
 def test_full_replay_equals_every_snapshot_tail_split() -> None:

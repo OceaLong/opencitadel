@@ -27,6 +27,7 @@ from app.infrastructure.observability.otel import setup_observability
 from app.interfaces.endpoints.a2a_routes import a2a_router, well_known_router
 from app.interfaces.endpoints.routes import router
 from app.interfaces.errors.exception_handlers import register_exception_handlers
+from app.interfaces.middleware.api_cache_policy import ApiCachePolicyMiddleware
 from app.interfaces.middleware.auth_context import AuthContextMiddleware
 from app.interfaces.middleware.csrf import CsrfMiddleware
 from app.interfaces.middleware.rate_limit import maybe_install_rate_limit
@@ -120,6 +121,10 @@ def _install_application(
             value.strip() for value in settings.trusted_proxy_cidrs.split(",") if value.strip()
         ),
     )
+    # Starlette makes the most recently added user middleware outermost.
+    # Install the pure-ASGI cache boundary last so even CSRF/rate-limit
+    # short-circuits receive the API no-store policy.
+    application.add_middleware(ApiCachePolicyMiddleware)
     application.include_router(well_known_router)
     application.include_router(a2a_router, prefix="/api/a2a")
     application.include_router(router, prefix="/api")

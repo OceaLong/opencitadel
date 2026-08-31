@@ -5,10 +5,13 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any
+from uuid import uuid4
 
+from app.application.execution.admission import RunAdmissionService
 from app.application.services.audit_service import AuditService
 from app.domain.errors import ConflictError, NotFoundError
+from app.domain.execution.run import RunFamily
 from app.domain.models.audit_log import AuditLog
 from app.domain.models.integration_server import MCPServerRecord
 from app.domain.models.patrol import PatrolPack, PatrolPackConfig, PatrolPackStatus
@@ -16,25 +19,7 @@ from app.domain.models.scheduled_job import ScheduledJob
 from app.domain.models.scope import OwnerScope, OwnerScopeType
 from app.domain.models.tool_policy import ApprovalMode, ToolCapability, ToolEffect, ToolIdempotency
 from app.domain.repositories.uow import IUnitOfWork
-from app.domain.runtime_policy import ActivityExecutionPolicy
 from app.domain.utils.schedule_utils import compute_next_run
-
-
-class PatrolCollectorValidatorPort(Protocol):
-    async def get_capabilities(
-        self,
-        server: MCPServerRecord,
-        *,
-        policy: ActivityExecutionPolicy,
-    ) -> dict[str, Any]: ...
-
-    async def dry_run(
-        self,
-        server: MCPServerRecord,
-        config: PatrolPackConfig,
-        *,
-        policy: ActivityExecutionPolicy,
-    ) -> dict[str, Any]: ...
 
 
 def _slugify(value: str) -> str:
@@ -47,11 +32,11 @@ class PatrolPackService:
         self,
         uow_factory: Callable[[], IUnitOfWork],
         audit_service: AuditService | None = None,
-        collector_validator: PatrolCollectorValidatorPort | None = None,
+        run_admission_service: RunAdmissionService | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._audit_service = audit_service
-        self._collector_validator = collector_validator
+        self._run_admission = run_admission_service
 
     async def _audit(
         self, action: str, pack: PatrolPack, actor_user_id: str, metadata: dict | None = None
@@ -160,6 +145,7 @@ class PatrolPackService:
             pack.status = PatrolPackStatus.DRAFT
             pack.last_validated_at = None
             pack.last_validated_version = None
+            pack.validation_run_id = None
             pack.validation_summary = {}
             pack.updated_at = datetime.now(UTC)
             if pack.scheduled_job_id:
@@ -209,90 +195,144 @@ class PatrolPackService:
                 errors.append(f"raw probe arguments are forbidden: {sorted(forbidden)}")
         return errors
 
-    async def validate_pack(
+    async def request_validation(
         self,
         pack_id: str,
         scope: OwnerScope,
         actor_user_id: str,
-        *,
-        policy: ActivityExecutionPolicy,
     ) -> PatrolPack:
         async with self._uow_factory() as uow:
             pack = await uow.patrol.get_pack(pack_id, scope, for_update=True)
             if pack is None:
                 raise NotFoundError("Patrol Pack 不存在", error_key="apiErrors.patrol.packNotFound")
-            pack.status = PatrolPackStatus.VALIDATING
-            await uow.patrol.save_pack(pack)
+            if pack.status == PatrolPackStatus.VALIDATING:
+                raise ConflictError(
+                    "Pack validation is already running",
+                    error_key="apiErrors.patrol.validationAlreadyRunning",
+                )
             server = await uow.mcp_server.get_by_id(pack.mcp_server_id, scope=scope)
             if server is None:
                 raise NotFoundError(
                     "Collector 不存在或不可访问", error_key="apiErrors.patrol.targetScopeDenied"
                 )
             validated_version = pack.version
-            await uow.commit()
-
-        errors = self._validate_static(pack.config, server)
-        capabilities: dict[str, Any] = {}
-        dry_run: dict[str, Any] = {}
-        if not errors:
-            if self._collector_validator is None:
-                embedded = (
-                    server.transport_options.get("patrol_capabilities")
-                    if isinstance(server.transport_options, dict)
-                    else None
-                )
-                if not isinstance(embedded, dict):
-                    errors.append("Collector live capability validator is unavailable")
-                else:
-                    capabilities = embedded
+            errors = self._validate_static(pack.config, server)
+            if errors:
+                pack.status = PatrolPackStatus.INVALID
+                pack.last_validated_at = datetime.now(UTC)
+                pack.last_validated_version = None
+                pack.validation_run_id = None
+                pack.validation_summary = {
+                    "ok": False,
+                    "errors": errors,
+                    "capability_hash": None,
+                    "enabled_tools": [],
+                    "dry_run": {},
+                }
             else:
-                try:
-                    capabilities = await self._collector_validator.get_capabilities(
-                        server,
-                        policy=policy,
-                    )
-                    dry_run = await self._collector_validator.dry_run(
-                        server,
-                        pack.config,
-                        policy=policy,
-                    )
-                    if not dry_run.get("ok"):
-                        errors.append("Collector read-only dry run did not pass")
-                except (OSError, RuntimeError, ValueError) as exc:
-                    errors.append(f"Collector unavailable: {str(exc)[:500]}")
+                if self._run_admission is None:
+                    raise RuntimeError("Patrol validation Run admission is unavailable")
+                validation_run_id = uuid4()
+                pack.status = PatrolPackStatus.VALIDATING
+                pack.last_validated_at = None
+                pack.last_validated_version = None
+                pack.validation_run_id = str(validation_run_id)
+                pack.validation_summary = {
+                    "errors": [],
+                    "validation_run_id": str(validation_run_id),
+                }
+                await self._run_admission.admit(
+                    family=RunFamily.PATROL,
+                    source_entity_type="patrol_pack_validation",
+                    source_entity_id=pack.id,
+                    owner_scope=scope,
+                    private_input={
+                        "pack_id": pack.id,
+                        "pack_version": validated_version,
+                        "validation_run_id": str(validation_run_id),
+                        "actor_user_id": actor_user_id,
+                    },
+                    public_input={
+                        "pack_id": pack.id,
+                        "pack_version": validated_version,
+                        "operation": "validate",
+                    },
+                    workflow={
+                        "operation": "validate",
+                        "pack_id": pack.id,
+                        "pack_version": validated_version,
+                        "validation_run_id": str(validation_run_id),
+                    },
+                    idempotency_key=f"patrol-pack-validation:{pack.id}:{validation_run_id}",
+                    run_id=validation_run_id,
+                    command_sink=uow.execution_commands,
+                )
+            pack.updated_at = datetime.now(UTC)
+            await uow.patrol.save_pack(pack)
+            await uow.commit()
+        await self._audit(
+            "patrol_pack_validated" if errors else "patrol_pack_validation_requested",
+            pack,
+            actor_user_id,
+            {"ok": False if errors else None, "errors": errors},
+        )
+        return pack
 
-        enabled_tools = set(capabilities.get("enabled_tools") or [])
-        required = {check.probe.tool for check in pack.config.checks if check.enabled}
-        if capabilities and not required.issubset(enabled_tools):
-            errors.append(f"Collector capabilities missing: {sorted(required - enabled_tools)}")
-        schema_hashes = capabilities.get("output_schema_hashes") or {}
-        for check in pack.config.checks:
-            if (
-                check.enabled
-                and capabilities
-                and schema_hashes.get(check.probe.tool) != check.probe.output_schema_hash
-            ):
-                errors.append(f"output schema hash mismatch: {check.id}")
-
+    async def complete_validation(
+        self,
+        *,
+        pack_id: str,
+        scope: OwnerScope,
+        actor_user_id: str,
+        validation_run_id: str,
+        validated_version: int,
+        capabilities: dict[str, Any],
+        dry_run: dict[str, Any],
+        errors: list[str],
+    ) -> PatrolPack:
         async with self._uow_factory() as uow:
-            current = await uow.patrol.get_pack(pack_id, scope, for_update=True)
-            if current is None:
+            pack = await uow.patrol.get_pack(pack_id, scope, for_update=True)
+            if pack is None:
                 raise NotFoundError("Patrol Pack 不存在", error_key="apiErrors.patrol.packNotFound")
-            if current.version != validated_version:
+            if (
+                pack.version != validated_version
+                or pack.validation_run_id != validation_run_id
+                or pack.status != PatrolPackStatus.VALIDATING
+            ):
                 raise ConflictError(
-                    "Pack 在验证期间已发生变化",
+                    "Pack validation result is stale",
                     error_key="apiErrors.patrol.versionConflict",
                 )
-            pack = current
+
+            resolved_errors = list(errors)
+            if not dry_run.get("ok") and not resolved_errors:
+                resolved_errors.append("Collector read-only dry run did not pass")
+            enabled_tools = set(capabilities.get("enabled_tools") or [])
+            required = {check.probe.tool for check in pack.config.checks if check.enabled}
+            if capabilities and not required.issubset(enabled_tools):
+                resolved_errors.append(
+                    f"Collector capabilities missing: {sorted(required - enabled_tools)}"
+                )
+            schema_hashes = capabilities.get("output_schema_hashes") or {}
+            resolved_errors.extend(
+                f"output schema hash mismatch: {check.id}"
+                for check in pack.config.checks
+                if check.enabled
+                and capabilities
+                and schema_hashes.get(check.probe.tool) != check.probe.output_schema_hash
+            )
+
             pack.last_validated_at = datetime.now(UTC)
+            pack.validation_run_id = None
             pack.validation_summary = {
-                "ok": not errors,
-                "errors": errors,
+                "ok": not resolved_errors,
+                "errors": resolved_errors,
+                "validation_run_id": validation_run_id,
                 "capability_hash": capabilities.get("overall_capability_hash"),
                 "enabled_tools": sorted(enabled_tools),
                 "dry_run": dry_run,
             }
-            if errors:
+            if resolved_errors:
                 pack.status = PatrolPackStatus.INVALID
                 pack.last_validated_version = None
             else:
@@ -302,7 +342,10 @@ class PatrolPackService:
             await uow.patrol.save_pack(pack)
             await uow.commit()
         await self._audit(
-            "patrol_pack_validated", pack, actor_user_id, {"ok": not errors, "errors": errors}
+            "patrol_pack_validated",
+            pack,
+            actor_user_id,
+            {"ok": not resolved_errors, "errors": resolved_errors},
         )
         return pack
 

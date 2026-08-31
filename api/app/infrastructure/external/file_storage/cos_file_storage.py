@@ -29,7 +29,6 @@ class CosFileStorage(FileStorage):
         self.bucket = bucket
         self.cos = cos
         self._uow_factory = uow_factory
-        self._uow = uow_factory()
 
     async def upload_file(self, payload: FileUploadPayload) -> File:
         """根据传递的文件源将文件上传到腾讯云cos"""
@@ -89,6 +88,25 @@ class CosFileStorage(FileStorage):
             return BytesIO(data), file
         except (OSError, RuntimeError, ValueError) as e:
             logger.error("下载文件[%s]失败: %s", file_id, e)
+            raise
+
+    async def delete_file(self, file_id: str) -> None:
+        """根据文件id删除COS对象及数据库记录。"""
+        try:
+            async with self._uow_factory() as uow:
+                file = await uow.file.get_by_id(file_id)
+                if not file:
+                    raise ValueError(f"该文件不存在, 文件id: {file_id}")
+                await run_in_threadpool(
+                    self.cos.client.delete_object,
+                    Bucket=self.bucket,
+                    Key=file.key,
+                )
+                await uow.file.delete(file_id)
+                await uow.commit()
+            logger.info("文件删除成功: %s (ID: %s)", file.filename, file_id)
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.error("删除文件[%s]失败: %s", file_id, e)
             raise
 
     async def presigned_get_url(

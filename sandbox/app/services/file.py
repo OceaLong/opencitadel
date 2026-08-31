@@ -156,11 +156,18 @@ class FileService:
                 end = end_line if end_line is not None else len(lines)
                 content = "\n".join(lines[start:end])
 
+            size_bytes = len(content.encode(encoding, errors="replace"))
+            truncated = max_length is not None and 0 < max_length < len(content)
             # 12.裁切下数据长度
-            if max_length is not None and 0 < max_length < len(content):
+            if truncated:
                 content = content[:max_length] + "(truncated)"
 
-            return FileReadResult(filepath=filepath, content=content)
+            return FileReadResult(
+                filepath=filepath,
+                content=content,
+                truncated=truncated,
+                size_bytes=size_bytes,
+            )
         except (OSError, RuntimeError, ValueError) as e:
             # 13.判断异常类型执行不同操作
             if isinstance(e, (BadRequestException, AppException)):

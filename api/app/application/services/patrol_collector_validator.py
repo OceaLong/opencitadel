@@ -162,7 +162,7 @@ class MCPPatrolCollectorValidator:
                             "check_id": check.id,
                             "probe_status": status.value,
                             "observation": (observation if isinstance(observation, dict) else {}),
-                            "evidence_refs": envelope.get("evidence_refs") or [],
+                            "evidence_refs": envelope.get("evidence") or [],
                             "explanation": str(envelope.get("explanation") or ""),
                             "error_code": envelope.get("error_code"),
                             "error_message": envelope.get("error_message"),

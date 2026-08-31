@@ -49,6 +49,44 @@ def test_model_preference_policy_separates_global_user_and_team_bindings():
     assert "app.is_admin" in write_predicate
 
 
+def test_policies_grant_auditor_read_all_and_block_all_writes():
+    # The auditor read-all / no-write guarantee is baked into every policy.
+    statements = policy_statements("sessions")
+    select = next(s for s in statements if "FOR SELECT" in s)
+    insert = next(s for s in statements if "FOR INSERT" in s)
+    update = next(s for s in statements if "FOR UPDATE" in s)
+    delete = next(s for s in statements if "FOR DELETE" in s)
+
+    # Auditor may read every row.
+    assert "current_setting('app.is_auditor', true), 'false') = 'true' OR (" in select
+    # Auditor can never satisfy any write predicate.
+    for write in (insert, update, delete):
+        assert "NOT COALESCE(current_setting('app.is_auditor', true), 'false') = 'true'" in write
+    # The signed-authorization gate still wraps every policy.
+    for statement in (select, insert, update, delete):
+        assert "opencitadel_authorization_valid() AND" in statement
+
+
+def test_apply_row_level_security_covers_every_tenant_table():
+    captured: list[list[str]] = []
+    tenant_rls.apply_row_level_security(captured.append)
+    tables = {
+        statement.split(" ")[2]
+        for group in captured
+        for statement in group
+        if statement.startswith("ALTER TABLE ")
+    }
+    expected = (
+        PRIVATE_ROOT_TABLES
+        | VISIBILITY_ROOT_TABLES
+        | tenant_rls.POLICY_ROOT_TABLES
+        | EXECUTION_ROOT_TABLES
+        | set(CHILD_TABLES)
+        | {"inference_bindings", "notifications", "service_api_keys", "user_quotas"}
+    )
+    assert expected <= tables
+
+
 def test_rls_policy_matrix_covers_root_and_child_tenant_tables():
     root_tables = (
         PRIVATE_ROOT_TABLES

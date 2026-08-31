@@ -65,8 +65,8 @@ Navigation hub for all OpenCitadel documentation. Each topic is maintained as a 
 | [Ops Collector](../ops-collector/README.md) | Fixed read-only MCP probes, configuration and deployment |
 | [Ops Actuator](../ops-actuator/README.md) | Fixed patch-only write MCP probes, configuration and deployment |
 | [OpsConsole demo](../demo/ops-console/README.md) | Web Operator ticket backend demo |
-| [E2E tests](../e2e/README.md) | Playwright smoke tests, OpsConsole demo |
-| [Repository scripts](../scripts/README.md) | `quickstart.sh`, `check-docs.sh` |
+| [E2E acceptance](../e2e/README.md) | Deterministic isolated full-stack gate, evidence, and cleanup |
+| [Repository scripts](../scripts/README.md) | `quickstart.sh`, `check-docs.sh`, acceptance runner |
 | [Deploy scripts](../deploy/scripts/README.md) | Production host tuning utilities |
 
 ### Open-source governance

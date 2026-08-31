@@ -74,7 +74,6 @@ const GROUPS: readonly PolicyGroupDefinition[] = [
         step: 0.05,
       },
       { path: "sandbox.warmup_max_retries", type: "number", min: 1, max: 1000 },
-      { path: "sandbox.fast_warmup_max_retries", type: "number", min: 1, max: 100 },
       { path: "sandbox.max_sandboxes_per_node", type: "number", min: 1, max: 1000 },
       { path: "sandbox.max_dynamic_sandboxes_global", type: "number", min: 0, max: 100000 },
       {

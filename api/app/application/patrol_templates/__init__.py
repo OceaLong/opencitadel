@@ -12,6 +12,7 @@ from app.domain.models.patrol import PatrolPackConfig
 
 _TEMPLATES = {
     "kubernetes-baseline-v1": Path(__file__).with_name("kubernetes_daily_patrol.v1.yaml"),
+    "compose-services-baseline-v1": Path(__file__).with_name("compose_services_patrol.v1.yaml"),
 }
 
 
